@@ -1,0 +1,114 @@
+# This is a basic workflow
+
+name: CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the main branch
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+    contents: read
+
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    permissions:
+      checks: write  ## for coveralls
+      contents: read ##  for docker-push
+      security-events: write ## for upload-sarif
+    # The type of runner that the job will run on
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+
+      # Set up Node
+      - name: Use Node 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      # Run install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Build extension
+      - name: Run build
+        run: npm run build
+
+      - name: Generate SARIF
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint-ci
+
+      - name: Upload SARIF file
+        if: matrix.os == 'ubuntu-latest'
+        uses: github/codeql-action/upload-sarif@17573ee1cc1b9d061760f3a006fc4aac4f944fd5 #v2
+        with:
+          # Path to SARIF file relative to the root of the repository
+          sarif_file: eslint-result.sarif
+          # Optional category for the results
+          # Used to differentiate multiple results for one commit
+          category: eslint
+
+      # Run tests
+      - name: Run Test
+        uses: coactions/setup-xvfb@b6b4fcfb9f5a895edadc3bc76318fae0ac17c8b3 # v1.0.1
+        with:
+          run: npm run coveralls
+
+        # Run Coveralls
+      - name: Coveralls
+        if: matrix.os == 'ubuntu-latest'
+        uses: coverallsapp/github-action@c7885c00cb7ec0b8f9f5ff3f53cddb980f7a4412 # v2.2.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        if: ${{ success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'}}
+        run: |
+          npm version prerelease --preid $(git rev-parse --short HEAD) --no-git-tag-version
+          npm publish --tag next
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+        # Setup QEMU as requirement for docker
+      - name: Set up QEMU
+        if: ${{ success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'}}
+        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
+  
+        # Setup DockerBuildx as requirement for docker
+      - name: Set up Docker Buildx
+        if: ${{ success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'}}
+        uses: docker/setup-buildx-action@6a58db7e0d21ca03e6c44877909e80e45217eed2 # v2.6.0
+
+        # Login to Quay
+      - name: Login to Quay
+        if: ${{ success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'}}
+        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc  # v2.2.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+        # Build and push the latest version of yaml language server image
+      - name: Build and push
+        if: ${{ success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'}}
+        uses: docker/build-push-action@44ea916f6c540f9302d50c2b1e5a8dc071f15cdf #v4.1.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: quay.io/redhat-developer/yaml-language-server:next

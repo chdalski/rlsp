@@ -1,0 +1,18 @@
+{
+  "documentation": [
+    "README.md"
+  ],
+  "housekeeping": {
+    "gitignore_patterns": [
+      "target/",
+      "dist/",
+      "build/",
+      "node_modules/",
+      "__pycache__/",
+      ".env",
+      ".DS_Store",
+      "*.pyc",
+      "*.pyo"
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "teammateMode": "in-process",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '## Startup Checklist\n\nBefore doing anything else, load your context:\n\n1. Read the project root CLAUDE.md for build commands, repo structure, and conventions.\n2. Read .claude/CLAUDE.md for orchestration instructions and the knowledge system.\n3. If you are an agent (Developer, Test Engineer, Security Engineer, Reviewer), read your agent file in .claude/agents/ and follow its Startup section — it tells you which knowledge files to load for your role.\n4. Detect project languages (scan for code file extensions) and load all matching .claude/knowledge/languages/<lang>.md files.\n5. Load all files in .claude/knowledge/extensions/ (skip README.md).\n6. If you are the lead, read .claude/CLAUDE.md fully — especially Workflows, Task Decomposition, Coordination, and your Startup section.\n\nDo NOT start working until you have completed this checklist. The knowledge files are what make your output good — skipping them produces worse results.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git commit*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CONFIG=.claude/config.json; if [ -f \"$CONFIG\" ]; then FILES=$(python3 -c \"import json,sys; d=json.load(open('$CONFIG')); print('\\n'.join(d.get('documentation',[])))\" 2>/dev/null || echo ''); if [ -n \"$FILES\" ]; then echo \"DOCUMENTATION CHECK: Before committing, verify these files are still accurate given your changes:\n\n$FILES\n\nIf any need updating, have the dev-team update them before committing.\"; fi; fi"
+          },
+          {
+            "type": "command",
+            "command": "CONFIG=.claude/config.json; if [ -f \"$CONFIG\" ]; then PATTERNS=$(python3 -c \"import json; d=json.load(open('$CONFIG')); [print(p) for p in d.get('housekeeping',{}).get('gitignore_patterns',[])]\" 2>/dev/null || echo ''); if [ -n \"$PATTERNS\" ]; then STAGED=$(git diff --cached --name-only 2>/dev/null || echo ''); WARNINGS=''; while IFS= read -r pattern; do MATCH=$(echo \"$STAGED\" | grep -F \"$pattern\" 2>/dev/null || true); if [ -n \"$MATCH\" ]; then WARNINGS=\"$WARNINGS\n  - $MATCH (matches: $pattern)\"; fi; done <<< \"$PATTERNS\"; if [ -n \"$WARNINGS\" ]; then echo \"HOUSEKEEPING WARNING: These staged files look like build artifacts or files that should be in .gitignore:$WARNINGS\n\nCheck if .gitignore needs updating. Unstage these files if they should not be committed.\"; fi; fi; echo \"HOUSEKEEPING REMINDER: Before committing, verify:\n- .gitignore covers build artifacts for this project\n- No secrets (.env, credentials, API keys) are staged\n- No debug statements (console.log, dbg!, print) left in production code\n- No large binary files are staged\n\nRun: git diff --cached --name-only to review staged files.\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Your context is about to be compacted. If you are on a team, message your teammates and the lead with your current status (what is done, what is in progress, what is next). After compaction, re-read your agent file and the project CLAUDE.md to recover context.'"
+          }
+        ]
+      }
+    ]
+  }
+}
