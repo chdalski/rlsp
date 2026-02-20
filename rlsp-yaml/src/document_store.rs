@@ -1,9 +1,18 @@
 use std::collections::HashMap;
+
 use tower_lsp::lsp_types::Url;
+use yaml_rust2::Yaml;
+
+use crate::parser;
+
+struct Document {
+    text: String,
+    yaml: Option<Vec<Yaml>>,
+}
 
 #[derive(Default)]
 pub struct DocumentStore {
-    documents: HashMap<Url, String>,
+    documents: HashMap<Url, Document>,
 }
 
 impl DocumentStore {
@@ -13,12 +22,29 @@ impl DocumentStore {
     }
 
     pub fn open(&mut self, uri: Url, text: String) {
-        self.documents.insert(uri, text);
+        let parsed = parser::parse_yaml(&text);
+        self.documents.insert(
+            uri,
+            Document {
+                text,
+                yaml: if parsed.documents.is_empty() {
+                    None
+                } else {
+                    Some(parsed.documents)
+                },
+            },
+        );
     }
 
     pub fn change(&mut self, uri: &Url, text: String) {
         if let Some(doc) = self.documents.get_mut(uri) {
-            *doc = text;
+            let parsed = parser::parse_yaml(&text);
+            doc.text = text;
+            doc.yaml = if parsed.documents.is_empty() {
+                None
+            } else {
+                Some(parsed.documents)
+            };
         }
     }
 
@@ -26,8 +52,14 @@ impl DocumentStore {
         self.documents.remove(uri);
     }
 
+    #[must_use]
     pub fn get(&self, uri: &Url) -> Option<&str> {
-        self.documents.get(uri).map(String::as_str)
+        self.documents.get(uri).map(|doc| doc.text.as_str())
+    }
+
+    #[must_use]
+    pub fn get_yaml(&self, uri: &Url) -> Option<&Vec<Yaml>> {
+        self.documents.get(uri)?.yaml.as_ref()
     }
 }
 
@@ -157,5 +189,62 @@ mod tests {
         store.open(uri.clone(), "second".to_string());
 
         assert_eq!(store.get(&uri), Some("second"));
+    }
+
+    #[test]
+    fn should_store_parsed_yaml_alongside_text() {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("doc.yaml");
+
+        store.open(uri.clone(), "key: value\n".to_string());
+
+        assert_eq!(store.get(&uri), Some("key: value\n"));
+        let yaml = store.get_yaml(&uri);
+        assert!(yaml.is_some());
+        assert_eq!(yaml.expect("yaml present").len(), 1);
+    }
+
+    #[test]
+    fn should_return_none_for_ast_of_unknown_document() {
+        let store = DocumentStore::new();
+        let uri = test_uri("unknown.yaml");
+
+        assert!(store.get_yaml(&uri).is_none());
+    }
+
+    #[test]
+    fn should_update_parsed_yaml_on_change() {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("doc.yaml");
+
+        store.open(uri.clone(), "key: old\n".to_string());
+        store.change(&uri, "key: new\n".to_string());
+
+        let yaml = store.get_yaml(&uri).expect("yaml present");
+        assert_eq!(yaml.len(), 1);
+        let val = yaml[0]["key"].as_str();
+        assert_eq!(val, Some("new"));
+    }
+
+    #[test]
+    fn should_clear_ast_on_close() {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("doc.yaml");
+
+        store.open(uri.clone(), "key: value\n".to_string());
+        store.close(&uri);
+
+        assert!(store.get_yaml(&uri).is_none());
+    }
+
+    #[test]
+    fn should_store_no_ast_when_parsing_fails() {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("bad.yaml");
+
+        store.open(uri.clone(), "key: [bad".to_string());
+
+        assert_eq!(store.get(&uri), Some("key: [bad"));
+        assert!(store.get_yaml(&uri).is_none());
     }
 }

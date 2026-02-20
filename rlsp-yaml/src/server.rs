@@ -1,19 +1,22 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverParams, InitializeParams,
     InitializeResult, InitializedParams, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
+use crate::parser;
 
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,
+    diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
 }
 
 impl Backend {
@@ -22,13 +25,33 @@ impl Backend {
         Self {
             client,
             document_store: Mutex::new(DocumentStore::new()),
+            diagnostics: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
-        let parsed = tower_lsp::lsp_types::Url::parse(uri).ok()?;
+        let parsed = Url::parse(uri).ok()?;
         let store = self.document_store.lock().ok()?;
         store.get(&parsed).map(str::to_string)
+    }
+
+    pub fn get_diagnostics(&self, uri: &str) -> Option<Vec<Diagnostic>> {
+        let parsed = Url::parse(uri).ok()?;
+        let diags = self.diagnostics.lock().ok()?;
+        diags.get(&parsed).cloned()
+    }
+
+    async fn parse_and_publish(&self, uri: Url, text: &str) {
+        let result = parser::parse_yaml(text);
+        let diagnostics = result.diagnostics.clone();
+
+        if let Ok(mut diags) = self.diagnostics.lock() {
+            diags.insert(uri.clone(), diagnostics.clone());
+        }
+
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
     }
 
     #[must_use]
@@ -60,23 +83,39 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let text = params.text_document.text;
+
         if let Ok(mut store) = self.document_store.lock() {
-            store.open(params.text_document.uri, params.text_document.text);
+            store.open(uri.clone(), text.clone());
         }
+
+        self.parse_and_publish(uri, &text).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        if let Ok(mut store) = self.document_store.lock()
-            && let Some(change) = params.content_changes.into_iter().last()
-        {
-            store.change(&params.text_document.uri, change.text);
+        let uri = params.text_document.uri;
+        if let Some(change) = params.content_changes.into_iter().last() {
+            if let Ok(mut store) = self.document_store.lock() {
+                store.change(&uri, change.text.clone());
+            }
+
+            self.parse_and_publish(uri, &change.text).await;
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+
         if let Ok(mut store) = self.document_store.lock() {
-            store.close(&params.text_document.uri);
+            store.close(&uri);
         }
+
+        if let Ok(mut diags) = self.diagnostics.lock() {
+            diags.remove(&uri);
+        }
+
+        self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn hover(&self, _: HoverParams) -> Result<Option<Hover>> {
