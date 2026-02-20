@@ -118,8 +118,23 @@ impl LanguageServer for Backend {
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
-    async fn hover(&self, _: HoverParams) -> Result<Option<Hover>> {
-        Ok(None)
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let yaml = store.get_yaml(&uri).cloned();
+            (text, yaml)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        Ok(crate::hover::hover_at(&text, yaml.as_ref(), position))
     }
 
     async fn document_symbol(
