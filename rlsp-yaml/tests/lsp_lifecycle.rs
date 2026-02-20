@@ -302,3 +302,59 @@ async fn should_return_none_for_hover_on_unknown_document() {
         "hover result should be null for unknown document"
     );
 }
+
+fn document_symbol_request(id: i64, uri: &str) -> Request {
+    Request::build("textDocument/documentSymbol")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_document_symbols_for_valid_yaml() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/symbols.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have result");
+    assert!(
+        !result.is_null(),
+        "documentSymbol result should not be null"
+    );
+    let result_str = serde_json::to_string(result).expect("serialize result");
+    assert!(result_str.contains("name"), "symbols should contain 'name'");
+    assert!(result_str.contains("age"), "symbols should contain 'age'");
+}
+
+#[tokio::test]
+async fn should_return_empty_symbols_for_unknown_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Do NOT send didOpen for this URI
+    let uri = "file:///test/unknown.yaml";
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have result");
+    // Should be null (None) or empty array
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "documentSymbol result should be null or empty for unknown document"
+    );
+}

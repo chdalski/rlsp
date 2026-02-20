@@ -139,9 +139,28 @@ impl LanguageServer for Backend {
 
     async fn document_symbol(
         &self,
-        _: DocumentSymbolParams,
+        params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        Ok(None)
+        let uri = params.text_document.uri;
+
+        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let yaml = store.get_yaml(&uri).cloned();
+            (text, yaml)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let symbols = crate::symbols::document_symbols(&text, yaml.as_ref());
+        if symbols.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 }
 
