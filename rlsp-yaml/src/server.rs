@@ -3,7 +3,8 @@ use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverParams, InitializeParams,
     InitializeResult, InitializedParams, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, Url,
@@ -60,6 +61,10 @@ impl Backend {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             hover_provider: Some(tower_lsp::lsp_types::HoverProviderCapability::Simple(true)),
             document_symbol_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
+            completion_provider: Some(CompletionOptions {
+                resolve_provider: Some(false),
+                ..CompletionOptions::default()
+            }),
             ..ServerCapabilities::default()
         }
     }
@@ -137,6 +142,30 @@ impl LanguageServer for Backend {
         Ok(crate::hover::hover_at(&text, yaml.as_ref(), position))
     }
 
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let yaml = store.get_yaml(&uri).cloned();
+            (text, yaml)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let items = crate::completion::complete_at(&text, yaml.as_ref(), position);
+        if items.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -199,5 +228,15 @@ mod tests {
             caps.document_symbol_provider,
             Some(OneOf::Left(true))
         ));
+    }
+
+    #[test]
+    fn should_advertise_completion_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.completion_provider.is_some(),
+            "capabilities should include completion_provider"
+        );
     }
 }
