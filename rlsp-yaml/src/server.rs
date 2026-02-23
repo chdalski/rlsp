@@ -7,8 +7,9 @@ use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, ReferenceParams, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
+    RenameOptions, RenameParams, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -61,16 +62,20 @@ impl Backend {
         ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             hover_provider: Some(tower_lsp::lsp_types::HoverProviderCapability::Simple(true)),
-            document_symbol_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
+            document_symbol_provider: Some(OneOf::Left(true)),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
                 ..CompletionOptions::default()
             }),
-            definition_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
-            references_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
+            definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
             folding_range_provider: Some(
                 tower_lsp::lsp_types::FoldingRangeProviderCapability::Simple(true),
             ),
+            rename_provider: Some(OneOf::Right(RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+            })),
             ..ServerCapabilities::default()
         }
     }
@@ -263,6 +268,45 @@ impl LanguageServer for Backend {
 
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
+
+    async fn prepare_rename(
+        &self,
+        params: tower_lsp::lsp_types::TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let range = crate::rename::prepare_rename(&text, position);
+        Ok(range.map(PrepareRenameResponse::Range))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        Ok(crate::rename::rename(&text, &uri, position, &new_name))
+    }
 }
 
 #[cfg(test)]
@@ -340,5 +384,26 @@ mod tests {
             caps.folding_range_provider.is_some(),
             "capabilities should include folding_range_provider"
         );
+    }
+
+    // Test 35
+    #[test]
+    fn should_advertise_rename_provider_with_prepare_support() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.rename_provider.is_some(),
+            "capabilities should include rename_provider"
+        );
+
+        if let Some(OneOf::Right(rename_opts)) = caps.rename_provider {
+            assert_eq!(
+                rename_opts.prepare_provider,
+                Some(true),
+                "rename_provider should have prepare_provider set to true"
+            );
+        } else {
+            panic!("rename_provider should be RenameOptions with prepare_provider");
+        }
     }
 }
