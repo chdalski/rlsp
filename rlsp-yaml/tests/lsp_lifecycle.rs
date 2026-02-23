@@ -692,3 +692,134 @@ async fn should_return_null_rename_for_invalid_new_name() {
         "rename result should be null for invalid new_name with space"
     );
 }
+
+// ---- Validator Integration Tests ----
+
+// Test 41 (SPIKE)
+#[tokio::test]
+async fn should_publish_combined_parser_and_validator_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // This text has both a parse error and an unused anchor in the valid portion
+    // Note: yaml_rust2 will fail to parse if there's a syntax error, so we can't
+    // test combined parse + validator errors easily. Instead, test that validator
+    // diagnostics are published for valid YAML.
+    let uri = "file:///test/validators.yaml";
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "defaults: &unused\n  key: val\nproduction:\n  key: other\n",
+        ),
+    )
+    .await;
+
+    let backend = service.inner();
+    let diags = backend
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    // Should have at least 1 diagnostic for unused anchor
+    assert!(!diags.is_empty(), "should have validator diagnostics");
+}
+
+// Test 42
+#[tokio::test]
+async fn should_publish_validator_diagnostics_on_document_open() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/unused.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "defaults: &unused\n  key: val\n"),
+    )
+    .await;
+
+    let backend = service.inner();
+    let diags = backend
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    assert!(!diags.is_empty(), "should have unused anchor diagnostic");
+    assert!(diags.iter().any(|d| d.tags.as_ref().is_some_and(|t| {
+        t.contains(&tower_lsp::lsp_types::DiagnosticTag::UNNECESSARY)
+    })));
+}
+
+// Test 43
+#[tokio::test]
+async fn should_publish_validator_diagnostics_on_document_change() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/change.yaml";
+    send(&mut service, did_open_notification(uri, "key: value\n")).await;
+
+    {
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert!(diags.is_empty(), "should have no diagnostics initially");
+    }
+
+    send(
+        &mut service,
+        did_change_notification(uri, "defaults: &unused\n  key: val\n", 2),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    assert!(
+        !diags.is_empty(),
+        "should have unused anchor diagnostic after change"
+    );
+}
+
+// Test 44
+#[tokio::test]
+async fn should_clear_diagnostics_on_document_close_validators() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/close.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "defaults: &unused\n  key: val\n"),
+    )
+    .await;
+
+    {
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert!(!diags.is_empty(), "should have diagnostics before close");
+    }
+
+    send(&mut service, did_close_notification(uri)).await;
+
+    let diags = service.inner().get_diagnostics(uri);
+    assert!(
+        diags.is_none() || diags.as_ref().is_some_and(Vec::is_empty),
+        "diagnostics should be cleared after close"
+    );
+}

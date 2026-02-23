@@ -7,3 +7,4 @@ pub mod references;
 pub mod rename;
 pub mod server;
 pub mod symbols;
+pub mod validators;

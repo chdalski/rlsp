@@ -46,7 +46,15 @@ impl Backend {
 
     async fn parse_and_publish(&self, uri: Url, text: &str) {
         let result = parser::parse_yaml(text);
-        let diagnostics = result.diagnostics.clone();
+        let mut diagnostics = result.diagnostics.clone();
+
+        // Run validators and combine diagnostics
+        diagnostics.extend(crate::validators::validate_unused_anchors(text));
+        diagnostics.extend(crate::validators::validate_flow_style(text));
+        diagnostics.extend(crate::validators::validate_key_ordering(
+            text,
+            &result.documents,
+        ));
 
         if let Ok(mut diags) = self.diagnostics.lock() {
             diags.insert(uri.clone(), diagnostics.clone());
