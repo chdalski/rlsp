@@ -5,9 +5,9 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location,
+    ReferenceParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -65,6 +65,8 @@ impl Backend {
                 resolve_provider: Some(false),
                 ..CompletionOptions::default()
             }),
+            definition_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
+            references_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
             ..ServerCapabilities::default()
         }
     }
@@ -166,6 +168,51 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let location = crate::references::goto_definition(&text, &uri, position);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let locations =
+            crate::references::find_references(&text, &uri, position, include_declaration);
+        if locations.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(locations))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -237,6 +284,26 @@ mod tests {
         assert!(
             caps.completion_provider.is_some(),
             "capabilities should include completion_provider"
+        );
+    }
+
+    #[test]
+    fn should_advertise_definition_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.definition_provider.is_some(),
+            "capabilities should include definition_provider"
+        );
+    }
+
+    #[test]
+    fn should_advertise_references_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.references_provider.is_some(),
+            "capabilities should include references_provider"
         );
     }
 }
