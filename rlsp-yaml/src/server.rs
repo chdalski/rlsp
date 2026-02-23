@@ -5,9 +5,10 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location,
-    ReferenceParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
+    InitializeResult, InitializedParams, Location, ReferenceParams, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -67,6 +68,9 @@ impl Backend {
             }),
             definition_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
             references_provider: Some(tower_lsp::lsp_types::OneOf::Left(true)),
+            folding_range_provider: Some(
+                tower_lsp::lsp_types::FoldingRangeProviderCapability::Simple(true),
+            ),
             ..ServerCapabilities::default()
         }
     }
@@ -213,6 +217,27 @@ impl LanguageServer for Backend {
         Ok(Some(locations))
     }
 
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let ranges = crate::folding::folding_ranges(&text);
+        if ranges.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(ranges))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -304,6 +329,16 @@ mod tests {
         assert!(
             caps.references_provider.is_some(),
             "capabilities should include references_provider"
+        );
+    }
+
+    #[test]
+    fn should_advertise_folding_range_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.folding_range_provider.is_some(),
+            "capabilities should include folding_range_provider"
         );
     }
 }
