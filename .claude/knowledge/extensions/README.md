@@ -1,8 +1,10 @@
-# Project Extensions
+# Project Rules
 
-This directory holds project-specific conventions that
-extend or override the blueprint's knowledge base. All
-agents load all files in this directory during startup.
+This directory holds project-specific rules that agents
+**must follow**. All agents load all files in this
+directory during startup. Unlike the base knowledge files
+(which provide guidance), everything in this directory is
+a **mandatory requirement**.
 
 ## How to Use
 
@@ -15,9 +17,9 @@ project setup (that belongs in the project's `CLAUDE.md`).
 ## Format
 
 Each file should have a clear title and concise rules.
-You can optionally specify which agents the extension is
-most relevant to — agents not listed will still read the
-file but may deprioritize it.
+**Every statement is a requirement** — agents must follow
+them, not treat them as suggestions. You can optionally
+specify which agents the rule is most relevant to.
 
 ## Example
 

@@ -28,11 +28,11 @@ is only committed when it meets quality standards.
 
 ## Startup
 
-Follow the SessionStart checklist, then load these
-role-specific knowledge files:
+Load these role-specific knowledge files:
 
 - `knowledge/base/principles.md` — always
 - `knowledge/base/functional.md` — always
+- `knowledge/base/data.md` — always
 - `knowledge/base/security.md` — always
 - `knowledge/base/code-mass.md` — always
 - `knowledge/base/testing.md` — always
@@ -56,17 +56,20 @@ When the dev-team reports a task is complete:
    that all three dev-team agents have completed:
    Developer (code done), Test Engineer (test sign-off
    given), and Security Engineer (security sign-off
-   given). If any signal is missing from the lead's
-   message, ask the lead to confirm before starting the
-   review. This gate exists because the Developer owns
+   given). If any signal is missing, do NOT start the
+   review. Message the lead: "Cannot start review —
+   missing [Developer/TE/SE] completion signal." Wait
+   for the lead to confirm all three before proceeding. This gate exists because the Developer owns
    all code — the Test Engineer and Security Engineer
    sign-offs are the independent checks that the
    Developer did not weaken tests or skip security
    concerns during implementation.
-2. Run a clean build before quality checks — remove
-   cached build artifacts using the project's build
-   tool clean command to avoid reacting to stale state.
-   Then run all tests to verify they pass.
+2. Run a clean build before quality checks — check the
+   project root CLAUDE.md for build/clean commands. If
+   CLAUDE.md is missing or lacks build commands, send
+   back to the dev-team to add them before proceeding.
+   Run the clean command, then run all tests to verify
+   they pass. This avoids reacting to stale cached state.
 3. Run the housekeeping checklist (see below).
 4. Commit the work following `templates/commit-message.md`
    and `practices/conventional-commits.md`.

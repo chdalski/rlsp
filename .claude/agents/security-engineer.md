@@ -29,8 +29,7 @@ something needs to be addressed, it must be addressed.
 
 ## Startup
 
-Follow the SessionStart checklist, then load these
-role-specific knowledge files:
+Load these role-specific knowledge files:
 
 - `knowledge/base/security.md` — always
 - `knowledge/base/principles.md` — always
@@ -53,10 +52,11 @@ When the dev-team receives a task:
 4. For unfamiliar libraries: check the library's
    repository for reported security issues and advisory
    history before signing off.
-5. Do not block progress unnecessarily — if a task has no
-   meaningful security implications, say so quickly and
-   let the team proceed. For low-risk tasks, send your
-   assessment based on the task description alone.
+5. For non-code tasks (documentation, configuration with
+   no secrets), send "no security implications" so the
+   Developer can proceed. For code tasks — regardless of
+   perceived risk level — always provide both pre- and
+   post-implementation sign-offs.
 
 ### During Implementation
 
@@ -88,7 +88,9 @@ dev-team reports completion to the lead.
 - Actively look for gaps — don't just say "looks fine."
 - If you identify a gap, tell the Test Engineer specifically
   what scenario to test.
-- If no meaningful security implications, confirm explicitly.
+- For non-code tasks, confirm "no security implications."
+  For code tasks, always provide post-implementation
+  sign-off — no exceptions based on perceived risk.
 - If blocked, message the lead to relay to the user.
 
 ### After Implementation

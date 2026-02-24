@@ -75,11 +75,11 @@ test list:
 The Developer writes all tests from the test list in
 a single batch:
 
-- If integration tests are included, spike one first
-  to validate the test harness. Fix any framework-level
-  issues before writing the rest.
-- Write all unit and integration tests together.
-- Do not split into phases.
+1. If integration tests are included, spike one first
+   to validate the test harness. Fix any framework-level
+   issues before continuing. Keep the spike test.
+2. Write all remaining tests (unit and integration)
+   together. Do not split into phases.
 
 ## Step 3: Test Engineer Verifies Tests
 

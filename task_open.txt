@@ -1,0 +1,157 @@
+# Open Tasks for rlsp-yaml YAML Language Server
+
+## Completed Features
+- [x] LSP bootstrap (tower-lsp, stdio transport)
+- [x] YAML parsing with diagnostic publishing
+- [x] Hover support
+- [x] Document symbols (outline view)
+- [x] Structural completion
+- [x] Anchor/alias navigation (go-to-definition + find references)
+- [x] Folding ranges
+- [x] Rename (anchors/aliases)
+- [x] Additional validators (unused anchors, flow style, key ordering)
+
+## Remaining Tasks (in order)
+
+### Task 1: Document Links
+Detect URLs in YAML values and make them clickable.
+
+**What to build:**
+- New module `src/links.rs` with pure function `document_links(text) -> Vec<DocumentLink>`
+- Scan YAML values for URL patterns (http://, https://, file://)
+- Return DocumentLink with range and target URL
+- Server integration: add `document_link_provider` capability and handler
+
+**Acceptance criteria:**
+- URLs in string values are detected and returned as DocumentLinks
+- Handles quoted and unquoted strings
+- Ignores URLs in comments
+- Works with multi-document YAML files
+
+---
+
+### Task 2: Selection Ranges
+Smart expand/shrink selection by YAML hierarchy (LSP SelectionRange).
+
+**What to build:**
+- New module `src/selection.rs` with pure function `selection_ranges(text, positions) -> Vec<SelectionRange>`
+- Indentation-based hierarchy detection (similar to folding)
+- Each SelectionRange has a parent pointing to the enclosing range
+- Server integration: add `selection_range_provider` capability and handler
+
+**Acceptance criteria:**
+- Cursor in a value expands to: value -> key-value pair -> parent mapping -> document
+- Cursor in a sequence item expands to: item -> sequence -> parent
+- Handles nested structures correctly
+- Works with multi-document YAML files
+
+---
+
+### Task 3: Code Actions
+Quick fixes and refactoring actions.
+
+**What to build:**
+- New module `src/code_actions.rs` with pure function `code_actions(text, range, diagnostics) -> Vec<CodeAction>`
+- Actions to implement:
+  1. **Convert flow to block style** — `{a: 1}` -> multi-line block mapping
+  2. **Convert block to flow style** — multi-line -> `{a: 1}`
+  3. **Tab to space conversion** — fix indentation issues
+  4. **Delete unused anchor** — remove `&name` when marked as unused by validator
+  5. **Convert quoted string to boolean** — `"true"` -> `true`
+  6. **Convert string to block scalar** — long strings to `|` or `>` style
+- Server integration: add `code_action_provider` capability and handler
+
+**Acceptance criteria:**
+- Code actions appear for relevant contexts
+- Applying an action produces valid YAML
+- Delete unused anchor only appears when diagnostic is present
+- Style conversions preserve semantics
+
+---
+
+### Task 4: Schema Support (Large - Multi-Part)
+JSON Schema integration for validation, completion, and hover.
+
+**Part A: Schema Loading and Association**
+- New module `src/schema.rs` for schema types and loading
+- Schema association by:
+  1. File pattern matching (e.g., `*.k8s.yaml` -> kubernetes schema)
+  2. Modeline comment (`# yaml-language-server: $schema=<url>`)
+  3. Workspace settings
+- Fetch schemas from URLs (schemastore.org) with caching
+- Parse JSON Schema (Draft-04, Draft-07 at minimum)
+
+**Part B: Schema Validation**
+- Extend diagnostic publishing to include schema validation errors
+- Validate required properties, types, enum values, additionalProperties
+- Produce clear diagnostic messages with property paths
+
+**Part C: Schema-Driven Completion**
+- Extend `completion.rs` to accept schema context
+- Suggest property names from schema
+- Suggest enum values from schema
+- Include descriptions in completion items
+
+**Part D: Schema-Driven Hover**
+- Extend `hover.rs` to accept schema context
+- Show property description from schema
+- Show type, default value, examples from schema
+
+**Acceptance criteria:**
+- Schemas load from URLs and cache locally
+- Modeline association works (`# yaml-language-server: $schema=...`)
+- Validation errors appear as diagnostics
+- Completion suggests schema-defined properties and enum values
+- Hover shows schema descriptions
+
+**Dependencies:** May require an HTTP client crate (e.g., `reqwest` or `ureq`) for fetching schemas — user approval needed.
+
+---
+
+## Lower Priority (can defer)
+
+### Task 5: Code Lens
+Show schema name at top of document.
+
+**What to build:**
+- New module `src/code_lens.rs`
+- Show schema title/name as code lens at document start
+- Clicking opens the schema URL
+- Server integration: add `code_lens_provider` capability
+
+---
+
+### Task 6: On-Type Formatting
+Auto-indent after `:`, `-`, `|`.
+
+**What to build:**
+- Server integration: add `document_on_type_formatting_provider` capability
+- Trigger characters: `\n` (newline)
+- Auto-indent logic:
+  - After `key:` -> indent for value
+  - After `- ` -> indent for sequence item content
+  - After `|` or `>` -> indent for block scalar content
+
+---
+
+### Task 7: Custom Tags
+Support for YAML custom tags like `!include`, `!ref`.
+
+**What to build:**
+- Configuration for custom tag definitions
+- Suppress "unknown tag" errors for configured tags
+- Optional: special handling (e.g., `!include` could show file path as link)
+
+---
+
+## Current Test Coverage
+- 242 tests (215 unit + 27 integration)
+- All tests pass
+- Clippy clean with pedantic + nursery lints
+
+## Architecture Notes
+- Pure function design: each feature module exports a pure function (text + position -> result)
+- Text-based position mapping (yaml-rust2 AST lacks span info)
+- tower-lsp v0.20 with "proposed" features
+- yaml-rust2 v0.9 for YAML parsing
+- tokio for async runtime

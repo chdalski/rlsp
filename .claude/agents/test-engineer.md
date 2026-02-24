@@ -35,8 +35,7 @@ down a split-ownership model.
 
 ## Startup
 
-Follow the SessionStart checklist, then load these
-role-specific knowledge files:
+Load these role-specific knowledge files:
 
 - `knowledge/base/testing.md` — always
 - `knowledge/base/security.md` — always
@@ -123,8 +122,8 @@ before the Developer starts implementing source code:
    match the specification.
 4. If tests are missing or incorrect, tell the
    Developer what to fix and wait for corrections.
-5. When satisfied, send "tests verified" to the
-   Developer. The Developer must not start source code
+5. When satisfied, broadcast "tests verified" to the
+   dev-team. The Developer must not start source code
    implementation until receiving this message. This
    checkpoint exists because the Developer wrote the
    tests — without independent verification, missing

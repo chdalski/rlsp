@@ -1,5 +1,7 @@
 # Rust Language Extension
 
+**Agents**: Developer, Reviewer
+
 > Extends base principles from `knowledge/base/principles.md`
 
 ## Philosophy
