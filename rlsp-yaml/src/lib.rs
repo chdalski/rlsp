@@ -1,4 +1,5 @@
 pub mod completion;
+pub mod document_links;
 pub mod document_store;
 pub mod folding;
 pub mod hover;
