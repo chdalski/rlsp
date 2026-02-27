@@ -37,3 +37,7 @@ unneeded_field_pattern = "deny"
 fn_params_excessive_bools = "deny"
 must_use_candidate = "deny"
 ```
+
+## Formatting
+
+- Use `cargo fmt` before committing to make sure the code is properly formatted

@@ -1,9 +1,10 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-ARG TZ
+ARG TZ="UTC"
 ENV TZ="$TZ"
 
 # Install development tools and iptables/ipset
+# hadolint ignore=DL3009
 RUN apt-get update && apt-get install -y --no-install-recommends \
     less \
     procps \
@@ -11,15 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     man-db \
     unzip \
     gnupg2 \
-    iptables \
-    ipset \
-    iproute2 \
     dnsutils \
     aggregate \
     jq \
     nano \
     vim \
-    fish
+    fish \
+    mitmproxy
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
@@ -40,19 +39,11 @@ ENV SHELL=/usr/bin/fish
 ENV EDITOR=nano
 ENV VISUAL=nano
 
-RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes \
-    && mkdir -p /home/vscode/.config/fish \
-    && echo 'fish_add_path /home/vscode/.local/bin' >> /home/vscode/.config/fish/config.fish \
-    && echo 'alias l="ls -lisa"' >> /home/vscode/.config/fish/config.fish \
-    && echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/vscode/.config/fish/config.fish \
-    && echo 'starship init fish | source' >> /home/vscode/.config/fish/config.fish \
-    && curl -fsSL https://claude.ai/install.sh | bash
-
-# Copy firewall script (allowed-domains.conf is bind-mounted at
-# runtime so changes take effect on container restart without rebuild)
-COPY init-firewall.sh /usr/local/bin/
-USER root
-RUN chmod +x /usr/local/bin/init-firewall.sh && \
-    echo "vscode ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/vscode-firewall && \
-    chmod 0440 /etc/sudoers.d/vscode-firewall
-USER vscode
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes && \
+    mkdir -p /home/vscode/.config/fish && \
+    echo 'fish_add_path /home/vscode/.local/bin' >> /home/vscode/.config/fish/config.fish && \
+    echo 'alias l="ls -lisa"' >> /home/vscode/.config/fish/config.fish && \
+    echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/vscode/.config/fish/config.fish && \
+    echo 'starship init fish | source' >> /home/vscode/.config/fish/config.fish && \
+    curl -fsSL https://claude.ai/install.sh | bash
