@@ -1,7 +1,0 @@
-{
-    "env": {
-        "ANTHROPIC_BASE_URL": "http://localhost:3000",
-        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-    },
-    "hasCompletedOnboarding": true
-}
