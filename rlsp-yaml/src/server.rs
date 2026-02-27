@@ -5,11 +5,12 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
-    RenameOptions, RenameParams, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    DocumentLink, DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
+    RenameParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -84,6 +85,10 @@ impl Backend {
                 prepare_provider: Some(true),
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             })),
+            document_link_provider: Some(DocumentLinkOptions {
+                resolve_provider: Some(false),
+                work_done_progress_options: Default::default(),
+            }),
             ..ServerCapabilities::default()
         }
     }
@@ -251,6 +256,27 @@ impl LanguageServer for Backend {
         Ok(Some(ranges))
     }
 
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = params.text_document.uri;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let links = crate::document_links::find_document_links(&text);
+        if links.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(links))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -413,5 +439,15 @@ mod tests {
         } else {
             panic!("rename_provider should be RenameOptions with prepare_provider");
         }
+    }
+
+    #[test]
+    fn should_advertise_document_link_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.document_link_provider.is_some(),
+            "capabilities should include document_link_provider"
+        );
     }
 }
