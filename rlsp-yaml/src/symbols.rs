@@ -93,7 +93,14 @@ fn yaml_to_symbols(yaml: &Yaml, lines: &[&str], base_line: usize) -> Vec<Documen
             }
             symbols
         }
-        _ => Vec::new(),
+        Yaml::Real(_)
+        | Yaml::Integer(_)
+        | Yaml::String(_)
+        | Yaml::Boolean(_)
+        | Yaml::Array(_)
+        | Yaml::Alias(_)
+        | Yaml::Null
+        | Yaml::BadValue => Vec::new(),
     }
 }
 
@@ -158,7 +165,13 @@ fn make_symbol(
                 Some(child_symbols)
             }
         }
-        _ => None,
+        Yaml::Real(_)
+        | Yaml::Integer(_)
+        | Yaml::String(_)
+        | Yaml::Boolean(_)
+        | Yaml::Alias(_)
+        | Yaml::Null
+        | Yaml::BadValue => None,
     };
 
     Some(DocumentSymbol {
@@ -223,7 +236,14 @@ fn make_sequence_children(arr: &[Yaml], lines: &[&str], search_from: usize) -> V
                 }
                 if cs.is_empty() { None } else { Some(cs) }
             }
-            _ => None,
+            Yaml::Real(_)
+            | Yaml::Integer(_)
+            | Yaml::String(_)
+            | Yaml::Boolean(_)
+            | Yaml::Array(_)
+            | Yaml::Alias(_)
+            | Yaml::Null
+            | Yaml::BadValue => None,
         };
 
         children.push(DocumentSymbol {
@@ -364,7 +384,9 @@ fn yaml_key_to_string(key: &Yaml) -> String {
         Yaml::Real(r) => r.clone(),
         Yaml::Boolean(b) => b.to_string(),
         Yaml::Null => "null".to_string(),
-        _ => format!("{key:?}"),
+        Yaml::Array(_) | Yaml::Hash(_) | Yaml::Alias(_) | Yaml::BadValue => {
+            format!("{key:?}")
+        }
     }
 }
 

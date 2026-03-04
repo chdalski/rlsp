@@ -1,17 +1,28 @@
+---
+paths:
+  - "**/README*"
+  - "**/docs/**/*.md"
+---
+
 # Documentation Principles
+
+These principles activate when writing or editing
+documentation files (READMEs, docs/ markdown). They ensure
+documentation stays accurate, useful, and maintainable.
 
 ## ARID — Accept Repetition In Documentation
 
 Documentation will repeat things found in code. This is
-acceptable and often necessary. Minimize redundancy where
-practical, but don't apply DRY dogmatically — readers should
-not need to read source code to understand documentation.
+acceptable and often necessary — readers should not need to
+read source code to understand documentation. Minimize
+redundancy where practical, but don't apply DRY dogmatically.
 
 ## Audience Awareness
 
 Identify who you are writing for before you start:
 
-- **Users** want results — how to install, configure, and use
+- **Users** want results — how to install, configure, and
+  use
 - **Developers** want to contribute — how the code works,
   how to extend it, how to run tests
 
@@ -24,21 +35,23 @@ distinct sections.
 Readers skim before they read. Structure content so they
 can quickly find what they need:
 
-- Use descriptive headings that summarize the section content
+- Use descriptive headings that summarize the section
+  content
 - Place the key idea first in each paragraph and list item
 - Use lists and tables for structured information
 - Keep paragraphs short and focused on one point
 
 ## Exemplary
 
-Show, don't just tell:
+Show, don't just tell — examples are the fastest path to
+understanding:
 
 - Include examples for common use cases
 - Place examples near the concepts they illustrate
 - Keep examples minimal — show the essential parts, omit
   boilerplate
-- Separate examples from dense reference material so neither
-  disrupts the other
+- Separate examples from dense reference material so
+  neither disrupts the other
 
 ## Consistency
 
@@ -62,7 +75,8 @@ Wrong documentation is worse than missing documentation:
 
 ## Proximity
 
-Store documentation close to the code it describes:
+Store documentation close to the code it describes — this
+makes it more likely to be updated when the code changes:
 
 - Co-locate docs in the repository, not in external wikis
   or separate systems
@@ -72,21 +86,22 @@ Store documentation close to the code it describes:
 
 ## Completeness
 
-Cover a topic fully or omit it entirely:
+Cover a topic fully or omit it entirely — partial coverage
+without disclaimers misleads readers into thinking they
+have the full picture:
 
-- Partial coverage without disclaimers misleads readers into
-  thinking they have the full picture
-- If a section is intentionally incomplete, say so explicitly
+- If a section is intentionally incomplete, say so
+  explicitly
 - A focused document that covers its scope thoroughly is
   better than a broad document that covers everything
   superficially
 
 ## Cumulative Structure
 
-Order content so prerequisites come first:
+Order content so prerequisites come first — don't reference
+concepts before introducing them:
 
 - Build understanding progressively from simple to complex
-- Don't reference concepts before introducing them
 - In tutorials, each step should build on the previous one
 - In reference docs, organize by domain concept rather than
   implementation structure
@@ -96,16 +111,16 @@ Order content so prerequisites come first:
 ### FAQ as Documentation
 
 FAQs tend to become disorganized junk drawers. They
-accumulate content that belongs in proper sections and
-go stale quickly. Integrate answers into the relevant
+accumulate content that belongs in proper sections and go
+stale quickly. Integrate answers into the relevant
 documentation sections instead.
 
 ### Documenting Implementation Instead of Behavior
 
-Describe what the code does for its users, not how it
-works internally. Implementation details change frequently
-and create maintenance burden. Document behavior, intent,
-and contracts.
+Describe what the code does for its users, not how it works
+internally. Implementation details change frequently and
+create maintenance burden. Document behavior, intent, and
+contracts.
 
 Exception: architecture documentation intentionally
 describes implementation for developer audiences.

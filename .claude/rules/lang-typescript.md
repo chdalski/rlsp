@@ -1,8 +1,10 @@
-# TypeScript Language Extension
+---
+paths:
+  - "**/*.ts"
+  - "**/*.tsx"
+---
 
-> Extends base principles from `knowledge/base/principles.md`
-
-## Philosophy
+# TypeScript
 
 TypeScript adds static types to JavaScript, catching errors
 at compile time. Embrace strict mode, discriminated unions,
@@ -14,7 +16,9 @@ pragmatic about JavaScript's multi-paradigm nature.
 
 ### Strict Mode
 
-Always enable strict mode in `tsconfig.json`:
+Always enable strict mode in `tsconfig.json` — without it,
+TypeScript silently permits `null` and `undefined` in places
+that cause runtime crashes:
 
 ```json
 {
@@ -28,7 +32,9 @@ Always enable strict mode in `tsconfig.json`:
 
 ### Discriminated Unions
 
-Make invalid states unrepresentable with tagged unions:
+Make invalid states unrepresentable with tagged unions —
+the compiler enforces exhaustive handling, so adding a new
+variant surfaces every location that needs updating:
 
 ```typescript
 type Result<T, E> =
@@ -44,7 +50,9 @@ type OrderStatus =
 
 ### Type Narrowing
 
-Use type guards and narrowing instead of type assertions:
+Use type guards and narrowing instead of type assertions —
+assertions bypass the compiler's safety checks and hide
+bugs:
 
 ```typescript
 // Bad - type assertion
@@ -61,14 +69,15 @@ function isOrder(value: unknown): value is Order {
 }
 
 if (isOrder(response)) {
-  // TypeScript knows response is Order here
   console.log(response.items.length);
 }
 ```
 
 ### Branded Types (Newtypes)
 
-Avoid primitive obsession with branded types:
+Avoid primitive obsession with branded types — the compiler
+prevents passing a `CustomerId` where an `OrderId` is
+expected, catching mix-ups that raw `number` allows:
 
 ```typescript
 type CustomerId = number & { readonly __brand: "CustomerId" };
@@ -87,7 +96,8 @@ function Email(value: string): Email {
 
 ### Utility Types
 
-Use built-in utility types effectively:
+Use built-in utility types — they express intent clearly
+and reduce boilerplate:
 
 ```typescript
 // Immutable objects
@@ -113,6 +123,9 @@ type Status = (typeof STATUSES)[number];
 
 ### Immutability
 
+Prefer immutable operations — mutation creates hidden
+coupling between call sites that share references:
+
 - Use `readonly` for properties and arrays
 - Use `as const` for literal types
 - Prefer spread operators over mutation
@@ -135,7 +148,8 @@ function addItem(order: Order, item: Item): Order {
 
 ### Array Transformations
 
-Use `map`, `filter`, `reduce` over imperative loops:
+Use `map`, `filter`, `reduce` over imperative loops — they
+declare intent and eliminate off-by-one errors:
 
 ```typescript
 // Imperative (avoid)
@@ -178,7 +192,8 @@ function processOrder(input: RawOrder): Result<Order, Error> {
 
 ### Functional Components
 
-Always use functional components with hooks:
+Always use functional components with hooks — class
+components are legacy and don't compose as well:
 
 ```typescript
 interface UserProfileProps {
@@ -204,7 +219,6 @@ function UserProfile({
 ### Composition Over Prop Drilling
 
 ```typescript
-// Use composition and context
 function OrderPage(): JSX.Element {
   return (
     <OrderProvider>
@@ -239,18 +253,10 @@ function useOrder(orderId: string) {
 
 ### Async/Await
 
-Always use async/await over raw promises or callbacks:
+Always use async/await over raw promises or callbacks —
+callback nesting obscures control flow and error handling:
 
 ```typescript
-// Bad - callback hell
-fetchUser(id, (err, user) => {
-  if (err) return handleError(err);
-  fetchOrders(user.id, (err, orders) => {
-    if (err) return handleError(err);
-    // ...
-  });
-});
-
 // Good - async/await
 async function getUserOrders(id: string): Promise<Order[]> {
   const user = await fetchUser(id);
@@ -260,8 +266,10 @@ async function getUserOrders(id: string): Promise<Order[]> {
 
 ### Error Handling
 
+Define specific error classes and handle errors at
+boundaries — generic catches hide the root cause:
+
 ```typescript
-// Define specific error classes
 class NotFoundError extends Error {
   constructor(
     readonly entity: string,
@@ -272,7 +280,6 @@ class NotFoundError extends Error {
   }
 }
 
-// Handle errors at boundaries
 async function handleRequest(
   req: Request,
   res: Response
@@ -300,6 +307,9 @@ async function handleRequest(
 
 ### Test Structure
 
+Use `describe`/`it` blocks with Arrange-Act-Assert —
+consistent structure makes tests scannable:
+
 ```typescript
 describe("OrderService", () => {
   describe("createOrder", () => {
@@ -324,6 +334,10 @@ describe("OrderService", () => {
 
 ### Component Testing
 
+Test through user-visible behavior, not implementation
+details — tests that click buttons and check text survive
+refactoring:
+
 ```typescript
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -341,6 +355,9 @@ test("submits order on button click", async () => {
 ```
 
 ### MSW for API Mocking
+
+Mock at the network boundary, not at the module level —
+this tests the actual HTTP handling code:
 
 ```typescript
 import { http, HttpResponse } from "msw";
@@ -364,7 +381,7 @@ afterAll(() => server.close());
 
 ### Tools
 
-- **ESLint** for linting (with typescript-eslint)
+- **ESLint** with typescript-eslint for linting
 - **Prettier** for formatting
 - Enable `no-explicit-any` and `no-unused-vars` rules
 
@@ -388,20 +405,16 @@ src/
     index.ts
 ```
 
-## Workflow Details
-
 ### Clean Builds
 
 Remove `node_modules/.cache`, `dist/`, or framework-specific
-build directories before quality checks. For projects using
-a bundler, run the clean script if defined in `package.json`.
+build directories before quality checks — stale build
+artifacts can mask errors:
 
-### Build Tool Commands
-
-- `npm run format` / `npx prettier --write .` — format code
+- `npm run format` / `npx prettier --write .` — format
 - `npm run lint` / `npx eslint .` — lint
-- `npm test` / `npx vitest` / `npx jest` — run tests
-- `rm -rf dist node_modules/.cache` — remove build artifacts
+- `npm test` / `npx vitest` / `npx jest` — test
+- `rm -rf dist node_modules/.cache` — clean artifacts
 
 ## Common Pitfalls
 

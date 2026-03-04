@@ -222,7 +222,7 @@ mod tests {
 
         let yaml = store.get_yaml(&uri).expect("yaml present");
         assert_eq!(yaml.len(), 1);
-        let val = yaml[0]["key"].as_str();
+        let val = yaml.first().expect("yaml present")["key"].as_str();
         assert_eq!(val, Some("new"));
     }
 

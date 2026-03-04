@@ -1,15 +1,13 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
 use tower_lsp::lsp_types::{DocumentLink, Position, Range, Url};
 
-/// Maximum allowed URL length to prevent DoS attacks.
+/// Maximum allowed URL length to prevent `DoS` attacks.
 const MAX_URL_LENGTH: usize = 2048;
 
 /// Regex pattern for detecting URLs with http://, https://, or file:// schemes.
 /// Excludes common delimiters and whitespace to avoid capturing surrounding text.
-static URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(https?|file)://[^\s<>"{}|\\^`\[\]()]+"#).unwrap()
-});
+static URL_REGEX: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"(https?|file)://[^\s<>"{}|\\^`\[\]()]+"#).unwrap());
 
 /// Find all document links (URLs) in the given YAML text.
 ///
@@ -76,11 +74,11 @@ fn calculate_range(line: usize, byte_start: usize, byte_end: usize, line_text: &
 
     Range {
         start: Position {
-            line: line as u32,
+            line: u32::try_from(line).expect("line index fits in u32"),
             character: start_char,
         },
         end: Position {
-            line: line as u32,
+            line: u32::try_from(line).expect("line index fits in u32"),
             character: end_char,
         },
     }
@@ -91,10 +89,13 @@ fn calculate_range(line: usize, byte_start: usize, byte_end: usize, line_text: &
 /// LSP uses UTF-16 code units for character positions, so we must convert
 /// from Rust's UTF-8 byte indices to UTF-16 offsets.
 fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
-    line_text[..byte_offset]
-        .chars()
-        .map(|c| c.len_utf16())
-        .sum::<usize>() as u32
+    u32::try_from(
+        line_text[..byte_offset]
+            .chars()
+            .map(char::len_utf16)
+            .sum::<usize>(),
+    )
+    .expect("column offset fits in u32")
 }
 
 #[cfg(test)]
@@ -110,10 +111,7 @@ mod tests {
                     l.range.start.line,
                     l.range.start.character,
                     l.range.end.character,
-                    l.target
-                        .as_ref()
-                        .map(|u| u.to_string())
-                        .unwrap_or_default(),
+                    l.target.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                 )
             })
             .collect()
@@ -167,7 +165,8 @@ mod tests {
 
     #[test]
     fn should_detect_http_and_https_and_file_schemes() {
-        let text = "http: http://example.com\nhttps: https://example.com\nfile: file:///path/to/file\n";
+        let text =
+            "http: http://example.com\nhttps: https://example.com\nfile: file:///path/to/file\n";
         let result = find_document_links(text);
 
         assert_eq!(result.len(), 3, "should detect all three schemes");
@@ -235,7 +234,8 @@ mod tests {
 
     #[test]
     fn should_detect_urls_in_all_sections() {
-        let text = "url: https://first.com\n---\nurl: https://second.com\n---\nurl: https://third.com\n";
+        let text =
+            "url: https://first.com\n---\nurl: https://second.com\n---\nurl: https://third.com\n";
         let result = find_document_links(text);
 
         assert_eq!(result.len(), 3);
@@ -417,7 +417,11 @@ mod tests {
         let text = format!("url: {}\n", url);
         let result = find_document_links(&text);
 
-        assert_eq!(result.len(), 1, "URL at exactly 2048 chars should be detected");
+        assert_eq!(
+            result.len(),
+            1,
+            "URL at exactly 2048 chars should be detected"
+        );
     }
 
     #[test]
@@ -490,7 +494,11 @@ mod tests {
         let text = "url: https://localhost\n";
         let result = find_document_links(text);
 
-        assert_eq!(result.len(), 1, "URLs without TLD (like localhost) are valid");
+        assert_eq!(
+            result.len(),
+            1,
+            "URLs without TLD (like localhost) are valid"
+        );
     }
 
     #[test]
@@ -558,7 +566,10 @@ mod tests {
         assert_eq!(result[0].range.start.line, 0);
         assert_eq!(result[1].range.start.line, 1);
         // Both URLs should have same relative position on their lines
-        assert_eq!(result[0].range.start.character, result[1].range.start.character);
+        assert_eq!(
+            result[0].range.start.character,
+            result[1].range.start.character
+        );
     }
 
     // ========== Scheme and Validation Tests ==========
@@ -575,7 +586,11 @@ url5: javascript:alert(1)
         let result = find_document_links(text);
 
         // Only http, https, file should be detected (ftp and javascript are not matched by regex)
-        assert_eq!(result.len(), 3, "only http, https, file schemes should be detected");
+        assert_eq!(
+            result.len(),
+            3,
+            "only http, https, file schemes should be detected"
+        );
         let tuples = links_as_tuples(&result);
         assert!(tuples[0].3.starts_with("https://"));
         assert!(tuples[1].3.starts_with("http://"));

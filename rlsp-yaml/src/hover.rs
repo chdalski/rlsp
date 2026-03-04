@@ -220,7 +220,9 @@ fn build_key_path(
         let mut i = line_idx;
         while i > 0 {
             i -= 1;
-            let prev_line = lines[i];
+            let Some(prev_line) = lines.get(i).copied() else {
+                continue;
+            };
             let prev_trimmed = prev_line.trim();
 
             // Skip empty lines, comments, separators
@@ -295,11 +297,13 @@ fn extract_key(trimmed_line: &str) -> Option<String> {
 
 /// Find the index of a sequence item by counting preceding siblings.
 fn sequence_index(lines: &[&str], line_idx: usize) -> usize {
-    let current_indent = indentation_level(lines[line_idx]);
+    let current_indent = lines.get(line_idx).map_or(0, |l| indentation_level(l));
     let mut idx = 0;
 
     for i in (0..line_idx).rev() {
-        let prev_line = lines[i];
+        let Some(prev_line) = lines.get(i).copied() else {
+            continue;
+        };
         let prev_trimmed = prev_line.trim();
         let prev_indent = indentation_level(prev_line);
 
@@ -331,14 +335,28 @@ fn resolve_path<'a>(doc: &'a Yaml, path: &[PathSegment]) -> Option<&'a Yaml> {
                     Yaml::Hash(map) => {
                         current = map.get(&yaml_key)?;
                     }
-                    _ => return None,
+                    Yaml::Real(_)
+                    | Yaml::Integer(_)
+                    | Yaml::String(_)
+                    | Yaml::Boolean(_)
+                    | Yaml::Array(_)
+                    | Yaml::Alias(_)
+                    | Yaml::Null
+                    | Yaml::BadValue => return None,
                 }
             }
             PathSegment::Index(idx) => match current {
                 Yaml::Array(arr) => {
                     current = arr.get(*idx)?;
                 }
-                _ => return None,
+                Yaml::Real(_)
+                | Yaml::Integer(_)
+                | Yaml::String(_)
+                | Yaml::Boolean(_)
+                | Yaml::Hash(_)
+                | Yaml::Alias(_)
+                | Yaml::Null
+                | Yaml::BadValue => return None,
             },
         }
     }
@@ -367,7 +385,7 @@ fn scalar_value(yaml: &Yaml) -> Option<String> {
         Yaml::Real(r) => Some(r.clone()),
         Yaml::Boolean(b) => Some(b.to_string()),
         Yaml::Null => Some("null".to_string()),
-        _ => None,
+        Yaml::Hash(_) | Yaml::Array(_) | Yaml::Alias(_) | Yaml::BadValue => None,
     }
 }
 

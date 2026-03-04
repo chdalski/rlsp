@@ -1,6 +1,19 @@
 [workspace]
 resolver = "2"
 
-members = [
-  "rlsp-yaml"
-]
+members = ["rlsp-yaml"]
+
+[workspace.lints.clippy]
+# https://github.com/rust-lang/cargo/issues/12918
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+indexing_slicing = "deny"
+fallible_impl_from = "deny"
+wildcard_enum_match_arm = "deny"
+unneeded_field_pattern = "deny"
+fn_params_excessive_bools = "deny"
+must_use_candidate = "deny"
+
+[workspace.lints.rust]
+warnings = "deny"

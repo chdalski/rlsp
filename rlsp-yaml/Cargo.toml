@@ -3,6 +3,9 @@ name = "rlsp-yaml"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 tower-lsp = { version = "0.20", features = ["proposed"] }
 tokio = { version = "1", features = ["full"] }

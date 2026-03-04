@@ -1,10 +1,19 @@
-# Absolute Priority Premise (APP)
+---
+paths:
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.py"
+  - "**/*.rs"
+  - "**/*.go"
+---
 
-## Description
+# Absolute Priority Premise (APP)
 
 APP assigns "mass" values to code components. Lower mass
 indicates simpler code. Use during refactoring to compare
-equivalent solutions.
+equivalent solutions — it gives an objective basis for
+choosing between implementations that are functionally
+identical.
 
 ## The Six Components (with Mass Values)
 
@@ -12,7 +21,7 @@ equivalent solutions.
 
 - Literal values: numbers, strings, booleans, empty
   collections, absence markers
-- Lowest mass - preferred building block
+- Lowest mass — preferred building block
 
 ### 2. Binding/Scalar (Mass: 1)
 
@@ -37,13 +46,13 @@ equivalent solutions.
 - Repetitive execution
 - **Note**: Only transforming operations count as loops;
   consuming/terminal operations count as invocations.
-  See [Transforming vs Consuming](#transforming-vs-consuming)
+  See Transforming vs Consuming below.
 
 ### 6. Assignment (Mass: 6)
 
 - Mutating existing variables or appending to mutable
   collections
-- State changes - most complex
+- State changes — most complex
 
 ## Calculation Rules
 
@@ -84,7 +93,9 @@ Total Mass = (constants * 1) + (bindings * 1)
 ### Transforming vs Consuming
 
 Distinguish between transforming and consuming collection
-operations:
+operations — this matters because transforming operations
+define iteration behavior (higher mass) while consuming
+operations just trigger execution (lower mass):
 
 - **Transforming** operations define iteration behavior
   and count as **Loops (5)**: map, filter, flat-map, take,
@@ -137,49 +148,46 @@ Total Mass: 23
 Early return eliminates all assignments and one conditional,
 cutting mass by ~50%.
 
-> **Agents**: When demonstrating APP to the user, write
-> comparison examples in the project's primary language.
+> When demonstrating APP, write comparison examples in the
+> project's primary language — pseudocode is for this
+> reference; real examples should use the language the team
+> is working in.
 
 ## When to Use
 
 - **During refactoring** to choose between equivalent
   solutions
 - **Comparing algorithms** of similar functionality
-- **NOT during initial TDD** red/green phases
+- **NOT during initial development** — write the simplest
+  thing that works first, then optimize
 
 ## Limitations
 
-- **Clarity always trumps mass** - readability matters most
-- **Ignores performance** - doesn't measure speed or memory
-- **Context-dependent** - works best for algorithm
+- **Clarity always trumps mass** — readability matters most
+- **Ignores performance** — doesn't measure speed or memory
+- **Context-dependent** — works best for algorithm
   comparisons
 
 ## Remember
 
-- APP is a **tool, not a rule**
+- APP is a **tool, not a rule** — it informs decisions,
+  it doesn't make them
 - **Context matters** more than absolute scores
-- **Combine with other principles** for best results
-- **Lower mass is generally better**, but not always
-- **Use during refactoring**, not initial development
-- **The best specific mass values are unknown** - these
-  are suggested weights
+- **Lower mass is generally better**, but a higher-mass
+  solution may win when it is more readable, more
+  idiomatic, or has better performance characteristics
+- **Use during refactoring**, not initial development —
+  premature optimization of mass distracts from getting
+  the logic right
 
 ## Sources and References
 
 ### Primary Sources
 
-- **Micah Martin's original work** (2012) -
-  [Transformation Priority Premise Applied][tpp-applied] -
-  8th Light blog post with Coin Changer Kata example
-- **8th Light University presentations** - Part One
-  and Part Two
-
-[tpp-applied]: https://8thlight.com/insights/transformation-priority-premise-applied
+- **Micah Martin's original work** — Transformation
+  Priority Premise Applied (8th Light blog)
 
 ### Secondary Sources
 
-- **Peter Kofler's detailed analysis** -
-  [Absolute Priority Premise, an Example][app-example] -
-  comprehensive explanation with Word Wrap kata examples
-
-[app-example]: https://blog.code-cop.org/2016/08/absolute-priority-premise-example.html
+- **Peter Kofler's detailed analysis** — Absolute Priority
+  Premise, an Example (code-cop.org)

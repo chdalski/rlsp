@@ -87,7 +87,7 @@ impl Backend {
             })),
             document_link_provider: Some(DocumentLinkOptions {
                 resolve_provider: Some(false),
-                work_done_progress_options: Default::default(),
+                work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
             ..ServerCapabilities::default()
         }

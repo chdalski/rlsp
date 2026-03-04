@@ -10,27 +10,11 @@
 - [x] Folding ranges
 - [x] Rename (anchors/aliases)
 - [x] Additional validators (unused anchors, flow style, key ordering)
+- [x] Document links (URL detection in YAML values)
 
 ## Remaining Tasks (in order)
 
-### Task 1: Document Links
-Detect URLs in YAML values and make them clickable.
-
-**What to build:**
-- New module `src/links.rs` with pure function `document_links(text) -> Vec<DocumentLink>`
-- Scan YAML values for URL patterns (http://, https://, file://)
-- Return DocumentLink with range and target URL
-- Server integration: add `document_link_provider` capability and handler
-
-**Acceptance criteria:**
-- URLs in string values are detected and returned as DocumentLinks
-- Handles quoted and unquoted strings
-- Ignores URLs in comments
-- Works with multi-document YAML files
-
----
-
-### Task 2: Selection Ranges
+### Task 1: Selection Ranges
 Smart expand/shrink selection by YAML hierarchy (LSP SelectionRange).
 
 **What to build:**
@@ -47,7 +31,7 @@ Smart expand/shrink selection by YAML hierarchy (LSP SelectionRange).
 
 ---
 
-### Task 3: Code Actions
+### Task 2: Code Actions
 Quick fixes and refactoring actions.
 
 **What to build:**
@@ -69,7 +53,7 @@ Quick fixes and refactoring actions.
 
 ---
 
-### Task 4: Schema Support (Large - Multi-Part)
+### Task 3: Schema Support (Large - Multi-Part)
 JSON Schema integration for validation, completion, and hover.
 
 **Part A: Schema Loading and Association**
@@ -110,7 +94,7 @@ JSON Schema integration for validation, completion, and hover.
 
 ## Lower Priority (can defer)
 
-### Task 5: Code Lens
+### Task 4: Code Lens
 Show schema name at top of document.
 
 **What to build:**
@@ -121,7 +105,7 @@ Show schema name at top of document.
 
 ---
 
-### Task 6: On-Type Formatting
+### Task 5: On-Type Formatting
 Auto-indent after `:`, `-`, `|`.
 
 **What to build:**
@@ -134,7 +118,7 @@ Auto-indent after `:`, `-`, `|`.
 
 ---
 
-### Task 7: Custom Tags
+### Task 6: Custom Tags
 Support for YAML custom tags like `!include`, `!ref`.
 
 **What to build:**
@@ -145,8 +129,7 @@ Support for YAML custom tags like `!include`, `!ref`.
 ---
 
 ## Current Test Coverage
-- 242 tests (215 unit + 27 integration)
-- All tests pass
+- 260 tests passing
 - Clippy clean with pedantic + nursery lints
 
 ## Architecture Notes

@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     gnupg2 \
     dnsutils \
-    jq \
     nano \
     vim \
+    git \
     fish
 
 # Set `DEVCONTAINER` environment variable to help with orientation
@@ -45,3 +45,5 @@ RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes && \
     echo 'alias l="ls -lisa"' >> /home/vscode/.config/fish/config.fish && \
     echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/vscode/.config/fish/config.fish && \
     echo 'starship init fish | source' >> /home/vscode/.config/fish/config.fish
+
+COPY .gitconfig /home/vscode/.gitconfig

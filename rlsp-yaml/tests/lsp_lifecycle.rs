@@ -749,9 +749,11 @@ async fn should_publish_validator_diagnostics_on_document_open() {
         .expect("diagnostics should exist");
 
     assert!(!diags.is_empty(), "should have unused anchor diagnostic");
-    assert!(diags.iter().any(|d| d.tags.as_ref().is_some_and(|t| {
-        t.contains(&tower_lsp::lsp_types::DiagnosticTag::UNNECESSARY)
-    })));
+    assert!(diags.iter().any(|d| {
+        d.tags
+            .as_ref()
+            .is_some_and(|t| t.contains(&tower_lsp::lsp_types::DiagnosticTag::UNNECESSARY))
+    }));
 }
 
 // Test 43

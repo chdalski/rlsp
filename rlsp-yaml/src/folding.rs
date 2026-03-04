@@ -193,8 +193,10 @@ fn collect_document_section_folds(lines: &[&str], ranges: &mut Vec<FoldingRange>
     }
 
     // First section: from line 0 to just before first separator
-    if separator_positions[0] > 0 {
-        let end = find_last_content_line_in_range(lines, 0, separator_positions[0]);
+    if let Some(&first_sep) = separator_positions.first()
+        && first_sep > 0
+    {
+        let end = find_last_content_line_in_range(lines, 0, first_sep);
         if let Some(end) = end
             && end > 0
         {
@@ -204,20 +206,23 @@ fn collect_document_section_folds(lines: &[&str], ranges: &mut Vec<FoldingRange>
 
     // Sections between separators
     for window in separator_positions.windows(2) {
-        let start = window[0] + 1;
-        let before = window[1];
-        if start < before {
-            let end = find_last_content_line_in_range(lines, start, before);
-            if let Some(end) = end
-                && end > start
-            {
-                push_fold(ranges, start, end, Some(FoldingRangeKind::Region));
+        if let [start_sep, before] = window {
+            let start = start_sep + 1;
+            if start < *before {
+                let end = find_last_content_line_in_range(lines, start, *before);
+                if let Some(end) = end
+                    && end > start
+                {
+                    push_fold(ranges, start, end, Some(FoldingRangeKind::Region));
+                }
             }
         }
     }
 
     // Last section: from after last separator to end
-    let last_sep = separator_positions[separator_positions.len() - 1];
+    let last_sep = *separator_positions
+        .last()
+        .expect("separator_positions is non-empty");
     let start = last_sep + 1;
     if start < lines.len() {
         let end = find_last_content_line_in_range(lines, start, lines.len());

@@ -1,8 +1,9 @@
-# Python Language Extension
+---
+paths:
+  - "**/*.py"
+---
 
-> Extends base principles from `knowledge/base/principles.md`
-
-## Philosophy
+# Python
 
 Python emphasizes readability and simplicity. "There should
 be one obvious way to do it." Write Pythonic code that
@@ -15,7 +16,9 @@ Python's dynamic nature pragmatically.
 
 ### List Comprehensions and Generators
 
-Prefer comprehensions over manual loops for transformations:
+Prefer comprehensions over manual loops for
+transformations — they express intent more clearly and
+avoid mutable accumulator patterns:
 
 ```python
 # Imperative (avoid)
@@ -41,16 +44,10 @@ active_names = (
 
 ### Context Managers
 
-Use context managers for resource management:
+Use context managers for resource management — they
+guarantee cleanup even when exceptions occur:
 
 ```python
-# Bad - manual cleanup
-f = open("data.txt")
-try:
-    data = f.read()
-finally:
-    f.close()
-
 # Good - context manager
 with open("data.txt") as f:
     data = f.read()
@@ -84,6 +81,9 @@ config = {**defaults, "timeout": 60}
 
 ### Basic Type Annotations
 
+Type hints catch bugs at static analysis time and serve as
+machine-checked documentation:
+
 ```python
 from typing import Protocol, TypeVar, Generic
 from collections.abc import Sequence, Mapping
@@ -102,8 +102,10 @@ def process_items(
 
 ### Protocols for Structural Typing
 
-Use `Protocol` instead of abstract base classes when
-you want structural (duck) typing:
+Use `Protocol` instead of abstract base classes when you
+want structural (duck) typing — any class with matching
+methods satisfies the protocol without explicit
+inheritance:
 
 ```python
 from typing import Protocol, runtime_checkable
@@ -152,6 +154,9 @@ class Result(Generic[T, E]):
 
 ### Discriminated Unions
 
+Use frozen dataclasses with `match` for exhaustive state
+handling — the type checker warns about unhandled variants:
+
 ```python
 from dataclasses import dataclass
 from typing import Union
@@ -182,18 +187,18 @@ def handle_status(status: OrderStatus) -> str:
 
 ## Functional Patterns
 
-### Map, Filter, and Functools
+### Comprehensions and Functools
+
+Prefer comprehensions for simple cases — they're more
+readable than `map`/`filter` in Python:
 
 ```python
 from functools import reduce, partial
 from itertools import chain, groupby
 
-# Prefer comprehensions for simple cases
 squares = [x ** 2 for x in numbers]
 
 # Use functools for composition
-from functools import reduce
-
 def compose(*fns):
     def composed(x):
         return reduce(
@@ -207,10 +212,13 @@ result = process(raw_input)
 
 ### Immutability
 
+Use frozen dataclasses for value objects — immutable
+objects are safer to share across threads and easier to
+reason about:
+
 ```python
 from dataclasses import dataclass
 
-# Use frozen dataclasses for value objects
 @dataclass(frozen=True)
 class Point:
     x: float
@@ -245,6 +253,9 @@ for category, items in groupby(
 
 ### Custom Exceptions
 
+Define domain-specific exceptions — generic `Exception`
+catches hide bugs and make error handling imprecise:
+
 ```python
 class DomainError(Exception):
     """Base for all domain errors."""
@@ -265,15 +276,10 @@ class ValidationError(DomainError):
 ### EAFP vs LBYL
 
 Python favors EAFP (Easier to Ask Forgiveness than
-Permission) over LBYL (Look Before You Leap):
+Permission) — it avoids race conditions between check and
+use:
 
 ```python
-# LBYL (avoid in Python)
-if key in dictionary:
-    value = dictionary[key]
-else:
-    value = default
-
 # EAFP (preferred)
 try:
     value = dictionary[key]
@@ -303,6 +309,9 @@ def process_order(order_data: dict) -> Order:
 
 ### Pytest Framework
 
+Use pytest as the test framework — its fixtures, parametrize,
+and assertion introspection reduce test boilerplate:
+
 ```python
 import pytest
 
@@ -321,6 +330,9 @@ class TestCustomerId:
 ```
 
 ### Fixtures
+
+Fixtures provide reusable test setup — they compose cleanly
+and handle teardown automatically:
 
 ```python
 import pytest
@@ -348,6 +360,9 @@ def test_find_order(mock_repo, sample_order):
 
 ### Parametrize
 
+Use parametrize for data-driven tests — it avoids
+duplicating test logic across similar cases:
+
 ```python
 @pytest.mark.parametrize(
     "input_val,expected",
@@ -366,7 +381,10 @@ def test_customer_id_validation(input_val, expected):
             CustomerId(input_val)
 ```
 
-### Hypothesis for Property-Based Testing
+### Property-Based Testing
+
+Use Hypothesis for property-based testing — it finds edge
+cases that manual test data misses:
 
 ```python
 from hypothesis import given
@@ -388,11 +406,14 @@ def test_customer_id_rejects_non_positive(value):
 ### Required Tools
 
 - **Ruff** for linting and formatting (replaces flake8,
-  isort, black)
+  isort, black) — single tool reduces config sprawl
 - **mypy** or **pyright** for type checking
 - **pytest** for testing
 
 ### Project Structure (src Layout)
+
+The src layout prevents accidental imports from the project
+root that work locally but fail when installed:
 
 ```text
 project/
@@ -424,22 +445,16 @@ project/
 - Keep functions focused and short
 - Use docstrings for public APIs (Google style)
 
-## Workflow Details
-
 ### Clean Builds
 
 Remove `__pycache__/`, `.pyc` files, and `.mypy_cache/`
-before quality checks to avoid stale bytecode or cached
-type-checking results.
+before quality checks — stale bytecode can mask import
+errors:
 
-### Build Tool Commands
-
-- `ruff format .` — format code
+- `ruff format .` — format
 - `ruff check .` — lint
 - `mypy .` / `pyright` — type check
-- `pytest` — run tests
-- `find . -type d -name __pycache__ -exec rm -rf {} +` —
-  remove cached bytecode
+- `pytest` — test
 
 ## Common Pitfalls
 
@@ -453,29 +468,3 @@ type-checking results.
 | Ignoring GIL | No true parallelism | Use multiprocessing/async |
 | String formatting with % | Outdated, error-prone | Use f-strings |
 | Deep inheritance | Rigid hierarchies | Composition + protocols |
-
-### Mutable Default Argument
-
-```python
-# Bug - shared mutable default
-def add_item(item, items=[]):
-    items.append(item)
-    return items
-
-# Fix - use None sentinel
-def add_item(item, items=None):
-    if items is None:
-        items = []
-    items.append(item)
-    return items
-```
-
-### Late Binding in Closures
-
-```python
-# Bug - all functions return 4
-fns = [lambda: i for i in range(5)]
-
-# Fix - capture value with default arg
-fns = [lambda i=i: i for i in range(5)]
-```

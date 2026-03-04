@@ -101,7 +101,7 @@ pub fn validate_unused_anchors(text: &str) -> Vec<Diagnostic> {
                     ),
                     severity: Some(DiagnosticSeverity::WARNING),
                     code: Some(NumberOrString::String("unusedAnchor".to_string())),
-                    message: format!("Anchor '{}' is never used", truncated_name),
+                    message: format!("Anchor '{truncated_name}' is never used"),
                     source: Some("rlsp-yaml".to_string()),
                     tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                     ..Diagnostic::default()
@@ -302,13 +302,17 @@ fn check_yaml_ordering(
                     Yaml::Integer(i) => Some(i.to_string()),
                     Yaml::Real(r) => Some(r.clone()),
                     Yaml::Boolean(b) => Some(b.to_string()),
-                    _ => None,
+                    Yaml::Array(_)
+                    | Yaml::Hash(_)
+                    | Yaml::Alias(_)
+                    | Yaml::Null
+                    | Yaml::BadValue => None,
                 })
                 .collect();
 
             // Check if keys are in alphabetical order
             // Track the maximum key seen so far to catch all out-of-order keys
-            let mut max_key = if keys.is_empty() { "" } else { &keys[0] };
+            let mut max_key: &str = keys.first().map_or("", String::as_str);
 
             for key in keys.iter().skip(1) {
                 if key.as_str() < max_key {
@@ -323,7 +327,7 @@ fn check_yaml_ordering(
                             ),
                             severity: Some(DiagnosticSeverity::WARNING),
                             code: Some(NumberOrString::String("mapKeyOrder".to_string())),
-                            message: format!("Key '{}' is out of alphabetical order", key),
+                            message: format!("Key '{key}' is out of alphabetical order"),
                             source: Some("rlsp-yaml".to_string()),
                             ..Diagnostic::default()
                         });
@@ -344,7 +348,13 @@ fn check_yaml_ordering(
                 check_yaml_ordering(item, lines, diagnostics, depth + 1);
             }
         }
-        _ => {}
+        Yaml::Real(_)
+        | Yaml::Integer(_)
+        | Yaml::String(_)
+        | Yaml::Boolean(_)
+        | Yaml::Alias(_)
+        | Yaml::Null
+        | Yaml::BadValue => {}
     }
 }
 

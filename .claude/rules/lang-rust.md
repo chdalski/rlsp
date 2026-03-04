@@ -1,10 +1,9 @@
-# Rust Language Extension
+---
+paths:
+  - "**/*.rs"
+---
 
-**Agents**: Developer, Reviewer
-
-> Extends base principles from `knowledge/base/principles.md`
-
-## Philosophy
+# Rust
 
 Rust prioritizes safety, performance, and expressiveness.
 The compiler enforces memory safety and thread safety at
@@ -17,8 +16,10 @@ immutability-first design.
 
 ### Ownership Design
 
-- Prefer owned types for public API boundaries
-- Use references (`&T`, `&mut T`) to avoid unnecessary clones
+- Prefer owned types for public API boundaries — this
+  avoids lifetime complexity at interface boundaries
+- Use references (`&T`, `&mut T`) to avoid unnecessary
+  clones
 - Keep lifetimes explicit only when the compiler requires it
 - Use `Arc` or `Rc` for shared ownership scenarios
 - Use `Cow<'_, T>` for data that may or may not be owned
@@ -29,8 +30,8 @@ immutability-first design.
   restructure data flow instead
 - **Fighting the borrow checker** means the design needs
   rethinking, not workarounds
-- **Using `String` when `&str` suffices** creates unnecessary
-  allocations
+- **Using `String` when `&str` suffices** creates
+  unnecessary allocations
 
 ```rust
 // Bad - unnecessary cloning
@@ -49,8 +50,9 @@ fn process(data: &MyStruct) -> &str {
 
 ### Newtypes for Domain Concepts
 
-Avoid primitive obsession. Wrap raw types to encode domain
-meaning and validation:
+Avoid primitive obsession — newtypes encode domain meaning
+and validation at the type level, preventing mix-ups the
+compiler catches:
 
 ```rust
 #[derive(Debug, Clone, PartialEq)]
@@ -68,7 +70,9 @@ impl CustomerId {
 
 ### Enums for State Machines
 
-Use enums to make invalid states unrepresentable:
+Use enums to make invalid states unrepresentable — the
+compiler enforces exhaustive matching, so adding a new
+variant surfaces every location that needs updating:
 
 ```rust
 enum OrderStatus {
@@ -78,6 +82,48 @@ enum OrderStatus {
     Delivered { delivered_at: DateTime<Utc> },
 }
 ```
+
+### Enums Over Boolean Parameters
+
+Replace boolean parameters with enums — boolean arguments
+at call sites are unreadable and easy to swap accidentally:
+
+```rust
+// Unclear — what does `true` mean at the call site?
+fn connect(host: &str, secure: bool) { /* ... */ }
+connect("example.com", true);
+
+// Explicit — intent is self-documenting and swap-proof
+enum ConnectionMode { Secure, Plaintext }
+fn connect(host: &str, mode: ConnectionMode) { /* ... */ }
+connect("example.com", ConnectionMode::Secure);
+```
+
+### Exhaustive Struct Initialization
+
+Avoid `..Default::default()` or struct update syntax when
+constructing a value for the first time — it silently
+ignores new fields as they are added, hiding every place
+that needs updating:
+
+```rust
+// Fragile — new Config fields are silently defaulted
+let config = Config {
+    host: "localhost".to_string(),
+    ..Default::default()
+};
+
+// Robust — compiler warns when Config gains a new field
+let config = Config {
+    host: "localhost".to_string(),
+    port: 5432,
+    timeout: Duration::from_secs(30),
+};
+```
+
+Exception: struct update syntax is appropriate when the
+intent is genuinely "copy all other fields from an existing
+instance" (e.g., `let updated = Config { port: 9000, ..existing }`).
 
 ### Result and Option
 
@@ -103,11 +149,13 @@ fn find_and_validate(
 
 - `thiserror` for library/domain error type definitions
 - `anyhow` for application-level error handling
-- Never use `unwrap()` or `expect()` in production code
+- Never use `unwrap()` or `expect()` in production code —
+  they panic and crash the process
 
 ### Custom Error Types
 
-Define specific error types per module or domain:
+Define specific error types per module or domain — this
+enables callers to handle different failures differently:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -143,12 +191,34 @@ async fn fetch_order(
 }
 ```
 
-## Functional Patterns in Rust
+## Functional Patterns
+
+### Slice Patterns Over Indexing
+
+Use slice patterns instead of direct indexing — indexing
+panics at runtime if the length assumption is wrong, while
+patterns force explicit handling of every case at compile
+time:
+
+```rust
+// Panics at runtime if items is empty or too short
+let first = items[0];
+let second = items[1];
+
+// Compiler-enforced — all lengths must be handled
+match items.as_slice() {
+    [] => handle_empty(),
+    [only] => handle_one(only),
+    [first, second] => handle_two(first, second),
+    [first, rest @ ..] => handle_many(first, rest),
+}
+```
 
 ### Iterator Chains Over Loops
 
-Prefer declarative iterator chains over imperative loops.
-This aligns with lower code mass (see base principles).
+Prefer declarative iterator chains over imperative loops —
+they compose cleanly and the compiler optimizes them to
+match hand-written loop performance:
 
 ```rust
 // Imperative (avoid)
@@ -167,21 +237,11 @@ let results: Vec<_> = items
     .collect();
 ```
 
-### Code Mass Analysis for Iterators
-
-Transforming methods count as Loops (mass 5):
-`.map()`, `.filter()`, `.flat_map()`, `.fold()`,
-`.take()`, `.skip()`, `.zip()`, `.chain()`
-
-Consuming methods count as Invocations (mass 2):
-`.collect()`, `.sum()`, `.count()`, `.any()`,
-`.all()`, `.find()`, `.min()`, `.max()`
-
 ### Immutability by Default
 
-- `let` bindings are immutable; use `mut` only when needed
-- Expression-based language reduces need for assignments
-- Prefer transformations over in-place mutation
+`let` bindings are immutable by default — use `mut` only
+when needed. Expression-based language reduces need for
+mutable accumulators:
 
 ```rust
 // Mutation (higher mass)
@@ -196,7 +256,8 @@ let total: i64 = prices.iter().sum();
 
 ### Function Composition
 
-Build complex operations from small, composable functions:
+Build complex operations from small, composable functions —
+each step is independently testable:
 
 ```rust
 fn validate(req: Request) -> Result<Request, Error> {
@@ -233,7 +294,7 @@ let shifted = transform_dates(&dates, |d| {
 });
 ```
 
-## Domain-Driven Design in Rust
+## Domain-Driven Design
 
 ### Value Objects as Newtypes
 
@@ -251,7 +312,7 @@ impl Email {
 }
 ```
 
-### Aggregates as Structs with Invariant Enforcement
+### Aggregates with Invariant Enforcement
 
 ```rust
 struct Order {
@@ -296,10 +357,10 @@ trait OrderRepository {
 ### Tokio Runtime
 
 - Use `tokio` as the async runtime consistently
-- Avoid blocking operations in async code
+- Avoid blocking operations in async code — they stall the
+  entire executor thread
 - Use `tokio::spawn` for concurrent tasks
 - Use channels for inter-task communication
-- Document whether functions are CPU-bound or I/O-bound
 
 ```rust
 async fn process_batch(
@@ -321,7 +382,96 @@ async fn process_batch(
 - `cargo test` for unit and integration tests
 - `proptest` for property-based testing
 - `mockall` for mocking trait implementations
-- Tests go in `#[cfg(test)] mod tests` within each file
+
+### Test Organization
+
+Rust has three test locations, each with a distinct purpose
+— choosing the right one keeps tests focused and avoids
+over-mocking:
+
+- **Inline `#[cfg(test)]` modules** — unit tests inside the
+  source file; they have access to private items, which is
+  the only way to test internal invariants directly
+- **`tests/` directory** — integration tests compiled as a
+  separate crate; they can only access public API, which
+  makes them true black-box regression tests
+- **Doc tests (`///`)** — code examples in documentation
+  comments that `cargo test` runs as tests; use them for
+  happy-path demonstrations so documentation and behaviour
+  stay in sync
+
+```rust
+/// Returns a validated customer ID.
+///
+/// ```
+/// # use mylib::CustomerId;
+/// let id = CustomerId::new(42).unwrap();
+/// assert_eq!(id.value(), 42);
+/// ```
+pub fn new(value: i64) -> Result<Self, ValidationError> { ... }
+```
+
+### Design for Testability
+
+Keep business logic free of direct I/O — functions that call
+`println!` embed an effect that tests cannot observe or
+redirect without capturing stdout. Two complementary
+patterns eliminate this:
+
+**Accept `impl Write` for output** so tests pass a
+`Vec<u8>` as an in-memory sink:
+
+```rust
+// Hard to test — output is embedded
+fn print_report(orders: &[Order]) {
+    for o in orders {
+        println!("{}: {}", o.id, o.status);
+    }
+}
+
+// Testable — caller injects the sink
+fn write_report(
+    orders: &[Order],
+    out: &mut impl Write,
+) -> io::Result<()> {
+    for o in orders {
+        writeln!(out, "{}: {}", o.id, o.status)?;
+    }
+    Ok(())
+}
+
+// In tests
+let mut buf = Vec::new();
+write_report(&orders, &mut buf)?;
+assert_eq!(String::from_utf8(buf)?, "1: pending\n");
+```
+
+**Return action enums for decisions** so the caller executes
+the effect and tests verify only the decision:
+
+```rust
+enum PricingDecision {
+    ApplyDiscount { percent: u8 },
+    NoDiscount,
+}
+
+fn evaluate_order(order: &Order) -> PricingDecision {
+    if order.total > 100 {
+        PricingDecision::ApplyDiscount { percent: 10 }
+    } else {
+        PricingDecision::NoDiscount
+    }
+}
+
+#[test]
+fn high_value_order_gets_discount() {
+    let order = Order::with_total(150);
+    assert!(matches!(
+        evaluate_order(&order),
+        PricingDecision::ApplyDiscount { percent: 10 }
+    ));
+}
+```
 
 ### Test Structure
 
@@ -356,33 +506,10 @@ mod tests {
 }
 ```
 
-### TDD with Ignored Test Lists
-
-Start features with a full list of ignored tests:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn should_accept_valid_email() {}
-
-    #[test]
-    #[ignore]
-    fn should_reject_email_without_at_sign() {}
-
-    #[test]
-    #[ignore]
-    fn should_reject_empty_email() {}
-}
-```
-
-Remove `#[ignore]` one at a time and implement
-minimally to pass each test.
-
 ### Property-Based Testing
+
+Use proptest to verify properties over random inputs — it
+finds edge cases that manual test data misses:
 
 ```rust
 use proptest::prelude::*;
@@ -402,12 +529,19 @@ proptest! {
 }
 ```
 
+### Inline Test Modules
+
+Rust uses `#[cfg(test)] mod tests` for inline unit tests —
+they live inside the source file and have access to private
+items, which is useful for testing internal invariants.
+
 ## Code Style and Tooling
 
 ### Required Tools
 
 - `cargo fmt` before every commit (consistent formatting)
-- `cargo clippy` with zero warnings
+- `cargo clippy` with zero warnings — clippy catches
+  correctness and performance issues the compiler misses
 - `cargo test` must pass
 
 ### Style Guidelines
@@ -419,47 +553,24 @@ proptest! {
 
 ### Module Organization
 
-- Use `<module>.rs` files, NOT `mod.rs` in `src/`
+- Use `<module>.rs` files, NOT `mod.rs` in `src/` — `mod.rs`
+  hides the module name in editor tabs
   - For submodules: `domain.rs` with `domain/models.rs`
   - Exception: `mod.rs` is acceptable in `tests/`
 - Organize by feature/domain, not by technical layer
 - Re-export public APIs with `pub use`
 - Use `snake_case` for file and folder names
 
-## Common Pitfalls
-
-| Pitfall | Why It's Bad | Fix |
-|---|---|---|
-| Excessive `.clone()` | Poor ownership design | Restructure data flow |
-| `unwrap()` in prod | Panics in production | Use `Result` and `?` |
-| `String` vs `&str` | Unnecessary allocation | Borrow when possible |
-| Deep trait hierarchies | Over-engineering | Composition over inheritance |
-| Manual loops | Higher code mass | Use iterator chains |
-| Complex generics | Hard to read | Simplify bounds |
-| Premature `unsafe` | Undermines safety | Profile first |
-| Ignoring warnings | Hides design issues | Fix all clippy warnings |
-
-## Workflow Details
-
-### Inline Test Modules
-
-Rust uses `#[cfg(test)] mod tests` for inline unit tests.
-When the Test Engineer and Developer share a file, the Test
-Engineer creates the file with the `#[cfg(test)]` module
-first. The Developer implements the production code above it.
-
 ### Clean Builds
 
 Use `cargo clean` to remove cached build artifacts before
-quality checks. This ensures clippy and test results reflect
-the current source, not stale incremental compilation state.
+quality checks — stale incremental compilation state can
+hide errors:
 
-### Build Tool Commands
-
-- `cargo fmt` — format code
-- `cargo clippy` — lint (run with zero warnings)
-- `cargo test` — run all tests
-- `cargo clean` — remove build artifacts
+- `cargo fmt` — format
+- `cargo clippy` — lint
+- `cargo test` — test
+- `cargo clean` — clean artifacts
 
 ## Recommended Crates
 
@@ -473,5 +584,24 @@ the current source, not stale incremental compilation state.
 | Logging | `tracing` | Structured logging |
 | Testing | `proptest` | Property-based tests |
 | Testing | `mockall` | Mock trait impls |
+| Testing | `insta` | Snapshot testing |
+| Testing | `test-case` | Parameterized test cases |
+| Testing | `tokio-test` | Async I/O and task mocking |
 | Security | `secrecy` | Sensitive data |
 | Collections | `im` | Immutable collections |
+
+## Common Pitfalls
+
+| Pitfall | Why It's Bad | Fix |
+|---|---|---|
+| Excessive `.clone()` | Poor ownership design | Restructure data flow |
+| `unwrap()` in prod | Panics in production | Use `Result` and `?` |
+| `String` vs `&str` | Unnecessary allocation | Borrow when possible |
+| Deep trait hierarchies | Over-engineering | Composition over inheritance |
+| Manual loops | Higher code mass | Use iterator chains |
+| Complex generics | Hard to read | Simplify bounds |
+| Premature `unsafe` | Undermines safety | Profile first |
+| Ignoring warnings | Hides design issues | Fix all clippy warnings |
+| Boolean parameters | Unreadable at call sites | Replace with enums |
+| `..Default::default()` in construction | Silently hides new fields | Initialize all fields explicitly |
+| Direct indexing (`items[0]`) | Panics at runtime | Use slice patterns |
