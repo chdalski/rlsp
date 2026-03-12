@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
+use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Position};
-use yaml_rust2::Yaml;
 
 /// Compute completion items for the given YAML text and cursor position.
 ///
@@ -10,7 +10,7 @@ use yaml_rust2::Yaml;
 #[must_use]
 pub fn complete_at(
     text: &str,
-    documents: Option<&Vec<Yaml>>,
+    documents: Option<&Vec<YamlOwned>>,
     position: Position,
 ) -> Vec<CompletionItem> {
     let Some(documents) = documents else {
@@ -493,8 +493,9 @@ mod tests {
         Position::new(line, character)
     }
 
-    fn parse_docs(text: &str) -> Option<Vec<Yaml>> {
-        yaml_rust2::YamlLoader::load_from_str(text).ok()
+    fn parse_docs(text: &str) -> Option<Vec<YamlOwned>> {
+        use saphyr::LoadableYamlNode;
+        YamlOwned::load_from_str(text).ok()
     }
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
@@ -726,7 +727,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_no_documents() {
         let text = "key: value\n";
-        let empty: Vec<Yaml> = Vec::new();
+        let empty: Vec<YamlOwned> = Vec::new();
         let result = complete_at(text, Some(&empty), pos(0, 0));
 
         assert!(

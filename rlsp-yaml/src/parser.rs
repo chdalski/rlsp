@@ -1,14 +1,14 @@
+use saphyr::{LoadableYamlNode, YamlOwned};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
-use yaml_rust2::{Yaml, YamlLoader};
 
 pub struct ParseResult {
-    pub documents: Vec<Yaml>,
+    pub documents: Vec<YamlOwned>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
 #[must_use]
 pub fn parse_yaml(text: &str) -> ParseResult {
-    match YamlLoader::load_from_str(text) {
+    match YamlOwned::load_from_str(text) {
         Ok(documents) => ParseResult {
             documents,
             diagnostics: Vec::new(),
@@ -65,7 +65,7 @@ mod tests {
 
         assert!(!result.diagnostics.is_empty());
         let diag = &result.diagnostics[0];
-        // yaml-rust2 reports the error on the line after the unclosed bracket
+        // saphyr reports the error on the line after the unclosed bracket
         // (line 4 in 1-based = line 3 in 0-based), which is where it expects ']'
         assert_eq!(diag.range.start.line, 3);
     }
@@ -132,6 +132,46 @@ mod tests {
     }
 
     #[test]
+    fn should_not_panic_on_deeply_nested_yaml() {
+        // Build 500 levels of nesting: each key indented 2 more spaces than the parent.
+        let mut text = String::new();
+        for i in 0..500usize {
+            let indent = "  ".repeat(i);
+            text.push_str(&format!("{indent}level{i}:\n"));
+        }
+        let leaf_indent = "  ".repeat(500);
+        text.push_str(&format!("{leaf_indent}leaf: value\n"));
+
+        // Must not panic; either succeeds or returns an error diagnostic.
+        let result = parse_yaml(&text);
+        assert!(
+            result.documents.len() + result.diagnostics.len() > 0,
+            "should return a result (documents or diagnostics), not both empty"
+        );
+    }
+
+    #[test]
+    fn should_not_panic_on_large_document() {
+        // Build 10,000 flat key-value pairs.
+        let mut text = String::new();
+        for i in 0..10_000usize {
+            text.push_str(&format!("key{i}: value{i}\n"));
+        }
+
+        let result = parse_yaml(&text);
+        assert!(result.diagnostics.is_empty(), "should parse without errors");
+        assert!(!result.documents.is_empty(), "should produce at least 1 document");
+    }
+
+    #[test]
+    fn should_handle_very_large_yaml_document() {
+        let text = format!("key: {}", "a".repeat(1_000_000));
+        // Must not panic regardless of whether it parses or errors.
+        let result = parse_yaml(&text);
+        let _ = result;
+    }
+
+    #[test]
     fn should_parse_valid_yaml_with_complex_types() {
         let input = "root:\n  list:\n    - item1\n    - item2\n  nested:\n    key: value\n";
         let result = parse_yaml(input);
@@ -159,7 +199,7 @@ mod tests {
             result.diagnostics[0].severity,
             Some(DiagnosticSeverity::ERROR)
         );
-        // yaml-rust2 returns Err for the whole parse, so no partial documents
+        // saphyr returns Err for the whole parse, so no partial documents
         assert!(result.documents.is_empty());
     }
 }

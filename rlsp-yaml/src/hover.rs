@@ -1,12 +1,16 @@
+use saphyr::{ScalarOwned, YamlOwned};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
-use yaml_rust2::Yaml;
 
 /// Compute hover information for the given YAML text and cursor position.
 ///
 /// Returns `None` if the position is on whitespace, a comment, a document
 /// separator, outside the document, or when no AST is available.
 #[must_use]
-pub fn hover_at(text: &str, documents: Option<&Vec<Yaml>>, position: Position) -> Option<Hover> {
+pub fn hover_at(
+    text: &str,
+    documents: Option<&Vec<YamlOwned>>,
+    position: Position,
+) -> Option<Hover> {
     let documents = documents?;
     if documents.is_empty() {
         return None;
@@ -171,7 +175,7 @@ struct NodeInfo {
 
 /// Find the node info (path, type, value) for the token at the cursor.
 fn find_node_info(
-    doc: &Yaml,
+    doc: &YamlOwned,
     token: &CursorToken,
     line: &str,
     lines: &[&str],
@@ -324,39 +328,35 @@ fn sequence_index(lines: &[&str], line_idx: usize) -> usize {
 }
 
 /// Resolve a path through the YAML AST to find the target node.
-fn resolve_path<'a>(doc: &'a Yaml, path: &[PathSegment]) -> Option<&'a Yaml> {
+fn resolve_path<'a>(doc: &'a YamlOwned, path: &[PathSegment]) -> Option<&'a YamlOwned> {
     let mut current = doc;
 
     for segment in path {
         match segment {
             PathSegment::Key(key) => {
-                let yaml_key = Yaml::String(key.clone());
+                let yaml_key = YamlOwned::Value(ScalarOwned::String(key.clone()));
                 match current {
-                    Yaml::Hash(map) => {
+                    YamlOwned::Mapping(map) => {
                         current = map.get(&yaml_key)?;
                     }
-                    Yaml::Real(_)
-                    | Yaml::Integer(_)
-                    | Yaml::String(_)
-                    | Yaml::Boolean(_)
-                    | Yaml::Array(_)
-                    | Yaml::Alias(_)
-                    | Yaml::Null
-                    | Yaml::BadValue => return None,
+                    YamlOwned::Value(_)
+                    | YamlOwned::Sequence(_)
+                    | YamlOwned::Alias(_)
+                    | YamlOwned::BadValue
+                    | YamlOwned::Tagged(_, _)
+                    | YamlOwned::Representation(_, _, _) => return None,
                 }
             }
             PathSegment::Index(idx) => match current {
-                Yaml::Array(arr) => {
+                YamlOwned::Sequence(arr) => {
                     current = arr.get(*idx)?;
                 }
-                Yaml::Real(_)
-                | Yaml::Integer(_)
-                | Yaml::String(_)
-                | Yaml::Boolean(_)
-                | Yaml::Hash(_)
-                | Yaml::Alias(_)
-                | Yaml::Null
-                | Yaml::BadValue => return None,
+                YamlOwned::Value(_)
+                | YamlOwned::Mapping(_)
+                | YamlOwned::Alias(_)
+                | YamlOwned::BadValue
+                | YamlOwned::Tagged(_, _)
+                | YamlOwned::Representation(_, _, _) => return None,
             },
         }
     }
@@ -365,27 +365,31 @@ fn resolve_path<'a>(doc: &'a Yaml, path: &[PathSegment]) -> Option<&'a Yaml> {
 }
 
 /// Get the type name for a YAML node.
-fn yaml_type_name(yaml: &Yaml) -> String {
+fn yaml_type_name(yaml: &YamlOwned) -> String {
     match yaml {
-        Yaml::Hash(_) => "mapping".to_string(),
-        Yaml::Array(_) => "sequence".to_string(),
-        Yaml::String(_) | Yaml::Integer(_) | Yaml::Real(_) | Yaml::Boolean(_) | Yaml::Null => {
-            "scalar".to_string()
-        }
-        Yaml::Alias(_) => "alias".to_string(),
-        Yaml::BadValue => "bad value".to_string(),
+        YamlOwned::Mapping(_) => "mapping".to_string(),
+        YamlOwned::Sequence(_) => "sequence".to_string(),
+        YamlOwned::Value(_) => "scalar".to_string(),
+        YamlOwned::Alias(_) => "alias".to_string(),
+        YamlOwned::Tagged(_, _) => "tagged".to_string(),
+        YamlOwned::BadValue | YamlOwned::Representation(_, _, _) => "bad value".to_string(),
     }
 }
 
 /// Get the scalar value representation for display.
-fn scalar_value(yaml: &Yaml) -> Option<String> {
+fn scalar_value(yaml: &YamlOwned) -> Option<String> {
     match yaml {
-        Yaml::String(s) => Some(s.clone()),
-        Yaml::Integer(i) => Some(i.to_string()),
-        Yaml::Real(r) => Some(r.clone()),
-        Yaml::Boolean(b) => Some(b.to_string()),
-        Yaml::Null => Some("null".to_string()),
-        Yaml::Hash(_) | Yaml::Array(_) | Yaml::Alias(_) | Yaml::BadValue => None,
+        YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
+        YamlOwned::Value(ScalarOwned::Integer(i)) => Some(i.to_string()),
+        YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => Some(f.to_string()),
+        YamlOwned::Value(ScalarOwned::Boolean(b)) => Some(b.to_string()),
+        YamlOwned::Value(ScalarOwned::Null) => Some("null".to_string()),
+        YamlOwned::Mapping(_)
+        | YamlOwned::Sequence(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => None,
     }
 }
 
@@ -437,8 +441,9 @@ mod tests {
         }
     }
 
-    fn parse_docs(text: &str) -> Option<Vec<Yaml>> {
-        yaml_rust2::YamlLoader::load_from_str(text).ok()
+    fn parse_docs(text: &str) -> Option<Vec<YamlOwned>> {
+        use saphyr::LoadableYamlNode;
+        YamlOwned::load_from_str(text).ok()
     }
 
     // Test 1

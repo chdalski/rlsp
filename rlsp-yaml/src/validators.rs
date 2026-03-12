@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
+
+use saphyr::{ScalarOwned, YamlOwned};
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
 };
-use yaml_rust2::Yaml;
 
 /// A token found in the text: either an anchor (`&name`) or an alias (`*name`).
 #[derive(Debug, Clone)]
@@ -267,9 +268,9 @@ fn find_closing_char(line: &str, start: usize, open: char, close: char) -> Optio
 /// Returns warning diagnostics for map keys that are not in alphabetical order.
 /// Uses case-sensitive lexicographic comparison.
 ///
-/// The `docs` parameter contains the parsed YAML documents from `yaml_rust2`.
+/// The `docs` parameter contains the parsed YAML documents from saphyr.
 #[must_use]
-pub fn validate_key_ordering(text: &str, docs: &[Yaml]) -> Vec<Diagnostic> {
+pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> {
     let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
 
@@ -282,7 +283,7 @@ pub fn validate_key_ordering(text: &str, docs: &[Yaml]) -> Vec<Diagnostic> {
 
 /// Recursively check YAML nodes for key ordering, with depth limit.
 fn check_yaml_ordering(
-    node: &Yaml,
+    node: &YamlOwned,
     lines: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
@@ -293,20 +294,22 @@ fn check_yaml_ordering(
     }
 
     match node {
-        Yaml::Hash(map) => {
+        YamlOwned::Mapping(map) => {
             // Extract keys in order
             let keys: Vec<String> = map
                 .keys()
                 .filter_map(|k| match k {
-                    Yaml::String(s) => Some(s.clone()),
-                    Yaml::Integer(i) => Some(i.to_string()),
-                    Yaml::Real(r) => Some(r.clone()),
-                    Yaml::Boolean(b) => Some(b.to_string()),
-                    Yaml::Array(_)
-                    | Yaml::Hash(_)
-                    | Yaml::Alias(_)
-                    | Yaml::Null
-                    | Yaml::BadValue => None,
+                    YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
+                    YamlOwned::Value(ScalarOwned::Integer(i)) => Some(i.to_string()),
+                    YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => Some(f.to_string()),
+                    YamlOwned::Value(ScalarOwned::Boolean(b)) => Some(b.to_string()),
+                    YamlOwned::Sequence(_)
+                    | YamlOwned::Mapping(_)
+                    | YamlOwned::Alias(_)
+                    | YamlOwned::Value(ScalarOwned::Null)
+                    | YamlOwned::BadValue
+                    | YamlOwned::Tagged(_, _)
+                    | YamlOwned::Representation(_, _, _) => None,
                 })
                 .collect();
 
@@ -342,19 +345,17 @@ fn check_yaml_ordering(
                 check_yaml_ordering(value, lines, diagnostics, depth + 1);
             }
         }
-        Yaml::Array(arr) => {
+        YamlOwned::Sequence(arr) => {
             // Recursively check array elements
             for item in arr {
                 check_yaml_ordering(item, lines, diagnostics, depth + 1);
             }
         }
-        Yaml::Real(_)
-        | Yaml::Integer(_)
-        | Yaml::String(_)
-        | Yaml::Boolean(_)
-        | Yaml::Alias(_)
-        | Yaml::Null
-        | Yaml::BadValue => {}
+        YamlOwned::Value(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => {}
     }
 }
 
@@ -759,7 +760,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_alphabetically_ordered_keys() {
         let text = "apple: 1\nbanana: 2\ncherry: 3\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -768,7 +769,7 @@ mod tests {
     #[test]
     fn should_detect_out_of_order_keys() {
         let text = "banana: 2\napple: 1\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -781,7 +782,7 @@ mod tests {
     #[test]
     fn should_return_correct_range_for_out_of_order_key() {
         let text = "banana: 2\napple: 1\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -791,7 +792,7 @@ mod tests {
     #[test]
     fn should_detect_multiple_out_of_order_keys() {
         let text = "charlie: 3\nalpha: 1\nbravo: 2\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 2);
@@ -802,7 +803,7 @@ mod tests {
     #[test]
     fn should_check_ordering_within_nested_mappings() {
         let text = "outer:\n  zebra: 1\n  alpha: 2\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "alpha is out of order within outer");
@@ -811,7 +812,7 @@ mod tests {
     #[test]
     fn should_check_ordering_at_each_level_independently() {
         let text = "b_parent:\n  a_child: 1\na_parent:\n  key: val\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "a_parent is out of order at top level");
@@ -822,7 +823,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_empty_document_ordering() {
         let text = "";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -831,7 +832,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_single_key() {
         let text = "only: value\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -841,7 +842,7 @@ mod tests {
     fn should_handle_numeric_string_keys() {
         // Implementation choice: lexicographic comparison ("10" < "2" lexicographically)
         let text = "2: two\n10: ten\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         // "10" comes after "2" but should come before (lexicographically "1" < "2")
@@ -851,7 +852,7 @@ mod tests {
     #[test]
     fn should_ignore_sequence_items_for_ordering() {
         let text = "items:\n  - zebra\n  - alpha\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -860,7 +861,7 @@ mod tests {
     #[test]
     fn should_handle_multi_document_key_ordering() {
         let text = "z: 1\n---\na: 2\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         // First doc has single key, second doc has single key
@@ -871,7 +872,7 @@ mod tests {
     fn should_be_case_sensitive() {
         // Implementation choice: case-sensitive comparison ("Apple" != "apple", "Apple" < "apple")
         let text = "Apple: 1\napple: 2\n";
-        let docs = yaml_rust2::YamlLoader::load_from_str(text).unwrap();
+        let docs = { use saphyr::LoadableYamlNode; YamlOwned::load_from_str(text).unwrap() };
         let result = validate_key_ordering(text, &docs);
 
         // "Apple" < "apple" lexicographically (uppercase comes before lowercase in ASCII)

@@ -20,7 +20,7 @@ the project exists. -->
 - `tower-lsp` 0.20 — LSP server framework (with `proposed` features)
 - `tokio` 1 — async runtime (`full` feature set)
 - `serde_json` 1 — JSON serialization for LSP protocol messages
-- `yaml-rust2` 0.9 — YAML parsing
+- `saphyr` 0.0.6 — YAML parsing (with span support via `MarkedYamlOwned`)
 - `regex` 1 — regular expression support
 - `once_cell` 1 — lazy static initialization
 
@@ -41,7 +41,7 @@ the project exists. -->
 │       ├── main.rs         # Binary entry point
 │       ├── lib.rs          # Module declarations
 │       ├── server.rs       # LSP Backend struct + LanguageServer trait impl
-│       ├── parser.rs       # YAML parsing (yaml-rust2)
+│       ├── parser.rs       # YAML parsing (saphyr)
 │       ├── document_store.rs  # In-memory document cache
 │       ├── completion.rs   # Completion provider
 │       ├── document_links.rs  # Document links / URL detection
@@ -49,6 +49,7 @@ the project exists. -->
 │       ├── hover.rs        # Hover information
 │       ├── references.rs   # Go-to-definition + find references
 │       ├── rename.rs       # Rename symbol
+│       ├── selection.rs    # Selection ranges (AST-based, saphyr MarkedYamlOwned)
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)
 └── yaml-language-server/   # TypeScript YAML LS (Red Hat upstream, v1.20.0)
