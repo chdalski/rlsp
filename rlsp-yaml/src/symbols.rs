@@ -1,14 +1,14 @@
 use std::fmt::Write;
 
+use saphyr::{ScalarOwned, YamlOwned};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
-use yaml_rust2::Yaml;
 
 /// Produce a hierarchical list of document symbols for the given YAML text.
 ///
 /// Returns an empty vector if the text is empty, the AST is unavailable,
 /// or the document contains only comments.
 #[must_use]
-pub fn document_symbols(text: &str, documents: Option<&Vec<Yaml>>) -> Vec<DocumentSymbol> {
+pub fn document_symbols(text: &str, documents: Option<&Vec<YamlOwned>>) -> Vec<DocumentSymbol> {
     let Some(documents) = documents else {
         return Vec::new();
     };
@@ -80,10 +80,10 @@ fn split_document_regions(lines: &[&str]) -> Vec<DocRegion> {
     regions
 }
 
-/// Convert a `Yaml` node into `DocumentSymbol` objects using the text for ranges.
-fn yaml_to_symbols(yaml: &Yaml, lines: &[&str], base_line: usize) -> Vec<DocumentSymbol> {
+/// Convert a `YamlOwned` node into `DocumentSymbol` objects using the text for ranges.
+fn yaml_to_symbols(yaml: &YamlOwned, lines: &[&str], base_line: usize) -> Vec<DocumentSymbol> {
     match yaml {
-        Yaml::Hash(map) => {
+        YamlOwned::Mapping(map) => {
             let mut symbols = Vec::new();
             for (key, value) in map {
                 let key_str = yaml_key_to_string(key);
@@ -93,14 +93,12 @@ fn yaml_to_symbols(yaml: &Yaml, lines: &[&str], base_line: usize) -> Vec<Documen
             }
             symbols
         }
-        Yaml::Real(_)
-        | Yaml::Integer(_)
-        | Yaml::String(_)
-        | Yaml::Boolean(_)
-        | Yaml::Array(_)
-        | Yaml::Alias(_)
-        | Yaml::Null
-        | Yaml::BadValue => Vec::new(),
+        YamlOwned::Value(_)
+        | YamlOwned::Sequence(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => Vec::new(),
     }
 }
 
@@ -108,7 +106,7 @@ fn yaml_to_symbols(yaml: &Yaml, lines: &[&str], base_line: usize) -> Vec<Documen
 #[allow(deprecated)] // DocumentSymbol.deprecated field
 fn make_symbol(
     key: &str,
-    value: &Yaml,
+    value: &YamlOwned,
     lines: &[&str],
     search_from: usize,
 ) -> Option<DocumentSymbol> {
@@ -141,7 +139,7 @@ fn make_symbol(
     );
 
     let children = match value {
-        Yaml::Hash(map) => {
+        YamlOwned::Mapping(map) => {
             let child_start = key_line + 1;
             let mut child_symbols = Vec::new();
             for (k, v) in map {
@@ -156,7 +154,7 @@ fn make_symbol(
                 Some(child_symbols)
             }
         }
-        Yaml::Array(arr) => {
+        YamlOwned::Sequence(arr) => {
             let child_start = key_line + 1;
             let child_symbols = make_sequence_children(arr, lines, child_start);
             if child_symbols.is_empty() {
@@ -165,13 +163,11 @@ fn make_symbol(
                 Some(child_symbols)
             }
         }
-        Yaml::Real(_)
-        | Yaml::Integer(_)
-        | Yaml::String(_)
-        | Yaml::Boolean(_)
-        | Yaml::Alias(_)
-        | Yaml::Null
-        | Yaml::BadValue => None,
+        YamlOwned::Value(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => None,
     };
 
     Some(DocumentSymbol {
@@ -188,7 +184,11 @@ fn make_symbol(
 
 /// Create child symbols for sequence items.
 #[allow(deprecated)] // DocumentSymbol.deprecated field
-fn make_sequence_children(arr: &[Yaml], lines: &[&str], search_from: usize) -> Vec<DocumentSymbol> {
+fn make_sequence_children(
+    arr: &[YamlOwned],
+    lines: &[&str],
+    search_from: usize,
+) -> Vec<DocumentSymbol> {
     let mut children = Vec::new();
     let mut line_cursor = search_from;
 
@@ -226,7 +226,7 @@ fn make_sequence_children(arr: &[Yaml], lines: &[&str], search_from: usize) -> V
         );
 
         let item_children = match item {
-            Yaml::Hash(map) => {
+            YamlOwned::Mapping(map) => {
                 let mut cs = Vec::new();
                 for (k, v) in map {
                     let k_str = yaml_key_to_string(k);
@@ -236,14 +236,12 @@ fn make_sequence_children(arr: &[Yaml], lines: &[&str], search_from: usize) -> V
                 }
                 if cs.is_empty() { None } else { Some(cs) }
             }
-            Yaml::Real(_)
-            | Yaml::Integer(_)
-            | Yaml::String(_)
-            | Yaml::Boolean(_)
-            | Yaml::Array(_)
-            | Yaml::Alias(_)
-            | Yaml::Null
-            | Yaml::BadValue => None,
+            YamlOwned::Value(_)
+            | YamlOwned::Sequence(_)
+            | YamlOwned::Alias(_)
+            | YamlOwned::BadValue
+            | YamlOwned::Tagged(_, _)
+            | YamlOwned::Representation(_, _, _) => None,
         };
 
         children.push(DocumentSymbol {
@@ -364,29 +362,38 @@ fn find_value_end_line(lines: &[&str], key_line: usize) -> usize {
     last_content_line
 }
 
-/// Map a `Yaml` value to the appropriate `SymbolKind`.
-const fn yaml_symbol_kind(yaml: &Yaml) -> SymbolKind {
+/// Map a `YamlOwned` value to the appropriate `SymbolKind`.
+const fn yaml_symbol_kind(yaml: &YamlOwned) -> SymbolKind {
     match yaml {
-        Yaml::Hash(_) => SymbolKind::OBJECT,
-        Yaml::Array(_) => SymbolKind::ARRAY,
-        Yaml::String(_) | Yaml::Alias(_) | Yaml::BadValue => SymbolKind::STRING,
-        Yaml::Integer(_) | Yaml::Real(_) => SymbolKind::NUMBER,
-        Yaml::Boolean(_) => SymbolKind::BOOLEAN,
-        Yaml::Null => SymbolKind::NULL,
+        YamlOwned::Mapping(_) => SymbolKind::OBJECT,
+        YamlOwned::Sequence(_) => SymbolKind::ARRAY,
+        YamlOwned::Value(ScalarOwned::String(_))
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => SymbolKind::STRING,
+        YamlOwned::Value(ScalarOwned::Integer(_) | ScalarOwned::FloatingPoint(_)) => {
+            SymbolKind::NUMBER
+        }
+        YamlOwned::Value(ScalarOwned::Boolean(_)) => SymbolKind::BOOLEAN,
+        YamlOwned::Value(ScalarOwned::Null) => SymbolKind::NULL,
     }
 }
 
 /// Convert a YAML key to a string representation.
-fn yaml_key_to_string(key: &Yaml) -> String {
+fn yaml_key_to_string(key: &YamlOwned) -> String {
     match key {
-        Yaml::String(s) => s.clone(),
-        Yaml::Integer(i) => i.to_string(),
-        Yaml::Real(r) => r.clone(),
-        Yaml::Boolean(b) => b.to_string(),
-        Yaml::Null => "null".to_string(),
-        Yaml::Array(_) | Yaml::Hash(_) | Yaml::Alias(_) | Yaml::BadValue => {
-            format!("{key:?}")
-        }
+        YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
+        YamlOwned::Value(ScalarOwned::Integer(i)) => i.to_string(),
+        YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => f.to_string(),
+        YamlOwned::Value(ScalarOwned::Boolean(b)) => b.to_string(),
+        YamlOwned::Value(ScalarOwned::Null) => "null".to_string(),
+        YamlOwned::Sequence(_)
+        | YamlOwned::Mapping(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(_, _)
+        | YamlOwned::Representation(_, _, _) => format!("{key:?}"),
     }
 }
 
@@ -395,8 +402,9 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::SymbolKind;
 
-    fn parse_docs(text: &str) -> Option<Vec<Yaml>> {
-        yaml_rust2::YamlLoader::load_from_str(text).ok()
+    fn parse_docs(text: &str) -> Option<Vec<YamlOwned>> {
+        use saphyr::LoadableYamlNode;
+        YamlOwned::load_from_str(text).ok()
     }
 
     fn find_symbol<'a>(symbols: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {

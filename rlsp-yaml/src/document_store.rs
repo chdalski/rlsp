@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
+use saphyr::{LoadableYamlNode, MarkedYamlOwned, YamlOwned};
 use tower_lsp::lsp_types::Url;
-use yaml_rust2::Yaml;
 
 use crate::parser;
 
 struct Document {
     text: String,
-    yaml: Option<Vec<Yaml>>,
+    yaml: Option<Vec<YamlOwned>>,
+    marked_yaml: Option<Vec<MarkedYamlOwned>>,
 }
 
 #[derive(Default)]
@@ -23,6 +24,7 @@ impl DocumentStore {
 
     pub fn open(&mut self, uri: Url, text: String) {
         let parsed = parser::parse_yaml(&text);
+        let marked = parse_marked(&text);
         self.documents.insert(
             uri,
             Document {
@@ -32,6 +34,7 @@ impl DocumentStore {
                 } else {
                     Some(parsed.documents)
                 },
+                marked_yaml: marked,
             },
         );
     }
@@ -39,6 +42,7 @@ impl DocumentStore {
     pub fn change(&mut self, uri: &Url, text: String) {
         if let Some(doc) = self.documents.get_mut(uri) {
             let parsed = parser::parse_yaml(&text);
+            doc.marked_yaml = parse_marked(&text);
             doc.text = text;
             doc.yaml = if parsed.documents.is_empty() {
                 None
@@ -58,9 +62,19 @@ impl DocumentStore {
     }
 
     #[must_use]
-    pub fn get_yaml(&self, uri: &Url) -> Option<&Vec<Yaml>> {
+    pub fn get_yaml(&self, uri: &Url) -> Option<&Vec<YamlOwned>> {
         self.documents.get(uri)?.yaml.as_ref()
     }
+
+    #[must_use]
+    pub fn get_marked_yaml(&self, uri: &Url) -> Option<&Vec<MarkedYamlOwned>> {
+        self.documents.get(uri)?.marked_yaml.as_ref()
+    }
+}
+
+/// Parse text into a `MarkedYamlOwned` AST. Returns `None` on parse failure.
+fn parse_marked(text: &str) -> Option<Vec<MarkedYamlOwned>> {
+    MarkedYamlOwned::load_from_str(text).ok()
 }
 
 #[cfg(test)]
