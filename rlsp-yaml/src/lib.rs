@@ -6,6 +6,7 @@ pub mod hover;
 pub mod parser;
 pub mod references;
 pub mod rename;
+pub mod selection;
 pub mod server;
 pub mod symbols;
 pub mod validators;

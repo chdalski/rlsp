@@ -9,7 +9,8 @@ use tower_lsp::lsp_types::{
     DocumentSymbolResponse, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
     InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
-    RenameParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
     WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
@@ -89,6 +90,7 @@ impl Backend {
                 resolve_provider: Some(false),
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
+            selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
             ..ServerCapabilities::default()
         }
     }
@@ -277,6 +279,32 @@ impl LanguageServer for Backend {
         Ok(Some(links))
     }
 
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let uri = params.text_document.uri;
+
+        let (text, marked_yaml) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let marked_yaml = store.get_marked_yaml(&uri).cloned();
+            (text, marked_yaml)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let result = crate::selection::selection_ranges(&text, marked_yaml.as_ref(), &params.positions);
+        if result.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(result))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -417,6 +445,16 @@ mod tests {
         assert!(
             caps.folding_range_provider.is_some(),
             "capabilities should include folding_range_provider"
+        );
+    }
+
+    #[test]
+    fn should_advertise_selection_range_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.selection_range_provider.is_some(),
+            "capabilities should include selection_range_provider"
         );
     }
 
