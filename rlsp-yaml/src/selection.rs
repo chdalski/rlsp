@@ -1,4 +1,4 @@
-use saphyr::{Marker, MarkedYamlOwned, YamlDataOwned};
+use saphyr::{MarkedYamlOwned, Marker, YamlDataOwned};
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
 /// Compute selection ranges for the given YAML text and cursor positions.
@@ -241,10 +241,7 @@ fn collect_ancestor_spans(
             if s.line() > 0 {
                 let start_line_0 = s.line().saturating_sub(1);
                 let end_line_0 = e.line().saturating_sub(1);
-                if line >= start_line_0
-                    && line <= end_line_0
-                    && col >= s.col()
-                {
+                if line >= start_line_0 && line <= end_line_0 && col >= s.col() {
                     ancestor_spans.push((s, e));
                 }
             }
@@ -261,19 +258,17 @@ fn value_start_marker(node: &MarkedYamlOwned) -> Option<Marker> {
         return Some(start);
     }
     match &node.data {
-        YamlDataOwned::Mapping(map) => {
-            map.keys()
-                .filter_map(|k| {
-                    let s = k.span.start;
-                    if s.line() > 0 { Some(s) } else { None }
-                })
-                .min_by_key(|m| (m.line(), m.col()))
-        }
-        YamlDataOwned::Sequence(arr) => {
-            arr.iter()
-                .filter_map(value_start_marker)
-                .min_by_key(|m| (m.line(), m.col()))
-        }
+        YamlDataOwned::Mapping(map) => map
+            .keys()
+            .filter_map(|k| {
+                let s = k.span.start;
+                if s.line() > 0 { Some(s) } else { None }
+            })
+            .min_by_key(|m| (m.line(), m.col())),
+        YamlDataOwned::Sequence(arr) => arr
+            .iter()
+            .filter_map(value_start_marker)
+            .min_by_key(|m| (m.line(), m.col())),
         YamlDataOwned::Tagged(_, inner) => value_start_marker(inner),
         YamlDataOwned::Value(_)
         | YamlDataOwned::Representation(_, _, _)
@@ -291,16 +286,14 @@ fn value_end_marker(node: &MarkedYamlOwned) -> Option<Marker> {
     }
     // Zero-span container: find the last non-zero child end
     match &node.data {
-        YamlDataOwned::Mapping(map) => {
-            map.values()
-                .filter_map(value_end_marker)
-                .max_by_key(|m| (m.line(), m.col()))
-        }
-        YamlDataOwned::Sequence(arr) => {
-            arr.iter()
-                .filter_map(value_end_marker)
-                .max_by_key(|m| (m.line(), m.col()))
-        }
+        YamlDataOwned::Mapping(map) => map
+            .values()
+            .filter_map(value_end_marker)
+            .max_by_key(|m| (m.line(), m.col())),
+        YamlDataOwned::Sequence(arr) => arr
+            .iter()
+            .filter_map(value_end_marker)
+            .max_by_key(|m| (m.line(), m.col())),
         YamlDataOwned::Tagged(_, inner) => value_end_marker(inner),
         YamlDataOwned::Value(_)
         | YamlDataOwned::Representation(_, _, _)
@@ -350,13 +343,23 @@ mod tests {
         let docs = parse_marked(text);
         let result = selection_ranges(text, docs.as_ref(), &[pos(0, 6)]);
 
-        assert_eq!(result.len(), 1, "should return one SelectionRange per position");
+        assert_eq!(
+            result.len(),
+            1,
+            "should return one SelectionRange per position"
+        );
         let sr = &result[0];
         assert_eq!(sr.range.start.line, 0);
-        assert!(sr.parent.is_some(), "should have a parent range (key-value pair)");
+        assert!(
+            sr.parent.is_some(),
+            "should have a parent range (key-value pair)"
+        );
         let parent = sr.parent.as_ref().expect("parent");
         assert_eq!(parent.range.start.line, 0);
-        assert!(parent.parent.is_some(), "should have a grandparent range (document root)");
+        assert!(
+            parent.parent.is_some(),
+            "should have a grandparent range (document root)"
+        );
     }
 
     #[test]
@@ -371,7 +374,10 @@ mod tests {
         assert!(sr.parent.is_some(), "should have parent (key-value pair)");
         let parent = sr.parent.as_ref().expect("parent");
         assert_eq!(parent.range.start.line, 0);
-        assert!(parent.parent.is_some(), "should have grandparent (document root)");
+        assert!(
+            parent.parent.is_some(),
+            "should have grandparent (document root)"
+        );
     }
 
     #[test]
@@ -401,9 +407,15 @@ mod tests {
         assert_eq!(sr.range.start.line, 1);
         assert!(sr.parent.is_some(), "should have parent (host: localhost)");
         let parent = sr.parent.as_ref().expect("parent");
-        assert!(parent.parent.is_some(), "should have grandparent (server mapping)");
+        assert!(
+            parent.parent.is_some(),
+            "should have grandparent (server mapping)"
+        );
         let grandparent = parent.parent.as_ref().expect("grandparent");
-        assert!(grandparent.parent.is_some(), "should have great-grandparent (document root)");
+        assert!(
+            grandparent.parent.is_some(),
+            "should have great-grandparent (document root)"
+        );
     }
 
     #[test]
@@ -413,7 +425,11 @@ mod tests {
         let positions = [pos(0, 6), pos(1, 5)];
         let result = selection_ranges(text, docs.as_ref(), &positions);
 
-        assert_eq!(result.len(), 2, "should return one SelectionRange per position");
+        assert_eq!(
+            result.len(),
+            2,
+            "should return one SelectionRange per position"
+        );
         assert_eq!(result[0].range.start.line, 0);
         assert_eq!(result[1].range.start.line, 1);
     }
@@ -429,9 +445,15 @@ mod tests {
         assert_eq!(sr.range.start.line, 1);
         assert!(sr.parent.is_some(), "should have parent (name: Alice)");
         let p1 = sr.parent.as_ref().expect("p1");
-        assert!(p1.parent.is_some(), "should have grandparent (list item mapping)");
+        assert!(
+            p1.parent.is_some(),
+            "should have grandparent (list item mapping)"
+        );
         let p2 = p1.parent.as_ref().expect("p2");
-        assert!(p2.parent.is_some(), "should have great-grandparent (users sequence)");
+        assert!(
+            p2.parent.is_some(),
+            "should have great-grandparent (users sequence)"
+        );
         let p3 = p2.parent.as_ref().expect("p3");
         assert!(p3.parent.is_some(), "should have document root");
     }
@@ -487,7 +509,10 @@ mod tests {
     #[test]
     fn should_return_empty_for_empty_document() {
         let result = selection_ranges("", None, &[pos(0, 0)]);
-        assert!(result.is_empty(), "should return empty Vec for empty document");
+        assert!(
+            result.is_empty(),
+            "should return empty Vec for empty document"
+        );
     }
 
     #[test]
@@ -551,7 +576,10 @@ mod tests {
             while let Some(ref p) = current.parent {
                 depth += 1;
                 current = p;
-                assert!(depth <= 600, "parent chain should be bounded (not infinite)");
+                assert!(
+                    depth <= 600,
+                    "parent chain should be bounded (not infinite)"
+                );
             }
         }
     }
@@ -561,6 +589,9 @@ mod tests {
         let text = "key: value\n";
         let docs = parse_marked(text);
         let result = selection_ranges(text, docs.as_ref(), &[]);
-        assert!(result.is_empty(), "should return empty Vec for empty positions slice");
+        assert!(
+            result.is_empty(),
+            "should return empty Vec for empty positions slice"
+        );
     }
 }

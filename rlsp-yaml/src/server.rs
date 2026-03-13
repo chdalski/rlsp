@@ -18,10 +18,17 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
 use crate::parser;
+use crate::schema::SchemaCache;
 
+// Lock ordering (must be acquired in this order to prevent deadlock):
+//   document_store → schema_associations → schema_cache → diagnostics
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,
+    /// Maps document URI to the schema URL associated with that document.
+    schema_associations: Mutex<HashMap<Url, String>>,
+    /// In-memory schema cache shared across all documents.
+    schema_cache: Mutex<SchemaCache>,
     diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
 }
 
@@ -31,6 +38,8 @@ impl Backend {
         Self {
             client,
             document_store: Mutex::new(DocumentStore::new()),
+            schema_associations: Mutex::new(HashMap::new()),
+            schema_cache: Mutex::new(SchemaCache::new()),
             diagnostics: Mutex::new(HashMap::new()),
         }
     }
@@ -58,6 +67,60 @@ impl Backend {
             text,
             &result.documents,
         ));
+
+        // Schema validation: extract URL from modeline, fetch/cache schema,
+        // then run schema validation against the parsed documents.
+        //
+        // Lock ordering: schema_associations → schema_cache (document_store
+        // is not held here; diagnostics is acquired last, below).
+        // No Mutex guard is held across any .await point.
+        if let Some(schema_url) = crate::schema::extract_schema_url(text) {
+            // Normalise and validate the URL before attempting a fetch.
+            let normalised = crate::schema::validate_and_normalize_url(&schema_url).ok();
+
+            if let Some(url) = normalised {
+                // Record the association (lock → insert → drop).
+                if let Ok(mut assoc) = self.schema_associations.lock() {
+                    assoc.insert(uri.clone(), url.clone());
+                }
+
+                // Check cache without holding the lock across spawn_blocking.
+                let cached = self
+                    .schema_cache
+                    .lock()
+                    .ok()
+                    .and_then(|cache| cache.get(&url).cloned());
+
+                let schema = if let Some(s) = cached {
+                    Some(s)
+                } else {
+                    // Fetch blocking-ly on a thread-pool thread.
+                    let url_clone = url.clone();
+                    let join_result = tokio::task::spawn_blocking(move || {
+                        crate::schema::fetch_schema(&url_clone)
+                    })
+                    .await;
+                    let fetched: Option<crate::schema::JsonSchema> =
+                        join_result.ok().and_then(std::result::Result::ok);
+
+                    // Store in cache (first-write-wins).
+                    if let Some(ref s) = fetched
+                        && let Ok(mut cache) = self.schema_cache.lock()
+                    {
+                        cache.insert(url, s.clone());
+                    }
+                    fetched
+                };
+
+                if let Some(s) = schema {
+                    diagnostics.extend(crate::schema_validation::validate_schema(
+                        text,
+                        &result.documents,
+                        &s,
+                    ));
+                }
+            }
+        }
 
         if let Ok(mut diags) = self.diagnostics.lock() {
             diags.insert(uri.clone(), diagnostics.clone());
@@ -299,7 +362,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let result = crate::selection::selection_ranges(&text, marked_yaml.as_ref(), &params.positions);
+        let result =
+            crate::selection::selection_ranges(&text, marked_yaml.as_ref(), &params.positions);
         if result.is_empty() {
             return Ok(None);
         }
@@ -321,21 +385,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let diagnostics = self
-            .get_diagnostics(uri.as_str())
-            .unwrap_or_default();
+        let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
         let actions = crate::code_actions::code_actions(&text, range, &diagnostics, &uri);
         if actions.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(
-            actions
-                .into_iter()
-                .map(CodeAction::into)
-                .collect(),
-        ))
+        Ok(Some(actions.into_iter().map(CodeAction::into).collect()))
     }
 
     async fn document_symbol(
@@ -521,5 +578,4 @@ mod tests {
             "capabilities should include document_link_provider"
         );
     }
-
 }

@@ -1,5 +1,4 @@
 pub mod code_actions;
-pub mod schema;
 pub mod completion;
 pub mod document_links;
 pub mod document_store;
@@ -8,6 +7,8 @@ pub mod hover;
 pub mod parser;
 pub mod references;
 pub mod rename;
+pub mod schema;
+pub mod schema_validation;
 pub mod selection;
 pub mod server;
 pub mod symbols;

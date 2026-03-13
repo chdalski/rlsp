@@ -346,7 +346,10 @@ fn block_to_flow(
     #[allow(clippy::cast_possible_truncation)]
     let edit_range = Range::new(
         Position::new(line_idx as u32, 0),
-        Position::new(end_line as u32, lines.get(end_line).map_or(0, |l| l.len() as u32)),
+        Position::new(
+            end_line as u32,
+            lines.get(end_line).map_or(0, |l| l.len() as u32),
+        ),
     );
 
     Some(make_action(
@@ -619,7 +622,10 @@ mod tests {
         let diag = make_diagnostic(0, 8, 20, "flowMap");
         let actions = code_actions(text, line_range(0), &[diag], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("flow mapping")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("flow mapping"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
@@ -645,7 +651,10 @@ mod tests {
         let diag = make_diagnostic(0, 7, 24, "flowSeq");
         let actions = code_actions(text, line_range(0), &[diag], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("flow sequence")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("flow sequence"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
@@ -715,7 +724,10 @@ mod tests {
         let text = "\tkey: value\n";
         let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("tabs to spaces")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("tabs to spaces"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
@@ -739,7 +751,10 @@ mod tests {
         let diag = make_diagnostic(0, 10, 17, "unusedAnchor");
         let actions = code_actions(text, line_range(0), &[diag], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("unused anchor")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
@@ -752,7 +767,10 @@ mod tests {
         let diag = make_diagnostic(0, 6, 13, "unusedAnchor");
         let actions = code_actions(text, line_range(0), &[diag], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("unused anchor")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
@@ -810,7 +828,10 @@ mod tests {
         let text = format!("description: \"{long_value}\"\n");
         let actions = code_actions(&text, cursor_range(0, 0), &[], &test_uri());
 
-        let action = actions.iter().find(|a| a.title.contains("block scalar")).unwrap();
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block scalar"))
+            .unwrap();
         let edit = action.edit.as_ref().unwrap();
         let changes = edit.changes.as_ref().unwrap();
         let edits = &changes[&test_uri()];
