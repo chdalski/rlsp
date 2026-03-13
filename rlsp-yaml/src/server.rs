@@ -230,7 +230,26 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(crate::hover::hover_at(&text, yaml.as_ref(), position))
+        // Lock ordering: document_store → schema_associations → schema_cache
+        let schema_url = self
+            .schema_associations
+            .lock()
+            .ok()
+            .and_then(|assoc| assoc.get(&uri).cloned());
+
+        let schema = schema_url.and_then(|url| {
+            self.schema_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(&url).cloned())
+        });
+
+        Ok(crate::hover::hover_at(
+            &text,
+            yaml.as_ref(),
+            position,
+            schema.as_ref(),
+        ))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

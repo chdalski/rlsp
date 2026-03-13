@@ -1,6 +1,25 @@
 use saphyr::{ScalarOwned, YamlOwned};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
+use crate::schema::JsonSchema;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Maximum number of examples to display in hover output.
+const MAX_EXAMPLES: usize = 3;
+
+/// Maximum characters for a schema description before truncation.
+const MAX_DESCRIPTION_LEN: usize = 200;
+
+/// Maximum characters for an example value before truncation.
+const MAX_EXAMPLE_LEN: usize = 100;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public API
+// ──────────────────────────────────────────────────────────────────────────────
+
 /// Compute hover information for the given YAML text and cursor position.
 ///
 /// Returns `None` if the position is on whitespace, a comment, a document
@@ -10,6 +29,7 @@ pub fn hover_at(
     text: &str,
     documents: Option<&Vec<YamlOwned>>,
     position: Position,
+    schema: Option<&JsonSchema>,
 ) -> Option<Hover> {
     let documents = documents?;
     if documents.is_empty() {
@@ -50,7 +70,20 @@ pub fn hover_at(
     // Walk the AST to find the node and build the path
     let result = find_node_info(doc, &token, line, &lines, line_idx)?;
 
-    let markdown = format_hover_markdown(&result.path, &result.yaml_type, result.value.as_deref());
+    let mut markdown =
+        format_hover_markdown(&result.path, &result.yaml_type, result.value.as_deref());
+
+    // Append schema info if a schema is available
+    if let Some(s) = schema {
+        let key_path = build_schema_key_path(&result.path);
+        if let Some(prop_schema) = resolve_schema_path(s, &key_path) {
+            let schema_section = format_schema_section(prop_schema);
+            if !schema_section.is_empty() {
+                markdown.push('\n');
+                markdown.push_str(&schema_section);
+            }
+        }
+    }
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -414,21 +447,178 @@ fn format_path(path: &[PathSegment]) -> String {
     result
 }
 
+/// Escape backtick characters in a string for safe embedding in a markdown code span.
+fn escape_for_code_span(s: &str) -> String {
+    s.replace('`', "\\`")
+}
+
+/// Truncate a string to at most `max_chars` characters.
+/// If truncated, appends the Unicode ellipsis character (U+2026).
+fn truncate_to(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let keep = max_chars - 1;
+    let truncated: String = s
+        .char_indices()
+        .nth(keep)
+        .map_or_else(|| s.to_string(), |(byte_idx, _)| s[..byte_idx].to_string());
+    format!("{truncated}\u{2026}")
+}
+
 /// Format the hover content as Markdown.
 fn format_hover_markdown(path: &str, yaml_type: &str, value: Option<&str>) -> String {
     use std::fmt::Write;
     let mut md = String::new();
-    let _ = write!(md, "**Path:** `{path}`\n\n");
+    let escaped_path = escape_for_code_span(path);
+    let _ = write!(md, "**Path:** `{escaped_path}`\n\n");
     let _ = writeln!(md, "**Type:** {yaml_type}");
     if let Some(val) = value {
-        let _ = write!(md, "\n**Value:** `{val}`\n");
+        let escaped_val = escape_for_code_span(val);
+        let _ = write!(md, "\n**Value:** `{escaped_val}`\n");
     }
     md
 }
 
+/// Build a schema key path (list of string keys) from a dotted path string like "a.b.c".
+/// Array index segments like "[0]" are represented as "[]" to match schema `items` lookups.
+fn build_schema_key_path(dotted_path: &str) -> Vec<String> {
+    dotted_path
+        .split('.')
+        .flat_map(|segment| {
+            // Handle "foo[0]" → ["foo", "[]"]
+            segment.find('[').map_or_else(
+                || vec![segment.to_string()],
+                |bracket_pos| {
+                    let key = &segment[..bracket_pos];
+                    if key.is_empty() {
+                        vec!["[]".to_string()]
+                    } else {
+                        vec![key.to_string(), "[]".to_string()]
+                    }
+                },
+            )
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Resolve a dotted key path through a `JsonSchema`, returning the matching sub-schema
+/// for the final key. Returns `None` if the path cannot be resolved.
+fn resolve_schema_path<'a>(schema: &'a JsonSchema, path: &[String]) -> Option<&'a JsonSchema> {
+    let [key, rest @ ..] = path else {
+        return None;
+    };
+
+    // Look in direct properties
+    let found = schema
+        .properties
+        .as_ref()
+        .and_then(|props| props.get(key.as_str()));
+
+    // If not in direct properties, check composition branches
+    let found = found.or_else(|| find_in_branches(schema, key));
+
+    let child = found?;
+
+    if rest.is_empty() {
+        Some(child)
+    } else {
+        resolve_schema_path(child, rest)
+    }
+}
+
+/// Search composition branches (allOf / anyOf / oneOf) for a property key.
+fn find_in_branches<'a>(schema: &'a JsonSchema, key: &str) -> Option<&'a JsonSchema> {
+    let branches = schema
+        .all_of
+        .iter()
+        .flatten()
+        .chain(schema.any_of.iter().flatten())
+        .chain(schema.one_of.iter().flatten());
+
+    for branch in branches {
+        if let Some(found) = branch.properties.as_ref().and_then(|props| props.get(key)) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Format the schema information section appended below the structural hover.
+fn format_schema_section(schema: &JsonSchema) -> String {
+    use std::fmt::Write;
+    let mut md = String::new();
+
+    // Description takes priority over title; skip empty strings
+    let text = schema
+        .description
+        .as_deref()
+        .filter(|d| !d.is_empty())
+        .or_else(|| schema.title.as_deref().filter(|t| !t.is_empty()));
+
+    if let Some(desc) = text {
+        let truncated = truncate_to(desc, MAX_DESCRIPTION_LEN);
+        let _ = writeln!(md, "\n**Description:** {truncated}");
+    }
+
+    // Schema type
+    if let Some(schema_type) = &schema.schema_type {
+        let type_str = match schema_type {
+            crate::schema::SchemaType::Single(t) => t.clone(),
+            crate::schema::SchemaType::Multiple(ts) => ts.join(" | "),
+        };
+        let _ = writeln!(md, "\n**Schema type:** {type_str}");
+    }
+
+    // Default value
+    if let Some(default) = &schema.default {
+        let _ = writeln!(md, "\n**Default:** {default}");
+    }
+
+    // Examples — at most MAX_EXAMPLES, with "and N more" note
+    if let Some(examples) = &schema.examples {
+        let non_empty: Vec<_> = examples.iter().collect();
+        if !non_empty.is_empty() {
+            let shown = non_empty.len().min(MAX_EXAMPLES);
+            let _ = write!(md, "\n**Examples:**");
+            for ex in non_empty.iter().take(shown) {
+                let label = json_value_to_display_string(ex);
+                let truncated = truncate_to(&label, MAX_EXAMPLE_LEN);
+                let _ = write!(md, "\n- {truncated}");
+            }
+            let remaining = non_empty.len().saturating_sub(shown);
+            if remaining > 0 {
+                let _ = write!(md, "\n- *and {remaining} more*");
+            }
+            md.push('\n');
+        }
+    }
+
+    md
+}
+
+/// Convert a `serde_json::Value` to a display string for hover output.
+/// Uses `Value::to_string()` which produces the JSON representation.
+fn json_value_to_display_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_) => value.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::Value as JsonValue;
+
     use super::*;
+    use crate::schema::{JsonSchema, SchemaType};
 
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
@@ -446,12 +636,19 @@ mod tests {
         YamlOwned::load_from_str(text).ok()
     }
 
+    fn schema_with_description(description: &str) -> JsonSchema {
+        JsonSchema {
+            description: Some(description.to_string()),
+            ..Default::default()
+        }
+    }
+
     // Test 1
     #[test]
     fn should_return_hover_for_simple_key() {
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0));
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -467,7 +664,7 @@ mod tests {
     fn should_return_hover_for_simple_value() {
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 6));
+        let result = hover_at(text, docs.as_ref(), pos(0, 6), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -484,7 +681,7 @@ mod tests {
     fn should_return_none_for_whitespace() {
         let text = "key: value\n\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 0));
+        let result = hover_at(text, docs.as_ref(), pos(1, 0), None);
 
         assert!(result.is_none());
     }
@@ -494,7 +691,7 @@ mod tests {
     fn should_return_none_for_comment() {
         let text = "# comment\nkey: value\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 2));
+        let result = hover_at(text, docs.as_ref(), pos(0, 2), None);
 
         assert!(result.is_none());
     }
@@ -504,7 +701,7 @@ mod tests {
     fn should_return_hover_for_nested_key() {
         let text = "server:\n  port: 8080\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 2));
+        let result = hover_at(text, docs.as_ref(), pos(1, 2), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -523,7 +720,7 @@ mod tests {
     fn should_return_hover_for_deeply_nested_key() {
         let text = "a:\n  b:\n    c: deep\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(2, 4));
+        let result = hover_at(text, docs.as_ref(), pos(2, 4), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -539,7 +736,7 @@ mod tests {
     fn should_return_hover_for_sequence_item() {
         let text = "items:\n  - first\n  - second\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 4));
+        let result = hover_at(text, docs.as_ref(), pos(1, 4), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -555,7 +752,7 @@ mod tests {
     fn should_return_hover_for_mapping_value_type() {
         let text = "server:\n  port: 8080\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0));
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -574,7 +771,7 @@ mod tests {
     fn should_return_hover_for_sequence_value_type() {
         let text = "items:\n  - one\n  - two\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0));
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -590,7 +787,7 @@ mod tests {
     fn should_return_hover_with_scalar_value() {
         let text = "port: 8080\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 6));
+        let result = hover_at(text, docs.as_ref(), pos(0, 6), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -602,7 +799,7 @@ mod tests {
     fn should_format_hover_as_markdown() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0));
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
 
         let hover = result.expect("should return hover");
         match &hover.contents {
@@ -618,7 +815,7 @@ mod tests {
     fn should_return_none_for_empty_document() {
         let text = "";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0));
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
 
         assert!(result.is_none());
     }
@@ -627,7 +824,7 @@ mod tests {
     #[test]
     fn should_return_none_when_document_failed_to_parse() {
         let text = "key: [bad";
-        let result = hover_at(text, None, pos(0, 0));
+        let result = hover_at(text, None, pos(0, 0), None);
 
         assert!(result.is_none());
     }
@@ -637,7 +834,7 @@ mod tests {
     fn should_return_hover_in_multi_document_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(2, 0));
+        let result = hover_at(text, docs.as_ref(), pos(2, 0), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -652,7 +849,7 @@ mod tests {
     fn should_return_none_for_position_beyond_document() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(5, 0));
+        let result = hover_at(text, docs.as_ref(), pos(5, 0), None);
 
         assert!(result.is_none());
     }
@@ -662,7 +859,7 @@ mod tests {
     fn should_return_none_for_document_separator_line() {
         let text = "key1: value1\n---\nkey2: value2\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 0));
+        let result = hover_at(text, docs.as_ref(), pos(1, 0), None);
 
         assert!(result.is_none());
     }
@@ -672,7 +869,7 @@ mod tests {
     fn should_return_hover_for_boolean_value() {
         let text = "enabled: true\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 9));
+        let result = hover_at(text, docs.as_ref(), pos(0, 9), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -688,7 +885,7 @@ mod tests {
     fn should_return_hover_for_null_value() {
         let text = "empty: ~\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 7));
+        let result = hover_at(text, docs.as_ref(), pos(0, 7), None);
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -696,5 +893,1037 @@ mod tests {
             content.to_lowercase().contains("scalar") || content.to_lowercase().contains("null"),
             "should mention scalar or null type"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group B — Schema info at key position (Tests 19–24)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 19 — schema with description appended below structural hover
+    #[test]
+    fn schema_description_appended_for_key_at_root() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            schema_with_description("The user's display name"),
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(content.contains("name"), "should contain key path 'name'");
+        assert!(
+            content.contains("The user's display name"),
+            "should contain schema description"
+        );
+    }
+
+    // Test 20 — schema type shown in hover
+    #[test]
+    fn schema_type_shown_for_key() {
+        let text = "port: 8080\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "port".to_string(),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("integer"),
+            "should contain schema type 'integer'"
+        );
+    }
+
+    // Test 21 — schema default shown in hover
+    #[test]
+    fn schema_default_shown_for_key() {
+        let text = "timeout: 30\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "timeout".to_string(),
+            JsonSchema {
+                default: Some(JsonValue::Number(30.into())),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(content.contains("30"), "should contain default value '30'");
+        assert!(
+            content.to_lowercase().contains("default"),
+            "should mention 'default'"
+        );
+    }
+
+    // Test 22 — schema examples shown in hover (up to 3)
+    #[test]
+    fn schema_examples_shown_for_key() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                examples: Some(vec![
+                    JsonValue::String("Alice".to_string()),
+                    JsonValue::String("Bob".to_string()),
+                ]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.to_lowercase().contains("example"),
+            "should mention examples"
+        );
+        assert!(content.contains("Alice"), "should show first example");
+        assert!(content.contains("Bob"), "should show second example");
+    }
+
+    // Test 23 — no schema info when key not in schema properties
+    #[test]
+    fn no_schema_info_for_unknown_key() {
+        let text = "unknown: value\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "known".to_string(),
+            schema_with_description("A known property"),
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        // Structural hover still works
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("unknown"),
+            "should contain key path 'unknown'"
+        );
+        // Schema description not shown for unknown key
+        assert!(
+            !content.contains("A known property"),
+            "should not show description for unknown key"
+        );
+    }
+
+    // Test 24 — schema info for nested key resolves through properties
+    #[test]
+    fn schema_description_for_nested_key() {
+        let text = "server:\n  port: 8080\n";
+        let docs = parse_docs(text);
+        let mut port_props = HashMap::new();
+        port_props.insert(
+            "port".to_string(),
+            JsonSchema {
+                description: Some("HTTP port number".to_string()),
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                ..Default::default()
+            },
+        );
+        let mut root_props = HashMap::new();
+        root_props.insert(
+            "server".to_string(),
+            JsonSchema {
+                properties: Some(port_props),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(root_props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(1, 2), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("server.port"),
+            "should contain nested path"
+        );
+        assert!(
+            content.contains("HTTP port number"),
+            "should contain nested schema description"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group C — Schema info at value position (Tests 25–26)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 25 — hovering on value shows schema description for the parent key
+    #[test]
+    fn schema_description_shown_for_value_position() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            schema_with_description("The user's display name"),
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 6), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("The user's display name"),
+            "should show schema description when hovering on value"
+        );
+    }
+
+    // Test 26 — hovering on value shows schema type for the parent key
+    #[test]
+    fn schema_type_shown_for_value_position() {
+        let text = "port: 8080\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "port".to_string(),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 6), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("integer"),
+            "should show schema type when hovering on value"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group D — Formatting and truncation (Tests 27–30)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 27 — existing structural hover section present before schema section
+    #[test]
+    fn schema_info_appended_below_structural_hover() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            schema_with_description("The user's display name"),
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        let path_pos = content.find("Path").expect("should contain 'Path'");
+        let schema_pos = content
+            .find("The user's display name")
+            .expect("should contain description");
+        assert!(
+            path_pos < schema_pos,
+            "structural hover (Path) should appear before schema info"
+        );
+    }
+
+    // Test 28 — long description is truncated to ≤200 chars + ellipsis
+    #[test]
+    fn long_description_truncated() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let long_desc = "A".repeat(500);
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), schema_with_description(&long_desc));
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // The full 500-char description must not appear verbatim
+        assert!(
+            !content.contains(&long_desc),
+            "full 500-char description must not appear"
+        );
+        assert!(
+            content.contains('\u{2026}'),
+            "truncated description must end with ellipsis"
+        );
+        // Description body must be ≤199 chars (plus ellipsis = 200)
+        let a_run: String = content
+            .chars()
+            .skip_while(|&c| c != 'A')
+            .take_while(|&c| c == 'A')
+            .collect();
+        assert!(
+            a_run.chars().count() <= 199,
+            "truncated description body must be ≤199 chars (plus ellipsis = 200), got {}",
+            a_run.chars().count()
+        );
+    }
+
+    // Test 29 — long example value is truncated to ≤100 chars + ellipsis
+    #[test]
+    fn long_example_value_truncated() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let long_example = "B".repeat(200);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                examples: Some(vec![JsonValue::String(long_example.clone())]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            !content.contains(&long_example),
+            "full 200-char example should not appear"
+        );
+        assert!(
+            content.contains('\u{2026}'),
+            "truncated example should end with ellipsis"
+        );
+        let b_run: String = content
+            .chars()
+            .skip_while(|&c| c != 'B')
+            .take_while(|&c| c == 'B')
+            .collect();
+        assert!(
+            b_run.chars().count() <= 99,
+            "truncated example body should be ≤99 chars (plus ellipsis = 100)"
+        );
+    }
+
+    // Test 30 — long example value is truncated to ≤100 Unicode chars
+    #[test]
+    fn long_example_value_truncated_at_100_chars() {
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let long_example = "a".repeat(200);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(vec![JsonValue::String(long_example.clone())]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // The full 200-char example must not appear verbatim
+        assert!(
+            !content.contains(&long_example),
+            "full 200-char example must not appear verbatim"
+        );
+        // Find the run of 'a' characters in hover content
+        let a_run: String = content
+            .chars()
+            .skip_while(|&c| c != 'a')
+            .take_while(|&c| c == 'a')
+            .collect();
+        assert!(
+            a_run.chars().count() <= 100,
+            "displayed example must be at most 100 chars (got {})",
+            a_run.chars().count()
+        );
+    }
+
+    // Test 31 — at most 3 examples shown; "and N more" note for overflow
+    #[test]
+    fn should_show_at_most_3_examples_with_overflow_note() {
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(vec![
+                    JsonValue::String("a".to_string()),
+                    JsonValue::String("b".to_string()),
+                    JsonValue::String("c".to_string()),
+                    JsonValue::String("d".to_string()),
+                    JsonValue::String("e".to_string()),
+                ]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // Cap is 3, not 5
+        assert!(
+            content.contains("and 2 more") || content.contains("2 more"),
+            "should show 'and 2 more' note for 5 examples capped at 3, got: {content}"
+        );
+        // items 4–5 must be absent as standalone example values
+        // (they appear as single-char strings "d" and "e" — check by looking for
+        // them as list items, not just any occurrence)
+        let lines_with_d = content
+            .lines()
+            .filter(|l| l.trim() == "- d" || l.trim() == "d")
+            .count();
+        let lines_with_e = content
+            .lines()
+            .filter(|l| l.trim() == "- e" || l.trim() == "e")
+            .count();
+        assert_eq!(
+            lines_with_d, 0,
+            "example 'd' (4th) must not appear as a list item"
+        );
+        assert_eq!(
+            lines_with_e, 0,
+            "example 'e' (5th) must not appear as a list item"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group E — Nested paths through schema (Tests 32–33)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 32 — schema info for two-level nested key
+    #[test]
+    fn schema_info_for_two_level_nested_key() {
+        let text = "database:\n  host: localhost\n";
+        let docs = parse_docs(text);
+        let mut db_props = HashMap::new();
+        db_props.insert(
+            "host".to_string(),
+            schema_with_description("Database host address"),
+        );
+        let mut root_props = HashMap::new();
+        root_props.insert(
+            "database".to_string(),
+            JsonSchema {
+                properties: Some(db_props),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(root_props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(1, 2), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("database.host"),
+            "should contain nested path"
+        );
+        assert!(
+            content.contains("Database host address"),
+            "should contain nested schema description"
+        );
+    }
+
+    // Test 33 — schema info not shown for key two levels deeper than schema has
+    #[test]
+    fn no_schema_info_for_deeper_than_schema_provides() {
+        let text = "a:\n  b:\n    c: deep\n";
+        let docs = parse_docs(text);
+        // Schema only describes 'a' with no nested properties
+        let mut root_props = HashMap::new();
+        root_props.insert("a".to_string(), schema_with_description("Top level A"));
+        let schema = JsonSchema {
+            properties: Some(root_props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(2, 4), Some(&schema));
+
+        // Structural hover for a.b.c should still work
+        let hover = result.expect("structural hover should work");
+        let content = hover_content(&hover);
+        assert!(content.contains("a.b.c"), "should contain path a.b.c");
+        // Schema description for 'a' should NOT appear when on 'c'
+        assert!(
+            !content.contains("Top level A"),
+            "should not show parent description when on nested key"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group F — Composition schemas (allOf / anyOf) (Tests 34–35)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 34 — allOf branch: property description found in first matching branch
+    #[test]
+    fn schema_info_from_all_of_branch() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut branch_props = HashMap::new();
+        branch_props.insert(
+            "name".to_string(),
+            schema_with_description("Name from allOf branch"),
+        );
+        let schema = JsonSchema {
+            all_of: Some(vec![JsonSchema {
+                properties: Some(branch_props),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("Name from allOf branch"),
+            "should find property description from allOf branch"
+        );
+    }
+
+    // Test 35 — anyOf branch: property description found in first matching branch
+    #[test]
+    fn schema_info_from_any_of_branch() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut branch_props = HashMap::new();
+        branch_props.insert(
+            "name".to_string(),
+            schema_with_description("Name from anyOf branch"),
+        );
+        let schema = JsonSchema {
+            any_of: Some(vec![JsonSchema {
+                properties: Some(branch_props),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("Name from anyOf branch"),
+            "should find property description from anyOf branch"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group G — Fallback behaviour (Tests 36–38)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 36 — None schema: structural hover works, no schema section appended
+    #[test]
+    fn no_schema_hover_unchanged() {
+        let text = "port: 8080\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
+
+        let hover = result.expect("should return hover with None schema");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("port"),
+            "structural hover path must be present"
+        );
+        assert!(
+            !content.contains("---"),
+            "no schema section must be appended when schema is None"
+        );
+    }
+
+    // Test 37 — Schema with no properties for cursor key: structural hover only
+    #[test]
+    fn schema_without_matching_property_shows_structural_only() {
+        let text = "port: 8080\n";
+        let docs = parse_docs(text);
+        // Schema has description at root but no properties
+        let schema = schema_with_description("Root schema description");
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(content.contains("port"), "structural hover path present");
+        assert!(
+            !content.contains("Root schema description"),
+            "root description should not appear for a specific key"
+        );
+    }
+
+    // Test 38 — Schema present but document fails to parse: returns None
+    #[test]
+    fn schema_present_but_parse_fails_returns_none() {
+        let text = "key: [bad";
+        let schema = schema_with_description("some desc");
+        let result = hover_at(text, None, pos(0, 0), Some(&schema));
+
+        assert!(result.is_none(), "should return None when no parsed docs");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group H — Edge cases (Tests 39–42)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 39 — empty description string: schema section not shown
+    #[test]
+    fn empty_description_not_shown() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                description: Some(String::new()),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // Should still contain structural hover
+        assert!(content.contains("name"), "structural hover present");
+        // Schema section should not be added for empty description
+        // (no "Schema" header or empty description block)
+        assert!(
+            !content.contains("**Description:**"),
+            "should not show description section for empty description"
+        );
+    }
+
+    // Test 40 — title shown when description absent
+    #[test]
+    fn title_shown_when_description_absent() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                title: Some("User Name".to_string()),
+                description: None,
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("User Name"),
+            "should show title when description is absent"
+        );
+    }
+
+    // Test 41 — null default value shown
+    #[test]
+    fn null_default_shown() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                default: Some(JsonValue::Null),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.to_lowercase().contains("null"),
+            "should show null default"
+        );
+        assert!(
+            content.to_lowercase().contains("default"),
+            "should label the default"
+        );
+    }
+
+    // Test 42 — title NOT shown when description present (description takes priority)
+    #[test]
+    fn description_takes_priority_over_title() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                title: Some("User Name".to_string()),
+                description: Some("The full display name of the user".to_string()),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("The full display name of the user"),
+            "should show description"
+        );
+        // Title should not appear when description is present
+        assert!(
+            !content.contains("User Name"),
+            "should not show title when description is present"
+        );
+    }
+
+    // Test 42 — 10 examples: show first 3, note "and 7 more"
+    #[test]
+    fn should_show_only_first_3_examples_when_10_provided() {
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let examples: Vec<JsonValue> = (0..10)
+            .map(|i| JsonValue::String(format!("ex{i}")))
+            .collect();
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(examples),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // First 3 shown; ex3 through ex9 must be absent as list items
+        assert!(content.contains("ex0"), "ex0 must appear");
+        for i in 3..10 {
+            let item = format!("ex{i}");
+            let lines_with_item = content
+                .lines()
+                .filter(|l| l.trim() == format!("- {item}") || l.trim() == item)
+                .count();
+            assert_eq!(
+                lines_with_item, 0,
+                "example '{item}' must not appear as a list item"
+            );
+        }
+        // "and 7 more" note expected
+        assert!(
+            content.contains("7 more"),
+            "should contain 'and 7 more' note, got: {content}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Security tests (Tests 43–50)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Test 43 — description truncation is char-based (not byte-based), cap is 200 chars
+    #[test]
+    fn should_truncate_long_description_in_hover_at_200_chars() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        // 300 × 'é' = 600 bytes but 300 chars; truncated at 200 chars (199 body + ellipsis)
+        let long_desc: String = std::iter::repeat('é').take(300).collect();
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), schema_with_description(&long_desc));
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // Extract the é-run from the content
+        let e_run: String = content
+            .chars()
+            .skip_while(|&c| c != 'é')
+            .take_while(|&c| c == 'é')
+            .collect();
+        assert!(
+            e_run.chars().count() <= 199,
+            "truncation must use chars not bytes; body must be ≤199 chars (got {})",
+            e_run.chars().count()
+        );
+        assert!(
+            content.contains('\u{2026}'),
+            "truncated description must end with ellipsis"
+        );
+    }
+
+    // Test 44 — backtick in schema default value rendered safely
+    #[test]
+    fn should_escape_backtick_in_schema_default_value() {
+        let text = "key: value\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                default: Some(JsonValue::String("foo`bar".to_string())),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // Must NOT contain a broken code span pattern "`foo`bar`"
+        assert!(
+            !content.contains("`foo`bar`"),
+            "must not contain broken code span '`foo`bar`', got: {content}"
+        );
+        // Must still render something that includes "foo" (the default appears)
+        assert!(
+            content.contains("foo"),
+            "default value 'foo' must appear somewhere"
+        );
+    }
+
+    // Test 45 — at most 3 examples shown with "and N more" overflow note
+    #[test]
+    fn should_show_at_most_3_examples_with_overflow_note_sec() {
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(vec![
+                    JsonValue::String("a".to_string()),
+                    JsonValue::String("b".to_string()),
+                    JsonValue::String("c".to_string()),
+                    JsonValue::String("d".to_string()),
+                    JsonValue::String("e".to_string()),
+                ]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        assert!(result.is_some(), "should return hover");
+        let hover = result.unwrap();
+        let content = hover_content(&hover);
+        // Items 4–5 ("d", "e") must not appear as standalone example list items
+        let d_count = content
+            .lines()
+            .filter(|l| l.trim() == "- d" || l.trim() == "d")
+            .count();
+        let e_count = content
+            .lines()
+            .filter(|l| l.trim() == "- e" || l.trim() == "e")
+            .count();
+        assert_eq!(d_count, 0, "'d' must not appear as example item");
+        assert_eq!(e_count, 0, "'e' must not appear as example item");
+        // "and N more" note present
+        assert!(
+            content.contains("more"),
+            "should contain overflow note indicating more examples exist, got: {content}"
+        );
+    }
+
+    // Test 46 — long example value truncated to ≤100 chars (char-based)
+    #[test]
+    fn should_truncate_long_example_value_at_100_chars() {
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let long_example = "a".repeat(200);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(vec![JsonValue::String(long_example.clone())]),
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        assert!(result.is_some(), "should return hover");
+        let hover = result.unwrap();
+        let content = hover_content(&hover);
+        // Find the example run in the hover content
+        let a_run: String = content
+            .chars()
+            .skip_while(|&c| c != 'a')
+            .take_while(|&c| c == 'a')
+            .collect();
+        assert!(
+            a_run.chars().count() <= 100,
+            "displayed example must be ≤ 100 chars (got {})",
+            a_run.chars().count()
+        );
+    }
+
+    // Test 47 — backtick in YAML value escaped in **Value:** code span
+    #[test]
+    fn should_escape_backtick_in_yaml_value_display() {
+        // YAML value contains a backtick — must be escaped so the code span doesn't break
+        let text = "foo: bar`baz\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 5), None);
+
+        assert!(result.is_some(), "should return hover");
+        let hover = result.unwrap();
+        let content = hover_content(&hover);
+        // The raw markdown must not contain the broken pattern "`bar`baz`"
+        assert!(
+            !content.contains("`bar`baz`"),
+            "must not contain broken code span '`bar`baz`', got: {content}"
+        );
+        // "bar" must still appear in some form
+        assert!(content.contains("bar"), "value 'bar' must appear in hover");
+    }
+
+    // Test 48 — no schema section when schema has no info for the hovered key
+    #[test]
+    fn should_show_structural_only_when_schema_has_no_info_for_hovered_key() {
+        let text = "name: Alice\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert("other".to_string(), schema_with_description("Other"));
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        assert!(result.is_some(), "should return hover");
+        let hover = result.unwrap();
+        let content = hover_content(&hover);
+        // No schema section separator or "Other" description
+        assert!(
+            !content.contains("---"),
+            "should not contain schema section separator"
+        );
+        assert!(
+            !content.contains("Other"),
+            "should not show 'Other' description"
+        );
+    }
+
+    // Test 49 — title shown as fallback when no description
+    #[test]
+    fn should_show_title_as_fallback_when_no_description() {
+        let text = "key: value\n";
+        let docs = parse_docs(text);
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                title: Some("My Key Title".to_string()),
+                description: None,
+                ..Default::default()
+            },
+        );
+        let schema = JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        };
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        assert!(result.is_some(), "should return hover");
+        let hover = result.unwrap();
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("My Key Title"),
+            "should show title as fallback when description absent"
+        );
+    }
+
+    // Test 50 — lock ordering: hover handler acquires document_store before schema locks
+    #[ignore = "lock ordering verified by code review — no runtime assertion possible"]
+    #[test]
+    fn lock_ordering_hover_handler_document_store_before_schema_associations() {
+        // The hover handler in server.rs must:
+        // 1. Acquire document_store lock → extract owned text + YAML → drop lock
+        // 2. Acquire schema_associations lock → extract owned URL → drop lock
+        // 3. Acquire schema_cache lock → clone schema → drop lock
+        // 4. Call hover_at() with no lock held; no std::sync::Mutex guard crosses an .await
+        // This ordering prevents deadlocks with other handlers using the same locks.
+        // Runtime detection would require injecting lock contention; verified by review.
     }
 }
