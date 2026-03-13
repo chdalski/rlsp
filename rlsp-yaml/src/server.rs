@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
+    CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentLink, DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams,
@@ -91,6 +92,7 @@ impl Backend {
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
             selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+            code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
             ..ServerCapabilities::default()
         }
     }
@@ -303,6 +305,37 @@ impl LanguageServer for Backend {
         }
 
         Ok(Some(result))
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let diagnostics = self
+            .get_diagnostics(uri.as_str())
+            .unwrap_or_default();
+
+        let actions = crate::code_actions::code_actions(&text, range, &diagnostics, &uri);
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(
+            actions
+                .into_iter()
+                .map(CodeAction::into)
+                .collect(),
+        ))
     }
 
     async fn document_symbol(
