@@ -108,25 +108,23 @@ pub fn complete_at(
                 structural
             }
         }
-        CursorContext::Value(key_name) => {
-            schema.map_or_else(
-                || suggest_values_for_key(&lines, &key_name),
-                |s| {
-                    let path = build_value_key_path(&lines, line_idx, current_indent, &key_name);
-                    resolve_schema_path(s, &path).map_or_else(
-                        || suggest_values_for_key(&lines, &key_name),
-                        |prop_schema| {
-                            let schema_items = schema_value_completions(prop_schema);
-                            if schema_items.is_empty() {
-                                suggest_values_for_key(&lines, &key_name)
-                            } else {
-                                schema_items
-                            }
-                        },
-                    )
-                },
-            )
-        }
+        CursorContext::Value(key_name) => schema.map_or_else(
+            || suggest_values_for_key(&lines, &key_name),
+            |s| {
+                let path = build_value_key_path(&lines, line_idx, current_indent, &key_name);
+                resolve_schema_path(s, &path).map_or_else(
+                    || suggest_values_for_key(&lines, &key_name),
+                    |prop_schema| {
+                        let schema_items = schema_value_completions(prop_schema);
+                        if schema_items.is_empty() {
+                            suggest_values_for_key(&lines, &key_name)
+                        } else {
+                            schema_items
+                        }
+                    },
+                )
+            },
+        ),
     }
 }
 
