@@ -237,6 +237,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
+        // Lock ordering: document_store → schema_associations → schema_cache
         let (text, yaml) = if let Ok(store) = self.document_store.lock() {
             let text = store.get(&uri).map(str::to_string);
             let yaml = store.get_yaml(&uri).cloned();
@@ -249,7 +250,22 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let items = crate::completion::complete_at(&text, yaml.as_ref(), position);
+        // Retrieve the schema URL for this document (if any).
+        let schema_url = self
+            .schema_associations
+            .lock()
+            .ok()
+            .and_then(|assoc| assoc.get(&uri).cloned());
+
+        // Retrieve the cached schema (if any) — no lock held across await.
+        let schema = schema_url.and_then(|url| {
+            self.schema_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(&url).cloned())
+        });
+
+        let items = crate::completion::complete_at(&text, yaml.as_ref(), position, schema.as_ref());
         if items.is_empty() {
             return Ok(None);
         }
