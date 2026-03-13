@@ -49,6 +49,7 @@ the project exists. -->
 │       ├── hover.rs        # Hover information
 │       ├── references.rs   # Go-to-definition + find references
 │       ├── rename.rs       # Rename symbol
+│       ├── schema.rs           # JSON Schema types, parsing, HTTP fetching, caching
 │       ├── selection.rs    # Selection ranges (AST-based, saphyr MarkedYamlOwned)
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)

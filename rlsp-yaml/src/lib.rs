@@ -1,3 +1,5 @@
+pub mod code_actions;
+pub mod schema;
 pub mod completion;
 pub mod document_links;
 pub mod document_store;
