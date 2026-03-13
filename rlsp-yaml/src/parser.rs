@@ -160,7 +160,10 @@ mod tests {
 
         let result = parse_yaml(&text);
         assert!(result.diagnostics.is_empty(), "should parse without errors");
-        assert!(!result.documents.is_empty(), "should produce at least 1 document");
+        assert!(
+            !result.documents.is_empty(),
+            "should produce at least 1 document"
+        );
     }
 
     #[test]

@@ -50,6 +50,7 @@ the project exists. -->
 │       ├── references.rs   # Go-to-definition + find references
 │       ├── rename.rs       # Rename symbol
 │       ├── schema.rs           # JSON Schema types, parsing, HTTP fetching, caching
+│       ├── schema_validation.rs  # Schema-driven diagnostic validation
 │       ├── selection.rs    # Selection ranges (AST-based, saphyr MarkedYamlOwned)
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)

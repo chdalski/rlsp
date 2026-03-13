@@ -171,8 +171,8 @@ pub fn validate_and_normalize_url(raw: &str) -> Result<String, SchemaError> {
         ));
     }
 
-    let url = Url::parse(raw)
-        .map_err(|e| SchemaError::UrlNotPermitted(format!("invalid URL: {e}")))?;
+    let url =
+        Url::parse(raw).map_err(|e| SchemaError::UrlNotPermitted(format!("invalid URL: {e}")))?;
 
     // Scheme allowlist
     match url.scheme() {
@@ -290,8 +290,8 @@ pub fn fetch_schema(url: &str) -> Result<JsonSchema, SchemaError> {
         return Err(SchemaError::ResponseTooLarge);
     }
 
-    let value: Value = serde_json::from_slice(&buf)
-        .map_err(|e| SchemaError::ParseFailed(e.to_string()))?;
+    let value: Value =
+        serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))?;
 
     check_json_depth(&value, 0)?;
 
@@ -347,7 +347,11 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
 
     match value {
         Value::Bool(true) => return Some(JsonSchema::default()),
-        Value::Bool(false) | Value::Null | Value::Number(_) | Value::String(_) | Value::Array(_) => {
+        Value::Bool(false)
+        | Value::Null
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Array(_) => {
             return None;
         }
         Value::Object(_) => {}
@@ -381,10 +385,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
 
     // default / examples
     schema.default = obj.get("default").cloned();
-    schema.examples = obj
-        .get("examples")
-        .and_then(Value::as_array)
-        .cloned();
+    schema.examples = obj.get("examples").and_then(Value::as_array).cloned();
 
     // enum
     schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
@@ -399,9 +400,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     // properties
     schema.properties = obj.get("properties").and_then(Value::as_object).map(|map| {
         map.iter()
-            .filter_map(|(k, v)| {
-                parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s))
-            })
+            .filter_map(|(k, v)| parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s)))
             .collect()
     });
 
@@ -499,9 +498,7 @@ fn parse_definitions(
     let map = value?.as_object()?;
     let result: HashMap<String, JsonSchema> = map
         .iter()
-        .filter_map(|(k, v)| {
-            parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s))
-        })
+        .filter_map(|(k, v)| parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s)))
         .collect();
     if result.is_empty() {
         None
@@ -611,9 +608,7 @@ fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
         (Some(&b'*'), _) => {
             let rest_pattern = pattern.get(1..).unwrap_or(&[]);
             for i in 0..=text.len() {
-                if text
-                    .get(..i)
-                    .is_some_and(|prefix| !prefix.contains(&b'/'))
+                if text.get(..i).is_some_and(|prefix| !prefix.contains(&b'/'))
                     && glob_matches_inner(rest_pattern, text.get(i..).unwrap_or(&[]))
                 {
                     return true;
@@ -777,7 +772,10 @@ mod tests {
     // Test 12
     #[test]
     fn should_return_url_for_exact_filename_match() {
-        let associations = [assoc("config.yaml", "https://example.com/config-schema.json")];
+        let associations = [assoc(
+            "config.yaml",
+            "https://example.com/config-schema.json",
+        )];
         assert_eq!(
             match_schema_by_filename("config.yaml", &associations),
             Some("https://example.com/config-schema.json".to_string())
@@ -1130,12 +1128,12 @@ mod tests {
     // `serde_json::from_slice` → `check_json_depth` → `parse_schema`.
     #[test]
     fn should_parse_fetched_schema_from_valid_response() {
-        let body = r#"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#;
+        let body =
+            r#"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#;
         let buf = body.as_bytes();
 
         // Step 1: deserialise JSON (mirrors fetch_schema's from_slice call)
-        let value: Value =
-            serde_json::from_slice(buf).expect("valid JSON should deserialise");
+        let value: Value = serde_json::from_slice(buf).expect("valid JSON should deserialise");
 
         // Step 2: depth check (mirrors fetch_schema's check_json_depth call)
         check_json_depth(&value, 0).expect("shallow schema should pass depth check");
@@ -1146,7 +1144,10 @@ mod tests {
         assert_eq!(schema_type_str(&schema), Some("object"));
         let props = schema.properties.as_ref().expect("should have properties");
         assert!(props.contains_key("name"));
-        assert_eq!(schema_type_str(props.get("name").expect("name")), Some("string"));
+        assert_eq!(
+            schema_type_str(props.get("name").expect("name")),
+            Some("string")
+        );
         let req = schema.required.as_ref().expect("should have required");
         assert!(req.contains(&"name".to_string()));
     }
@@ -1242,9 +1243,7 @@ mod tests {
     // Test 51 — AWS metadata endpoint rejected (link-local)
     #[test]
     fn should_reject_link_local_aws_metadata_url() {
-        assert!(
-            validate_and_normalize_url("http://169.254.169.254/latest/meta-data/").is_err()
-        );
+        assert!(validate_and_normalize_url("http://169.254.169.254/latest/meta-data/").is_err());
     }
 
     // Test 52 — URL exceeding max length rejected
@@ -1323,7 +1322,10 @@ mod tests {
             v = json!({"type": "object", "properties": {"child": v}});
         }
         let result = parse_schema(&v);
-        assert!(result.is_some(), "schema within depth limit should be accepted");
+        assert!(
+            result.is_some(),
+            "schema within depth limit should be accepted"
+        );
     }
 
     // Test 58 — two-node circular $ref does not hang
@@ -1346,8 +1348,7 @@ mod tests {
     // behavior so any future change is immediately detectable.
     #[test]
     fn should_normalize_cache_key_trailing_slash() {
-        let key_no_slash =
-            validate_and_normalize_url("https://example.com/schema").expect("valid");
+        let key_no_slash = validate_and_normalize_url("https://example.com/schema").expect("valid");
         let key_with_slash =
             validate_and_normalize_url("https://example.com/schema/").expect("valid");
 
