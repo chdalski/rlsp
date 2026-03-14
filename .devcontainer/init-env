@@ -1,0 +1,5 @@
+#!/bin/sh
+# Creates .env.local with default auth mode if it doesn't exist yet.
+# Called via initializeCommand before the container starts.
+# See init-env.cmd for the Windows equivalent.
+test -f .devcontainer/.env.local || echo 'CLAUDE_AUTH=proxy' > .devcontainer/.env.local

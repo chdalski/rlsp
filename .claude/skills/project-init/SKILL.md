@@ -12,11 +12,11 @@ description: >
 
 Generate a project context document at `CLAUDE.md` (project
 root) by scanning the project and filling in the template
-from `.claude/templates/project-context.md`. Claude Code
-loads root `CLAUDE.md` at cache level 3 alongside
-`.claude/CLAUDE.md` — both are always in context without
-conflicting, since `.claude/CLAUDE.md` contains lead
-instructions and `CLAUDE.md` contains project context.
+from `.claude/skills/project-init/project-context.md`.
+Claude Code loads root `CLAUDE.md` at cache level 3
+alongside `.claude/CLAUDE.md` — both are always in context
+without conflicting, since `.claude/CLAUDE.md` contains
+lead instructions and `CLAUDE.md` contains project context.
 
 For projects with git-repository subdirectories (e.g., git
 submodules), also generate a `CLAUDE.md` in each
@@ -102,8 +102,8 @@ listing them helps users understand what guidance is active.
 ## Steps
 
 1. **Read template** — read
-   `.claude/templates/project-context.md` for the canonical
-   structure.
+   `.claude/skills/project-init/project-context.md` for
+   the canonical structure.
 
 2. **Check for existing context** — if `CLAUDE.md` exists
    at the project root, ask the user whether to overwrite
@@ -121,8 +121,8 @@ listing them helps users understand what guidance is active.
 
 5. **Apply Cargo lints** (Rust projects only) — if Rust was
    detected, read `.claude/skills/project-init/rust-init.md`
-   and follow its instructions to update all `Cargo.toml` files
-   in the project.
+   and follow its instructions to update all `Cargo.toml`
+   files in the project.
 
 6. **Detect mono-repo** — check for workspace fields,
    multiple manifest directories, or git submodules. If
@@ -156,4 +156,5 @@ listing them helps users understand what guidance is active.
       projects only)
     - Whether any files beyond `CLAUDE.md` were modified
       (e.g. Cargo.toml lint updates) — the lead uses this
-      to decide whether to offer cleanup during clarification
+      to decide whether to offer cleanup during
+      clarification

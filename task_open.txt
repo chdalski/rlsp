@@ -11,27 +11,11 @@
 - [x] Rename (anchors/aliases)
 - [x] Additional validators (unused anchors, flow style, key ordering)
 - [x] Document links (URL detection in YAML values)
+- [x] Selection ranges (AST-based expand/shrink selection via saphyr MarkedYamlOwned spans)
 
 ## Remaining Tasks (in order)
 
-### Task 1: Selection Ranges
-Smart expand/shrink selection by YAML hierarchy (LSP SelectionRange).
-
-**What to build:**
-- New module `src/selection.rs` with pure function `selection_ranges(text, positions) -> Vec<SelectionRange>`
-- Indentation-based hierarchy detection (similar to folding)
-- Each SelectionRange has a parent pointing to the enclosing range
-- Server integration: add `selection_range_provider` capability and handler
-
-**Acceptance criteria:**
-- Cursor in a value expands to: value -> key-value pair -> parent mapping -> document
-- Cursor in a sequence item expands to: item -> sequence -> parent
-- Handles nested structures correctly
-- Works with multi-document YAML files
-
----
-
-### Task 2: Code Actions
+### Task 1: Code Actions
 Quick fixes and refactoring actions.
 
 **What to build:**
@@ -94,7 +78,7 @@ JSON Schema integration for validation, completion, and hover.
 
 ## Lower Priority (can defer)
 
-### Task 4: Code Lens
+### Task 3: Code Lens
 Show schema name at top of document.
 
 **What to build:**
@@ -105,7 +89,7 @@ Show schema name at top of document.
 
 ---
 
-### Task 5: On-Type Formatting
+### Task 4: On-Type Formatting
 Auto-indent after `:`, `-`, `|`.
 
 **What to build:**
@@ -118,7 +102,7 @@ Auto-indent after `:`, `-`, `|`.
 
 ---
 
-### Task 6: Custom Tags
+### Task 5: Custom Tags
 Support for YAML custom tags like `!include`, `!ref`.
 
 **What to build:**
@@ -129,12 +113,12 @@ Support for YAML custom tags like `!include`, `!ref`.
 ---
 
 ## Current Test Coverage
-- 260 tests passing
+- 281 tests passing
 - Clippy clean with pedantic + nursery lints
 
 ## Architecture Notes
 - Pure function design: each feature module exports a pure function (text + position -> result)
-- Text-based position mapping (yaml-rust2 AST lacks span info)
+- saphyr 0.0.6 for YAML parsing (migrated from yaml-rust2)
+- MarkedYamlOwned for AST nodes with span info (used by selection ranges)
 - tower-lsp v0.20 with "proposed" features
-- yaml-rust2 v0.9 for YAML parsing
 - tokio for async runtime
