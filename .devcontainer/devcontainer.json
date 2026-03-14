@@ -1,24 +1,46 @@
 {
-  "name": "Claude Code Sandbox",
+  "name": "${localWorkspaceFolderBasename} - Sandbox",
   "build": {
     "dockerfile": "Dockerfile"
   },
   // Use features to enable language support (https://containers.dev/features):
-  //
   "features": {
     "ghcr.io/devcontainers/features/rust:1": {},
-    "ghcr.io/devcontainers/features/node:1": {},
-    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "pnpmVersion": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/uv:1": {},
     "ghcr.io/devcontainers/features/go:1": {}
   },
   "remoteUser": "vscode",
+  // Cross-platform init: runs on the HOST before the container starts.
+  // The extensionless "init-env" is resolved by the OS — Unix runs init-env
+  // directly (shebang), Windows appends .cmd via PATHEXT and runs init-env.cmd.
+  // Creates .devcontainer/.env.local (gitignored) with CLAUDE_AUTH=proxy if
+  // it doesn't exist yet. The file must exist before Docker reads it via
+  // --env-file in runArgs below.
+  "initializeCommand": [
+    ".devcontainer/init-env"
+  ],
+  "runArgs": [
+    "--env-file",
+    ".devcontainer/.env.local"
+  ],
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=claude-code-config-${localWorkspaceFolderBasename},target=/home/vscode/.claude,type=volume",
-    "source=${localEnv:HOME}/.claude/settings.json,target=/home/vscode/.claude-host-settings.json,type=bind,readonly"
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/vscode/.claude-host,type=bind,readonly",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude.json,target=/home/vscode/.claude-host.json,type=bind,readonly",
+    "source=pnpm-store-${devcontainerId},target=/home/vscode/.local/share/pnpm/store,type=volume",
+    "source=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse,target=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse,type=bind",
+    "source=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native,target=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native,type=bind"
   ],
+  "containerEnv": {
+    "PULSE_SERVER": "unix:${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native"
+  },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "bash /workspace/.devcontainer/init-claude-settings.sh",
+  "postCreateCommand": "bash /workspace/.devcontainer/post-create.sh",
+  "postStartCommand": "bash /workspace/.devcontainer/post-start.sh",
   "waitFor": "postStartCommand"
 }

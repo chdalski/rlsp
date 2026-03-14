@@ -1,8 +1,5 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-ARG TZ="UTC"
-ENV TZ="$TZ"
-
 # Install development tools
 # hadolint ignore=DL3009
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,10 +10,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     gnupg2 \
     dnsutils \
+    jq \
     nano \
     vim \
     git \
-    fish
+    fish \
+    sox \
+    pulseaudio-utils \
+    alsa-utils \
+    libasound2-plugins
+
+# Route ALSA through PulseAudio so applications that use ALSA directly
+# don't fail when /dev/snd is unavailable (e.g., VM or remote host).
+RUN printf 'pcm.default pulse\nctl.default pulse\n' > /etc/asound.conf
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
@@ -45,5 +51,3 @@ RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes && \
     echo 'alias l="ls -lisa"' >> /home/vscode/.config/fish/config.fish && \
     echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/vscode/.config/fish/config.fish && \
     echo 'starship init fish | source' >> /home/vscode/.config/fish/config.fish
-
-COPY .gitconfig /home/vscode/.gitconfig
