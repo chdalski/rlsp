@@ -47,7 +47,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Task 3: Refactor `references.rs` (4079e81)
 - [x] Task 4: Refactor `code_actions.rs` (e3adb01)
 - [x] Task 5: Refactor `folding.rs` (20d79f5)
-- [ ] Task 6: Refactor `symbols.rs`
+- [x] Task 6: Refactor `symbols.rs` (a606192)
 - [ ] Task 7: Refactor `hover.rs`
 - [ ] Task 8: Refactor `validators.rs`
 - [ ] Task 9: Refactor `schema_validation.rs`
