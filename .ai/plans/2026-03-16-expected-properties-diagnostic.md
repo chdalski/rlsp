@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-16)
 **Created:** 2026-03-16
 
 ## Goal
@@ -26,7 +26,7 @@ rather than having to look up the schema themselves.
 ## Steps
 
 - [x] Clarify message format with user (all required properties)
-- [ ] Implement message enhancement and tests
+- [x] Implement message enhancement and tests (5111f31)
 
 ## Tasks
 
@@ -43,11 +43,11 @@ Files:
   (line ~159-170) and tests
 
 Acceptance criteria:
-- [ ] Diagnostic message includes "Expected properties: a, b, c"
-- [ ] Long required lists are truncated (reuse MAX_ENUM_DISPLAY)
-- [ ] Existing tests pass with updated assertions
-- [ ] New test verifies expected properties in message
-- [ ] `cargo clippy` and `cargo test` pass
+- [x] Diagnostic message includes "Expected properties: a, b, c"
+- [x] Long required lists are truncated (reuse MAX_ENUM_DISPLAY)
+- [x] Existing tests pass with updated assertions
+- [x] New test verifies expected properties in message
+- [x] `cargo clippy` and `cargo test` pass
 
 ## Decisions
 
