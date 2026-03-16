@@ -51,7 +51,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Task 7: Refactor `hover.rs` (822e095)
 - [x] Task 8: Refactor `validators.rs` (d52d991)
 - [x] Task 9: Refactor `schema_validation.rs` (adf9638)
-- [ ] Task 10: Refactor `on_type_formatting.rs`
+- [x] Task 10: Refactor `on_type_formatting.rs` (12eeb91)
 - [ ] Task 11: Refactor `completion.rs`
 
 ## Tasks
