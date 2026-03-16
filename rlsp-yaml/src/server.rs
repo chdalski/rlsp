@@ -27,6 +27,7 @@ use crate::schema::SchemaCache;
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub custom_tags: Vec<String>,
+    pub key_ordering: bool,
 }
 
 // Lock ordering (must be acquired in this order to prevent deadlock):
@@ -63,6 +64,13 @@ impl Backend {
             .unwrap_or_default()
     }
 
+    pub(crate) fn get_key_ordering(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_some_and(|s| s.key_ordering)
+    }
+
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
         let parsed = Url::parse(uri).ok()?;
         let store = self.document_store.lock().ok()?;
@@ -82,13 +90,18 @@ impl Backend {
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validators::validate_unused_anchors(text));
         diagnostics.extend(crate::validators::validate_flow_style(text));
-        diagnostics.extend(crate::validators::validate_key_ordering(
-            text,
-            &result.documents,
-        ));
 
         // Custom tag validation: merge workspace settings tags with per-document modeline tags.
-        // get_custom_tags() acquires and releases the settings lock before any other lock below.
+        // get_custom_tags() and get_key_ordering() acquire and release the settings lock before
+        // any other lock below.
+        let key_ordering = self.get_key_ordering();
+        if key_ordering {
+            diagnostics.extend(crate::validators::validate_key_ordering(
+                text,
+                &result.documents,
+            ));
+        }
+
         let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
         allowed_tags.extend(crate::schema::extract_custom_tags(text));
         diagnostics.extend(crate::validators::validate_custom_tags(
@@ -741,6 +754,20 @@ mod tests {
         let json = serde_json::json!({"customTags": []});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert!(settings.custom_tags.is_empty());
+    }
+
+    #[test]
+    fn settings_deserializes_key_ordering_true() {
+        let json = serde_json::json!({"keyOrdering": true});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.key_ordering);
+    }
+
+    #[test]
+    fn settings_defaults_key_ordering_to_false_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(!settings.key_ordering);
     }
 
     // ---- Custom tags wiring ----
