@@ -149,22 +149,27 @@ fn validate_mapping(
 
     // Required properties
     if let Some(required) = &schema.required {
-        for req_key in required {
-            let key_yaml = YamlOwned::Value(ScalarOwned::String(req_key.clone()));
-            if !map.contains_key(&key_yaml) {
-                let range = mapping_range(path, lines);
-                diagnostics.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::ERROR,
-                    "schemaRequired",
-                    format!(
-                        "Missing required property '{}' at {}",
-                        req_key,
-                        format_path(path)
-                    ),
-                ));
-            }
-        }
+        diagnostics.extend(
+            required
+                .iter()
+                .filter(|req_key| {
+                    let key_yaml = YamlOwned::Value(ScalarOwned::String((*req_key).clone()));
+                    !map.contains_key(&key_yaml)
+                })
+                .map(|req_key| {
+                    let range = mapping_range(path, lines);
+                    make_diagnostic(
+                        range,
+                        DiagnosticSeverity::ERROR,
+                        "schemaRequired",
+                        format!(
+                            "Missing required property '{}' at {}",
+                            req_key,
+                            format_path(path)
+                        ),
+                    )
+                }),
+        );
     }
 
     // Validate known properties and check for additional properties
@@ -425,26 +430,31 @@ fn find_key_range(key: &str, lines: &[&str]) -> Range {
     // Strip array-index brackets if present (e.g. "[0]")
     let key = key.trim_start_matches('[').trim_end_matches(']');
 
-    for (line_idx, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        // Match "key:" or "- key:" patterns
-        let candidate = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-        if candidate.starts_with(key)
-            && candidate
-                .get(key.len()..)
-                .is_some_and(|rest| rest.starts_with(':') || rest.starts_with(' '))
-        {
-            let col = line.len() - line.trim_start().len();
-            let col = u32::try_from(col).unwrap_or(0);
-            let end_col = col + u32::try_from(key.len()).unwrap_or(0);
-            let line_u32 = u32::try_from(line_idx).unwrap_or(0);
-            return Range::new(
-                Position::new(line_u32, col),
-                Position::new(line_u32, end_col),
-            );
-        }
-    }
-    Range::new(Position::new(0, 0), Position::new(0, 0))
+    lines
+        .iter()
+        .enumerate()
+        .find_map(|(line_idx, line)| {
+            let trimmed = line.trim_start();
+            // Match "key:" or "- key:" patterns
+            let candidate = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+            if candidate.starts_with(key)
+                && candidate
+                    .get(key.len()..)
+                    .is_some_and(|rest| rest.starts_with(':') || rest.starts_with(' '))
+            {
+                let col = line.len() - line.trim_start().len();
+                let col = u32::try_from(col).unwrap_or(0);
+                let end_col = col + u32::try_from(key.len()).unwrap_or(0);
+                let line_u32 = u32::try_from(line_idx).unwrap_or(0);
+                Some(Range::new(
+                    Position::new(line_u32, col),
+                    Position::new(line_u32, end_col),
+                ))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
