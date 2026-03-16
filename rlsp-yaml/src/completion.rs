@@ -823,7 +823,11 @@ fn collect_sibling_keys(lines: &[&str], current_line: usize, current_indent: usi
 }
 
 /// Suggest values for a key by finding the same key name elsewhere in the same document.
-fn suggest_values_for_key(lines: &[&str], cursor_line: usize, key_name: &str) -> Vec<CompletionItem> {
+fn suggest_values_for_key(
+    lines: &[&str],
+    cursor_line: usize,
+    key_name: &str,
+) -> Vec<CompletionItem> {
     let mut seen = HashSet::new();
     let (doc_start, doc_end) = document_range(lines, cursor_line);
     lines
@@ -862,12 +866,23 @@ fn is_document_separator(trimmed: &str) -> bool {
 fn document_range(lines: &[&str], cursor_line: usize) -> (usize, usize) {
     let start = (0..cursor_line)
         .rev()
-        .find(|&i| lines.get(i).is_some_and(|l| is_document_separator(l.trim())))
+        .find(|&i| {
+            lines
+                .get(i)
+                .is_some_and(|l| is_document_separator(l.trim()))
+        })
         .map_or(0, |sep| sep + 1);
 
     let end = (cursor_line + 1..lines.len())
-        .find(|&i| lines.get(i).is_some_and(|l| is_document_separator(l.trim())))
-        .map_or_else(|| lines.len().saturating_sub(1), |sep| sep.saturating_sub(1));
+        .find(|&i| {
+            lines
+                .get(i)
+                .is_some_and(|l| is_document_separator(l.trim()))
+        })
+        .map_or_else(
+            || lines.len().saturating_sub(1),
+            |sep| sep.saturating_sub(1),
+        );
 
     (start, end)
 }

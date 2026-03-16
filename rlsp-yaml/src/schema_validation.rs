@@ -149,6 +149,16 @@ fn validate_mapping(
 
     // Required properties
     if let Some(required) = &schema.required {
+        let listed: Vec<&str> = required
+            .iter()
+            .take(MAX_ENUM_DISPLAY)
+            .map(String::as_str)
+            .collect();
+        let props_list = if required.len() > MAX_ENUM_DISPLAY {
+            format!("{}, ... ({} total)", listed.join(", "), required.len())
+        } else {
+            listed.join(", ")
+        };
         diagnostics.extend(
             required
                 .iter()
@@ -163,9 +173,10 @@ fn validate_mapping(
                         DiagnosticSeverity::ERROR,
                         "schemaRequired",
                         format!(
-                            "Missing required property '{}' at {}",
+                            "Missing required property '{}' at {}. Expected properties: {}.",
                             req_key,
-                            format_path(path)
+                            format_path(path),
+                            props_list
                         ),
                     )
                 }),
@@ -1650,5 +1661,67 @@ mod tests {
         // `schema_cache.lock()` calls use `.ok()?` or `.ok()` (not
         // `.unwrap()`). A poisoned lock returns `None`/`Err`, and the calling
         // code skips schema validation rather than panicking.
+    }
+
+    // Test 66
+    #[test]
+    fn should_include_expected_properties_in_required_diagnostic_message() {
+        let schema = JsonSchema {
+            required: Some(vec![
+                "name".to_string(),
+                "age".to_string(),
+                "email".to_string(),
+            ]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema);
+        assert!(!result.is_empty());
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("Expected properties:"),
+            "message should contain 'Expected properties:', got: {msg}"
+        );
+        assert!(
+            msg.contains("name"),
+            "message should contain 'name', got: {msg}"
+        );
+        assert!(
+            msg.contains("age"),
+            "message should contain 'age', got: {msg}"
+        );
+        assert!(
+            msg.contains("email"),
+            "message should contain 'email', got: {msg}"
+        );
+    }
+
+    // Test 67
+    #[test]
+    fn should_truncate_expected_properties_list_when_more_than_max() {
+        let schema = JsonSchema {
+            required: Some(vec![
+                "alpha".to_string(),
+                "beta".to_string(),
+                "gamma".to_string(),
+                "delta".to_string(),
+                "epsilon".to_string(),
+                "zeta".to_string(),
+                "eta".to_string(),
+            ]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema);
+        assert!(!result.is_empty());
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("(7 total)"),
+            "message should contain total count, got: {msg}"
+        );
+        assert!(
+            msg.contains("..."),
+            "message should contain ellipsis for truncation, got: {msg}"
+        );
     }
 }
