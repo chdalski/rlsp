@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Position,
+    CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, MarkupContent,
+    MarkupKind, Position,
 };
 
 use crate::schema::{JsonSchema, SchemaType};
@@ -336,11 +337,21 @@ fn collect_schema_properties(
                     value: truncate_description(d),
                 })
             });
+            let (tags, sort_text) = if prop_schema.deprecated == Some(true) {
+                (
+                    Some(vec![CompletionItemTag::DEPRECATED]),
+                    Some(format!("~{key}")),
+                )
+            } else {
+                (None, None)
+            };
             items.push(CompletionItem {
                 label: key.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail,
                 documentation,
+                tags,
+                sort_text,
                 ..CompletionItem::default()
             });
         }
@@ -2097,6 +2108,110 @@ mod tests {
         assert!(
             !labels.contains(&"alpha"),
             "should not suggest 'alpha' from document 1 through empty middle document, got: {labels:?}"
+        );
+    }
+
+    // Test 59 — deprecated property gets DEPRECATED tag and tilde sort_text
+    #[test]
+    fn should_tag_deprecated_property_with_deprecated_tag_and_tilde_sort_text() {
+        let schema = object_schema(vec![(
+            "old_field",
+            JsonSchema {
+                deprecated: Some(true),
+                ..JsonSchema::default()
+            },
+        )]);
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let item = result
+            .iter()
+            .find(|i| i.label == "old_field")
+            .expect("should suggest old_field");
+        assert_eq!(
+            item.tags,
+            Some(vec![CompletionItemTag::DEPRECATED]),
+            "deprecated property should have DEPRECATED tag"
+        );
+        assert!(
+            item.sort_text
+                .as_deref()
+                .map(|s| s.starts_with('~'))
+                .unwrap_or(false),
+            "deprecated property sort_text should start with '~', got: {:?}",
+            item.sort_text
+        );
+    }
+
+    // Test 60 — non-deprecated property has no tags and no sort_text
+    #[test]
+    fn should_not_tag_non_deprecated_property() {
+        let schema = object_schema(vec![(
+            "current_field",
+            JsonSchema {
+                deprecated: None,
+                ..JsonSchema::default()
+            },
+        )]);
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let item = result
+            .iter()
+            .find(|i| i.label == "current_field")
+            .expect("should suggest current_field");
+        assert_eq!(
+            item.tags, None,
+            "non-deprecated property should have no tags"
+        );
+        assert_eq!(
+            item.sort_text, None,
+            "non-deprecated property should have no sort_text"
+        );
+    }
+
+    // Test 61 — only deprecated property is tagged when mixed schema
+    #[test]
+    fn should_only_tag_deprecated_property_in_mixed_schema() {
+        let schema = object_schema(vec![
+            (
+                "new_field",
+                JsonSchema {
+                    deprecated: None,
+                    ..JsonSchema::default()
+                },
+            ),
+            (
+                "old_field",
+                JsonSchema {
+                    deprecated: Some(true),
+                    ..JsonSchema::default()
+                },
+            ),
+        ]);
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let new_item = result
+            .iter()
+            .find(|i| i.label == "new_field")
+            .expect("should suggest new_field");
+        let old_item = result
+            .iter()
+            .find(|i| i.label == "old_field")
+            .expect("should suggest old_field");
+
+        assert_eq!(
+            new_item.tags, None,
+            "non-deprecated 'new_field' should have no tags"
+        );
+        assert_eq!(
+            old_item.tags,
+            Some(vec![CompletionItemTag::DEPRECATED]),
+            "deprecated 'old_field' should have DEPRECATED tag"
         );
     }
 

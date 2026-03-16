@@ -89,6 +89,7 @@ pub struct JsonSchema {
     pub max_length: Option<u64>,
     /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
     pub definitions: Option<HashMap<String, Self>>,
+    pub deprecated: Option<bool>,
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
@@ -376,6 +377,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     schema.title = string_field(obj, "title");
     schema.description = string_field(obj, "description");
     schema.pattern = string_field(obj, "pattern");
+    schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
 
     // numeric constraints
     schema.minimum = obj.get("minimum").and_then(Value::as_f64);
@@ -1090,11 +1092,19 @@ mod tests {
         assert!(defs.contains_key("addr"));
     }
 
+    // Test 38 — deprecated: true parses to Some(true)
+    #[test]
+    fn should_parse_deprecated_true() {
+        let v = json!({"type": "string", "deprecated": true});
+        let s = parse_schema(&v).expect("should parse");
+        assert_eq!(s.deprecated, Some(true));
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // $ref resolution
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 38
+    // Test 39
     #[test]
     fn should_resolve_simple_local_ref() {
         let v = json!({
@@ -1105,7 +1115,7 @@ mod tests {
         assert_eq!(schema_type_str(&s), Some("string"));
     }
 
-    // Test 39
+    // Test 40
     #[test]
     fn should_return_none_for_missing_ref_target() {
         let v = json!({"$ref": "#/definitions/Missing"});
