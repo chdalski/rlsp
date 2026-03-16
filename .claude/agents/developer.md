@@ -38,7 +38,14 @@ When you receive a task:
 1. Read the task description and understand the scope.
 2. Read all referenced source files to understand existing
    patterns and architecture.
-3. Assess risk and uncertainty using the risk-assessment
+3. **Take a baseline snapshot** — run
+   `git diff --name-only` and
+   `git ls-files --others --exclude-standard` to record
+   which files are already modified or untracked before you
+   start. This baseline lets you identify exactly which
+   files your work changed, excluding pre-existing
+   modifications that belong to other work.
+4. Assess risk and uncertainty using the risk-assessment
    rule (loaded automatically) to decide whether to consult
    advisors before implementing.
 
@@ -72,6 +79,13 @@ If the risk-assessment rule indicates consultation:
 - Work in small, meaningful increments. Each increment
   should compile and pass the tests written so far.
 - Keep changes focused. Only modify what is necessary.
+- If your task includes integration tests, spike one
+  integration test first to validate the test harness
+  (server setup, database fixtures, framework test
+  utilities) before writing the rest — the spike catches
+  framework-level issues early. Fixing a broken harness
+  after writing 20 tests wastes significant effort. Unit
+  tests do not need a spike.
 - Do not skip, weaken, or remove tests during
   implementation. If a test seems wrong, discuss with
   the test advisor rather than changing it — the test
@@ -104,14 +118,26 @@ If the risk-assessment rule indicates consultation:
    - If an advisor flags issues, fix them and re-request
      the sign-off.
 
-3. **Send to the reviewer.** Message the reviewer with:
+3. **Identify your changes.** Run `git diff --name-only`
+   and `git ls-files --others --exclude-standard` again.
+   Every file in the current output that was not in the
+   baseline snapshot is a file you changed. This includes
+   incidental changes from formatters and linters —
+   `cargo fmt`, `prettier`, `gofmt`, etc. reformat beyond
+   the files you edited.
+
+4. **Send to the reviewer.** Message the reviewer with:
    - Which task slice this covers
-   - Which files were changed
+   - **Every file you changed** (the delta from step 3
+     above) — not just the files listed in the task
+     description. Omitting incidental formatter changes
+     causes the reviewer to commit a subset, leaving a
+     dirty tree after a "clean" commit.
    - What tests were added or modified
    - Advisor sign-off status (which advisors signed off,
      or "no advisors consulted" if skipped)
 
-4. **Handle review outcome:**
+5. **Handle review outcome:**
    - **Approved:** The reviewer commits and reports the
      SHA. Message the requester that the task is complete,
      include the SHA. Wait for the next assignment.

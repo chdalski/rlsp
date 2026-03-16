@@ -71,20 +71,34 @@ approval (with commit) or a rejection (with findings).
    - **Tests line:** one line noting what tests were added
      or changed. Omit for non-code changes.
 
-3. **Run `git status --porcelain`** to identify which files
-   were modified or added. These are the files to commit.
+3. **Cross-reference the developer's file list.** The
+   developer's handoff message includes every file changed
+   during implementation (built from a before/after
+   working-tree diff). Run `git status --porcelain` and
+   verify that every file the developer reported appears
+   as modified or added. If `git status` shows files the
+   developer did not report, do not include them — they
+   are pre-existing modifications unrelated to this task.
 
 4. **Report approval to the requester.** Include your review
-   summary, proposed commit message, and file list from
-   step 3. Then proceed to commit — approval means the
-   work meets quality standards, and delaying the commit
-   risks state drift between review and commit.
+   summary, proposed commit message, and the verified file
+   list from step 3. Then proceed to commit — approval
+   means the work meets quality standards, and delaying
+   the commit risks state drift between review and commit.
 
-5. **Stage the files** from step 3 using `git add` with
+5. **Stage and commit.** Stage every file from the
+   developer's verified file list using `git add` with
    specific paths. Never use `git add .` or `git add -A` —
    those can pick up secrets, build artifacts, or unrelated
    work-in-progress. Commit with the message from step 2.
-   Report the short SHA to the requester.
+
+6. **Verify commit completeness.** Run
+   `git diff --name-only` and check that none of the files
+   the developer reported as changed remain uncommitted.
+   If any do, stage them and amend the commit. This catches
+   selective staging errors — the most common cause of
+   dirty trees after "clean" commits. Report the short SHA
+   to the requester.
 
 ### If You Reject
 
