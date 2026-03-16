@@ -49,7 +49,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Task 5: Refactor `folding.rs` (20d79f5)
 - [x] Task 6: Refactor `symbols.rs` (a606192)
 - [x] Task 7: Refactor `hover.rs` (822e095)
-- [ ] Task 8: Refactor `validators.rs`
+- [x] Task 8: Refactor `validators.rs` (d52d991)
 - [ ] Task 9: Refactor `schema_validation.rs`
 - [ ] Task 10: Refactor `on_type_formatting.rs`
 - [ ] Task 11: Refactor `completion.rs`
