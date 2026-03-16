@@ -571,8 +571,33 @@ fn format_schema_section(schema: &JsonSchema) -> String {
         let shown = examples.len().min(MAX_EXAMPLES);
         let _ = write!(md, "\n**Examples:**");
         examples.iter().take(shown).for_each(|ex| {
-            let truncated = truncate_to(&json_value_to_display_string(ex), MAX_EXAMPLE_LEN);
-            let _ = write!(md, "\n- {truncated}");
+            match ex {
+                serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                    // Pretty-print objects/arrays in a fenced code block.
+                    // Fall back to compact inline if pretty form exceeds the limit
+                    // (a truncated code block renders incorrectly).
+                    if let Ok(pretty) = serde_json::to_string_pretty(ex) {
+                        if pretty.chars().count() <= MAX_EXAMPLE_LEN {
+                            let _ = write!(md, "\n```json\n{pretty}\n```");
+                        } else {
+                            let compact = json_value_to_display_string(ex);
+                            let truncated = truncate_to(&compact, MAX_EXAMPLE_LEN);
+                            let _ = write!(md, "\n- {truncated}");
+                        }
+                    } else {
+                        let truncated =
+                            truncate_to(&json_value_to_display_string(ex), MAX_EXAMPLE_LEN);
+                        let _ = write!(md, "\n- {truncated}");
+                    }
+                }
+                serde_json::Value::Null
+                | serde_json::Value::Bool(_)
+                | serde_json::Value::Number(_)
+                | serde_json::Value::String(_) => {
+                    let truncated = truncate_to(&json_value_to_display_string(ex), MAX_EXAMPLE_LEN);
+                    let _ = write!(md, "\n- {truncated}");
+                }
+            }
         });
         let remaining = examples.len().saturating_sub(shown);
         if remaining > 0 {
@@ -1911,5 +1936,136 @@ mod tests {
         // 4. Call hover_at() with no lock held; no std::sync::Mutex guard crosses an .await
         // This ordering prevents deadlocks with other handlers using the same locks.
         // Runtime detection would require injecting lock contention; verified by review.
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Group J — Hover examples formatting (Tests 51–55)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fn schema_with_examples(examples: Vec<JsonValue>) -> JsonSchema {
+        let mut props = HashMap::new();
+        props.insert(
+            "key".to_string(),
+            JsonSchema {
+                examples: Some(examples),
+                ..Default::default()
+            },
+        );
+        JsonSchema {
+            properties: Some(props),
+            ..Default::default()
+        }
+    }
+
+    // Test 51 — object example renders as fenced ```json code block
+    #[test]
+    fn object_example_renders_as_fenced_code_block() {
+        use serde_json::json;
+        let schema = schema_with_examples(vec![json!({"name": "Alice", "age": 30})]);
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("```json"),
+            "object example should be in a fenced json code block, got: {content}"
+        );
+        // Pretty-printed: each key on its own line
+        assert!(
+            content.contains("\"name\": \"Alice\"") || content.contains("\"age\": 30"),
+            "object example should be pretty-printed, got: {content}"
+        );
+    }
+
+    // Test 52 — array example renders as fenced ```json code block
+    #[test]
+    fn array_example_renders_as_fenced_code_block() {
+        use serde_json::json;
+        let schema = schema_with_examples(vec![json!(["a", "b", "c"])]);
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("```json"),
+            "array example should be in a fenced json code block, got: {content}"
+        );
+    }
+
+    // Test 53 — simple value (string, number, bool) uses list-item format, no code block
+    #[test]
+    fn simple_value_examples_use_list_item_format() {
+        use serde_json::json;
+        let schema = schema_with_examples(vec![json!("hello"), json!(42), json!(true)]);
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            !content.contains("```json"),
+            "simple examples must not use code blocks, got: {content}"
+        );
+        assert!(
+            content.contains("- hello"),
+            "string example should appear as list item '- hello', got: {content}"
+        );
+        assert!(
+            content.contains("- 42"),
+            "number example should appear as list item '- 42', got: {content}"
+        );
+        assert!(
+            content.contains("- true"),
+            "bool example should appear as list item '- true', got: {content}"
+        );
+    }
+
+    // Test 54 — mixed examples: object gets code block, simple gets list item
+    #[test]
+    fn mixed_examples_dispatch_correctly_per_type() {
+        use serde_json::json;
+        let schema = schema_with_examples(vec![json!({"host": "localhost"}), json!("simple")]);
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("```json"),
+            "object example should use code block, got: {content}"
+        );
+        assert!(
+            content.contains("- simple"),
+            "string example should use list item format, got: {content}"
+        );
+    }
+
+    // Test 55 — long object exceeding MAX_EXAMPLE_LEN falls back to compact inline
+    #[test]
+    fn long_object_example_falls_back_to_compact_inline() {
+        use serde_json::json;
+        // Build an object whose pretty-printed form exceeds 100 chars
+        let big_value: String = "x".repeat(50);
+        let schema = schema_with_examples(vec![json!({
+            "field_a": big_value,
+            "field_b": "another long value that pushes past the limit"
+        })]);
+        let text = "key: v\n";
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let hover = result.expect("should return hover");
+        let content = hover_content(&hover);
+        // The pretty form exceeds 100 chars, so no code block should appear
+        assert!(
+            !content.contains("```json"),
+            "long object should fall back to compact inline (no code block), got: {content}"
+        );
     }
 }
