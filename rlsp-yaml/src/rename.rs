@@ -71,19 +71,20 @@ pub fn rename(text: &str, uri: &Url, position: Position, new_name: &str) -> Opti
     let name = &cursor_token.name;
 
     // Collect all edits for this name (anchor + all aliases)
-    let mut edits = Vec::new();
-    for token in &tokens {
-        if token.name == *name {
-            let prefix = if token.is_anchor { "&" } else { "*" };
-            edits.push(TextEdit {
+    let edits: Vec<TextEdit> = tokens
+        .iter()
+        .filter(|t| t.name == *name)
+        .map(|t| {
+            let prefix = if t.is_anchor { "&" } else { "*" };
+            TextEdit {
                 range: Range::new(
-                    Position::new(token.line, token.start_col),
-                    Position::new(token.line, token.end_col),
+                    Position::new(t.line, t.start_col),
+                    Position::new(t.line, t.end_col),
                 ),
                 new_text: format!("{prefix}{new_name}"),
-            });
-        }
-    }
+            }
+        })
+        .collect();
 
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), edits);
