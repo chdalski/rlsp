@@ -263,6 +263,184 @@ fn find_closing_char(line: &str, start: usize, open: char, close: char) -> Optio
     None
 }
 
+/// Validate custom YAML tags against an allowed set.
+///
+/// Returns warning diagnostics for any `!tag` found in the YAML documents that is not
+/// listed in `allowed_tags`. When `allowed_tags` is empty, validation is skipped and
+/// an empty vec is returned — no tags configured means no warnings.
+#[must_use]
+pub fn validate_custom_tags<S: std::hash::BuildHasher>(
+    text: &str,
+    docs: &[YamlOwned],
+    allowed_tags: &HashSet<String, S>,
+) -> Vec<Diagnostic> {
+    if allowed_tags.is_empty() {
+        return Vec::new();
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let mut diagnostics = Vec::new();
+    // Track how many times each tag string has been seen so far (to handle duplicates).
+    let mut seen_counts: HashMap<String, usize> = HashMap::new();
+
+    for doc in docs {
+        collect_tag_diagnostics(
+            doc,
+            &lines,
+            allowed_tags,
+            &mut seen_counts,
+            &mut diagnostics,
+            0,
+        );
+    }
+
+    diagnostics
+}
+
+/// Recursively walk a YAML node and emit diagnostics for unknown tags.
+fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
+    node: &YamlOwned,
+    lines: &[&str],
+    allowed_tags: &HashSet<String, S>,
+    seen_counts: &mut HashMap<String, usize>,
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) {
+    const MAX_DEPTH: usize = 100;
+    if depth > MAX_DEPTH {
+        return;
+    }
+
+    match node {
+        YamlOwned::Tagged(tag, inner) => {
+            let tag_str = tag.to_string();
+            if !allowed_tags.contains(&tag_str) {
+                let occurrence = *seen_counts.get(&tag_str).unwrap_or(&0);
+                seen_counts.insert(tag_str.clone(), occurrence + 1);
+
+                if let Some(range) = find_tag_occurrence(lines, &tag_str, occurrence) {
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unknownTag".to_string())),
+                        message: format!("Unknown tag: {tag_str}"),
+                        source: Some("rlsp-yaml".to_string()),
+                        ..Diagnostic::default()
+                    });
+                }
+            }
+            collect_tag_diagnostics(
+                inner,
+                lines,
+                allowed_tags,
+                seen_counts,
+                diagnostics,
+                depth + 1,
+            );
+        }
+        YamlOwned::Mapping(map) => {
+            for (key, value) in map {
+                collect_tag_diagnostics(
+                    key,
+                    lines,
+                    allowed_tags,
+                    seen_counts,
+                    diagnostics,
+                    depth + 1,
+                );
+                collect_tag_diagnostics(
+                    value,
+                    lines,
+                    allowed_tags,
+                    seen_counts,
+                    diagnostics,
+                    depth + 1,
+                );
+            }
+        }
+        YamlOwned::Sequence(arr) => {
+            for item in arr {
+                collect_tag_diagnostics(
+                    item,
+                    lines,
+                    allowed_tags,
+                    seen_counts,
+                    diagnostics,
+                    depth + 1,
+                );
+            }
+        }
+        YamlOwned::Value(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Representation(_, _, _) => {}
+    }
+}
+
+/// Find the byte range of the Nth occurrence (0-indexed) of `tag_str` in the text lines.
+/// Returns `None` if the occurrence index is out of range.
+///
+/// Skips occurrences that appear inside single- or double-quoted strings so that
+/// `note: "use !include for files"` does not shadow `value: !include actual.yaml`.
+fn find_tag_occurrence(lines: &[&str], tag_str: &str, occurrence: usize) -> Option<Range> {
+    let mut count = 0usize;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        let mut search_start = 0;
+        while let Some(pos) = line[search_start..].find(tag_str) {
+            let abs_pos = search_start + pos;
+
+            // Check whether this position is inside a quoted string by scanning
+            // from the start of the line up to abs_pos.
+            let in_quotes = is_inside_quotes(line, abs_pos);
+
+            // Make sure it's a real tag boundary: preceded by nothing or whitespace/colon/dash,
+            // and not immediately followed by another tag-name character.
+            let before_ok = abs_pos == 0
+                || line
+                    .as_bytes()
+                    .get(abs_pos - 1)
+                    .is_some_and(|&b| b == b' ' || b == b'\t' || b == b':' || b == b'-');
+            let after_end = abs_pos + tag_str.len();
+            let after_ok = line
+                .as_bytes()
+                .get(after_end)
+                .is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'-' && b != b'_' && b != b'.');
+
+            if !in_quotes && before_ok && after_ok {
+                if count == occurrence {
+                    #[allow(clippy::cast_possible_truncation)]
+                    return Some(Range::new(
+                        Position::new(line_idx as u32, abs_pos as u32),
+                        Position::new(line_idx as u32, after_end as u32),
+                    ));
+                }
+                count += 1;
+            }
+            search_start = abs_pos + 1;
+        }
+    }
+    None
+}
+
+/// Return `true` if byte position `pos` in `line` falls inside a single- or double-quoted
+/// string, using the same quote-tracking logic as `validate_flow_style`.
+fn is_inside_quotes(line: &str, pos: usize) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    for (i, ch) in line.char_indices() {
+        if i >= pos {
+            break;
+        }
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            _ => {}
+        }
+    }
+    in_single || in_double
+}
+
 /// Validate map key ordering in YAML documents.
 ///
 /// Returns warning diagnostics for map keys that are not in alphabetical order.
@@ -913,5 +1091,108 @@ mod tests {
 
         // "Apple" < "apple" lexicographically (uppercase comes before lowercase in ASCII)
         assert!(result.is_empty());
+    }
+
+    // ---- Custom Tags Validator: helpers ----
+
+    fn parse_docs(text: &str) -> Vec<YamlOwned> {
+        use saphyr::LoadableYamlNode;
+        YamlOwned::load_from_str(text).unwrap()
+    }
+
+    fn allowed(tags: &[&str]) -> HashSet<String> {
+        tags.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    // ---- Custom Tags Validator: Happy Paths ----
+
+    #[test]
+    fn unknown_tag_produces_warning_with_unknown_tag_code() {
+        let text = "value: !include foo.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "unknownTag")
+        );
+        assert!(result[0].message.contains("!include"));
+        assert_eq!(result[0].source.as_deref(), Some("rlsp-yaml"));
+    }
+
+    #[test]
+    fn allowed_tag_produces_no_diagnostic() {
+        let text = "value: !include foo.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn empty_allowed_tags_returns_no_diagnostics() {
+        // Even though !include is present, empty set skips validation
+        let text = "value: !include foo.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&[]));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn multiple_tags_only_unknown_ones_flagged() {
+        let text = "a: !include foo.yaml\nb: !ref bar.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("!ref"));
+    }
+
+    #[test]
+    fn no_tags_in_document_returns_empty_vec() {
+        let text = "key: value\nother: 123\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
+        assert!(result.is_empty());
+    }
+
+    // ---- Custom Tags Validator: Multi-document ----
+
+    #[test]
+    fn tags_in_multi_document_yaml_are_all_checked() {
+        let text = "a: !include foo.yaml\n---\nb: !ref bar.yaml\n";
+        let docs = parse_docs(text);
+
+        // Neither allowed
+        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        assert_eq!(result.len(), 2);
+
+        // Both allowed
+        let result = validate_custom_tags(text, &docs, &allowed(&["!include", "!ref"]));
+        assert!(result.is_empty());
+    }
+
+    // ---- Custom Tags Validator: Nested tags ----
+
+    #[test]
+    fn nested_tagged_value_is_found() {
+        // Tag on a value inside a mapping
+        let text = "outer:\n  inner: !include nested.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("!include"));
+    }
+
+    // ---- Custom Tags Validator: Quote-aware position scanning ----
+
+    #[test]
+    fn tag_in_quoted_string_does_not_shadow_real_tag_range() {
+        // The AST sees one Tagged node (!include on line 1).
+        // Raw text has "!include" on line 0 inside quotes — must be skipped.
+        let text = "note: \"use !include for files\"\nvalue: !include actual.yaml\n";
+        let docs = parse_docs(text);
+        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        assert_eq!(result.len(), 1);
+        // Diagnostic must point to line 1, not line 0 (the quoted mention).
+        assert_eq!(result[0].range.start.line, 1);
     }
 }
