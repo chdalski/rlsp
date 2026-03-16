@@ -32,55 +32,48 @@ static URL_REGEX: std::sync::LazyLock<Regex> =
 /// ```
 #[must_use]
 pub fn find_document_links(text: &str, base_uri: Option<&Url>) -> Vec<DocumentLink> {
-    let mut links = Vec::new();
-
-    for (line_idx, line) in text.lines().enumerate() {
-        collect_url_links(line, line_idx, &mut links);
-        collect_include_links(line, line_idx, base_uri, &mut links);
-    }
-
-    links
+    text.lines()
+        .enumerate()
+        .flat_map(|(line_idx, line)| {
+            let mut links = url_links(line, line_idx);
+            links.extend(include_links(line, line_idx, base_uri));
+            links
+        })
+        .collect()
 }
 
-/// Collect URL links (http/https/file scheme) from a single line.
-fn collect_url_links(line: &str, line_idx: usize, links: &mut Vec<DocumentLink>) {
-    for mat in URL_REGEX.find_iter(line) {
-        let mut matched_text = mat.as_str();
+/// Return URL links (http/https/file scheme) found on a single line.
+fn url_links(line: &str, line_idx: usize) -> Vec<DocumentLink> {
+    URL_REGEX
+        .find_iter(line)
+        .filter_map(|mat| {
+            let matched_text = trim_trailing_punctuation(mat.as_str());
+            let byte_end = mat.start() + matched_text.len();
 
-        // Trim trailing punctuation that's not part of the URL
-        matched_text = trim_trailing_punctuation(matched_text);
-        let byte_end = mat.start() + matched_text.len();
+            if matched_text.len() > MAX_URL_LENGTH {
+                return None;
+            }
 
-        // Skip URLs exceeding maximum length
-        if matched_text.len() > MAX_URL_LENGTH {
-            continue;
-        }
-
-        // Validate URL and create DocumentLink
-        if let Ok(url) = Url::parse(matched_text) {
+            let url = Url::parse(matched_text).ok()?;
             let range = calculate_range(line_idx, mat.start(), byte_end, line);
-            links.push(DocumentLink {
+            Some(DocumentLink {
                 range,
                 target: Some(url),
                 tooltip: None,
                 data: None,
-            });
-        }
-    }
+            })
+        })
+        .collect()
 }
 
-/// Collect `!include <path>` links from a single line.
+/// Return `!include <path>` links found on a single line.
 ///
 /// Skips occurrences inside quoted strings. Resolves relative paths against
 /// `base_uri` when provided; skips them when `base_uri` is `None`.
-fn collect_include_links(
-    line: &str,
-    line_idx: usize,
-    base_uri: Option<&Url>,
-    links: &mut Vec<DocumentLink>,
-) {
+fn include_links(line: &str, line_idx: usize, base_uri: Option<&Url>) -> Vec<DocumentLink> {
     const TAG: &str = "!include ";
 
+    let mut links = Vec::new();
     let mut search_from = 0;
     while let Some(rel_pos) = line[search_from..].find(TAG) {
         let tag_start = search_from + rel_pos;
@@ -113,6 +106,7 @@ fn collect_include_links(
             data: None,
         });
     }
+    links
 }
 
 /// Extract the path token from the rest of a line after `!include `.
