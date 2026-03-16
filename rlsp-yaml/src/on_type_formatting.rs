@@ -44,14 +44,14 @@ pub fn format_on_type(text: &str, position: Position, ch: &str, tab_size: u32) -
 ///
 /// Falls back to the empty string if all lines above are empty.
 fn find_prev_non_empty_line<'a>(lines: &[&'a str], idx: usize) -> &'a str {
-    for i in (0..=idx).rev() {
-        if let Some(line) = lines.get(i)
-            && !line.trim().is_empty()
-        {
-            return line;
-        }
-    }
-    ""
+    lines
+        .get(..=idx)
+        .unwrap_or(lines)
+        .iter()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .copied()
+        .unwrap_or("")
 }
 
 /// Count leading spaces on a line.
