@@ -44,7 +44,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Write findings document
 - [x] Task 1: Refactor `document_links.rs` (7f34533)
 - [x] Task 2: Refactor `rename.rs` (2de560b)
-- [ ] Task 3: Refactor `references.rs`
+- [x] Task 3: Refactor `references.rs` (4079e81)
 - [ ] Task 4: Refactor `code_actions.rs`
 - [ ] Task 5: Refactor `folding.rs`
 - [ ] Task 6: Refactor `symbols.rs`

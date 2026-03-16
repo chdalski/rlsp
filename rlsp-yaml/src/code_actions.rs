@@ -23,56 +23,37 @@ pub fn code_actions(
     uri: &tower_lsp::lsp_types::Url,
 ) -> Vec<CodeAction> {
     let lines: Vec<&str> = text.lines().collect();
-    let mut actions = Vec::new();
 
     // Diagnostic-driven actions
-    for diag in diagnostics {
-        if !ranges_overlap(&diag.range, &range) {
-            continue;
-        }
-        match diagnostic_code(diag) {
-            Some("flowMap") => {
-                if let Some(action) = flow_map_to_block(&lines, diag, uri) {
-                    actions.push(action);
-                }
-            }
-            Some("flowSeq") => {
-                if let Some(action) = flow_seq_to_block(&lines, diag, uri) {
-                    actions.push(action);
-                }
-            }
-            Some("unusedAnchor") => {
-                if let Some(action) = delete_unused_anchor(&lines, diag, uri) {
-                    actions.push(action);
-                }
-            }
-            _ => {}
-        }
-    }
+    let diag_actions = diagnostics
+        .iter()
+        .filter(|diag| ranges_overlap(&diag.range, &range))
+        .filter_map(|diag| match diagnostic_code(diag) {
+            Some("flowMap") => flow_map_to_block(&lines, diag, uri),
+            Some("flowSeq") => flow_seq_to_block(&lines, diag, uri),
+            Some("unusedAnchor") => delete_unused_anchor(&lines, diag, uri),
+            _ => None,
+        });
 
     // Context-driven actions (not tied to diagnostics)
     let line_idx = range.start.line as usize;
-    if let Some(line) = lines.get(line_idx) {
-        if line.contains('\t')
-            && let Some(action) = tab_to_spaces(&lines, line_idx, uri)
-        {
-            actions.push(action);
-        }
+    let context_actions: Vec<CodeAction> = lines.get(line_idx).map_or(vec![], |line| {
+        [
+            if line.contains('\t') {
+                tab_to_spaces(&lines, line_idx, uri)
+            } else {
+                None
+            },
+            quoted_bool_to_unquoted(line, line_idx, range, uri),
+            string_to_block_scalar(line, line_idx, uri),
+            block_to_flow(&lines, line_idx, uri),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    });
 
-        if let Some(action) = quoted_bool_to_unquoted(line, line_idx, range, uri) {
-            actions.push(action);
-        }
-
-        if let Some(action) = string_to_block_scalar(line, line_idx, uri) {
-            actions.push(action);
-        }
-
-        if let Some(action) = block_to_flow(&lines, line_idx, uri) {
-            actions.push(action);
-        }
-    }
-
-    actions
+    diag_actions.chain(context_actions).collect()
 }
 
 const fn diagnostic_code(diag: &Diagnostic) -> Option<&str> {
@@ -146,14 +127,12 @@ fn flow_map_to_block(
     }
 
     let indent_str = " ".repeat(base_indent);
-    let mut block_lines = Vec::new();
-    for pair in &pairs {
-        let trimmed = pair.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        block_lines.push(format!("{indent_str}{trimmed}"));
-    }
+    let block_lines: Vec<String> = pairs
+        .iter()
+        .map(|p| p.trim())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{indent_str}{t}"))
+        .collect();
 
     if block_lines.is_empty() {
         return None;
@@ -227,14 +206,12 @@ fn flow_seq_to_block(
     }
 
     let indent_str = " ".repeat(base_indent);
-    let mut block_lines = Vec::new();
-    for item in &items {
-        let trimmed = item.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        block_lines.push(format!("{indent_str}- {trimmed}"));
-    }
+    let block_lines: Vec<String> = items
+        .iter()
+        .map(|i| i.trim())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{indent_str}- {t}"))
+        .collect();
 
     if block_lines.is_empty() {
         return None;
