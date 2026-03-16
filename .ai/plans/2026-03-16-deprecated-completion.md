@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-16)
 **Created:** 2026-03-16
 
 ## Goal
@@ -30,7 +30,7 @@ without hiding them entirely.
 ## Steps
 
 - [x] Clarify behavior with user (tag + de-prioritize)
-- [ ] Implement deprecated property handling
+- [x] Implement deprecated property handling (7830507)
 
 ## Tasks
 
@@ -61,11 +61,11 @@ Files:
 - `rlsp-yaml/src/completion.rs`
 
 Acceptance criteria:
-- [ ] `JsonSchema.deprecated` field exists and parses
-- [ ] Deprecated completions have `CompletionItemTag::DEPRECATED`
-- [ ] Deprecated completions have `sort_text` starting with `~`
-- [ ] Non-deprecated completions unchanged
-- [ ] `cargo clippy` and `cargo test` pass
+- [x] `JsonSchema.deprecated` field exists and parses
+- [x] Deprecated completions have `CompletionItemTag::DEPRECATED`
+- [x] Deprecated completions have `sort_text` starting with `~`
+- [x] Non-deprecated completions unchanged
+- [x] `cargo clippy` and `cargo test` pass
 
 ## Decisions
 
