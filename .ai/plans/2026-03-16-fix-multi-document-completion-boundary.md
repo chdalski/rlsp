@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-16)
 **Created:** 2026-03-16
 
 ## Goal
@@ -46,15 +46,15 @@ The fix is the same pattern for all four: treat `---` and
 
 ## Steps
 
-- [ ] Add a helper `is_document_separator(trimmed: &str)`
-- [ ] Fix `collect_sibling_keys` to stop at separators
-- [ ] Fix `collect_present_keys_at_indent` to scope within
+- [x] Add a helper `is_document_separator(trimmed: &str)`
+- [x] Fix `collect_sibling_keys` to stop at separators
+- [x] Fix `collect_present_keys_at_indent` to scope within
       the current document
-- [ ] Fix `suggest_values_for_key` to scope within the
+- [x] Fix `suggest_values_for_key` to scope within the
       current document
-- [ ] Fix `is_in_sequence_item` to stop at separators
-- [ ] Add tests for each function with multi-document input
-- [ ] Run `cargo test` and `cargo clippy` to verify
+- [x] Fix `is_in_sequence_item` to stop at separators
+- [x] Add tests for each function with multi-document input
+- [x] Run `cargo test` and `cargo clippy` to verify
 
 ## Tasks
 
@@ -64,24 +64,24 @@ All four functions need the same fix pattern — a document
 separator check. Since the changes are small and tightly
 coupled, they belong in a single commit.
 
-- [ ] Add `is_document_separator` helper that checks for
+- [x] Add `is_document_separator` helper that checks for
       `---` and `...` (trimmed)
-- [ ] `collect_sibling_keys`: break backward/forward loops
+- [x] `collect_sibling_keys`: break backward/forward loops
       on separator
-- [ ] `collect_present_keys_at_indent`: determine current
+- [x] `collect_present_keys_at_indent`: determine current
       document range (find nearest `---`/`...` before and
       after cursor line) and restrict iteration to that
       range
-- [ ] `suggest_values_for_key`: same document-range
+- [x] `suggest_values_for_key`: same document-range
       scoping
-- [ ] `is_in_sequence_item`: break backward loop on
+- [x] `is_in_sequence_item`: break backward loop on
       separator
-- [ ] Tests: multi-document sibling key isolation
-- [ ] Tests: multi-document present-key scoping
-- [ ] Tests: multi-document value suggestion isolation
-- [ ] Tests: multi-document sequence item detection
-- [ ] `cargo test` passes
-- [ ] `cargo clippy` passes
+- [x] Tests: multi-document sibling key isolation
+- [x] Tests: multi-document present-key scoping
+- [x] Tests: multi-document value suggestion isolation
+- [x] Tests: multi-document sequence item detection
+- [x] `cargo test` passes
+- [x] `cargo clippy` passes
 
 ## Decisions
 

@@ -253,9 +253,14 @@ When the reviewer reports approval:
 1. **Update the plan** — mark the completed task, note the
    commit SHA. This keeps the plan current for potential
    session resumption.
-2. **Check for supersession** — verify the current plan is
+2. **Commit the plan update** using conventional commit
+   format: `docs(<scope>): update plan progress`. Plan
+   progress commits are the one exception to "the reviewer
+   makes all commits" — they are administrative updates to
+   your own artifacts, not code changes that need review.
+3. **Check for supersession** — verify the current plan is
    still valid before proceeding.
-3. **Send the next task** to the developer, or proceed to
+4. **Send the next task** to the developer, or proceed to
    plan completion if all tasks are done.
 
 ## What You Do and Do Not Do
@@ -335,7 +340,8 @@ When you find existing plans in the plans directory:
 When all tasks in a plan are committed:
 
 1. Update the plan status to "Completed"
-2. Report to the user:
+2. Commit the plan update: `docs(<scope>): mark plan complete`
+3. Report to the user:
    - Summary of what was implemented
    - List of commits (SHAs and messages)
    - Any accepted risks or trade-offs noted by advisors
@@ -364,6 +370,9 @@ is unaffected — only the per-teammate message history
 ## Conventional Commits
 
 This blueprint uses conventional commit prefixes. The
-reviewer composes and makes all commits — commit type
-definitions live in the reviewer's agent file. You do not
-commit directly.
+reviewer composes and makes all code commits — commit type
+definitions live in the reviewer's agent file. The one
+exception is plan progress updates (`docs` prefix) — you
+commit these directly because plan management is your
+responsibility and these changes are administrative, not
+code that needs review.
