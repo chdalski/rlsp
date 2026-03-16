@@ -88,27 +88,30 @@ pub fn validate_unused_anchors(text: &str) -> Vec<Diagnostic> {
         }
 
         // Report unused anchors
-        for (name, anchor) in &anchors {
-            if !used_anchors.contains(name) {
-                let truncated_name = if name.len() > 100 {
-                    format!("{}...", &name[..100])
-                } else {
-                    name.clone()
-                };
-                diagnostics.push(Diagnostic {
-                    range: Range::new(
-                        Position::new(anchor.line, anchor.start_col),
-                        Position::new(anchor.line, anchor.end_col),
-                    ),
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("unusedAnchor".to_string())),
-                    message: format!("Anchor '{truncated_name}' is never used"),
-                    source: Some("rlsp-yaml".to_string()),
-                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                    ..Diagnostic::default()
-                });
-            }
-        }
+        diagnostics.extend(
+            anchors
+                .iter()
+                .filter(|(name, _)| !used_anchors.contains(*name))
+                .map(|(name, anchor)| {
+                    let truncated_name = if name.len() > 100 {
+                        format!("{}...", &name[..100])
+                    } else {
+                        name.clone()
+                    };
+                    Diagnostic {
+                        range: Range::new(
+                            Position::new(anchor.line, anchor.start_col),
+                            Position::new(anchor.line, anchor.end_col),
+                        ),
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unusedAnchor".to_string())),
+                        message: format!("Anchor '{truncated_name}' is never used"),
+                        source: Some("rlsp-yaml".to_string()),
+                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                        ..Diagnostic::default()
+                    }
+                }),
+        );
     }
 
     diagnostics
@@ -539,14 +542,15 @@ fn check_yaml_ordering(
 
 /// Find the line number where a key appears in the text.
 fn find_key_line(key: &str, lines: &[&str]) -> Option<u32> {
-    for (line_idx, line) in lines.iter().enumerate() {
+    lines.iter().enumerate().find_map(|(line_idx, line)| {
         let trimmed = line.trim_start();
         if trimmed.starts_with(key) && trimmed[key.len()..].trim_start().starts_with(':') {
             #[allow(clippy::cast_possible_truncation)]
-            return Some(line_idx as u32);
+            Some(line_idx as u32)
+        } else {
+            None
         }
-    }
-    None
+    })
 }
 
 #[cfg(test)]
