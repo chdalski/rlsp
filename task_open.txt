@@ -15,19 +15,9 @@
 - [x] Code actions (flow/block conversion, tab fix, unused anchor delete, quoted bool, block scalar)
 - [x] Schema support (loading, validation, completion, hover)
 - [x] Custom tags (unknown tag validation, modeline + workspace settings configuration)
+- [x] Code lens (schema title/URL at top of document)
 
 ## Lower Priority (can defer)
-
-### Task 3: Code Lens
-Show schema name at top of document.
-
-**What to build:**
-- New module `src/code_lens.rs`
-- Show schema title/name as code lens at document start
-- Clicking opens the schema URL
-- Server integration: add `code_lens_provider` capability
-
----
 
 ### Task 4: On-Type Formatting
 Auto-indent after `:`, `-`, `|`.
@@ -53,7 +43,7 @@ Show `!include` file paths as clickable document links.
 ---
 
 ## Current Test Coverage
-- 554 tests passing
+- 560 tests passing
 - Clippy clean with pedantic + nursery lints
 
 ## Architecture Notes
