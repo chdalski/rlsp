@@ -553,6 +553,378 @@ fn find_key_line(key: &str, lines: &[&str]) -> Option<u32> {
     })
 }
 
+/// Validate duplicate mapping keys in YAML text.
+///
+/// Returns error diagnostics for any key that appears more than once within
+/// the same mapping block. Works on raw text because saphyr silently
+/// deduplicates keys in its AST.
+///
+/// Each YAML document (separated by `---`) is scoped independently.
+#[must_use]
+pub fn validate_duplicate_keys(text: &str) -> Vec<Diagnostic> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut diagnostics = Vec::new();
+
+    // Each entry: (indent_level, HashSet<normalized_key>).
+    // The stack tracks the current nesting of block mapping scopes.
+    let mut scope_stack: Vec<(usize, HashSet<String>)> = Vec::new();
+
+    // Per-sequence-item scope stack: each entry is (seq_item_indent, seen_keys).
+    // When `- ` is seen at indent X, a new entry is pushed; subsequent keys at
+    // indent > X belong to that item's scope rather than the block scope.
+    let mut seq_item_scopes: Vec<(usize, HashSet<String>)> = Vec::new();
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+
+        // Skip blank and comment lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Document separator resets all scopes
+        if trimmed == "---" || trimmed == "..." {
+            scope_stack.clear();
+            seq_item_scopes.clear();
+            continue;
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        let line_num = line_idx as u32;
+        let indent = line.len() - trimmed.len();
+
+        // Check for flow-style duplicate keys on this line
+        check_flow_duplicates(line, line_num, &mut diagnostics);
+
+        // Detect sequence item: line starts with `- ` (or bare `-`)
+        let (effective_indent, effective_trimmed) = if trimmed.starts_with("- ") || trimmed == "-" {
+            // Pop seq_item_scopes at the same or deeper indent (sibling/child items)
+            seq_item_scopes.retain(|(si, _)| *si < indent);
+            // Push a fresh scope for this sequence item
+            seq_item_scopes.push((indent, HashSet::new()));
+
+            if trimmed == "-" {
+                // Bare `-` with no inline key; nothing to parse as a key
+                continue;
+            }
+            let after_dash = trimmed[2..].trim_start();
+            let extra_ws = trimmed.len() - 2 - after_dash.len();
+            let new_indent = indent + 2 + extra_ws;
+            (new_indent, after_dash)
+        } else {
+            (indent, trimmed)
+        };
+
+        // Extract the mapping key from this line (returns None if not a key line)
+        let Some((key_str, key_col)) = extract_block_key(effective_indent, effective_trimmed)
+        else {
+            continue;
+        };
+
+        let normalized = normalize_key(&key_str);
+
+        // Pop scope_stack entries strictly deeper than effective_indent (they are closed)
+        scope_stack.retain(|(si, _)| *si <= effective_indent);
+
+        // Determine whether this key belongs to a sequence item scope or the block scope.
+        let in_seq_item = seq_item_scopes
+            .last()
+            .is_some_and(|(si, _)| *si < effective_indent);
+
+        if in_seq_item {
+            if let Some((_, seen)) = seq_item_scopes.last_mut() {
+                check_or_insert_key(
+                    seen,
+                    normalized,
+                    &key_str,
+                    line_num,
+                    key_col,
+                    &mut diagnostics,
+                );
+            }
+        } else {
+            // Ensure a scope exists at effective_indent
+            if scope_stack
+                .last()
+                .is_none_or(|(si, _)| *si != effective_indent)
+            {
+                scope_stack.push((effective_indent, HashSet::new()));
+            }
+            if let Some((_, seen)) = scope_stack.last_mut() {
+                check_or_insert_key(
+                    seen,
+                    normalized,
+                    &key_str,
+                    line_num,
+                    key_col,
+                    &mut diagnostics,
+                );
+            }
+        }
+    }
+
+    diagnostics
+}
+
+/// Check `normalized` against `seen`; emit a duplicate diagnostic or record the key.
+fn check_or_insert_key(
+    seen: &mut HashSet<String>,
+    normalized: String,
+    key_str: &str,
+    line_num: u32,
+    key_col: u32,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    #[allow(clippy::cast_possible_truncation)]
+    let key_end_col = key_col + key_str.len() as u32;
+    if seen.contains(&normalized) {
+        push_duplicate_diagnostic(diagnostics, line_num, key_col, key_end_col, key_str);
+    } else {
+        seen.insert(normalized);
+    }
+}
+
+/// Extract the mapping key from a line that has already been adjusted for sequence items.
+///
+/// Returns `(raw_key_text, start_col)` where `start_col` is the column in the
+/// **original** line (accounting for `effective_indent`), or `None` if the line
+/// is not a mapping-key line.
+fn extract_block_key(effective_indent: usize, effective_trimmed: &str) -> Option<(String, u32)> {
+    if !effective_trimmed.contains(':') {
+        return None;
+    }
+
+    let raw_key = parse_key_from_trimmed(effective_trimmed)?;
+
+    #[allow(clippy::cast_possible_truncation)]
+    let col = effective_indent as u32;
+
+    Some((raw_key, col))
+}
+
+/// Parse and return the key name from the start of a trimmed mapping line.
+///
+/// Handles quoted keys (`"key"` or `'key'`) and plain keys (`key`).
+/// Returns the key text without surrounding quotes, or `None` if the
+/// line does not look like a mapping key.
+fn parse_key_from_trimmed(trimmed: &str) -> Option<String> {
+    if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        let quote = trimmed.chars().next().unwrap();
+        let close = trimmed[1..].find(quote)?;
+        let key_end = close + 2; // byte pos past closing quote
+        let after_key = trimmed[key_end..].trim_start();
+        if !after_key.starts_with(':') {
+            return None;
+        }
+        return Some(trimmed[1..=close].to_string());
+    }
+
+    // Plain key: everything before the first `: ` (or trailing `:`)
+    let colon_pos = find_plain_key_colon(trimmed)?;
+    let key = trimmed[..colon_pos].trim_end().to_string();
+    if key.is_empty() {
+        return None;
+    }
+    Some(key)
+}
+
+/// Return the byte offset of `:` that terminates a plain YAML key.
+/// The colon must be followed by a space, tab, or end-of-string.
+fn find_plain_key_colon(s: &str) -> Option<usize> {
+    for (i, ch) in s.char_indices() {
+        if ch == ':' {
+            let after = &s[i + 1..];
+            if after.is_empty() || after.starts_with(' ') || after.starts_with('\t') {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Normalize a key for duplicate-detection comparison (trim whitespace).
+fn normalize_key(key: &str) -> String {
+    key.trim().to_string()
+}
+
+/// Push an error diagnostic for a duplicate key.
+fn push_duplicate_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    line_num: u32,
+    start_col: u32,
+    end_col: u32,
+    key: &str,
+) {
+    let display_key = if key.len() > 100 {
+        let end = key.char_indices().nth(100).map_or(key.len(), |(i, _)| i);
+        format!("{}...", &key[..end])
+    } else {
+        key.to_string()
+    };
+    diagnostics.push(Diagnostic {
+        range: Range::new(
+            Position::new(line_num, start_col),
+            Position::new(line_num, end_col),
+        ),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String("duplicateKey".to_string())),
+        message: format!("Duplicate key: '{display_key}'"),
+        source: Some("rlsp-yaml".to_string()),
+        ..Diagnostic::default()
+    });
+}
+
+/// Check a single line for duplicate keys within flow-style mappings `{...}`.
+///
+/// Only handles single-line flow mappings.
+fn check_flow_duplicates(line: &str, line_num: u32, diagnostics: &mut Vec<Diagnostic>) {
+    for (i, ch) in line.char_indices() {
+        if ch == '{'
+            && !is_inside_quotes(line, i)
+            && let Some(close) = find_closing_char(line, i, '{', '}')
+        {
+            let block = &line[i + 1..close];
+            check_flow_block_keys(block, i + 1, line_num, diagnostics);
+        }
+    }
+}
+
+/// Check keys within a flow mapping block (the text between `{` and `}`).
+fn check_flow_block_keys(
+    block: &str,
+    block_offset: usize,
+    line_num: u32,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut chars = block.char_indices().peekable();
+
+    loop {
+        // Skip whitespace
+        while chars.peek().is_some_and(|(_, c)| c.is_ascii_whitespace()) {
+            chars.next();
+        }
+
+        let Some(&(key_start, first_ch)) = chars.peek() else {
+            break;
+        };
+
+        // Parse key (quoted or plain)
+        let (key_str, key_end) = if first_ch == '"' || first_ch == '\'' {
+            parse_flow_quoted_key(block, &mut chars)
+        } else {
+            parse_flow_plain_key(block, &mut chars)
+        };
+
+        if key_str.is_empty() {
+            // Not a key — skip to next comma
+            for (_, c) in chars.by_ref() {
+                if c == ',' {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // Skip whitespace before `:`
+        while chars.peek().is_some_and(|(_, c)| c.is_ascii_whitespace()) {
+            chars.next();
+        }
+
+        // Expect `:`
+        if chars.peek().is_none_or(|(_, c)| *c != ':') {
+            for (_, c) in chars.by_ref() {
+                if c == ',' {
+                    break;
+                }
+            }
+            continue;
+        }
+        chars.next(); // consume `:`
+
+        let normalized = normalize_key(&key_str);
+        #[allow(clippy::cast_possible_truncation)]
+        let key_col = (block_offset + key_start) as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let key_end_col = (block_offset + key_end) as u32;
+
+        if seen.contains(&normalized) {
+            push_duplicate_diagnostic(diagnostics, line_num, key_col, key_end_col, &key_str);
+        } else {
+            seen.insert(normalized);
+        }
+
+        // Skip value: advance to next `,` at depth 0 (skip nested {}, [])
+        let mut depth = 0usize;
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        for (_, c) in chars.by_ref() {
+            match c {
+                '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+                '"' if !in_single_quote => in_double_quote = !in_double_quote,
+                '{' | '[' if !in_single_quote && !in_double_quote => depth += 1,
+                '}' | ']' if !in_single_quote && !in_double_quote => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+                ',' if !in_single_quote && !in_double_quote && depth == 0 => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Parse a quoted key from a flow mapping entry.
+///
+/// Advances `chars` past the closing quote. Returns `(inner_text, end_byte_pos)`.
+fn parse_flow_quoted_key<I>(block: &str, chars: &mut std::iter::Peekable<I>) -> (String, usize)
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let Some((start, quote)) = chars.next() else {
+        return (String::new(), 0);
+    };
+    let mut end = start + 1;
+    for (i, c) in chars.by_ref() {
+        end = i + c.len_utf8();
+        if c == quote {
+            // inner = between the two quote chars
+            let inner = block[start + 1..i].to_string();
+            return (inner, end);
+        }
+    }
+    (String::new(), end)
+}
+
+/// Parse a plain (unquoted) key from a flow mapping entry.
+///
+/// Advances `chars` up to (but not consuming) the terminating `:`, `,`, or `}`.
+/// Returns `(trimmed_key, end_byte_pos)`.
+fn parse_flow_plain_key<I>(block: &str, chars: &mut std::iter::Peekable<I>) -> (String, usize)
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let Some(&(start, _)) = chars.peek() else {
+        return (String::new(), 0);
+    };
+    let mut end = start;
+    loop {
+        match chars.peek() {
+            Some(&(_, ':') | &(_, ',') | &(_, '}')) | None => break,
+            Some(&(i, c)) => {
+                end = i + c.len_utf8();
+                chars.next();
+            }
+        }
+    }
+    let key = block[start..end].trim_end().to_string();
+    (key, end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1184,6 +1556,164 @@ mod tests {
         let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("!include"));
+    }
+
+    // ---- Duplicate Key Validator: Happy Paths ----
+
+    #[test]
+    fn should_return_empty_for_document_with_no_duplicate_keys() {
+        let result = validate_duplicate_keys("a: 1\nb: 2\nc: 3\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_detect_simple_top_level_duplicate() {
+        let text = "a: 1\na: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "duplicateKey")
+        );
+        assert_eq!(result[0].source.as_deref(), Some("rlsp-yaml"));
+        assert!(result[0].message.contains("'a'"));
+        assert_eq!(result[0].range.start.line, 1, "duplicate is on line 1");
+    }
+
+    #[test]
+    fn should_detect_duplicate_in_nested_mapping() {
+        let text = "outer:\n  x: 1\n  x: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'x'"));
+        assert_eq!(result[0].range.start.line, 2);
+    }
+
+    #[test]
+    fn should_not_flag_same_key_at_different_nesting_levels() {
+        // `name` appears at top level and inside `nested:` — these are different scopes
+        let text = "name: top\nnested:\n  name: inner\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_reset_scope_on_document_boundary() {
+        // `key` appears once in each document — no duplicate
+        let text = "key: 1\n---\nkey: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_detect_duplicate_within_same_document_in_multi_doc_yaml() {
+        let text = "a: 1\na: 2\n---\nb: 3\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'a'"));
+    }
+
+    // ---- Duplicate Key Validator: Flow Mappings ----
+
+    #[test]
+    fn should_detect_flow_mapping_duplicate() {
+        let text = "cfg: {x: 1, x: 2}\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(result[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn should_return_empty_for_flow_mapping_without_duplicates() {
+        let text = "cfg: {a: 1, b: 2}\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    // ---- Duplicate Key Validator: Quoted Keys ----
+
+    #[test]
+    fn should_treat_double_quoted_and_unquoted_same_key_as_duplicate() {
+        let text = "\"key\": 1\nkey: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'key'"));
+    }
+
+    #[test]
+    fn should_treat_two_double_quoted_identical_keys_as_duplicate() {
+        let text = "\"key\": 1\n\"key\": 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+    }
+
+    // ---- Duplicate Key Validator: Sequence Items ----
+
+    #[test]
+    fn should_not_flag_same_key_in_different_sequence_items() {
+        // Each `- name:` is a separate mapping in the sequence
+        let text = "items:\n  - name: alice\n  - name: bob\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_detect_duplicate_within_same_sequence_item() {
+        let text = "items:\n  - name: alice\n    name: alice2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'name'"));
+    }
+
+    // ---- Duplicate Key Validator: Edge Cases ----
+
+    #[test]
+    fn should_return_empty_for_empty_document_duplicate_keys() {
+        let result = validate_duplicate_keys("");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_return_empty_for_comment_only_document_duplicate_keys() {
+        let result = validate_duplicate_keys("# just a comment\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_use_error_severity_for_duplicate_keys() {
+        let text = "a: 1\na: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn should_truncate_long_key_name_in_message() {
+        let long_key = "k".repeat(110);
+        let text = format!("{long_key}: 1\n{long_key}: 2\n");
+        let result = validate_duplicate_keys(&text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("..."));
+        // truncated to 100 chars + "..."
+        let display = &result[0].message;
+        assert!(display.len() < long_key.len() + 20);
     }
 
     // ---- Custom Tags Validator: Quote-aware position scanning ----
