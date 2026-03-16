@@ -240,20 +240,12 @@ fn resolve_schema_path<'a>(schema: &'a JsonSchema, path: &[String]) -> Option<&'
     }
 
     // Walk composition branches (capped).
-    let branches: Vec<&JsonSchema> = [&schema.all_of, &schema.any_of, &schema.one_of]
+    [&schema.all_of, &schema.any_of, &schema.one_of]
         .into_iter()
         .flatten()
         .flat_map(|v| v.iter())
         .take(MAX_BRANCH_COUNT)
-        .collect();
-
-    for branch in branches {
-        if let Some(found) = resolve_schema_path(branch, path) {
-            return Some(found);
-        }
-    }
-
-    None
+        .find_map(|branch| resolve_schema_path(branch, path))
 }
 
 /// Collect keys already present in the document at `cursor_indent`, to exclude
@@ -298,15 +290,10 @@ fn schema_has_properties(schema: &JsonSchema) -> bool {
     if schema.properties.as_ref().is_some_and(|p| !p.is_empty()) {
         return true;
     }
-    for branch_list in [&schema.all_of, &schema.any_of, &schema.one_of]
+    [&schema.all_of, &schema.any_of, &schema.one_of]
         .into_iter()
         .flatten()
-    {
-        if branch_list.iter().any(schema_has_properties) {
-            return true;
-        }
-    }
-    false
+        .any(|branch_list| branch_list.iter().any(schema_has_properties))
 }
 
 /// Produce key completion items from a resolved schema, excluding already-present keys.
@@ -819,28 +806,27 @@ fn collect_sibling_keys(lines: &[&str], current_line: usize, current_indent: usi
 /// Suggest values for a key by finding the same key name elsewhere in the document.
 fn suggest_values_for_key(lines: &[&str], key_name: &str) -> Vec<CompletionItem> {
     let mut seen = HashSet::new();
-    let mut items = Vec::new();
-
-    for line in lines {
-        let trimmed = line.trim();
-        let effective = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-
-        if let Some(colon_pos) = find_mapping_colon(effective) {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let effective = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+            let colon_pos = find_mapping_colon(effective)?;
             let k = effective[..colon_pos].trim();
-            if k == key_name {
-                let val = effective[colon_pos + 1..].trim();
-                if !val.is_empty() && seen.insert(val.to_string()) {
-                    items.push(CompletionItem {
-                        label: val.to_string(),
-                        kind: Some(CompletionItemKind::VALUE),
-                        ..CompletionItem::default()
-                    });
-                }
+            if k != key_name {
+                return None;
             }
-        }
-    }
-
-    items
+            let val = effective[colon_pos + 1..].trim();
+            if val.is_empty() || !seen.insert(val.to_string()) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: val.to_string(),
+                kind: Some(CompletionItemKind::VALUE),
+                ..CompletionItem::default()
+            })
+        })
+        .collect()
 }
 
 /// Get the indentation level (number of leading spaces) of a line.
