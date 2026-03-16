@@ -147,6 +147,15 @@ correctness bug.
   no duplication, fewest elements
 - Evaluate functional style: immutability, pure functions,
   declarative patterns
+- **Flag accumulate-in-loop patterns** — mutable
+  accumulator + loop + conditional push/append is a
+  Medium-severity finding when the declarative alternative
+  satisfies all four criteria in `functional-style.md`
+  (readability, less code, no manual index math, lower
+  complexity). Do not flag loops that are correct per the
+  exceptions listed there (state machines, async with
+  multiple await points, recursive walks, complex
+  early-exit, test builders).
 - Assess complexity using code mass principles
 
 ### 4. Performance

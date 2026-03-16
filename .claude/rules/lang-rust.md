@@ -216,12 +216,18 @@ match items.as_slice() {
 
 ### Iterator Chains Over Loops
 
-Prefer declarative iterator chains over imperative loops —
-they compose cleanly and the compiler optimizes them to
-match hand-written loop performance:
+Use iterator chains instead of imperative loops when the
+criteria in `functional-style.md` are met (readability,
+less code, no manual index math, lower complexity). The
+compiler optimizes iterator chains to match hand-written
+loop performance, so there is no runtime cost.
+
+**Collect-and-push** — the most common anti-pattern. A
+`mut Vec` is created, a `for` loop pushes items
+conditionally. Always refactor:
 
 ```rust
-// Imperative (avoid)
+// Anti-pattern — mutable accumulator + loop
 let mut results = Vec::new();
 for item in items {
     if item.is_valid() {
@@ -229,13 +235,50 @@ for item in items {
     }
 }
 
-// Declarative (preferred)
+// Refactored — declarative, no mutation
 let results: Vec<_> = items
     .iter()
     .filter(|item| item.is_valid())
     .map(|item| item.transform())
     .collect();
 ```
+
+**Linear and reverse search** — loops that scan for a
+match. Use `.find()`, `.position()`, or `.rev()` variants:
+
+```rust
+// Anti-pattern — manual reverse search with index math
+for i in (0..current_line).rev() {
+    if lines[i].indent() < current_indent {
+        return Some(i);
+    }
+}
+
+// Refactored — no index math, no off-by-one risk
+lines[..current_line]
+    .iter()
+    .enumerate()
+    .rev()
+    .find(|(_, line)| line.indent() < current_indent)
+    .map(|(i, _)| i)
+```
+
+**When loops are correct in Rust:**
+
+- **`char_indices()` state machines** — tracking quote
+  depth, nesting level, or parser state through `match`
+  arms. A `.scan()` with a tuple accumulator is harder
+  to read.
+- **Async loops with multiple `.await` points** — a `for`
+  loop with `await` and `?` is clearer than `Stream`
+  combinators that require `StreamExt`, `TryStreamExt`,
+  `Box::pin`, and lifetime annotations.
+- **Recursive tree walks** — the recursive helper is
+  inherently imperative. Forcing it into iterators
+  requires a stack-based adapter that obscures traversal
+  logic.
+
+See `functional-style.md` for the full decision criteria.
 
 ### Immutability by Default
 

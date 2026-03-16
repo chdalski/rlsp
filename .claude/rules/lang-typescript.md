@@ -148,11 +148,16 @@ function addItem(order: Order, item: Item): Order {
 
 ### Array Transformations
 
-Use `map`, `filter`, `reduce` over imperative loops — they
-declare intent and eliminate off-by-one errors:
+Use `map`, `filter`, `find` instead of imperative loops
+when the criteria in `functional-style.md` are met
+(readability, less code, no manual index math, lower
+complexity).
+
+**Collect-and-push** — the most common anti-pattern.
+Always refactor:
 
 ```typescript
-// Imperative (avoid)
+// Anti-pattern — mutable accumulator + loop
 const results: string[] = [];
 for (const user of users) {
   if (user.isActive) {
@@ -160,11 +165,53 @@ for (const user of users) {
   }
 }
 
-// Declarative (preferred)
+// Refactored — declarative, no mutation
 const results = users
   .filter((user) => user.isActive)
   .map((user) => user.name.toUpperCase());
 ```
+
+**`.reduce()` readability caveat** — `reduce` with a
+complex accumulator (building objects with multiple keys,
+tracking state across iterations) is often less readable
+than a loop. When the reducer callback exceeds 3-4 lines
+or needs type assertions on the accumulator, use a loop
+instead:
+
+```typescript
+// reduce with complex accumulator — hard to follow
+const grouped = items.reduce<Record<string, Item[]>>(
+  (acc, item) => {
+    const key = item.category;
+    acc[key] = [...(acc[key] ?? []), item];
+    return acc;
+  },
+  {}
+);
+
+// Loop is clearer for complex accumulation
+const grouped: Record<string, Item[]> = {};
+for (const item of items) {
+  const key = item.category;
+  (grouped[key] ??= []).push(item);
+}
+```
+
+**When loops are correct in TypeScript:**
+
+- **`for await...of` with multiple awaits** — a loop with
+  `await` per iteration and `try`/`catch` is clearer than
+  piping through async transform streams. Async stream
+  combinators add ceremony without improving readability.
+- **Complex `reduce` accumulators** — when the callback
+  needs multiple lines, type assertions, or tracks more
+  than one piece of state, a loop is more readable (see
+  example above).
+- **Index-dependent mutation** — when each iteration
+  depends on results from previous iterations in ways that
+  require accessing the partially-built result.
+
+See `functional-style.md` for the full decision criteria.
 
 ### Pipeline Pattern
 
@@ -428,3 +475,5 @@ artifacts can mask errors:
 | `as` type assertions | Unsafe casts | Type guards instead |
 | Ignoring Promise rejections | Silent failures | Always handle errors |
 | Enums | Surprising behavior | Use `as const` objects |
+| Accumulate-in-loop | Higher code mass, mutable state | Use `filter`/`map`/`find` |
+| Complex `reduce` | Unreadable accumulator | Use a loop instead |

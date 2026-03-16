@@ -16,18 +16,24 @@ Python's dynamic nature pragmatically.
 
 ### List Comprehensions and Generators
 
-Prefer comprehensions over manual loops for
-transformations — they express intent more clearly and
-avoid mutable accumulator patterns:
+Use comprehensions instead of manual accumulate-in-loop
+patterns when the criteria in `functional-style.md` are
+met (readability, less code, no manual index math, lower
+complexity). In Python, comprehensions are the primary
+declarative alternative — they are more readable than
+`map()`/`filter()` for most cases.
+
+**Collect-and-append** — the most common anti-pattern.
+Always refactor:
 
 ```python
-# Imperative (avoid)
+# Anti-pattern — mutable accumulator + loop
 results = []
 for user in users:
     if user.is_active:
         results.append(user.name.upper())
 
-# Pythonic (preferred)
+# Refactored — comprehension
 results = [
     user.name.upper()
     for user in users
@@ -41,6 +47,40 @@ active_names = (
     if user.is_active
 )
 ```
+
+**Linear search** — loops that scan for a match. Use
+`next()` with a generator expression:
+
+```python
+# Anti-pattern — manual search loop
+result = None
+for user in users:
+    if user.email == target:
+        result = user
+        break
+
+# Refactored
+result = next(
+    (u for u in users if u.email == target), None
+)
+```
+
+**When loops are correct in Python:**
+
+- **Async iteration with multiple `await` points** — an
+  `async for` loop with `await` and `try`/`except` per
+  iteration is clearer than chaining async generators
+  through `aiostream` combinators.
+- **Comprehensions with side effects** — if the loop body
+  does I/O or mutates external state, a comprehension
+  hides the side effect. Keep the loop and make the effect
+  visible.
+- **Multi-line conditions with early exit** — when the
+  loop body has complex `break`/`continue` logic tied to
+  different state, a comprehension would require nesting
+  that hurts readability.
+
+See `functional-style.md` for the full decision criteria.
 
 ### Context Managers
 
@@ -468,3 +508,4 @@ errors:
 | Ignoring GIL | No true parallelism | Use multiprocessing/async |
 | String formatting with % | Outdated, error-prone | Use f-strings |
 | Deep inheritance | Rigid hierarchies | Composition + protocols |
+| Accumulate-in-loop | Higher code mass, mutable state | Use comprehensions or `next()` |
