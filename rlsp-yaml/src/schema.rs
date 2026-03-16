@@ -786,6 +786,27 @@ mod tests {
         assert_eq!(extract_schema_url(""), None);
     }
 
+    // Test 12 — $schema=none (lowercase) is extracted as-is
+    #[test]
+    fn should_extract_none_sentinel_lowercase() {
+        let text = "# yaml-language-server: $schema=none\nkey: value\n";
+        assert_eq!(extract_schema_url(text), Some("none".to_string()));
+    }
+
+    // Test 13 — $schema=None (mixed case) is extracted as-is
+    #[test]
+    fn should_extract_none_sentinel_mixed_case() {
+        let text = "# yaml-language-server: $schema=None\nkey: value\n";
+        assert_eq!(extract_schema_url(text), Some("None".to_string()));
+    }
+
+    // Test 14 — $schema=NONE (uppercase) is extracted as-is
+    #[test]
+    fn should_extract_none_sentinel_uppercase() {
+        let text = "# yaml-language-server: $schema=NONE\nkey: value\n";
+        assert_eq!(extract_schema_url(text), Some("NONE".to_string()));
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // extract_custom_tags
     // ══════════════════════════════════════════════════════════════════════════

@@ -115,49 +115,61 @@ impl Backend {
         // is not held here; diagnostics is acquired last, below).
         // No Mutex guard is held across any .await point.
         if let Some(schema_url) = crate::schema::extract_schema_url(text) {
-            // Normalise and validate the URL before attempting a fetch.
-            let normalised = crate::schema::validate_and_normalize_url(&schema_url).ok();
-
-            if let Some(url) = normalised {
-                // Record the association (lock → insert → drop).
+            if schema_url.eq_ignore_ascii_case("none") {
+                // $schema=none disables schema processing for this document.
+                // Clear any previous association so stale schema info is not
+                // carried over from a prior save.
                 if let Ok(mut assoc) = self.schema_associations.lock() {
-                    assoc.insert(uri.clone(), url.clone());
+                    assoc.remove(&uri);
                 }
+                // Fall through: non-schema validators (anchors, flow style,
+                // key ordering, duplicate keys) already ran above and their
+                // diagnostics are retained.
+            } else {
+                // Normalise and validate the URL before attempting a fetch.
+                let normalised = crate::schema::validate_and_normalize_url(&schema_url).ok();
 
-                // Check cache without holding the lock across spawn_blocking.
-                let cached = self
-                    .schema_cache
-                    .lock()
-                    .ok()
-                    .and_then(|cache| cache.get(&url).cloned());
-
-                let schema = if let Some(s) = cached {
-                    Some(s)
-                } else {
-                    // Fetch blocking-ly on a thread-pool thread.
-                    let url_clone = url.clone();
-                    let join_result = tokio::task::spawn_blocking(move || {
-                        crate::schema::fetch_schema(&url_clone)
-                    })
-                    .await;
-                    let fetched: Option<crate::schema::JsonSchema> =
-                        join_result.ok().and_then(std::result::Result::ok);
-
-                    // Store in cache (first-write-wins).
-                    if let Some(ref s) = fetched
-                        && let Ok(mut cache) = self.schema_cache.lock()
-                    {
-                        cache.insert(url, s.clone());
+                if let Some(url) = normalised {
+                    // Record the association (lock → insert → drop).
+                    if let Ok(mut assoc) = self.schema_associations.lock() {
+                        assoc.insert(uri.clone(), url.clone());
                     }
-                    fetched
-                };
 
-                if let Some(s) = schema {
-                    diagnostics.extend(crate::schema_validation::validate_schema(
-                        text,
-                        &result.documents,
-                        &s,
-                    ));
+                    // Check cache without holding the lock across spawn_blocking.
+                    let cached = self
+                        .schema_cache
+                        .lock()
+                        .ok()
+                        .and_then(|cache| cache.get(&url).cloned());
+
+                    let schema = if let Some(s) = cached {
+                        Some(s)
+                    } else {
+                        // Fetch blocking-ly on a thread-pool thread.
+                        let url_clone = url.clone();
+                        let join_result = tokio::task::spawn_blocking(move || {
+                            crate::schema::fetch_schema(&url_clone)
+                        })
+                        .await;
+                        let fetched: Option<crate::schema::JsonSchema> =
+                            join_result.ok().and_then(std::result::Result::ok);
+
+                        // Store in cache (first-write-wins).
+                        if let Some(ref s) = fetched
+                            && let Ok(mut cache) = self.schema_cache.lock()
+                        {
+                            cache.insert(url, s.clone());
+                        }
+                        fetched
+                    };
+
+                    if let Some(s) = schema {
+                        diagnostics.extend(crate::schema_validation::validate_schema(
+                            text,
+                            &result.documents,
+                            &s,
+                        ));
+                    }
                 }
             }
         }
