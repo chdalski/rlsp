@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-16)
 **Created:** 2026-03-16
 
 ## Goal
@@ -45,9 +45,9 @@ handle:
 
 - [x] Clarify requirements with user
 - [x] Review existing validator patterns and codebase
-- [ ] Implement `validate_duplicate_keys` in validators.rs
-- [ ] Wire into server.rs parse_and_publish
-- [ ] Add tests
+- [x] Implement `validate_duplicate_keys` in validators.rs
+- [x] Wire into server.rs parse_and_publish
+- [x] Add tests
 
 ## Tasks
 
@@ -58,17 +58,16 @@ following the existing validator pattern. Wire it into
 `server.rs` `parse_and_publish()`. Include comprehensive
 tests.
 
-- [ ] Add `validate_duplicate_keys(text: &str) -> Vec<Diagnostic>` to validators.rs
-- [ ] Handle block-style mappings via indentation tracking
-- [ ] Handle flow-style mappings (`{key: v, key: v}`)
-- [ ] Scope duplicate detection per mapping (not globally)
-- [ ] Scope detection per document (`---` boundaries)
-- [ ] Skip keys in comments and quoted strings
-- [ ] Diagnostic code: `"duplicateKey"`, severity: ERROR
-- [ ] Wire into `parse_and_publish` in server.rs
-- [ ] Tests: no duplicates (clean file), simple duplicate at top level,
-      nested mapping duplicates, multi-document scoping, flow mapping
-      duplicates, keys after sequence items, quoted keys, edge cases
+- [x] Add `validate_duplicate_keys(text: &str) -> Vec<Diagnostic>` to validators.rs
+- [x] Handle block-style mappings via indentation tracking
+- [x] Handle flow-style mappings (`{key: v, key: v}`)
+- [x] Scope duplicate detection per mapping (not globally)
+- [x] Scope detection per document (`---` boundaries)
+- [x] Skip keys in comments and quoted strings
+- [x] Diagnostic code: `"duplicateKey"`, severity: ERROR
+- [x] Wire into `parse_and_publish` in server.rs
+- [x] Tests: 17 tests covering all specified scenarios
+- **Commit:** `551fc7b` — `feat(validators): add duplicate key detection validator`
 
 ## Decisions
 
