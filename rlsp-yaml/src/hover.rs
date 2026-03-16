@@ -96,16 +96,12 @@ pub fn hover_at(
 
 /// Determine which YAML document (by `---` separator) a line belongs to.
 fn document_index_for_line(lines: &[&str], target_line: usize) -> usize {
-    let mut doc_idx = 0;
-    for (i, line) in lines.iter().enumerate() {
-        if i >= target_line {
-            break;
-        }
-        if line.trim() == "---" && i > 0 {
-            doc_idx += 1;
-        }
-    }
-    doc_idx
+    lines
+        .iter()
+        .enumerate()
+        .take(target_line)
+        .filter(|(i, line)| line.trim() == "---" && *i > 0)
+        .count()
 }
 
 /// Information about a YAML token at the cursor position.
@@ -287,9 +283,7 @@ fn build_key_path(
 
     // Reverse parents (we collected bottom-up)
     parents.reverse();
-    for key in parents {
-        path.push(PathSegment::Key(key));
-    }
+    path.extend(parents.into_iter().map(PathSegment::Key));
 
     // Add current token to path
     match token {
@@ -530,19 +524,13 @@ fn resolve_schema_path<'a>(schema: &'a JsonSchema, path: &[String]) -> Option<&'
 
 /// Search composition branches (allOf / anyOf / oneOf) for a property key.
 fn find_in_branches<'a>(schema: &'a JsonSchema, key: &str) -> Option<&'a JsonSchema> {
-    let branches = schema
+    schema
         .all_of
         .iter()
         .flatten()
         .chain(schema.any_of.iter().flatten())
-        .chain(schema.one_of.iter().flatten());
-
-    for branch in branches {
-        if let Some(found) = branch.properties.as_ref().and_then(|props| props.get(key)) {
-            return Some(found);
-        }
-    }
-    None
+        .chain(schema.one_of.iter().flatten())
+        .find_map(|branch| branch.properties.as_ref()?.get(key))
 }
 
 /// Format the schema information section appended below the structural hover.
@@ -577,22 +565,20 @@ fn format_schema_section(schema: &JsonSchema) -> String {
     }
 
     // Examples — at most MAX_EXAMPLES, with "and N more" note
-    if let Some(examples) = &schema.examples {
-        let non_empty: Vec<_> = examples.iter().collect();
-        if !non_empty.is_empty() {
-            let shown = non_empty.len().min(MAX_EXAMPLES);
-            let _ = write!(md, "\n**Examples:**");
-            for ex in non_empty.iter().take(shown) {
-                let label = json_value_to_display_string(ex);
-                let truncated = truncate_to(&label, MAX_EXAMPLE_LEN);
-                let _ = write!(md, "\n- {truncated}");
-            }
-            let remaining = non_empty.len().saturating_sub(shown);
-            if remaining > 0 {
-                let _ = write!(md, "\n- *and {remaining} more*");
-            }
-            md.push('\n');
+    if let Some(examples) = &schema.examples
+        && !examples.is_empty()
+    {
+        let shown = examples.len().min(MAX_EXAMPLES);
+        let _ = write!(md, "\n**Examples:**");
+        examples.iter().take(shown).for_each(|ex| {
+            let truncated = truncate_to(&json_value_to_display_string(ex), MAX_EXAMPLE_LEN);
+            let _ = write!(md, "\n- {truncated}");
+        });
+        let remaining = examples.len().saturating_sub(shown);
+        if remaining > 0 {
+            let _ = write!(md, "\n- *and {remaining} more*");
         }
+        md.push('\n');
     }
 
     md
