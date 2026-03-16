@@ -39,18 +39,22 @@ On session start:
    whether the user wants to address any resulting issues
    before starting new work — new lints may surface warnings
    across the codebase.
-2. Read `.claude/settings.json` and check for
-   `plansDirectory`. If the key is **absent**, invoke
-   `/ensure-plans-dir` — the skill will configure the
-   default in `settings.local.json` and set up the plans
-   directory. Inform the user that `plansDirectory` was not
-   configured and has been set to `.ai/plans/` in
-   `settings.local.json`, and suggest they move it to
-   `settings.json` if they want the setting
-   version-controlled. Silently defaulting would leave
-   future sessions and other agents without a configured
-   path. If `plansDirectory` is present, scan that directory
-   for **all** plan files — not just in-progress ones. A
+2. **Invoke `/ensure-plans-dir`** — this refreshes the
+   format guide to match the current blueprint version and
+   configures `plansDirectory` if it is missing. Always
+   invoke this, even if the plans directory already exists —
+   a blueprint update may have changed the plan format, and
+   stale format guides produce plans that don't match the
+   current conventions.
+
+   If the skill reports that `plansDirectory` was not
+   configured, inform the user that it has been set to
+   `.ai/plans/` in `settings.local.json`, and suggest they
+   move it to `settings.json` if they want the setting
+   version-controlled.
+
+   After the skill completes, scan the plans directory for
+   **all** plan files — not just in-progress ones. A
    previous session may have left work incomplete, and
    multiple plans may exist from separate feature requests.
 3. If incomplete plans exist, present the full queue state
