@@ -88,35 +88,35 @@ pub fn find_references(
 
     let name = &cursor_token.name;
 
-    let mut locations = Vec::new();
-
     // Optionally include the anchor declaration
-    if include_declaration
-        && let Some(anchor) = tokens.iter().find(|t| t.is_anchor && t.name == *name)
-    {
-        locations.push(Location {
-            uri: uri.clone(),
-            range: Range::new(
-                Position::new(anchor.line, anchor.start_col),
-                Position::new(anchor.line, anchor.end_col),
-            ),
-        });
-    }
-
-    // Include all alias references
-    for token in &tokens {
-        if !token.is_anchor && token.name == *name {
-            locations.push(Location {
+    let declaration = if include_declaration {
+        tokens
+            .iter()
+            .find(|t| t.is_anchor && t.name == *name)
+            .map(|anchor| Location {
                 uri: uri.clone(),
                 range: Range::new(
-                    Position::new(token.line, token.start_col),
-                    Position::new(token.line, token.end_col),
+                    Position::new(anchor.line, anchor.start_col),
+                    Position::new(anchor.line, anchor.end_col),
                 ),
-            });
-        }
-    }
+            })
+    } else {
+        None
+    };
 
-    locations
+    // Include all alias references
+    let aliases = tokens
+        .iter()
+        .filter(|t| !t.is_anchor && t.name == *name)
+        .map(|t| Location {
+            uri: uri.clone(),
+            range: Range::new(
+                Position::new(t.line, t.start_col),
+                Position::new(t.line, t.end_col),
+            ),
+        });
+
+    declaration.into_iter().chain(aliases).collect()
 }
 
 /// Determine the document boundaries for the YAML document containing the
