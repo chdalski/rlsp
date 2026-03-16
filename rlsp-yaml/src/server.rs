@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
@@ -54,8 +54,6 @@ impl Backend {
         }
     }
 
-    // Used in Task 3 (parse_and_publish integration).
-    #[allow(dead_code)]
     pub(crate) fn get_custom_tags(&self) -> Vec<String> {
         self.settings
             .lock()
@@ -86,6 +84,16 @@ impl Backend {
         diagnostics.extend(crate::validators::validate_key_ordering(
             text,
             &result.documents,
+        ));
+
+        // Custom tag validation: merge workspace settings tags with per-document modeline tags.
+        // get_custom_tags() acquires and releases the settings lock before any other lock below.
+        let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
+        allowed_tags.extend(crate::schema::extract_custom_tags(text));
+        diagnostics.extend(crate::validators::validate_custom_tags(
+            text,
+            &result.documents,
+            &allowed_tags,
         ));
 
         // Schema validation: extract URL from modeline, fetch/cache schema,
@@ -670,5 +678,24 @@ mod tests {
         let json = serde_json::json!({"customTags": []});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert!(settings.custom_tags.is_empty());
+    }
+
+    // ---- Custom tags wiring ----
+
+    #[test]
+    fn get_custom_tags_returns_empty_vec_by_default() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert!(backend.get_custom_tags().is_empty());
+    }
+
+    #[test]
+    fn should_advertise_code_action_provider() {
+        let caps = Backend::capabilities();
+
+        assert!(
+            caps.code_action_provider.is_some(),
+            "capabilities should include code_action_provider"
+        );
     }
 }
