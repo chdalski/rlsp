@@ -3,14 +3,14 @@ use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
-    CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
-    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
-    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CodeLens,
+    CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams, CompletionResponse,
+    Diagnostic, DidChangeConfigurationParams, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
+    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse,
+    ReferenceParams, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
     SelectionRangeProviderCapability, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
@@ -184,6 +184,9 @@ impl Backend {
             }),
             selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
             code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+            code_lens_provider: Some(CodeLensOptions {
+                resolve_provider: Some(false),
+            }),
             ..ServerCapabilities::default()
         }
     }
@@ -473,6 +476,34 @@ impl LanguageServer for Backend {
         Ok(Some(actions.into_iter().map(CodeAction::into).collect()))
     }
 
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = params.text_document.uri;
+
+        // Lock ordering: schema_associations → schema_cache
+        let schema_url = self
+            .schema_associations
+            .lock()
+            .ok()
+            .and_then(|assoc| assoc.get(&uri).cloned());
+
+        let Some(url) = schema_url else {
+            return Ok(None);
+        };
+
+        let schema = self
+            .schema_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&url).cloned());
+
+        let lenses = crate::code_lens::code_lenses(&url, schema.as_ref());
+        if lenses.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(lenses))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -697,5 +728,11 @@ mod tests {
             caps.code_action_provider.is_some(),
             "capabilities should include code_action_provider"
         );
+    }
+
+    #[test]
+    fn should_advertise_code_lens_provider() {
+        let caps = Backend::capabilities();
+        assert!(caps.code_lens_provider.is_some());
     }
 }

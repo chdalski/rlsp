@@ -43,6 +43,8 @@ the project exists. -->
 │       ├── server.rs       # LSP Backend struct + LanguageServer trait impl
 │       ├── parser.rs       # YAML parsing (saphyr)
 │       ├── document_store.rs  # In-memory document cache
+│       ├── code_actions.rs # Code action provider
+│       ├── code_lens.rs    # Code lens provider (schema URL link)
 │       ├── completion.rs   # Completion provider
 │       ├── document_links.rs  # Document links / URL detection
 │       ├── folding.rs      # Folding ranges
