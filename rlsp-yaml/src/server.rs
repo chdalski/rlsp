@@ -65,10 +65,7 @@ impl Backend {
     }
 
     pub(crate) fn get_key_ordering(&self) -> bool {
-        self.settings
-            .lock()
-            .ok()
-            .is_some_and(|s| s.key_ordering)
+        self.settings.lock().ok().is_some_and(|s| s.key_ordering)
     }
 
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
@@ -90,6 +87,7 @@ impl Backend {
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validators::validate_unused_anchors(text));
         diagnostics.extend(crate::validators::validate_flow_style(text));
+        diagnostics.extend(crate::validators::validate_duplicate_keys(text));
 
         // Custom tag validation: merge workspace settings tags with per-document modeline tags.
         // get_custom_tags() and get_key_ordering() acquire and release the settings lock before
