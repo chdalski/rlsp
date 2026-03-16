@@ -21,16 +21,12 @@ pub fn document_symbols(text: &str, documents: Option<&Vec<YamlOwned>>) -> Vec<D
     // Split the text into document regions by `---` separators
     let doc_regions = split_document_regions(&lines);
 
-    let mut all_symbols = Vec::new();
-
-    for (doc_idx, region) in doc_regions.iter().enumerate() {
-        if let Some(doc) = documents.get(doc_idx) {
-            let symbols = yaml_to_symbols(doc, &lines, region.start_line);
-            all_symbols.extend(symbols);
-        }
-    }
-
-    all_symbols
+    doc_regions
+        .iter()
+        .enumerate()
+        .filter_map(|(doc_idx, region)| documents.get(doc_idx).map(|doc| (doc, region)))
+        .flat_map(|(doc, region)| yaml_to_symbols(doc, &lines, region.start_line))
+        .collect()
 }
 
 /// A region of lines belonging to a single YAML document.
@@ -83,16 +79,12 @@ fn split_document_regions(lines: &[&str]) -> Vec<DocRegion> {
 /// Convert a `YamlOwned` node into `DocumentSymbol` objects using the text for ranges.
 fn yaml_to_symbols(yaml: &YamlOwned, lines: &[&str], base_line: usize) -> Vec<DocumentSymbol> {
     match yaml {
-        YamlOwned::Mapping(map) => {
-            let mut symbols = Vec::new();
-            for (key, value) in map {
-                let key_str = yaml_key_to_string(key);
-                if let Some(sym) = make_symbol(&key_str, value, lines, base_line) {
-                    symbols.push(sym);
-                }
-            }
-            symbols
-        }
+        YamlOwned::Mapping(map) => map
+            .iter()
+            .filter_map(|(key, value)| {
+                make_symbol(&yaml_key_to_string(key), value, lines, base_line)
+            })
+            .collect(),
         YamlOwned::Value(_)
         | YamlOwned::Sequence(_)
         | YamlOwned::Alias(_)
@@ -141,13 +133,10 @@ fn make_symbol(
     let children = match value {
         YamlOwned::Mapping(map) => {
             let child_start = key_line + 1;
-            let mut child_symbols = Vec::new();
-            for (k, v) in map {
-                let k_str = yaml_key_to_string(k);
-                if let Some(s) = make_symbol(&k_str, v, lines, child_start) {
-                    child_symbols.push(s);
-                }
-            }
+            let child_symbols: Vec<DocumentSymbol> = map
+                .iter()
+                .filter_map(|(k, v)| make_symbol(&yaml_key_to_string(k), v, lines, child_start))
+                .collect();
             if child_symbols.is_empty() {
                 None
             } else {
@@ -227,13 +216,10 @@ fn make_sequence_children(
 
         let item_children = match item {
             YamlOwned::Mapping(map) => {
-                let mut cs = Vec::new();
-                for (k, v) in map {
-                    let k_str = yaml_key_to_string(k);
-                    if let Some(s) = make_symbol(&k_str, v, lines, item_line) {
-                        cs.push(s);
-                    }
-                }
+                let cs: Vec<DocumentSymbol> = map
+                    .iter()
+                    .filter_map(|(k, v)| make_symbol(&yaml_key_to_string(k), v, lines, item_line))
+                    .collect();
                 if cs.is_empty() { None } else { Some(cs) }
             }
             YamlOwned::Value(_)
@@ -263,13 +249,11 @@ fn make_sequence_children(
 
 /// Find the next line starting with a sequence item marker (`- `).
 fn find_sequence_item_line(lines: &[&str], from: usize) -> Option<usize> {
-    for i in from..lines.len() {
-        let trimmed = lines.get(i)?.trim();
-        if trimmed.starts_with("- ") || trimmed == "-" {
-            return Some(i);
-        }
-    }
-    None
+    (from..lines.len()).find(|&i| {
+        lines
+            .get(i)
+            .is_some_and(|l| l.trim().starts_with("- ") || l.trim() == "-")
+    })
 }
 
 /// Find the line and column where a key appears in the text.
