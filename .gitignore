@@ -1,2 +1,3 @@
 target/
 cache-proxy.log
+rust_out
