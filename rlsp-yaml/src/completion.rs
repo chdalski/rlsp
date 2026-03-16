@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, MarkupContent,
-    MarkupKind, Position,
+    CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, InsertTextFormat,
+    MarkupContent, MarkupKind, Position,
 };
 
 use crate::schema::{JsonSchema, SchemaType};
@@ -308,7 +308,60 @@ fn schema_has_properties(schema: &JsonSchema) -> bool {
 fn schema_key_completions(schema: &JsonSchema, present: &HashSet<String>) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
     collect_schema_properties(schema, present, &mut items, 0);
+
+    // If 2+ required properties are missing, offer a snippet that inserts them all at once.
+    if let Some(required) = &schema.required {
+        let missing: Vec<&String> = required
+            .iter()
+            .filter(|r| !present.contains(r.as_str()))
+            .collect();
+        if missing.len() >= 2 {
+            let snippet_body: String = missing
+                .iter()
+                .enumerate()
+                .map(|(idx, key)| {
+                    let n = idx + 1;
+                    let default = schema
+                        .properties
+                        .as_ref()
+                        .and_then(|props| props.get(*key))
+                        .map_or("", snippet_default);
+                    if default.is_empty() {
+                        format!("{key}: ${{{n}:}}")
+                    } else {
+                        format!("{key}: ${{{n}:{default}}}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            items.push(CompletionItem {
+                label: "(all required)".to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                insert_text: Some(snippet_body),
+                sort_text: Some("!".to_string()),
+                detail: Some(format!("{} required properties", missing.len())),
+                ..CompletionItem::default()
+            });
+        }
+    }
+
     items
+}
+
+/// Return the snippet placeholder default for a schema based on its type.
+fn snippet_default(schema: &JsonSchema) -> &'static str {
+    match schema.schema_type.as_ref() {
+        Some(SchemaType::Single(t)) => match t.as_str() {
+            "string" => "\"\"",
+            "integer" | "number" => "0",
+            "boolean" => "false",
+            "object" => "{}",
+            "array" => "[]",
+            _ => "",
+        },
+        _ => "",
+    }
 }
 
 /// Recursively collect property names from a schema and its composition branches.
@@ -2226,5 +2279,196 @@ mod tests {
         // Each lock must be fully released (guard dropped) before the next is acquired.
         // No std::sync::Mutex guard may be held across an .await point.
         // Enforcement: code review + the lock ordering comment on the Backend struct.
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group I — Multi-Required Snippet Completion
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn schema_with_required(props: Vec<(&str, JsonSchema)>, required: Vec<&str>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+            required: Some(required.into_iter().map(str::to_string).collect()),
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 62 — 3 required props all missing → snippet item with all 3 tab-stops
+    #[test]
+    fn should_offer_all_required_snippet_when_three_required_props_missing() {
+        let schema = schema_with_required(
+            vec![
+                ("name", string_schema()),
+                ("age", integer_schema()),
+                ("enabled", boolean_schema()),
+            ],
+            vec!["name", "age", "enabled"],
+        );
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let snippet = result
+            .iter()
+            .find(|i| i.label == "(all required)")
+            .expect("should offer '(all required)' snippet item");
+
+        let insert_text = snippet
+            .insert_text
+            .as_deref()
+            .expect("snippet item must have insert_text");
+
+        assert!(
+            insert_text.contains("${1:"),
+            "snippet must contain tab-stop ${{1:...}}, got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("${2:"),
+            "snippet must contain tab-stop ${{2:...}}, got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("${3:"),
+            "snippet must contain tab-stop ${{3:...}}, got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("name:"),
+            "snippet must mention 'name', got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("age:"),
+            "snippet must mention 'age', got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("enabled:"),
+            "snippet must mention 'enabled', got: {insert_text}"
+        );
+    }
+
+    // Test 63 — 3 required, 2 already present → no snippet (only 1 missing)
+    #[test]
+    fn should_not_offer_snippet_when_only_one_required_prop_missing() {
+        let schema = schema_with_required(
+            vec![
+                ("name", string_schema()),
+                ("age", integer_schema()),
+                ("enabled", boolean_schema()),
+            ],
+            vec!["name", "age", "enabled"],
+        );
+        // "name" and "age" are already present; only "enabled" is missing
+        let text = "name: Alice\nage: 30\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let has_snippet = result.iter().any(|i| i.label == "(all required)");
+        assert!(
+            !has_snippet,
+            "should not offer snippet when only 1 required prop is missing"
+        );
+    }
+
+    // Test 64 — schema with 0 required → no snippet
+    #[test]
+    fn should_not_offer_snippet_when_no_required_props() {
+        let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let has_snippet = result.iter().any(|i| i.label == "(all required)");
+        assert!(
+            !has_snippet,
+            "should not offer snippet when schema has no required array"
+        );
+    }
+
+    // Test 65 — type-aware defaults: string → "", integer → 0, boolean → false
+    #[test]
+    fn should_use_type_aware_defaults_in_snippet() {
+        let schema = schema_with_required(
+            vec![
+                ("title", string_schema()),
+                ("count", integer_schema()),
+                ("active", boolean_schema()),
+            ],
+            vec!["title", "count", "active"],
+        );
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let snippet = result
+            .iter()
+            .find(|i| i.label == "(all required)")
+            .expect("should offer snippet");
+
+        let insert_text = snippet
+            .insert_text
+            .as_deref()
+            .expect("must have insert_text");
+
+        assert!(
+            insert_text.contains("\"\""),
+            "string type should default to \"\", got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains(":0")
+                || insert_text.contains(": 0")
+                || insert_text.contains("{1:0}")
+                || insert_text.contains("{2:0}")
+                || insert_text.contains("{3:0}"),
+            "integer type should default to 0, got: {insert_text}"
+        );
+        assert!(
+            insert_text.contains("false"),
+            "boolean type should default to false, got: {insert_text}"
+        );
+    }
+
+    // Test 66 — snippet item has InsertTextFormat::SNIPPET
+    #[test]
+    fn should_set_insert_text_format_to_snippet() {
+        let schema = schema_with_required(
+            vec![("name", string_schema()), ("age", integer_schema())],
+            vec!["name", "age"],
+        );
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let snippet = result
+            .iter()
+            .find(|i| i.label == "(all required)")
+            .expect("should offer snippet");
+
+        assert_eq!(
+            snippet.insert_text_format,
+            Some(InsertTextFormat::SNIPPET),
+            "snippet item must have InsertTextFormat::SNIPPET"
+        );
+    }
+
+    // Test 67 — snippet item sort_text is "!" (sorts to top)
+    #[test]
+    fn should_set_snippet_sort_text_to_exclamation() {
+        let schema = schema_with_required(
+            vec![("name", string_schema()), ("age", integer_schema())],
+            vec!["name", "age"],
+        );
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let snippet = result
+            .iter()
+            .find(|i| i.label == "(all required)")
+            .expect("should offer snippet");
+
+        assert_eq!(
+            snippet.sort_text.as_deref(),
+            Some("!"),
+            "snippet sort_text should be '!' to sort to top"
+        );
     }
 }
