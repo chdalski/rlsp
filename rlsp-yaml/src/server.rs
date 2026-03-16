@@ -422,7 +422,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let links = crate::document_links::find_document_links(&text);
+        let links = crate::document_links::find_document_links(&text, Some(&uri));
         if links.is_empty() {
             return Ok(None);
         }
