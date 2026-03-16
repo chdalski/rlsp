@@ -7,12 +7,13 @@ use tower_lsp::lsp_types::{
     CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DidChangeConfigurationParams, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse,
-    ReferenceParams, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    DocumentLinkParams, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
+    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
+    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
     SelectionRangeProviderCapability, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    TextDocumentSyncKind, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -186,6 +187,10 @@ impl Backend {
             code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
             code_lens_provider: Some(CodeLensOptions {
                 resolve_provider: Some(false),
+            }),
+            document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
+                first_trigger_character: "\n".to_string(),
+                more_trigger_character: None,
             }),
             ..ServerCapabilities::default()
         }
@@ -504,6 +509,33 @@ impl LanguageServer for Backend {
         Ok(Some(lenses))
     }
 
+    async fn on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let ch = &params.ch;
+        let tab_size = params.options.tab_size;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let edits = crate::on_type_formatting::format_on_type(&text, position, ch, tab_size);
+        if edits.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(edits))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -734,5 +766,11 @@ mod tests {
     fn should_advertise_code_lens_provider() {
         let caps = Backend::capabilities();
         assert!(caps.code_lens_provider.is_some());
+    }
+
+    #[test]
+    fn should_advertise_on_type_formatting_provider() {
+        let caps = Backend::capabilities();
+        assert!(caps.document_on_type_formatting_provider.is_some());
     }
 }

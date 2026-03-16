@@ -49,6 +49,7 @@ the project exists. -->
 │       ├── document_links.rs  # Document links / URL detection
 │       ├── folding.rs      # Folding ranges
 │       ├── hover.rs        # Hover information
+│       ├── on_type_formatting.rs  # On-type formatting (newline indent)
 │       ├── references.rs   # Go-to-definition + find references
 │       ├── rename.rs       # Rename symbol
 │       ├── schema.rs           # JSON Schema types, parsing, HTTP fetching, caching
