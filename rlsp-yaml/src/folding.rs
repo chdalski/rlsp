@@ -63,12 +63,12 @@ fn collect_indentation_folds(lines: &[&str], ranges: &mut Vec<FoldingRange>) {
 
     // Close any remaining open regions at end of document
     let total = lines.len();
-    for region in stack.into_iter().rev() {
+    stack.into_iter().rev().for_each(|region| {
         let end = find_last_content_line(lines, region.start_line, total);
         if end > region.start_line {
             push_fold(ranges, region.start_line, end, None);
         }
-    }
+    });
 }
 
 /// Close stack regions whose indentation is >= the current line's indent.
@@ -167,16 +167,14 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 /// Find the last non-blank, non-separator content line between `start` (exclusive)
 /// and `before` (exclusive).
 fn find_last_content_line(lines: &[&str], start: usize, before: usize) -> usize {
-    let mut last = start;
-    for i in (start + 1)..before {
-        if let Some(line) = lines.get(i) {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && trimmed != "---" && trimmed != "..." {
-                last = i;
-            }
-        }
-    }
-    last
+    ((start + 1)..before)
+        .rev()
+        .find(|&i| {
+            lines
+                .get(i)
+                .is_some_and(|l| !l.trim().is_empty() && l.trim() != "---" && l.trim() != "...")
+        })
+        .unwrap_or(start)
 }
 
 /// Collect folding ranges for document sections separated by `---`.
@@ -236,16 +234,11 @@ fn collect_document_section_folds(lines: &[&str], ranges: &mut Vec<FoldingRange>
 
 /// Find the last content line in the range `[from, before)`.
 fn find_last_content_line_in_range(lines: &[&str], from: usize, before: usize) -> Option<usize> {
-    let mut last = None;
-    for i in from..before {
-        if let Some(line) = lines.get(i) {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && trimmed != "---" && trimmed != "..." {
-                last = Some(i);
-            }
-        }
-    }
-    last
+    (from..before).rev().find(|&i| {
+        lines
+            .get(i)
+            .is_some_and(|l| !l.trim().is_empty() && l.trim() != "---" && l.trim() != "...")
+    })
 }
 
 /// Collect folding ranges for consecutive comment blocks (3+ lines).
