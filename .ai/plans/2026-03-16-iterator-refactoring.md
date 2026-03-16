@@ -42,7 +42,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Analyze codebase and categorize loops
 - [x] Update rules files with nuanced criteria
 - [x] Write findings document
-- [ ] Task 1: Refactor `document_links.rs`
+- [x] Task 1: Refactor `document_links.rs` (7f34533)
 - [ ] Task 2: Refactor `rename.rs`
 - [ ] Task 3: Refactor `references.rs`
 - [ ] Task 4: Refactor `code_actions.rs`
