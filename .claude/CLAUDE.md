@@ -130,9 +130,18 @@ After clarification is complete:
    `AskUserQuestion` to confirm. If the user requests
    changes, revise and re-present.
 
-7. **Add the plan to the queue.** After user approval,
-   the plan enters the queue. If other plans are already
-   queued, decide optimal execution order based on
+7. **Commit the plan.** After user approval, commit the
+   plan file using conventional commit format:
+   `docs(<scope>): add plan for <feature>`. Committing
+   before implementation ensures the plan is persisted in
+   git independently of the code changes — if a session
+   crashes mid-execution, the plan survives and the next
+   session can resume from a committed plan rather than a
+   dangling file.
+
+8. **Add the plan to the queue.** After the plan is
+   committed, it enters the queue. If other plans are
+   already queued, decide optimal execution order based on
    dependencies and impact (see Plan Queue Management).
 
 Plans live in the plans directory configured in

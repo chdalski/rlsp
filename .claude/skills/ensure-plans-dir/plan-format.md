@@ -17,7 +17,6 @@ Every plan file must begin with these fields:
 **Repository:** root
 **Status:** NotStarted
 **Created:** YYYY-MM-DD
-**Author:** <agent-or-role-name>
 ```
 
 **Repository** — `root` for the main repo, or the subrepo
@@ -34,8 +33,6 @@ progresses — stale status misleads the next session:
 - `Canceled` — superseded or no longer needed
 
 **Created** — date the plan was written (YYYY-MM-DD).
-
-**Author** — agent that wrote the plan.
 
 ## Required Sections
 
