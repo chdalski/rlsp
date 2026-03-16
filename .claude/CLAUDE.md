@@ -344,13 +344,22 @@ When all tasks in a plan are committed:
    the next one. If the queue is empty, inform the user.
 
 **New tasks after completion.** Each plan covers one
-feature or task. When the user requests a new task, the
-full cycle restarts: clarification → planning → queue
-insertion. Do not reuse the previous plan or skip
-clarification — the new task has its own scope, risk
-profile, and advisor needs. The existing team persists
-(no need to re-create it), but the new task gets its own
-plan file.
+feature or task. When the user requests a new task:
+
+1. **Delete the current team** via `TeamDelete` — teammates
+   carry conversation history from the completed plan, and
+   stale context from plan A pollutes decisions in plan B.
+   Deleting clears this accumulated state.
+2. **Restart the full cycle** — clarification → planning →
+   queue insertion (which includes `TeamCreate` in the
+   Planning phase). Do not reuse the previous plan or skip
+   clarification — the new task has its own scope, risk
+   profile, and advisor needs.
+
+The new team gets fresh context windows. Cached content at
+levels 1–4 (system prompt, tools, CLAUDE.md, session state)
+is unaffected — only the per-teammate message history
+(level 5) resets, which is the desired outcome.
 
 ## Conventional Commits
 
