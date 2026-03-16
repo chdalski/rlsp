@@ -558,6 +558,32 @@ pub fn extract_schema_url(text: &str) -> Option<String> {
     None
 }
 
+/// Extract custom tag names from a `yaml-language-server` modeline comment.
+///
+/// Searches the first 10 lines of `text` for a line of the form:
+/// ```text
+/// # yaml-language-server: $tags=!include,!ref
+/// ```
+/// Each tag is trimmed of whitespace. Empty strings after splitting are dropped.
+/// Returns an empty `Vec` if no such line is found within the first 10 lines.
+#[must_use]
+pub fn extract_custom_tags(text: &str) -> Vec<String> {
+    const PREFIX: &str = "# yaml-language-server: $tags=";
+
+    for line in text.lines().take(10) {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(PREFIX) {
+            return rest
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema association — file pattern matching
 // ──────────────────────────────────────────────────────────────────────────────
@@ -756,6 +782,55 @@ mod tests {
     #[test]
     fn should_return_none_for_empty_input() {
         assert_eq!(extract_schema_url(""), None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // extract_custom_tags
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn should_extract_single_tag_from_modeline() {
+        let text = "# yaml-language-server: $tags=!include\nkey: value\n";
+        assert_eq!(extract_custom_tags(text), vec!["!include"]);
+    }
+
+    #[test]
+    fn should_extract_multiple_tags_from_modeline() {
+        let text = "# yaml-language-server: $tags=!include,!ref,!Ref\nkey: value\n";
+        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref", "!Ref"]);
+    }
+
+    #[test]
+    fn should_trim_whitespace_around_tags() {
+        let text = "# yaml-language-server: $tags= !include , !ref \nkey: value\n";
+        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref"]);
+    }
+
+    #[test]
+    fn should_return_empty_vec_when_no_tags_modeline() {
+        let text = "key: value\nother: stuff\n";
+        assert_eq!(extract_custom_tags(text), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_return_empty_vec_when_tags_modeline_beyond_line_10() {
+        let mut text = String::new();
+        for _ in 0..10 {
+            text.push_str("key: value\n");
+        }
+        text.push_str("# yaml-language-server: $tags=!include\n");
+        assert_eq!(extract_custom_tags(&text), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_return_empty_vec_for_empty_input() {
+        assert_eq!(extract_custom_tags(""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_extract_tags_from_modeline_on_second_line() {
+        let text = "key: value\n# yaml-language-server: $tags=!include,!ref\n";
+        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref"]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════

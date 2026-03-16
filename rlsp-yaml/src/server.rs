@@ -5,14 +5,14 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentLink, DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams,
-    DocumentSymbolResponse, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
-    RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkDoneProgressOptions, WorkspaceEdit,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
+    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
+    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    SelectionRangeProviderCapability, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -20,8 +20,16 @@ use crate::document_store::DocumentStore;
 use crate::parser;
 use crate::schema::SchemaCache;
 
+/// Workspace settings received via LSP initialization options or
+/// `workspace/didChangeConfiguration`.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Settings {
+    pub custom_tags: Vec<String>,
+}
+
 // Lock ordering (must be acquired in this order to prevent deadlock):
-//   document_store → schema_associations → schema_cache → diagnostics
+//   document_store → schema_associations → schema_cache → diagnostics → settings
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,
@@ -30,6 +38,7 @@ pub struct Backend {
     /// In-memory schema cache shared across all documents.
     schema_cache: Mutex<SchemaCache>,
     diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
+    settings: Mutex<Settings>,
 }
 
 impl Backend {
@@ -41,7 +50,18 @@ impl Backend {
             schema_associations: Mutex::new(HashMap::new()),
             schema_cache: Mutex::new(SchemaCache::new()),
             diagnostics: Mutex::new(HashMap::new()),
+            settings: Mutex::new(Settings::default()),
         }
+    }
+
+    // Used in Task 3 (parse_and_publish integration).
+    #[allow(dead_code)]
+    pub(crate) fn get_custom_tags(&self) -> Vec<String> {
+        self.settings
+            .lock()
+            .ok()
+            .map(|s| s.custom_tags.clone())
+            .unwrap_or_default()
     }
 
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
@@ -163,11 +183,26 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let settings = params
+            .initialization_options
+            .and_then(|v| serde_json::from_value::<Settings>(v).ok())
+            .unwrap_or_default();
+        if let Ok(mut s) = self.settings.lock() {
+            *s = settings;
+        }
         Ok(InitializeResult {
             capabilities: Self::capabilities(),
             ..InitializeResult::default()
         })
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        if let Ok(settings) = serde_json::from_value::<Settings>(params.settings)
+            && let Ok(mut s) = self.settings.lock()
+        {
+            *s = settings;
+        }
     }
 
     async fn initialized(&self, _: InitializedParams) {
@@ -612,5 +647,28 @@ mod tests {
             caps.document_link_provider.is_some(),
             "capabilities should include document_link_provider"
         );
+    }
+
+    // ---- Settings deserialization ----
+
+    #[test]
+    fn settings_deserializes_custom_tags_from_json() {
+        let json = serde_json::json!({"customTags": ["!include", "!ref"]});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.custom_tags, vec!["!include", "!ref"]);
+    }
+
+    #[test]
+    fn settings_defaults_to_empty_custom_tags_when_field_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.custom_tags.is_empty());
+    }
+
+    #[test]
+    fn settings_accepts_empty_custom_tags_array() {
+        let json = serde_json::json!({"customTags": []});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.custom_tags.is_empty());
     }
 }
