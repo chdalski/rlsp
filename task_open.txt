@@ -16,34 +16,11 @@
 - [x] Schema support (loading, validation, completion, hover)
 - [x] Custom tags (unknown tag validation, modeline + workspace settings configuration)
 - [x] Code lens (schema title/URL at top of document)
-
-## Lower Priority (can defer)
-
-### Task 4: On-Type Formatting
-Auto-indent after `:`, `-`, `|`.
-
-**What to build:**
-- Server integration: add `document_on_type_formatting_provider` capability
-- Trigger characters: `\n` (newline)
-- Auto-indent logic:
-  - After `key:` -> indent for value
-  - After `- ` -> indent for sequence item content
-  - After `|` or `>` -> indent for block scalar content
-
----
-
-### Task 5: `!include` Document Links
-Show `!include` file paths as clickable document links.
-
-**What to build:**
-- Detect `!include <path>` tags in YAML values
-- Resolve the path relative to the current document
-- Show it as a clickable document link (extend `document_links.rs`)
-
----
+- [x] On-type formatting (newline auto-indent after colon, block scalar indicators)
+- [x] `!include` document links (file path resolution and clickable links)
 
 ## Current Test Coverage
-- 560 tests passing
+- 587 tests passing
 - Clippy clean with pedantic + nursery lints
 
 ## Architecture Notes
