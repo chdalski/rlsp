@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-16)
 **Created:** 2026-03-16
 
 ## Goal
@@ -52,7 +52,7 @@ no behavior changes, all existing tests must continue to pass.
 - [x] Task 8: Refactor `validators.rs` (d52d991)
 - [x] Task 9: Refactor `schema_validation.rs` (adf9638)
 - [x] Task 10: Refactor `on_type_formatting.rs` (12eeb91)
-- [ ] Task 11: Refactor `completion.rs`
+- [x] Task 11: Refactor `completion.rs` (d148030)
 
 ## Tasks
 
