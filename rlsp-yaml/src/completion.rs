@@ -109,15 +109,15 @@ pub fn complete_at(
             }
         }
         CursorContext::Value(key_name) => schema.map_or_else(
-            || suggest_values_for_key(&lines, &key_name),
+            || suggest_values_for_key(&lines, line_idx, &key_name),
             |s| {
                 let path = build_value_key_path(&lines, line_idx, current_indent, &key_name);
                 resolve_schema_path(s, &path).map_or_else(
-                    || suggest_values_for_key(&lines, &key_name),
+                    || suggest_values_for_key(&lines, line_idx, &key_name),
                     |prop_schema| {
                         let schema_items = schema_value_completions(prop_schema);
                         if schema_items.is_empty() {
-                            suggest_values_for_key(&lines, &key_name)
+                            suggest_values_for_key(&lines, line_idx, &key_name)
                         } else {
                             schema_items
                         }
@@ -256,8 +256,15 @@ fn collect_present_keys_at_indent(
     cursor_indent: usize,
 ) -> HashSet<String> {
     let mut keys = HashSet::new();
+    let (doc_start, doc_end) = document_range(lines, cursor_line);
 
-    for (i, line) in lines.iter().enumerate() {
+    for (i, line) in lines
+        .get(doc_start..=doc_end)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (i + doc_start, l))
+    {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -526,6 +533,10 @@ fn is_in_sequence_item(lines: &[&str], current_line: usize, current_indent: usiz
             continue;
         }
 
+        if is_document_separator(prev_trimmed) {
+            break;
+        }
+
         let prev_indent = indentation_level(prev_line);
 
         if prev_indent < current_indent {
@@ -763,6 +774,10 @@ fn collect_sibling_keys(lines: &[&str], current_line: usize, current_indent: usi
             continue;
         }
 
+        if is_document_separator(trimmed) {
+            break;
+        }
+
         let indent = indentation_level(line);
 
         if indent < current_indent {
@@ -786,6 +801,10 @@ fn collect_sibling_keys(lines: &[&str], current_line: usize, current_indent: usi
             continue;
         }
 
+        if is_document_separator(trimmed) {
+            break;
+        }
+
         let indent = indentation_level(line);
 
         if indent < current_indent {
@@ -803,10 +822,13 @@ fn collect_sibling_keys(lines: &[&str], current_line: usize, current_indent: usi
     keys
 }
 
-/// Suggest values for a key by finding the same key name elsewhere in the document.
-fn suggest_values_for_key(lines: &[&str], key_name: &str) -> Vec<CompletionItem> {
+/// Suggest values for a key by finding the same key name elsewhere in the same document.
+fn suggest_values_for_key(lines: &[&str], cursor_line: usize, key_name: &str) -> Vec<CompletionItem> {
     let mut seen = HashSet::new();
+    let (doc_start, doc_end) = document_range(lines, cursor_line);
     lines
+        .get(doc_start..=doc_end)
+        .unwrap_or_default()
         .iter()
         .filter_map(|line| {
             let trimmed = line.trim();
@@ -827,6 +849,27 @@ fn suggest_values_for_key(lines: &[&str], key_name: &str) -> Vec<CompletionItem>
             })
         })
         .collect()
+}
+
+/// Return true if the trimmed line is a YAML document separator (`---` or `...`).
+fn is_document_separator(trimmed: &str) -> bool {
+    trimmed == "---" || trimmed == "..."
+}
+
+/// Return the `(start, end)` line index range (both inclusive) for the document
+/// containing `cursor_line`.  The range is bounded by `---`/`...` separators
+/// immediately before and after the cursor line.
+fn document_range(lines: &[&str], cursor_line: usize) -> (usize, usize) {
+    let start = (0..cursor_line)
+        .rev()
+        .find(|&i| lines.get(i).is_some_and(|l| is_document_separator(l.trim())))
+        .map_or(0, |sep| sep + 1);
+
+    let end = (cursor_line + 1..lines.len())
+        .find(|&i| lines.get(i).is_some_and(|l| is_document_separator(l.trim())))
+        .map_or_else(|| lines.len().saturating_sub(1), |sep| sep.saturating_sub(1));
+
+    (start, end)
 }
 
 /// Get the indentation level (number of leading spaces) of a line.
@@ -1902,6 +1945,144 @@ mod tests {
             "'b' is on cursor line, should not appear"
         );
         assert!(labels.contains(&"c"), "'c' is not present, should appear");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group H — Multi-Document Boundary Tests
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 51 — sibling keys must not cross --- boundary
+    #[test]
+    fn should_not_suggest_sibling_keys_from_other_document() {
+        // doc1 has "alpha"; doc2 has "beta". Cursor on "beta" should not see "alpha".
+        let text = "alpha: 1\n---\nbeta: 2\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(2, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            !labels.contains(&"alpha"),
+            "should not suggest 'alpha' from document 1 when cursor is in document 2, got: {labels:?}"
+        );
+    }
+
+    // Test 52 — sibling keys must not cross ... boundary
+    #[test]
+    fn should_not_suggest_sibling_keys_across_document_end_marker() {
+        let text = "alpha: 1\n...\nbeta: 2\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(2, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            !labels.contains(&"alpha"),
+            "should not suggest 'alpha' from before '...' separator, got: {labels:?}"
+        );
+    }
+
+    // Test 53 — collect_present_keys_at_indent must not see keys from other document
+    #[test]
+    fn should_not_suppress_schema_key_present_only_in_other_document() {
+        // doc1 has "name: Alice"; doc2 has only "age: 30".
+        // Schema has "name" and "age". Cursor in doc2 — "name" should be suggested because
+        // it is not present in doc2.
+        let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
+        let text = "name: Alice\n---\nage: 30\n";
+        let docs = parse_docs(text);
+        // cursor on "age:" in doc2
+        let result = complete_at(text, docs.as_ref(), pos(2, 0), Some(&schema));
+
+        let labels = labels(&result);
+        assert!(
+            labels.contains(&"name"),
+            "should suggest 'name' because it is absent from document 2, got: {labels:?}"
+        );
+    }
+
+    // Test 54 — suggest_values_for_key must not include values from other document
+    #[test]
+    fn should_not_suggest_values_from_other_document() {
+        // doc1 has "env: production"; doc2 has "env: " (cursor here).
+        // Value completion for "env" in doc2 should not see "production" from doc1.
+        let text = "env: production\n---\nenv: \n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(2, 5), None);
+
+        let labels = labels(&result);
+        assert!(
+            !labels.contains(&"production"),
+            "should not suggest 'production' from document 1 when cursor is in document 2, got: {labels:?}"
+        );
+    }
+
+    // Test 55 — is_in_sequence_item must not cross --- boundary
+    #[test]
+    fn should_not_detect_sequence_context_from_other_document() {
+        // doc1 has a sequence item "- name: Alice"; doc2 has a plain mapping "host: local".
+        // Completion in doc2 should use mapping-sibling logic, not sequence-item logic.
+        let text = "items:\n  - name: Alice\n---\nhost: local\nport: 8080\n";
+        let docs = parse_docs(text);
+        // cursor on "host:" in doc2
+        let result = complete_at(text, docs.as_ref(), pos(3, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            labels.contains(&"port"),
+            "should suggest sibling key 'port' in document 2, got: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"name"),
+            "should not suggest 'name' from the sequence in document 1, got: {labels:?}"
+        );
+    }
+
+    // Test 56 — cursor on first line (no separator before it)
+    #[test]
+    fn should_handle_cursor_on_first_line_of_multi_doc_file() {
+        let text = "alpha: 1\n---\nbeta: 2\n";
+        let docs = parse_docs(text);
+        // cursor on "alpha:" — first line, no separator before it
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            !labels.contains(&"beta"),
+            "should not suggest 'beta' from document 2 when cursor is on line 0, got: {labels:?}"
+        );
+    }
+
+    // Test 57 — cursor on last line of file (no separator after it)
+    #[test]
+    fn should_handle_cursor_on_last_line_of_multi_doc_file() {
+        let text = "alpha: 1\n---\nbeta: 2\ngamma: 3\n";
+        let docs = parse_docs(text);
+        // cursor on last line "gamma:"
+        let result = complete_at(text, docs.as_ref(), pos(3, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            labels.contains(&"beta"),
+            "should suggest sibling 'beta' from the same document, got: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"alpha"),
+            "should not suggest 'alpha' from document 1, got: {labels:?}"
+        );
+    }
+
+    // Test 58 — consecutive separators (empty document between them)
+    #[test]
+    fn should_handle_consecutive_document_separators() {
+        let text = "alpha: 1\n---\n---\nbeta: 2\n";
+        let docs = parse_docs(text);
+        // cursor on "beta:" — the document between the two --- lines is empty
+        let result = complete_at(text, docs.as_ref(), pos(3, 0), None);
+
+        let labels = labels(&result);
+        assert!(
+            !labels.contains(&"alpha"),
+            "should not suggest 'alpha' from document 1 through empty middle document, got: {labels:?}"
+        );
     }
 
     // Test 50 — lock ordering: document_store released before schema_associations
