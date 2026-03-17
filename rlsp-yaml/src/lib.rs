@@ -12,6 +12,7 @@ pub mod rename;
 pub mod schema;
 pub mod schema_validation;
 pub mod selection;
+pub mod semantic_tokens;
 pub mod server;
 pub mod symbols;
 pub mod validators;

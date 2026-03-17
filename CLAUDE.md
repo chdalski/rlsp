@@ -55,6 +55,7 @@ the project exists. -->
 │       ├── schema.rs           # JSON Schema types, parsing, HTTP fetching, caching
 │       ├── schema_validation.rs  # Schema-driven diagnostic validation
 │       ├── selection.rs    # Selection ranges (AST-based, saphyr MarkedYamlOwned)
+│       ├── semantic_tokens.rs  # Semantic token provider
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)
 └── yaml-language-server/   # TypeScript YAML LS (Red Hat upstream, v1.20.0)
