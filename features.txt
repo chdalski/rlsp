@@ -9,7 +9,7 @@ feasibility, and alignment with existing infrastructure.
 Tier 1 — High Impact, Feasible Now
 ====================================
 
-Duplicate Key Detection
+Duplicate Key Detection [won't implement]
 -----------------------
 Priority: 1
 Related: #1145 (BigInt keys false reported as duplicate)
@@ -19,7 +19,7 @@ a diagnostic when duplicate keys are found in a mapping.
 Note: Validator infrastructure already exists (anchors,
 flow style, key ordering) — this follows the same pattern.
 
-Expected Properties in Diagnostic Messages
+Expected Properties in Diagnostic Messages [completed]
 -------------------------------------------
 Priority: 2
 Related: #1123
@@ -28,7 +28,7 @@ the expected property names to help users fix the issue.
 Note: schema_validation.rs already reports "schemaRequired"
 diagnostics — enriching the message text is a small change.
 
-Exclude Deprecated Properties from Completion
+Exclude Deprecated Properties from Completion [completed]
 ----------------------------------------------
 Priority: 3
 Related: #833
@@ -41,7 +41,7 @@ completion.rs — checking the flag is minimal work.
 Tier 2 — Medium Impact, Moderate Effort
 =========================================
 
-Multi-Required Snippet Completion
+Multi-Required Snippet Completion [completed]
 -----------------------------------
 Priority: 4
 Related: #1134
@@ -52,14 +52,14 @@ has a bug where required keys with enum constraints are
 skipped. We should implement the feature correctly from
 the start.
 
-Hover Formatting Improvements
+Hover Formatting Improvements [completed]
 ------------------------------
 Priority: 5
 Related: #791
 Format JSON examples in hover with proper indentation
 instead of single-line JSON stringify output.
 
-Schema Disable via Modeline
+Schema Disable via Modeline [completed]
 ----------------------------
 Priority: 6
 Related: #796
@@ -71,7 +71,7 @@ Adding a sentinel value is a small parser change.
 Tier 3 — Valuable but Higher Effort
 =====================================
 
-Semantic Highlighting
+Semantic Highlighting [TODO]
 ---------------------
 Priority: 7
 Related: #838
@@ -82,7 +82,7 @@ Note: Requires full SemanticTokensProvider protocol —
 token types, legends, delta encoding. Significant new
 surface area.
 
-Schema Association Configuration
+Schema Association Configuration [TODO]
 ---------------------------------
 Priority: 8
 Related: #1140, #828, #824
@@ -90,7 +90,7 @@ More flexible file-to-schema mapping: disable association
 for specific files, define multiple validation patterns,
 allow users to change default schema URLs.
 
-File Watcher Registration
+File Watcher Registration [TODO]
 --------------------------
 Priority: 9
 Related: #1084
@@ -101,7 +101,7 @@ editor extension to push notifications.
 Tier 4 — Niche or High Effort / Low Return
 ============================================
 
-Tab-to-Spaces On-Type Formatting
+Tab-to-Spaces On-Type Formatting [won't implement]
 ---------------------------------
 Priority: 10
 Related: #1056, #862
@@ -110,7 +110,7 @@ Could add tab-to-spaces conversion on typing tab characters.
 Note: Most editors handle tab-to-spaces natively. Risk of
 conflicting with editor settings.
 
-Multiple Schemas per File
+Multiple Schemas per File [won't implement]
 --------------------------
 Priority: 11
 Related: #1082, #808, #800
@@ -120,7 +120,7 @@ a single document.
 Note: Requires significant architecture changes for
 per-sub-value schema assignment.
 
-Embedded Language Support
+Embedded Language Support [won't implement]
 --------------------------
 Priority: 12
 Related: #1210
@@ -129,7 +129,7 @@ languages (JSON, SQL, etc.) within YAML string values.
 Note: Very high effort — language embedding, delegating
 to sub-LSPs. Niche use case.
 
-Localized Validation Messages
+Localized Validation Messages [won't implement]
 ------------------------------
 Priority: 13
 Related: #1131
