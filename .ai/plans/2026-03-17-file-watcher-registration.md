@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-17)
 **Created:** 2026-03-17
 
 ## Goal
@@ -28,7 +28,7 @@ to push notifications via `didOpen`/`didChange`.
 ## Steps
 
 - [x] Clarify approach with user
-- [ ] Implement file watcher registration
+- [x] Implement file watcher registration (2f181d3)
 
 ## Tasks
 
