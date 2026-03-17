@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-17)
 **Created:** 2026-03-17
 
 ## Goal
@@ -30,7 +30,7 @@ Kubernetes schema) without editing the YAML files themselves.
 ## Steps
 
 - [x] Clarify approach with user
-- [ ] Implement schema association configuration
+- [x] Implement schema association configuration (717015f)
 
 ## Tasks
 
