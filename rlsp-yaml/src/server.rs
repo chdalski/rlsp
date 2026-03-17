@@ -13,9 +13,10 @@ use tower_lsp::lsp_types::{
     FoldingRangeParams, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
     PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
-    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WatchKind,
-    WorkDoneProgressOptions, WorkspaceEdit,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -257,6 +258,13 @@ impl Backend {
                 first_trigger_character: "\n".to_string(),
                 more_trigger_character: None,
             }),
+            semantic_tokens_provider: Some(
+                SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                    legend: crate::semantic_tokens::legend(),
+                    full: Some(SemanticTokensFullOptions::Bool(true)),
+                    ..SemanticTokensOptions::default()
+                }),
+            ),
             ..ServerCapabilities::default()
         }
     }
@@ -634,6 +642,29 @@ impl LanguageServer for Backend {
         Ok(Some(edits))
     }
 
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        let tokens = crate::semantic_tokens::semantic_tokens(&text);
+        if tokens.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -932,5 +963,14 @@ mod tests {
     fn should_advertise_on_type_formatting_provider() {
         let caps = Backend::capabilities();
         assert!(caps.document_on_type_formatting_provider.is_some());
+    }
+
+    #[test]
+    fn should_advertise_semantic_tokens_provider() {
+        let caps = Backend::capabilities();
+        assert!(
+            caps.semantic_tokens_provider.is_some(),
+            "capabilities should include semantic_tokens_provider"
+        );
     }
 }
