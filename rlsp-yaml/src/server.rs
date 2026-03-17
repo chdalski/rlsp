@@ -6,14 +6,16 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CodeLens,
     CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DidChangeConfigurationParams, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions,
     DocumentLinkParams, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams,
-    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
-    SelectionRangeProviderCapability, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher, FoldingRange,
+    FoldingRangeParams, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
+    PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WatchKind,
+    WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -285,11 +287,44 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let _ = &self.client;
+        let watchers = vec![
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yaml".to_string()),
+                kind: Some(WatchKind::all()),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yml".to_string()),
+                kind: Some(WatchKind::all()),
+            },
+        ];
+        let registration = Registration {
+            id: "yaml-file-watcher".to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                watchers,
+            })
+            .ok(),
+        };
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let _ = client.register_capability(vec![registration]).await;
+        });
     }
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
+        // Collect open documents, releasing the lock before any async work.
+        let docs: Vec<(Url, String)> = if let Ok(store) = self.document_store.lock() {
+            store.all_documents()
+        } else {
+            return;
+        };
+        for (uri, text) in docs {
+            self.parse_and_publish(uri, &text).await;
+        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
