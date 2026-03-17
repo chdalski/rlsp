@@ -9,7 +9,7 @@ feasibility, and alignment with existing infrastructure.
 Tier 1 — High Impact, Feasible Now
 ====================================
 
-Duplicate Key Detection [won't implement]
+Duplicate Key Detection [completed]
 -----------------------
 Priority: 1
 Related: #1145 (BigInt keys false reported as duplicate)
@@ -71,7 +71,7 @@ Adding a sentinel value is a small parser change.
 Tier 3 — Valuable but Higher Effort
 =====================================
 
-Semantic Highlighting [TODO]
+Semantic Highlighting [completed]
 ---------------------
 Priority: 7
 Related: #838
@@ -82,7 +82,7 @@ Note: Requires full SemanticTokensProvider protocol —
 token types, legends, delta encoding. Significant new
 surface area.
 
-Schema Association Configuration [TODO]
+Schema Association Configuration [completed]
 ---------------------------------
 Priority: 8
 Related: #1140, #828, #824
@@ -90,7 +90,7 @@ More flexible file-to-schema mapping: disable association
 for specific files, define multiple validation patterns,
 allow users to change default schema URLs.
 
-File Watcher Registration [TODO]
+File Watcher Registration [completed]
 --------------------------
 Priority: 9
 Related: #1084
