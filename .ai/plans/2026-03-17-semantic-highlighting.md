@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-17)
 **Created:** 2026-03-17
 
 ## Goal
@@ -32,7 +32,7 @@ and comments each get distinct token types.
 ## Steps
 
 - [x] Clarify approach with user
-- [ ] Implement semantic token provider
+- [x] Implement semantic token provider (3402902)
 
 ## Tasks
 
