@@ -70,6 +70,14 @@ impl DocumentStore {
     pub fn get_marked_yaml(&self, uri: &Url) -> Option<&Vec<MarkedYamlOwned>> {
         self.documents.get(uri)?.marked_yaml.as_ref()
     }
+
+    #[must_use]
+    pub fn all_documents(&self) -> Vec<(Url, String)> {
+        self.documents
+            .iter()
+            .map(|(uri, doc)| (uri.clone(), doc.text.clone()))
+            .collect()
+    }
 }
 
 /// Parse text into a `MarkedYamlOwned` AST. Returns `None` on parse failure.
@@ -249,6 +257,30 @@ mod tests {
         store.close(&uri);
 
         assert!(store.get_yaml(&uri).is_none());
+    }
+
+    #[test]
+    fn all_documents_returns_all_open_documents() {
+        let mut store = DocumentStore::new();
+        let uri_a = test_uri("a.yaml");
+        let uri_b = test_uri("b.yaml");
+
+        store.open(uri_a.clone(), "alpha".to_string());
+        store.open(uri_b.clone(), "beta".to_string());
+
+        let mut docs = store.all_documents();
+        docs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(docs.len(), 2);
+        let texts: Vec<&str> = docs.iter().map(|(_, t)| t.as_str()).collect();
+        assert!(texts.contains(&"alpha"));
+        assert!(texts.contains(&"beta"));
+    }
+
+    #[test]
+    fn all_documents_returns_empty_when_store_is_empty() {
+        let store = DocumentStore::new();
+        assert!(store.all_documents().is_empty());
     }
 
     #[test]
