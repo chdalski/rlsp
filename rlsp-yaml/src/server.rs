@@ -28,6 +28,8 @@ use crate::schema::SchemaCache;
 pub struct Settings {
     pub custom_tags: Vec<String>,
     pub key_ordering: bool,
+    /// Maps schema URL → glob pattern (upstream yaml-language-server convention).
+    pub schemas: HashMap<String, String>,
 }
 
 // Lock ordering (must be acquired in this order to prevent deadlock):
@@ -68,6 +70,22 @@ impl Backend {
         self.settings.lock().ok().is_some_and(|s| s.key_ordering)
     }
 
+    pub(crate) fn get_schema_associations(&self) -> Vec<crate::schema::SchemaAssociation> {
+        self.settings
+            .lock()
+            .ok()
+            .map(|s| {
+                s.schemas
+                    .iter()
+                    .map(|(url, pattern)| crate::schema::SchemaAssociation {
+                        pattern: pattern.clone(),
+                        url: url.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
         let parsed = Url::parse(uri).ok()?;
         let store = self.document_store.lock().ok()?;
@@ -78,6 +96,59 @@ impl Backend {
         let parsed = Url::parse(uri).ok()?;
         let diags = self.diagnostics.lock().ok()?;
         diags.get(&parsed).cloned()
+    }
+
+    /// Normalize `schema_url`, record the association, fetch/cache the schema,
+    /// and append schema-validation diagnostics to `diagnostics`.
+    ///
+    /// No Mutex guard is held across any `.await` point.
+    async fn process_schema(
+        &self,
+        uri: &Url,
+        schema_url: &str,
+        diagnostics: &mut Vec<Diagnostic>,
+        documents: &[saphyr::YamlOwned],
+        text: &str,
+    ) {
+        let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();
+
+        if let Some(url) = normalised {
+            // Record the association (lock → insert → drop).
+            if let Ok(mut assoc) = self.schema_associations.lock() {
+                assoc.insert(uri.clone(), url.clone());
+            }
+
+            // Check cache without holding the lock across spawn_blocking.
+            let cached = self
+                .schema_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(&url).cloned());
+
+            let schema = if let Some(s) = cached {
+                Some(s)
+            } else {
+                let url_clone = url.clone();
+                let join_result =
+                    tokio::task::spawn_blocking(move || crate::schema::fetch_schema(&url_clone))
+                        .await;
+                let fetched: Option<crate::schema::JsonSchema> =
+                    join_result.ok().and_then(std::result::Result::ok);
+
+                if let Some(ref s) = fetched
+                    && let Ok(mut cache) = self.schema_cache.lock()
+                {
+                    cache.insert(url, s.clone());
+                }
+                fetched
+            };
+
+            if let Some(s) = schema {
+                diagnostics.extend(crate::schema_validation::validate_schema(
+                    text, documents, &s,
+                ));
+            }
+        }
     }
 
     async fn parse_and_publish(&self, uri: Url, text: &str) {
@@ -126,51 +197,20 @@ impl Backend {
                 // key ordering, duplicate keys) already ran above and their
                 // diagnostics are retained.
             } else {
-                // Normalise and validate the URL before attempting a fetch.
-                let normalised = crate::schema::validate_and_normalize_url(&schema_url).ok();
-
-                if let Some(url) = normalised {
-                    // Record the association (lock → insert → drop).
-                    if let Ok(mut assoc) = self.schema_associations.lock() {
-                        assoc.insert(uri.clone(), url.clone());
-                    }
-
-                    // Check cache without holding the lock across spawn_blocking.
-                    let cached = self
-                        .schema_cache
-                        .lock()
-                        .ok()
-                        .and_then(|cache| cache.get(&url).cloned());
-
-                    let schema = if let Some(s) = cached {
-                        Some(s)
-                    } else {
-                        // Fetch blocking-ly on a thread-pool thread.
-                        let url_clone = url.clone();
-                        let join_result = tokio::task::spawn_blocking(move || {
-                            crate::schema::fetch_schema(&url_clone)
-                        })
-                        .await;
-                        let fetched: Option<crate::schema::JsonSchema> =
-                            join_result.ok().and_then(std::result::Result::ok);
-
-                        // Store in cache (first-write-wins).
-                        if let Some(ref s) = fetched
-                            && let Ok(mut cache) = self.schema_cache.lock()
-                        {
-                            cache.insert(url, s.clone());
-                        }
-                        fetched
-                    };
-
-                    if let Some(s) = schema {
-                        diagnostics.extend(crate::schema_validation::validate_schema(
-                            text,
-                            &result.documents,
-                            &s,
-                        ));
-                    }
-                }
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                    .await;
+            }
+        } else {
+            // No modeline — check workspace associations.
+            // get_schema_associations() acquires and releases the settings lock
+            // before any schema_associations or schema_cache lock is taken below.
+            let associations = self.get_schema_associations();
+            let filename = uri.path();
+            if let Some(schema_url) =
+                crate::schema::match_schema_by_filename(filename, &associations)
+            {
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                    .await;
             }
         }
 
@@ -778,6 +818,54 @@ mod tests {
         let json = serde_json::json!({});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert!(!settings.key_ordering);
+    }
+
+    // ---- Schemas deserialization ----
+
+    #[test]
+    fn settings_deserializes_schemas_from_json() {
+        let json = serde_json::json!({"schemas": {"https://example.com/schema.json": "*.yaml"}});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            settings
+                .schemas
+                .get("https://example.com/schema.json")
+                .map(String::as_str),
+            Some("*.yaml")
+        );
+    }
+
+    #[test]
+    fn settings_defaults_to_empty_schemas_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.schemas.is_empty());
+    }
+
+    // ---- Schema associations wiring ----
+
+    #[test]
+    fn get_schema_associations_returns_empty_by_default() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert!(backend.get_schema_associations().is_empty());
+    }
+
+    #[test]
+    fn get_schema_associations_converts_settings_to_vec() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({"schemas": {"https://example.com/schema.json": "*.yaml"}});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        let associations = backend.get_schema_associations();
+        assert_eq!(associations.len(), 1);
+        assert_eq!(associations[0].url, "https://example.com/schema.json");
+        assert_eq!(associations[0].pattern, "*.yaml");
     }
 
     // ---- Custom tags wiring ----
