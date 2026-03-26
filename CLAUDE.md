@@ -6,9 +6,12 @@ which files they touch.
 ## Overview
 
 _The Rust Language Server Project_ is a collection of
-language server implementations AI-written in Rust.
-The purpose is to provide users with small, fast
-implementations with minimal memory footprint.
+language server implementations written in Rust,
+built entirely by AI agents. No human-written
+application code — every line of source is authored,
+reviewed, and committed by AI. The purpose is to
+provide users with small, fast implementations with
+minimal memory footprint.
 
 ## Project Structure
 
@@ -67,6 +70,14 @@ rlsp-<language>/
     ├── configuration.md       # all server settings — update when config changes
     └── feature-log.md         # feature decisions — update when features are added or rejected
 ```
+
+## Contribution Model
+
+This project is AI-written. External contributions
+are accepted as GitHub issues (bug reports and feature
+requests), not as pull requests or patches. The
+maintainer reviews issues and AI implements accepted
+changes.
 
 ## Trusted Sources
 
