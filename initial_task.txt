@@ -1,3 +1,0 @@
-We want to implement a yaml lsp in rust.
-The directory @yaml-language-server/ contains a typescript yaml language server that can be used as guidance - however it should be just that - a guiding light.
-The lsp should be created in the crate @rlsp-yaml - part of the workspace.
