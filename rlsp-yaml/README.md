@@ -97,20 +97,11 @@ vim.lsp.start({
 })
 ```
 
-## Settings
+## Configuration
 
-Settings can be passed via `initializationOptions` or `workspace/didChangeConfiguration`:
+Settings are passed via `initializationOptions` or `workspace/didChangeConfiguration`. Per-document modelines override workspace settings.
 
-```json
-{
-  "customTags": ["!include", "!ref"],
-  "keyOrdering": false,
-  "schemas": {
-    "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
-    "https://raw.githubusercontent.com/.../schema.json": "deploy/**/*.yaml"
-  }
-}
-```
+See [docs/configuration.md](docs/configuration.md) for the full reference — workspace settings, modelines, editor setup examples, and schema fetching details.
 
 ## License
 
