@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-26
 
 ## Goal
@@ -25,11 +25,11 @@ issues-only contribution model.
 
 ## Steps
 
-- [ ] Add crates.io metadata to rlsp-yaml/Cargo.toml
-- [ ] Add workspace-level metadata to root Cargo.toml
-- [ ] Add SPDX headers to all 20 .rs source files
+- [x] Add crates.io metadata to rlsp-yaml/Cargo.toml
+- [x] Add workspace-level metadata to root Cargo.toml
+- [x] Add SPDX headers to all 20 .rs source files
 - [ ] Update CLAUDE.md (Overview + Contribution Model)
-- [ ] Verify `cargo package --list` looks correct
+- [x] Verify `cargo package --list` looks correct
 
 ## Tasks
 
@@ -111,9 +111,12 @@ Update the project-root CLAUDE.md with two changes:
 
 ## Decisions
 
-- **MSRV = 1.85.0** — minimum Rust version supporting
-  edition 2024. Declaring this ensures users know what
-  toolchain they need.
+- **MSRV = 1.87.0** — initially planned 1.85 (minimum for
+  edition 2024), but bumped to 1.87 because the codebase
+  uses `str::as_str()` in a const context
+  (`code_actions.rs`), which is only stable from 1.87.
+  The `incompatible_msrv` clippy lint (deny-level) caught
+  this.
 - **Workspace-level metadata inheritance** — `authors`,
   `license`, `repository` defined once in the workspace
   root and inherited by member crates. Reduces duplication
