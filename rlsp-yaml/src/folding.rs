@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
 /// Compute folding ranges for the given YAML text.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use saphyr::{ScalarOwned, YamlOwned};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 

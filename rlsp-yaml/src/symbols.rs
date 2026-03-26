@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use std::fmt::Write;
 
 use saphyr::{ScalarOwned, YamlOwned};

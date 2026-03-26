@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use regex::Regex;
 use tower_lsp::lsp_types::{DocumentLink, Position, Range, Url};
 

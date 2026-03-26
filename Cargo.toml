@@ -3,6 +3,11 @@ resolver = "2"
 
 members = ["rlsp-yaml"]
 
+[workspace.package]
+authors = ["Christoph Dalski"]
+license = "MIT"
+repository = "https://github.com/cdalski/rlsp"
+
 [workspace.lints.clippy]
 # https://github.com/rust-lang/cargo/issues/12918
 all = { level = "warn", priority = -1 }

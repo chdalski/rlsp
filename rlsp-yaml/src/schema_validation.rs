@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 

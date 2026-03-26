@@ -2,6 +2,14 @@
 name = "rlsp-yaml"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
+description = "A fast, lightweight YAML language server"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage = "https://github.com/cdalski/rlsp"
+keywords = ["yaml", "lsp", "language-server"]
+categories = ["development-tools", "text-editors"]
 
 [lints]
 workspace = true

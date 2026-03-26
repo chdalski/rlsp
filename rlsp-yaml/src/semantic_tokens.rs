@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };

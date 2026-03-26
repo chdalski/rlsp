@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 /// A token found in the text: either an anchor (`&name`) or an alias (`*name`).

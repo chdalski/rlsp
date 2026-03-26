@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use saphyr::{MarkedYamlOwned, Marker, YamlDataOwned};
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 

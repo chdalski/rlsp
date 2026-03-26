@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
 /// Compute text edits for on-type formatting when a newline is typed.

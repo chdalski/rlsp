@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use rlsp_yaml::server::Backend;
 use tokio::io::{stdin, stdout};
 use tower_lsp::{LspService, Server};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, Diagnostic, NumberOrString, Position, Range, TextEdit,
     WorkspaceEdit,

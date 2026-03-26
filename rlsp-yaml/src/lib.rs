@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pub mod code_actions;
 pub mod code_lens;
 pub mod completion;

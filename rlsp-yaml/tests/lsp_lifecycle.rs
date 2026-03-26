@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
 use serde_json::json;
