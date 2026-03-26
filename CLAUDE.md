@@ -37,9 +37,6 @@ implementations with minimal memory footprint.
 │       ├── semantic_tokens.rs  # Semantic token provider
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)
-└── yaml-language-server/   # TypeScript YAML LS (Red Hat upstream, v1.20.0)
-    ├── src/                # TypeScript source
-    └── test/               # Mocha tests
 ```
 
 ## Build and Test
