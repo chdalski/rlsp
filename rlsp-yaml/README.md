@@ -5,6 +5,7 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 ## Features
 
 **Core editing support:**
+
 - Hover information (with schema-aware descriptions and formatted examples)
 - Completion (structural + schema-driven, with snippet support)
 - Document symbols (outline view)
@@ -19,6 +20,7 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 - Semantic highlighting (keys, values, anchors, aliases, tags, comments)
 
 **Validation:**
+
 - YAML syntax errors
 - Duplicate key detection
 - Unused anchor warnings
@@ -28,6 +30,7 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 - JSON Schema validation (required properties, type checking, enum constraints)
 
 **Schema support:**
+
 - Schema association via modeline (`# yaml-language-server: $schema=<url>`)
 - Schema association via workspace settings (glob-based `schemas` mapping)
 - Schema disable via `$schema=none` modeline
@@ -37,6 +40,7 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 - Expected properties listed in diagnostic messages
 
 **Infrastructure:**
+
 - File watcher registration (reacts to external file changes)
 - Workspace settings (`customTags`, `keyOrdering`, `schemas`)
 
@@ -44,7 +48,7 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 
 Pure-function design: each feature module exports a function that takes text (and optionally parsed YAML or schema) and returns LSP types. The server layer (`server.rs`) handles document storage, schema caching, and delegates to these pure functions.
 
-```
+```text
 src/
 ├── main.rs              # Binary entry point
 ├── lib.rs               # Module declarations
@@ -89,6 +93,7 @@ cargo build --release
 **VS Code:** Use a generic LSP client extension and configure it to run the binary for YAML files.
 
 **Neovim (nvim-lspconfig):**
+
 ```lua
 vim.lsp.start({
   name = "rlsp-yaml",
