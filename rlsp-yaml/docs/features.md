@@ -1,0 +1,122 @@
+# Potential Features from Upstream yaml-language-server Issues
+
+Sourced from: <https://github.com/redhat-developer/yaml-language-server/issues>
+
+Prioritized into tiers by user impact, implementation feasibility, and alignment with existing infrastructure.
+
+## Tier 1 — High Impact, Feasible Now
+
+### Duplicate Key Detection [completed]
+
+**Priority:** 1
+**Related:** #1145 (BigInt keys false reported as duplicate)
+
+Our server currently has no duplicate key detection at all. saphyr silently keeps the last occurrence. We should emit a diagnostic when duplicate keys are found in a mapping.
+
+> Validator infrastructure already exists (anchors, flow style, key ordering) — this follows the same pattern.
+
+### Expected Properties in Diagnostic Messages [completed]
+
+**Priority:** 2
+**Related:** #1123
+
+Our "missing required property" diagnostics could list the expected property names to help users fix the issue.
+
+> `schema_validation.rs` already reports "schemaRequired" diagnostics — enriching the message text is a small change.
+
+### Exclude Deprecated Properties from Completion [completed]
+
+**Priority:** 3
+**Related:** #833
+
+We don't check the `deprecated` flag in JSON Schema when building completion items. Deprecated properties should be de-prioritized or marked with a strikethrough.
+
+> Schema properties are already iterated in `completion.rs` — checking the flag is minimal work.
+
+## Tier 2 — Medium Impact, Moderate Effort
+
+### Multi-Required Snippet Completion [completed]
+
+**Priority:** 4
+**Related:** #1134
+
+When completing a key in a mapping, offer a snippet that inserts all remaining required properties at once (with placeholder values). The upstream server supports this but has a bug where required keys with enum constraints are skipped. We should implement the feature correctly from the start.
+
+### Hover Formatting Improvements [completed]
+
+**Priority:** 5
+**Related:** #791
+
+Format JSON examples in hover with proper indentation instead of single-line JSON stringify output.
+
+### Schema Disable via Modeline [completed]
+
+**Priority:** 6
+**Related:** #796
+
+Allow users to disable schema validation for a specific file using a modeline like `# yaml-language-server: $schema=none`.
+
+> Modeline parsing already exists (`extract_schema_url`). Adding a sentinel value is a small parser change.
+
+## Tier 3 — Valuable but Higher Effort
+
+### Semantic Highlighting [completed]
+
+**Priority:** 7
+**Related:** #838
+
+We don't provide semantic tokens. This would enable richer syntax highlighting for keys, values, anchors, aliases, tags, and comments.
+
+> Requires full SemanticTokensProvider protocol — token types, legends, delta encoding. Significant new surface area.
+
+### Schema Association Configuration [completed]
+
+**Priority:** 8
+**Related:** #1140, #828, #824
+
+More flexible file-to-schema mapping: disable association for specific files, define multiple validation patterns, allow users to change default schema URLs.
+
+### File Watcher Registration [completed]
+
+**Priority:** 9
+**Related:** #1084
+
+Register `workspace/didChangeWatchedFiles` capability so the server reacts to file changes without relying on the editor extension to push notifications.
+
+## Tier 4 — Niche or High Effort / Low Return
+
+### Tab-to-Spaces On-Type Formatting [won't implement]
+
+**Priority:** 10
+**Related:** #1056, #862
+
+Our on-type formatting only handles newline insertion. Could add tab-to-spaces conversion on typing tab characters.
+
+> Most editors handle tab-to-spaces natively. Risk of conflicting with editor settings.
+
+### Multiple Schemas per File [won't implement]
+
+**Priority:** 11
+**Related:** #1082, #808, #800
+
+Support applying different schemas to different documents within a multi-document YAML file, or to sub-values within a single document.
+
+> Requires significant architecture changes for per-sub-value schema assignment.
+
+### Embedded Language Support [won't implement]
+
+**Priority:** 12
+**Related:** #1210
+
+Support syntax highlighting and validation for embedded languages (JSON, SQL, etc.) within YAML string values.
+
+> Very high effort — language embedding, delegating to sub-LSPs. Niche use case.
+
+### Localized Validation Messages [won't implement]
+
+**Priority:** 13
+**Related:** #1131
+
+Internationalize diagnostic messages so they can be presented in the user's locale.
+
+> Cross-cutting concern touching every diagnostic string. High maintenance cost for a developer-focused tool.
