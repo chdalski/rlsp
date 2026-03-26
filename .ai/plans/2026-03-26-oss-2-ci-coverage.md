@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-26)
 **Created:** 2026-03-26
 
 ## Goal
@@ -22,11 +22,11 @@ for automated dependency updates.
 
 ## Steps
 
-- [ ] Create CI workflow (test, lint, format check)
-- [ ] Create coverage workflow with Codecov upload
-- [ ] Add codecov.yml configuration
-- [ ] Create dependabot.yml
-- [ ] Add CI and coverage badges to root README
+- [x] Create CI workflow (test, lint, format check)
+- [x] Create coverage workflow with Codecov upload
+- [x] Add codecov.yml configuration
+- [x] Create dependabot.yml
+- [ ] Add CI and coverage badges to root README (deferred to Plan 5)
 
 ## Tasks
 
