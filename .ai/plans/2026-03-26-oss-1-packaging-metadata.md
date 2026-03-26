@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-26)
 **Created:** 2026-03-26
 
 ## Goal
@@ -28,7 +28,7 @@ issues-only contribution model.
 - [x] Add crates.io metadata to rlsp-yaml/Cargo.toml
 - [x] Add workspace-level metadata to root Cargo.toml
 - [x] Add SPDX headers to all 20 .rs source files
-- [ ] Update CLAUDE.md (Overview + Contribution Model)
+- [x] Update CLAUDE.md (Overview + Contribution Model)
 - [x] Verify `cargo package --list` looks correct
 
 ## Tasks
