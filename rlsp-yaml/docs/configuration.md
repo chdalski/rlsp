@@ -15,6 +15,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "customTags": ["!include", "!ref"],
   "keyOrdering": false,
   "kubernetesVersion": "1.32.0",
+  "schemaStore": true,
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": "deploy/**/*.yaml"
@@ -51,10 +52,22 @@ Set this to match your cluster version to get accurate validation:
 { "kubernetesVersion": "1.29.0" }
 ```
 
-Schema resolution priority (highest to lowest):
-1. `$schema=` modeline in the document
-2. Workspace `schemas` glob match
-3. Kubernetes auto-detection (this setting)
+### `schemaStore`
+
+- **Type:** `boolean`
+- **Default:** `true`
+
+Enable automatic schema association using the [SchemaStore](https://www.schemastore.org/) catalog. When enabled, the server fetches the SchemaStore catalog on first use and matches each YAML file's path against the catalog's `fileMatch` patterns. If a match is found, the corresponding schema is fetched and used for validation, completion, and hover.
+
+This is the lowest-priority fallback — it only applies when no modeline, workspace glob, or Kubernetes auto-detection match is found for a file.
+
+The catalog is fetched lazily (on first need) and cached in memory for the session. If the catalog fetch fails (e.g. no network), the server continues without SchemaStore and no diagnostics are lost.
+
+To disable SchemaStore association:
+
+```json
+{ "schemaStore": false }
+```
 
 ### `schemas`
 
@@ -110,6 +123,7 @@ vim.lsp.start({
     customTags = { "!include", "!ref" },
     keyOrdering = false,
     kubernetesVersion = "1.32.0",
+    schemaStore = true,
     schemas = {
       ["https://json.schemastore.org/github-workflow"] = ".github/workflows/*.yml",
     },
@@ -133,7 +147,19 @@ Some validators are always active; others depend on settings.
 | Flow style warnings | always active | — |
 | Key ordering | `keyOrdering` | off |
 | Custom tag validation | `customTags` | off (empty = disabled) |
-| JSON Schema validation | `schemas` / modeline / K8s auto-detect | off (no schema = disabled) |
+| JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
+| SchemaStore auto-association | `schemaStore` | on |
+
+## Schema Resolution Priority
+
+When a YAML file is opened or changed, the server resolves a schema using the following chain (first match wins):
+
+1. **Modeline** — `# yaml-language-server: $schema=<url>` in the first 10 lines of the file. Highest priority; overrides everything else. Use `$schema=none` to disable schema processing for a specific file.
+2. **Workspace glob** — the `schemas` setting maps schema URLs to glob patterns. The first pattern that matches the file's URI path wins.
+3. **Kubernetes auto-detection** — if the document's root mapping contains both `apiVersion` and `kind`, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using the configured `kubernetesVersion`.
+4. **SchemaStore** — if enabled (`schemaStore: true`, the default), the server fetches the [SchemaStore](https://www.schemastore.org/) catalog and matches the file's path against catalog `fileMatch` patterns. The catalog is fetched lazily on first need and cached for the session.
+
+If none of the above produce a match, no schema is applied and only syntax/structural validators run.
 
 ## Schema Fetching
 

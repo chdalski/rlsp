@@ -80,7 +80,7 @@ Auto-detect Kubernetes manifests by inspecting root-level `apiVersion` and `kind
 
 > Motivated by redhat-developer/yaml-language-server#1213 — wrong schema version applied to HPA v2 manifests. Our approach resolves the correct version-specific schema automatically.
 
-### SchemaStore Integration
+### SchemaStore Integration [completed]
 
 **Priority:** 11
 
