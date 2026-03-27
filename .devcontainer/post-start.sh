@@ -96,7 +96,7 @@ SELECTED="${NAMES[$((RANDOM % ${#NAMES[@]}))]}"
 
 FIRST=$(echo "$SELECTED" | awk '{print $1}' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
 SECOND=$(echo "$SELECTED" | awk '{print $2}' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
-EMAIL="${FIRST}.${SECOND}@codecentric.de"
+EMAIL="${FIRST}.${SECOND}@chrisski.dev"
 
 git config --global user.name "$SELECTED"
 git config --global user.email "$EMAIL"
