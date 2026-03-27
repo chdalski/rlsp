@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -25,10 +25,11 @@ direct HTTPS access to schema hosts is blocked.
 
 ## Steps
 
-- [ ] Add `httpProxy` setting and proxy-aware agent
-- [ ] Wire proxy into all fetch call sites
-- [ ] Write tests
-- [ ] Update documentation
+- [x] Add `httpProxy` setting and proxy-aware agent (cb99e67)
+- [x] Wire proxy into all fetch call sites (cb99e67)
+- [x] Add HTTP timeouts to build_agent (968462b)
+- [x] Write tests (cb99e67)
+- [x] Update documentation (c1da0f7)
 
 ## Tasks
 
