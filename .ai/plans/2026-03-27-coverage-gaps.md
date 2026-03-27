@@ -21,7 +21,7 @@ except main.rs. Focus on the highest-gap modules first.
 
 ## Steps
 
-- [ ] Add tests for server.rs uncovered paths
+- [x] Add tests for server.rs uncovered paths (81da39f, 76.9% → 96.5%)
 - [ ] Add tests for completion.rs uncovered paths
 - [ ] Add tests for hover.rs uncovered paths
 - [ ] Add tests for validators.rs uncovered paths
