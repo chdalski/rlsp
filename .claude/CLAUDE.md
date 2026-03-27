@@ -29,16 +29,10 @@ On session start:
    generate it. Project context gives all agents the
    information they need to produce project-appropriate
    code; without it, agents default to generic patterns.
-   After generating, mention to the user that the TODO
-   sections (Overview, Architecture, Code Exemplars,
-   Anti-Patterns, Trusted Sources) need human input —
-   auto-detection covers languages and structure, but not
-   intent or conventions. If `/project-init` reports that
-   files beyond `CLAUDE.md` were modified (e.g. Cargo.toml
-   lint updates), mention this during clarification and ask
-   whether the user wants to address any resulting issues
-   before starting new work — new lints may surface warnings
-   across the codebase.
+   After generating, commit the skill's outputs (see
+   Skill-Output Commits). The skill reports what it found
+   and what needs attention — relay relevant findings to
+   the user during clarification.
 2. **Invoke `/ensure-plans-dir`** — this refreshes the
    format guide to match the current blueprint version and
    configures `plansDirectory` if it is missing. Always
@@ -53,10 +47,12 @@ On session start:
    move it to `settings.json` if they want the setting
    version-controlled.
 
-   After the skill completes, scan the plans directory for
-   **all** plan files — not just in-progress ones. A
-   previous session may have left work incomplete, and
-   multiple plans may exist from separate feature requests.
+   After the skill completes, commit its outputs if any
+   files were created or updated (see Skill-Output
+   Commits). Then scan the plans directory for **all**
+   plan files — not just in-progress ones. A previous
+   session may have left work incomplete, and multiple
+   plans may exist from separate feature requests.
 3. If incomplete plans exist, present the full queue state
    to the user: which plans are NotStarted, InProgress,
    Completed, or Canceled. Ask how to proceed.
@@ -104,14 +100,18 @@ After clarification is complete:
    directory and its format guide. Do not skip this even if
    the plans directory appears to exist — the skill checks
    whether the format guide is current and refreshes it if
-   not.
+   not. If the skill produced changes (check `git status`),
+   commit them before proceeding (see Skill-Output Commits).
 
 2. **Create the team** via `TeamCreate` with all four
    agents: `developer`, `reviewer`, `test-engineer`,
-   `security-engineer`. Creating the team upfront ensures
-   all agents can communicate via `SendMessage` from the
-   start. Advisors idle when not consulted; this has no cost
-   beyond initial setup.
+   `security-engineer`. All four agents must be spawned —
+   the developer's risk-assessment rule directs it to
+   consult advisors for high-risk or high-uncertainty tasks,
+   and `SendMessage` to a non-existent advisor silently
+   fails, blocking the developer indefinitely. Idle advisors
+   have no cost beyond initial setup; missing advisors block
+   the pipeline.
 
 3. **Read the codebase.** Use Read, Glob, and Grep to
    understand the relevant code, patterns, and architecture.
@@ -254,10 +254,10 @@ When the reviewer reports approval:
    commit SHA. This keeps the plan current for potential
    session resumption.
 2. **Commit the plan update** using conventional commit
-   format: `docs(<scope>): update plan progress`. Plan
-   progress commits are the one exception to "the reviewer
-   makes all commits" — they are administrative updates to
-   your own artifacts, not code changes that need review.
+   format: `docs(<scope>): update plan progress`. This is
+   a skill-output commit (see Skill-Output Commits) — plan
+   files are artifacts your instructions name as outputs,
+   not code changes that need review.
 3. **Check for supersession** — verify the current plan is
    still valid before proceeding.
 4. **Send the next task** to the developer, or proceed to
@@ -367,12 +367,34 @@ levels 1–4 (system prompt, tools, CLAUDE.md, session state)
 is unaffected — only the per-teammate message history
 (level 5) resets, which is the desired outcome.
 
+## Skill-Output Commits
+
+The reviewer makes all code commits. The one exception:
+**you commit files that a skill's `SKILL.md` explicitly
+names as outputs — immediately after the skill completes.**
+
+The skill procedure determines what is written; you execute
+it mechanically. This is not a general permission to commit
+files you write based on your own judgment — that is
+implementation work and must go through the
+developer-reviewer pipeline.
+
+**The test:** if you removed the skill invocation, would
+this file still need to exist? If yes, it is project work
+that belongs in the pipeline. If no, it is skill
+infrastructure that you commit directly.
+
+This covers:
+- `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
+  config
+- `/ensure-plans-dir` outputs — plan format guide
+- Plan progress updates — plan files are named outputs of
+  your plan-management instructions
+
 ## Conventional Commits
 
 This blueprint uses conventional commit prefixes. The
 reviewer composes and makes all code commits — commit type
-definitions live in the reviewer's agent file. The one
-exception is plan progress updates (`docs` prefix) — you
-commit these directly because plan management is your
-responsibility and these changes are administrative, not
-code that needs review.
+definitions live in the reviewer's agent file. For
+skill-output commits (see above), use `chore` for
+infrastructure artifacts and `docs` for plan files.

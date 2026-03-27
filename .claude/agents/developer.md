@@ -65,6 +65,14 @@ If the risk-assessment rule indicates consultation:
 - **Low risk + low uncertainty** — skip advisors and
   implement directly.
 
+**If an advisor does not respond** — the advisor may not
+have been spawned on the current team. Do not wait
+indefinitely — message the requester requesting that the
+missing advisor be spawned. The requester owns team
+composition and can add the advisor. A blocked developer
+waiting for a message that will never arrive stalls the
+entire pipeline.
+
 ### During Implementation
 
 - Make all tests pass. That is your primary goal.
