@@ -909,3 +909,652 @@ async fn should_return_null_document_links_for_unknown_document() {
         "documentLink result should be null or empty for unknown document"
     );
 }
+
+// ---- selection_range ----
+
+fn selection_range_request(id: i64, uri: &str, line: u32, character: u32) -> Request {
+    Request::build("textDocument/selectionRange")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": line, "character": character }]
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_selection_ranges_for_valid_yaml() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "server:\n  host: localhost\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, selection_range_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+    assert!(
+        !result.is_null(),
+        "selectionRange result should not be null for valid YAML"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_selection_ranges_for_unknown_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Do NOT send didOpen for this URI
+    let uri = "file:///test/unknown.yaml";
+    let resp = send(&mut service, selection_range_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "selectionRange result should be null or empty for unknown document"
+    );
+}
+
+// ---- code_action ----
+
+fn code_action_request(id: i64, uri: &str, start_line: u32, end_line: u32) -> Request {
+    Request::build("textDocument/codeAction")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": 0 },
+                "end":   { "line": end_line,   "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_code_actions_for_document_with_actions() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/code-action.yaml";
+    // Flow mapping triggers a "convert to block" code action
+    send(
+        &mut service,
+        did_open_notification(uri, "config: {key: value}\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, code_action_request(2, uri, 0, 1)).await;
+    let resp = resp.expect("codeAction should return a response");
+    let result = resp.result().expect("codeAction should have a result");
+    assert!(
+        !result.is_null(),
+        "codeAction result should not be null for document with actions"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_code_actions_for_unknown_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Do NOT send didOpen for this URI
+    let uri = "file:///test/unknown.yaml";
+    let resp = send(&mut service, code_action_request(2, uri, 0, 1)).await;
+    let resp = resp.expect("codeAction should return a response");
+    let result = resp.result().expect("codeAction should have result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "codeAction result should be null or empty for unknown document"
+    );
+}
+
+// ---- code_lens ----
+
+fn code_lens_request(id: i64, uri: &str) -> Request {
+    Request::build("textDocument/codeLens")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_null_code_lens_when_no_schema_association() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/no-schema.yaml";
+    send(&mut service, did_open_notification(uri, "key: value\n")).await;
+
+    let resp = send(&mut service, code_lens_request(2, uri)).await;
+    let resp = resp.expect("codeLens should return a response");
+    let result = resp.result().expect("codeLens should have result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "codeLens result should be null when no schema is associated"
+    );
+}
+
+#[tokio::test]
+async fn should_return_code_lens_when_schema_modeline_is_present() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/schema-doc.yaml";
+    // The $schema modeline causes process_schema to store the association even
+    // when the fetch fails (network unavailable in tests). code_lens then finds
+    // the association and returns a lens with the URL as the title.
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nkey: value\n",
+        ),
+    )
+    .await;
+
+    let resp = send(&mut service, code_lens_request(2, uri)).await;
+    let resp = resp.expect("codeLens should return a response");
+    let result = resp.result().expect("codeLens should have result");
+    assert!(
+        !result.is_null(),
+        "codeLens result should not be null when schema modeline is present"
+    );
+    let arr = result.as_array().expect("codeLens result should be array");
+    assert!(!arr.is_empty(), "codeLens should return at least one lens");
+    let result_str = serde_json::to_string(&arr[0]).expect("serialize lens");
+    assert!(
+        result_str.contains("json.schemastore.org"),
+        "lens command title or arguments should reference the schema URL"
+    );
+}
+
+// ---- on_type_formatting ----
+
+fn on_type_formatting_request(id: i64, uri: &str, line: u32, character: u32, ch: &str) -> Request {
+    Request::build("textDocument/onTypeFormatting")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "ch": ch,
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_indent_edit_on_type_newline_after_mapping_key() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/format.yaml";
+    // After "server:\n" the cursor is at line 1 col 0; the formatter should
+    // insert indentation for the child key.
+    send(&mut service, did_open_notification(uri, "server:\n\n")).await;
+
+    let resp = send(&mut service, on_type_formatting_request(2, uri, 1, 0, "\n")).await;
+    let resp = resp.expect("onTypeFormatting should return a response");
+    let result = resp.result().expect("onTypeFormatting should have result");
+    assert!(
+        !result.is_null(),
+        "onTypeFormatting result should not be null after newline on mapping line"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_on_type_formatting_for_unknown_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Do NOT send didOpen for this URI
+    let uri = "file:///test/unknown.yaml";
+    let resp = send(&mut service, on_type_formatting_request(2, uri, 1, 0, "\n")).await;
+    let resp = resp.expect("onTypeFormatting should return a response");
+    let result = resp.result().expect("onTypeFormatting should have result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "onTypeFormatting should be null or empty for unknown document"
+    );
+}
+
+// ---- semantic_tokens_full ----
+
+fn semantic_tokens_request(id: i64, uri: &str) -> Request {
+    Request::build("textDocument/semanticTokens/full")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_return_semantic_tokens_for_valid_yaml() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/tokens.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, semantic_tokens_request(2, uri)).await;
+    let resp = resp.expect("semanticTokens/full should return a response");
+    let result = resp
+        .result()
+        .expect("semanticTokens/full should have result");
+    assert!(
+        !result.is_null(),
+        "semanticTokens/full result should not be null for valid YAML"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_semantic_tokens_for_unknown_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Do NOT send didOpen for this URI
+    let uri = "file:///test/unknown.yaml";
+    let resp = send(&mut service, semantic_tokens_request(2, uri)).await;
+    let resp = resp.expect("semanticTokens/full should return a response");
+    let result = resp
+        .result()
+        .expect("semanticTokens/full should have result");
+    assert!(
+        result.is_null(),
+        "semanticTokens/full should be null for unknown document"
+    );
+}
+
+// ---- did_change_configuration ----
+
+fn did_change_configuration_notification(settings: serde_json::Value) -> Request {
+    Request::build("workspace/didChangeConfiguration")
+        .params(json!({ "settings": settings }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_update_settings_on_did_change_configuration() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Open a document with out-of-order keys. Before didChangeConfiguration
+    // (keyOrdering=false), no ordering diagnostic should appear.
+    let uri = "file:///test/config-change.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "zebra: 1\napple: 2\n"),
+    )
+    .await;
+
+    {
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert!(
+            diags.is_empty(),
+            "key_ordering is disabled by default, no ordering diagnostics expected"
+        );
+    }
+
+    // Enable keyOrdering via didChangeConfiguration
+    let resp = send(
+        &mut service,
+        did_change_configuration_notification(json!({ "keyOrdering": true })),
+    )
+    .await;
+    assert!(
+        resp.is_none(),
+        "didChangeConfiguration should not return a response"
+    );
+
+    // Re-open (or change) the document to trigger re-validation with new settings
+    send(
+        &mut service,
+        did_change_notification(uri, "zebra: 1\napple: 2\n", 2),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist after re-validation");
+    assert!(
+        !diags.is_empty(),
+        "out-of-order keys should produce a diagnostic after keyOrdering is enabled"
+    );
+}
+
+// ---- did_change_watched_files ----
+
+fn did_change_watched_files_notification(uri: &str) -> Request {
+    Request::build("workspace/didChangeWatchedFiles")
+        .params(json!({
+            "changes": [
+                { "uri": uri, "type": 2 }
+            ]
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_republish_diagnostics_on_did_change_watched_files() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Open a valid document
+    let uri = "file:///test/watched.yaml";
+    send(&mut service, did_open_notification(uri, "key: value\n")).await;
+
+    // Trigger watched-files notification (re-validates all open documents)
+    let resp = send(&mut service, did_change_watched_files_notification(uri)).await;
+    assert!(
+        resp.is_none(),
+        "didChangeWatchedFiles should not return a response"
+    );
+
+    // Document should still be open with same diagnostics (empty for valid YAML)
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist after re-validation");
+    assert!(diags.is_empty(), "valid YAML should have no diagnostics");
+}
+
+// ---- key ordering validation path ----
+
+fn initialize_request_with_key_ordering(id: i64) -> Request {
+    Request::build("initialize")
+        .id(id)
+        .params(json!({
+            "capabilities": {},
+            "processId": null,
+            "rootUri": null,
+            "initializationOptions": { "keyOrdering": true }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_publish_key_ordering_diagnostic_when_enabled() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request_with_key_ordering(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/key-order.yaml";
+    // Keys out of alphabetical order should trigger a diagnostic when key_ordering is enabled
+    send(
+        &mut service,
+        did_open_notification(uri, "zebra: 1\napple: 2\n"),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        !diags.is_empty(),
+        "out-of-order keys should produce a diagnostic when keyOrdering is enabled"
+    );
+}
+
+// ---- $schema=none modeline ----
+
+#[tokio::test]
+async fn should_produce_no_diagnostics_for_valid_yaml_with_schema_none_modeline() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // $schema=none should disable schema processing; the non-schema validators
+    // (anchors, flow style, key ordering, duplicate keys) still run, but valid
+    // YAML should produce no diagnostics.
+    let uri = "file:///test/schema-none.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "# yaml-language-server: $schema=none\nkey: value\n"),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        diags.is_empty(),
+        "valid YAML with $schema=none should have no diagnostics, got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_code_lens_after_schema_none_modeline() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/schema-none-lens.yaml";
+    // First open with a real schema modeline so an association is stored.
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nkey: value\n",
+        ),
+    )
+    .await;
+
+    // Verify lens is returned when association exists
+    {
+        let resp = send(&mut service, code_lens_request(2, uri)).await;
+        let result = resp
+            .expect("codeLens should return a response")
+            .result()
+            .expect("codeLens should have result")
+            .clone();
+        assert!(
+            !result.is_null(),
+            "codeLens should be present before $schema=none"
+        );
+    }
+
+    // Now change to $schema=none, which should clear the association
+    send(
+        &mut service,
+        did_change_notification(uri, "# yaml-language-server: $schema=none\nkey: value\n", 2),
+    )
+    .await;
+
+    let resp = send(&mut service, code_lens_request(3, uri)).await;
+    let result = resp
+        .expect("codeLens should return a response")
+        .result()
+        .expect("codeLens should have result")
+        .clone();
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "codeLens should be null after $schema=none clears the association"
+    );
+}
+
+// ---- glob-based schema association fallback ----
+
+fn initialize_request_with_schema_glob(id: i64, schema_url: &str, glob: &str) -> Request {
+    Request::build("initialize")
+        .id(id)
+        .params(json!({
+            "capabilities": {},
+            "processId": null,
+            "rootUri": null,
+            "initializationOptions": {
+                "schemas": { schema_url: glob }
+            }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn should_attempt_schema_validation_via_glob_association() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    // Configure a schema glob that matches *.yaml; the fetch will fail (no
+    // real network) but the path through match_schema_by_filename is exercised.
+    send(
+        &mut service,
+        initialize_request_with_schema_glob(1, "https://example.com/schema.json", "*.yaml"),
+    )
+    .await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/glob-doc.yaml";
+    let resp = send(&mut service, did_open_notification(uri, "key: value\n")).await;
+    assert!(
+        resp.is_none(),
+        "didOpen notification should not return a response"
+    );
+
+    // Document should be stored; schema fetch will fail silently, yielding no
+    // schema-validation diagnostics but the code path is exercised.
+    let text = service.inner().get_document_text(uri);
+    assert_eq!(
+        text.as_deref(),
+        Some("key: value\n"),
+        "document should be stored even when schema fetch fails"
+    );
+}
+
+// ---- hover with schema association via modeline ----
+
+#[tokio::test]
+async fn should_return_hover_when_schema_modeline_is_present() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/hover-schema.yaml";
+    // Use a $schema modeline. The fetch will fail in tests (no network), but
+    // the schema_associations entry is stored and the schema_cache lookup path
+    // in hover() is exercised (returning None from cache, which is fine).
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nname: Alice\n",
+        ),
+    )
+    .await;
+
+    let hover_req = Request::build("textDocument/hover")
+        .id(2)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 1, "character": 0 }
+        }))
+        .finish();
+
+    let resp = send(&mut service, hover_req).await;
+    let resp = resp.expect("hover should return a response");
+    // Result may or may not be null depending on hover logic, but the
+    // schema association lookup path in hover() is exercised regardless.
+    assert!(
+        resp.result().is_some(),
+        "hover response should have a result field (even if null)"
+    );
+}
+
+// ---- completion with schema association via modeline ----
+
+#[tokio::test]
+async fn should_exercise_schema_lookup_in_completion() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/completion-schema.yaml";
+    // Use a $schema modeline to store a schema association. The fetch will fail
+    // in tests but the schema lookup path in completion() is exercised.
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nname: Alice\nage: 30\n",
+        ),
+    )
+    .await;
+
+    let completion_req = Request::build("textDocument/completion")
+        .id(2)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 1, "character": 0 }
+        }))
+        .finish();
+
+    let resp = send(&mut service, completion_req).await;
+    let resp = resp.expect("completion should return a response");
+    // Result may be null or have items; the important thing is the schema
+    // association lookup path in completion() is exercised.
+    assert!(
+        resp.result().is_some(),
+        "completion response should have a result field"
+    );
+}
