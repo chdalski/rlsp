@@ -14,6 +14,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
 {
   "customTags": ["!include", "!ref"],
   "keyOrdering": false,
+  "kubernetesVersion": "1.32.0",
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": "deploy/**/*.yaml"
@@ -36,6 +37,24 @@ Tags from the workspace setting are merged with any tags declared via modeline (
 - **Default:** `false`
 
 When enabled, the server warns if mapping keys are not in alphabetical order.
+
+### `kubernetesVersion`
+
+- **Type:** `string`
+- **Default:** `"1.32.0"`
+
+The Kubernetes cluster version used for automatic schema resolution. When a document contains root-level `apiVersion` and `kind` fields and no schema is configured via modeline or glob, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using this version string.
+
+Set this to match your cluster version to get accurate validation:
+
+```json
+{ "kubernetesVersion": "1.29.0" }
+```
+
+Schema resolution priority (highest to lowest):
+1. `$schema=` modeline in the document
+2. Workspace `schemas` glob match
+3. Kubernetes auto-detection (this setting)
 
 ### `schemas`
 
@@ -90,6 +109,7 @@ vim.lsp.start({
   init_options = {
     customTags = { "!include", "!ref" },
     keyOrdering = false,
+    kubernetesVersion = "1.32.0",
     schemas = {
       ["https://json.schemastore.org/github-workflow"] = ".github/workflows/*.yml",
     },
@@ -113,7 +133,7 @@ Some validators are always active; others depend on settings.
 | Flow style warnings | always active | — |
 | Key ordering | `keyOrdering` | off |
 | Custom tag validation | `customTags` | off (empty = disabled) |
-| JSON Schema validation | `schemas` / modeline | off (no schema = disabled) |
+| JSON Schema validation | `schemas` / modeline / K8s auto-detect | off (no schema = disabled) |
 
 ## Schema Fetching
 

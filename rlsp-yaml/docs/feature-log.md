@@ -72,6 +72,46 @@ More flexible file-to-schema mapping: disable association for specific files, de
 
 Register `workspace/didChangeWatchedFiles` capability so the server reacts to file changes without relying on the editor extension to push notifications.
 
+### Kubernetes-Aware Schema Resolution [completed]
+
+**Priority:** 10
+
+Auto-detect Kubernetes manifests by inspecting root-level `apiVersion` and `kind` fields and fetch the correct schema from yannh/kubernetes-json-schema. Eliminates manual schema configuration for standard K8s resources.
+
+> Motivated by redhat-developer/yaml-language-server#1213 — wrong schema version applied to HPA v2 manifests. Our approach resolves the correct version-specific schema automatically.
+
+### SchemaStore Integration
+
+**Priority:** 11
+
+Automatically fetch schema associations from [SchemaStore](https://www.schemastore.org/) so common file types (GitHub Actions, Docker Compose, Ansible, etc.) validate without any user configuration.
+
+> Red Hat's server does this. High user value — most YAML files users edit have a schema on SchemaStore. Requires fetching the SchemaStore catalog and matching filenames against it.
+
+### Full Document Formatting
+
+**Priority:** 12
+
+Implement `textDocument/formatting` to reformat entire YAML documents. Red Hat uses Prettier under the hood; we'd need a pure-Rust formatter.
+
+> Users expect formatting from a modern LSP. Significant effort — either integrate an existing Rust YAML formatter or build one. No mature Rust YAML formatting crate exists today.
+
+### Range Formatting
+
+**Priority:** 13
+
+Implement `textDocument/rangeFormatting` to format a selected region of a YAML document.
+
+> Depends on full document formatting infrastructure. Lower priority than full-document formatting.
+
+### Proxy Support for Schema Fetching
+
+**Priority:** 14
+
+Allow users to configure an HTTP proxy for schema fetching, supporting corporate environments behind firewalls.
+
+> `ureq` supports proxy configuration. Needs a new setting (`httpProxy` or similar) plumbed through to the fetch layer.
+
 ## Tier 4 — Niche or High Effort / Low Return
 
 ### Tab-to-Spaces On-Type Formatting [won't implement]
