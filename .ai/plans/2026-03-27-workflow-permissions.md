@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -36,8 +36,8 @@ hardens the CI pipeline.
 
 - [x] Identify affected workflows and required permissions
 - [x] Confirm `release-plz.yml` already has permissions
-- [ ] Add `permissions: contents: read` to `ci.yml`
-- [ ] Add `permissions: contents: read` to `coverage.yml`
+- [x] Add `permissions: contents: read` to `ci.yml`
+- [x] Add `permissions: contents: read` to `coverage.yml`
 
 ## Tasks
 
@@ -48,8 +48,8 @@ workflow files, placed between the `on:` trigger block and
 the `env:` / `jobs:` block (consistent with YAML workflow
 conventions).
 
-- [ ] `ci.yml`: add `permissions:` block after `on:` block
-- [ ] `coverage.yml`: add `permissions:` block after `on:` block
+- [x] `ci.yml`: add `permissions:` block after `on:` block — d0ef952
+- [x] `coverage.yml`: add `permissions:` block after `on:` block — d0ef952
 
 ## Decisions
 
