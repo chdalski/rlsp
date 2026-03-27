@@ -16,6 +16,8 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "keyOrdering": false,
   "kubernetesVersion": "1.32.0",
   "schemaStore": true,
+  "formatPrintWidth": 80,
+  "formatSingleQuote": false,
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": "deploy/**/*.yaml"
@@ -82,6 +84,22 @@ Glob syntax:
 
 A modeline `$schema=` in the document takes priority over glob-based associations.
 
+### `formatPrintWidth`
+
+- **Type:** `number`
+- **Default:** `80`
+
+Maximum line width for the full-document formatter. The formatter tries to fit content on a single line up to this width; if it doesn't fit, it breaks to block style.
+
+### `formatSingleQuote`
+
+- **Type:** `boolean`
+- **Default:** `false`
+
+When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
+
+> **Indentation** (`tabWidth`, `useTabs`) is not configurable via workspace settings — it is taken directly from the LSP `textDocument/formatting` request, which carries the editor's indentation preferences. Configure indentation in your editor settings.
+
 ## Modelines
 
 Modelines are special YAML comments in the **first 10 lines** of a file. They override workspace settings on a per-document basis.
@@ -127,6 +145,8 @@ vim.lsp.start({
     schemas = {
       ["https://json.schemastore.org/github-workflow"] = ".github/workflows/*.yml",
     },
+    formatPrintWidth = 80,
+    formatSingleQuote = false,
   },
 })
 ```
@@ -149,6 +169,19 @@ Some validators are always active; others depend on settings.
 | Custom tag validation | `customTags` | off (empty = disabled) |
 | JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
 | SchemaStore auto-association | `schemaStore` | on |
+
+## Formatting
+
+The server implements `textDocument/formatting` for full-document YAML formatting.
+
+**Behavior:**
+
+- **Indentation** (tab size, tabs vs spaces) is controlled by the editor — the LSP `textDocument/formatting` request carries `tab_size` and `insert_spaces` from the editor's own settings.
+- **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`).
+- **Comments** are preserved during formatting. The formatter extracts comments from the original text and reattaches them to the formatted output.
+- **Syntax errors** — if the document cannot be parsed, the original text is returned unchanged so no content is lost.
+
+The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks saphyr's AST and emits IR nodes that the engine renders with line-width awareness.
 
 ## Schema Resolution Priority
 

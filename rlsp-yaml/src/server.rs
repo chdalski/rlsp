@@ -45,8 +45,6 @@ pub struct Settings {
     pub format_print_width: Option<usize>,
     /// Prefer single-quoted strings. Defaults to false.
     pub format_single_quote: Option<bool>,
-    /// Add spaces inside flow braces. Defaults to true.
-    pub format_bracket_spacing: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -752,10 +750,7 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
-            bracket_spacing: settings
-                .as_ref()
-                .and_then(|s| s.format_bracket_spacing)
-                .unwrap_or(true),
+            bracket_spacing: true,
         };
         drop(settings);
 
@@ -1266,19 +1261,11 @@ mod tests {
     }
 
     #[test]
-    fn settings_deserializes_format_bracket_spacing_false() {
-        let json = serde_json::json!({ "formatBracketSpacing": false });
-        let settings: Settings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.format_bracket_spacing, Some(false));
-    }
-
-    #[test]
     fn settings_format_fields_default_to_none_when_absent() {
         let json = serde_json::json!({});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.format_print_width, None);
         assert_eq!(settings.format_single_quote, None);
-        assert_eq!(settings.format_bracket_spacing, None);
     }
 
     // ---- Formatting capability ----

@@ -88,13 +88,13 @@ Automatically fetch schema associations from [SchemaStore](https://www.schemasto
 
 > Red Hat's server does this. High user value — most YAML files users edit have a schema on SchemaStore. Requires fetching the SchemaStore catalog and matching filenames against it.
 
-### Full Document Formatting
+### Full Document Formatting [completed]
 
 **Priority:** 12
 
-Implement `textDocument/formatting` to reformat entire YAML documents. Red Hat uses Prettier under the hood; we'd need a pure-Rust formatter.
+Implement `textDocument/formatting` to reformat entire YAML documents. Built on `rlsp-fmt`, a new workspace crate implementing the Wadler-Lindig pretty-printing algorithm. The YAML formatter walks saphyr's AST, emits IR nodes, and extracts/reattaches comments via line scanning.
 
-> Users expect formatting from a modern LSP. Significant effort — either integrate an existing Rust YAML formatter or build one. No mature Rust YAML formatting crate exists today.
+> Configurable via `formatPrintWidth` and `formatSingleQuote` workspace settings. Indentation (`tab_size`, `insert_spaces`) is taken from the LSP request so the editor controls it.
 
 ### Range Formatting
 
