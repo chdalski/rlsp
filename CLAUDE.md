@@ -36,6 +36,7 @@ minimal memory footprint.
 │       ├── document_links.rs  # Document links / URL detection
 │       ├── folding.rs      # Folding ranges
 │       ├── hover.rs        # Hover information
+│       ├── formatter.rs       # YAML document formatting (full-document format_yaml)
 │       ├── on_type_formatting.rs  # On-type formatting (newline indent)
 │       ├── references.rs   # Go-to-definition + find references
 │       ├── rename.rs       # Rename symbol

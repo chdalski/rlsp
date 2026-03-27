@@ -9,14 +9,15 @@ use tower_lsp::lsp_types::{
     CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DidChangeConfigurationParams, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher, FoldingRange,
-    FoldingRangeParams, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
-    PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
-    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams, DocumentLink,
+    DocumentLinkOptions, DocumentLinkParams, DocumentOnTypeFormattingOptions,
+    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
+    FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, Location, OneOf, Position, PrepareRenameResponse, Range, ReferenceParams,
+    Registration, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
 };
@@ -40,6 +41,12 @@ pub struct Settings {
     pub kubernetes_version: Option<String>,
     /// Enable `SchemaStore` automatic schema association. Defaults to `true` when absent.
     pub schema_store: Option<bool>,
+    /// Maximum line width for the full-document formatter. Defaults to 80.
+    pub format_print_width: Option<usize>,
+    /// Prefer single-quoted strings. Defaults to false.
+    pub format_single_quote: Option<bool>,
+    /// Add spaces inside flow braces. Defaults to true.
+    pub format_bracket_spacing: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -355,6 +362,7 @@ impl Backend {
             code_lens_provider: Some(CodeLensOptions {
                 resolve_provider: Some(false),
             }),
+            document_formatting_provider: Some(OneOf::Left(true)),
             document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
                 first_trigger_character: "\n".to_string(),
                 more_trigger_character: None,
@@ -714,6 +722,77 @@ impl LanguageServer for Backend {
         }
 
         Ok(Some(lenses))
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        // Tab settings come from LSP params (editor override); other settings from workspace.
+        let tab_size = params.options.tab_size as usize;
+        let insert_spaces = params.options.insert_spaces;
+        let settings = self.settings.lock().ok();
+        let options = crate::formatter::YamlFormatOptions {
+            print_width: settings
+                .as_ref()
+                .and_then(|s| s.format_print_width)
+                .unwrap_or(80),
+            tab_width: tab_size,
+            use_tabs: !insert_spaces,
+            single_quote: settings
+                .as_ref()
+                .and_then(|s| s.format_single_quote)
+                .unwrap_or(false),
+            bracket_spacing: settings
+                .as_ref()
+                .and_then(|s| s.format_bracket_spacing)
+                .unwrap_or(true),
+        };
+        drop(settings);
+
+        let formatted = crate::formatter::format_yaml(&text, &options);
+
+        // No changes — return None.
+        if formatted == text {
+            return Ok(None);
+        }
+
+        // Replace the entire document with a single TextEdit spanning from (0,0)
+        // to the end of the last line. For documents ending with a newline the
+        // end position is (line_count, 0); otherwise it is (last_line_idx, last_col).
+        let lines: Vec<&str> = text.lines().collect();
+        let end = if text.ends_with('\n') {
+            Position {
+                line: u32::try_from(lines.len()).unwrap_or(u32::MAX),
+                character: 0,
+            }
+        } else {
+            let last_col = lines.last().map_or(0, |l| l.len());
+            Position {
+                line: u32::try_from(lines.len().saturating_sub(1)).unwrap_or(u32::MAX),
+                character: u32::try_from(last_col).unwrap_or(u32::MAX),
+            }
+        };
+
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end,
+            },
+            new_text: formatted,
+        }]))
     }
 
     async fn on_type_formatting(
@@ -1168,5 +1247,48 @@ mod tests {
         }
 
         assert!(backend.get_schema_store_enabled());
+    }
+
+    // ---- Formatting settings ----
+
+    #[test]
+    fn settings_deserializes_format_print_width() {
+        let json = serde_json::json!({ "formatPrintWidth": 120 });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_print_width, Some(120));
+    }
+
+    #[test]
+    fn settings_deserializes_format_single_quote() {
+        let json = serde_json::json!({ "formatSingleQuote": true });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_single_quote, Some(true));
+    }
+
+    #[test]
+    fn settings_deserializes_format_bracket_spacing_false() {
+        let json = serde_json::json!({ "formatBracketSpacing": false });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_bracket_spacing, Some(false));
+    }
+
+    #[test]
+    fn settings_format_fields_default_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_print_width, None);
+        assert_eq!(settings.format_single_quote, None);
+        assert_eq!(settings.format_bracket_spacing, None);
+    }
+
+    // ---- Formatting capability ----
+
+    #[test]
+    fn should_advertise_document_formatting_provider() {
+        let caps = Backend::capabilities();
+        assert!(
+            caps.document_formatting_provider.is_some(),
+            "capabilities should include document_formatting_provider"
+        );
     }
 }
