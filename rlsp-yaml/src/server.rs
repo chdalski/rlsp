@@ -11,13 +11,13 @@ use tower_lsp::lsp_types::{
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams, DocumentLink,
     DocumentLinkOptions, DocumentLinkParams, DocumentOnTypeFormattingOptions,
-    DocumentOnTypeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
-    FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, OneOf, Position, PrepareRenameResponse, Range, ReferenceParams,
-    Registration, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
-    SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    DocumentOnTypeFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
+    InitializeResult, InitializedParams, Location, OneOf, Position, PrepareRenameResponse, Range,
+    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
 };
@@ -361,6 +361,7 @@ impl Backend {
                 resolve_provider: Some(false),
             }),
             document_formatting_provider: Some(OneOf::Left(true)),
+            document_range_formatting_provider: Some(OneOf::Left(true)),
             document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
                 first_trigger_character: "\n".to_string(),
                 more_trigger_character: None,
@@ -787,6 +788,96 @@ impl LanguageServer for Backend {
                 end,
             },
             new_text: formatted,
+        }]))
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let requested = params.range;
+
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(None);
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let tab_size = params.options.tab_size as usize;
+        let insert_spaces = params.options.insert_spaces;
+        let settings = self.settings.lock().ok();
+        let options = crate::formatter::YamlFormatOptions {
+            print_width: settings
+                .as_ref()
+                .and_then(|s| s.format_print_width)
+                .unwrap_or(80),
+            tab_width: tab_size,
+            use_tabs: !insert_spaces,
+            single_quote: settings
+                .as_ref()
+                .and_then(|s| s.format_single_quote)
+                .unwrap_or(false),
+            bracket_spacing: true,
+        };
+        drop(settings);
+
+        let formatted = crate::formatter::format_yaml(&text, &options);
+
+        // Extract the lines within the requested range from both the original
+        // and the formatted output. The range end is exclusive at character 0
+        // of the next line when the editor selects whole lines.
+        let orig_lines: Vec<&str> = text.lines().collect();
+        let fmt_lines: Vec<&str> = formatted.lines().collect();
+
+        let start_line = requested.start.line as usize;
+        let end_line = requested.end.line as usize;
+
+        // Clamp to the actual number of lines in both versions.
+        let orig_end = end_line.min(orig_lines.len().saturating_sub(1));
+        let fmt_end = end_line.min(fmt_lines.len().saturating_sub(1));
+
+        // Collect the range slice from each version for comparison.
+        let orig_slice = orig_lines
+            .get(start_line..=orig_end)
+            .unwrap_or_default()
+            .join("\n");
+        let fmt_slice = fmt_lines
+            .get(start_line..=fmt_end)
+            .unwrap_or_default()
+            .join("\n");
+
+        // No change in the requested range — nothing to do.
+        if orig_slice == fmt_slice {
+            return Ok(None);
+        }
+
+        // Build the replacement text. Append a trailing newline so the edit
+        // replaces whole lines (including the terminator of the last line).
+        let new_text = format!("{fmt_slice}\n");
+
+        // The edit range spans from the start of start_line to the start of
+        // the line after end_line (i.e. character 0 of end_line + 1), which
+        // replaces the lines in their entirety.
+        let edit_start = Position {
+            line: u32::try_from(start_line).unwrap_or(u32::MAX),
+            character: 0,
+        };
+        let edit_end = Position {
+            line: u32::try_from(end_line + 1).unwrap_or(u32::MAX),
+            character: 0,
+        };
+
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: edit_start,
+                end: edit_end,
+            },
+            new_text,
         }]))
     }
 
@@ -1276,6 +1367,118 @@ mod tests {
         assert!(
             caps.document_formatting_provider.is_some(),
             "capabilities should include document_formatting_provider"
+        );
+    }
+
+    #[test]
+    fn should_advertise_document_range_formatting_provider() {
+        let caps = Backend::capabilities();
+        assert!(
+            caps.document_range_formatting_provider.is_some(),
+            "capabilities should include document_range_formatting_provider"
+        );
+    }
+
+    // ---- Range formatting handler ----
+
+    #[tokio::test]
+    async fn range_formatting_returns_none_when_range_already_formatted() {
+        use tower_lsp::lsp_types::{
+            DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier,
+            WorkDoneProgressParams,
+        };
+
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///test.yaml").unwrap();
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), "key: value\nother: 1\n".to_string());
+        }
+
+        let params = DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let result = LanguageServer::range_formatting(backend, params)
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "already-formatted range should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn range_formatting_returns_edit_scoped_to_requested_lines() {
+        use tower_lsp::lsp_types::{
+            DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier,
+            WorkDoneProgressParams,
+        };
+
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///test.yaml").unwrap();
+        // Line 1 has a double-space after the colon; the formatter normalises
+        // `b:  2` → `b: 2`, guaranteeing a change on exactly that line.
+        let text = "a: 1\nb:  2\nc: 3\n";
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), text.to_string());
+        }
+
+        let params = DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri },
+            // Request only line 1 (b:  2).
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 0,
+                },
+                end: Position {
+                    line: 1,
+                    character: 0,
+                },
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let result = LanguageServer::range_formatting(backend, params)
+            .await
+            .unwrap();
+        let edits = result.expect("formatter must produce an edit for `b:  2`");
+        assert_eq!(edits.len(), 1);
+        // The edit must cover line 1 only, not touch line 0 or line 2.
+        assert_eq!(edits[0].range.start.line, 1, "edit start must be line 1");
+        assert_eq!(
+            edits[0].range.end.line, 2,
+            "edit end must be line 2 (exclusive)"
+        );
+        assert!(
+            edits[0].new_text.contains("b: 2"),
+            "formatted line must normalise double-space: {:?}",
+            edits[0].new_text
         );
     }
 }
