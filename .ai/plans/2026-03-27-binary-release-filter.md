@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -29,9 +29,9 @@ binaries to the wrong release tag.
 
 - [x] Analyze current workflow and identify the bug
 - [x] Review release-plz output format
-- [ ] Redesign build-binaries to iterate over released binary crates
-- [ ] Ensure library-only crates skip binary builds
-- [ ] Test with a dry-run or validation
+- [x] Redesign build-binaries to iterate over released binary crates (d26dd31)
+- [x] Ensure library-only crates skip binary builds (d26dd31)
+- [x] Validated via reviewer code review (d26dd31)
 
 ## Tasks
 
@@ -44,16 +44,16 @@ that have binary targets, then matrix over both the filtered
 crates and the target platforms. Library crates like `rlsp-fmt`
 produce no matrix entries and skip the build entirely.
 
-- [ ] Add a `filter-binaries` job that parses the `releases`
-      JSON and outputs only binary crate names + tags
-- [ ] Update `build-binaries` to matrix over the filtered list
-      combined with the target platforms
-- [ ] Each matrix entry checks out the correct tag, builds the
+- [x] Add a `filter-binaries` job that parses the `releases`
+      JSON and outputs only binary crate names + tags (d26dd31)
+- [x] Update `build-binaries` to matrix over the filtered list
+      combined with the target platforms (d26dd31)
+- [x] Each matrix entry checks out the correct tag, builds the
       correct binary, packages with the correct name, and uploads
-      to the correct release
-- [ ] When no binary crates are released, the matrix is empty
-      and the job is skipped
-- [ ] Validate with `act` or manual review
+      to the correct release (d26dd31)
+- [x] When no binary crates are released, the matrix is empty
+      and the job is skipped (d26dd31)
+- [x] Validated via reviewer code review (d26dd31)
 
 ## Decisions
 
