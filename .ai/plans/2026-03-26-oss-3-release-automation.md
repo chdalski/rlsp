@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-26
 
 ## Goal
@@ -29,6 +29,7 @@ binaries for all target architectures.
 - [ ] Create release-plz configuration
 - [ ] Create release-plz GitHub Actions workflow
 - [ ] Create cross-platform binary release workflow
+- [ ] Add Codecov component_management for per-crate coverage
 - [ ] Document CARGO_REGISTRY_TOKEN and release process
 
 ## Tasks
@@ -121,6 +122,23 @@ Create `.github/workflows/release-binaries.yml`:
 - [ ] release-binaries.yml
 - [ ] Verify matrix covers all 6 targets
 - [ ] Archive naming convention documented
+
+### Task 3: Codecov per-crate components
+
+Add `component_management` to `codecov.yml` so each workspace
+crate gets its own coverage breakdown in the Codecov UI. Uses
+path-based filtering — no CI changes needed since the existing
+coverage workflow already uploads a single workspace-wide report.
+
+```yaml
+component_management:
+  individual_components:
+    - component_id: rlsp-yaml
+      paths:
+        - rlsp-yaml/**
+```
+
+- [ ] Add component_management section to codecov.yml
 
 ## Decisions
 
