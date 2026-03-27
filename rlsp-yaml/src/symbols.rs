@@ -641,4 +641,112 @@ mod tests {
         // Should not panic; may return empty or minimal symbols
         let _ = symbols;
     }
+
+    // Test 16 — yaml_to_symbols: sequence root returns empty
+    #[test]
+    fn should_return_empty_for_sequence_root_document() {
+        let text = "- one\n- two\n- three\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        // Sequence is not a Mapping, so yaml_to_symbols returns empty
+        assert!(
+            symbols.is_empty(),
+            "sequence root should produce no symbols, got: {symbols:?}"
+        );
+    }
+
+    // Test 17 — yaml_to_symbols: scalar root returns empty
+    #[test]
+    fn should_return_empty_for_scalar_root_document() {
+        let text = "just a scalar\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        assert!(
+            symbols.is_empty(),
+            "scalar root should produce no symbols, got: {symbols:?}"
+        );
+    }
+
+    // Test 18 — find_sequence_item_line: bare dash (no space after)
+    #[test]
+    fn should_produce_sequence_children_for_bare_dash_items() {
+        let text = "items:\n  -\n  - two\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        // Should not panic; items symbol should still be produced
+        let items = find_symbol(&symbols, "items");
+        assert!(items.is_some(), "should have 'items' symbol");
+    }
+
+    // Test 19 — yaml_key_to_string: integer key
+    #[test]
+    fn should_handle_integer_keyed_mapping() {
+        // saphyr parses "1:" as integer key
+        let text = "1: one\n2: two\n";
+        let docs = parse_docs(text);
+        // Should not panic even with integer keys
+        let _symbols = document_symbols(text, docs.as_ref());
+    }
+
+    // Test 20 — split_document_regions: content before first ---
+    #[test]
+    fn should_include_pre_separator_region_when_content_precedes_first_separator() {
+        let text = "before: separator\n---\nafter: separator\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        let has_before = symbols.iter().any(|s| s.name == "before");
+        let has_after = symbols.iter().any(|s| s.name == "after");
+        assert!(has_before, "should have 'before' symbol");
+        assert!(has_after, "should have 'after' symbol");
+    }
+
+    // Test 21 — make_sequence_children: sequence item with Mapping value
+    #[test]
+    fn should_produce_symbols_for_sequence_of_mappings_with_multiple_keys() {
+        let text = "list:\n  - a: 1\n    b: 2\n  - a: 3\n    b: 4\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        let list = find_symbol(&symbols, "list").expect("list symbol");
+        assert_eq!(list.kind, SymbolKind::ARRAY);
+        let children = list.children.as_ref().expect("list children");
+        assert!(children.len() >= 2, "should have at least 2 items");
+        // Each item should itself have children (a, b)
+        let first = &children[0];
+        let first_children = first.children.as_ref().expect("first item children");
+        assert!(first_children.iter().any(|c| c.name == "a"));
+        assert!(first_children.iter().any(|c| c.name == "b"));
+    }
+
+    // Test 22 — find_value_end_line: value that spans multiple lines
+    #[test]
+    fn should_extend_symbol_range_to_last_child_line() {
+        let text = "root:\n  child1: a\n  child2: b\n  child3: c\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(text, docs.as_ref());
+
+        let root = find_symbol(&symbols, "root").expect("root symbol");
+        assert!(
+            root.range.end.line >= 3,
+            "root range should extend to last child line, got: {:?}",
+            root.range.end.line
+        );
+    }
+
+    // Test 23 — empty documents list
+    #[test]
+    fn should_return_empty_for_empty_documents_vec() {
+        let text = "key: value\n";
+        let empty: Vec<saphyr::YamlOwned> = Vec::new();
+        let symbols = document_symbols(text, Some(&empty));
+
+        assert!(
+            symbols.is_empty(),
+            "empty documents should produce no symbols"
+        );
+    }
 }

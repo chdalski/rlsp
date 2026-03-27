@@ -590,4 +590,130 @@ mod tests {
             "should fold config mapping (lines 0-7), got: {tuples:?}"
         );
     }
+
+    // Test 20 — multi-document: three sections (exercises windows(2) with two pairs)
+    #[test]
+    fn should_fold_three_document_sections() {
+        let text = "a: 1\nb: 2\n---\nc: 3\nd: 4\n---\ne: 5\nf: 6\n";
+        let result = folding_ranges(text);
+
+        // All three sections must produce region folds
+        let region_folds: Vec<_> = result
+            .iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Region))
+            .collect();
+        assert!(
+            region_folds.len() >= 3,
+            "three document sections should produce at least 3 region folds, got: {region_folds:?}"
+        );
+    }
+
+    // Test 21 — multi-document: content only after last separator (last section fold)
+    #[test]
+    fn should_fold_last_section_after_final_separator() {
+        let text = "---\nkey1: val1\nkey2: val2\n";
+        let result = folding_ranges(text);
+
+        // Section after --- (lines 1-2) should produce a region fold
+        let region_folds: Vec<_> = result
+            .iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Region))
+            .collect();
+        assert!(
+            !region_folds.is_empty(),
+            "content after separator should produce a region fold, got: {result:?}"
+        );
+    }
+
+    // Test 22 — comment block at end of file (no trailing non-comment line)
+    #[test]
+    fn should_fold_comment_block_at_end_of_file() {
+        let text = "key: value\n# comment line 1\n# comment line 2\n# comment line 3\n";
+        let result = folding_ranges(text);
+
+        let comment_folds: Vec<_> = result
+            .iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
+            .collect();
+        assert!(
+            !comment_folds.is_empty(),
+            "comment block at end of file should produce a Comment fold, got: {result:?}"
+        );
+        let tuples: Vec<(u32, u32)> = comment_folds
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert!(
+            tuples.contains(&(1, 3)),
+            "comment fold should span lines 1-3, got: {tuples:?}"
+        );
+    }
+
+    // Test 23 — is_block_scalar_indicator: strip indicator variants
+    #[test]
+    fn should_fold_block_scalar_with_chomping_indicator() {
+        let text =
+            "a: |-\n  content line 1\n  content line 2\nb: >+\n  folded line 1\n  folded line 2\n";
+        let result = folding_ranges(text);
+
+        let tuples = ranges_as_tuples(&result);
+        assert!(
+            tuples.contains(&(0, 2)),
+            "should fold '|-' block scalar (lines 0-2), got: {tuples:?}"
+        );
+        assert!(
+            tuples.contains(&(3, 5)),
+            "should fold '>+' block scalar (lines 3-5), got: {tuples:?}"
+        );
+    }
+
+    // Test 24 — is_block_scalar_indicator: indentation digit after indicator
+    #[test]
+    fn should_fold_block_scalar_with_indentation_indicator() {
+        let text = "text: |2\n  indented content\n  more content\n";
+        let result = folding_ranges(text);
+
+        let tuples = ranges_as_tuples(&result);
+        assert!(
+            tuples.contains(&(0, 2)),
+            "should fold '|2' block scalar (lines 0-2), got: {tuples:?}"
+        );
+    }
+
+    // Test 25 — find_last_content_line_in_range: range where all lines are blank/separator
+    #[test]
+    fn should_not_fold_section_consisting_only_of_blank_lines() {
+        // Two separators with only blank lines between them
+        let text = "a: 1\n---\n\n\n---\nb: 2\n";
+        let result = folding_ranges(text);
+
+        // The middle section (only blank lines) should not produce a region fold
+        let region_folds: Vec<_> = result
+            .iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Region))
+            .collect();
+        for fold in &region_folds {
+            assert!(
+                fold.start_line != 2 && fold.start_line != 3,
+                "blank-only section should not produce a region fold, got: {fold:?}"
+            );
+        }
+    }
+
+    // Test 26 — comment block of exactly 1 line (i - 1 == start, should NOT fold)
+    #[test]
+    fn should_not_fold_single_comment_line() {
+        // Only 1 comment line — `i - 1 == start` so condition `i - 1 > start` is false
+        let text = "# only one comment\nkey: value\n";
+        let result = folding_ranges(text);
+
+        let comment_folds: Vec<_> = result
+            .iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
+            .collect();
+        assert!(
+            comment_folds.is_empty(),
+            "single comment line should not fold, got: {comment_folds:?}"
+        );
+    }
 }

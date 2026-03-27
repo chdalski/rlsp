@@ -596,4 +596,117 @@ mod tests {
             "should return empty Vec for empty positions slice"
         );
     }
+
+    // ---- Additional coverage tests ----
+
+    // find_document_end: document terminated by "..."
+    #[test]
+    fn should_scope_document_end_at_dot_dot_dot_terminator() {
+        let text = "key: value\n...\nafter: end\n";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 5)]);
+
+        // Should return a result scoped to before the "..." terminator
+        if let Some(sr) = result.first() {
+            let mut outermost = sr;
+            while let Some(ref p) = outermost.parent {
+                outermost = p;
+            }
+            assert!(
+                outermost.range.end.line <= 1,
+                "document root should end at or before '...', got end line {}",
+                outermost.range.end.line
+            );
+        }
+    }
+
+    // Cursor on "..." line — should return no result (filtered out)
+    #[test]
+    fn should_return_empty_for_cursor_on_dot_dot_dot_line() {
+        let text = "key: value\n...\nother: val\n";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 0)]);
+        // "..." is a separator — should return None (filtered out by filter_map)
+        assert!(
+            result.is_empty(),
+            "cursor on '...' line should produce no selection range"
+        );
+    }
+
+    // value_start_marker recursion through Sequence
+    #[test]
+    fn should_handle_sequence_value_in_mapping() {
+        let text = "items:\n  - alpha\n  - beta\n  - gamma\n";
+        let docs = parse_marked(text);
+        // Cursor on a sequence item — exercises value_start_marker/value_end_marker paths
+        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 4)]);
+        // Should not panic; any valid result is acceptable
+        let _ = result;
+    }
+
+    // value_end_marker recursion through nested sequences
+    #[test]
+    fn should_handle_deeply_nested_sequence_value() {
+        let text = "data:\n  - nested:\n      - deep_value\n";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 10)]);
+        // Should not panic
+        let _ = result;
+    }
+
+    // make_line_range: start == end (single line document)
+    #[test]
+    fn should_handle_single_line_document() {
+        let text = "key: value";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 5)]);
+        // Single line doc: start_line == end_line
+        if let Some(sr) = result.first() {
+            let mut outermost = sr;
+            while let Some(ref p) = outermost.parent {
+                outermost = p;
+            }
+            assert_eq!(outermost.range.start.line, outermost.range.end.line);
+        }
+    }
+
+    // find_document_for_line: line exactly at separator increments doc_idx
+    #[test]
+    fn should_correctly_find_document_for_line_after_separator() {
+        let text = "a: 1\n---\nb: 2\n---\nc: 3\n";
+        let docs = parse_marked(text);
+        // Cursor on last doc (line 4)
+        let result = selection_ranges(text, docs.as_ref(), &[pos(4, 3)]);
+        if let Some(sr) = result.first() {
+            let mut outermost = sr;
+            while let Some(ref p) = outermost.parent {
+                outermost = p;
+            }
+            assert!(
+                outermost.range.start.line >= 4,
+                "outermost range should be scoped to third document, got start line {}",
+                outermost.range.start.line
+            );
+        }
+    }
+
+    // Cursor on key token (col 0) with empty positions after key
+    #[test]
+    fn should_handle_key_at_column_zero_with_no_value() {
+        let text = "empty:\nother: val\n";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 0)]);
+        // Should not panic
+        let _ = result;
+    }
+
+    // Sequence with empty items (BadValue/Alias scenarios)
+    #[test]
+    fn should_handle_alias_in_sequence() {
+        let text = "base: &anchor value\ncopy:\n  - *anchor\n";
+        let docs = parse_marked(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 4)]);
+        // Alias items produce no spans — should not panic
+        let _ = result;
+    }
 }

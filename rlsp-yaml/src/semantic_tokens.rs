@@ -548,4 +548,154 @@ mod tests {
         assert_eq!(prop.1, 0);
         assert_eq!(str_tok.1, 5);
     }
+
+    // ---- Additional coverage tests ----
+
+    // strip_sequence_prefix: bare dash returns empty (no token)
+    #[test]
+    fn bare_dash_sequence_item_produces_no_token() {
+        // A bare "-" with no value should produce no scalar token
+        let abs = absolute(&semantic_tokens("items:\n  -\n"));
+        // Only "items" key token expected; no STRING/NUMBER/KEYWORD for bare "-"
+        let non_property: Vec<_> = abs.iter().filter(|t| t.3 != TOKEN_PROPERTY).collect();
+        assert!(
+            non_property.is_empty(),
+            "bare '-' should produce no scalar token, got: {non_property:?}"
+        );
+    }
+
+    // is_number: negative integer
+    #[test]
+    fn negative_integer_produces_number_token() {
+        let abs = absolute(&semantic_tokens("temp: -42"));
+        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
+        assert_eq!(nums.len(), 1);
+        assert_eq!(nums[0].2, 3); // len("-42")
+    }
+
+    // is_number: scientific notation
+    #[test]
+    fn scientific_notation_produces_number_token() {
+        let abs = absolute(&semantic_tokens("val: 1.5e10"));
+        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
+        assert_eq!(nums.len(), 1);
+    }
+
+    // is_number: negative scientific notation
+    #[test]
+    fn negative_float_produces_number_token() {
+        let abs = absolute(&semantic_tokens("val: -3.14"));
+        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
+        assert_eq!(nums.len(), 1);
+        assert_eq!(nums[0].2, 5); // len("-3.14")
+    }
+
+    // block scalar variants: |- and >-
+    #[test]
+    fn block_scalar_pipe_minus_produces_operator_token() {
+        let abs = absolute(&semantic_tokens("text: |-"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
+    }
+
+    #[test]
+    fn block_scalar_gt_minus_produces_operator_token() {
+        let abs = absolute(&semantic_tokens("text: >-"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
+    }
+
+    #[test]
+    fn block_scalar_pipe_plus_produces_operator_token() {
+        let abs = absolute(&semantic_tokens("text: |+"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
+    }
+
+    #[test]
+    fn block_scalar_gt_plus_produces_operator_token() {
+        let abs = absolute(&semantic_tokens("text: >+"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
+    }
+
+    // sequence item with string value (no mapping colon)
+    #[test]
+    fn sequence_item_string_value_produces_string_token() {
+        let abs = absolute(&semantic_tokens("- hello"));
+        let strings: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_STRING).collect();
+        assert_eq!(strings.len(), 1);
+        assert_eq!(strings[0].2, 5); // len("hello")
+    }
+
+    // sequence item with number value
+    #[test]
+    fn sequence_item_number_value_produces_number_token() {
+        let abs = absolute(&semantic_tokens("- 42"));
+        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
+        assert_eq!(nums.len(), 1);
+    }
+
+    // sequence item with keyword value
+    #[test]
+    fn sequence_item_keyword_value_produces_keyword_token() {
+        let abs = absolute(&semantic_tokens("- true"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
+    }
+
+    // inline tag on value side (key: !tag value)
+    #[test]
+    fn tag_on_value_side_of_mapping_produces_type_token() {
+        let abs = absolute(&semantic_tokens("key: !str hello"));
+        let types: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_TYPE).collect();
+        assert!(
+            !types.is_empty(),
+            "tag on value side should produce type token"
+        );
+    }
+
+    // anchor on sequence item
+    #[test]
+    fn anchor_on_sequence_item_produces_variable_with_declaration() {
+        let abs = absolute(&semantic_tokens("- &myanchor value"));
+        let vars: Vec<_> = abs
+            .iter()
+            .filter(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
+            .collect();
+        assert!(
+            !vars.is_empty(),
+            "anchor on sequence item should produce variable with declaration modifier"
+        );
+    }
+
+    // keyword variants: on/off
+    #[test]
+    fn on_keyword_produces_keyword_token() {
+        let abs = absolute(&semantic_tokens("flag: on"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
+    }
+
+    #[test]
+    fn off_keyword_produces_keyword_token() {
+        let abs = absolute(&semantic_tokens("flag: off"));
+        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
+    }
+
+    // comment stops inline marker scan (# in middle of line)
+    #[test]
+    fn inline_comment_stops_marker_scan() {
+        // "&anchor" after "#" should NOT be treated as an anchor token
+        let abs = absolute(&semantic_tokens("key: value # &notananchor"));
+        let vars: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_VARIABLE).collect();
+        assert!(
+            vars.is_empty(),
+            "marker inside comment should not produce variable token"
+        );
+    }
+
+    // delta_line is correct when crossing multiple lines
+    #[test]
+    fn delta_line_correct_across_multiple_lines() {
+        let text = "a: 1\n\nb: 2\n";
+        let abs = absolute(&semantic_tokens(text));
+        let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
+        assert!(keys.iter().any(|k| k.0 == 0)); // "a" on line 0
+        assert!(keys.iter().any(|k| k.0 == 2)); // "b" on line 2 (blank line skipped)
+    }
 }
