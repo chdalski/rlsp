@@ -81,8 +81,8 @@ enum Doc {
 - [x] Create `rlsp-fmt` crate with IR and printer (79c8d2c)
 - [x] Add YAML formatter (AST → IR, no comments) (1e14890)
 - [x] Add comment preservation (2afd833)
-- [ ] Wire into LSP `textDocument/formatting`
-- [ ] Add formatting settings
+- [x] Wire into LSP `textDocument/formatting` (874ffa5)
+- [x] Add formatting settings (874ffa5)
 - [ ] Write tests
 - [ ] Update documentation
 
