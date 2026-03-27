@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -83,8 +83,8 @@ enum Doc {
 - [x] Add comment preservation (2afd833)
 - [x] Wire into LSP `textDocument/formatting` (874ffa5)
 - [x] Add formatting settings (874ffa5)
-- [ ] Write tests
-- [ ] Update documentation
+- [x] Write tests (79c8d2c, 1e14890, 2afd833)
+- [x] Update documentation (8663af8)
 
 ## Tasks
 
