@@ -83,6 +83,12 @@ existing one with the new tag pattern.
 **Changelogs** are auto-generated from conventional commits
 via git-cliff (`cliff.toml`).
 
+**Publishing** uses OIDC trusted publishing — no `CARGO_REGISTRY_TOKEN` secret
+is needed. release-plz handles the OIDC token exchange internally. New crates
+must be published manually the first time (crates.io requirement); after that,
+configure trusted publishing on crates.io under Settings → Trusted Publishing,
+pointing to the `release-plz.yml` workflow.
+
 ## Repository Layout
 
 Each language server lives in its own crate: `rlsp-<language>`.
