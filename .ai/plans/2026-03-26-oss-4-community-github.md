@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-26
 
 ## Goal
@@ -21,14 +21,14 @@ model.
 
 ## Steps
 
-- [ ] Create CONTRIBUTING.md
-- [ ] Create CODE_OF_CONDUCT.md
-- [ ] Create SECURITY.md
-- [ ] Create bug report issue template
-- [ ] Create feature request issue template
-- [ ] Create issue template chooser config
-- [ ] Create PR template (redirect to issues)
-- [ ] Document recommended GitHub labels
+- [x] Create CONTRIBUTING.md (f16903c)
+- [x] Create CODE_OF_CONDUCT.md (df467c3)
+- [x] Create SECURITY.md (df467c3)
+- [x] Create bug report issue template (f16903c)
+- [x] Create feature request issue template (f16903c)
+- [x] Create issue template chooser config (f16903c)
+- [x] Create PR template (f16903c)
+- [x] Document recommended GitHub labels (f16903c, in CONTRIBUTING.md)
 
 ## Tasks
 
@@ -54,9 +54,9 @@ model.
 - Expected response timeline
 - Scope: rlsp-yaml binary, dependencies
 
-- [ ] CONTRIBUTING.md
-- [ ] CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
-- [ ] SECURITY.md
+- [x] CONTRIBUTING.md (f16903c)
+- [x] CODE_OF_CONDUCT.md (df467c3)
+- [x] SECURITY.md (df467c3)
 
 ### Task 2: GitHub issue and PR templates
 
@@ -83,10 +83,10 @@ model.
 - Keep it friendly — people may not read CONTRIBUTING.md
   before submitting
 
-- [ ] Bug report issue template (.yml form)
-- [ ] Feature request issue template (.yml form)
-- [ ] Issue template chooser config
-- [ ] PR template
+- [x] Bug report issue template (f16903c)
+- [x] Feature request issue template (f16903c)
+- [x] Issue template chooser config (f16903c)
+- [x] PR template (f16903c)
 
 ### Task 3: Recommended GitHub labels
 
@@ -104,7 +104,7 @@ or as a separate note:
 | `duplicate` | `#cfd3d7` | Duplicate of another issue |
 | `good first issue` | `#7057ff` | Good for newcomers to file |
 
-- [ ] Label table in CONTRIBUTING.md
+- [x] Label table in CONTRIBUTING.md (f16903c)
 
 ## Decisions
 
