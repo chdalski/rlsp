@@ -17,7 +17,12 @@ minimal memory footprint.
 
 ```text
 /
-├── Cargo.toml              # Rust workspace root (single member: rlsp-yaml)
+├── Cargo.toml              # Rust workspace root (members: rlsp-fmt, rlsp-yaml)
+├── rlsp-fmt/               # Generic Wadler-Lindig pretty-printing engine
+│   └── src/
+│       ├── lib.rs          # Public API: Doc, FormatOptions, format(), builder functions
+│       ├── ir.rs           # Doc IR enum and builder functions
+│       └── printer.rs      # Wadler-Lindig printer
 ├── rlsp-yaml/              # Rust YAML LSP server crate
 │   └── src/
 │       ├── main.rs         # Binary entry point

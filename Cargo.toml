@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rlsp-yaml"]
+members = ["rlsp-fmt", "rlsp-yaml"]
 
 [workspace.package]
 authors = ["Christoph Dalski"]
