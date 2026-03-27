@@ -10,3 +10,8 @@ coverage:
 comment:
   layout: "diff, flags, files"
   require_changes: true
+component_management:
+  individual_components:
+    - component_id: rlsp-yaml
+      paths:
+        - rlsp-yaml/**
