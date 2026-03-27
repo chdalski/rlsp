@@ -26,8 +26,8 @@ binaries for all target architectures.
 
 ## Steps
 
-- [ ] Create release-plz configuration
-- [ ] Create release-plz GitHub Actions workflow
+- [x] Create release-plz configuration (94287ea)
+- [x] Create release-plz GitHub Actions workflow (94287ea)
 - [ ] Create cross-platform binary release workflow
 - [ ] Add Codecov component_management for per-crate coverage
 - [ ] Document CARGO_REGISTRY_TOKEN and release process
@@ -84,9 +84,9 @@ Create `.github/workflows/release-plz.yml`:
     merge to publish to crates.io and create git tags
 - Requires `CARGO_REGISTRY_TOKEN` secret
 
-- [ ] release-plz.toml
-- [ ] cliff.toml
-- [ ] .github/workflows/release-plz.yml
+- [x] release-plz.toml (94287ea)
+- [x] cliff.toml (94287ea)
+- [x] .github/workflows/release-plz.yml (94287ea)
 
 ### Task 2: Cross-platform binary release workflow
 
