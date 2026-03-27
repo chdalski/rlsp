@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -22,12 +22,12 @@ except main.rs. Focus on the highest-gap modules first.
 ## Steps
 
 - [x] Add tests for server.rs uncovered paths (81da39f, 76.9% → 96.5%)
-- [ ] Add tests for completion.rs uncovered paths
-- [ ] Add tests for hover.rs uncovered paths
-- [ ] Add tests for validators.rs uncovered paths
-- [ ] Add tests for schema.rs uncovered paths
-- [ ] Add tests for symbols.rs, folding.rs, semantic_tokens.rs, selection.rs
-- [ ] Verify coverage improvement
+- [x] Add tests for completion.rs uncovered paths (863cc60)
+- [x] Add tests for hover.rs uncovered paths (ad5991e)
+- [x] Add tests for validators.rs uncovered paths (ad5991e)
+- [x] Add tests for schema.rs uncovered paths (adc42af)
+- [x] Add tests for symbols.rs, folding.rs, semantic_tokens.rs, selection.rs (f267ae2)
+- [x] Verify coverage improvement (94.16% → 96.52%)
 
 ## Tasks
 
