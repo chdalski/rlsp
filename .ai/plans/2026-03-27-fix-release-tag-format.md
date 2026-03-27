@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -27,8 +27,8 @@ the package name to keep releases independent.
 
 ## Steps
 
-- [ ] Add `git_tag_name` to `release-plz.toml` workspace config
-- [ ] Verify the format aligns with `release-binaries.yml` trigger
+- [x] Add `git_tag_name` to `release-plz.toml` workspace config (80a91eb)
+- [x] Verify the format aligns with `release-binaries.yml` trigger (80a91eb)
 
 ## Tasks
 
