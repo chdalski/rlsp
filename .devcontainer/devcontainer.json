@@ -10,7 +10,7 @@
       "pnpmVersion": "latest"
     },
     "ghcr.io/devcontainers-extra/features/uv:1": {},
-    "ghcr.io/devcontainers/features/go:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "remoteUser": "vscode",
   // Cross-platform init: runs on the HOST before the container starts.
