@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -32,9 +32,9 @@ instead.
 
 ## Steps
 
-- [ ] Update release-plz workflow for trusted publishing
-- [ ] Update CLAUDE.md release section to mention trusted
-      publishing
+- [x] Update release-plz workflow for trusted publishing (3aef0c0)
+- [x] Update CLAUDE.md release section to mention trusted
+      publishing (3547c32)
 
 ## Tasks
 
