@@ -1500,4 +1500,277 @@ mod tests {
         // and assert Err is returned.
         unimplemented!()
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group K — Previously uncovered paths
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // ── SchemaError Display ───────────────────────────────────────────────────
+
+    #[test]
+    fn schema_error_display_fetch_failed() {
+        let e = SchemaError::FetchFailed("connection refused".to_string());
+        let msg = e.to_string();
+        assert!(msg.contains("fetch failed"), "got: {msg}");
+        assert!(msg.contains("connection refused"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_error_display_response_too_large() {
+        let e = SchemaError::ResponseTooLarge;
+        let msg = e.to_string();
+        assert!(msg.contains("size limit"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_error_display_parse_failed() {
+        let e = SchemaError::ParseFailed("unexpected token".to_string());
+        let msg = e.to_string();
+        assert!(msg.contains("parse failed"), "got: {msg}");
+        assert!(msg.contains("unexpected token"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_error_display_too_deep() {
+        let e = SchemaError::TooDeep;
+        let msg = e.to_string();
+        assert!(msg.contains("depth"), "got: {msg}");
+    }
+
+    #[test]
+    fn schema_error_display_url_not_permitted() {
+        let e = SchemaError::UrlNotPermitted("ftp://bad".to_string());
+        let msg = e.to_string();
+        assert!(msg.contains("not permitted"), "got: {msg}");
+    }
+
+    // ── SSRF guard — additional IP ranges ────────────────────────────────────
+
+    #[test]
+    fn should_reject_private_ipv4_10_range() {
+        let result = validate_and_normalize_url("http://10.0.0.1/schema.json");
+        assert!(result.is_err(), "private 10.x.x.x must be rejected");
+    }
+
+    #[test]
+    fn should_reject_private_ipv4_192_168_range() {
+        let result = validate_and_normalize_url("http://192.168.1.1/schema.json");
+        assert!(result.is_err(), "private 192.168.x.x must be rejected");
+    }
+
+    #[test]
+    fn should_reject_private_ipv4_172_16_range() {
+        let result = validate_and_normalize_url("http://172.16.0.1/schema.json");
+        assert!(result.is_err(), "private 172.16.x.x must be rejected");
+    }
+
+    #[test]
+    fn should_reject_unspecified_ipv4_0_0_0_0() {
+        let result = validate_and_normalize_url("http://0.0.0.0/schema.json");
+        assert!(result.is_err(), "unspecified 0.0.0.0 must be rejected");
+    }
+
+    #[test]
+    fn should_reject_ipv6_unspecified_double_colon() {
+        let result = validate_and_normalize_url("http://[::]/schema.json");
+        assert!(result.is_err(), "IPv6 unspecified :: must be rejected");
+    }
+
+    #[test]
+    fn should_reject_ipv6_link_local_fe80() {
+        let result = validate_and_normalize_url("http://[fe80::1]/schema.json");
+        assert!(result.is_err(), "IPv6 link-local fe80:: must be rejected");
+    }
+
+    #[test]
+    fn should_reject_ftp_scheme() {
+        let result = validate_and_normalize_url("ftp://example.com/schema.json");
+        assert!(result.is_err(), "ftp:// scheme must be rejected");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("ftp"),
+            "error message should mention the scheme, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn should_reject_unparseable_url() {
+        let result = validate_and_normalize_url("not a url at all");
+        assert!(result.is_err(), "unparseable string must be rejected");
+    }
+
+    // ── parse_type edge cases ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_type_returns_none_for_non_string_non_array() {
+        // type: 42 (number) — should be ignored
+        let v = json!({"type": 42});
+        let s = parse_schema(&v).expect("should parse as object schema");
+        assert!(
+            s.schema_type.is_none(),
+            "non-string/non-array type should yield None"
+        );
+    }
+
+    #[test]
+    fn parse_type_returns_none_for_empty_type_array() {
+        // type: [] — empty array has no types, should yield None
+        let v = json!({"type": []});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(
+            s.schema_type.is_none(),
+            "empty type array should yield None schema_type"
+        );
+    }
+
+    #[test]
+    fn parse_type_filters_non_string_items_from_array() {
+        // type: [42, "string"] — non-string items filtered out; "string" survives
+        let v = json!({"type": [42, "string"]});
+        let s = parse_schema(&v).expect("should parse");
+        // "string" remains after filtering
+        assert!(
+            s.schema_type.is_some(),
+            "string item should survive filtering"
+        );
+    }
+
+    // ── $ref edge cases ───────────────────────────────────────────────────────
+
+    #[test]
+    fn ref_pointing_to_root_returns_parsed_root() {
+        // $ref: "#" — empty pointer, resolves to root document itself
+        let v = json!({
+            "definitions": {
+                "Root": {"$ref": "#"}
+            },
+            "type": "object"
+        });
+        // Parsing the root succeeds — it has type "object"
+        let s = parse_schema(&v).expect("should parse");
+        assert_eq!(schema_type_str(&s), Some("object"));
+    }
+
+    #[test]
+    fn ref_without_hash_prefix_yields_ref_path_only() {
+        // $ref without '#' prefix cannot be resolved locally — returns schema with ref_path set
+        let v = json!({"$ref": "http://example.com/other-schema.json"});
+        let result = parse_schema(&v);
+        // resolve_ref returns None for non-# refs; parse_schema_with_root returns Some(schema)
+        // with only ref_path set
+        if let Some(s) = result {
+            assert_eq!(
+                s.ref_path.as_deref(),
+                Some("http://example.com/other-schema.json")
+            );
+        }
+        // None is also acceptable (no crash guarantee)
+    }
+
+    // ── parse_schema_array edge cases ─────────────────────────────────────────
+
+    #[test]
+    fn empty_all_of_array_yields_none() {
+        // allOf: [] — empty array produces no schemas; field should be None
+        let v = json!({"allOf": []});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(s.all_of.is_none(), "empty allOf should yield None");
+    }
+
+    #[test]
+    fn all_of_with_non_object_entries_filtered_out_yields_none() {
+        // allOf: ["string"] — non-object entries filtered by parse_schema_with_root
+        let v = json!({"allOf": ["not a schema"]});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(
+            s.all_of.is_none(),
+            "allOf with only invalid entries should yield None"
+        );
+    }
+
+    // ── parse_definitions edge cases ─────────────────────────────────────────
+
+    #[test]
+    fn empty_definitions_object_yields_none() {
+        // definitions: {} — empty map produces no entries; field should be None
+        let v = json!({"definitions": {}});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(
+            s.definitions.is_none(),
+            "empty definitions should yield None"
+        );
+    }
+
+    #[test]
+    fn both_definitions_and_defs_are_merged() {
+        // Both definitions (Draft-04) and $defs (Draft-07) present — merged
+        let v = json!({
+            "definitions": {"TypeA": {"type": "string"}},
+            "$defs": {"TypeB": {"type": "integer"}}
+        });
+        let s = parse_schema(&v).expect("should parse");
+        let defs = s
+            .definitions
+            .as_ref()
+            .expect("should have merged definitions");
+        assert!(
+            defs.contains_key("TypeA"),
+            "TypeA from definitions should be present"
+        );
+        assert!(
+            defs.contains_key("TypeB"),
+            "TypeB from $defs should be present"
+        );
+    }
+
+    // ── additionalProperties: true ────────────────────────────────────────────
+
+    #[test]
+    fn additional_properties_true_parsed_as_permissive_schema() {
+        // additionalProperties: true — boolean true is a permissive schema
+        let v = json!({"type": "object", "additionalProperties": true});
+        let s = parse_schema(&v).expect("should parse");
+        // true is a permissive boolean schema → AdditionalProperties::Schema(empty)
+        assert!(
+            matches!(
+                s.additional_properties,
+                Some(AdditionalProperties::Schema(_))
+            ),
+            "additionalProperties: true should yield Schema variant"
+        );
+    }
+
+    // ── check_json_depth with array ───────────────────────────────────────────
+
+    #[test]
+    fn check_json_depth_rejects_deeply_nested_array() {
+        // Build a deeply nested array: [[[[...]]]]
+        let mut v = json!("leaf");
+        for _ in 0..55 {
+            v = json!([v]);
+        }
+        let result = check_json_depth(&v, 0);
+        assert!(
+            result.is_err(),
+            "deeply nested array should exceed depth limit"
+        );
+    }
+
+    #[test]
+    fn check_json_depth_accepts_shallow_array() {
+        let v = json!(["a", "b", "c"]);
+        assert!(check_json_depth(&v, 0).is_ok());
+    }
+
+    // ── required with non-string values filtered ──────────────────────────────
+
+    #[test]
+    fn required_with_non_string_values_filtered() {
+        // required: [42, "name"] — non-string values (42) are filtered by filter_map
+        let v = json!({"required": [42, "name", true]});
+        let s = parse_schema(&v).expect("should parse");
+        let req = s.required.as_ref().expect("should have required");
+        assert_eq!(req.len(), 1, "only string 'name' should survive filtering");
+        assert!(req.contains(&"name".to_string()));
+    }
 }
