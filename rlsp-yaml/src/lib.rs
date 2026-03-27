@@ -6,6 +6,7 @@ pub mod completion;
 pub mod document_links;
 pub mod document_store;
 pub mod folding;
+pub mod formatter;
 pub mod hover;
 pub mod on_type_formatting;
 pub mod parser;
