@@ -267,11 +267,15 @@ fn is_ssrf_blocked_host(host: &str) -> bool {
 // Schema fetching
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Build a `ureq` agent with redirect following disabled and an optional proxy.
+/// Build a `ureq` agent with redirect following disabled, timeouts, and an
+/// optional proxy.
 ///
 /// Both fetch functions use this helper so agent construction is consistent.
 fn build_agent(proxy: Option<&str>) -> ureq::Agent {
-    let mut builder = ureq::Agent::config_builder().max_redirects(0);
+    let mut builder = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .timeout_connect(Some(std::time::Duration::from_secs(5)))
+        .timeout_global(Some(std::time::Duration::from_secs(15)));
     if let Some(url) = proxy {
         if let Ok(p) = ureq::Proxy::new(url) {
             builder = builder.proxy(Some(p));
