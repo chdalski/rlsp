@@ -79,7 +79,7 @@ enum Doc {
 ## Steps
 
 - [x] Create `rlsp-fmt` crate with IR and printer (79c8d2c)
-- [ ] Add YAML formatter (AST → IR, no comments)
+- [x] Add YAML formatter (AST → IR, no comments) (1e14890)
 - [ ] Add comment preservation
 - [ ] Wire into LSP `textDocument/formatting`
 - [ ] Add formatting settings
