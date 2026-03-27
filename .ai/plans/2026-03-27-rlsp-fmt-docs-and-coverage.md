@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-27
 
 ## Goal
@@ -34,9 +34,9 @@ are unreachable.
 
 - [x] Analyze codecov data and identify uncovered lines
 - [x] Read all relevant source files
-- [ ] Add crate-level `//!` docs to `rlsp-fmt/src/lib.rs`
-- [ ] Add doc examples to builder functions in `rlsp-fmt/src/ir.rs`
-- [ ] Add doc example to `format()` in `rlsp-fmt/src/printer.rs`
+- [x] Add crate-level `//!` docs to `rlsp-fmt/src/lib.rs` (a3b9bfa)
+- [x] Add doc examples to builder functions in `rlsp-fmt/src/ir.rs` (a3b9bfa)
+- [x] Add doc example to `format()` in `rlsp-fmt/src/printer.rs` (a3b9bfa)
 - [ ] Remove dead `Mode::Break` branches from `fits()` in `printer.rs`
 - [ ] Add brief `//!` crate description to `rlsp-yaml/src/lib.rs`
 - [ ] Run `cargo test`, `cargo clippy`, `cargo doc`
@@ -50,11 +50,10 @@ with an overview of the Wadler-Lindig algorithm, a quick usage
 example, and re-export documentation. Add `///` doc examples to
 builder functions in `ir.rs` and to `format()` in `printer.rs`.
 
-- [ ] `lib.rs`: crate-level `//!` docs with overview and example
-- [ ] `ir.rs`: doc examples on `text`, `line`, `hard_line`,
-      `indent`, `group`, `concat`, `flat_alt`, `join`
-- [ ] `printer.rs`: doc example on `format()`
-- [ ] All doc examples must compile and pass as doc tests
+- [x] `lib.rs`: crate-level `//!` docs with overview and example (a3b9bfa)
+- [x] `ir.rs`: doc examples on all 8 builder functions (a3b9bfa)
+- [x] `printer.rs`: doc example on `format()` (a3b9bfa)
+- [x] All 10 doc examples compile and pass as doc tests (a3b9bfa)
 
 ### Task 2: Remove dead code in fits() and add rlsp-yaml crate docs
 
