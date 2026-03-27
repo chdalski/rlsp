@@ -35,7 +35,13 @@ pub struct Settings {
     pub key_ordering: bool,
     /// Maps schema URL → glob pattern (upstream yaml-language-server convention).
     pub schemas: HashMap<String, String>,
+    /// Kubernetes cluster version for schema resolution (e.g. `"1.32.0"`).
+    /// Defaults to `"1.32.0"` when absent.
+    pub kubernetes_version: Option<String>,
 }
+
+/// Default Kubernetes version used when `kubernetesVersion` is not configured.
+const DEFAULT_KUBERNETES_VERSION: &str = "1.32.0";
 
 // Lock ordering (must be acquired in this order to prevent deadlock):
 //   document_store → schema_associations → schema_cache → diagnostics → settings
@@ -89,6 +95,14 @@ impl Backend {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub(crate) fn get_kubernetes_version(&self) -> String {
+        self.settings
+            .lock()
+            .ok()
+            .and_then(|s| s.kubernetes_version.clone())
+            .unwrap_or_else(|| DEFAULT_KUBERNETES_VERSION.to_string())
     }
 
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
@@ -207,13 +221,23 @@ impl Backend {
             }
         } else {
             // No modeline — check workspace associations.
-            // get_schema_associations() acquires and releases the settings lock
-            // before any schema_associations or schema_cache lock is taken below.
+            // get_schema_associations() and get_kubernetes_version() acquire and
+            // release the settings lock before any schema_associations or
+            // schema_cache lock is taken below.
             let associations = self.get_schema_associations();
+            let k8s_version = self.get_kubernetes_version();
             let filename = uri.path();
             if let Some(schema_url) =
                 crate::schema::match_schema_by_filename(filename, &associations)
             {
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                    .await;
+            } else if let Some((api_version, kind)) =
+                crate::schema::detect_kubernetes_resource(&result.documents)
+            {
+                // Third fallback: Kubernetes auto-detection.
+                let schema_url =
+                    crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
                 self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
                     .await;
             }
@@ -934,6 +958,43 @@ mod tests {
         assert_eq!(associations.len(), 1);
         assert_eq!(associations[0].url, "https://example.com/schema.json");
         assert_eq!(associations[0].pattern, "*.yaml");
+    }
+
+    // ---- Kubernetes version setting ----
+
+    #[test]
+    fn settings_deserializes_kubernetes_version() {
+        let json = serde_json::json!({"kubernetesVersion": "1.29.0"});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.kubernetes_version.as_deref(), Some("1.29.0"));
+    }
+
+    #[test]
+    fn settings_defaults_kubernetes_version_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.kubernetes_version.is_none());
+    }
+
+    #[test]
+    fn get_kubernetes_version_returns_default_when_not_configured() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert_eq!(backend.get_kubernetes_version(), DEFAULT_KUBERNETES_VERSION);
+    }
+
+    #[test]
+    fn get_kubernetes_version_returns_configured_value() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({"kubernetesVersion": "1.29.0"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(backend.get_kubernetes_version(), "1.29.0");
     }
 
     // ---- Custom tags wiring ----
