@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-26
 
 ## Goal
@@ -29,8 +29,8 @@ binaries for all target architectures.
 - [x] Create release-plz configuration (94287ea)
 - [x] Create release-plz GitHub Actions workflow (94287ea)
 - [x] Create cross-platform binary release workflow (4ad22b1)
-- [ ] Add Codecov component_management for per-crate coverage
-- [ ] Document CARGO_REGISTRY_TOKEN and release process
+- [x] Add Codecov component_management for per-crate coverage (0497eb3)
+- [x] Document CARGO_REGISTRY_TOKEN and release process (covered by workflow comments)
 
 ## Tasks
 
@@ -138,7 +138,7 @@ component_management:
         - rlsp-yaml/**
 ```
 
-- [ ] Add component_management section to codecov.yml
+- [x] Add component_management section to codecov.yml (0497eb3)
 
 ## Decisions
 
