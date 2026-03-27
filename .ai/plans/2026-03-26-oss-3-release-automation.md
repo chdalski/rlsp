@@ -28,7 +28,7 @@ binaries for all target architectures.
 
 - [x] Create release-plz configuration (94287ea)
 - [x] Create release-plz GitHub Actions workflow (94287ea)
-- [ ] Create cross-platform binary release workflow
+- [x] Create cross-platform binary release workflow (4ad22b1)
 - [ ] Add Codecov component_management for per-crate coverage
 - [ ] Document CARGO_REGISTRY_TOKEN and release process
 
@@ -119,9 +119,9 @@ Create `.github/workflows/release-binaries.yml`:
   - Upload to GitHub Release using `softprops/action-gh-release@v2`
 - Binary naming: `rlsp-yaml-{target}.tar.gz` / `.zip`
 
-- [ ] release-binaries.yml
-- [ ] Verify matrix covers all 6 targets
-- [ ] Archive naming convention documented
+- [x] release-binaries.yml (4ad22b1)
+- [x] Verify matrix covers all 6 targets (4ad22b1)
+- [x] Archive naming convention documented (4ad22b1)
 
 ### Task 3: Codecov per-crate components
 
