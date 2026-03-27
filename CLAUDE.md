@@ -58,6 +58,31 @@ Workspace lints are defined in the root `Cargo.toml` and inherited
 via `lints.workspace = true`. All clippy warnings
 at pedantic + nursery level; selected lints at `deny`.
 
+## Release
+
+Releases are automated via [release-plz](https://release-plz.ieni.dev/)
+and two GitHub Actions workflows:
+
+1. **release-plz** (`.github/workflows/release-plz.yml`) —
+   runs on every push to `main`. Creates a release PR with
+   version bump and changelog, and publishes to crates.io
+   when the PR is merged.
+
+2. **release-binaries** (`.github/workflows/release-binaries.yml`) —
+   triggered by tag push. Builds cross-platform binaries
+   and uploads them to the GitHub Release.
+
+**Tag format:** `<package>-v<version>` (e.g. `rlsp-yaml-v0.2.0`).
+Configured at the workspace level in `release-plz.toml` via
+`git_tag_name = "{{ package }}-v{{ version }}"`. Each crate's
+binary workflow must have a matching trigger pattern
+(e.g. `rlsp-yaml-v*`). When adding a new crate, add a
+corresponding `release-binaries` workflow or extend the
+existing one with the new tag pattern.
+
+**Changelogs** are auto-generated from conventional commits
+via git-cliff (`cliff.toml`).
+
 ## Repository Layout
 
 Each language server lives in its own crate: `rlsp-<language>`.
