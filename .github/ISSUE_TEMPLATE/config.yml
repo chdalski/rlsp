@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: General Question
-    url: https://github.com/cdalski/rlsp/discussions
+    url: https://github.com/chdalski/rlsp/discussions
     about: Ask questions and discuss rlsp-yaml usage
