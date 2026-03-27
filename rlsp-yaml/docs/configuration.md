@@ -18,6 +18,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "schemaStore": true,
   "formatPrintWidth": 80,
   "formatSingleQuote": false,
+  "httpProxy": "http://proxy.corp:8080",
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": "deploy/**/*.yaml"
@@ -98,6 +99,19 @@ Maximum line width for the full-document formatter. The formatter tries to fit c
 
 When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
 
+### `httpProxy`
+
+- **Type:** `string` (optional)
+- **Default:** `null` (no proxy)
+
+HTTP proxy URL used for all schema fetching (individual schemas and the SchemaStore catalog). Format: `http://host:port` or `https://host:port`.
+
+```json
+{ "httpProxy": "http://proxy.corp:8080" }
+```
+
+When absent or `null`, requests are made directly. Invalid proxy URLs are silently ignored and requests fall back to direct connections.
+
 > **Indentation** (`tabWidth`, `useTabs`) is not configurable via workspace settings — it is taken directly from the LSP `textDocument/formatting` request, which carries the editor's indentation preferences. Configure indentation in your editor settings.
 
 ## Modelines
@@ -147,6 +161,7 @@ vim.lsp.start({
     },
     formatPrintWidth = 80,
     formatSingleQuote = false,
+    httpProxy = "http://proxy.corp:8080",
   },
 })
 ```

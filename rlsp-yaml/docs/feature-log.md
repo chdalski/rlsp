@@ -104,7 +104,7 @@ Implement `textDocument/rangeFormatting` to format a selected region of a YAML d
 
 > Depends on full document formatting infrastructure. Lower priority than full-document formatting.
 
-### Proxy Support for Schema Fetching
+### Proxy Support for Schema Fetching [completed]
 
 **Priority:** 14
 
