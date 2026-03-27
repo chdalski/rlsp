@@ -172,14 +172,16 @@ Some validators are always active; others depend on settings.
 
 ## Formatting
 
-The server implements `textDocument/formatting` for full-document YAML formatting.
+The server implements `textDocument/formatting` for full-document YAML formatting and `textDocument/rangeFormatting` for formatting a selected region.
 
 **Behavior:**
 
-- **Indentation** (tab size, tabs vs spaces) is controlled by the editor — the LSP `textDocument/formatting` request carries `tab_size` and `insert_spaces` from the editor's own settings.
+- **Indentation** (tab size, tabs vs spaces) is controlled by the editor — the LSP formatting requests carry `tab_size` and `insert_spaces` from the editor's own settings.
 - **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`).
 - **Comments** are preserved during formatting. The formatter extracts comments from the original text and reattaches them to the formatted output.
 - **Syntax errors** — if the document cannot be parsed, the original text is returned unchanged so no content is lost.
+
+**Range formatting** uses the same settings and formatter as full-document formatting. The full document is formatted internally and the resulting lines that correspond to the requested range are returned as the edit. This ensures consistent line-breaking decisions — the printer needs surrounding context to make correct choices.
 
 The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks saphyr's AST and emits IR nodes that the engine renders with line-width awareness.
 

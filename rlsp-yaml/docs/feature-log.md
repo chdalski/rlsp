@@ -96,7 +96,7 @@ Implement `textDocument/formatting` to reformat entire YAML documents. Built on 
 
 > Configurable via `formatPrintWidth` and `formatSingleQuote` workspace settings. Indentation (`tab_size`, `insert_spaces`) is taken from the LSP request so the editor controls it.
 
-### Range Formatting
+### Range Formatting [completed]
 
 **Priority:** 13
 
