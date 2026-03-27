@@ -1595,7 +1595,10 @@ async fn should_record_schema_association_for_kubernetes_manifest() {
     let resp = resp.expect("codeLens should return a response");
     let result = resp.result().expect("codeLens should have result");
     let arr = result.as_array().expect("codeLens result should be array");
-    assert!(!arr.is_empty(), "codeLens should return a lens for the K8s schema");
+    assert!(
+        !arr.is_empty(),
+        "codeLens should return a lens for the K8s schema"
+    );
     let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
         lens_str.contains("kubernetes-json-schema"),
@@ -1633,7 +1636,10 @@ async fn should_use_configured_kubernetes_version_in_schema_url() {
     let resp = resp.expect("codeLens should return a response");
     let result = resp.result().expect("codeLens should have result");
     let arr = result.as_array().expect("codeLens result should be array");
-    assert!(!arr.is_empty(), "codeLens should return a lens for the K8s schema");
+    assert!(
+        !arr.is_empty(),
+        "codeLens should return a lens for the K8s schema"
+    );
     let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
         lens_str.contains("v1.29.0"),
