@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -41,7 +41,7 @@ user configuration.
 - [x] Add catalog matching function (34d135a)
 - [x] Add `schema_store` setting and Backend integration (128583f)
 - [x] Write tests (34d135a, 128583f)
-- [ ] Update documentation
+- [x] Update documentation (6450d8e)
 
 ## Tasks
 
