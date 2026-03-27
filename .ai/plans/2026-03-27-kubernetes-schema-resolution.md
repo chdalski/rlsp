@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -44,8 +44,8 @@ yannh/kubernetes-json-schema on GitHub.
 - [x] Add Kubernetes detection + URL construction to `schema.rs` (77c4298)
 - [x] Integrate into `parse_and_publish` as third fallback (9232a96)
 - [x] Write tests for detection and URL construction (77c4298, 9232a96)
-- [ ] Update `configuration.md` with new setting
-- [ ] Update `feature-log.md`
+- [x] Update `configuration.md` with new setting (630e0d9)
+- [x] Update `feature-log.md` (630e0d9)
 
 ## Tasks
 
