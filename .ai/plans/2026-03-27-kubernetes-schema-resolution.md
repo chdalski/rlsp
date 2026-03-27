@@ -42,8 +42,8 @@ yannh/kubernetes-json-schema on GitHub.
 
 - [x] Add `kubernetes_version` field to `Settings`
 - [x] Add Kubernetes detection + URL construction to `schema.rs` (77c4298)
-- [ ] Integrate into `parse_and_publish` as third fallback
-- [ ] Write tests for detection and URL construction
+- [x] Integrate into `parse_and_publish` as third fallback (9232a96)
+- [x] Write tests for detection and URL construction (77c4298, 9232a96)
 - [ ] Update `configuration.md` with new setting
 - [ ] Update `feature-log.md`
 
