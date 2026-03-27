@@ -23,6 +23,27 @@ struct Work<'a> {
 /// `Group` nodes attempt flat mode by checking whether the group fits within
 /// the remaining line width (`fits` lookahead). If it doesn't fit, the group
 /// switches to break mode.
+///
+/// # Examples
+///
+/// ```
+/// use rlsp_fmt::{concat, group, indent, line, text, format, FormatOptions};
+///
+/// let doc = group(concat(vec![
+///     text("["),
+///     indent(concat(vec![line(), text("a"), text(","), line(), text("b")])),
+///     line(),
+///     text("]"),
+/// ]));
+///
+/// // Wide enough: rendered flat on one line.
+/// let wide = format(&doc, &FormatOptions::default());
+/// assert_eq!(wide, "[ a, b ]");
+///
+/// // Narrow: rendered across multiple lines.
+/// let opts = FormatOptions { print_width: 5, ..Default::default() };
+/// assert!(format(&doc, &opts).contains('\n'));
+/// ```
 #[must_use]
 pub fn format(doc: &Doc, options: &FormatOptions) -> String {
     let mut output = String::new();
