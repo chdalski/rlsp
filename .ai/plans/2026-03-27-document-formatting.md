@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-27
 
 ## Goal
@@ -78,7 +78,7 @@ enum Doc {
 
 ## Steps
 
-- [ ] Create `rlsp-fmt` crate with IR and printer
+- [x] Create `rlsp-fmt` crate with IR and printer (79c8d2c)
 - [ ] Add YAML formatter (AST → IR, no comments)
 - [ ] Add comment preservation
 - [ ] Wire into LSP `textDocument/formatting`
