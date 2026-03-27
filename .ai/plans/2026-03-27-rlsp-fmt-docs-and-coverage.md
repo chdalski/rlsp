@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -37,9 +37,9 @@ are unreachable.
 - [x] Add crate-level `//!` docs to `rlsp-fmt/src/lib.rs` (a3b9bfa)
 - [x] Add doc examples to builder functions in `rlsp-fmt/src/ir.rs` (a3b9bfa)
 - [x] Add doc example to `format()` in `rlsp-fmt/src/printer.rs` (a3b9bfa)
-- [ ] Remove dead `Mode::Break` branches from `fits()` in `printer.rs`
-- [ ] Add brief `//!` crate description to `rlsp-yaml/src/lib.rs`
-- [ ] Run `cargo test`, `cargo clippy`, `cargo doc`
+- [x] Remove dead `Mode::Break` branches from `fits()` in `printer.rs` (5219f94)
+- [x] Add brief `//!` crate description to `rlsp-yaml/src/lib.rs` (5219f94)
+- [x] Run `cargo test`, `cargo clippy`, `cargo doc` (888 tests pass)
 
 ## Tasks
 
@@ -62,11 +62,11 @@ Remove the unreachable `Mode::Break` branches from `fits()` in
 `mode` parameter and break-mode handling are unnecessary. Add a
 brief `//!` crate description to `rlsp-yaml/src/lib.rs`.
 
-- [ ] Remove `mode` from `fits()` internal stack — always `Flat`
-- [ ] Remove `Mode::Break` arm from `Doc::Line` match (lines 135-140)
-- [ ] Remove `Mode::Break` arm from `Doc::FlatAlt` match (line 157)
-- [ ] Add `//!` crate description to `rlsp-yaml/src/lib.rs`
-- [ ] `cargo test`, `cargo clippy`, `cargo doc` all pass
+- [x] Remove `mode` from `fits()` internal stack — always `Flat` (5219f94)
+- [x] Remove `Mode::Break` arm from `Doc::Line` match (5219f94)
+- [x] Remove `Mode::Break` arm from `Doc::FlatAlt` match (5219f94)
+- [x] Add `//!` crate description to `rlsp-yaml/src/lib.rs` (5219f94)
+- [x] `cargo test`, `cargo clippy`, `cargo doc` all pass (5219f94)
 
 ## Decisions
 
