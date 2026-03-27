@@ -188,7 +188,7 @@ const fn is_anchor_name_char(ch: char) -> bool {
 
 /// Validate that a proposed new anchor name is valid.
 fn is_valid_anchor_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(is_anchor_name_char)
+    !name.is_empty() && name.len() <= 256 && name.chars().all(is_anchor_name_char)
 }
 
 #[cfg(test)]
@@ -687,16 +687,26 @@ mod tests {
 
     // Test 45
     #[test]
-    fn should_handle_very_long_new_name_without_panic() {
+    fn should_reject_new_name_exceeding_max_length() {
         let text = "key: &anchor value\n";
         let uri = test_uri();
-        let long_name = "a".repeat(10000);
+        let long_name = "a".repeat(257);
         let result = rename(text, &uri, pos(0, 5), &long_name);
-
-        // Should either accept or reject, but not panic
         assert!(
-            result.is_some() || result.is_none(),
-            "should not panic with very long new_name"
+            result.is_none(),
+            "name longer than 256 chars must be rejected"
+        );
+    }
+
+    #[test]
+    fn should_accept_new_name_at_exactly_max_length() {
+        let text = "key: &anchor value\n";
+        let uri = test_uri();
+        let max_name = "a".repeat(256);
+        let result = rename(text, &uri, pos(0, 5), &max_name);
+        assert!(
+            result.is_some(),
+            "name of exactly 256 chars must be accepted"
         );
     }
 

@@ -256,6 +256,15 @@ fn is_ssrf_blocked_host(host: &str) -> bool {
                     || v6.is_unspecified() // ::
                     // fe80::/10 (link-local) — check manually
                     || v6.segments().first().is_some_and(|s| (s & 0xffc0) == 0xfe80)
+                    // fc00::/7 (ULA — IPv6 private addresses)
+                    || v6.segments().first().is_some_and(|s| (s & 0xfe00) == 0xfc00)
+                    // ::ffff:0:0/96 (IPv4-mapped) — apply IPv4 SSRF checks
+                    || v6.to_ipv4_mapped().is_some_and(|v4| {
+                        v4.is_loopback()
+                            || v4.is_link_local()
+                            || v4.is_private()
+                            || v4.is_unspecified()
+                    })
             }
         };
     }
@@ -1811,6 +1820,46 @@ mod tests {
     fn should_reject_unparseable_url() {
         let result = validate_and_normalize_url("not a url at all");
         assert!(result.is_err(), "unparseable string must be rejected");
+    }
+
+    // IPv6 ULA (fc00::/7) and IPv4-mapped SSRF gaps
+    #[test]
+    fn should_reject_ipv6_ula_fd00() {
+        let result = validate_and_normalize_url("http://[fd00::1]/schema.json");
+        assert!(result.is_err(), "IPv6 ULA fd00:: must be rejected");
+    }
+
+    #[test]
+    fn should_reject_ipv6_ula_fc00() {
+        let result = validate_and_normalize_url("http://[fc00::1]/schema.json");
+        assert!(result.is_err(), "IPv6 ULA fc00:: must be rejected");
+    }
+
+    #[test]
+    fn should_reject_ipv4_mapped_private() {
+        let result = validate_and_normalize_url("http://[::ffff:192.168.1.1]/schema.json");
+        assert!(
+            result.is_err(),
+            "IPv4-mapped private address must be rejected"
+        );
+    }
+
+    #[test]
+    fn should_reject_ipv4_mapped_loopback() {
+        let result = validate_and_normalize_url("http://[::ffff:127.0.0.1]/schema.json");
+        assert!(
+            result.is_err(),
+            "IPv4-mapped loopback address must be rejected"
+        );
+    }
+
+    #[test]
+    fn should_allow_ipv4_mapped_public() {
+        let result = validate_and_normalize_url("http://[::ffff:8.8.8.8]/schema.json");
+        assert!(
+            result.is_ok(),
+            "IPv4-mapped public address must be allowed: {result:?}"
+        );
     }
 
     // ── parse_type edge cases ─────────────────────────────────────────────────
