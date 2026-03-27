@@ -589,6 +589,82 @@ pub fn extract_custom_tags(text: &str) -> Vec<String> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Schema association — Kubernetes auto-detection
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Inspect the first YAML document's root mapping for `apiVersion` and `kind`.
+///
+/// Returns `Some((api_version, kind))` if both keys are present and both values
+/// are plain string scalars.  Returns `None` if the document slice is empty,
+/// the root node is not a mapping, or either key is absent / non-string.
+#[must_use]
+pub fn detect_kubernetes_resource(docs: &[saphyr::YamlOwned]) -> Option<(String, String)> {
+    use saphyr::{ScalarOwned, YamlOwned};
+
+    let root = docs.first()?;
+    let YamlOwned::Mapping(map) = root else {
+        return None;
+    };
+
+    let mut api_version: Option<String> = None;
+    let mut kind: Option<String> = None;
+
+    for (k, v) in map {
+        let key = match k {
+            YamlOwned::Value(ScalarOwned::String(s)) => s.as_str(),
+            YamlOwned::Representation(..)
+            | YamlOwned::Value(_)
+            | YamlOwned::Sequence(_)
+            | YamlOwned::Mapping(_)
+            | YamlOwned::Tagged(..)
+            | YamlOwned::Alias(_)
+            | YamlOwned::BadValue => continue,
+        };
+        let val = match v {
+            YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
+            YamlOwned::Representation(..)
+            | YamlOwned::Value(_)
+            | YamlOwned::Sequence(_)
+            | YamlOwned::Mapping(_)
+            | YamlOwned::Tagged(..)
+            | YamlOwned::Alias(_)
+            | YamlOwned::BadValue => continue,
+        };
+        match key {
+            "apiVersion" => api_version = Some(val),
+            "kind" => kind = Some(val),
+            _ => {}
+        }
+    }
+
+    Some((api_version?, kind?))
+}
+
+/// Construct a Kubernetes JSON Schema URL for the given resource.
+///
+/// Uses the schema repository at
+/// `https://raw.githubusercontent.com/yannh/kubernetes-json-schema`.
+///
+/// Filename rules:
+/// - `kind` is lowercased.
+/// - For grouped API versions (e.g. `apps/v1`) the filename is
+///   `{kind}-{group}-{version}.json`.
+/// - For core API versions (e.g. `v1`) the filename is
+///   `{kind}-{api_version}.json`.
+#[must_use]
+pub fn kubernetes_schema_url(api_version: &str, kind: &str, k8s_version: &str) -> String {
+    let kind_lower = kind.to_lowercase();
+    let filename = if let Some((group, version)) = api_version.split_once('/') {
+        format!("{kind_lower}-{group}-{version}.json")
+    } else {
+        format!("{kind_lower}-{api_version}.json")
+    };
+    format!(
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v{k8s_version}-standalone-strict/{filename}"
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Schema association — file pattern matching
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1772,5 +1848,98 @@ mod tests {
         let req = s.required.as_ref().expect("should have required");
         assert_eq!(req.len(), 1, "only string 'name' should survive filtering");
         assert!(req.contains(&"name".to_string()));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // detect_kubernetes_resource + kubernetes_schema_url
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn parse_docs(text: &str) -> Vec<saphyr::YamlOwned> {
+        use saphyr::LoadableYamlNode;
+        saphyr::YamlOwned::load_from_str(text).unwrap_or_default()
+    }
+
+    // Test K8s-1: core API (v1 Pod) — detection and URL
+    #[test]
+    fn should_detect_core_api_pod_and_build_url() {
+        let docs = parse_docs("apiVersion: v1\nkind: Pod\n");
+        let result = detect_kubernetes_resource(&docs);
+        assert_eq!(result, Some(("v1".to_string(), "Pod".to_string())));
+        let url = kubernetes_schema_url("v1", "Pod", "1.29.0");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/pod-v1.json"
+        );
+    }
+
+    // Test K8s-2: grouped API (apps/v1 Deployment) — detection and URL
+    #[test]
+    fn should_detect_grouped_api_deployment_and_build_url() {
+        let docs = parse_docs("apiVersion: apps/v1\nkind: Deployment\n");
+        let result = detect_kubernetes_resource(&docs);
+        assert_eq!(
+            result,
+            Some(("apps/v1".to_string(), "Deployment".to_string()))
+        );
+        let url = kubernetes_schema_url("apps/v1", "Deployment", "1.29.0");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/deployment-apps-v1.json"
+        );
+    }
+
+    // Test K8s-3: HPA autoscaling/v2 case
+    #[test]
+    fn should_detect_hpa_and_build_url() {
+        let docs = parse_docs("apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\n");
+        let result = detect_kubernetes_resource(&docs);
+        assert_eq!(
+            result,
+            Some((
+                "autoscaling/v2".to_string(),
+                "HorizontalPodAutoscaler".to_string()
+            ))
+        );
+        let url = kubernetes_schema_url("autoscaling/v2", "HorizontalPodAutoscaler", "1.29.0");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/horizontalpodautoscaler-autoscaling-v2.json"
+        );
+    }
+
+    // Test K8s-4: missing apiVersion → None
+    #[test]
+    fn should_return_none_when_api_version_missing() {
+        let docs = parse_docs("kind: Pod\nmetadata:\n  name: test\n");
+        assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    // Test K8s-5: missing kind → None
+    #[test]
+    fn should_return_none_when_kind_missing() {
+        let docs = parse_docs("apiVersion: v1\nmetadata:\n  name: test\n");
+        assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    // Test K8s-6: empty docs → None
+    #[test]
+    fn should_return_none_for_empty_docs() {
+        assert_eq!(detect_kubernetes_resource(&[]), None);
+    }
+
+    // Test K8s-7: multi-document — only first doc inspected; second has fields, first doesn't
+    #[test]
+    fn should_inspect_only_first_document() {
+        let docs = parse_docs("other: value\n---\napiVersion: v1\nkind: Pod\n");
+        // First doc has no apiVersion/kind → None
+        assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    // Test K8s-8: non-string values for apiVersion/kind → None
+    #[test]
+    fn should_return_none_when_api_version_or_kind_is_non_string() {
+        // apiVersion is a mapping, kind is a mapping — neither is a string scalar
+        let docs = parse_docs("apiVersion:\n  nested: true\nkind:\n  - item\n");
+        assert_eq!(detect_kubernetes_resource(&docs), None);
     }
 }
