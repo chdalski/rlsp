@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-27
 
 ## Goal
@@ -28,8 +28,8 @@ in the previous plan.
 
 ## Steps
 
-- [ ] Add `rangeFormatting` handler and capability
-- [ ] Write tests
+- [x] Add `rangeFormatting` handler and capability (579b0ca)
+- [x] Write tests (579b0ca)
 - [ ] Update documentation
 
 ## Tasks
