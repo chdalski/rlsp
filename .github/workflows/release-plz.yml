@@ -44,73 +44,89 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-binaries:
-    name: Build ${{ matrix.target }}
+  filter-binaries:
+    name: Filter binary releases
     needs: release-plz-release
     if: needs.release-plz-release.outputs.releases_created == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - id: filter
+        run: |
+          # Binary crates that need compiled releases
+          BINARY_CRATES='["rlsp-yaml"]'
+
+          RELEASES='${{ needs.release-plz-release.outputs.releases }}'
+
+          # Filter releases to only binary crates, output {crate, tag} pairs
+          MATRIX=$(echo "$RELEASES" | jq -c --argjson bins "$BINARY_CRATES" \
+            '[.[] | select(.package_name as $p | $bins | index($p)) | {crate: .package_name, tag: .tag}]')
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  build-binaries:
+    name: Build ${{ matrix.crate.crate }} (${{ matrix.target.target }})
+    needs: filter-binaries
+    if: needs.filter-binaries.outputs.matrix != '[]'
+    runs-on: ${{ matrix.target.os }}
     permissions:
       contents: write
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: riscv64gc-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
+        crate: ${{ fromJSON(needs.filter-binaries.outputs.matrix) }}
+        target:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: riscv64gc-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
 
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ fromJSON(needs.release-plz-release.outputs.releases)[0].tag }}
+          ref: ${{ matrix.crate.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target.target }}
 
       - name: Install cross (Linux cross-compilation)
-        if: matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'riscv64gc-unknown-linux-gnu'
+        if: matrix.target.target == 'aarch64-unknown-linux-gnu' || matrix.target.target == 'riscv64gc-unknown-linux-gnu'
         run: cargo install cross
 
       - name: Build (cross)
-        if: matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'riscv64gc-unknown-linux-gnu'
-        run: cross build --release --target ${{ matrix.target }}
+        if: matrix.target.target == 'aarch64-unknown-linux-gnu' || matrix.target.target == 'riscv64gc-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target.target }}
 
       - name: Build (native)
-        if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.target != 'riscv64gc-unknown-linux-gnu'
-        run: cargo build --release --target ${{ matrix.target }}
+        if: matrix.target.target != 'aarch64-unknown-linux-gnu' && matrix.target.target != 'riscv64gc-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target.target }}
 
       - name: Package (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        run: tar czf rlsp-yaml-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release rlsp-yaml
+        if: matrix.target.os != 'windows-latest'
+        run: tar czf ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz -C target/${{ matrix.target.target }}/release ${{ matrix.crate.crate }}
 
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/rlsp-yaml.exe -DestinationPath rlsp-yaml-${{ matrix.target }}.zip
+        if: matrix.target.os == 'windows-latest'
+        run: Compress-Archive -Path target/${{ matrix.target.target }}/release/${{ matrix.crate.crate }}.exe -DestinationPath ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip
         shell: pwsh
 
       - name: Upload to GitHub Release (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+        if: matrix.target.os != 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ fromJSON(needs.release-plz-release.outputs.releases)[0].tag }}
-          files: rlsp-yaml-${{ matrix.target }}.tar.gz
+          tag_name: ${{ matrix.crate.tag }}
+          files: ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz
 
       - name: Upload to GitHub Release (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.target.os == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ fromJSON(needs.release-plz-release.outputs.releases)[0].tag }}
-          files: rlsp-yaml-${{ matrix.target }}.zip
+          tag_name: ${{ matrix.crate.tag }}
+          files: ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip
