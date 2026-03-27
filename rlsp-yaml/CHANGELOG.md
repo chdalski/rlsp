@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Refactoring
+
+- Simplify fits() by removing dead break-mode branches (5219f94)
+
 ## Bug Fixes
 
 - Add connect and global timeouts to HTTP agent (968462b)
