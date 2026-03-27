@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-27)
 **Created:** 2026-03-27
 
 ## Goal
@@ -31,8 +31,8 @@ solves this without requiring additional tokens.
 
 ## Steps
 
-- [ ] Merge binary build matrix into release-plz workflow
-- [ ] Delete the standalone release-binaries workflow
+- [x] Merge binary build matrix into release-plz workflow (9d63005)
+- [x] Delete the standalone release-binaries workflow (9d63005)
 
 ## Tasks
 
