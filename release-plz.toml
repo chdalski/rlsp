@@ -1,0 +1,7 @@
+[workspace]
+changelog_config = "cliff.toml"
+publish_timeout = "10m"
+git_release_enable = true
+
+[[package]]
+name = "rlsp-yaml"
