@@ -24,7 +24,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
 use crate::parser;
-use crate::schema::SchemaCache;
+use crate::schema::{SchemaCache, SchemaStoreCatalog};
 
 /// Workspace settings received via LSP initialization options or
 /// `workspace/didChangeConfiguration`.
@@ -38,6 +38,8 @@ pub struct Settings {
     /// Kubernetes cluster version for schema resolution (e.g. `"1.32.0"`).
     /// Defaults to `"1.32.0"` when absent.
     pub kubernetes_version: Option<String>,
+    /// Enable `SchemaStore` automatic schema association. Defaults to `true` when absent.
+    pub schema_store: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -45,6 +47,7 @@ const DEFAULT_KUBERNETES_VERSION: &str = "1.32.0";
 
 // Lock ordering (must be acquired in this order to prevent deadlock):
 //   document_store → schema_associations → schema_cache → diagnostics → settings
+//   schemastore_catalog is independent (never held with other locks)
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,
@@ -54,6 +57,8 @@ pub struct Backend {
     schema_cache: Mutex<SchemaCache>,
     diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
     settings: Mutex<Settings>,
+    /// Lazily-fetched `SchemaStore` catalog, cached for the session.
+    schemastore_catalog: Mutex<Option<SchemaStoreCatalog>>,
 }
 
 impl Backend {
@@ -66,6 +71,7 @@ impl Backend {
             schema_cache: Mutex::new(SchemaCache::new()),
             diagnostics: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
+            schemastore_catalog: Mutex::new(None),
         }
     }
 
@@ -103,6 +109,58 @@ impl Backend {
             .ok()
             .and_then(|s| s.kubernetes_version.clone())
             .unwrap_or_else(|| DEFAULT_KUBERNETES_VERSION.to_string())
+    }
+
+    /// Return `true` if `SchemaStore` automatic association is enabled.
+    ///
+    /// Defaults to `true` when `schemaStore` is absent from settings.
+    pub(crate) fn get_schema_store_enabled(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.schema_store.unwrap_or(true))
+    }
+
+    /// Return the cached `SchemaStore` catalog, fetching it on first call.
+    ///
+    /// On fetch failure, logs a warning and returns `None` — `SchemaStore`
+    /// is non-fatal: the server continues without it.
+    ///
+    /// Pattern: check cache under lock → drop lock → fetch if miss →
+    /// re-acquire lock → insert. No lock is held across the blocking fetch.
+    async fn get_or_fetch_schemastore_catalog(&self) -> Option<SchemaStoreCatalog> {
+        // Check cache without holding the lock across spawn_blocking.
+        let cached = self
+            .schemastore_catalog
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+
+        if cached.is_some() {
+            return cached;
+        }
+
+        // Cache miss — fetch without holding any lock.
+        let fetched = tokio::task::spawn_blocking(crate::schema::fetch_schemastore_catalog).await;
+
+        match fetched {
+            Ok(Ok(catalog)) => {
+                if let Ok(mut guard) = self.schemastore_catalog.lock() {
+                    *guard = Some(catalog.clone());
+                }
+                Some(catalog)
+            }
+            Ok(Err(e)) => {
+                self.client
+                    .log_message(
+                        tower_lsp::lsp_types::MessageType::WARNING,
+                        format!("SchemaStore catalog fetch failed: {e}"),
+                    )
+                    .await;
+                None
+            }
+            Err(_) => None,
+        }
     }
 
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
@@ -221,11 +279,12 @@ impl Backend {
             }
         } else {
             // No modeline — check workspace associations.
-            // get_schema_associations() and get_kubernetes_version() acquire and
-            // release the settings lock before any schema_associations or
-            // schema_cache lock is taken below.
+            // get_schema_associations(), get_kubernetes_version(), and
+            // get_schema_store_enabled() each acquire and release the settings
+            // lock before any schema_associations or schema_cache lock is taken.
             let associations = self.get_schema_associations();
             let k8s_version = self.get_kubernetes_version();
+            let schema_store_enabled = self.get_schema_store_enabled();
             let filename = uri.path();
             if let Some(schema_url) =
                 crate::schema::match_schema_by_filename(filename, &associations)
@@ -240,6 +299,22 @@ impl Backend {
                     crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
                 self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
                     .await;
+            } else if schema_store_enabled {
+                // Fourth fallback: SchemaStore catalog.
+                // get_or_fetch_schemastore_catalog() acquires and releases
+                // schemastore_catalog lock without holding any other lock.
+                if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await {
+                    if let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog) {
+                        self.process_schema(
+                            &uri,
+                            &schema_url,
+                            &mut diagnostics,
+                            &result.documents,
+                            text,
+                        )
+                        .await;
+                    }
+                }
             }
         }
 
@@ -1035,5 +1110,63 @@ mod tests {
             caps.semantic_tokens_provider.is_some(),
             "capabilities should include semantic_tokens_provider"
         );
+    }
+
+    // ---- schemaStore setting ----
+
+    #[test]
+    fn settings_deserializes_schema_store_true() {
+        let json = serde_json::json!({"schemaStore": true});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.schema_store, Some(true));
+    }
+
+    #[test]
+    fn settings_deserializes_schema_store_false() {
+        let json = serde_json::json!({"schemaStore": false});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.schema_store, Some(false));
+    }
+
+    #[test]
+    fn settings_defaults_schema_store_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.schema_store, None);
+    }
+
+    #[test]
+    fn get_schema_store_enabled_returns_true_by_default() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert!(backend.get_schema_store_enabled());
+    }
+
+    #[test]
+    fn get_schema_store_enabled_returns_false_when_disabled() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({"schemaStore": false});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert!(!backend.get_schema_store_enabled());
+    }
+
+    #[test]
+    fn get_schema_store_enabled_returns_true_when_explicitly_enabled() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({"schemaStore": true});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert!(backend.get_schema_store_enabled());
     }
 }
