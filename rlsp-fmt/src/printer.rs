@@ -96,13 +96,12 @@ pub fn format(doc: &Doc, options: &FormatOptions) -> String {
             }
             Doc::Group(inner) => {
                 // Try flat mode first; fall back to break if it doesn't fit.
-                let effective_mode = if mode == Mode::Flat
-                    || fits(inner, options.print_width.saturating_sub(col), options)
-                {
-                    Mode::Flat
-                } else {
-                    Mode::Break
-                };
+                let effective_mode =
+                    if mode == Mode::Flat || fits(inner, options.print_width.saturating_sub(col)) {
+                        Mode::Flat
+                    } else {
+                        Mode::Break
+                    };
                 stack.push(Work {
                     indent,
                     mode: effective_mode,
@@ -131,13 +130,13 @@ pub fn format(doc: &Doc, options: &FormatOptions) -> String {
 /// The lookahead uses its own flat-mode stack. It returns `false` as soon as
 /// any content would exceed `remaining`, or when a `HardLine` is encountered
 /// (which forces a break regardless of mode).
-fn fits(doc: &Doc, remaining: usize, options: &FormatOptions) -> bool {
+fn fits(doc: &Doc, remaining: usize) -> bool {
     // Track remaining space using a saturating sentinel: if consumed > 0 after
     // saturation we know it didn't fit.
     let mut rem: Option<usize> = Some(remaining);
-    let mut stack: Vec<(usize, Mode, &Doc)> = vec![(0, Mode::Flat, doc)];
+    let mut stack: Vec<&Doc> = vec![doc];
 
-    while let Some((indent, mode, doc)) = stack.pop() {
+    while let Some(doc) = stack.pop() {
         if rem.is_none() {
             return false;
         }
@@ -149,35 +148,21 @@ fn fits(doc: &Doc, remaining: usize, options: &FormatOptions) -> bool {
                 // Hard line always breaks — doesn't fit in flat lookahead.
                 return false;
             }
-            Doc::Line => match mode {
-                Mode::Flat => {
-                    rem = rem.and_then(|r| r.checked_sub(1));
-                }
-                Mode::Break => {
-                    // In break mode a Line resets the column to the indent.
-                    // Compute remaining space on the new line.
-                    let new_col = indent_width(indent, options);
-                    rem = options.print_width.checked_sub(new_col);
-                }
-            },
-            Doc::Indent(inner) => {
-                stack.push((indent + 1, mode, inner));
+            Doc::Line => {
+                // In flat mode, Line renders as a single space.
+                rem = rem.and_then(|r| r.checked_sub(1));
+            }
+            Doc::Indent(inner) | Doc::Group(inner) => {
+                stack.push(inner);
             }
             Doc::Concat(docs) => {
                 for child in docs.iter().rev() {
-                    stack.push((indent, mode, child));
+                    stack.push(child);
                 }
             }
-            Doc::Group(inner) => {
-                // Nested groups in lookahead are always flat.
-                stack.push((indent, Mode::Flat, inner));
-            }
-            Doc::FlatAlt { flat, break_ } => {
-                let chosen = match mode {
-                    Mode::Flat => flat.as_ref(),
-                    Mode::Break => break_.as_ref(),
-                };
-                stack.push((indent, mode, chosen));
+            Doc::FlatAlt { flat, .. } => {
+                // Lookahead is always flat — use the flat variant.
+                stack.push(flat.as_ref());
             }
         }
     }

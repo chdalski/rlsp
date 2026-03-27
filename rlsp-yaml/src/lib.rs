@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MIT
 
+//! A fast, lightweight YAML language server implementing the
+//! [Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
+//!
+//! This crate provides the library modules used by the `rlsp-yaml` binary.
+//! See the [repository](https://github.com/chdalski/rlsp) for usage and configuration.
+
 pub mod code_actions;
 pub mod code_lens;
 pub mod completion;
