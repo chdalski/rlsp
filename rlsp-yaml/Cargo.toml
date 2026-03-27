@@ -15,7 +15,7 @@ categories = ["development-tools", "text-editors"]
 workspace = true
 
 [dependencies]
-rlsp-fmt = { version = "0.1.0", path = "../rlsp-fmt" }
+rlsp-fmt = { version = "0.1.2", path = "../rlsp-fmt" }
 tower-lsp = { version = "0.20", features = ["proposed"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
