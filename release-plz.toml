@@ -2,6 +2,7 @@
 changelog_config = "cliff.toml"
 publish_timeout = "10m"
 git_release_enable = true
+git_tag_name = "{{ package }}-v{{ version }}"
 
 [[package]]
 name = "rlsp-yaml"
