@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report a bug in rlsp-yaml
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Open a YAML file
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: rlsp-yaml Version
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: editor
+    attributes:
+      label: Editor / LSP Client
+      placeholder: "e.g. Neovim 0.10, VS Code 1.88"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. Ubuntu 24.04, macOS 14, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: yaml_sample
+    attributes:
+      label: YAML Sample
+      description: A minimal YAML snippet that reproduces the issue (if applicable).
+      render: yaml
+    validations:
+      required: false
