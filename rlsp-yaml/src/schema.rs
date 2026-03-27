@@ -145,6 +145,7 @@ impl SchemaCache {
     /// Return a cached schema, fetching and caching it on the first call.
     ///
     /// `url` must already be normalised (use [`validate_and_normalize_url`]).
+    /// `proxy` is forwarded to [`fetch_schema`] on a cache miss.
     ///
     /// # Errors
     ///
@@ -154,9 +155,13 @@ impl SchemaCache {
     ///
     /// Does not panic in practice: the entry is inserted immediately before the
     /// `.get()` call, so the key is always present.
-    pub fn get_or_fetch(&mut self, url: &str) -> Result<&JsonSchema, SchemaError> {
+    pub fn get_or_fetch(
+        &mut self,
+        url: &str,
+        proxy: Option<&str>,
+    ) -> Result<&JsonSchema, SchemaError> {
         if !self.inner.contains_key(url) {
-            let schema = fetch_schema(url)?;
+            let schema = fetch_schema(url, proxy)?;
             self.inner.insert(url.to_string(), schema);
         }
         Ok(self.inner.get(url).expect("just inserted"))
@@ -262,27 +267,38 @@ fn is_ssrf_blocked_host(host: &str) -> bool {
 // Schema fetching
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Build a `ureq` agent with redirect following disabled and an optional proxy.
+///
+/// Both fetch functions use this helper so agent construction is consistent.
+fn build_agent(proxy: Option<&str>) -> ureq::Agent {
+    let mut builder = ureq::Agent::config_builder().max_redirects(0);
+    if let Some(url) = proxy {
+        if let Ok(p) = ureq::Proxy::new(url) {
+            builder = builder.proxy(Some(p));
+        }
+    }
+    builder.build().new_agent()
+}
+
 /// Fetch a JSON Schema from `url` and parse it.
 ///
 /// `url` should already be validated and normalised via
 /// [`validate_and_normalize_url`].  This function is blocking; call it via
 /// `tokio::task::spawn_blocking` from async contexts.
 ///
+/// When `proxy` is `Some`, requests are routed through the given proxy URL.
+///
 /// # Errors
 ///
 /// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
 /// failure.
-pub fn fetch_schema(url: &str) -> Result<JsonSchema, SchemaError> {
+pub fn fetch_schema(url: &str, proxy: Option<&str>) -> Result<JsonSchema, SchemaError> {
     use std::io::Read as _;
 
     // Validate and normalise the URL before issuing any network request.
     validate_and_normalize_url(url)?;
 
-    let agent = ureq::Agent::config_builder()
-        // Do not follow redirects at all — prevents redirect-based SSRF.
-        .max_redirects(0)
-        .build()
-        .new_agent();
+    let agent = build_agent(proxy);
 
     let response = agent
         .get(url)
@@ -324,17 +340,16 @@ const SCHEMASTORE_CATALOG_URL: &str = "https://www.schemastore.org/api/json/cata
 /// Fetch and parse the `SchemaStore` catalog, returning only entries that have
 /// at least one `fileMatch` pattern ending in `.yml` or `.yaml`.
 ///
+/// When `proxy` is `Some`, requests are routed through the given proxy URL.
+///
 /// # Errors
 ///
 /// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
 /// failure.
-pub fn fetch_schemastore_catalog() -> Result<SchemaStoreCatalog, SchemaError> {
+pub fn fetch_schemastore_catalog(proxy: Option<&str>) -> Result<SchemaStoreCatalog, SchemaError> {
     use std::io::Read as _;
 
-    let agent = ureq::Agent::config_builder()
-        .max_redirects(0)
-        .build()
-        .new_agent();
+    let agent = build_agent(proxy);
 
     let response = agent
         .get(SCHEMASTORE_CATALOG_URL)
@@ -1421,7 +1436,7 @@ mod tests {
     // network call is made.
     #[test]
     fn should_return_error_for_unreachable_url() {
-        let result = fetch_schema("http://127.0.0.1:19999/nonexistent.json");
+        let result = fetch_schema("http://127.0.0.1:19999/nonexistent.json", None);
         assert!(result.is_err());
     }
 
@@ -1483,7 +1498,7 @@ mod tests {
     // Sec-4: fetch_schema rejects 127.0.0.1 before making a network call
     #[test]
     fn should_reject_loopback_ip_in_fetch() {
-        let result = fetch_schema("http://127.0.0.1:8080/schema.json");
+        let result = fetch_schema("http://127.0.0.1:8080/schema.json", None);
         assert!(result.is_err());
     }
 
@@ -2263,5 +2278,28 @@ mod tests {
         };
         let result = match_schemastore("docker-compose.yaml", &catalog);
         assert_eq!(result, Some("https://example.com/compose.json".to_string()));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // build_agent tests
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // BA-1: build_agent without proxy constructs successfully (no panic)
+    #[test]
+    fn build_agent_without_proxy_does_not_panic() {
+        let _agent = build_agent(None);
+    }
+
+    // BA-2: build_agent with a valid proxy URL constructs successfully (no panic)
+    #[test]
+    fn build_agent_with_valid_proxy_does_not_panic() {
+        let _agent = build_agent(Some("http://proxy.example.com:8080"));
+    }
+
+    // BA-3: build_agent with an invalid proxy URL falls back gracefully (no panic)
+    #[test]
+    fn build_agent_with_invalid_proxy_falls_back_gracefully() {
+        // An invalid URL must not panic — build_agent silently ignores it.
+        let _agent = build_agent(Some("not-a-valid-proxy-url"));
     }
 }

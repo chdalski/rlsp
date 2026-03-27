@@ -45,6 +45,9 @@ pub struct Settings {
     pub format_print_width: Option<usize>,
     /// Prefer single-quoted strings. Defaults to false.
     pub format_single_quote: Option<bool>,
+    /// HTTP proxy URL for schema fetching (e.g. `"http://proxy.corp:8080"`).
+    /// When absent, no proxy is used.
+    pub http_proxy: Option<String>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -126,6 +129,11 @@ impl Backend {
             .is_none_or(|s| s.schema_store.unwrap_or(true))
     }
 
+    /// Return the configured HTTP proxy URL, or `None` if not set.
+    pub(crate) fn get_http_proxy(&self) -> Option<String> {
+        self.settings.lock().ok().and_then(|s| s.http_proxy.clone())
+    }
+
     /// Return the cached `SchemaStore` catalog, fetching it on first call.
     ///
     /// On fetch failure, logs a warning and returns `None` — `SchemaStore`
@@ -146,7 +154,11 @@ impl Backend {
         }
 
         // Cache miss — fetch without holding any lock.
-        let fetched = tokio::task::spawn_blocking(crate::schema::fetch_schemastore_catalog).await;
+        let proxy = self.get_http_proxy();
+        let fetched = tokio::task::spawn_blocking(move || {
+            crate::schema::fetch_schemastore_catalog(proxy.as_deref())
+        })
+        .await;
 
         match fetched {
             Ok(Ok(catalog)) => {
@@ -211,9 +223,11 @@ impl Backend {
                 Some(s)
             } else {
                 let url_clone = url.clone();
-                let join_result =
-                    tokio::task::spawn_blocking(move || crate::schema::fetch_schema(&url_clone))
-                        .await;
+                let proxy = self.get_http_proxy();
+                let join_result = tokio::task::spawn_blocking(move || {
+                    crate::schema::fetch_schema(&url_clone, proxy.as_deref())
+                })
+                .await;
                 let fetched: Option<crate::schema::JsonSchema> =
                     join_result.ok().and_then(std::result::Result::ok);
 
@@ -1357,6 +1371,49 @@ mod tests {
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.format_print_width, None);
         assert_eq!(settings.format_single_quote, None);
+    }
+
+    // ---- HTTP proxy setting ----
+
+    #[test]
+    fn settings_deserializes_http_proxy() {
+        let json = serde_json::json!({ "httpProxy": "http://proxy.corp:8080" });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            settings.http_proxy.as_deref(),
+            Some("http://proxy.corp:8080")
+        );
+    }
+
+    #[test]
+    fn settings_defaults_http_proxy_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.http_proxy.is_none());
+    }
+
+    #[test]
+    fn get_http_proxy_returns_none_by_default() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert!(backend.get_http_proxy().is_none());
+    }
+
+    #[test]
+    fn get_http_proxy_returns_configured_value() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({ "httpProxy": "http://proxy.corp:8080" });
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(
+            backend.get_http_proxy().as_deref(),
+            Some("http://proxy.corp:8080")
+        );
     }
 
     // ---- Formatting capability ----
