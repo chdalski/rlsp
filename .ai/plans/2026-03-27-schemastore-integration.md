@@ -39,8 +39,8 @@ user configuration.
 
 - [x] Add SchemaStore catalog types and fetch logic (34d135a)
 - [x] Add catalog matching function (34d135a)
-- [ ] Add `schema_store` setting and Backend integration
-- [ ] Write tests
+- [x] Add `schema_store` setting and Backend integration (128583f)
+- [x] Write tests (34d135a, 128583f)
 - [ ] Update documentation
 
 ## Tasks
