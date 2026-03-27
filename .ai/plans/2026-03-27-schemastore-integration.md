@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-27
 
 ## Goal
@@ -37,8 +37,8 @@ user configuration.
 
 ## Steps
 
-- [ ] Add SchemaStore catalog types and fetch logic
-- [ ] Add catalog matching function
+- [x] Add SchemaStore catalog types and fetch logic (34d135a)
+- [x] Add catalog matching function (34d135a)
 - [ ] Add `schema_store` setting and Backend integration
 - [ ] Write tests
 - [ ] Update documentation
