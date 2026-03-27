@@ -2473,4 +2473,448 @@ mod tests {
             "snippet sort_text should be '!' to sort to top"
         );
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group J — Previously Uncovered Paths
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Line 74: blank line with no schema → returns empty vec
+    #[test]
+    fn should_return_empty_for_blank_line_when_no_schema() {
+        let text = "key: value\n\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(1, 0), None);
+
+        assert!(
+            result.is_empty(),
+            "blank line with no schema should return empty"
+        );
+    }
+
+    // Lines 191-192: sequence item with no key in build_key_path pushes "[]"
+    // A bare "- " line in the parent triggers the [] sentinel.
+    #[test]
+    fn should_build_path_with_sequence_sentinel_for_bare_sequence_parent() {
+        // "servers" is a sequence; items have "host" and "port".
+        // Schema resolves via "servers" → [] → items schema.
+        let schema = object_schema(vec![(
+            "servers",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("array".to_string())),
+                items: Some(Box::new(object_schema(vec![
+                    ("host", string_schema()),
+                    ("port", integer_schema()),
+                ]))),
+                ..JsonSchema::default()
+            },
+        )]);
+        // Bare sequence item "- " with no inline key, then indented key below it
+        let text = "servers:\n  -\n    host: localhost\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(2, 4), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"port"),
+            "should suggest 'port' via sequence [] path, got: {ls:?}"
+        );
+    }
+
+    // Lines 361-365: snippet_default for object/array/unknown types
+    #[test]
+    fn should_use_object_default_in_snippet_for_object_type_required_field() {
+        // Need 2+ required missing for snippet; pair with a string field
+        let schema = schema_with_required(
+            vec![
+                (
+                    "config",
+                    JsonSchema {
+                        schema_type: Some(SchemaType::Single("object".to_string())),
+                        ..JsonSchema::default()
+                    },
+                ),
+                ("name", string_schema()),
+            ],
+            vec!["config", "name"],
+        );
+        let schema2 = schema_with_required(
+            vec![
+                (
+                    "tags",
+                    JsonSchema {
+                        schema_type: Some(SchemaType::Single("array".to_string())),
+                        ..JsonSchema::default()
+                    },
+                ),
+                ("name", string_schema()),
+            ],
+            vec!["tags", "name"],
+        );
+
+        let text = "\n";
+        let docs = parse_docs(text);
+
+        let result1 = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+        let snippet1 = result1.iter().find(|i| i.label == "(all required)");
+        assert!(
+            snippet1.is_some(),
+            "should offer snippet for object-typed field"
+        );
+        let insert1 = snippet1.unwrap().insert_text.as_deref().unwrap_or("");
+        assert!(
+            insert1.contains("{}"),
+            "object type default should be '{{}}', got: {insert1}"
+        );
+
+        let result2 = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema2));
+        let snippet2 = result2.iter().find(|i| i.label == "(all required)");
+        assert!(
+            snippet2.is_some(),
+            "should offer snippet for array-typed field"
+        );
+        let insert2 = snippet2.unwrap().insert_text.as_deref().unwrap_or("");
+        assert!(
+            insert2.contains("[]"),
+            "array type default should be '[]', got: {insert2}"
+        );
+    }
+
+    // Line 332: required field with no-default type (None type) → bare tab-stop format
+    #[test]
+    fn should_use_bare_tab_stop_in_snippet_for_field_with_no_type() {
+        // Need 2+ required missing to trigger snippet; pair no-type "data" with typed "name"
+        let schema = schema_with_required(
+            vec![("data", JsonSchema::default()), ("name", string_schema())],
+            vec!["data", "name"],
+        );
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let snippet = result.iter().find(|i| i.label == "(all required)");
+        assert!(snippet.is_some(), "should offer snippet");
+        let insert = snippet.unwrap().insert_text.as_deref().unwrap_or("");
+        // "data" has no type so default is "" → produces "data: ${N:}" (bare tab-stop)
+        assert!(
+            insert.contains("data: ${"),
+            "no-type field should have a tab-stop, got: {insert}"
+        );
+    }
+
+    // Line 377: collect_schema_properties depth cap
+    #[test]
+    fn should_not_panic_when_allof_depth_exceeds_max_branch_count() {
+        // Build a deeply recursive schema via allOf to hit the depth guard
+        fn deep_schema(depth: usize) -> JsonSchema {
+            if depth == 0 {
+                return object_schema(vec![("leaf", JsonSchema::default())]);
+            }
+            JsonSchema {
+                all_of: Some(vec![deep_schema(depth - 1)]),
+                ..JsonSchema::default()
+            }
+        }
+        // 25 levels deep — exceeds MAX_BRANCH_COUNT (20)
+        let schema = deep_schema(25);
+        let text = "\n";
+        let docs = parse_docs(text);
+        // Must not panic or hang
+        let _result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+    }
+
+    // Lines 475-477: json_value_to_yaml_label for Number, Null, Array, Object
+    #[test]
+    fn should_render_number_and_null_enum_values_as_yaml_labels() {
+        let schema = object_schema(vec![(
+            "value",
+            JsonSchema {
+                enum_values: Some(vec![
+                    serde_json::Value::Number(serde_json::Number::from(42)),
+                    serde_json::Value::Null,
+                    serde_json::Value::Number(serde_json::Number::from_f64(3.14).unwrap()),
+                ]),
+                ..JsonSchema::default()
+            },
+        )]);
+        // "value: " is 7 chars; colon at index 5; col=6 puts cursor in value position
+        let text = "value: \n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 6), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"42"), "should render integer 42, got: {ls:?}");
+        assert!(ls.contains(&"null"), "should render null, got: {ls:?}");
+        assert!(
+            ls.iter().any(|l| l.starts_with("3.14") || *l == "3.14"),
+            "should render float 3.14, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn should_skip_array_and_object_enum_values() {
+        let schema = object_schema(vec![(
+            "value",
+            JsonSchema {
+                enum_values: Some(vec![
+                    serde_json::json!("valid"),
+                    serde_json::json!(["a", "b"]), // array — skipped
+                    serde_json::json!({"k": "v"}), // object — skipped
+                ]),
+                ..JsonSchema::default()
+            },
+        )]);
+        // col=6: cursor in value position (after "value: ")
+        let text = "value: \n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 6), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"valid"),
+            "string enum value should appear, got: {ls:?}"
+        );
+        assert_eq!(
+            ls.len(),
+            1,
+            "array and object enum values should be skipped, got: {ls:?}"
+        );
+    }
+
+    // Line 486: SchemaType::Multiple in type_label
+    #[test]
+    fn should_render_multiple_type_label_as_pipe_separated_string() {
+        let schema = object_schema(vec![(
+            "value",
+            JsonSchema {
+                schema_type: Some(SchemaType::Multiple(vec![
+                    "string".to_string(),
+                    "null".to_string(),
+                ])),
+                ..JsonSchema::default()
+            },
+        )]);
+        let text = "name: x\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        let item = result.iter().find(|i| i.label == "value");
+        assert!(item.is_some(), "should suggest 'value'");
+        assert_eq!(
+            item.unwrap().detail.as_deref(),
+            Some("string | null"),
+            "multiple types should be joined with ' | '"
+        );
+    }
+
+    // Lines 538-542: find_mapping_colon single-quote handling
+    #[test]
+    fn should_find_colon_after_single_quoted_key_containing_colon() {
+        // Key with colon inside single quotes; the mapping colon is after the closing quote
+        let line = "'key:with:colons': value";
+        let pos_colon = find_mapping_colon(line);
+        assert!(
+            pos_colon.is_some(),
+            "should find mapping colon after closing quote, got: {pos_colon:?}"
+        );
+        let colon_pos = pos_colon.unwrap();
+        assert_eq!(
+            &line[..colon_pos],
+            "'key:with:colons'",
+            "key should be the single-quoted string"
+        );
+    }
+
+    #[test]
+    fn should_return_none_when_colon_is_inside_single_quotes() {
+        // Line like "'no: colon here'" — no mapping colon outside quotes
+        let line = "'no: colon here'";
+        assert_eq!(
+            find_mapping_colon(line),
+            None,
+            "colon inside single quotes should not count as mapping colon"
+        );
+    }
+
+    // Lines 599, 611, 619, 621: is_in_sequence_item edge cases
+    // Line 599: prev line is a document separator → break
+    #[test]
+    fn should_not_detect_sequence_context_across_document_separator() {
+        let text = "items:\n  - name: Alice\n---\nhost: local\n";
+        let docs = parse_docs(text);
+        // "host:" is in a plain mapping in doc2; is_in_sequence_item should return false
+        let result = complete_at(text, docs.as_ref(), pos(3, 0), None);
+        let ls = labels(&result);
+        // Should suggest sibling from same doc, not from sequence in doc1
+        assert!(
+            !ls.contains(&"name"),
+            "should not suggest sequence key 'name' from doc1, got: {ls:?}"
+        );
+    }
+
+    // Line 611: prev line at lower indent is NOT a "- " → break (no sequence detected)
+    #[test]
+    fn should_not_detect_sequence_context_when_parent_is_plain_mapping() {
+        // "server:\n  host:" — parent is a plain mapping key, not a sequence item
+        let text = "server:\n  host: localhost\n  port: 8080\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(1, 2), None);
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"port"),
+            "should suggest sibling 'port', not sequence keys, got: {ls:?}"
+        );
+    }
+
+    // Lines 619, 621: same-level "- " line in is_in_sequence_item → true
+    // A same-indent previous "- " line means we're in a sequence context.
+    #[test]
+    fn should_detect_sequence_context_when_same_indent_sibling_is_sequence_item() {
+        // Sequence items indented under a parent key
+        // cursor on "  - name: Bob" (second item, which starts with "- ")
+        let text = "people:\n  - name: Alice\n    age: 30\n  - name: Bob\n";
+        let docs = parse_docs(text);
+        // cursor on "  - name: Bob" (line 3), col=4 (inside key area)
+        let result = complete_at(text, docs.as_ref(), pos(3, 4), None);
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"age"),
+            "should suggest 'age' from sibling sequence item via same-indent '- ' detection, got: {ls:?}"
+        );
+    }
+
+    // Lines 675-733: find_current_item_start and find_sequence_indent
+    #[test]
+    fn should_suggest_sibling_sequence_item_keys_for_multiline_sequence_item() {
+        // Sequence item spans multiple lines; cursor is inside an item
+        // (not the first "- " line)
+        let text = "items:\n  - name: Alice\n    age: 30\n    city: NY\n  - name: Bob\n";
+        let docs = parse_docs(text);
+        // cursor on line 4 ("  - name: Bob"), which is itself a "- " line
+        let result = complete_at(text, docs.as_ref(), pos(4, 4), None);
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"age") || ls.contains(&"city"),
+            "should suggest keys from sibling sequence item, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn should_find_sequence_indent_when_cursor_is_not_on_sequence_line() {
+        // Cursor is on a key inside a sequence item (not the "- " line itself).
+        // The sibling item has "score" which the current item doesn't — exercises
+        // find_sequence_indent walking back from a non-"- " line.
+        let text = "list:\n  - id: 1\n    label: a\n  - id: 2\n    score: 99\n";
+        let docs = parse_docs(text);
+        // cursor on line 2 ("    label: a") — inside the first sequence item
+        let result = complete_at(text, docs.as_ref(), pos(2, 4), None);
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"score"),
+            "should suggest 'score' from sibling sequence item, got: {ls:?}"
+        );
+    }
+
+    // Lines 778-827: collect_all_sequence_item_keys — walking backward to find
+    // sequence start, then forward collecting keys
+    #[test]
+    fn should_collect_keys_from_all_sequence_items_including_those_before_cursor() {
+        // Three sequence items; cursor on third. Keys from items 1 and 2 should appear.
+        let text = "- kind: A\n  color: red\n- kind: B\n  size: large\n- kind: C\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(4, 2), None);
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"color") || ls.contains(&"size"),
+            "should collect keys from all prior sequence items, got: {ls:?}"
+        );
+    }
+
+    // Lines 950, 969-971, 981-993: find_mapping_colon quote-aware edge cases
+    #[test]
+    fn should_find_colon_after_double_quoted_key_containing_colon() {
+        let line = "\"key:with:colons\": value";
+        let pos_colon = find_mapping_colon(line);
+        assert!(
+            pos_colon.is_some(),
+            "should find mapping colon after closing double-quote, got: {pos_colon:?}"
+        );
+        let colon_pos = pos_colon.unwrap();
+        assert_eq!(&line[..colon_pos], "\"key:with:colons\"");
+    }
+
+    #[test]
+    fn should_return_none_for_line_with_no_colon() {
+        assert_eq!(find_mapping_colon("just a plain value"), None);
+    }
+
+    #[test]
+    fn should_return_none_for_colon_not_followed_by_space() {
+        // "key:value" — colon not followed by space, not a mapping colon
+        assert_eq!(
+            find_mapping_colon("key:value"),
+            None,
+            "colon not followed by space should not be a mapping colon"
+        );
+    }
+
+    #[test]
+    fn should_return_none_for_colon_inside_double_quotes() {
+        let line = "\"no: colon here\"";
+        assert_eq!(
+            find_mapping_colon(line),
+            None,
+            "colon inside double quotes should not count as mapping colon"
+        );
+    }
+
+    // classify_cursor: Key context from sequence item line (lines 549-551)
+    #[test]
+    fn should_classify_cursor_as_key_for_sequence_item_with_key_colon() {
+        // "- key: value" — effective_line is "key: value", find_mapping_colon on effective_line
+        let result = classify_cursor("- mykey: value", 2);
+        assert!(
+            matches!(result, CursorContext::Key(k) if k == "mykey"),
+            "should classify as Key with 'mykey'"
+        );
+    }
+
+    // classify_cursor: Key context when line has no colon at all (line 554)
+    #[test]
+    fn should_classify_cursor_as_key_when_no_colon_on_line() {
+        let result = classify_cursor("justtext", 0);
+        assert!(
+            matches!(result, CursorContext::Key(k) if k == "justtext"),
+            "should classify bare text as Key"
+        );
+    }
+
+    // complete_at with blank line + schema → schema_key_completions path (lines 64-74)
+    #[test]
+    fn should_suggest_schema_keys_on_blank_line_when_schema_is_present() {
+        let schema = object_schema(vec![("host", string_schema()), ("port", integer_schema())]);
+        let text = "host: localhost\n\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(1, 0), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"port"),
+            "should suggest 'port' on blank line with schema, got: {ls:?}"
+        );
+    }
+
+    // blank line + schema but schema has no properties → returns empty (lines 68-74)
+    #[test]
+    fn should_return_empty_on_blank_line_when_schema_has_no_matching_path() {
+        // Schema has "database" which has no sub-properties at top level cursor
+        let schema = JsonSchema::default();
+        let text = "\n";
+        let docs = parse_docs(text);
+        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
+
+        assert!(
+            result.is_empty(),
+            "blank line with schema having no properties should return empty"
+        );
+    }
 }
