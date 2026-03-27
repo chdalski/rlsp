@@ -101,6 +101,19 @@ pub struct SchemaAssociation {
     pub url: String,
 }
 
+/// A single entry from the `SchemaStore` catalog.
+#[derive(Debug, Clone)]
+pub struct SchemaStoreEntry {
+    pub url: String,
+    pub file_match: Vec<String>,
+}
+
+/// The parsed `SchemaStore` catalog, filtered to YAML-relevant entries.
+#[derive(Debug, Clone, Default)]
+pub struct SchemaStoreCatalog {
+    pub entries: Vec<SchemaStoreEntry>,
+}
+
 /// In-memory cache of parsed JSON Schemas, keyed by normalized URL.
 #[derive(Debug, Default)]
 pub struct SchemaCache {
@@ -299,6 +312,112 @@ pub fn fetch_schema(url: &str) -> Result<JsonSchema, SchemaError> {
     check_json_depth(&value, 0)?;
 
     parse_schema(&value).ok_or_else(|| SchemaError::ParseFailed("not a JSON Schema".to_string()))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SchemaStore catalog fetch, parse, and matching
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Catalog URL for `SchemaStore`.
+const SCHEMASTORE_CATALOG_URL: &str = "https://www.schemastore.org/api/json/catalog.json";
+
+/// Fetch and parse the `SchemaStore` catalog, returning only entries that have
+/// at least one `fileMatch` pattern ending in `.yml` or `.yaml`.
+///
+/// # Errors
+///
+/// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
+/// failure.
+pub fn fetch_schemastore_catalog() -> Result<SchemaStoreCatalog, SchemaError> {
+    use std::io::Read as _;
+
+    let agent = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .build()
+        .new_agent();
+
+    let response = agent
+        .get(SCHEMASTORE_CATALOG_URL)
+        .call()
+        .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
+
+    let mut limited = response
+        .into_body()
+        .into_reader()
+        .take(MAX_SCHEMA_BYTES + 1);
+
+    let mut buf = Vec::new();
+    limited
+        .read_to_end(&mut buf)
+        .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
+
+    if buf.len() as u64 > MAX_SCHEMA_BYTES {
+        return Err(SchemaError::ResponseTooLarge);
+    }
+
+    let value: Value =
+        serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))?;
+
+    parse_schemastore_catalog(&value)
+        .ok_or_else(|| SchemaError::ParseFailed("not a SchemaStore catalog".to_string()))
+}
+
+/// Parse a `SchemaStore` catalog JSON value into a [`SchemaStoreCatalog`].
+///
+/// Returns `None` if the value is not a JSON object with a `schemas` array.
+fn parse_schemastore_catalog(value: &Value) -> Option<SchemaStoreCatalog> {
+    let obj = value.as_object()?;
+    let schemas = obj.get("schemas")?.as_array()?;
+
+    let entries = schemas
+        .iter()
+        .filter_map(|entry| {
+            let entry_obj = entry.as_object()?;
+            let url = entry_obj.get("url")?.as_str()?.to_string();
+            if url.is_empty() {
+                return None;
+            }
+            // Retain only YAML-relevant fileMatch patterns within this entry.
+            let file_match: Vec<String> = entry_obj
+                .get("fileMatch")?
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .filter(|p| {
+                    std::path::Path::new(p.as_str())
+                        .extension()
+                        .is_some_and(|ext| {
+                            ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml")
+                        })
+                })
+                .collect();
+            // Only keep entries that have at least one YAML-relevant pattern.
+            if file_match.is_empty() {
+                None
+            } else {
+                Some(SchemaStoreEntry { url, file_match })
+            }
+        })
+        .collect();
+
+    Some(SchemaStoreCatalog { entries })
+}
+
+/// Return the schema URL from the catalog for the first entry whose
+/// `fileMatch` patterns match `filename`, or `None` if no entry matches.
+#[must_use]
+pub fn match_schemastore(filename: &str, catalog: &SchemaStoreCatalog) -> Option<String> {
+    catalog.entries.iter().find_map(|entry| {
+        let matches = entry
+            .file_match
+            .iter()
+            .any(|pattern| glob_matches(pattern, filename));
+        if matches {
+            Some(entry.url.clone())
+        } else {
+            None
+        }
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1941,5 +2060,208 @@ mod tests {
         // apiVersion is a mapping, kind is a mapping — neither is a string scalar
         let docs = parse_docs("apiVersion:\n  nested: true\nkind:\n  - item\n");
         assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SchemaStore catalog parsing and matching
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn make_catalog_json(schemas: &[(&str, &[&str])]) -> Value {
+        let schemas_json: Vec<Value> = schemas
+            .iter()
+            .map(|(url, patterns)| {
+                json!({
+                    "name": "Schema Name",
+                    "url": url,
+                    "fileMatch": patterns
+                })
+            })
+            .collect();
+        json!({ "schemas": schemas_json })
+    }
+
+    // SS-1: catalog with one YAML entry is parsed and kept
+    #[test]
+    fn should_parse_catalog_entry_with_yaml_pattern() {
+        let v = make_catalog_json(&[("https://example.com/schema.json", &["*.yaml"])]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(catalog.entries.len(), 1);
+        assert_eq!(catalog.entries[0].url, "https://example.com/schema.json");
+        assert_eq!(catalog.entries[0].file_match, vec!["*.yaml"]);
+    }
+
+    // SS-2: entry with only JSON patterns is filtered out
+    #[test]
+    fn should_filter_out_entry_with_only_json_patterns() {
+        let v = make_catalog_json(&[("https://example.com/schema.json", &["*.json"])]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(
+            catalog.entries.len(),
+            0,
+            "JSON-only entries must be excluded"
+        );
+    }
+
+    // SS-3: entry with mixed YAML and JSON patterns is kept; non-YAML patterns are discarded
+    #[test]
+    fn should_keep_entry_with_mixed_yaml_and_json_patterns() {
+        let v = make_catalog_json(&[(
+            "https://example.com/schema.json",
+            &["*.json", "docker-compose.yml"],
+        )]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(catalog.entries.len(), 1);
+        // The *.json pattern is discarded; only the YAML pattern is retained.
+        assert_eq!(catalog.entries[0].file_match, vec!["docker-compose.yml"]);
+    }
+
+    // SS-4: entry with .yml pattern is kept
+    #[test]
+    fn should_keep_entry_with_yml_extension_pattern() {
+        let v = make_catalog_json(&[("https://example.com/schema.json", &["*.yml"])]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(catalog.entries.len(), 1);
+    }
+
+    // SS-5: entry without fileMatch field is skipped (parse returns None for that entry)
+    #[test]
+    fn should_skip_entry_without_file_match() {
+        let v = json!({
+            "schemas": [
+                { "name": "No FileMatch", "url": "https://example.com/schema.json" }
+            ]
+        });
+        let catalog = parse_schemastore_catalog(&v).expect("should parse catalog");
+        assert_eq!(
+            catalog.entries.len(),
+            0,
+            "entry missing fileMatch must be skipped"
+        );
+    }
+
+    // SS-6: empty schemas array yields empty catalog
+    #[test]
+    fn should_parse_empty_catalog() {
+        let v = json!({ "schemas": [] });
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(catalog.entries.len(), 0);
+    }
+
+    // SS-7: non-object input returns None
+    #[test]
+    fn should_return_none_for_non_object_catalog() {
+        let v = json!(["not", "an", "object"]);
+        assert!(parse_schemastore_catalog(&v).is_none());
+    }
+
+    // SS-8: input missing the schemas key returns None
+    #[test]
+    fn should_return_none_for_catalog_missing_schemas_key() {
+        let v = json!({ "other": "data" });
+        assert!(parse_schemastore_catalog(&v).is_none());
+    }
+
+    // SS-8b: entry with empty url is skipped
+    #[test]
+    fn should_skip_entry_with_empty_url() {
+        let v = json!({
+            "schemas": [
+                { "name": "Empty URL", "url": "", "fileMatch": ["*.yaml"] }
+            ]
+        });
+        let catalog = parse_schemastore_catalog(&v).expect("should parse catalog");
+        assert_eq!(
+            catalog.entries.len(),
+            0,
+            "entry with empty url must be skipped"
+        );
+    }
+
+    // SS-9: multiple entries — both YAML ones kept, JSON-only one filtered
+    #[test]
+    fn should_filter_multiple_entries_correctly() {
+        let v = make_catalog_json(&[
+            (
+                "https://example.com/workflow.json",
+                &["**/.github/workflows/*.yml"],
+            ),
+            ("https://example.com/compose.json", &["docker-compose.yaml"]),
+            ("https://example.com/package.json", &["package.json"]),
+        ]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(catalog.entries.len(), 2);
+    }
+
+    // SS-10: match_schemastore returns URL for matching filename
+    #[test]
+    fn should_return_url_for_matching_filename() {
+        let catalog = SchemaStoreCatalog {
+            entries: vec![SchemaStoreEntry {
+                url: "https://example.com/workflow.json".to_string(),
+                file_match: vec!["**/.github/workflows/*.yml".to_string()],
+            }],
+        };
+        let result = match_schemastore(".github/workflows/ci.yml", &catalog);
+        assert_eq!(
+            result,
+            Some("https://example.com/workflow.json".to_string())
+        );
+    }
+
+    // SS-11: match_schemastore returns None when no entry matches
+    #[test]
+    fn should_return_none_when_no_catalog_entry_matches() {
+        let catalog = SchemaStoreCatalog {
+            entries: vec![SchemaStoreEntry {
+                url: "https://example.com/workflow.json".to_string(),
+                file_match: vec!["**/.github/workflows/*.yml".to_string()],
+            }],
+        };
+        let result = match_schemastore("docker-compose.yaml", &catalog);
+        assert_eq!(result, None);
+    }
+
+    // SS-12: match_schemastore returns first matching entry when multiple match
+    #[test]
+    fn should_return_first_matching_catalog_entry() {
+        let catalog = SchemaStoreCatalog {
+            entries: vec![
+                SchemaStoreEntry {
+                    url: "https://example.com/first.json".to_string(),
+                    file_match: vec!["*.yaml".to_string()],
+                },
+                SchemaStoreEntry {
+                    url: "https://example.com/second.json".to_string(),
+                    file_match: vec!["*.yaml".to_string()],
+                },
+            ],
+        };
+        let result = match_schemastore("config.yaml", &catalog);
+        assert_eq!(result, Some("https://example.com/first.json".to_string()));
+    }
+
+    // SS-13: match_schemastore returns None for empty catalog
+    #[test]
+    fn should_return_none_for_empty_catalog() {
+        let catalog = SchemaStoreCatalog { entries: vec![] };
+        let result = match_schemastore("config.yaml", &catalog);
+        assert_eq!(result, None);
+    }
+
+    // SS-14: entry with multiple fileMatch patterns — matches if any pattern matches
+    #[test]
+    fn should_match_if_any_file_match_pattern_matches() {
+        let catalog = SchemaStoreCatalog {
+            entries: vec![SchemaStoreEntry {
+                url: "https://example.com/compose.json".to_string(),
+                file_match: vec![
+                    "docker-compose.yml".to_string(),
+                    "docker-compose.yaml".to_string(),
+                    "compose.yaml".to_string(),
+                ],
+            }],
+        };
+        let result = match_schemastore("docker-compose.yaml", &catalog);
+        assert_eq!(result, Some("https://example.com/compose.json".to_string()));
     }
 }
