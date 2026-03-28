@@ -12,70 +12,70 @@ with existing infrastructure.
 
 ---
 
-### String Constraints (`pattern`, `minLength`, `maxLength`) [not started]
+### String Constraints (`pattern`, `minLength`, `maxLength`) [completed]
 
 **Description:** Validate string values against `pattern` regex, `minLength`, and `maxLength` from JSON Schema.
 **Complexity:** Low
 **Comment:** All three fields already parsed into `JsonSchema` struct but never checked in `schema_validation.rs`. Draft-04 keywords.
 **Tier:** 1
 
-### Numeric Constraints (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`) [not started]
+### Numeric Constraints (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`) [completed]
 
 **Description:** Validate numeric values against bounds and divisibility constraints.
 **Complexity:** Low
 **Comment:** `minimum`/`maximum` already parsed but never validated. `exclusiveMinimum`/`exclusiveMaximum` need parsing (boolean in Draft-04, number in Draft-06+). `multipleOf` needs parsing. All Draft-04 keywords with Draft-06 evolution.
 **Tier:** 1
 
-### `const` Keyword [not started]
+### `const` Keyword [completed]
 
 **Description:** Validate that a value matches a single fixed value specified by `const`.
 **Complexity:** Low
 **Comment:** Draft-06 keyword. Simple equality check against a single JSON value. Very common in real schemas — Kubernetes CRDs use `oneOf` + `const` patterns.
 **Tier:** 1
 
-### `not` Keyword [not started]
+### `not` Keyword [completed]
 
 **Description:** Validate that a value does *not* match the given sub-schema.
 **Complexity:** Low
 **Comment:** Draft-04 keyword. Invert the validation result of a sub-schema. Straightforward composition — run validation, pass if diagnostics are produced.
 **Tier:** 2
 
-### `patternProperties` [not started]
+### `patternProperties` [completed]
 
 **Description:** Match mapping keys against regex patterns and validate their values against corresponding schemas.
 **Complexity:** Medium
 **Comment:** Draft-04 keyword. Needs new field in `JsonSchema`, parsing, validation, and completion integration. Common in schemas that allow dynamic key names (e.g. Kubernetes labels, environment variables).
 **Tier:** 2
 
-### Array Constraints (`minItems`, `maxItems`, `uniqueItems`) [not started]
+### Array Constraints (`minItems`, `maxItems`, `uniqueItems`) [completed]
 
 **Description:** Validate array length bounds and item uniqueness.
 **Complexity:** Low
 **Comment:** Draft-04 keywords. Need new fields in `JsonSchema` and straightforward validation checks on sequence length and item equality.
 **Tier:** 2
 
-### `dependencies` / `dependentRequired` / `dependentSchemas` [not started]
+### `dependencies` / `dependentRequired` / `dependentSchemas` [completed]
 
 **Description:** Validate cross-property dependencies — when property A is present, require property B or validate against an additional schema.
 **Complexity:** Medium
 **Comment:** `dependencies` is Draft-04, split into `dependentRequired` and `dependentSchemas` in Draft 2019-09. Need to support both forms for backwards compatibility. Used in schemas with conditional requirements.
 **Tier:** 2
 
-### `propertyNames` [not started]
+### `propertyNames` [completed]
 
 **Description:** Validate that all mapping keys match a given schema (typically a string schema with `pattern`).
 **Complexity:** Low
 **Comment:** Draft-06 keyword. Applies a schema to each key string in a mapping. Useful for enforcing key naming conventions.
 **Tier:** 2
 
-### `if` / `then` / `else` [not started]
+### `if` / `then` / `else` [completed]
 
 **Description:** Conditional schema application — if a value matches the `if` schema, validate against `then`; otherwise validate against `else`.
 **Complexity:** Medium
 **Comment:** Draft-07 keyword. Used heavily in real-world schemas for polymorphic validation (e.g. "if type is X, require fields A and B"). Builds on existing composition validation infrastructure.
 **Tier:** 2
 
-### `contains` / `minContains` / `maxContains` [not started]
+### `contains` / `minContains` / `maxContains` [completed]
 
 **Description:** Validate that an array contains at least one item matching a schema, with optional min/max count bounds.
 **Complexity:** Medium
@@ -89,28 +89,28 @@ with existing infrastructure.
 **Comment:** Format-agnostic LSP feature — applies to any YAML file with color values (theme configs, CI badge definitions, UI settings). Requires regex-based color detection and color format conversion.
 **Tier:** 2
 
-### `prefixItems` (Tuple Validation) [not started]
+### `prefixItems` (Tuple Validation) [completed]
 
 **Description:** Validate array items positionally — each array index validated against a different schema.
 **Complexity:** Medium
 **Comment:** Draft 2020-12 keyword replacing the Draft-04 tuple form of `items` (when `items` is an array). Needs new field and positional item validation logic.
 **Tier:** 3
 
-### `$anchor` / `$dynamicRef` / `$dynamicAnchor` [not started]
+### `$anchor` / `$dynamicRef` / `$dynamicAnchor` [completed]
 
 **Description:** Support named anchors and dynamic reference resolution across schema documents.
 **Complexity:** High
 **Comment:** Draft 2019-09 / 2020-12 keywords. `$anchor` names a schema location; `$dynamicRef`/`$dynamicAnchor` enable dynamic dispatch in recursive schemas. Requires changes to `$ref` resolution infrastructure.
 **Tier:** 3
 
-### `unevaluatedProperties` / `unevaluatedItems` [not started]
+### `unevaluatedProperties` / `unevaluatedItems` [completed]
 
 **Description:** Reject properties or items not evaluated by any sub-schema in `allOf`/`anyOf`/`oneOf`/`if`/`then`/`else`.
 **Complexity:** High
 **Comment:** Draft 2019-09 keywords. Requires tracking which properties/items were "evaluated" during composition — a cross-cutting concern that touches the entire validation walk. The hardest keywords to implement correctly.
 **Tier:** 3
 
-### `$vocabulary` [not started]
+### `$vocabulary` [completed]
 
 **Description:** Declare which JSON Schema vocabularies a schema uses, enabling vocabulary-aware validation.
 **Complexity:** High
