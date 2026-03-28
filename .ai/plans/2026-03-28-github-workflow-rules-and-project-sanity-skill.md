@@ -53,7 +53,7 @@ check files and reports findings without auto-fixing.
 - [x] Review existing code scanning alerts and action warnings
 - [x] Analyze existing rules and skill patterns
 - [x] Create GitHub workflows rules file (718d640)
-- [ ] Create project-sanity skill (SKILL.md dispatcher)
+- [x] Create project-sanity skill (SKILL.md dispatcher) (a4c6e19)
 - [ ] Create github-sanity.md domain check file
 
 ## Tasks
