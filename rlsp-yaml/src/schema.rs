@@ -97,6 +97,8 @@ pub struct JsonSchema {
     pub then_schema: Option<Box<Self>>,
     pub else_schema: Option<Box<Self>>,
     pub ref_path: Option<String>,
+    pub anchor: Option<String>,
+    pub dynamic_anchor: Option<String>,
     pub pattern: Option<String>,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
@@ -513,10 +515,12 @@ pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
 
 /// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
 fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSchema) {
-    // title / description / pattern
+    // title / description / pattern / anchors
     schema.title = string_field(obj, "title");
     schema.description = string_field(obj, "description");
     schema.pattern = string_field(obj, "pattern");
+    schema.anchor = string_field(obj, "$anchor");
+    schema.dynamic_anchor = string_field(obj, "$dynamicAnchor");
     schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
 
     // numeric constraints
@@ -617,6 +621,14 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
             return Some(resolved);
         }
         return Some(schema);
+    }
+
+    // $dynamicRef — same resolution as $ref for single-document schemas
+    if let Some(Value::String(ref_str)) = obj.get("$dynamicRef") {
+        if let Some(resolved) = resolve_ref(ref_str, root, depth + 1) {
+            return Some(resolved);
+        }
+        // Fall through if unresolved — parse remaining fields
     }
 
     // type
@@ -850,9 +862,14 @@ fn parse_definitions(
 // $ref resolution
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Resolve a local JSON Pointer `$ref` (e.g. `#/definitions/Foo`) within `root`.
+/// Resolve a local `$ref` within `root`.
 ///
-/// Returns `None` if the pointer does not resolve or the depth limit is
+/// Handles three forms:
+/// - `#`       → root schema
+/// - `#/a/b`   → JSON Pointer (RFC 6901)
+/// - `#name`   → named anchor (`$anchor` or `$dynamicAnchor`)
+///
+/// Returns `None` if the reference does not resolve or the depth limit is
 /// exceeded (circular ref guard).
 fn resolve_ref(ref_str: &str, root: &Value, depth: usize) -> Option<JsonSchema> {
     if depth > MAX_REF_DEPTH {
@@ -860,13 +877,55 @@ fn resolve_ref(ref_str: &str, root: &Value, depth: usize) -> Option<JsonSchema> 
     }
 
     let pointer = ref_str.strip_prefix('#')?;
-    let target = if pointer.is_empty() {
-        root
-    } else {
-        root.pointer(pointer)?
-    };
 
-    parse_schema_with_root(target, root, depth + 1)
+    if pointer.is_empty() {
+        // "#" → root schema
+        return parse_schema_with_root(root, root, depth + 1);
+    }
+
+    if pointer.starts_with('/') {
+        // "#/foo/bar" → JSON Pointer
+        let target = root.pointer(pointer)?;
+        return parse_schema_with_root(target, root, depth + 1);
+    }
+
+    // "#name" → anchor lookup
+    find_anchor_in_value(pointer, root).and_then(|v| parse_schema_with_root(v, root, depth + 1))
+}
+
+/// Walk `value` recursively, returning the first JSON object that has
+/// `"$anchor": name` or `"$dynamicAnchor": name`.
+fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
+    match value {
+        Value::Object(obj) => {
+            let has_anchor = obj
+                .get("$anchor")
+                .and_then(Value::as_str)
+                .is_some_and(|a| a == name);
+            let has_dynamic = obj
+                .get("$dynamicAnchor")
+                .and_then(Value::as_str)
+                .is_some_and(|a| a == name);
+            if has_anchor || has_dynamic {
+                return Some(value);
+            }
+            for v in obj.values() {
+                if let Some(found) = find_anchor_in_value(name, v) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                if let Some(found) = find_anchor_in_value(name, v) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2596,5 +2655,152 @@ mod tests {
         let dep_req = schema.dependent_required.unwrap();
         // 2019-09 wins: only "c", not "b"
         assert_eq!(dep_req.get("a").unwrap(), &vec!["c".to_string()]);
+    }
+
+    // ── $anchor / $dynamicRef / $dynamicAnchor ────────────────────────────────
+
+    // Anchor-1: $ref resolves to a schema with $anchor
+    #[test]
+    fn ref_resolves_named_anchor() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "foo": { "$ref": "#item" }
+            },
+            "$defs": {
+                "Item": {
+                    "$anchor": "item",
+                    "type": "string"
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let foo = schema.properties.unwrap();
+        let foo_schema = foo.get("foo").unwrap();
+        assert_eq!(
+            foo_schema.schema_type,
+            Some(SchemaType::Single("string".to_string()))
+        );
+    }
+
+    // Anchor-2: $ref resolves to a schema with $dynamicAnchor
+    #[test]
+    fn ref_resolves_dynamic_anchor() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "bar": { "$ref": "#loop" }
+            },
+            "$defs": {
+                "Node": {
+                    "$dynamicAnchor": "loop",
+                    "type": "integer"
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let bar_schema = schema.properties.unwrap();
+        let bar = bar_schema.get("bar").unwrap();
+        assert_eq!(
+            bar.schema_type,
+            Some(SchemaType::Single("integer".to_string()))
+        );
+    }
+
+    // Anchor-3: $dynamicRef resolves via anchor lookup
+    #[test]
+    fn dynamic_ref_resolves_to_dynamic_anchor() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "val": { "$dynamicRef": "#node" }
+            },
+            "$defs": {
+                "Node": {
+                    "$dynamicAnchor": "node",
+                    "type": "boolean"
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let val_schema = schema.properties.unwrap();
+        let val = val_schema.get("val").unwrap();
+        assert_eq!(
+            val.schema_type,
+            Some(SchemaType::Single("boolean".to_string()))
+        );
+    }
+
+    // Anchor-4: anchor not found — ref unresolved, schema has ref_path but no type
+    #[test]
+    fn ref_returns_schema_with_ref_path_when_anchor_not_found() {
+        let value = json!({ "$ref": "#nonexistent" });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.ref_path, Some("#nonexistent".to_string()));
+        assert!(schema.schema_type.is_none());
+    }
+
+    // Anchor-5: nested anchor inside definitions sub-schema
+    #[test]
+    fn ref_resolves_anchor_nested_inside_definitions() {
+        let value = json!({
+            "$defs": {
+                "outer": {
+                    "type": "object",
+                    "properties": {
+                        "inner": {
+                            "$anchor": "nested",
+                            "type": "number"
+                        }
+                    }
+                }
+            },
+            "properties": {
+                "x": { "$ref": "#nested" }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let x = schema.properties.unwrap();
+        let x_schema = x.get("x").unwrap();
+        assert_eq!(
+            x_schema.schema_type,
+            Some(SchemaType::Single("number".to_string()))
+        );
+    }
+
+    // Anchor-6: existing JSON Pointer refs still work
+    #[test]
+    fn json_pointer_ref_still_resolves_correctly() {
+        let value = json!({
+            "properties": {
+                "name": { "$ref": "#/$defs/Name" }
+            },
+            "$defs": {
+                "Name": { "type": "string" }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let name = schema.properties.unwrap();
+        let name_schema = name.get("name").unwrap();
+        assert_eq!(
+            name_schema.schema_type,
+            Some(SchemaType::Single("string".to_string()))
+        );
+    }
+
+    // Anchor-7: $anchor field stored on parsed schema
+    #[test]
+    fn anchor_field_stored_on_schema() {
+        let value = json!({ "$anchor": "myanchor", "type": "string" });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.anchor, Some("myanchor".to_string()));
+    }
+
+    // Anchor-8: $dynamicAnchor field stored on parsed schema
+    #[test]
+    fn dynamic_anchor_field_stored_on_schema() {
+        let value = json!({ "$dynamicAnchor": "myloop", "type": "array" });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.dynamic_anchor, Some("myloop".to_string()));
     }
 }
