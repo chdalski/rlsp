@@ -115,6 +115,8 @@ pub struct JsonSchema {
     /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
     pub definitions: Option<HashMap<String, Self>>,
     pub deprecated: Option<bool>,
+    pub unevaluated_properties: Option<AdditionalProperties>,
+    pub unevaluated_items: Option<Box<Self>>,
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
@@ -699,6 +701,14 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         .map(Box::new);
     schema.else_schema = obj
         .get("else")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+
+    // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
+    schema.unevaluated_properties =
+        parse_additional_properties(obj.get("unevaluatedProperties"), root, depth);
+    schema.unevaluated_items = obj
+        .get("unevaluatedItems")
         .and_then(|v| parse_schema_with_root(v, root, depth + 1))
         .map(Box::new);
 

@@ -60,6 +60,92 @@ const MAX_DESCRIPTION_LEN: usize = 200;
 const MAX_ENUM_DISPLAY: usize = 5;
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Evaluation context (for unevaluatedProperties / unevaluatedItems)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Collect property names directly evaluated by `schema` (one level: `properties`,
+/// `patternProperties` keys, and composition sub-schema properties).
+/// Used to determine what composition branches consider "evaluated" without
+/// full recursive context threading.
+fn collect_evaluated_properties(schema: &JsonSchema, key: &str) -> bool {
+    // Matched by properties
+    if schema
+        .properties
+        .as_ref()
+        .is_some_and(|p| p.contains_key(key))
+    {
+        return true;
+    }
+    // Matched by patternProperties
+    if let Some(pp) = &schema.pattern_properties {
+        for (pattern, _) in pp {
+            if pattern.len() <= MAX_PATTERN_LEN {
+                if let Some(re) = get_regex(pattern) {
+                    if re.is_match(key) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    // Matched by allOf sub-schemas (one level deep)
+    if let Some(all_of) = &schema.all_of {
+        for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
+            if collect_evaluated_properties(branch, key) {
+                return true;
+            }
+        }
+    }
+    // Matched by anyOf / oneOf sub-schemas (one level deep)
+    if let Some(any_of) = &schema.any_of {
+        for branch in any_of.iter().take(MAX_BRANCH_COUNT) {
+            if collect_evaluated_properties(branch, key) {
+                return true;
+            }
+        }
+    }
+    if let Some(one_of) = &schema.one_of {
+        for branch in one_of.iter().take(MAX_BRANCH_COUNT) {
+            if collect_evaluated_properties(branch, key) {
+                return true;
+            }
+        }
+    }
+    // Matched by if/then/else (one level deep)
+    if let Some(then_s) = &schema.then_schema {
+        if collect_evaluated_properties(then_s, key) {
+            return true;
+        }
+    }
+    if let Some(else_s) = &schema.else_schema {
+        if collect_evaluated_properties(else_s, key) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Collect the number of prefix items directly covered by `schema` and its
+/// composition sub-schemas (one level deep).
+fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
+    let mut count = schema.prefix_items.as_ref().map_or(0, Vec::len);
+    // items (non-nil) covers all remaining indices — signal with usize::MAX
+    if schema.items.is_some() {
+        return usize::MAX;
+    }
+    if let Some(all_of) = &schema.all_of {
+        for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
+            let branch_count = collect_evaluated_item_count(branch);
+            if branch_count == usize::MAX {
+                return usize::MAX;
+            }
+            count = count.max(branch_count);
+        }
+    }
+    count
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -187,6 +273,98 @@ fn validate_node(
 
     // Composition
     validate_composition(node, schema, path, lines, diagnostics, depth);
+
+    // unevaluatedProperties (Draft 2019-09)
+    if schema.unevaluated_properties.is_some() {
+        if let YamlOwned::Mapping(map) = node {
+            validate_unevaluated_properties(map, schema, path, lines, diagnostics, depth);
+        }
+    }
+
+    // unevaluatedItems (Draft 2019-09)
+    if schema.unevaluated_items.is_some() {
+        if let YamlOwned::Sequence(seq) = node {
+            validate_unevaluated_items(seq, schema, path, lines, diagnostics, depth);
+        }
+    }
+}
+
+fn validate_unevaluated_properties(
+    map: &saphyr::MappingOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) {
+    use saphyr::ScalarOwned;
+    for k in map.keys() {
+        let key_str = match k {
+            YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
+            YamlOwned::Value(ScalarOwned::Integer(i)) => i.to_string(),
+            YamlOwned::Value(_)
+            | YamlOwned::Sequence(_)
+            | YamlOwned::Mapping(_)
+            | YamlOwned::Alias(_)
+            | YamlOwned::BadValue
+            | YamlOwned::Tagged(_, _)
+            | YamlOwned::Representation(_, _, _) => continue,
+        };
+        if collect_evaluated_properties(schema, &key_str) {
+            continue;
+        }
+        match &schema.unevaluated_properties {
+            Some(AdditionalProperties::Denied) => {
+                let range = key_range(&key_str, path, lines);
+                diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    "schemaUnevaluatedProperty",
+                    format!(
+                        "Unevaluated property '{}' is not allowed at {}",
+                        key_str,
+                        format_path(path)
+                    ),
+                ));
+            }
+            Some(AdditionalProperties::Schema(extra_schema)) => {
+                let v = map.get(k).expect("key came from map");
+                let mut child_path = path.to_vec();
+                child_path.push(key_str.clone());
+                validate_node(v, extra_schema, &child_path, lines, diagnostics, depth + 1);
+            }
+            None => {}
+        }
+    }
+}
+
+fn validate_unevaluated_items(
+    seq: &saphyr::SequenceOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) {
+    let evaluated_count = collect_evaluated_item_count(schema);
+    let Some(unevaluated_schema) = &schema.unevaluated_items else {
+        return;
+    };
+    for (i, item) in seq.iter().enumerate() {
+        if evaluated_count == usize::MAX || i < evaluated_count {
+            continue;
+        }
+        let mut item_path = path.to_vec();
+        item_path.push(format!("[{i}]"));
+        validate_node(
+            item,
+            unevaluated_schema,
+            &item_path,
+            lines,
+            diagnostics,
+            depth + 1,
+        );
+    }
 }
 
 fn validate_array_constraints(
@@ -3782,5 +3960,128 @@ mod tests {
         // prefixItems was set first — array-form items is ignored
         assert!(schema.prefix_items.is_some());
         assert_eq!(schema.prefix_items.as_ref().unwrap().len(), 1);
+    }
+
+    // ── unevaluatedProperties / unevaluatedItems ─────────────────────────────
+
+    // Test 150 — unevaluatedProperties: false with allOf — properties from allOf evaluated (pass)
+    #[test]
+    fn should_produce_no_diagnostics_when_allof_evaluates_all_properties() {
+        let schema = JsonSchema {
+            all_of: Some(vec![object_schema_with_props(vec![(
+                "name",
+                string_schema(),
+            )])]),
+            unevaluated_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("name: hello");
+        let result = validate_schema("name: hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 151 — unevaluatedProperties: false — property not in any sub-schema (diagnostic)
+    #[test]
+    fn should_produce_diagnostic_for_unevaluated_property() {
+        let schema = JsonSchema {
+            properties: Some(
+                vec![("name".to_string(), string_schema())]
+                    .into_iter()
+                    .collect(),
+            ),
+            unevaluated_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("name: hello\nextra: world");
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("extra"));
+    }
+
+    // Test 152 — unevaluatedProperties with sub-schema — unevaluated validated against it
+    #[test]
+    fn should_validate_unevaluated_property_against_schema() {
+        let schema = JsonSchema {
+            properties: Some(
+                vec![("name".to_string(), string_schema())]
+                    .into_iter()
+                    .collect(),
+            ),
+            unevaluated_properties: Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+            ..JsonSchema::default()
+        };
+        // "extra" is unevaluated and not an integer — diagnostic
+        let docs = parse_docs("name: hello\nextra: world");
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("integer"));
+    }
+
+    // Test 153 — unevaluatedItems with prefixItems — prefix items are evaluated (pass)
+    #[test]
+    fn should_produce_no_diagnostics_when_prefix_items_cover_all_items() {
+        let schema = JsonSchema {
+            prefix_items: Some(vec![string_schema(), integer_schema()]),
+            unevaluated_items: Some(Box::new(JsonSchema {
+                schema_type: Some(SchemaType::Single("boolean".to_string())),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("- hello\n- 42");
+        let result = validate_schema("- hello\n- 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 154 — unevaluatedItems — item beyond prefix not evaluated (diagnostic)
+    #[test]
+    fn should_produce_diagnostic_for_unevaluated_item_beyond_prefix() {
+        let schema = JsonSchema {
+            prefix_items: Some(vec![string_schema()]),
+            unevaluated_items: Some(Box::new(integer_schema())),
+            ..JsonSchema::default()
+        };
+        // [0] is string (evaluated by prefix), [1] is string (unevaluated, fails integer)
+        let docs = parse_docs("- hello\n- world");
+        let result = validate_schema("- hello\n- world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("integer"));
+    }
+
+    // Test 155 — unevaluatedProperties with if/then — then branch properties evaluated
+    #[test]
+    fn should_evaluate_properties_from_then_branch() {
+        let schema = JsonSchema {
+            if_schema: Some(Box::new(JsonSchema {
+                required: Some(vec!["name".to_string()]),
+                ..JsonSchema::default()
+            })),
+            then_schema: Some(Box::new(object_schema_with_props(vec![(
+                "extra",
+                string_schema(),
+            )]))),
+            unevaluated_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        // "extra" is in then_schema — evaluated, no diagnostic
+        let docs = parse_docs("name: hello\nextra: world");
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        // "name" is not in then properties — it's unevaluated → diagnostic
+        // "extra" IS in then properties → no diagnostic for extra
+        let unevaluated: Vec<_> = result
+            .iter()
+            .filter(|d| d.message.contains("extra"))
+            .collect();
+        assert!(unevaluated.is_empty(), "extra should be evaluated by then");
+    }
+
+    // Test 156 — no unevaluated keywords — existing behavior unchanged (regression)
+    #[test]
+    fn should_not_change_behavior_when_no_unevaluated_keywords() {
+        let schema = object_schema_with_props(vec![("name", string_schema())]);
+        let docs = parse_docs("name: hello\nextra: world");
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        // Without unevaluated keywords, extra property is allowed
+        assert!(result.is_empty());
     }
 }
