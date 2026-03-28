@@ -67,7 +67,7 @@ many spec keywords are missing entirely.
 - [x] Implement scalar constraints (pattern, minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, const) — 42d392b
 - [x] Implement `not` keyword — baeeef8
 - [x] Implement `patternProperties` — dca6cdc
-- [ ] Implement array constraints (minItems, maxItems, uniqueItems)
+- [x] Implement array constraints (minItems, maxItems, uniqueItems) — 24ed3c4
 - [ ] Implement `propertyNames`
 - [ ] Implement `dependencies` / `dependentRequired` / `dependentSchemas`
 - [ ] Implement `if` / `then` / `else`
