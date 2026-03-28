@@ -86,10 +86,23 @@ pub enum AdditionalProperties {
     Schema(Box<JsonSchema>),
 }
 
+/// The JSON Schema draft version declared by the `$schema` keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SchemaDraft {
+    Draft04,
+    Draft06,
+    Draft07,
+    Draft201909,
+    Draft202012,
+    #[default]
+    Unknown,
+}
+
 /// A subset of JSON Schema (Draft-04 and Draft-07) sufficient for validation,
 /// completion, and hover support.
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
+    pub draft: SchemaDraft,
     pub schema_type: Option<SchemaType>,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -671,6 +684,23 @@ fn parse_extension_fields(
         });
 }
 
+fn detect_draft(uri: &str) -> SchemaDraft {
+    match uri {
+        "http://json-schema.org/draft-04/schema#" | "http://json-schema.org/draft-04/schema" => {
+            SchemaDraft::Draft04
+        }
+        "http://json-schema.org/draft-06/schema#" | "http://json-schema.org/draft-06/schema" => {
+            SchemaDraft::Draft06
+        }
+        "http://json-schema.org/draft-07/schema#" | "http://json-schema.org/draft-07/schema" => {
+            SchemaDraft::Draft07
+        }
+        "https://json-schema.org/draft/2019-09/schema" => SchemaDraft::Draft201909,
+        "https://json-schema.org/draft/2020-12/schema" => SchemaDraft::Draft202012,
+        _ => SchemaDraft::Unknown,
+    }
+}
+
 fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<JsonSchema> {
     if depth > MAX_REF_DEPTH {
         return None;
@@ -707,6 +737,13 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         }
         // Fall through if unresolved — parse remaining fields
     }
+
+    // $schema — detect draft version
+    schema.draft = obj
+        .get("$schema")
+        .and_then(Value::as_str)
+        .map(detect_draft)
+        .unwrap_or_default();
 
     // type
     schema.schema_type = parse_type(obj.get("type"));
@@ -2954,5 +2991,112 @@ mod tests {
             schema.schema_type,
             Some(SchemaType::Single("object".to_string()))
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // detect_draft / SchemaDraft
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Draft-1: Draft-04 URI with trailing # is detected
+    #[test]
+    fn draft04_uri_with_hash_is_detected() {
+        let value = json!({
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft04);
+    }
+
+    // Draft-2: Draft-07 URI with trailing # is detected
+    #[test]
+    fn draft07_uri_with_hash_is_detected() {
+        let value = json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft07);
+    }
+
+    // Draft-3: Draft 2020-12 URI is detected
+    #[test]
+    fn draft202012_uri_is_detected() {
+        let value = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft202012);
+    }
+
+    // Draft-4: Schema without $schema defaults to Unknown
+    #[test]
+    fn schema_without_dollar_schema_defaults_to_unknown() {
+        let value = json!({ "type": "object" });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Unknown);
+    }
+
+    // Draft-5: Schema with unrecognized $schema URI defaults to Unknown
+    #[test]
+    fn unrecognized_schema_uri_defaults_to_unknown() {
+        let value = json!({
+            "$schema": "https://example.com/my-custom-schema",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Unknown);
+    }
+
+    // Draft-6: Sub-schema $schema is parsed (no depth restriction)
+    #[test]
+    fn sub_schema_dollar_schema_is_parsed() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "nested": {
+                    "$schema": "https://json-schema.org/draft/2019-09/schema",
+                    "type": "string"
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let props = schema.properties.as_ref().unwrap();
+        let nested = props.get("nested").unwrap();
+        assert_eq!(nested.draft, SchemaDraft::Draft201909);
+    }
+
+    // Draft-7: Draft-04 URI without trailing # is also detected
+    #[test]
+    fn draft04_uri_without_hash_is_detected() {
+        let value = json!({
+            "$schema": "http://json-schema.org/draft-04/schema",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft04);
+    }
+
+    // Draft-8: Draft-06 URI with trailing # is detected
+    #[test]
+    fn draft06_uri_with_hash_is_detected() {
+        let value = json!({
+            "$schema": "http://json-schema.org/draft-06/schema#",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft06);
+    }
+
+    // Draft-9: Draft 2019-09 URI is detected
+    #[test]
+    fn draft201909_uri_is_detected() {
+        let value = json!({
+            "$schema": "https://json-schema.org/draft/2019-09/schema",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(schema.draft, SchemaDraft::Draft201909);
     }
 }
