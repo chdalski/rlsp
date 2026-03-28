@@ -2072,19 +2072,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // Test 50 — lock ordering: hover handler acquires document_store before schema locks
-    #[ignore = "lock ordering verified by code review — no runtime assertion possible"]
-    #[test]
-    fn lock_ordering_hover_handler_document_store_before_schema_associations() {
-        // The hover handler in server.rs must:
-        // 1. Acquire document_store lock → extract owned text + YAML → drop lock
-        // 2. Acquire schema_associations lock → extract owned URL → drop lock
-        // 3. Acquire schema_cache lock → clone schema → drop lock
-        // 4. Call hover_at() with no lock held; no std::sync::Mutex guard crosses an .await
-        // This ordering prevents deadlocks with other handlers using the same locks.
-        // Runtime detection would require injecting lock contention; verified by review.
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     // Group J — Hover examples formatting (Tests 51–55)
     // ──────────────────────────────────────────────────────────────────────────
