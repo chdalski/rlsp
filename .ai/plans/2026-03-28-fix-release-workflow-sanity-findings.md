@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-28)
 **Created:** 2026-03-28
 
 ## Goal
@@ -58,7 +58,7 @@ name, which is useful if a job is retried.
 
 - [x] Audit workflow with /project-sanity
 - [x] User approved fixes
-- [ ] Fix both findings in release-plz.yml
+- [x] Fix both findings in release-plz.yml (b167af7)
 
 ## Tasks
 
