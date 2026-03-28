@@ -48,6 +48,7 @@ jobs:
     name: Filter binary releases
     needs: release-plz-release
     if: needs.release-plz-release.outputs.releases_created == 'true'
+    permissions: {}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.filter.outputs.matrix }}
@@ -119,14 +120,12 @@ jobs:
 
       - name: Upload to GitHub Release (Linux/macOS)
         if: matrix.target.os != 'windows-latest'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ matrix.crate.tag }}
-          files: ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz
+        run: gh release upload ${{ matrix.crate.tag }} ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to GitHub Release (Windows)
         if: matrix.target.os == 'windows-latest'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ matrix.crate.tag }}
-          files: ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip
+        run: gh release upload ${{ matrix.crate.tag }} ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
