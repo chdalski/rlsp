@@ -240,18 +240,18 @@ impl Backend {
                 let url_clone = url.clone();
                 let proxy = self.get_http_proxy();
                 let join_result = tokio::task::spawn_blocking(move || {
-                    crate::schema::fetch_schema(&url_clone, proxy.as_deref())
+                    crate::schema::fetch_schema_raw(&url_clone, proxy.as_deref())
                 })
                 .await;
-                let fetched: Option<crate::schema::JsonSchema> =
+                let fetched: Option<(serde_json::Value, crate::schema::JsonSchema)> =
                     join_result.ok().and_then(std::result::Result::ok);
 
-                if let Some(ref s) = fetched
+                if let Some((ref v, ref s)) = fetched
                     && let Ok(mut cache) = self.schema_cache.lock()
                 {
-                    cache.insert(url, s.clone());
+                    cache.insert(url, v.clone(), s.clone());
                 }
-                fetched
+                fetched.map(|(_, s)| s)
             };
 
             if let Some(s) = schema {
