@@ -80,6 +80,7 @@ pub struct JsonSchema {
     pub examples: Option<Vec<Value>>,
     pub items: Option<Box<Self>>,
     pub additional_properties: Option<AdditionalProperties>,
+    pub pattern_properties: Option<Vec<(String, Self)>>,
     pub all_of: Option<Vec<Self>>,
     pub any_of: Option<Vec<Self>>,
     pub one_of: Option<Vec<Self>>,
@@ -580,6 +581,18 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
             .filter_map(|(k, v)| parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s)))
             .collect()
     });
+
+    // patternProperties
+    schema.pattern_properties =
+        obj.get("patternProperties")
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| {
+                        parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s))
+                    })
+                    .collect()
+            });
 
     // items
     schema.items = obj

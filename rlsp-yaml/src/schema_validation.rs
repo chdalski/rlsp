@@ -432,31 +432,77 @@ fn validate_mapping(
             let mut child_path = path.to_vec();
             child_path.push(key_str.clone());
             validate_node(v, prop_schema, &child_path, lines, diagnostics, depth + 1);
-        } else if !is_known {
-            // Check additionalProperties
-            match &schema.additional_properties {
-                Some(AdditionalProperties::Denied) => {
-                    let range = key_range(&key_str, path, lines);
-                    diagnostics.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        "schemaAdditionalProperty",
-                        format!(
-                            "Additional property '{}' is not allowed at {}",
-                            key_str,
-                            format_path(path)
-                        ),
-                    ));
+        } else {
+            // Check patternProperties for keys not in properties
+            let matched_by_pattern =
+                validate_pattern_properties(v, &key_str, schema, path, lines, diagnostics, depth);
+
+            if !is_known && !matched_by_pattern {
+                // Check additionalProperties
+                match &schema.additional_properties {
+                    Some(AdditionalProperties::Denied) => {
+                        let range = key_range(&key_str, path, lines);
+                        diagnostics.push(make_diagnostic(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            "schemaAdditionalProperty",
+                            format!(
+                                "Additional property '{}' is not allowed at {}",
+                                key_str,
+                                format_path(path)
+                            ),
+                        ));
+                    }
+                    Some(AdditionalProperties::Schema(extra_schema)) => {
+                        let mut child_path = path.to_vec();
+                        child_path.push(key_str.clone());
+                        validate_node(v, extra_schema, &child_path, lines, diagnostics, depth + 1);
+                    }
+                    None => {}
                 }
-                Some(AdditionalProperties::Schema(extra_schema)) => {
-                    let mut child_path = path.to_vec();
-                    child_path.push(key_str.clone());
-                    validate_node(v, extra_schema, &child_path, lines, diagnostics, depth + 1);
-                }
-                None => {}
             }
         }
     }
+}
+
+/// Validate `value` against any `patternProperties` patterns that match `key`.
+/// Returns `true` if the key was matched by at least one pattern.
+fn validate_pattern_properties(
+    value: &YamlOwned,
+    key: &str,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) -> bool {
+    let Some(pattern_props) = &schema.pattern_properties else {
+        return false;
+    };
+
+    let mut matched = false;
+    for (pattern, pat_schema) in pattern_props {
+        if pattern.len() > MAX_PATTERN_LEN {
+            continue;
+        }
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(key) {
+                matched = true;
+                let mut child_path = path.to_vec();
+                child_path.push(key.to_string());
+                validate_node(
+                    value,
+                    pat_schema,
+                    &child_path,
+                    lines,
+                    diagnostics,
+                    depth + 1,
+                );
+            }
+        }
+        // invalid regex or pattern too long — skip silently
+    }
+    matched
 }
 
 fn validate_composition(
@@ -2525,5 +2571,138 @@ mod tests {
         let docs = parse_docs("env: dev");
         let result = validate_schema("env: dev", &docs, &schema);
         assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // patternProperties
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 99
+    #[test]
+    fn should_validate_value_against_pattern_properties_schema() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
+            ..JsonSchema::default()
+        };
+        // str_name should be validated as string — integer is a type violation
+        let text = "str_name: 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+    }
+
+    // Test 100
+    #[test]
+    fn should_produce_no_diagnostics_when_pattern_property_value_is_valid() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
+            ..JsonSchema::default()
+        };
+        let text = "str_name: hello";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 101
+    #[test]
+    fn should_not_trigger_additional_properties_for_key_matched_by_pattern() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let text = "str_name: hello";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        // str_name matches the pattern — no additionalProperty diagnostic
+        assert!(
+            result
+                .iter()
+                .all(|d| code_of(d) != "schemaAdditionalProperty")
+        );
+    }
+
+    // Test 102
+    #[test]
+    fn should_trigger_additional_properties_for_key_not_matched_by_pattern() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        // "other" doesn't match "^str_" and there are no properties
+        let text = "other: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
+    }
+
+    // Test 103
+    #[test]
+    fn should_prefer_properties_over_pattern_properties_for_known_key() {
+        // "name" is in properties (integer), and also matches pattern (string).
+        // properties takes precedence — integer schema applies.
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some([("name".to_string(), integer_schema())].into()),
+            pattern_properties: Some(vec![("^name$".to_string(), string_schema())]),
+            ..JsonSchema::default()
+        };
+        // "name" is an integer — valid against properties schema (integer), but
+        // patternProperties schema (string) is not applied for known properties.
+        let text = "name: 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 104
+    #[test]
+    fn should_match_key_against_multiple_patterns_and_validate_all() {
+        // "x_num" matches both "^x_" (string) and ".*num.*" (integer).
+        // Both schemas validate the value — integer value fails string check.
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![
+                ("^x_".to_string(), string_schema()),
+                ("num".to_string(), integer_schema()),
+            ]),
+            ..JsonSchema::default()
+        };
+        // value is integer — fails string pattern, passes integer pattern
+        let text = "x_num: 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        // One type violation from the string pattern
+        let type_diags: Vec<_> = result
+            .iter()
+            .filter(|d| code_of(d) == "schemaType")
+            .collect();
+        assert_eq!(type_diags.len(), 1);
+    }
+
+    // Test 105
+    #[test]
+    fn should_skip_pattern_exceeding_max_length_and_fall_through_to_additional_properties() {
+        let long_pattern = "a".repeat(1025);
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![(long_pattern, string_schema())]),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        // The pattern is too long — skipped. "key" falls through to additionalProperties.
+        let text = "key: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
     }
 }
