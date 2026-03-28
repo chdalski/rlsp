@@ -112,6 +112,19 @@ HTTP proxy URL used for all schema fetching (individual schemas and the SchemaSt
 
 When absent or `null`, requests are made directly. Invalid proxy URLs are silently ignored and requests fall back to direct connections.
 
+### `colorDecorators`
+
+- **Type:** `boolean` (optional)
+- **Default:** `true`
+
+Enable color picker integration for color values in YAML documents. When enabled, the server responds to `textDocument/documentColor` requests by detecting hex codes (`#rrggbb`, `#rgb`), CSS named colors (`red`, `blue`, etc.), and CSS color functions (`rgb()`, `rgba()`, `hsl()`, `hsla()`) in YAML values, and returns them to the editor for color picker decoration. The server also handles `textDocument/colorPresentation` requests to convert a picked color back to hex, RGB, or HSL notation.
+
+To disable color decorators:
+
+```json
+{ "colorDecorators": false }
+```
+
 > **Indentation** (`tabWidth`, `useTabs`) is not configurable via workspace settings — it is taken directly from the LSP `textDocument/formatting` request, which carries the editor's indentation preferences. Configure indentation in your editor settings.
 
 ## Modelines

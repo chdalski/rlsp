@@ -6,10 +6,11 @@ use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CodeLens,
-    CodeLensOptions, CodeLensParams, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams, DocumentLink,
+    CodeLensOptions, CodeLensParams, ColorInformation, ColorPresentation, ColorPresentationParams,
+    ColorProviderCapability, CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentColorParams, DocumentFormattingParams, DocumentLink,
     DocumentLinkOptions, DocumentLinkParams, DocumentOnTypeFormattingOptions,
     DocumentOnTypeFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern,
@@ -48,6 +49,8 @@ pub struct Settings {
     /// HTTP proxy URL for schema fetching (e.g. `"http://proxy.corp:8080"`).
     /// When absent, no proxy is used.
     pub http_proxy: Option<String>,
+    /// Enable color decorators (color picker) for color values. Defaults to `true` when absent.
+    pub color_decorators: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -387,8 +390,17 @@ impl Backend {
                     ..SemanticTokensOptions::default()
                 }),
             ),
+            color_provider: Some(ColorProviderCapability::Simple(true)),
             ..ServerCapabilities::default()
         }
+    }
+
+    /// Return `true` if color decorators are enabled (default: `true`).
+    pub(crate) fn get_color_decorators_enabled(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.color_decorators.unwrap_or(true))
     }
 }
 
@@ -1009,6 +1021,40 @@ impl LanguageServer for Backend {
 
         Ok(crate::rename::rename(&text, &uri, position, &new_name))
     }
+
+    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
+        if !self.get_color_decorators_enabled() {
+            return Ok(Vec::new());
+        }
+
+        let uri = params.text_document.uri;
+        let text = if let Ok(store) = self.document_store.lock() {
+            store.get(&uri).map(str::to_string)
+        } else {
+            return Ok(Vec::new());
+        };
+
+        let Some(text) = text else {
+            return Ok(Vec::new());
+        };
+
+        let colors = crate::color::find_colors(&text)
+            .into_iter()
+            .map(|m| ColorInformation {
+                range: m.range,
+                color: m.color,
+            })
+            .collect();
+
+        Ok(colors)
+    }
+
+    async fn color_presentation(
+        &self,
+        params: ColorPresentationParams,
+    ) -> Result<Vec<ColorPresentation>> {
+        Ok(crate::color::color_presentations(params.color))
+    }
 }
 
 #[cfg(test)]
@@ -1536,6 +1582,117 @@ mod tests {
             edits[0].new_text.contains("b: 2"),
             "formatted line must normalise double-space: {:?}",
             edits[0].new_text
+        );
+    }
+
+    // ---- Color provider capability ----
+
+    #[test]
+    fn should_advertise_color_provider() {
+        let caps = Backend::capabilities();
+        assert!(
+            caps.color_provider.is_some(),
+            "capabilities should include color_provider"
+        );
+    }
+
+    // ---- colorDecorators setting ----
+
+    #[test]
+    fn settings_deserializes_color_decorators_false() {
+        let json = serde_json::json!({ "colorDecorators": false });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.color_decorators, Some(false));
+    }
+
+    #[test]
+    fn settings_defaults_color_decorators_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.color_decorators.is_none());
+    }
+
+    #[test]
+    fn get_color_decorators_enabled_returns_true_by_default() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+        assert!(backend.get_color_decorators_enabled());
+    }
+
+    #[test]
+    fn get_color_decorators_enabled_returns_false_when_disabled() {
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({ "colorDecorators": false });
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert!(!backend.get_color_decorators_enabled());
+    }
+
+    // ---- document_color handler ----
+
+    #[tokio::test]
+    async fn document_color_returns_colors_for_yaml_with_hex_values() {
+        use tower_lsp::lsp_types::{
+            PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///test.yaml").unwrap();
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), "color: '#ff0000'\n".to_string());
+        }
+
+        let params = DocumentColorParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let colors = LanguageServer::document_color(backend, params)
+            .await
+            .unwrap();
+        assert!(!colors.is_empty(), "should detect hex color in YAML value");
+    }
+
+    #[tokio::test]
+    async fn document_color_returns_empty_when_color_decorators_disabled() {
+        use tower_lsp::lsp_types::{
+            PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let backend = service.inner();
+
+        let json = serde_json::json!({ "colorDecorators": false });
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        let uri = Url::parse("file:///test.yaml").unwrap();
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), "color: '#ff0000'\n".to_string());
+        }
+
+        let params = DocumentColorParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let colors = LanguageServer::document_color(backend, params)
+            .await
+            .unwrap();
+        assert!(
+            colors.is_empty(),
+            "should return empty when color decorators are disabled"
         );
     }
 }

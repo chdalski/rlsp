@@ -82,7 +82,7 @@ with existing infrastructure.
 **Comment:** `contains` is Draft-06, `minContains`/`maxContains` added in Draft 2019-09. Needs sub-schema evaluation per array item with counting.
 **Tier:** 2
 
-### Color Provider [not started]
+### Color Provider [completed]
 
 **Description:** Detect color values (hex codes, CSS named colors, RGB/HSL expressions) in YAML values and provide color picker integration via `textDocument/documentColor` and `textDocument/colorPresentation`.
 **Complexity:** Medium

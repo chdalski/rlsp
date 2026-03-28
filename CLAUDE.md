@@ -32,6 +32,7 @@ minimal memory footprint.
 │       ├── document_store.rs  # In-memory document cache
 │       ├── code_actions.rs # Code action provider
 │       ├── code_lens.rs    # Code lens provider (schema URL link)
+│       ├── color.rs        # Color provider (find_colors, color_presentations)
 │       ├── completion.rs   # Completion provider
 │       ├── document_links.rs  # Document links / URL detection
 │       ├── folding.rs      # Folding ranges

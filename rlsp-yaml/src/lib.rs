@@ -8,6 +8,7 @@
 
 pub mod code_actions;
 pub mod code_lens;
+pub mod color;
 pub mod completion;
 pub mod document_links;
 pub mod document_store;
