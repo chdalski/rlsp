@@ -103,6 +103,7 @@ pub enum SchemaDraft {
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
     pub draft: SchemaDraft,
+    pub id: Option<String>,
     pub schema_type: Option<SchemaType>,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -546,7 +547,7 @@ fn check_json_depth(value: &Value, depth: usize) -> Result<(), SchemaError> {
 /// - `false` → `None` (no schema representation for "reject everything")
 #[must_use]
 pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
-    parse_schema_with_root(value, value, 0)
+    parse_schema_with_root(value, value, None, 0)
 }
 
 /// Check `$vocabulary` declarations and return warnings for unknown required vocabularies.
@@ -610,13 +611,14 @@ fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSc
 fn parse_array_fields(
     obj: &serde_json::Map<String, Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
     schema: &mut JsonSchema,
 ) {
     // prefixItems (Draft 2020-12)
     schema.prefix_items = obj.get("prefixItems").and_then(Value::as_array).map(|arr| {
         arr.iter()
-            .filter_map(|v| parse_schema_with_root(v, root, depth + 1))
+            .filter_map(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
             .collect()
     });
 
@@ -625,19 +627,19 @@ fn parse_array_fields(
         Some(Value::Array(arr)) if schema.prefix_items.is_none() => {
             schema.prefix_items = Some(
                 arr.iter()
-                    .filter_map(|v| parse_schema_with_root(v, root, depth + 1))
+                    .filter_map(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
                     .collect(),
             );
         }
         Some(v) => {
-            schema.items = parse_schema_with_root(v, root, depth + 1).map(Box::new);
+            schema.items = parse_schema_with_root(v, root, base_uri, depth + 1).map(Box::new);
         }
         None => {}
     }
 
     schema.contains = obj
         .get("contains")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
         .map(Box::new);
     schema.min_items = obj.get("minItems").and_then(Value::as_u64);
     schema.max_items = obj.get("maxItems").and_then(Value::as_u64);
@@ -646,25 +648,57 @@ fn parse_array_fields(
     schema.unique_items = obj.get("uniqueItems").and_then(Value::as_bool);
 }
 
+/// Populate allOf/anyOf/oneOf/not and if/then/else fields on `schema` from `obj`.
+fn parse_combinator_fields(
+    obj: &serde_json::Map<String, Value>,
+    root: &Value,
+    base_uri: Option<&str>,
+    depth: usize,
+    schema: &mut JsonSchema,
+) {
+    schema.all_of = parse_schema_array(obj.get("allOf"), root, base_uri, depth);
+    schema.any_of = parse_schema_array(obj.get("anyOf"), root, base_uri, depth);
+    schema.one_of = parse_schema_array(obj.get("oneOf"), root, base_uri, depth);
+    schema.not = obj
+        .get("not")
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
+        .map(Box::new);
+
+    // if / then / else (Draft-07)
+    schema.if_schema = obj
+        .get("if")
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
+        .map(Box::new);
+    schema.then_schema = obj
+        .get("then")
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
+        .map(Box::new);
+    schema.else_schema = obj
+        .get("else")
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
+        .map(Box::new);
+}
+
 /// Populate `unevaluatedProperties`, `unevaluatedItems`, `definitions`, and `$vocabulary`
 /// on `schema` from `obj`. Extracted to keep `parse_schema_with_root` under 100 lines.
 fn parse_extension_fields(
     obj: &serde_json::Map<String, Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
     schema: &mut JsonSchema,
 ) {
     // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
     schema.unevaluated_properties =
-        parse_additional_properties(obj.get("unevaluatedProperties"), root, depth);
+        parse_additional_properties(obj.get("unevaluatedProperties"), root, base_uri, depth);
     schema.unevaluated_items = obj
         .get("unevaluatedItems")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .and_then(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
         .map(Box::new);
 
     // definitions (Draft-04) + $defs (Draft-07)
-    let defs_04 = parse_definitions(obj.get("definitions"), root, depth);
-    let defs_07 = parse_definitions(obj.get("$defs"), root, depth);
+    let defs_04 = parse_definitions(obj.get("definitions"), root, base_uri, depth);
+    let defs_07 = parse_definitions(obj.get("$defs"), root, base_uri, depth);
     schema.definitions = match (defs_04, defs_07) {
         (Some(mut a), Some(b)) => {
             a.extend(b);
@@ -684,6 +718,18 @@ fn parse_extension_fields(
         });
 }
 
+/// Resolve `relative` against `base`, returning an absolute URI string.
+///
+/// If `relative` is already an absolute URI it is returned as-is.
+/// Returns `None` when `base` is `None` or when joining fails.
+fn resolve_uri(base: Option<&str>, relative: &str) -> Option<String> {
+    if Url::parse(relative).is_ok() {
+        return Some(relative.to_string());
+    }
+    let base_url = Url::parse(base?).ok()?;
+    base_url.join(relative).ok().map(|u| u.to_string())
+}
+
 fn detect_draft(uri: &str) -> SchemaDraft {
     match uri {
         "http://json-schema.org/draft-04/schema#" | "http://json-schema.org/draft-04/schema" => {
@@ -701,7 +747,12 @@ fn detect_draft(uri: &str) -> SchemaDraft {
     }
 }
 
-fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<JsonSchema> {
+fn parse_schema_with_root(
+    value: &Value,
+    root: &Value,
+    base_uri: Option<&str>,
+    depth: usize,
+) -> Option<JsonSchema> {
     if depth > MAX_REF_DEPTH {
         return None;
     }
@@ -745,6 +796,20 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         .map(detect_draft)
         .unwrap_or_default();
 
+    // $id (Draft-06+) / id (Draft-04) — update base URI for sub-schemas
+    let raw_id = obj
+        .get("$id")
+        .or_else(|| obj.get("id"))
+        .and_then(Value::as_str);
+    let effective_base: Option<String> = if let Some(raw) = raw_id {
+        let resolved = resolve_uri(base_uri, raw).unwrap_or_else(|| raw.to_string());
+        schema.id = Some(resolved.clone());
+        Some(resolved)
+    } else {
+        base_uri.map(String::from)
+    };
+    let effective_base = effective_base.as_deref();
+
     // type
     schema.schema_type = parse_type(obj.get("type"));
 
@@ -760,7 +825,9 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     // properties
     schema.properties = obj.get("properties").and_then(Value::as_object).map(|map| {
         map.iter()
-            .filter_map(|(k, v)| parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s)))
+            .filter_map(|(k, v)| {
+                parse_schema_with_root(v, root, effective_base, depth + 1).map(|s| (k.clone(), s))
+            })
             .collect()
     });
 
@@ -771,52 +838,31 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
             .map(|map| {
                 map.iter()
                     .filter_map(|(k, v)| {
-                        parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s))
+                        parse_schema_with_root(v, root, effective_base, depth + 1)
+                            .map(|s| (k.clone(), s))
                     })
                     .collect()
             });
 
-    parse_array_fields(obj, root, depth, &mut schema);
+    parse_array_fields(obj, root, effective_base, depth, &mut schema);
 
     // additionalProperties
     schema.additional_properties =
-        parse_additional_properties(obj.get("additionalProperties"), root, depth);
+        parse_additional_properties(obj.get("additionalProperties"), root, effective_base, depth);
 
     // propertyNames
     schema.property_names = obj
         .get("propertyNames")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .and_then(|v| parse_schema_with_root(v, root, effective_base, depth + 1))
         .map(Box::new);
 
     // dependencies (Draft-04) / dependentRequired + dependentSchemas (Draft 2019-09)
-    let (dep_req, dep_sch) = parse_dependencies(obj, root, depth);
+    let (dep_req, dep_sch) = parse_dependencies(obj, root, effective_base, depth);
     schema.dependent_required = dep_req;
     schema.dependent_schemas = dep_sch;
 
-    // allOf / anyOf / oneOf / not
-    schema.all_of = parse_schema_array(obj.get("allOf"), root, depth);
-    schema.any_of = parse_schema_array(obj.get("anyOf"), root, depth);
-    schema.one_of = parse_schema_array(obj.get("oneOf"), root, depth);
-    schema.not = obj
-        .get("not")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-
-    // if / then / else (Draft-07)
-    schema.if_schema = obj
-        .get("if")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-    schema.then_schema = obj
-        .get("then")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-    schema.else_schema = obj
-        .get("else")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-
-    parse_extension_fields(obj, root, depth, &mut schema);
+    parse_combinator_fields(obj, root, effective_base, depth, &mut schema);
+    parse_extension_fields(obj, root, effective_base, depth, &mut schema);
 
     Some(schema)
 }
@@ -832,6 +878,7 @@ type ParsedDependencies = (
 fn parse_dependencies(
     obj: &serde_json::Map<String, Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
 ) -> ParsedDependencies {
     let mut dep_req: HashMap<String, Vec<String>> = HashMap::new();
@@ -847,7 +894,7 @@ fn parse_dependencies(
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect();
                 dep_req.insert(key.clone(), reqs);
-            } else if let Some(schema) = parse_schema_with_root(val, root, depth + 1) {
+            } else if let Some(schema) = parse_schema_with_root(val, root, base_uri, depth + 1) {
                 // Sub-schema → dependentSchemas
                 dep_sch.insert(key.clone(), schema);
             }
@@ -870,7 +917,7 @@ fn parse_dependencies(
     // Draft 2019-09 `dependentSchemas` — merges over Draft-04 entries
     if let Some(Value::Object(ds)) = obj.get("dependentSchemas") {
         for (key, val) in ds {
-            if let Some(schema) = parse_schema_with_root(val, root, depth + 1) {
+            if let Some(schema) = parse_schema_with_root(val, root, base_uri, depth + 1) {
                 dep_sch.insert(key.clone(), schema);
             }
         }
@@ -914,6 +961,7 @@ fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Strin
 fn parse_additional_properties(
     value: Option<&Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
 ) -> Option<AdditionalProperties> {
     match value? {
@@ -924,7 +972,7 @@ fn parse_additional_properties(
         | Value::Number(_)
         | Value::String(_)
         | Value::Array(_)
-        | Value::Object(_)) => parse_schema_with_root(v, root, depth + 1)
+        | Value::Object(_)) => parse_schema_with_root(v, root, base_uri, depth + 1)
             .map(|s| AdditionalProperties::Schema(Box::new(s))),
     }
 }
@@ -932,12 +980,13 @@ fn parse_additional_properties(
 fn parse_schema_array(
     value: Option<&Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
 ) -> Option<Vec<JsonSchema>> {
     let arr = value?.as_array()?;
     let schemas: Vec<JsonSchema> = arr
         .iter()
-        .filter_map(|v| parse_schema_with_root(v, root, depth + 1))
+        .filter_map(|v| parse_schema_with_root(v, root, base_uri, depth + 1))
         .collect();
     if schemas.is_empty() {
         None
@@ -949,12 +998,15 @@ fn parse_schema_array(
 fn parse_definitions(
     value: Option<&Value>,
     root: &Value,
+    base_uri: Option<&str>,
     depth: usize,
 ) -> Option<HashMap<String, JsonSchema>> {
     let map = value?.as_object()?;
     let result: HashMap<String, JsonSchema> = map
         .iter()
-        .filter_map(|(k, v)| parse_schema_with_root(v, root, depth + 1).map(|s| (k.clone(), s)))
+        .filter_map(|(k, v)| {
+            parse_schema_with_root(v, root, base_uri, depth + 1).map(|s| (k.clone(), s))
+        })
         .collect();
     if result.is_empty() {
         None
@@ -985,17 +1037,18 @@ fn resolve_ref(ref_str: &str, root: &Value, depth: usize) -> Option<JsonSchema> 
 
     if pointer.is_empty() {
         // "#" → root schema
-        return parse_schema_with_root(root, root, depth + 1);
+        return parse_schema_with_root(root, root, None, depth + 1);
     }
 
     if pointer.starts_with('/') {
         // "#/foo/bar" → JSON Pointer
         let target = root.pointer(pointer)?;
-        return parse_schema_with_root(target, root, depth + 1);
+        return parse_schema_with_root(target, root, None, depth + 1);
     }
 
     // "#name" → anchor lookup
-    find_anchor_in_value(pointer, root).and_then(|v| parse_schema_with_root(v, root, depth + 1))
+    find_anchor_in_value(pointer, root)
+        .and_then(|v| parse_schema_with_root(v, root, None, depth + 1))
 }
 
 /// Walk `value` recursively, returning the first JSON object that has
@@ -3098,5 +3151,105 @@ mod tests {
         });
         let schema = parse_schema(&value).unwrap();
         assert_eq!(schema.draft, SchemaDraft::Draft201909);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // $id / id base URI resolution
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Id-1: absolute $id is stored verbatim
+    #[test]
+    fn absolute_dollar_id_is_stored() {
+        let value = json!({
+            "$id": "https://example.com/schema.json",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(
+            schema.id,
+            Some("https://example.com/schema.json".to_string())
+        );
+    }
+
+    // Id-2: relative $id is resolved against supplied base URI
+    #[test]
+    fn relative_dollar_id_is_resolved_against_base_uri() {
+        // Use parse_schema_with_root directly to supply a base URI
+        let value = json!({ "$id": "sub.json", "type": "object" });
+        let schema =
+            parse_schema_with_root(&value, &value, Some("https://example.com/root.json"), 0)
+                .unwrap();
+        assert_eq!(schema.id, Some("https://example.com/sub.json".to_string()));
+    }
+
+    // Id-3: nested schema with its own $id overrides parent base for further nesting
+    #[test]
+    fn nested_dollar_id_overrides_parent_base() {
+        let value = json!({
+            "$id": "https://example.com/root.json",
+            "properties": {
+                "child": {
+                    "$id": "child.json",
+                    "type": "string"
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let child = schema.properties.as_ref().unwrap().get("child").unwrap();
+        assert_eq!(child.id, Some("https://example.com/child.json".to_string()));
+    }
+
+    // Id-4: Draft-04 `id` (without $ prefix) is parsed the same way
+    #[test]
+    fn draft04_id_without_dollar_is_parsed() {
+        let value = json!({
+            "id": "https://example.com/schema.json",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(
+            schema.id,
+            Some("https://example.com/schema.json".to_string())
+        );
+    }
+
+    // Id-5: $id takes precedence over id when both are present
+    #[test]
+    fn dollar_id_takes_precedence_over_id() {
+        let value = json!({
+            "$id": "https://example.com/preferred.json",
+            "id": "https://example.com/ignored.json",
+            "type": "object"
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert_eq!(
+            schema.id,
+            Some("https://example.com/preferred.json".to_string())
+        );
+    }
+
+    // Id-6: schema without $id propagates parent base URI unchanged
+    #[test]
+    fn schema_without_dollar_id_propagates_parent_base() {
+        // The child has no $id — its own sub-child should still inherit the root base
+        let value = json!({
+            "$id": "https://example.com/root.json",
+            "properties": {
+                "middle": {
+                    "type": "object",
+                    "properties": {
+                        "leaf": {
+                            "$id": "leaf.json",
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let middle = schema.properties.as_ref().unwrap().get("middle").unwrap();
+        assert!(middle.id.is_none(), "middle has no $id");
+        let leaf = middle.properties.as_ref().unwrap().get("leaf").unwrap();
+        assert_eq!(leaf.id, Some("https://example.com/leaf.json".to_string()));
     }
 }
