@@ -172,7 +172,7 @@ fn validate_node(
                 );
             }
         }
-        validate_array_constraints(seq, schema, path, lines, diagnostics);
+        validate_array_constraints(seq, schema, path, lines, diagnostics, depth);
     }
 
     // Composition
@@ -185,6 +185,7 @@ fn validate_array_constraints(
     path: &[String],
     lines: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) {
     let len = seq.len() as u64;
 
@@ -236,6 +237,72 @@ fn validate_array_constraints(
                 DiagnosticSeverity::ERROR,
                 "schemaUniqueItems",
                 format!("Array at {} contains duplicate items", format_path(path)),
+            ));
+        }
+    }
+
+    if let Some(contains_schema) = &schema.contains {
+        validate_contains(
+            seq,
+            contains_schema,
+            schema,
+            path,
+            lines,
+            diagnostics,
+            depth,
+        );
+    }
+}
+
+fn validate_contains(
+    seq: &saphyr::SequenceOwned,
+    contains_schema: &JsonSchema,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) {
+    let match_count = seq
+        .iter()
+        .filter(|item| {
+            let mut scratch = Vec::new();
+            validate_node(item, contains_schema, path, lines, &mut scratch, depth + 1);
+            scratch.is_empty()
+        })
+        .count() as u64;
+
+    // Default min is 1 when `contains` is present without `minContains`
+    let effective_min = schema.min_contains.unwrap_or(1);
+
+    if match_count < effective_min {
+        let range = node_range(path, lines);
+        diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaContains",
+            format!(
+                "Array at {} must contain at least {} item(s) matching the schema, found {}",
+                format_path(path),
+                effective_min,
+                match_count
+            ),
+        ));
+    }
+
+    if let Some(max) = schema.max_contains {
+        if match_count > max {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaContains",
+                format!(
+                    "Array at {} must contain at most {} item(s) matching the schema, found {}",
+                    format_path(path),
+                    max,
+                    match_count
+                ),
             ));
         }
     }
@@ -3484,6 +3551,104 @@ mod tests {
         // Without if, then/else are ignored — string value produces no diagnostic
         let docs = parse_docs("val: hello");
         let result = validate_schema("val: hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // ── contains / minContains / maxContains ────────────────────────────────
+
+    fn contains_schema(min_contains: Option<u64>, max_contains: Option<u64>) -> JsonSchema {
+        JsonSchema {
+            contains: Some(Box::new(JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                ..JsonSchema::default()
+            })),
+            min_contains,
+            max_contains,
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 135
+    #[test]
+    fn should_produce_no_diagnostics_when_array_has_one_matching_item_no_min_max() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
+        let docs = parse_docs("items:\n  - 1\n  - hello");
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 136
+    #[test]
+    fn should_produce_diagnostic_when_no_items_match_contains_schema() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
+        let docs = parse_docs("items:\n  - hello\n  - world");
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at least 1"));
+    }
+
+    // Test 137
+    #[test]
+    fn should_produce_diagnostic_when_min_contains_not_met() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
+        let docs = parse_docs("items:\n  - 1\n  - hello");
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at least 2"));
+    }
+
+    // Test 138
+    #[test]
+    fn should_produce_no_diagnostics_when_min_contains_met() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
+        let docs = parse_docs("items:\n  - 1\n  - 2");
+        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 139
+    #[test]
+    fn should_produce_diagnostic_when_max_contains_exceeded() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
+        let docs = parse_docs("items:\n  - 1\n  - 2");
+        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("at most 1"));
+    }
+
+    // Test 140
+    #[test]
+    fn should_produce_no_diagnostics_when_max_contains_not_exceeded() {
+        let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
+        let docs = parse_docs("items:\n  - 1\n  - hello");
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 141
+    #[test]
+    fn should_produce_no_diagnostics_when_min_contains_zero() {
+        // minContains: 0 disables the "at least one" requirement
+        let schema = object_schema_with_props(vec![("items", contains_schema(Some(0), None))]);
+        let docs = parse_docs("items:\n  - hello\n  - world");
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 142
+    #[test]
+    fn should_ignore_min_contains_and_max_contains_when_contains_absent() {
+        // minContains/maxContains without contains are ignored per spec
+        let schema = object_schema_with_props(vec![(
+            "items",
+            JsonSchema {
+                min_contains: Some(5),
+                max_contains: Some(0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("items:\n  - hello\n  - world");
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
         assert!(result.is_empty());
     }
 }

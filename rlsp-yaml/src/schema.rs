@@ -79,8 +79,11 @@ pub struct JsonSchema {
     pub default: Option<Value>,
     pub examples: Option<Vec<Value>>,
     pub items: Option<Box<Self>>,
+    pub contains: Option<Box<Self>>,
     pub min_items: Option<u64>,
     pub max_items: Option<u64>,
+    pub max_contains: Option<u64>,
+    pub min_contains: Option<u64>,
     pub unique_items: Option<bool>,
     pub additional_properties: Option<AdditionalProperties>,
     pub pattern_properties: Option<Vec<(String, Self)>>,
@@ -611,8 +614,14 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         .get("items")
         .and_then(|v| parse_schema_with_root(v, root, depth + 1))
         .map(Box::new);
+    schema.contains = obj
+        .get("contains")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
     schema.min_items = obj.get("minItems").and_then(Value::as_u64);
     schema.max_items = obj.get("maxItems").and_then(Value::as_u64);
+    schema.min_contains = obj.get("minContains").and_then(Value::as_u64);
+    schema.max_contains = obj.get("maxContains").and_then(Value::as_u64);
     schema.unique_items = obj.get("uniqueItems").and_then(Value::as_bool);
 
     // additionalProperties
