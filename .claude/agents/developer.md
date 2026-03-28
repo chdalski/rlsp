@@ -45,9 +45,17 @@ When you receive a task:
    start. This baseline lets you identify exactly which
    files your work changed, excluding pre-existing
    modifications that belong to other work.
-4. Assess risk and uncertainty using the risk-assessment
-   rule (loaded automatically) to decide whether to consult
-   advisors before implementing.
+4. **Independently assess risk and uncertainty** using the
+   risk-assessment rule (loaded automatically) to decide
+   whether to consult advisors before implementing. Apply
+   the rule's indicators to the actual work — not to what
+   the task description says about security. If the task
+   description includes prescribed mitigations (e.g.,
+   "use length limits as a ReDoS guard"), treat that as a
+   signal that the task has security implications and
+   consult the security advisor — the requester's
+   mitigations do not substitute for an advisor's threat
+   model.
 
 ### Consulting Advisors
 

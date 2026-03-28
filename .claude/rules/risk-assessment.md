@@ -64,6 +64,33 @@ the blast radius is contained:
   behavior or trust boundaries
 - **Documentation** — comments, README updates, plan files
 
+## Dispatch-Time Assessment (Lead)
+
+This rule loads for both the lead and the developer. The
+lead applies it **before sending each task** to the
+developer — not just at planning time. Check the task
+description against the high-risk and high-uncertainty
+indicators above. If any match:
+
+- **Direct the developer to consult the relevant advisor as
+  the first step of the task.** State which advisor and why
+  — e.g., "consult the security advisor before implementing;
+  this task parses untrusted input from HTTP responses."
+- **Do not prescribe mitigations yourself.** If you identify
+  a security concern, that is a signal to route to the
+  security advisor — not a signal that you have sufficient
+  expertise to specify the controls. The lead's job is to
+  identify the risk category; the advisor's job is to
+  specify the response.
+
+This dispatch-time check exists because a production
+incident showed that when the lead prescribed mitigations in
+a task description ("limit pattern length to ≤1024 chars as
+ReDoS guard"), the developer treated security as addressed
+and did not consult the security advisor. The advisor would
+have identified three additional issues the lead missed.
+Surface-level mitigations create a false sense of coverage.
+
 ## When in Doubt, Consult
 
 The cost of an unnecessary consultation (a few seconds of

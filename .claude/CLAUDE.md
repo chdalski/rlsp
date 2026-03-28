@@ -221,19 +221,32 @@ For each task slice in the plan:
    verify the current plan is still valid (see Plan Queue
    Management above).
 
-2. **Send the task** to the `developer` via `SendMessage`.
+2. **Check the task against the risk-assessment rule**
+   (loaded automatically). If any high-risk or
+   high-uncertainty indicator matches, include an explicit
+   direction in the task message: "consult the security
+   advisor before implementing" or "consult the test advisor
+   for a test list." Do not prescribe mitigations yourself —
+   if you see a security concern, name the risk category and
+   route to the advisor. The advisor specifies the controls;
+   you identify the trigger.
+
+3. **Send the task** to the `developer` via `SendMessage`.
    Include:
    - The task description from the plan
    - Which files are involved
    - Relevant context from the plan and codebase analysis
    - Any constraints or patterns to follow
+   - Which advisors to consult (from the risk check above),
+     or "no advisors needed" if the task is low risk and
+     low uncertainty
 
    Send one task at a time — the developer works on a single
    task until it is committed, then receives the next one.
    This keeps each commit focused and independently
    reviewable.
 
-3. **Stay responsive.** While the developer is working,
+4. **Stay responsive.** While the developer is working,
    you are available to the user. If the user sends new
    requests, clarify them and create new plans concurrently.
 
