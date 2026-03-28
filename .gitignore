@@ -2,3 +2,4 @@ target/
 cache-proxy.log
 rust_out
 .ai/reports/
+.ai/upstream-issues/
