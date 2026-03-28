@@ -1,7 +1,7 @@
 # Implement Ignored Tests
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-28)
 **Created:** 2026-03-28
 
 ## Goal
@@ -29,10 +29,10 @@ providing CI value.
 
 ## Steps
 
-- [ ] Implement redirect blocking test with `tiny_http`
-- [ ] Replace mutex-across-await test with lint reference
-- [ ] Implement lock poisoning test
-- [ ] Delete lock ordering test, improve source comment
+- [x] Implement redirect blocking test with `tiny_http` — d36e950
+- [x] Replace mutex-across-await test with lint reference — dda1f1d
+- [x] Implement lock poisoning test — dda1f1d
+- [x] Delete lock ordering test, improve source comment — dda1f1d
 
 ## Tasks
 
