@@ -79,6 +79,7 @@ pub struct JsonSchema {
     pub default: Option<Value>,
     pub examples: Option<Vec<Value>>,
     pub items: Option<Box<Self>>,
+    pub prefix_items: Option<Vec<Self>>,
     pub contains: Option<Box<Self>>,
     pub min_items: Option<u64>,
     pub max_items: Option<u64>,
@@ -549,6 +550,46 @@ fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSc
     schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
 }
 
+/// Populate array-related fields (items, prefixItems, contains, counts) on `schema` from `obj`.
+fn parse_array_fields(
+    obj: &serde_json::Map<String, Value>,
+    root: &Value,
+    depth: usize,
+    schema: &mut JsonSchema,
+) {
+    // prefixItems (Draft 2020-12)
+    schema.prefix_items = obj.get("prefixItems").and_then(Value::as_array).map(|arr| {
+        arr.iter()
+            .filter_map(|v| parse_schema_with_root(v, root, depth + 1))
+            .collect()
+    });
+
+    // items — object form (single schema) or array form (Draft-04 tuple → prefixItems)
+    match obj.get("items") {
+        Some(Value::Array(arr)) if schema.prefix_items.is_none() => {
+            schema.prefix_items = Some(
+                arr.iter()
+                    .filter_map(|v| parse_schema_with_root(v, root, depth + 1))
+                    .collect(),
+            );
+        }
+        Some(v) => {
+            schema.items = parse_schema_with_root(v, root, depth + 1).map(Box::new);
+        }
+        None => {}
+    }
+
+    schema.contains = obj
+        .get("contains")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+    schema.min_items = obj.get("minItems").and_then(Value::as_u64);
+    schema.max_items = obj.get("maxItems").and_then(Value::as_u64);
+    schema.min_contains = obj.get("minContains").and_then(Value::as_u64);
+    schema.max_contains = obj.get("maxContains").and_then(Value::as_u64);
+    schema.unique_items = obj.get("uniqueItems").and_then(Value::as_bool);
+}
+
 fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<JsonSchema> {
     if depth > MAX_REF_DEPTH {
         return None;
@@ -609,20 +650,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
                     .collect()
             });
 
-    // items
-    schema.items = obj
-        .get("items")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-    schema.contains = obj
-        .get("contains")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-    schema.min_items = obj.get("minItems").and_then(Value::as_u64);
-    schema.max_items = obj.get("maxItems").and_then(Value::as_u64);
-    schema.min_contains = obj.get("minContains").and_then(Value::as_u64);
-    schema.max_contains = obj.get("maxContains").and_then(Value::as_u64);
-    schema.unique_items = obj.get("uniqueItems").and_then(Value::as_bool);
+    parse_array_fields(obj, root, depth, &mut schema);
 
     // additionalProperties
     schema.additional_properties =

@@ -158,8 +158,18 @@ fn validate_node(
 
     // Sequence-specific checks
     if let YamlOwned::Sequence(seq) = node {
+        // prefixItems — validate each element at its positional schema
+        let prefix_len = schema.prefix_items.as_ref().map_or(0, Vec::len);
+        if let Some(prefix_schemas) = &schema.prefix_items {
+            for (i, (item, item_schema)) in seq.iter().zip(prefix_schemas.iter()).enumerate() {
+                let mut item_path = path.to_vec();
+                item_path.push(format!("[{i}]"));
+                validate_node(item, item_schema, &item_path, lines, diagnostics, depth + 1);
+            }
+        }
+        // items — applies to elements beyond prefixItems
         if let Some(items_schema) = &schema.items {
-            for (i, item) in seq.iter().enumerate() {
+            for (i, item) in seq.iter().enumerate().skip(prefix_len) {
                 let mut item_path = path.to_vec();
                 item_path.push(format!("[{i}]"));
                 validate_node(
@@ -3650,5 +3660,127 @@ mod tests {
         let docs = parse_docs("items:\n  - hello\n  - world");
         let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
         assert!(result.is_empty());
+    }
+
+    // ── prefixItems ─────────────────────────────────────────────────────────
+
+    fn tuple_schema(prefix: Vec<JsonSchema>, items: Option<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            prefix_items: Some(prefix),
+            items: items.map(Box::new),
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 143
+    #[test]
+    fn should_produce_diagnostic_when_second_item_fails_prefix_schema() {
+        let schema = object_schema_with_props(vec![(
+            "arr",
+            tuple_schema(vec![string_schema(), integer_schema()], None),
+        )]);
+        // [0] is a string (ok), [1] is a string but expected integer (fail)
+        let docs = parse_docs("arr:\n  - hello\n  - world");
+        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("integer"));
+    }
+
+    // Test 144
+    #[test]
+    fn should_produce_no_diagnostics_when_all_items_match_prefix_schemas() {
+        let schema = object_schema_with_props(vec![(
+            "arr",
+            tuple_schema(vec![string_schema(), integer_schema()], None),
+        )]);
+        let docs = parse_docs("arr:\n  - hello\n  - 42");
+        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 145
+    #[test]
+    fn should_validate_extra_items_against_items_schema_when_prefix_items_set() {
+        let schema = object_schema_with_props(vec![(
+            "arr",
+            tuple_schema(vec![string_schema()], Some(integer_schema())),
+        )]);
+        // [0] string ok, [1] integer ok (matches items schema)
+        let docs = parse_docs("arr:\n  - hello\n  - 42");
+        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 146
+    #[test]
+    fn should_produce_diagnostic_when_extra_item_fails_items_schema() {
+        let schema = object_schema_with_props(vec![(
+            "arr",
+            tuple_schema(vec![string_schema()], Some(integer_schema())),
+        )]);
+        // [0] string ok, [1] string fails items schema (expected integer)
+        let docs = parse_docs("arr:\n  - hello\n  - world");
+        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("integer"));
+    }
+
+    // Test 147
+    #[test]
+    fn should_produce_no_diagnostics_when_array_shorter_than_prefix_items() {
+        let schema = object_schema_with_props(vec![(
+            "arr",
+            tuple_schema(
+                vec![string_schema(), integer_schema(), string_schema()],
+                None,
+            ),
+        )]);
+        // Only one item — only [0] is validated, [1] and [2] positions absent
+        let docs = parse_docs("arr:\n  - hello");
+        let result = validate_schema("arr:\n  - hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 148 — Draft-04 array-form items parsed as prefixItems
+    #[test]
+    fn should_parse_draft04_array_items_as_prefix_items() {
+        use crate::schema::parse_schema;
+        use serde_json::json;
+        let raw = json!({
+            "type": "object",
+            "properties": {
+                "arr": {
+                    "type": "array",
+                    "items": [
+                        { "type": "string" },
+                        { "type": "integer" }
+                    ]
+                }
+            }
+        });
+        let schema = parse_schema(&raw).expect("valid schema");
+        let arr_schema = schema
+            .properties
+            .as_ref()
+            .and_then(|p| p.get("arr"))
+            .expect("arr property");
+        assert!(arr_schema.prefix_items.is_some());
+        assert_eq!(arr_schema.prefix_items.as_ref().unwrap().len(), 2);
+        assert!(arr_schema.items.is_none());
+    }
+
+    // Test 149 — prefixItems takes precedence over array-form items
+    #[test]
+    fn should_prefer_prefix_items_over_draft04_array_items() {
+        use crate::schema::parse_schema;
+        use serde_json::json;
+        let raw = json!({
+            "prefixItems": [{ "type": "string" }],
+            "items": [{ "type": "integer" }, { "type": "boolean" }]
+        });
+        let schema = parse_schema(&raw).expect("valid schema");
+        // prefixItems was set first — array-form items is ignored
+        assert!(schema.prefix_items.is_some());
+        assert_eq!(schema.prefix_items.as_ref().unwrap().len(), 1);
     }
 }
