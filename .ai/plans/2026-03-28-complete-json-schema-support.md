@@ -1,7 +1,7 @@
 # Complete JSON Schema Support (Draft-04 through 2020-12)
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-28
 
 ## Goal
@@ -64,7 +64,7 @@ many spec keywords are missing entirely.
 
 ## Steps
 
-- [ ] Implement scalar constraints (pattern, minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, const)
+- [x] Implement scalar constraints (pattern, minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, const) — 42d392b
 - [ ] Implement `not` keyword
 - [ ] Implement `patternProperties`
 - [ ] Implement array constraints (minItems, maxItems, uniqueItems)
