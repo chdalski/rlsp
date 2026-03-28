@@ -56,9 +56,21 @@ pub struct Settings {
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
 const DEFAULT_KUBERNETES_VERSION: &str = "1.32.0";
 
-// Lock ordering (must be acquired in this order to prevent deadlock):
-//   document_store → schema_associations → schema_cache → diagnostics → settings
-//   schemastore_catalog is independent (never held with other locks)
+// Lock acquisition order — always acquire in this sequence to prevent deadlock.
+// Every handler that needs multiple locks must follow this order and must fully
+// release each guard (let it drop) before acquiring the next:
+//
+//   1. document_store
+//   2. schema_associations
+//   3. schema_cache
+//   4. diagnostics
+//   5. settings
+//
+// schemastore_catalog is independent — it is never held concurrently with any
+// of the above locks.
+//
+// No std::sync::Mutex guard may be held across an .await point. Extract the
+// needed data as owned values, drop the guard, then call async operations.
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,

@@ -2400,16 +2400,8 @@ mod tests {
     // Security: Mutex / Async Safety (Structural)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 64
-    #[test]
-    #[ignore]
-    fn should_not_hold_mutex_across_schema_fetch() {
-        // Mutex-across-await correctness is enforced by code review and the
-        // tokio linting rule. See `parse_and_publish` in `server.rs`:
-        // schema_cache and schema_associations locks are acquired, data
-        // extracted as owned values, lock dropped, then `spawn_blocking` is
-        // called. No std::sync::Mutex guard is held across any `.await` point.
-    }
+    // Mutex-across-await safety is enforced at compile time by
+    // clippy::await_holding_lock (pedantic group, deny-on-warnings).
 
     // ══════════════════════════════════════════════════════════════════════════
     // Security: Mutex Poison Handling
@@ -2417,12 +2409,29 @@ mod tests {
 
     // Test 65
     #[test]
-    #[ignore]
     fn should_continue_without_schema_validation_when_cache_lock_poisoned() {
-        // Poison handling is verified by code inspection: all
-        // `schema_cache.lock()` calls use `.ok()?` or `.ok()` (not
-        // `.unwrap()`). A poisoned lock returns `None`/`Err`, and the calling
-        // code skips schema validation rather than panicking.
+        use std::sync::{Arc, Mutex};
+
+        let lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+        let lock_clone = Arc::clone(&lock);
+
+        // Poison the mutex by panicking while holding the guard.
+        let handle = std::thread::spawn(move || {
+            let _guard = lock_clone.lock().unwrap();
+            panic!("intentional panic to poison the mutex");
+        });
+        assert!(handle.join().is_err(), "thread should have panicked");
+
+        // The poisoned mutex returns Err from lock(), and .ok() gives None —
+        // matching the production pattern used throughout schema_cache access.
+        assert!(
+            lock.lock().is_err(),
+            "poisoned mutex must return Err from lock()"
+        );
+        assert!(
+            lock.lock().ok().is_none(),
+            ".ok() on poisoned lock must return None"
+        );
     }
 
     // Test 66

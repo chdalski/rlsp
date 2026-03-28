@@ -2270,19 +2270,6 @@ mod tests {
         );
     }
 
-    // Test 50 — lock ordering: document_store released before schema_associations
-    #[test]
-    #[ignore]
-    fn lock_ordering_document_store_released_before_schema_associations() {
-        // Structural/code-review enforcement test — not executable at unit test level.
-        //
-        // The completion handler in server.rs must acquire locks in this order:
-        //   document_store → schema_associations → schema_cache
-        // Each lock must be fully released (guard dropped) before the next is acquired.
-        // No std::sync::Mutex guard may be held across an .await point.
-        // Enforcement: code review + the lock ordering comment on the Backend struct.
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // Group I — Multi-Required Snippet Completion
     // ══════════════════════════════════════════════════════════════════════════
