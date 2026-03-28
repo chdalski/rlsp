@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-28)
 **Created:** 2026-03-28
 
 ## Goal
@@ -54,7 +54,7 @@ check files and reports findings without auto-fixing.
 - [x] Analyze existing rules and skill patterns
 - [x] Create GitHub workflows rules file (718d640)
 - [x] Create project-sanity skill (SKILL.md dispatcher) (a4c6e19)
-- [ ] Create github-sanity.md domain check file
+- [x] Create github-sanity.md domain check file (388f3e8)
 
 ## Tasks
 
