@@ -21,6 +21,26 @@ const MAX_JSON_DEPTH: usize = 50;
 /// Maximum `$ref` resolution depth to prevent stack overflow on circular refs.
 const MAX_REF_DEPTH: usize = 32;
 
+/// Standard vocabulary URIs for Draft 2019-09 and Draft 2020-12.
+const KNOWN_VOCABULARIES: &[&str] = &[
+    // Draft 2019-09
+    "https://json-schema.org/draft/2019-09/vocab/core",
+    "https://json-schema.org/draft/2019-09/vocab/applicator",
+    "https://json-schema.org/draft/2019-09/vocab/validation",
+    "https://json-schema.org/draft/2019-09/vocab/meta-data",
+    "https://json-schema.org/draft/2019-09/vocab/format",
+    "https://json-schema.org/draft/2019-09/vocab/content",
+    // Draft 2020-12
+    "https://json-schema.org/draft/2020-12/vocab/core",
+    "https://json-schema.org/draft/2020-12/vocab/applicator",
+    "https://json-schema.org/draft/2020-12/vocab/unevaluated",
+    "https://json-schema.org/draft/2020-12/vocab/validation",
+    "https://json-schema.org/draft/2020-12/vocab/meta-data",
+    "https://json-schema.org/draft/2020-12/vocab/format-annotation",
+    "https://json-schema.org/draft/2020-12/vocab/format-assertion",
+    "https://json-schema.org/draft/2020-12/vocab/content",
+];
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────────
@@ -117,6 +137,7 @@ pub struct JsonSchema {
     pub deprecated: Option<bool>,
     pub unevaluated_properties: Option<AdditionalProperties>,
     pub unevaluated_items: Option<Box<Self>>,
+    pub vocabulary: Option<HashMap<String, bool>>,
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
@@ -515,6 +536,22 @@ pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
     parse_schema_with_root(value, value, 0)
 }
 
+/// Check `$vocabulary` declarations and return warnings for unknown required vocabularies.
+///
+/// Returns one warning string per unknown required vocabulary URI.
+/// Optional vocabularies (`false`) that are unrecognized are silently ignored per spec.
+#[must_use]
+pub fn check_vocabulary(schema: &JsonSchema) -> Vec<String> {
+    let Some(vocab) = &schema.vocabulary else {
+        return vec![];
+    };
+    vocab
+        .iter()
+        .filter(|(uri, required)| **required && !KNOWN_VOCABULARIES.contains(&uri.as_str()))
+        .map(|(uri, _)| format!("Unknown required vocabulary: {uri}"))
+        .collect()
+}
+
 /// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
 fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSchema) {
     // title / description / pattern / anchors
@@ -594,6 +631,44 @@ fn parse_array_fields(
     schema.min_contains = obj.get("minContains").and_then(Value::as_u64);
     schema.max_contains = obj.get("maxContains").and_then(Value::as_u64);
     schema.unique_items = obj.get("uniqueItems").and_then(Value::as_bool);
+}
+
+/// Populate `unevaluatedProperties`, `unevaluatedItems`, `definitions`, and `$vocabulary`
+/// on `schema` from `obj`. Extracted to keep `parse_schema_with_root` under 100 lines.
+fn parse_extension_fields(
+    obj: &serde_json::Map<String, Value>,
+    root: &Value,
+    depth: usize,
+    schema: &mut JsonSchema,
+) {
+    // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
+    schema.unevaluated_properties =
+        parse_additional_properties(obj.get("unevaluatedProperties"), root, depth);
+    schema.unevaluated_items = obj
+        .get("unevaluatedItems")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+
+    // definitions (Draft-04) + $defs (Draft-07)
+    let defs_04 = parse_definitions(obj.get("definitions"), root, depth);
+    let defs_07 = parse_definitions(obj.get("$defs"), root, depth);
+    schema.definitions = match (defs_04, defs_07) {
+        (Some(mut a), Some(b)) => {
+            a.extend(b);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    };
+
+    // $vocabulary (Draft 2019-09 / 2020-12)
+    schema.vocabulary = obj
+        .get("$vocabulary")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(k, v)| v.as_bool().map(|b| (k.clone(), b)))
+                .collect()
+        });
 }
 
 fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<JsonSchema> {
@@ -704,24 +779,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         .and_then(|v| parse_schema_with_root(v, root, depth + 1))
         .map(Box::new);
 
-    // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
-    schema.unevaluated_properties =
-        parse_additional_properties(obj.get("unevaluatedProperties"), root, depth);
-    schema.unevaluated_items = obj
-        .get("unevaluatedItems")
-        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
-        .map(Box::new);
-
-    // definitions (Draft-04) + $defs (Draft-07)
-    let defs_04 = parse_definitions(obj.get("definitions"), root, depth);
-    let defs_07 = parse_definitions(obj.get("$defs"), root, depth);
-    schema.definitions = match (defs_04, defs_07) {
-        (Some(mut a), Some(b)) => {
-            a.extend(b);
-            Some(a)
-        }
-        (a, b) => a.or(b),
-    };
+    parse_extension_fields(obj, root, depth, &mut schema);
 
     Some(schema)
 }
@@ -2812,5 +2870,81 @@ mod tests {
         let value = json!({ "$dynamicAnchor": "myloop", "type": "array" });
         let schema = parse_schema(&value).unwrap();
         assert_eq!(schema.dynamic_anchor, Some("myloop".to_string()));
+    }
+
+    // ── $vocabulary ───────────────────────────────────────────────────────────
+
+    // Vocab-1: known vocabulary URIs parse cleanly with no warnings
+    #[test]
+    fn known_vocabularies_produce_no_warnings() {
+        let value = json!({
+            "$vocabulary": {
+                "https://json-schema.org/draft/2020-12/vocab/core": true,
+                "https://json-schema.org/draft/2020-12/vocab/validation": true,
+                "https://json-schema.org/draft/2020-12/vocab/applicator": false
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert!(schema.vocabulary.is_some());
+        let warnings = check_vocabulary(&schema);
+        assert!(warnings.is_empty());
+    }
+
+    // Vocab-2: unknown required vocabulary produces a warning
+    #[test]
+    fn unknown_required_vocabulary_produces_warning() {
+        let value = json!({
+            "$vocabulary": {
+                "https://example.com/my-custom-vocab": true
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let warnings = check_vocabulary(&schema);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("https://example.com/my-custom-vocab"));
+    }
+
+    // Vocab-3: unknown optional vocabulary produces no warning
+    #[test]
+    fn unknown_optional_vocabulary_produces_no_warning() {
+        let value = json!({
+            "$vocabulary": {
+                "https://example.com/optional-vocab": false
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let warnings = check_vocabulary(&schema);
+        assert!(warnings.is_empty());
+    }
+
+    // Vocab-4: schema without $vocabulary has None field and no warnings
+    #[test]
+    fn schema_without_vocabulary_has_none_and_no_warnings() {
+        let value = json!({ "type": "object" });
+        let schema = parse_schema(&value).unwrap();
+        assert!(schema.vocabulary.is_none());
+        let warnings = check_vocabulary(&schema);
+        assert!(warnings.is_empty());
+    }
+
+    // Vocab-5: $vocabulary doesn't interfere with other schema fields
+    #[test]
+    fn vocabulary_does_not_interfere_with_other_fields() {
+        let value = json!({
+            "$vocabulary": {
+                "https://json-schema.org/draft/2020-12/vocab/core": true
+            },
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        assert!(schema.vocabulary.is_some());
+        assert!(schema.properties.is_some());
+        assert_eq!(
+            schema.schema_type,
+            Some(SchemaType::Single("object".to_string()))
+        );
     }
 }
