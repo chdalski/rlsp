@@ -1,7 +1,7 @@
 # Complete JSON Schema Support (Draft-04 through 2020-12)
 
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-28)
 **Created:** 2026-03-28
 
 ## Goal
@@ -68,14 +68,15 @@ many spec keywords are missing entirely.
 - [x] Implement `not` keyword — baeeef8
 - [x] Implement `patternProperties` — dca6cdc
 - [x] Implement array constraints (minItems, maxItems, uniqueItems) — 24ed3c4
-- [ ] Implement `propertyNames`
-- [ ] Implement `dependencies` / `dependentRequired` / `dependentSchemas`
-- [ ] Implement `if` / `then` / `else`
-- [ ] Implement `contains` / `minContains` / `maxContains`
-- [ ] Implement `prefixItems`
-- [ ] Implement `$anchor` / `$dynamicRef` / `$dynamicAnchor`
-- [ ] Implement `unevaluatedProperties` / `unevaluatedItems`
-- [ ] Implement `$vocabulary`
+- [x] Regex security hardening (security engineer findings) — 13d62b5
+- [x] Implement `propertyNames` — 5712efc
+- [x] Implement `dependencies` / `dependentRequired` / `dependentSchemas` — 352eec8
+- [x] Implement `if` / `then` / `else` — 6fbecf1
+- [x] Implement `contains` / `minContains` / `maxContains` — 2f0e3ee
+- [x] Implement `prefixItems` — d5a20e8
+- [x] Implement `$anchor` / `$dynamicRef` / `$dynamicAnchor` — 693cd37
+- [x] Implement `unevaluatedProperties` / `unevaluatedItems` — a1427b7
+- [x] Implement `$vocabulary` — 5c95a0f
 
 ## Tasks
 
