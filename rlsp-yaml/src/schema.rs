@@ -89,6 +89,9 @@ pub struct JsonSchema {
     pub any_of: Option<Vec<Self>>,
     pub one_of: Option<Vec<Self>>,
     pub not: Option<Box<Self>>,
+    pub if_schema: Option<Box<Self>>,
+    pub then_schema: Option<Box<Self>>,
+    pub else_schema: Option<Box<Self>>,
     pub ref_path: Option<String>,
     pub pattern: Option<String>,
     pub minimum: Option<f64>,
@@ -633,6 +636,20 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     schema.one_of = parse_schema_array(obj.get("oneOf"), root, depth);
     schema.not = obj
         .get("not")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+
+    // if / then / else (Draft-07)
+    schema.if_schema = obj
+        .get("if")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+    schema.then_schema = obj
+        .get("then")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
+    schema.else_schema = obj
+        .get("else")
         .and_then(|v| parse_schema_with_root(v, root, depth + 1))
         .map(Box::new);
 

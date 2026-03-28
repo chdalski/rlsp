@@ -792,6 +792,23 @@ fn validate_composition(
             ));
         }
     }
+
+    // if / then / else (Draft-07)
+    if let Some(if_schema) = &schema.if_schema {
+        let mut scratch = Vec::new();
+        validate_node(node, if_schema, path, lines, &mut scratch, depth + 1);
+        if scratch.is_empty() {
+            // if matched — apply then
+            if let Some(then_schema) = &schema.then_schema {
+                validate_node(node, then_schema, path, lines, diagnostics, depth + 1);
+            }
+        } else {
+            // if didn't match — apply else
+            if let Some(else_schema) = &schema.else_schema {
+                validate_node(node, else_schema, path, lines, diagnostics, depth + 1);
+            }
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -3299,6 +3316,174 @@ mod tests {
         let text = "other: value";
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // if / then / else
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 128
+    #[test]
+    fn should_apply_then_and_pass_when_if_matches_and_then_passes() {
+        // if: type string → then: minLength 3
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                then_schema: Some(Box::new(JsonSchema {
+                    min_length: Some(3),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is a string of length 5 — if matches, then passes
+        let docs = parse_docs("val: hello");
+        let result = validate_schema("val: hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 129
+    #[test]
+    fn should_apply_then_and_fail_when_if_matches_and_then_fails() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                then_schema: Some(Box::new(JsonSchema {
+                    min_length: Some(10),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is a short string — if matches, then fails
+        let docs = parse_docs("val: hi");
+        let result = validate_schema("val: hi", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinLength");
+    }
+
+    // Test 130
+    #[test]
+    fn should_apply_else_and_pass_when_if_does_not_match_and_else_passes() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                else_schema: Some(Box::new(JsonSchema {
+                    minimum: Some(0.0),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is integer 5 — if doesn't match (not string), else passes (>= 0)
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 131
+    #[test]
+    fn should_apply_else_and_fail_when_if_does_not_match_and_else_fails() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                else_schema: Some(Box::new(JsonSchema {
+                    minimum: Some(10.0),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is integer 3 — if doesn't match, else fails (< 10)
+        let docs = parse_docs("val: 3");
+        let result = validate_schema("val: 3", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinimum");
+    }
+
+    // Test 132
+    #[test]
+    fn should_produce_no_diagnostics_when_if_matches_but_no_then() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                else_schema: Some(Box::new(JsonSchema {
+                    minimum: Some(0.0),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is string — if matches, no then → no diagnostic
+        let docs = parse_docs("val: hello");
+        let result = validate_schema("val: hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 133
+    #[test]
+    fn should_produce_no_diagnostics_when_if_does_not_match_and_no_else() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                if_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                then_schema: Some(Box::new(JsonSchema {
+                    min_length: Some(10),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // val is integer — if doesn't match, no else → no diagnostic
+        let docs = parse_docs("val: 42");
+        let result = validate_schema("val: 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 134
+    #[test]
+    fn should_ignore_then_and_else_when_no_if() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                then_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("integer".to_string())),
+                    ..JsonSchema::default()
+                })),
+                else_schema: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("integer".to_string())),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        // Without if, then/else are ignored — string value produces no diagnostic
+        let docs = parse_docs("val: hello");
+        let result = validate_schema("val: hello", &docs, &schema);
         assert!(result.is_empty());
     }
 }
