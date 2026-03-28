@@ -1,6 +1,31 @@
 # Changelog
 
 
+## Bug Fixes
+
+- Harden regex compilation against ReDoS (13d62b5)
+
+## Documentation
+
+- Reformat feature-log and add schema/color gaps (38d8624)
+- Mark all JSON Schema keywords as completed (f86a742)
+
+## Features
+
+- Add scalar constraint validation (42d392b)
+- Add not keyword validation (baeeef8)
+- Add patternProperties validation (dca6cdc)
+- Add array constraint validation (24ed3c4)
+- Add propertyNames validation (5712efc)
+- Add dependencies/dependentRequired/dependentSchemas (352eec8)
+- Add if/then/else conditional validation (6fbecf1)
+- Add contains/minContains/maxContains validation (2f0e3ee)
+- Add prefixItems / Draft-04 tuple validation (d5a20e8)
+- Add $anchor/$dynamicRef/$dynamicAnchor resolution (693cd37)
+- Add unevaluatedProperties/unevaluatedItems (a1427b7)
+- Add $vocabulary parsing and check_vocabulary (5c95a0f)
+- Add color provider for YAML value color detection (7c91ff9)
+
 ## Refactoring
 
 - Simplify fits() by removing dead break-mode branches (5219f94)
