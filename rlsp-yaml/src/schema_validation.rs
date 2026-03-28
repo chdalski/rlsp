@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: MIT
 
+use regex::Regex;
 use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+
+/// Maximum length of a `pattern` string we will compile and match, as a
+/// guard against pathological `ReDoS` inputs.
+const MAX_PATTERN_LEN: usize = 1024;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -110,6 +115,9 @@ fn validate_node(
         ));
     }
 
+    // Scalar constraints
+    validate_scalar_constraints(node, schema, path, lines, diagnostics);
+
     // Mapping-specific checks
     if let YamlOwned::Mapping(map) = node {
         validate_mapping(map, schema, path, lines, diagnostics, depth);
@@ -135,6 +143,225 @@ fn validate_node(
 
     // Composition
     validate_composition(node, schema, path, lines, diagnostics, depth);
+}
+
+fn validate_scalar_constraints(
+    node: &YamlOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use saphyr::ScalarOwned;
+
+    if let YamlOwned::Value(ScalarOwned::String(s)) = node {
+        validate_string_constraints(s, schema, path, lines, diagnostics);
+    }
+
+    let numeric_val = match node {
+        YamlOwned::Value(ScalarOwned::Integer(i)) =>
+        {
+            #[allow(clippy::cast_precision_loss)]
+            Some(*i as f64)
+        }
+        YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => Some(**f),
+        YamlOwned::Value(_)
+        | YamlOwned::Sequence(_)
+        | YamlOwned::Mapping(_)
+        | YamlOwned::Alias(_)
+        | YamlOwned::BadValue
+        | YamlOwned::Tagged(..)
+        | YamlOwned::Representation(..) => None,
+    };
+    if let Some(val) = numeric_val {
+        validate_numeric_constraints(val, schema, path, lines, diagnostics);
+    }
+
+    // const — compare any scalar node via yaml_to_json
+    if let Some(const_val) = &schema.const_value {
+        if let Some(yaml_val) = yaml_to_json(node) {
+            if yaml_val != *const_val {
+                let range = node_range(path, lines);
+                diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    "schemaConst",
+                    format!("Value at {} must equal {}", format_path(path), const_val),
+                ));
+            }
+        }
+        // If yaml_to_json returns None (object/array), skip the check
+    }
+}
+
+fn validate_string_constraints(
+    s: &str,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(pattern) = &schema.pattern {
+        if pattern.len() <= MAX_PATTERN_LEN {
+            if let Ok(re) = Regex::new(pattern) {
+                if !re.is_match(s) {
+                    let range = node_range(path, lines);
+                    diagnostics.push(make_diagnostic(
+                        range,
+                        DiagnosticSeverity::ERROR,
+                        "schemaPattern",
+                        format!(
+                            "Value at {} does not match pattern: {}",
+                            format_path(path),
+                            pattern
+                        ),
+                    ));
+                }
+            }
+            // invalid regex — skip silently
+        }
+    }
+
+    let char_count = s.chars().count() as u64;
+
+    if let Some(min_len) = schema.min_length {
+        if char_count < min_len {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMinLength",
+                format!(
+                    "Value at {} is too short: {} chars (minimum {})",
+                    format_path(path),
+                    char_count,
+                    min_len
+                ),
+            ));
+        }
+    }
+
+    if let Some(max_len) = schema.max_length {
+        if char_count > max_len {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMaxLength",
+                format!(
+                    "Value at {} is too long: {} chars (maximum {})",
+                    format_path(path),
+                    char_count,
+                    max_len
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_numeric_constraints(
+    val: f64,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // minimum (inclusive by default; strict if Draft-04 exclusiveMinimum is true)
+    if let Some(minimum) = schema.minimum {
+        let exclusive = schema.exclusive_minimum_draft04.unwrap_or(false);
+        let violation = if exclusive {
+            val <= minimum
+        } else {
+            val < minimum
+        };
+        if violation {
+            let range = node_range(path, lines);
+            let bound = if exclusive { "exclusive" } else { "inclusive" };
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMinimum",
+                format!(
+                    "Value at {} is below minimum {minimum} ({bound})",
+                    format_path(path),
+                ),
+            ));
+        }
+    }
+
+    // maximum (inclusive by default; strict if Draft-04 exclusiveMaximum is true)
+    if let Some(maximum) = schema.maximum {
+        let exclusive = schema.exclusive_maximum_draft04.unwrap_or(false);
+        let violation = if exclusive {
+            val >= maximum
+        } else {
+            val > maximum
+        };
+        if violation {
+            let range = node_range(path, lines);
+            let bound = if exclusive { "exclusive" } else { "inclusive" };
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMaximum",
+                format!(
+                    "Value at {} is above maximum {maximum} ({bound})",
+                    format_path(path),
+                ),
+            ));
+        }
+    }
+
+    // exclusiveMinimum (Draft-06+ number form)
+    if let Some(excl_min) = schema.exclusive_minimum {
+        if val <= excl_min {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMinimum",
+                format!(
+                    "Value at {} must be greater than {excl_min} (exclusive minimum)",
+                    format_path(path),
+                ),
+            ));
+        }
+    }
+
+    // exclusiveMaximum (Draft-06+ number form)
+    if let Some(excl_max) = schema.exclusive_maximum {
+        if val >= excl_max {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMaximum",
+                format!(
+                    "Value at {} must be less than {excl_max} (exclusive maximum)",
+                    format_path(path),
+                ),
+            ));
+        }
+    }
+
+    // multipleOf
+    if let Some(multiple_of) = schema.multiple_of {
+        if multiple_of > 0.0 {
+            let quotient = val / multiple_of;
+            if (quotient - quotient.round()).abs() >= f64::EPSILON {
+                let range = node_range(path, lines);
+                diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    "schemaMultipleOf",
+                    format!(
+                        "Value at {} must be a multiple of {multiple_of}",
+                        format_path(path),
+                    ),
+                ));
+            }
+        }
+    }
 }
 
 fn validate_mapping(
@@ -1725,5 +1952,450 @@ mod tests {
             msg.contains("..."),
             "message should contain ellipsis for truncation, got: {msg}"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — pattern
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 68
+    #[test]
+    fn should_produce_no_diagnostics_when_string_matches_pattern() {
+        let schema = object_schema_with_props(vec![(
+            "code",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                pattern: Some("^[A-Z]{3}$".to_string()),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("code: ABC");
+        let result = validate_schema("code: ABC", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 69
+    #[test]
+    fn should_produce_error_when_string_does_not_match_pattern() {
+        let schema = object_schema_with_props(vec![(
+            "code",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                pattern: Some("^[A-Z]{3}$".to_string()),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("code: abc");
+        let result = validate_schema("code: abc", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaPattern");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 70
+    #[test]
+    fn should_skip_pattern_check_when_pattern_exceeds_max_length() {
+        let long_pattern = "a".repeat(1025);
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                pattern: Some(long_pattern),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: anything");
+        let result = validate_schema("val: anything", &docs, &schema);
+        // Pattern too long — skipped, no diagnostic
+        assert!(result.is_empty());
+    }
+
+    // Test 71
+    #[test]
+    fn should_skip_pattern_check_for_invalid_regex() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                pattern: Some("[invalid".to_string()),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: anything");
+        let result = validate_schema("val: anything", &docs, &schema);
+        // Invalid regex — skipped silently
+        assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — minLength / maxLength
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 72
+    #[test]
+    fn should_produce_no_diagnostics_when_string_meets_min_length() {
+        let schema = object_schema_with_props(vec![(
+            "name",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                min_length: Some(3),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("name: abc");
+        let result = validate_schema("name: abc", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 73
+    #[test]
+    fn should_produce_error_when_string_is_shorter_than_min_length() {
+        let schema = object_schema_with_props(vec![(
+            "name",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                min_length: Some(5),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("name: hi");
+        let result = validate_schema("name: hi", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinLength");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 74
+    #[test]
+    fn should_produce_no_diagnostics_when_string_meets_max_length() {
+        let schema = object_schema_with_props(vec![(
+            "name",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                max_length: Some(10),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("name: hello");
+        let result = validate_schema("name: hello", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 75
+    #[test]
+    fn should_produce_error_when_string_exceeds_max_length() {
+        let schema = object_schema_with_props(vec![(
+            "name",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                max_length: Some(3),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("name: toolong");
+        let result = validate_schema("name: toolong", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaxLength");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — minimum / maximum (inclusive)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 76
+    #[test]
+    fn should_produce_no_diagnostics_when_integer_meets_minimum() {
+        let schema = object_schema_with_props(vec![(
+            "port",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                minimum: Some(1.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("port: 80");
+        let result = validate_schema("port: 80", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 77
+    #[test]
+    fn should_produce_error_when_integer_is_below_minimum() {
+        let schema = object_schema_with_props(vec![(
+            "port",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                minimum: Some(1.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("port: 0");
+        let result = validate_schema("port: 0", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinimum");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 78
+    #[test]
+    fn should_produce_no_diagnostics_when_integer_meets_maximum() {
+        let schema = object_schema_with_props(vec![(
+            "port",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                maximum: Some(65535.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("port: 8080");
+        let result = validate_schema("port: 8080", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 79
+    #[test]
+    fn should_produce_error_when_integer_exceeds_maximum() {
+        let schema = object_schema_with_props(vec![(
+            "port",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                maximum: Some(65535.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("port: 99999");
+        let result = validate_schema("port: 99999", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaximum");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — Draft-04 exclusiveMinimum / exclusiveMaximum (bool)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 80
+    #[test]
+    fn should_produce_error_when_value_equals_minimum_and_exclusive_draft04() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                minimum: Some(5.0),
+                exclusive_minimum_draft04: Some(true),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinimum");
+    }
+
+    // Test 81
+    #[test]
+    fn should_produce_no_diagnostics_when_value_equals_minimum_and_not_exclusive_draft04() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                minimum: Some(5.0),
+                exclusive_minimum_draft04: Some(false),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 82
+    #[test]
+    fn should_produce_error_when_value_equals_maximum_and_exclusive_draft04() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                maximum: Some(10.0),
+                exclusive_maximum_draft04: Some(true),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 10");
+        let result = validate_schema("val: 10", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaximum");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — Draft-06+ exclusiveMinimum / exclusiveMaximum (f64)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 83
+    #[test]
+    fn should_produce_error_when_value_equals_exclusive_minimum_draft06() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_minimum: Some(5.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinimum");
+    }
+
+    // Test 84
+    #[test]
+    fn should_produce_no_diagnostics_when_value_exceeds_exclusive_minimum_draft06() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_minimum: Some(5.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 6");
+        let result = validate_schema("val: 6", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 85
+    #[test]
+    fn should_produce_error_when_value_equals_exclusive_maximum_draft06() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_maximum: Some(10.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 10");
+        let result = validate_schema("val: 10", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaximum");
+    }
+
+    // Test 86
+    #[test]
+    fn should_produce_no_diagnostics_when_value_is_below_exclusive_maximum_draft06() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_maximum: Some(10.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 9");
+        let result = validate_schema("val: 9", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — multipleOf
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 87
+    #[test]
+    fn should_produce_no_diagnostics_when_value_is_multiple_of() {
+        let schema = object_schema_with_props(vec![(
+            "count",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                multiple_of: Some(5.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("count: 15");
+        let result = validate_schema("count: 15", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 88
+    #[test]
+    fn should_produce_error_when_value_is_not_multiple_of() {
+        let schema = object_schema_with_props(vec![(
+            "count",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("integer".to_string())),
+                multiple_of: Some(5.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("count: 7");
+        let result = validate_schema("count: 7", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMultipleOf");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Scalar constraints — const
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 89
+    #[test]
+    fn should_produce_no_diagnostics_when_value_equals_const() {
+        let schema = object_schema_with_props(vec![(
+            "version",
+            JsonSchema {
+                const_value: Some(json!("v1")),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("version: v1");
+        let result = validate_schema("version: v1", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 90
+    #[test]
+    fn should_produce_error_when_value_does_not_equal_const() {
+        let schema = object_schema_with_props(vec![(
+            "version",
+            JsonSchema {
+                const_value: Some(json!("v1")),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("version: v2");
+        let result = validate_schema("version: v2", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaConst");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 91
+    #[test]
+    fn should_produce_no_diagnostics_when_integer_equals_const() {
+        let schema = object_schema_with_props(vec![(
+            "level",
+            JsonSchema {
+                const_value: Some(json!(42)),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("level: 42");
+        let result = validate_schema("level: 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 92
+    #[test]
+    fn should_skip_const_check_for_mapping_node() {
+        let schema = object_schema_with_props(vec![(
+            "obj",
+            JsonSchema {
+                const_value: Some(json!({"key": "val"})),
+                ..JsonSchema::default()
+            },
+        )]);
+        let text = "obj:\n  key: other";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        // yaml_to_json returns None for mappings — const check skipped
+        let const_diags: Vec<_> = result
+            .iter()
+            .filter(|d| code_of(d) == "schemaConst")
+            .collect();
+        assert!(const_diags.is_empty());
     }
 }

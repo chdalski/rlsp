@@ -89,6 +89,12 @@ pub struct JsonSchema {
     pub maximum: Option<f64>,
     pub min_length: Option<u64>,
     pub max_length: Option<u64>,
+    pub exclusive_minimum: Option<f64>,
+    pub exclusive_maximum: Option<f64>,
+    pub exclusive_minimum_draft04: Option<bool>,
+    pub exclusive_maximum_draft04: Option<bool>,
+    pub multiple_of: Option<f64>,
+    pub const_value: Option<serde_json::Value>,
     /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
     pub definitions: Option<HashMap<String, Self>>,
     pub deprecated: Option<bool>,
@@ -533,6 +539,25 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     schema.maximum = obj.get("maximum").and_then(Value::as_f64);
     schema.min_length = obj.get("minLength").and_then(Value::as_u64);
     schema.max_length = obj.get("maxLength").and_then(Value::as_u64);
+
+    // exclusiveMinimum: Draft-06+ uses a number; Draft-04 uses a boolean
+    if let Some(excl_min) = obj.get("exclusiveMinimum") {
+        if excl_min.is_number() {
+            schema.exclusive_minimum = excl_min.as_f64();
+        } else if excl_min.is_boolean() {
+            schema.exclusive_minimum_draft04 = excl_min.as_bool();
+        }
+    }
+    // exclusiveMaximum: same dual-form pattern
+    if let Some(excl_max) = obj.get("exclusiveMaximum") {
+        if excl_max.is_number() {
+            schema.exclusive_maximum = excl_max.as_f64();
+        } else if excl_max.is_boolean() {
+            schema.exclusive_maximum_draft04 = excl_max.as_bool();
+        }
+    }
+    schema.multiple_of = obj.get("multipleOf").and_then(Value::as_f64);
+    schema.const_value = obj.get("const").cloned();
 
     // default / examples
     schema.default = obj.get("default").cloned();
