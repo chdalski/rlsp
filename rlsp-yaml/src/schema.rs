@@ -101,6 +101,8 @@ pub struct JsonSchema {
     pub exclusive_maximum_draft04: Option<bool>,
     pub multiple_of: Option<f64>,
     pub const_value: Option<serde_json::Value>,
+    pub dependent_required: Option<HashMap<String, Vec<String>>>,
+    pub dependent_schemas: Option<HashMap<String, Self>>,
     /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
     pub definitions: Option<HashMap<String, Self>>,
     pub deprecated: Option<bool>,
@@ -620,6 +622,11 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
         .and_then(|v| parse_schema_with_root(v, root, depth + 1))
         .map(Box::new);
 
+    // dependencies (Draft-04) / dependentRequired + dependentSchemas (Draft 2019-09)
+    let (dep_req, dep_sch) = parse_dependencies(obj, root, depth);
+    schema.dependent_required = dep_req;
+    schema.dependent_schemas = dep_sch;
+
     // allOf / anyOf / oneOf / not
     schema.all_of = parse_schema_array(obj.get("allOf"), root, depth);
     schema.any_of = parse_schema_array(obj.get("anyOf"), root, depth);
@@ -641,6 +648,74 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     };
 
     Some(schema)
+}
+
+type ParsedDependencies = (
+    Option<HashMap<String, Vec<String>>>,
+    Option<HashMap<String, JsonSchema>>,
+);
+
+/// Parse `dependencies` (Draft-04), `dependentRequired`, and `dependentSchemas`
+/// (Draft 2019-09) from a schema object, merging into a unified pair of maps.
+/// 2019-09 entries take precedence over Draft-04 `dependencies` on key collision.
+fn parse_dependencies(
+    obj: &serde_json::Map<String, Value>,
+    root: &Value,
+    depth: usize,
+) -> ParsedDependencies {
+    let mut dep_req: HashMap<String, Vec<String>> = HashMap::new();
+    let mut dep_sch: HashMap<String, JsonSchema> = HashMap::new();
+
+    // Draft-04 `dependencies`
+    if let Some(Value::Object(deps)) = obj.get("dependencies") {
+        for (key, val) in deps {
+            if let Some(arr) = val.as_array() {
+                // Array of strings → dependentRequired
+                let reqs: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                dep_req.insert(key.clone(), reqs);
+            } else if let Some(schema) = parse_schema_with_root(val, root, depth + 1) {
+                // Sub-schema → dependentSchemas
+                dep_sch.insert(key.clone(), schema);
+            }
+        }
+    }
+
+    // Draft 2019-09 `dependentRequired` — merges over Draft-04 entries
+    if let Some(Value::Object(dr)) = obj.get("dependentRequired") {
+        for (key, val) in dr {
+            if let Some(arr) = val.as_array() {
+                let reqs: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                dep_req.insert(key.clone(), reqs);
+            }
+        }
+    }
+
+    // Draft 2019-09 `dependentSchemas` — merges over Draft-04 entries
+    if let Some(Value::Object(ds)) = obj.get("dependentSchemas") {
+        for (key, val) in ds {
+            if let Some(schema) = parse_schema_with_root(val, root, depth + 1) {
+                dep_sch.insert(key.clone(), schema);
+            }
+        }
+    }
+
+    let dep_req = if dep_req.is_empty() {
+        None
+    } else {
+        Some(dep_req)
+    };
+    let dep_sch = if dep_sch.is_empty() {
+        None
+    } else {
+        Some(dep_sch)
+    };
+    (dep_req, dep_sch)
 }
 
 fn parse_type(value: Option<&Value>) -> Option<SchemaType> {
@@ -2413,5 +2488,59 @@ mod tests {
     fn build_agent_with_invalid_proxy_falls_back_gracefully() {
         // An invalid URL must not panic — build_agent silently ignores it.
         let _agent = build_agent(Some("not-a-valid-proxy-url"));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Draft-04 `dependencies` parsing
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Dep-1: array value → dependentRequired
+    #[test]
+    fn draft04_dependencies_array_maps_to_dependent_required() {
+        let value = json!({
+            "type": "object",
+            "dependencies": {
+                "credit_card": ["billing_address", "billing_zip"]
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let dep_req = schema.dependent_required.unwrap();
+        let reqs = dep_req.get("credit_card").unwrap();
+        assert!(reqs.contains(&"billing_address".to_string()));
+        assert!(reqs.contains(&"billing_zip".to_string()));
+        assert!(schema.dependent_schemas.is_none());
+    }
+
+    // Dep-2: object value → dependentSchemas
+    #[test]
+    fn draft04_dependencies_object_maps_to_dependent_schemas() {
+        let value = json!({
+            "type": "object",
+            "dependencies": {
+                "name": { "required": ["age"] }
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let dep_sch = schema.dependent_schemas.unwrap();
+        let dep = dep_sch.get("name").unwrap();
+        assert_eq!(dep.required, Some(vec!["age".to_string()]));
+        assert!(schema.dependent_required.is_none());
+    }
+
+    // Dep-3: 2019-09 dependentRequired takes precedence over Draft-04
+    #[test]
+    fn draft2019_dependent_required_overrides_draft04() {
+        let value = json!({
+            "dependencies": {
+                "a": ["b"]
+            },
+            "dependentRequired": {
+                "a": ["c"]  // overrides Draft-04 entry for "a"
+            }
+        });
+        let schema = parse_schema(&value).unwrap();
+        let dep_req = schema.dependent_required.unwrap();
+        // 2019-09 wins: only "c", not "b"
+        assert_eq!(dep_req.get("a").unwrap(), &vec!["c".to_string()]);
     }
 }

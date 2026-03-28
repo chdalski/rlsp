@@ -584,6 +584,62 @@ fn validate_mapping(
             validate_node(&key_node, pn_schema, path, lines, diagnostics, depth + 1);
         }
     }
+
+    validate_dependencies(map, schema, path, lines, diagnostics, depth);
+}
+
+fn validate_dependencies(
+    map: &saphyr::MappingOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) {
+    use saphyr::ScalarOwned;
+
+    // dependentRequired: if trigger key is present, listed keys must also be present
+    if let Some(dep_req) = &schema.dependent_required {
+        for (trigger, required_keys) in dep_req {
+            let trigger_yaml = YamlOwned::Value(ScalarOwned::String(trigger.clone()));
+            if map.contains_key(&trigger_yaml) {
+                for missing in required_keys {
+                    let missing_yaml = YamlOwned::Value(ScalarOwned::String(missing.clone()));
+                    if !map.contains_key(&missing_yaml) {
+                        let range = mapping_range(path, lines);
+                        diagnostics.push(make_diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            "schemaDependentRequired",
+                            format!(
+                                "Property '{}' is required when '{}' is present at {}",
+                                missing,
+                                trigger,
+                                format_path(path)
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // dependentSchemas: if trigger key is present, validate the whole mapping
+    if let Some(dep_sch) = &schema.dependent_schemas {
+        for (trigger, dep_schema) in dep_sch {
+            let trigger_yaml = YamlOwned::Value(ScalarOwned::String(trigger.clone()));
+            if map.contains_key(&trigger_yaml) {
+                validate_node(
+                    &YamlOwned::Mapping(map.clone()),
+                    dep_schema,
+                    path,
+                    lines,
+                    diagnostics,
+                    depth + 1,
+                );
+            }
+        }
+    }
 }
 
 /// Validate `value` against any `patternProperties` patterns that match `key`.
@@ -3117,5 +3173,132 @@ mod tests {
             .filter(|d| code_of(d) == "schemaPattern")
             .collect();
         assert_eq!(pattern_diags.len(), 2);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // dependentRequired / dependentSchemas
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 122
+    #[test]
+    fn should_produce_error_when_trigger_present_and_dependent_required_missing() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_required: Some(
+                [(
+                    "credit_card".to_string(),
+                    vec!["billing_address".to_string()],
+                )]
+                .into(),
+            ),
+            ..JsonSchema::default()
+        };
+        // credit_card present but billing_address absent
+        let text = "credit_card: 1234";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaDependentRequired");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(result[0].message.contains("billing_address"));
+        assert!(result[0].message.contains("credit_card"));
+    }
+
+    // Test 123
+    #[test]
+    fn should_produce_no_diagnostics_when_trigger_and_dependency_both_present() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_required: Some(
+                [(
+                    "credit_card".to_string(),
+                    vec!["billing_address".to_string()],
+                )]
+                .into(),
+            ),
+            ..JsonSchema::default()
+        };
+        let text = "credit_card: 1234\nbilling_address: 123 Main St";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 124
+    #[test]
+    fn should_produce_no_diagnostics_when_trigger_absent_in_dependent_required() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_required: Some(
+                [(
+                    "credit_card".to_string(),
+                    vec!["billing_address".to_string()],
+                )]
+                .into(),
+            ),
+            ..JsonSchema::default()
+        };
+        // trigger absent — no check performed
+        let text = "name: Alice";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 125
+    #[test]
+    fn should_produce_diagnostic_when_trigger_present_and_dependent_schema_fails() {
+        // When "name" is present, the mapping must also have "age" (required by dep schema)
+        let dep_schema = JsonSchema {
+            required: Some(vec!["age".to_string()]),
+            ..JsonSchema::default()
+        };
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_schemas: Some([("name".to_string(), dep_schema)].into()),
+            ..JsonSchema::default()
+        };
+        let text = "name: Alice";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(!result.is_empty());
+        assert_eq!(code_of(&result[0]), "schemaRequired");
+    }
+
+    // Test 126
+    #[test]
+    fn should_produce_no_diagnostics_when_dependent_schema_passes() {
+        let dep_schema = JsonSchema {
+            required: Some(vec!["age".to_string()]),
+            ..JsonSchema::default()
+        };
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_schemas: Some([("name".to_string(), dep_schema)].into()),
+            ..JsonSchema::default()
+        };
+        let text = "name: Alice\nage: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 127
+    #[test]
+    fn should_produce_no_diagnostics_when_dependent_schema_trigger_absent() {
+        let dep_schema = JsonSchema {
+            required: Some(vec!["age".to_string()]),
+            ..JsonSchema::default()
+        };
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            dependent_schemas: Some([("name".to_string(), dep_schema)].into()),
+            ..JsonSchema::default()
+        };
+        // trigger "name" absent — dep schema not checked
+        let text = "other: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
     }
 }
