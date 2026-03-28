@@ -1,7 +1,7 @@
 # Color Provider
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-28)
 **Created:** 2026-03-28
 
 ## Goal
@@ -26,6 +26,11 @@ editors for YAML files containing color values.
   codebase — this is a new provider
 - Server capabilities in `server.rs` need to advertise
   `ColorProviderCapability`
+- Controlled by a `colorDecorators` workspace setting
+  (default `true`), consistent with VS Code's naming
+  convention and the existing settings pattern in
+  `server.rs`. When disabled, `document_color` returns
+  an empty vec.
 
 ### Supported color formats
 
@@ -115,3 +120,10 @@ color patterns.
 - **No alpha in named colors:** CSS named colors don't
   have alpha variants. Alpha is only supported in hex
   (8-digit), RGBA, and HSLA formats.
+
+- **Runtime setting over crate feature:** A `colorDecorators`
+  setting (default true) controls the feature at runtime.
+  A crate feature was considered but rejected — the code
+  is small, users install pre-built binaries, and runtime
+  settings are consistent with how other features are
+  toggled (keyOrdering, schemaStore, customTags).
