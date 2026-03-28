@@ -84,6 +84,7 @@ pub struct JsonSchema {
     pub unique_items: Option<bool>,
     pub additional_properties: Option<AdditionalProperties>,
     pub pattern_properties: Option<Vec<(String, Self)>>,
+    pub property_names: Option<Box<Self>>,
     pub all_of: Option<Vec<Self>>,
     pub any_of: Option<Vec<Self>>,
     pub one_of: Option<Vec<Self>>,
@@ -501,6 +502,45 @@ pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
     parse_schema_with_root(value, value, 0)
 }
 
+/// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
+fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSchema) {
+    // title / description / pattern
+    schema.title = string_field(obj, "title");
+    schema.description = string_field(obj, "description");
+    schema.pattern = string_field(obj, "pattern");
+    schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
+
+    // numeric constraints
+    schema.minimum = obj.get("minimum").and_then(Value::as_f64);
+    schema.maximum = obj.get("maximum").and_then(Value::as_f64);
+    schema.min_length = obj.get("minLength").and_then(Value::as_u64);
+    schema.max_length = obj.get("maxLength").and_then(Value::as_u64);
+
+    // exclusiveMinimum: Draft-06+ uses a number; Draft-04 uses a boolean
+    if let Some(excl_min) = obj.get("exclusiveMinimum") {
+        if excl_min.is_number() {
+            schema.exclusive_minimum = excl_min.as_f64();
+        } else if excl_min.is_boolean() {
+            schema.exclusive_minimum_draft04 = excl_min.as_bool();
+        }
+    }
+    // exclusiveMaximum: same dual-form pattern
+    if let Some(excl_max) = obj.get("exclusiveMaximum") {
+        if excl_max.is_number() {
+            schema.exclusive_maximum = excl_max.as_f64();
+        } else if excl_max.is_boolean() {
+            schema.exclusive_maximum_draft04 = excl_max.as_bool();
+        }
+    }
+    schema.multiple_of = obj.get("multipleOf").and_then(Value::as_f64);
+    schema.const_value = obj.get("const").cloned();
+
+    // default / examples / enum
+    schema.default = obj.get("default").cloned();
+    schema.examples = obj.get("examples").and_then(Value::as_array).cloned();
+    schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
+}
+
 fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<JsonSchema> {
     if depth > MAX_REF_DEPTH {
         return None;
@@ -533,43 +573,7 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     // type
     schema.schema_type = parse_type(obj.get("type"));
 
-    // title / description / pattern
-    schema.title = string_field(obj, "title");
-    schema.description = string_field(obj, "description");
-    schema.pattern = string_field(obj, "pattern");
-    schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
-
-    // numeric constraints
-    schema.minimum = obj.get("minimum").and_then(Value::as_f64);
-    schema.maximum = obj.get("maximum").and_then(Value::as_f64);
-    schema.min_length = obj.get("minLength").and_then(Value::as_u64);
-    schema.max_length = obj.get("maxLength").and_then(Value::as_u64);
-
-    // exclusiveMinimum: Draft-06+ uses a number; Draft-04 uses a boolean
-    if let Some(excl_min) = obj.get("exclusiveMinimum") {
-        if excl_min.is_number() {
-            schema.exclusive_minimum = excl_min.as_f64();
-        } else if excl_min.is_boolean() {
-            schema.exclusive_minimum_draft04 = excl_min.as_bool();
-        }
-    }
-    // exclusiveMaximum: same dual-form pattern
-    if let Some(excl_max) = obj.get("exclusiveMaximum") {
-        if excl_max.is_number() {
-            schema.exclusive_maximum = excl_max.as_f64();
-        } else if excl_max.is_boolean() {
-            schema.exclusive_maximum_draft04 = excl_max.as_bool();
-        }
-    }
-    schema.multiple_of = obj.get("multipleOf").and_then(Value::as_f64);
-    schema.const_value = obj.get("const").cloned();
-
-    // default / examples
-    schema.default = obj.get("default").cloned();
-    schema.examples = obj.get("examples").and_then(Value::as_array).cloned();
-
-    // enum
-    schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
+    parse_scalar_fields(obj, &mut schema);
 
     // required
     schema.required = obj.get("required").and_then(Value::as_array).map(|arr| {
@@ -609,6 +613,12 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     // additionalProperties
     schema.additional_properties =
         parse_additional_properties(obj.get("additionalProperties"), root, depth);
+
+    // propertyNames
+    schema.property_names = obj
+        .get("propertyNames")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
 
     // allOf / anyOf / oneOf / not
     schema.all_of = parse_schema_array(obj.get("allOf"), root, depth);

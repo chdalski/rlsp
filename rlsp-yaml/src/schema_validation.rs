@@ -577,6 +577,12 @@ fn validate_mapping(
                 }
             }
         }
+
+        // propertyNames — validate each key as a string node against the schema
+        if let Some(pn_schema) = &schema.property_names {
+            let key_node = YamlOwned::Value(ScalarOwned::String(key_str.clone()));
+            validate_node(&key_node, pn_schema, path, lines, diagnostics, depth + 1);
+        }
     }
 }
 
@@ -2993,5 +2999,123 @@ mod tests {
         let result = validate_schema(text, &docs, &schema);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // propertyNames
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 116
+    #[test]
+    fn should_produce_no_diagnostics_when_all_keys_match_property_names_pattern() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            property_names: Some(Box::new(JsonSchema {
+                pattern: Some("^[a-z_]+$".to_string()),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let text = "foo: 1\nbar_baz: 2";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 117
+    #[test]
+    fn should_produce_diagnostic_when_key_violates_property_names_pattern() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            property_names: Some(Box::new(JsonSchema {
+                pattern: Some("^[a-z_]+$".to_string()),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        // "BadKey" contains uppercase — violates pattern
+        let text = "BadKey: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaPattern");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 118
+    #[test]
+    fn should_produce_diagnostic_when_key_violates_property_names_min_length() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            property_names: Some(Box::new(JsonSchema {
+                min_length: Some(3),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let text = "ab: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinLength");
+    }
+
+    // Test 119
+    #[test]
+    fn should_produce_diagnostic_when_key_not_in_property_names_enum() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            property_names: Some(Box::new(JsonSchema {
+                enum_values: Some(vec![json!("foo"), json!("bar")]),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let text = "baz: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaEnum");
+    }
+
+    // Test 120
+    #[test]
+    fn should_apply_property_names_to_all_keys_regardless_of_properties() {
+        // "name" is in properties, "extra" is not — propertyNames applies to both
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some([("name".to_string(), string_schema())].into()),
+            property_names: Some(Box::new(JsonSchema {
+                pattern: Some("^[a-z]+$".to_string()),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        // Both keys are lowercase — no violations
+        let text = "name: Alice\nextra: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 121
+    #[test]
+    fn should_produce_diagnostics_for_all_violating_keys_with_property_names() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            property_names: Some(Box::new(JsonSchema {
+                pattern: Some("^[a-z]+$".to_string()),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let text = "UPPER: 1\nAlso_Bad: 2\ngood: 3";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        let pattern_diags: Vec<_> = result
+            .iter()
+            .filter(|d| code_of(d) == "schemaPattern")
+            .collect();
+        assert_eq!(pattern_diags.len(), 2);
     }
 }
