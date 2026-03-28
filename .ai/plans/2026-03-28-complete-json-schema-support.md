@@ -65,7 +65,7 @@ many spec keywords are missing entirely.
 ## Steps
 
 - [x] Implement scalar constraints (pattern, minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, const) — 42d392b
-- [ ] Implement `not` keyword
+- [x] Implement `not` keyword — baeeef8
 - [ ] Implement `patternProperties`
 - [ ] Implement array constraints (minItems, maxItems, uniqueItems)
 - [ ] Implement `propertyNames`
