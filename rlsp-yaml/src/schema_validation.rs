@@ -124,25 +124,88 @@ fn validate_node(
     }
 
     // Sequence-specific checks
-    if let YamlOwned::Sequence(seq) = node
-        && let Some(items_schema) = &schema.items
-    {
-        for (i, item) in seq.iter().enumerate() {
-            let mut item_path = path.to_vec();
-            item_path.push(format!("[{i}]"));
-            validate_node(
-                item,
-                items_schema,
-                &item_path,
-                lines,
-                diagnostics,
-                depth + 1,
-            );
+    if let YamlOwned::Sequence(seq) = node {
+        if let Some(items_schema) = &schema.items {
+            for (i, item) in seq.iter().enumerate() {
+                let mut item_path = path.to_vec();
+                item_path.push(format!("[{i}]"));
+                validate_node(
+                    item,
+                    items_schema,
+                    &item_path,
+                    lines,
+                    diagnostics,
+                    depth + 1,
+                );
+            }
         }
+        validate_array_constraints(seq, schema, path, lines, diagnostics);
     }
 
     // Composition
     validate_composition(node, schema, path, lines, diagnostics, depth);
+}
+
+fn validate_array_constraints(
+    seq: &saphyr::SequenceOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let len = seq.len() as u64;
+
+    if let Some(min) = schema.min_items {
+        if len < min {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMinItems",
+                format!(
+                    "Array at {} has {} items, minimum is {}",
+                    format_path(path),
+                    len,
+                    min
+                ),
+            ));
+        }
+    }
+
+    if let Some(max) = schema.max_items {
+        if len > max {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMaxItems",
+                format!(
+                    "Array at {} has {} items, maximum is {}",
+                    format_path(path),
+                    len,
+                    max
+                ),
+            ));
+        }
+    }
+
+    if schema.unique_items == Some(true) {
+        let json_items: Vec<serde_json::Value> = seq.iter().filter_map(yaml_to_json).collect();
+        let has_duplicate = json_items.iter().enumerate().any(|(i, a)| {
+            json_items
+                .get(..i)
+                .is_some_and(|prev| prev.iter().any(|b| a == b))
+        });
+        if has_duplicate {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaUniqueItems",
+                format!("Array at {} contains duplicate items", format_path(path)),
+            ));
+        }
+    }
 }
 
 fn validate_scalar_constraints(
@@ -2704,5 +2767,96 @@ mod tests {
         let result = validate_schema(text, &docs, &schema);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Array constraints — minItems / maxItems / uniqueItems
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn array_schema(min: Option<u64>, max: Option<u64>, unique: Option<bool>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            min_items: min,
+            max_items: max,
+            unique_items: unique,
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 106
+    #[test]
+    fn should_produce_error_when_array_has_fewer_items_than_min_items() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
+        let text = "tags:\n  - a";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinItems");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 107
+    #[test]
+    fn should_produce_no_diagnostics_when_array_meets_min_items() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
+        let text = "tags:\n  - a\n  - b";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 108
+    #[test]
+    fn should_produce_error_when_array_exceeds_max_items() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
+        let text = "tags:\n  - a\n  - b\n  - c";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaxItems");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 109
+    #[test]
+    fn should_produce_no_diagnostics_when_array_meets_max_items() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
+        let text = "tags:\n  - a\n  - b";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 110
+    #[test]
+    fn should_produce_error_when_array_has_duplicate_items_and_unique_items_true() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
+        let text = "tags:\n  - foo\n  - bar\n  - foo";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaUniqueItems");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 111
+    #[test]
+    fn should_produce_no_diagnostics_when_all_items_unique_and_unique_items_true() {
+        let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
+        let text = "tags:\n  - foo\n  - bar\n  - baz";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 112
+    #[test]
+    fn should_produce_no_diagnostics_when_unique_items_false_even_with_duplicates() {
+        let schema =
+            object_schema_with_props(vec![("tags", array_schema(None, None, Some(false)))]);
+        let text = "tags:\n  - foo\n  - foo";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.is_empty());
     }
 }
