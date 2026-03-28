@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-use regex::Regex;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use regex::RegexBuilder;
 use saphyr::YamlOwned;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
@@ -9,6 +12,36 @@ use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
 /// Maximum length of a `pattern` string we will compile and match, as a
 /// guard against pathological `ReDoS` inputs.
 const MAX_PATTERN_LEN: usize = 1024;
+
+/// Maximum compiled NFA size for a regex, as a memory guard.
+const REGEX_SIZE_LIMIT: usize = 512 * 1024;
+
+thread_local! {
+    /// Per-thread regex cache, keyed by pattern string.
+    /// `None` means the pattern was tried and failed to compile within limits.
+    static REGEX_CACHE: RefCell<HashMap<String, Option<regex::Regex>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Return a compiled `Regex` for `pattern`, using the thread-local cache.
+///
+/// Returns `None` if the pattern exceeds `REGEX_SIZE_LIMIT` or is otherwise
+/// invalid. The failed result is also cached so that subsequent calls with
+/// the same pattern skip recompilation.
+fn get_regex(pattern: &str) -> Option<regex::Regex> {
+    REGEX_CACHE.with(|cache| {
+        let mut map = cache.borrow_mut();
+        if let Some(entry) = map.get(pattern) {
+            return entry.clone();
+        }
+        let compiled = RegexBuilder::new(pattern)
+            .size_limit(REGEX_SIZE_LIMIT)
+            .build()
+            .ok();
+        map.insert(pattern.to_string(), compiled.clone());
+        compiled
+    })
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -265,23 +298,42 @@ fn validate_string_constraints(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(pattern) = &schema.pattern {
-        if pattern.len() <= MAX_PATTERN_LEN {
-            if let Ok(re) = Regex::new(pattern) {
-                if !re.is_match(s) {
-                    let range = node_range(path, lines);
-                    diagnostics.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        "schemaPattern",
-                        format!(
-                            "Value at {} does not match pattern: {}",
-                            format_path(path),
-                            pattern
-                        ),
-                    ));
-                }
+        if pattern.len() > MAX_PATTERN_LEN {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaPatternLimit",
+                format!(
+                    "Pattern at {} exceeds maximum length ({MAX_PATTERN_LEN} chars) and was not validated",
+                    format_path(path),
+                ),
+            ));
+        } else if let Some(re) = get_regex(pattern) {
+            if !re.is_match(s) {
+                let range = node_range(path, lines);
+                diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    "schemaPattern",
+                    format!(
+                        "Value at {} does not match pattern: {}",
+                        format_path(path),
+                        pattern
+                    ),
+                ));
             }
-            // invalid regex — skip silently
+        } else {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaPatternLimit",
+                format!(
+                    "Pattern at {} could not be compiled and was not validated",
+                    format_path(path),
+                ),
+            ));
         }
     }
 
@@ -546,9 +598,19 @@ fn validate_pattern_properties(
     let mut matched = false;
     for (pattern, pat_schema) in pattern_props {
         if pattern.len() > MAX_PATTERN_LEN {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaPatternLimit",
+                format!(
+                    "Pattern at {} exceeds maximum length ({MAX_PATTERN_LEN} chars) and was not validated",
+                    format_path(path),
+                ),
+            ));
             continue;
         }
-        if let Ok(re) = Regex::new(pattern) {
+        if let Some(re) = get_regex(pattern) {
             if re.is_match(key) {
                 matched = true;
                 let mut child_path = path.to_vec();
@@ -562,8 +624,18 @@ fn validate_pattern_properties(
                     depth + 1,
                 );
             }
+        } else {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaPatternLimit",
+                format!(
+                    "Pattern at {} could not be compiled and was not validated",
+                    format_path(path),
+                ),
+            ));
         }
-        // invalid regex or pattern too long — skip silently
     }
     matched
 }
@@ -2121,7 +2193,7 @@ mod tests {
 
     // Test 70
     #[test]
-    fn should_skip_pattern_check_when_pattern_exceeds_max_length() {
+    fn should_emit_warning_when_pattern_exceeds_max_length() {
         let long_pattern = "a".repeat(1025);
         let schema = object_schema_with_props(vec![(
             "val",
@@ -2132,24 +2204,27 @@ mod tests {
         )]);
         let docs = parse_docs("val: anything");
         let result = validate_schema("val: anything", &docs, &schema);
-        // Pattern too long — skipped, no diagnostic
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaPatternLimit");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
     // Test 71
     #[test]
-    fn should_skip_pattern_check_for_invalid_regex() {
+    fn should_emit_warning_when_pattern_cannot_be_compiled() {
         let schema = object_schema_with_props(vec![(
             "val",
             JsonSchema {
+                // A pattern that RegexBuilder rejects (unclosed bracket)
                 pattern: Some("[invalid".to_string()),
                 ..JsonSchema::default()
             },
         )]);
         let docs = parse_docs("val: anything");
         let result = validate_schema("val: anything", &docs, &schema);
-        // Invalid regex — skipped silently
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaPatternLimit");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2753,7 +2828,7 @@ mod tests {
 
     // Test 105
     #[test]
-    fn should_skip_pattern_exceeding_max_length_and_fall_through_to_additional_properties() {
+    fn should_emit_warning_for_over_length_pattern_and_fall_through_to_additional_properties() {
         let long_pattern = "a".repeat(1025);
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
@@ -2761,12 +2836,18 @@ mod tests {
             additional_properties: Some(AdditionalProperties::Denied),
             ..JsonSchema::default()
         };
-        // The pattern is too long — skipped. "key" falls through to additionalProperties.
+        // The pattern is too long — emits a PatternLimit warning.
+        // "key" also falls through to additionalProperties (not matched by any pattern).
         let text = "key: value";
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
+        assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
+            && d.severity == Some(DiagnosticSeverity::WARNING)));
+        assert!(
+            result
+                .iter()
+                .any(|d| code_of(d) == "schemaAdditionalProperty")
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2858,5 +2939,59 @@ mod tests {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema);
         assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Regex security hardening
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 113
+    #[test]
+    fn should_emit_warning_when_pattern_limit_exceeded_in_pattern_properties() {
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("[invalid".to_string(), string_schema())]),
+            ..JsonSchema::default()
+        };
+        // Invalid regex in patternProperties — warning emitted
+        let text = "key: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
+            && d.severity == Some(DiagnosticSeverity::WARNING)));
+    }
+
+    // Test 114
+    #[test]
+    fn should_still_match_valid_string_against_pattern_after_hardening() {
+        // Regression: hardening must not break valid pattern matching
+        let schema = object_schema_with_props(vec![(
+            "code",
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                pattern: Some("^[A-Z]{3}$".to_string()),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("code: abc");
+        let result = validate_schema("code: abc", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaPattern");
+    }
+
+    // Test 115
+    #[test]
+    fn should_still_match_valid_pattern_property_after_hardening() {
+        // Regression: hardening must not break valid patternProperties matching
+        let schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
+            ..JsonSchema::default()
+        };
+        let text = "str_name: 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
     }
 }
