@@ -83,6 +83,7 @@ pub struct JsonSchema {
     pub all_of: Option<Vec<Self>>,
     pub any_of: Option<Vec<Self>>,
     pub one_of: Option<Vec<Self>>,
+    pub not: Option<Box<Self>>,
     pub ref_path: Option<String>,
     pub pattern: Option<String>,
     pub minimum: Option<f64>,
@@ -590,10 +591,14 @@ fn parse_schema_with_root(value: &Value, root: &Value, depth: usize) -> Option<J
     schema.additional_properties =
         parse_additional_properties(obj.get("additionalProperties"), root, depth);
 
-    // allOf / anyOf / oneOf
+    // allOf / anyOf / oneOf / not
     schema.all_of = parse_schema_array(obj.get("allOf"), root, depth);
     schema.any_of = parse_schema_array(obj.get("anyOf"), root, depth);
     schema.one_of = parse_schema_array(obj.get("oneOf"), root, depth);
+    schema.not = obj
+        .get("not")
+        .and_then(|v| parse_schema_with_root(v, root, depth + 1))
+        .map(Box::new);
 
     // definitions (Draft-04) + $defs (Draft-07)
     let defs_04 = parse_definitions(obj.get("definitions"), root, depth);

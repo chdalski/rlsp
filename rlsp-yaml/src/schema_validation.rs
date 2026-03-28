@@ -531,6 +531,24 @@ fn validate_composition(
             ));
         }
     }
+
+    // not: the value must NOT match the sub-schema
+    if let Some(not_schema) = &schema.not {
+        let mut scratch = Vec::new();
+        validate_node(node, not_schema, path, lines, &mut scratch, depth + 1);
+        if scratch.is_empty() {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaNot",
+                format!(
+                    "Value at {} must not match the excluded schema",
+                    format_path(path)
+                ),
+            ));
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2397,5 +2415,115 @@ mod tests {
             .filter(|d| code_of(d) == "schemaConst")
             .collect();
         assert!(const_diags.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // not keyword
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 93
+    #[test]
+    fn should_produce_error_when_value_matches_not_schema() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                not: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: hello");
+        let result = validate_schema("val: hello", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaNot");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 94
+    #[test]
+    fn should_produce_no_diagnostics_when_value_does_not_match_not_schema() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                not: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 42");
+        let result = validate_schema("val: 42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 95
+    #[test]
+    fn should_reject_string_when_not_type_string() {
+        let schema = JsonSchema {
+            not: Some(Box::new(JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("hello");
+        let result = validate_schema("hello", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaNot");
+    }
+
+    // Test 96
+    #[test]
+    fn should_allow_integer_when_not_type_string() {
+        let schema = JsonSchema {
+            not: Some(Box::new(JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("42");
+        let result = validate_schema("42", &docs, &schema);
+        assert!(result.is_empty());
+    }
+
+    // Test 97
+    #[test]
+    fn should_produce_error_when_value_matches_not_enum() {
+        let schema = object_schema_with_props(vec![(
+            "env",
+            JsonSchema {
+                not: Some(Box::new(JsonSchema {
+                    enum_values: Some(vec![json!("prod"), json!("staging")]),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("env: prod");
+        let result = validate_schema("env: prod", &docs, &schema);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaNot");
+    }
+
+    // Test 98
+    #[test]
+    fn should_produce_no_diagnostics_when_value_outside_not_enum() {
+        let schema = object_schema_with_props(vec![(
+            "env",
+            JsonSchema {
+                not: Some(Box::new(JsonSchema {
+                    enum_values: Some(vec![json!("prod"), json!("staging")]),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("env: dev");
+        let result = validate_schema("env: dev", &docs, &schema);
+        assert!(result.is_empty());
     }
 }
