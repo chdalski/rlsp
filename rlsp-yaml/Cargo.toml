@@ -27,4 +27,5 @@ ureq = { version = "3", features = ["rustls"] }
 
 [dev-dependencies]
 futures = "0.3"
+tiny_http = "0.12"
 tower = "0.5"

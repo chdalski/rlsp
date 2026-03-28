@@ -2017,26 +2017,34 @@ mod tests {
         );
     }
 
-    // Test 61 — redirect to a different host must be blocked.
-    // Full HTTP mocking is not feasible without external dependencies, so this
-    // test is marked `#[ignore]`. It documents the required behaviour:
+    // Test 61 — redirect must not be followed (max_redirects(0) enforcement).
     //
-    // The ureq Agent is configured with `max_redirects(0)`, which means any
-    // redirect response (3xx) is treated as an error rather than followed.
-    // A real integration test would:
-    //   1. Spin up a local HTTP server that responds 302 -> http://169.254.169.254
-    //   2. Call `fetch_schema("http://127.0.0.2/redirect")` (itself blocked by
-    //      SSRF guard, so the server would need to be on a public IP)
-    //   3. Assert `Err` is returned
-    //
-    // The SSRF guard on the initial URL and the `max_redirects(0)` setting
-    // together ensure redirects to blocked hosts cannot be followed.
+    // With max_redirects(0), ureq returns the 3xx response as-is rather than
+    // following it. The test asserts that the status code is 302 — proving the
+    // redirect was not followed (which would have produced a 200 from /redirected).
     #[test]
-    #[ignore = "requires HTTP mock server; redirect blocking enforced by max_redirects(0) in fetch_schema"]
-    fn should_reject_redirect_to_different_host() {
-        // Would call fetch_schema with a URL that redirects to 169.254.169.254
-        // and assert Err is returned.
-        unimplemented!()
+    fn should_not_follow_redirects() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let url = format!("http://{addr}/schema.json");
+        let redirect_target = format!("http://{addr}/redirected");
+
+        std::thread::spawn(move || {
+            if let Ok(req) = server.recv() {
+                let location =
+                    tiny_http::Header::from_bytes(b"Location", redirect_target.as_bytes()).unwrap();
+                let response = tiny_http::Response::empty(302).with_header(location);
+                let _ = req.respond(response);
+            }
+        });
+
+        let agent = build_agent(None);
+        let response = agent.get(&url).call().expect("request should succeed");
+        assert_eq!(
+            response.status(),
+            302,
+            "agent must return 302 without following the redirect"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
