@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -28,14 +28,16 @@ via the `kubernetesVersion` setting.
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Update URL construction to handle "master" vs versioned
-- [ ] Change default constant to "master"
-- [ ] Update documentation
-- [ ] Add/update tests
+- [x] Update URL construction to handle "master" vs versioned
+- [x] Change default constant to "master"
+- [x] Update documentation
+- [x] Add/update tests
 
 ## Tasks
 
 ### Task 1: Update URL construction and default, with tests
+
+*Completed — commit c0b7367*
 
 Change `kubernetes_schema_url()` in `schema.rs` to produce
 `master-standalone-strict/` when `k8s_version` is `"master"`
@@ -50,6 +52,9 @@ Files:
 - `rlsp-yaml/src/server.rs` — default constant + doc comment
 
 ### Task 2: Update documentation
+
+*Completed — included in commit c0b7367 (reviewer caught
+stale references during Task 1 review)*
 
 Update `rlsp-yaml/docs/configuration.md` to reflect the new
 default of `"master"`. Update the description to explain
