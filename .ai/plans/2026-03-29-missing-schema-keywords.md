@@ -1,7 +1,7 @@
 # Missing JSON Schema Keywords
 
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -47,7 +47,7 @@ These are the last gaps in the validation implementation.
   struct, parsing, and validation — 1963542
 - [x] Add `additionalItems` to schema struct, parsing,
   and validation — 6bcfef4
-- [ ] Update feature-log with new keywords
+- [x] Update feature-log with new keywords — 2c09807
 
 ## Tasks
 
