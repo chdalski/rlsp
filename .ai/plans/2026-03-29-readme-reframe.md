@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -31,12 +31,12 @@ with minimal memory footprint — rather than how it was built.
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Update README.md — new tagline, remove AI references, reframe contributing section
-- [ ] Update CONTRIBUTING.md — remove AI opening paragraph, reframe policy
+- [x] Update README.md — new tagline, remove AI references, reframe contributing section
+- [x] Update CONTRIBUTING.md — remove AI opening paragraph, reframe policy
 
 ## Tasks
 
-### Task 1: Reframe README.md and CONTRIBUTING.md
+### Task 1: Reframe README.md and CONTRIBUTING.md — `4a120d4`
 
 Update both files in a single commit since they're closely related
 and the changes are small.
