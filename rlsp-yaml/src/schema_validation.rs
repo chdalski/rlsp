@@ -666,6 +666,10 @@ fn validate_format(
         "regex" => is_valid_regex(s),
         "json-pointer" => is_valid_json_pointer(s),
         "relative-json-pointer" => is_valid_relative_json_pointer(s),
+        "idn-hostname" => is_valid_idn_hostname(s),
+        "idn-email" => is_valid_idn_email(s),
+        "iri" => is_valid_iri(s),
+        "iri-reference" => is_valid_iri_reference(s),
         // Unknown formats are intentionally ignored
         _ => return,
     };
@@ -1087,6 +1091,31 @@ fn is_valid_relative_json_pointer(s: &str) -> bool {
         return true;
     }
     is_valid_json_pointer(rest)
+}
+
+/// IDN hostname: validates using IDNA UTS#46 strict processing (UseSTD3ASCIIRules=true).
+fn is_valid_idn_hostname(s: &str) -> bool {
+    idna::domain_to_ascii_strict(s).is_ok()
+}
+
+/// IDN email: local@domain where domain is validated via IDNA strict processing.
+fn is_valid_idn_email(s: &str) -> bool {
+    let Some(at_pos) = s.rfind('@') else {
+        return false;
+    };
+    let local = &s[..at_pos];
+    let domain = &s[at_pos + 1..];
+    !local.is_empty() && idna::domain_to_ascii_strict(domain).is_ok()
+}
+
+/// IRI (Internationalized Resource Identifier, RFC 3987).
+fn is_valid_iri(s: &str) -> bool {
+    iri_string::types::IriStr::new(s).is_ok()
+}
+
+/// IRI-reference (absolute IRI or relative reference, RFC 3987).
+fn is_valid_iri_reference(s: &str) -> bool {
+    iri_string::types::IriReferenceStr::new(s).is_ok()
 }
 
 fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
@@ -4751,4 +4780,65 @@ mod tests {
         // Unmatched parenthesis — invalid regex, YAML-safe string
         assert_eq!(run_format("(unclosed-paren", "regex").len(), 1);
     }
+
+    // Test 179 — idn-hostname: valid ASCII and internationalized hostnames
+    #[test]
+    fn format_idn_hostname_valid() {
+        assert!(run_format("example.com", "idn-hostname").is_empty());
+        assert!(run_format("xn--nxasmq6b.com", "idn-hostname").is_empty());
+        assert!(run_format("sub.example.org", "idn-hostname").is_empty());
+    }
+
+    // Test 180 — idn-hostname: invalid hostname
+    #[test]
+    fn format_idn_hostname_invalid() {
+        assert_eq!(run_format("not a hostname", "idn-hostname").len(), 1);
+        assert_eq!(run_format("-bad-start.com", "idn-hostname").len(), 1);
+    }
+
+    // Test 181 — idn-email: valid ASCII and internationalized email
+    #[test]
+    fn format_idn_email_valid() {
+        assert!(run_format("user@example.com", "idn-email").is_empty());
+        assert!(run_format("user@xn--nxasmq6b.com", "idn-email").is_empty());
+    }
+
+    // Test 182 — idn-email: invalid (missing @, empty local, bad domain)
+    #[test]
+    fn format_idn_email_invalid() {
+        assert_eq!(run_format("no-at-sign", "idn-email").len(), 1);
+        // Domain with leading hyphen is invalid per IDNA strict processing
+        assert_eq!(run_format("user@-bad-domain.com", "idn-email").len(), 1);
+    }
+
+    // Test 183 — iri: valid IRI
+    #[test]
+    fn format_iri_valid() {
+        assert!(run_format("https://example.com/path", "iri").is_empty());
+        assert!(run_format("http://example.com", "iri").is_empty());
+        assert!(run_format("urn:isbn:0451450523", "iri").is_empty());
+    }
+
+    // Test 184 — iri: invalid (relative reference is not an absolute IRI)
+    #[test]
+    fn format_iri_invalid() {
+        assert_eq!(run_format("not an iri", "iri").len(), 1);
+        assert_eq!(run_format("://missing-scheme", "iri").len(), 1);
+    }
+
+    // Test 185 — iri-reference: valid (absolute IRI and relative refs)
+    #[test]
+    fn format_iri_reference_valid() {
+        assert!(run_format("https://example.com/path", "iri-reference").is_empty());
+        assert!(run_format("/relative/path", "iri-reference").is_empty());
+        assert!(run_format("relative/path", "iri-reference").is_empty());
+    }
+
+    // Test 186 — iri-reference: invalid
+    #[test]
+    fn format_iri_reference_invalid() {
+        assert_eq!(run_format("not valid iri ref", "iri-reference").len(), 1);
+    }
+
 }
+

@@ -434,6 +434,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "iri-string"
+version = "0.7.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8e7418f59cc01c88316161279a7f665217ae316b388e58a0d10e29f54f1e5eb"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -673,6 +683,8 @@ name = "rlsp-yaml"
 version = "0.3.0"
 dependencies = [
  "futures",
+ "idna",
+ "iri-string",
  "once_cell",
  "regex",
  "rlsp-fmt",

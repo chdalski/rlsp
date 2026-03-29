@@ -126,6 +126,10 @@ Supported formats:
 | `regex` | Valid regular expression |
 | `json-pointer` | RFC 6901 JSON Pointer |
 | `relative-json-pointer` | Relative JSON Pointer |
+| `idn-hostname` | Internationalized domain name (IDNA UTS#46) |
+| `idn-email` | Internationalized email address |
+| `iri` | Internationalized Resource Identifier (RFC 3987) |
+| `iri-reference` | IRI or relative IRI reference (RFC 3987) |
 
 Unknown format values are silently ignored (per the JSON Schema specification, format validation is advisory).
 
