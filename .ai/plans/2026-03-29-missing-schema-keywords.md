@@ -45,8 +45,8 @@ These are the last gaps in the validation implementation.
 
 - [x] Add `minProperties`/`maxProperties` to schema
   struct, parsing, and validation — 1963542
-- [ ] Add `additionalItems` to schema struct, parsing,
-  and validation
+- [x] Add `additionalItems` to schema struct, parsing,
+  and validation — 6bcfef4
 - [ ] Update feature-log with new keywords
 
 ## Tasks
