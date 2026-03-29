@@ -3,6 +3,15 @@
 
 ## Documentation
 
+- Remove hardcoded test count from readme (cfb6fbb)
+
+## Refactoring
+
+- Replace expect/unwrap with safe alternatives and allow test lints (7092dcd)
+- Fix 88 clippy violations in test code (ac8b43f)
+
+## Documentation
+
 - Restructure documentation into three-tier layout (ee94187)
 
 ## Bug Fixes
