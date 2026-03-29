@@ -216,7 +216,12 @@ fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation
+)]
 mod tests {
     use super::*;
 
@@ -224,7 +229,7 @@ mod tests {
         Url::parse(uri).unwrap()
     }
 
-    /// Helper to extract (line, start_char, end_char, url) tuples from DocumentLinks.
+    /// Helper to extract (`line`, `start_char`, `end_char`, `url`) tuples from `DocumentLink`s.
     fn links_as_tuples(links: &[DocumentLink]) -> Vec<(u32, u32, u32, String)> {
         links
             .iter()
@@ -233,7 +238,10 @@ mod tests {
                     l.range.start.line,
                     l.range.start.character,
                     l.range.end.character,
-                    l.target.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+                    l.target
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_default(),
                 )
             })
             .collect()
@@ -525,7 +533,7 @@ mod tests {
     #[test]
     fn should_skip_extremely_long_urls() {
         let long_url = format!("https://example.com/{}", "a".repeat(3000));
-        let text = format!("url: {}\n", long_url);
+        let text = format!("url: {long_url}\n");
         let result = find_document_links(&text, None);
 
         assert_eq!(result.len(), 0, "URLs over 2048 chars should be skipped");
@@ -535,8 +543,8 @@ mod tests {
     fn should_handle_url_at_max_length() {
         // URL exactly at 2048 chars
         let path = "a".repeat(2048 - "https://example.com/".len());
-        let url = format!("https://example.com/{}", path);
-        let text = format!("url: {}\n", url);
+        let url = format!("https://example.com/{path}");
+        let text = format!("url: {url}\n");
         let result = find_document_links(&text, None);
 
         assert_eq!(
@@ -698,13 +706,13 @@ mod tests {
 
     #[test]
     fn should_only_detect_allowed_schemes() {
-        let text = r#"
+        let text = r"
 url1: https://example.com
 url2: ftp://example.com
 url3: http://example.com
 url4: file:///path/to/file
 url5: javascript:alert(1)
-"#;
+";
         let result = find_document_links(text, None);
 
         // Only http, https, file should be detected (ftp and javascript are not matched by regex)
@@ -736,11 +744,11 @@ url5: javascript:alert(1)
 
     #[test]
     fn should_only_include_validated_urls() {
-        let text = r#"
+        let text = r"
 url1: https://valid.com
 url2: https://
 url3: https://another-valid.com
-"#;
+";
         let result = find_document_links(text, None);
 
         // Only the 2 valid URLs should be included (https:// with no domain fails validation)
@@ -812,12 +820,10 @@ url3: https://another-valid.com
         let b = base("file:///dir/doc.yaml");
         let result = find_document_links(text, Some(&b));
 
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
         assert!(
-            include_links.is_empty(),
+            result
+                .iter()
+                .all(|l| l.tooltip.as_deref() != Some("Open included file")),
             "!include inside quotes should be ignored"
         );
     }
@@ -842,12 +848,10 @@ url3: https://another-valid.com
         let text = "config: !include foo.yaml\n";
         let result = find_document_links(text, None);
 
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
         assert!(
-            include_links.is_empty(),
+            result
+                .iter()
+                .all(|l| l.tooltip.as_deref() != Some("Open included file")),
             "relative !include without base_uri should be skipped"
         );
     }
@@ -885,12 +889,10 @@ url3: https://another-valid.com
         let b = base("file:///dir/doc.yaml");
         let result = find_document_links(text, Some(&b));
 
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
         assert!(
-            include_links.is_empty(),
+            result
+                .iter()
+                .all(|l| l.tooltip.as_deref() != Some("Open included file")),
             "!include with no path should be skipped"
         );
     }
@@ -902,13 +904,13 @@ url3: https://another-valid.com
         let b = base("file:///dir/doc.yaml");
         let result = find_document_links(text, Some(&b));
 
-        let url_links: Vec<_> = result.iter().filter(|l| l.tooltip.is_none()).collect();
-        let include_links: Vec<_> = result
+        let url_count = result.iter().filter(|l| l.tooltip.is_none()).count();
+        let include_count = result
             .iter()
             .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
-        assert_eq!(url_links.len(), 1, "should find one URL link");
-        assert_eq!(include_links.len(), 1, "should find one include link");
+            .count();
+        assert_eq!(url_count, 1, "should find one URL link");
+        assert_eq!(include_count, 1, "should find one include link");
     }
 
     // Test 10: apostrophe inside double-quoted value must not suppress a following !include
@@ -918,12 +920,11 @@ url3: https://another-valid.com
         let b = base("file:///dir/doc.yaml");
         let result = find_document_links(text, Some(&b));
 
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
         assert_eq!(
-            include_links.len(),
+            result
+                .iter()
+                .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
+                .count(),
             1,
             "!include after a double-quoted value containing an apostrophe should be detected"
         );

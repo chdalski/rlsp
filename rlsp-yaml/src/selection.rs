@@ -323,8 +323,15 @@ fn marker_to_lsp_range(start: &Marker, end: &Marker) -> Range {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation
+)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
     use saphyr::LoadableYamlNode;
 
@@ -565,10 +572,10 @@ mod tests {
         let mut text = String::new();
         for i in 0..500usize {
             let indent = "  ".repeat(i);
-            text.push_str(&format!("{indent}l{i}:\n"));
+            writeln!(text, "{indent}l{i}:").unwrap();
         }
         let leaf_indent = "  ".repeat(500);
-        text.push_str(&format!("{leaf_indent}leaf: deep\n"));
+        writeln!(text, "{leaf_indent}leaf: deep").unwrap();
 
         let docs = parse_marked(&text);
         let result = selection_ranges(&text, docs.as_ref(), &[pos(500, leaf_indent.len() as u32)]);

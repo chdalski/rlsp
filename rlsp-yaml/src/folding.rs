@@ -616,12 +616,10 @@ mod tests {
         let result = folding_ranges(text);
 
         // Section after --- (lines 1-2) should produce a region fold
-        let region_folds: Vec<_> = result
-            .iter()
-            .filter(|r| r.kind == Some(FoldingRangeKind::Region))
-            .collect();
         assert!(
-            !region_folds.is_empty(),
+            result
+                .iter()
+                .any(|r| r.kind == Some(FoldingRangeKind::Region)),
             "content after separator should produce a region fold, got: {result:?}"
         );
     }

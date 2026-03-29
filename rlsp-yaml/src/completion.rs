@@ -1873,8 +1873,7 @@ mod tests {
             };
             assert!(
                 doc_char_count <= 200,
-                "documentation should be truncated to 200 chars, got {}",
-                doc_char_count
+                "documentation should be truncated to 200 chars, got {doc_char_count}"
             );
         }
     }
@@ -1928,8 +1927,7 @@ mod tests {
             .count();
         assert!(
             schema_prop_count <= 20,
-            "at most 20 allOf branches should be walked, got {} schema props",
-            schema_prop_count
+            "at most 20 allOf branches should be walked, got {schema_prop_count} schema props"
         );
     }
 
@@ -2193,8 +2191,7 @@ mod tests {
         assert!(
             item.sort_text
                 .as_deref()
-                .map(|s| s.starts_with('~'))
-                .unwrap_or(false),
+                .is_some_and(|s| s.starts_with('~')),
             "deprecated property sort_text should start with '~', got: {:?}",
             item.sort_text
         );
@@ -2375,6 +2372,7 @@ mod tests {
 
     // Test 65 — type-aware defaults: string → "", integer → 0, boolean → false
     #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // snippet placeholders look like format args
     fn should_use_type_aware_defaults_in_snippet() {
         let schema = schema_with_required(
             vec![
@@ -2612,6 +2610,7 @@ mod tests {
 
     // Lines 475-477: json_value_to_yaml_label for Number, Null, Array, Object
     #[test]
+    #[allow(clippy::approx_constant)] // 3.14 is a test value, not an approximation of PI
     fn should_render_number_and_null_enum_values_as_yaml_labels() {
         let schema = object_schema(vec![(
             "value",

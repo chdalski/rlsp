@@ -246,11 +246,6 @@ impl SchemaCache {
     /// # Errors
     ///
     /// Propagates errors from [`fetch_schema_raw`].
-    ///
-    /// # Panics
-    ///
-    /// Does not panic in practice: the entry is inserted immediately before the
-    /// `.get()` call, so the key is always present.
     pub fn get_or_fetch(
         &mut self,
         url: &str,
@@ -1584,7 +1579,12 @@ fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation
+)]
 mod tests {
     use super::*;
     use serde_json::json;
@@ -2154,8 +2154,10 @@ mod tests {
     #[test]
     fn should_return_cached_schema_on_cache_hit() {
         let mut cache = SchemaCache::new();
-        let mut schema = JsonSchema::default();
-        schema.description = Some("test".to_string());
+        let schema = JsonSchema {
+            description: Some("test".to_string()),
+            ..JsonSchema::default()
+        };
         cache.insert(
             "https://example.com/schema.json".to_string(),
             Value::Null,
@@ -2172,10 +2174,14 @@ mod tests {
     #[test]
     fn should_not_overwrite_existing_cache_entry() {
         let mut cache = SchemaCache::new();
-        let mut schema_a = JsonSchema::default();
-        schema_a.description = Some("first".to_string());
-        let mut schema_b = JsonSchema::default();
-        schema_b.description = Some("second".to_string());
+        let schema_a = JsonSchema {
+            description: Some("first".to_string()),
+            ..JsonSchema::default()
+        };
+        let schema_b = JsonSchema {
+            description: Some("second".to_string()),
+            ..JsonSchema::default()
+        };
 
         cache.insert(
             "https://example.com/schema.json".to_string(),
@@ -3683,30 +3689,26 @@ mod tests {
     fn circular_remote_refs_are_deduplicated() {
         // Pre-populate cache with schema A that has a $ref to schema B,
         // and schema B that has a $ref back to schema A.
-        let schema_a_value = json!({ "$ref": "https://example.com/b.json" });
-        let schema_b_value = json!({ "$ref": "https://example.com/a.json" });
+        let json_a = json!({ "$ref": "https://example.com/b.json" });
+        let json_b = json!({ "$ref": "https://example.com/a.json" });
 
-        let schema_a = parse_schema(&schema_a_value).unwrap();
-        let schema_b = parse_schema(&schema_b_value).unwrap();
+        let schema_a = parse_schema(&json_a).unwrap();
+        let schema_b = parse_schema(&json_b).unwrap();
 
         let mut cache = SchemaCache::new();
         cache.insert(
             "https://example.com/a.json".to_string(),
-            schema_a_value.clone(),
+            json_a.clone(),
             schema_a,
         );
-        cache.insert(
-            "https://example.com/b.json".to_string(),
-            schema_b_value.clone(),
-            schema_b,
-        );
+        cache.insert("https://example.com/b.json".to_string(), json_b, schema_b);
 
         // Resolving A should terminate — the cycle is broken when B tries to
         // re-visit A (already in visited set).
         let mut ctx = ParseContext::new(&mut cache, None);
         let result = resolve_ref(
             "https://example.com/a.json",
-            &schema_a_value,
+            &json_a,
             None,
             Some(&mut ctx),
             0,
@@ -3778,21 +3780,23 @@ mod tests {
     fn dollar_id_spoofing_cannot_overwrite_cache_entry() {
         let mut cache = SchemaCache::new();
 
-        let mut legitimate = JsonSchema::default();
-        legitimate.description = Some("legitimate".to_string());
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
             Value::Null,
-            legitimate,
+            JsonSchema {
+                description: Some("legitimate".to_string()),
+                ..JsonSchema::default()
+            },
         );
 
         // A malicious schema tries to claim the same URL via $id.
-        let mut malicious = JsonSchema::default();
-        malicious.description = Some("malicious".to_string());
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
             Value::Null,
-            malicious,
+            JsonSchema {
+                description: Some("malicious".to_string()),
+                ..JsonSchema::default()
+            },
         );
 
         let cached = cache
@@ -3835,7 +3839,7 @@ mod tests {
         let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value.clone(), remote_schema);
+        cache.insert(ref_url.to_string(), remote_value, remote_schema);
 
         let root = json!({});
         let mut ctx = ParseContext::new(&mut cache, None);
@@ -3861,7 +3865,7 @@ mod tests {
 
         let mut cache = SchemaCache::new();
         let url = "https://example.com/types.json".to_string();
-        cache.insert(url.clone(), remote_value.clone(), remote_schema);
+        cache.insert(url.clone(), remote_value, remote_schema);
 
         let root = json!({});
         let ref_str = format!("{url}#/definitions/Address");
@@ -3885,7 +3889,7 @@ mod tests {
         let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value.clone(), remote_schema);
+        cache.insert(ref_url.to_string(), remote_value, remote_schema);
 
         let root = json!({
             "type": "object",

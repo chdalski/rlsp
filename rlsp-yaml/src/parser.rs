@@ -41,6 +41,8 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     #[test]
@@ -140,10 +142,10 @@ mod tests {
         let mut text = String::new();
         for i in 0..500usize {
             let indent = "  ".repeat(i);
-            text.push_str(&format!("{indent}level{i}:\n"));
+            writeln!(text, "{indent}level{i}:").unwrap();
         }
         let leaf_indent = "  ".repeat(500);
-        text.push_str(&format!("{leaf_indent}leaf: value\n"));
+        writeln!(text, "{leaf_indent}leaf: value").unwrap();
 
         // Must not panic; either succeeds or returns an error diagnostic.
         let result = parse_yaml(&text);
@@ -158,7 +160,7 @@ mod tests {
         // Build 10,000 flat key-value pairs.
         let mut text = String::new();
         for i in 0..10_000usize {
-            text.push_str(&format!("key{i}: value{i}\n"));
+            writeln!(text, "key{i}: value{i}").unwrap();
         }
 
         let result = parse_yaml(&text);

@@ -268,8 +268,8 @@ mod tests {
         let uri_a = test_uri("a.yaml");
         let uri_b = test_uri("b.yaml");
 
-        store.open(uri_a.clone(), "alpha".to_string());
-        store.open(uri_b.clone(), "beta".to_string());
+        store.open(uri_a, "alpha".to_string());
+        store.open(uri_b, "beta".to_string());
 
         let mut docs = store.all_documents();
         docs.sort_by(|a, b| a.0.cmp(&b.0));

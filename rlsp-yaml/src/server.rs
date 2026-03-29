@@ -1267,14 +1267,14 @@ mod tests {
 
     #[test]
     fn get_schema_associations_returns_empty_by_default() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert!(backend.get_schema_associations().is_empty());
     }
 
     #[test]
     fn get_schema_associations_converts_settings_to_vec() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({"schemas": {"https://example.com/schema.json": "*.yaml"}});
@@ -1312,14 +1312,14 @@ mod tests {
 
     #[test]
     fn get_kubernetes_version_returns_default_when_not_configured() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert_eq!(backend.get_kubernetes_version(), DEFAULT_KUBERNETES_VERSION);
     }
 
     #[test]
     fn get_kubernetes_version_returns_configured_value() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({"kubernetesVersion": "1.29.0"});
@@ -1335,7 +1335,7 @@ mod tests {
 
     #[test]
     fn get_custom_tags_returns_empty_vec_by_default() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert!(backend.get_custom_tags().is_empty());
     }
@@ -1396,14 +1396,14 @@ mod tests {
 
     #[test]
     fn get_schema_store_enabled_returns_true_by_default() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert!(backend.get_schema_store_enabled());
     }
 
     #[test]
     fn get_schema_store_enabled_returns_false_when_disabled() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({"schemaStore": false});
@@ -1417,7 +1417,7 @@ mod tests {
 
     #[test]
     fn get_schema_store_enabled_returns_true_when_explicitly_enabled() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({"schemaStore": true});
@@ -1474,14 +1474,14 @@ mod tests {
 
     #[test]
     fn get_http_proxy_returns_none_by_default() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert!(backend.get_http_proxy().is_none());
     }
 
     #[test]
     fn get_http_proxy_returns_configured_value() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({ "httpProxy": "http://proxy.corp:8080" });
@@ -1525,7 +1525,7 @@ mod tests {
             WorkDoneProgressParams,
         };
 
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let uri = Url::parse("file:///test.yaml").unwrap();
@@ -1569,7 +1569,7 @@ mod tests {
             WorkDoneProgressParams,
         };
 
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let uri = Url::parse("file:///test.yaml").unwrap();
@@ -1648,14 +1648,14 @@ mod tests {
 
     #[test]
     fn get_color_decorators_enabled_returns_true_by_default() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
         assert!(backend.get_color_decorators_enabled());
     }
 
     #[test]
     fn get_color_decorators_enabled_returns_false_when_disabled() {
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({ "colorDecorators": false });
@@ -1675,7 +1675,7 @@ mod tests {
             PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
         };
 
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let uri = Url::parse("file:///test.yaml").unwrap();
@@ -1701,7 +1701,7 @@ mod tests {
             PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
         };
 
-        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client));
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
         let json = serde_json::json!({ "colorDecorators": false });

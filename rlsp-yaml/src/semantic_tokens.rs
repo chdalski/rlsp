@@ -428,8 +428,7 @@ mod tests {
     #[test]
     fn quoted_string_value_produces_string_token() {
         let abs = absolute(&semantic_tokens(r#"key: "quoted""#));
-        let strings: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_STRING).collect();
-        assert!(!strings.is_empty());
+        assert!(abs.iter().any(|t| t.3 == TOKEN_STRING));
     }
 
     #[test]
@@ -487,28 +486,22 @@ mod tests {
     #[test]
     fn anchor_produces_variable_with_declaration_modifier() {
         let abs = absolute(&semantic_tokens("base: &anchor value"));
-        let vars: Vec<_> = abs
-            .iter()
-            .filter(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
-            .collect();
-        assert!(!vars.is_empty());
+        assert!(
+            abs.iter()
+                .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
+        );
     }
 
     #[test]
     fn alias_produces_variable_without_modifier() {
         let abs = absolute(&semantic_tokens("child: *anchor"));
-        let vars: Vec<_> = abs
-            .iter()
-            .filter(|t| t.3 == TOKEN_VARIABLE && t.4 == 0)
-            .collect();
-        assert!(!vars.is_empty());
+        assert!(abs.iter().any(|t| t.3 == TOKEN_VARIABLE && t.4 == 0));
     }
 
     #[test]
     fn tag_produces_type_token() {
         let abs = absolute(&semantic_tokens("value: !include file.yaml"));
-        let types: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_TYPE).collect();
-        assert!(!types.is_empty());
+        assert!(abs.iter().any(|t| t.3 == TOKEN_TYPE));
     }
 
     #[test]
@@ -578,8 +571,7 @@ mod tests {
     #[test]
     fn scientific_notation_produces_number_token() {
         let abs = absolute(&semantic_tokens("val: 1.5e10"));
-        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
-        assert_eq!(nums.len(), 1);
+        assert_eq!(abs.iter().filter(|t| t.3 == TOKEN_NUMBER).count(), 1);
     }
 
     // is_number: negative scientific notation
@@ -629,8 +621,7 @@ mod tests {
     #[test]
     fn sequence_item_number_value_produces_number_token() {
         let abs = absolute(&semantic_tokens("- 42"));
-        let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
-        assert_eq!(nums.len(), 1);
+        assert_eq!(abs.iter().filter(|t| t.3 == TOKEN_NUMBER).count(), 1);
     }
 
     // sequence item with keyword value
@@ -644,9 +635,8 @@ mod tests {
     #[test]
     fn tag_on_value_side_of_mapping_produces_type_token() {
         let abs = absolute(&semantic_tokens("key: !str hello"));
-        let types: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_TYPE).collect();
         assert!(
-            !types.is_empty(),
+            abs.iter().any(|t| t.3 == TOKEN_TYPE),
             "tag on value side should produce type token"
         );
     }
@@ -655,12 +645,9 @@ mod tests {
     #[test]
     fn anchor_on_sequence_item_produces_variable_with_declaration() {
         let abs = absolute(&semantic_tokens("- &myanchor value"));
-        let vars: Vec<_> = abs
-            .iter()
-            .filter(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
-            .collect();
         assert!(
-            !vars.is_empty(),
+            abs.iter()
+                .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION),
             "anchor on sequence item should produce variable with declaration modifier"
         );
     }
@@ -683,9 +670,8 @@ mod tests {
     fn inline_comment_stops_marker_scan() {
         // "&anchor" after "#" should NOT be treated as an anchor token
         let abs = absolute(&semantic_tokens("key: value # &notananchor"));
-        let vars: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_VARIABLE).collect();
         assert!(
-            vars.is_empty(),
+            abs.iter().all(|t| t.3 != TOKEN_VARIABLE),
             "marker inside comment should not produce variable token"
         );
     }

@@ -2844,11 +2844,13 @@ mod tests {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         // Second document is missing "name"
-        let req_diags: Vec<_> = result
-            .iter()
-            .filter(|d| code_of(d) == "schemaRequired")
-            .collect();
-        assert_eq!(req_diags.len(), 1);
+        assert_eq!(
+            result
+                .iter()
+                .filter(|d| code_of(d) == "schemaRequired")
+                .count(),
+            1
+        );
     }
 
     // Test 57
@@ -3569,11 +3571,7 @@ mod tests {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         // yaml_to_json returns None for mappings — const check skipped
-        let const_diags: Vec<_> = result
-            .iter()
-            .filter(|d| code_of(d) == "schemaConst")
-            .collect();
-        assert!(const_diags.is_empty());
+        assert!(result.iter().all(|d| code_of(d) != "schemaConst"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -3794,11 +3792,10 @@ mod tests {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         // One type violation from the string pattern
-        let type_diags: Vec<_> = result
-            .iter()
-            .filter(|d| code_of(d) == "schemaType")
-            .collect();
-        assert_eq!(type_diags.len(), 1);
+        assert_eq!(
+            result.iter().filter(|d| code_of(d) == "schemaType").count(),
+            1
+        );
     }
 
     // Test 105
@@ -4081,11 +4078,13 @@ mod tests {
         let text = "UPPER: 1\nAlso_Bad: 2\ngood: 3";
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
-        let pattern_diags: Vec<_> = result
-            .iter()
-            .filter(|d| code_of(d) == "schemaPattern")
-            .collect();
-        assert_eq!(pattern_diags.len(), 2);
+        assert_eq!(
+            result
+                .iter()
+                .filter(|d| code_of(d) == "schemaPattern")
+                .count(),
+            2
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -4709,11 +4708,10 @@ mod tests {
         let result = validate_schema("name: hello\nextra: world", &docs, &schema, true);
         // "name" is not in then properties — it's unevaluated → diagnostic
         // "extra" IS in then properties → no diagnostic for extra
-        let unevaluated: Vec<_> = result
-            .iter()
-            .filter(|d| d.message.contains("extra"))
-            .collect();
-        assert!(unevaluated.is_empty(), "extra should be evaluated by then");
+        assert!(
+            result.iter().all(|d| !d.message.contains("extra")),
+            "extra should be evaluated by then"
+        );
     }
 
     // Test 156 — no unevaluated keywords — existing behavior unchanged (regression)

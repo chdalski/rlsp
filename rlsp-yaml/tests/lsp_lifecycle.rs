@@ -1209,7 +1209,7 @@ async fn should_return_null_semantic_tokens_for_unknown_document() {
 
 // ---- did_change_configuration ----
 
-fn did_change_configuration_notification(settings: serde_json::Value) -> Request {
+fn did_change_configuration_notification(settings: &serde_json::Value) -> Request {
     Request::build("workspace/didChangeConfiguration")
         .params(json!({ "settings": settings }))
         .finish()
@@ -1246,7 +1246,7 @@ async fn should_update_settings_on_did_change_configuration() {
     // Enable keyOrdering via didChangeConfiguration
     let resp = send(
         &mut service,
-        did_change_configuration_notification(json!({ "keyOrdering": true })),
+        did_change_configuration_notification(&json!({ "keyOrdering": true })),
     )
     .await;
     assert!(

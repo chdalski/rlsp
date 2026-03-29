@@ -427,9 +427,8 @@ mod tests {
         let result = find_references(text, &uri, pos(0, 10), false);
 
         assert_eq!(result.len(), 2, "should find 2 alias references only");
-        let lines: Vec<u32> = result.iter().map(|l| l.range.start.line).collect();
         assert!(
-            !lines.contains(&0),
+            !result.iter().any(|l| l.range.start.line == 0),
             "should NOT include &shared anchor on line 0"
         );
     }

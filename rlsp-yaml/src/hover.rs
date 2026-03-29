@@ -641,7 +641,7 @@ mod tests {
     fn hover_content(hover: &Hover) -> &str {
         match &hover.contents {
             HoverContents::Markup(m) => &m.value,
-            _ => panic!("expected MarkupContent"),
+            HoverContents::Scalar(_) | HoverContents::Array(_) => panic!("expected MarkupContent"),
         }
     }
 
@@ -820,7 +820,7 @@ mod tests {
             HoverContents::Markup(m) => {
                 assert_eq!(m.kind, MarkupKind::Markdown);
             }
-            _ => panic!("expected MarkupContent"),
+            HoverContents::Scalar(_) | HoverContents::Array(_) => panic!("expected MarkupContent"),
         }
     }
 
@@ -1709,7 +1709,7 @@ mod tests {
         let text = "name: Alice\n";
         let docs = parse_docs(text);
         // 300 × 'é' = 600 bytes but 300 chars; truncated at 200 chars (199 body + ellipsis)
-        let long_desc: String = std::iter::repeat('é').take(300).collect();
+        let long_desc: String = "é".repeat(300);
         let mut props = HashMap::new();
         props.insert("name".to_string(), schema_with_description(&long_desc));
         let schema = JsonSchema {
@@ -1826,7 +1826,7 @@ mod tests {
         props.insert(
             "key".to_string(),
             JsonSchema {
-                examples: Some(vec![JsonValue::String(long_example.clone())]),
+                examples: Some(vec![JsonValue::String(long_example)]),
                 ..Default::default()
             },
         );
@@ -1984,7 +1984,7 @@ mod tests {
         let hover = result.expect("should return hover for plain scalar in sequence");
         let content = hover_content(&hover);
         assert!(
-            content.contains("0") || content.contains("plainvalue"),
+            content.contains('0') || content.contains("plainvalue"),
             "should contain sequence index or value"
         );
     }

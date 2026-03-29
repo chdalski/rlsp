@@ -930,6 +930,8 @@ where
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     // ---- Unused Anchors Validator: Happy Paths ----
@@ -1106,11 +1108,11 @@ mod tests {
         // Generate YAML with 100+ anchors, some used, some not
         let mut text = String::new();
         for i in 0..120 {
-            text.push_str(&format!("anchor{}: &anchor{}\n  key: val\n", i, i));
+            writeln!(text, "anchor{i}: &anchor{i}\n  key: val").unwrap();
         }
         // Use only even-numbered anchors
         for i in (0..120).step_by(2) {
-            text.push_str(&format!("ref{}: *anchor{}\n", i, i));
+            writeln!(text, "ref{i}: *anchor{i}").unwrap();
         }
 
         let result = validate_unused_anchors(&text);
@@ -1127,7 +1129,7 @@ mod tests {
     #[test]
     fn should_handle_long_anchor_name() {
         let long_name = "a".repeat(200);
-        let text = format!("data: &{}\n  k: v\n", long_name);
+        let text = format!("data: &{long_name}\n  k: v\n");
         let result = validate_unused_anchors(&text);
 
         assert_eq!(result.len(), 1);
