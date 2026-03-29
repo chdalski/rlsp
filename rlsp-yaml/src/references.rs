@@ -211,6 +211,7 @@ const fn is_anchor_name_char(ch: char) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

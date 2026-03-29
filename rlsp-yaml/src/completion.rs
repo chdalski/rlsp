@@ -994,6 +994,7 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};

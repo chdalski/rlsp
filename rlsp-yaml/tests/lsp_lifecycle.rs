@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#![allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;

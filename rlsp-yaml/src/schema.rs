@@ -260,7 +260,12 @@ impl SchemaCache {
             let (value, schema) = fetch_schema_raw(url, proxy)?;
             self.inner.insert(url.to_string(), (value, schema));
         }
-        Ok(self.inner.get(url).map(|(_, s)| s).expect("just inserted"))
+        let Some((_, schema)) = self.inner.get(url) else {
+            return Err(SchemaError::FetchFailed(
+                "cache miss after insert".to_string(),
+            ));
+        };
+        Ok(schema)
     }
 
     /// Return whether the URL is already in the cache (avoids a fetch).
@@ -1579,6 +1584,7 @@ fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use serde_json::json;

@@ -711,7 +711,7 @@ fn extract_block_key(effective_indent: usize, effective_trimmed: &str) -> Option
 /// line does not look like a mapping key.
 fn parse_key_from_trimmed(trimmed: &str) -> Option<String> {
     if trimmed.starts_with('"') || trimmed.starts_with('\'') {
-        let quote = trimmed.chars().next().unwrap();
+        let quote = trimmed.chars().next()?;
         let close = trimmed[1..].find(quote)?;
         let key_end = close + 2; // byte pos past closing quote
         let after_key = trimmed[key_end..].trim_start();
@@ -928,6 +928,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

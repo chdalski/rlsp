@@ -39,6 +39,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -625,6 +625,7 @@ fn json_value_to_display_string(value: &serde_json::Value) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use std::collections::HashMap;
 

@@ -168,7 +168,10 @@ pub fn join(separator: &Doc, docs: Vec<Doc>) -> Doc {
         return Doc::Concat(vec![]);
     }
     let mut iter = docs.into_iter();
-    let mut result = vec![iter.next().expect("non-empty checked above")];
+    let Some(first) = iter.next() else {
+        return Doc::Concat(vec![]);
+    };
+    let mut result = vec![first];
     for doc in iter {
         result.push(separator.clone());
         result.push(doc);

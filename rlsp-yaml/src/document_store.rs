@@ -88,6 +88,7 @@ fn parse_marked(text: &str) -> Option<Vec<MarkedYamlOwned>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

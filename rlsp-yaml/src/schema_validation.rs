@@ -338,7 +338,9 @@ fn validate_unevaluated_properties(
                 ));
             }
             Some(AdditionalProperties::Schema(extra_schema)) => {
-                let v = map.get(k).expect("key came from map");
+                let Some(v) = map.get(k) else {
+                    continue;
+                };
                 let mut child_path = path.to_vec();
                 child_path.push(key_str.clone());
                 validate_node(v, extra_schema, &child_path, ctx, depth + 1);
@@ -1882,6 +1884,7 @@ fn format_path(path: &[String]) -> String {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};

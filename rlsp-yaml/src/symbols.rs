@@ -384,6 +384,7 @@ fn yaml_key_to_string(key: &YamlOwned) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::SymbolKind;

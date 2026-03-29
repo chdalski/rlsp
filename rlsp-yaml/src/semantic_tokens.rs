@@ -347,6 +347,7 @@ fn to_u32(v: usize) -> u32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

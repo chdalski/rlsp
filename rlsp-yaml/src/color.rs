@@ -646,6 +646,7 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -323,6 +323,7 @@ fn marker_to_lsp_range(start: &Marker, end: &Marker) -> Range {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use saphyr::LoadableYamlNode;

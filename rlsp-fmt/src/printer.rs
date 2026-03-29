@@ -195,6 +195,7 @@ const fn indent_width(indent: usize, options: &FormatOptions) -> usize {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::FormatOptions;

@@ -192,6 +192,7 @@ fn is_valid_anchor_name(name: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

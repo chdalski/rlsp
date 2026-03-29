@@ -8,8 +8,10 @@ const MAX_URL_LENGTH: usize = 2048;
 
 /// Regex pattern for detecting URLs with http://, https://, or file:// schemes.
 /// Excludes common delimiters and whitespace to avoid capturing surrounding text.
-static URL_REGEX: std::sync::LazyLock<Regex> =
-    std::sync::LazyLock::new(|| Regex::new(r#"(https?|file)://[^\s<>"{}|\\^`\[\]()]+"#).unwrap());
+static URL_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#"(https?|file)://[^\s<>"{}|\\^`\[\]()]+"#)
+        .unwrap_or_else(|_| unreachable!("static regex is valid"))
+});
 
 /// Find all document links (URLs and `!include` paths) in the given YAML text.
 ///
@@ -189,11 +191,11 @@ fn calculate_range(line: usize, byte_start: usize, byte_end: usize, line_text: &
 
     Range {
         start: Position {
-            line: u32::try_from(line).expect("line index fits in u32"),
+            line: u32::try_from(line).unwrap_or(u32::MAX),
             character: start_char,
         },
         end: Position {
-            line: u32::try_from(line).expect("line index fits in u32"),
+            line: u32::try_from(line).unwrap_or(u32::MAX),
             character: end_char,
         },
     }
@@ -210,10 +212,11 @@ fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
             .map(char::len_utf16)
             .sum::<usize>(),
     )
-    .expect("column offset fits in u32")
+    .unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

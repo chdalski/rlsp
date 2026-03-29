@@ -220,9 +220,9 @@ fn collect_document_section_folds(lines: &[&str], ranges: &mut Vec<FoldingRange>
     }
 
     // Last section: from after last separator to end
-    let last_sep = *separator_positions
-        .last()
-        .expect("separator_positions is non-empty");
+    let Some(&last_sep) = separator_positions.last() else {
+        return;
+    };
     let start = last_sep + 1;
     if start < lines.len() {
         let end = find_last_content_line_in_range(lines, start, lines.len());
@@ -291,6 +291,7 @@ fn push_fold(
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::FoldingRangeKind;

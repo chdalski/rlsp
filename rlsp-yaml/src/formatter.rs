@@ -575,6 +575,7 @@ fn sequence_item_to_doc(item: &YamlOwned, options: &YamlFormatOptions) -> Doc {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
