@@ -125,6 +125,8 @@ pub struct JsonSchema {
     pub title: Option<String>,
     pub description: Option<String>,
     pub format: Option<String>,
+    pub content_encoding: Option<String>,
+    pub content_media_type: Option<String>,
     pub properties: Option<HashMap<String, Self>>,
     pub required: Option<Vec<String>>,
     pub enum_values: Option<Vec<Value>>,
@@ -716,6 +718,8 @@ fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSc
     schema.examples = obj.get("examples").and_then(Value::as_array).cloned();
     schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
     schema.format = string_field(obj, "format");
+    schema.content_encoding = string_field(obj, "contentEncoding");
+    schema.content_media_type = string_field(obj, "contentMediaType");
 }
 
 /// Populate `properties` and `patternProperties` on `schema` from `obj`.

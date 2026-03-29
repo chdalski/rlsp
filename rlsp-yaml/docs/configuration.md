@@ -105,9 +105,15 @@ When `true`, string scalars are wrapped in single quotes instead of double quote
 - **Type:** `boolean` (optional)
 - **Default:** `true`
 
-Enable validation of the JSON Schema `format` keyword. When enabled, string values are checked against the declared format and a **warning** diagnostic (`schemaFormat`) is emitted for values that do not conform.
+Enable validation of the JSON Schema `format` keyword, `contentEncoding`, and `contentMediaType` keywords. When enabled:
 
-Supported formats:
+- String values are checked against the declared `format` and a **warning** diagnostic (`schemaFormat`) is emitted for values that do not conform.
+- String values are decoded against the declared `contentEncoding` and a **warning** diagnostic (`schemaContentEncoding`) is emitted for values that cannot be decoded.
+- Decoded content is checked against the declared `contentMediaType` and a **warning** diagnostic (`schemaContentMediaType`) is emitted for content that does not match.
+
+When disabled, all three keyword checks are skipped (annotation-only mode, per Draft 2019-09+).
+
+Supported `format` values:
 
 | Format | Description |
 |--------|-------------|
@@ -131,9 +137,13 @@ Supported formats:
 | `iri` | Internationalized Resource Identifier (RFC 3987) |
 | `iri-reference` | IRI or relative IRI reference (RFC 3987) |
 
-Unknown format values are silently ignored (per the JSON Schema specification, format validation is advisory).
+Unknown `format` values are silently ignored (per the JSON Schema specification, format validation is advisory).
 
-To disable format validation:
+Supported `contentEncoding` values: `base64`, `base64url`, `base32`, `base16`. Unknown encodings are silently ignored.
+
+Supported `contentMediaType` values: `application/json`. Unknown media types are silently ignored.
+
+To disable format and content validation:
 
 ```json
 { "formatValidation": false }

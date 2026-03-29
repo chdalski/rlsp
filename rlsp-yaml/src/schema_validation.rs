@@ -637,6 +637,9 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
         if let Some(format) = &schema.format {
             validate_format(s, format, path, ctx.lines, ctx.diagnostics);
         }
+        if schema.content_encoding.is_some() || schema.content_media_type.is_some() {
+            validate_content(s, schema, path, ctx.lines, ctx.diagnostics);
+        }
     }
 }
 
@@ -684,6 +687,75 @@ fn validate_format(
                 format_path(path)
             ),
         ));
+    }
+}
+
+/// Validates `contentEncoding` and `contentMediaType` keywords.
+///
+/// Decodes the string using the declared encoding, then (if both are set)
+/// checks the decoded bytes against the declared media type.
+fn validate_content(
+    s: &str,
+    schema: &JsonSchema,
+    path: &[String],
+    lines: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Step 1: decode if contentEncoding is set
+    let decoded_bytes: Option<Vec<u8>> = if let Some(enc) = &schema.content_encoding {
+        let result = match enc.as_str() {
+            "base64" => data_encoding::BASE64.decode(s.as_bytes()),
+            "base64url" => data_encoding::BASE64URL.decode(s.as_bytes()),
+            "base32" => data_encoding::BASE32.decode(s.as_bytes()),
+            "base16" => data_encoding::HEXUPPER_PERMISSIVE.decode(s.as_bytes()),
+            // Unknown encoding — skip both checks
+            _ => return,
+        };
+        if let Ok(bytes) = result {
+            Some(bytes)
+        } else {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaContentEncoding",
+                format!(
+                    "String at {} is not valid {enc} encoded data",
+                    format_path(path)
+                ),
+            ));
+            // Encoding failed — skip media type check
+            return;
+        }
+    } else {
+        // No encoding set — use raw string bytes for media type check
+        None
+    };
+
+    // Step 2: check media type if set
+    if let Some(media_type) = &schema.content_media_type {
+        let valid = match media_type.as_str() {
+            "application/json" => {
+                let text = decoded_bytes
+                    .as_ref()
+                    .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
+                text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok())
+            }
+            // Unknown media type — skip
+            _ => return,
+        };
+        if !valid {
+            let range = node_range(path, lines);
+            diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaContentMediaType",
+                format!(
+                    "String at {} does not contain valid {media_type} content",
+                    format_path(path)
+                ),
+            ));
+        }
     }
 }
 
@@ -4838,6 +4910,136 @@ mod tests {
     #[test]
     fn format_iri_reference_invalid() {
         assert_eq!(run_format("not valid iri ref", "iri-reference").len(), 1);
+    }
+
+    fn content_schema(encoding: Option<&str>, media_type: Option<&str>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            content_encoding: encoding.map(str::to_string),
+            content_media_type: media_type.map(str::to_string),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn run_content(text: &str, encoding: Option<&str>, media_type: Option<&str>) -> Vec<Diagnostic> {
+        let schema = content_schema(encoding, media_type);
+        let docs = parse_docs(text);
+        validate_schema(text, &docs, &schema, true)
+    }
+
+    // Test 187 — contentEncoding base64: valid
+    #[test]
+    fn content_encoding_base64_valid() {
+        // "hello" in base64
+        assert!(run_content("aGVsbG8=", Some("base64"), None).is_empty());
+        assert!(run_content("", Some("base64"), None).is_empty());
+    }
+
+    // Test 188 — contentEncoding base64: invalid
+    #[test]
+    fn content_encoding_base64_invalid() {
+        assert_eq!(run_content("not-valid-base64!!!", Some("base64"), None).len(), 1);
+    }
+
+    // Test 189 — contentEncoding base64url: valid
+    #[test]
+    fn content_encoding_base64url_valid() {
+        // "hello" in base64url
+        assert!(run_content("aGVsbG8=", Some("base64url"), None).is_empty());
+    }
+
+    // Test 190 — contentEncoding base64url: invalid
+    #[test]
+    fn content_encoding_base64url_invalid() {
+        assert_eq!(run_content("not+valid/base64url!!!", Some("base64url"), None).len(), 1);
+    }
+
+    // Test 191 — contentEncoding base32: valid
+    #[test]
+    fn content_encoding_base32_valid() {
+        // "hello" in base32
+        assert!(run_content("NBSWY3DPEB3W64TMMQ======", Some("base32"), None).is_empty());
+    }
+
+    // Test 192 — contentEncoding base32: invalid
+    #[test]
+    fn content_encoding_base32_invalid() {
+        assert_eq!(run_content("not-valid-base32!!!", Some("base32"), None).len(), 1);
+    }
+
+    // Test 193 — contentEncoding base16: valid
+    #[test]
+    fn content_encoding_base16_valid() {
+        assert!(run_content("48656C6C6F", Some("base16"), None).is_empty());
+        assert!(run_content("48656c6c6f", Some("base16"), None).is_empty());
+    }
+
+    // Test 194 — contentEncoding base16: invalid
+    #[test]
+    fn content_encoding_base16_invalid() {
+        assert_eq!(run_content("ZZZZ", Some("base16"), None).len(), 1);
+    }
+
+    // Test 195 — contentEncoding unknown: silently ignored
+    #[test]
+    fn content_encoding_unknown_ignored() {
+        assert!(run_content("anything", Some("base58"), None).is_empty());
+    }
+
+    // Test 196 — contentMediaType application/json: valid (no encoding)
+    // The value must be a YAML string (quoted) so it reaches validate_string_constraints.
+    // Values starting with { or [ are YAML flow collections; use quoted YAML.
+    #[test]
+    fn content_media_type_json_valid_no_encoding() {
+        // "\"42\"" parses as YAML string "42", which is valid JSON
+        let schema = content_schema(None, Some("application/json"));
+        let docs = parse_docs("\"42\"");
+        assert!(validate_schema("\"42\"", &docs, &schema, true).is_empty());
+    }
+
+    // Test 197 — contentMediaType application/json: invalid (no encoding)
+    #[test]
+    fn content_media_type_json_invalid_no_encoding() {
+        assert_eq!(run_content("not json", None, Some("application/json")).len(), 1);
+    }
+
+    // Test 198 — contentEncoding + contentMediaType: valid base64-encoded JSON
+    #[test]
+    fn content_encoding_and_media_type_valid() {
+        // base64("{"key":"value"}") = "eyJrZXkiOiJ2YWx1ZSJ9"
+        assert!(run_content("eyJrZXkiOiJ2YWx1ZSJ9", Some("base64"), Some("application/json")).is_empty());
+    }
+
+    // Test 199 — contentEncoding + contentMediaType: encoding fails → only encoding diagnostic
+    #[test]
+    fn content_encoding_fails_skips_media_type_check() {
+        let diags = run_content("not-valid-base64!!!", Some("base64"), Some("application/json"));
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].code == Some(NumberOrString::String("schemaContentEncoding".to_string())));
+    }
+
+    // Test 200 — contentEncoding + contentMediaType: valid encoding but invalid JSON
+    #[test]
+    fn content_encoding_valid_media_type_invalid() {
+        // base64("not json") = "bm90IGpzb24="
+        let diags = run_content("bm90IGpzb24=", Some("base64"), Some("application/json"));
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].code == Some(NumberOrString::String("schemaContentMediaType".to_string())));
+    }
+
+    // Test 201 — contentMediaType unknown: silently ignored
+    #[test]
+    fn content_media_type_unknown_ignored() {
+        assert!(run_content("anything", None, Some("text/plain")).is_empty());
+    }
+
+    // Test 202 — format_validation disabled: content checks also skipped
+    #[test]
+    fn content_validation_disabled_when_format_validation_off() {
+        let schema = content_schema(Some("base64"), Some("application/json"));
+        let docs = parse_docs("not-valid-base64!!!");
+        let result = validate_schema("not-valid-base64!!!", &docs, &schema, false);
+        assert!(result.is_empty());
     }
 
 }
