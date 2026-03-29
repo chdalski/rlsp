@@ -185,7 +185,7 @@ src/
 
 ```sh
 cargo build            # build
-cargo test             # run all tests (~660 tests)
+cargo test             # run all tests
 cargo clippy           # lint (pedantic + nursery, zero warnings)
 cargo fmt              # format
 ```
