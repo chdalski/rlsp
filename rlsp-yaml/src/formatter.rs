@@ -1475,4 +1475,113 @@ mod tests {
             "second EOF comment should follow first"
         );
     }
+
+    // Tests for sequence node paths in sequence_to_doc / sequence_item_to_doc.
+
+    // SQ1: Empty sequence value formats as `[]` (line 536).
+    // saphyr parses `[]` as Sequence([]), triggering the seq.is_empty() early return.
+    #[test]
+    fn empty_sequence_formats_as_brackets() {
+        let input = "empty_seq: []\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("[]"),
+            "empty sequence should format as []: {result:?}"
+        );
+    }
+
+    // SQ2: Empty mapping value formats as `{}` (line 490).
+    // saphyr parses `{}` as Mapping({}), triggering the map.is_empty() early return.
+    #[test]
+    fn empty_mapping_formats_as_braces() {
+        let input = "empty_map: {}\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("{}"),
+            "empty mapping should format as {{}}: {result:?}"
+        );
+    }
+
+    // SQ3: Nested sequence-in-sequence (lines 562-564).
+    // saphyr produces Sequence([Sequence([...]), ...]) for `- - item` syntax.
+    // The non-empty Sequence arm in sequence_item_to_doc fires for the inner sequence.
+    #[test]
+    fn nested_sequence_in_sequence() {
+        let input = "outer:\n  - - inner1\n    - inner2\n  - simple\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("inner1"), "inner1 missing: {result:?}");
+        assert!(result.contains("inner2"), "inner2 missing: {result:?}");
+        assert!(result.contains("simple"), "simple missing: {result:?}");
+        // The outer sequence must be under `outer:`.
+        let outer_pos = result.find("outer:").unwrap();
+        let inner1_pos = result.find("inner1").unwrap();
+        assert!(
+            inner1_pos > outer_pos,
+            "inner1 should appear after outer key: {result:?}"
+        );
+    }
+
+    // SQ4: Nested sequence idempotency.
+    #[test]
+    fn nested_sequence_idempotent() {
+        let input = "outer:\n  - - inner1\n    - inner2\n  - simple\n";
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(
+            first, second,
+            "nested sequence formatting should be idempotent:\nfirst:  {first:?}\nsecond: {second:?}"
+        );
+    }
+
+    // Tests for multi-document edge cases.
+
+    // MD1: `...` document-end terminator.
+    // saphyr treats `...` as a document boundary (same role as `---`). The formatter
+    // always emits `---` separators between documents, so `...` terminators are not
+    // preserved in the output — this is a known limitation. Content is preserved.
+    #[test]
+    fn document_end_terminator_content_preserved() {
+        // `...` followed by a new document introduced by `---`.
+        let input = "key1: value1\n...\n---\nkey2: value2\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("key1: value1"),
+            "doc1 content missing: {result:?}"
+        );
+        assert!(
+            result.contains("key2: value2"),
+            "doc2 content missing: {result:?}"
+        );
+        // Documents are separated by `---` in the output regardless of input separator.
+        assert!(
+            result.contains("---"),
+            "document separator missing: {result:?}"
+        );
+    }
+
+    // MD2: Three-document file using mixed `---` and `...` separators.
+    // saphyr parses all three as separate documents. The formatter joins them with `---`.
+    #[test]
+    fn three_document_mixed_separators() {
+        let input = "key: value\n...\nkey2: value2\n---\nkey3: value3\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("key: value"), "doc1 missing: {result:?}");
+        assert!(result.contains("key2: value2"), "doc2 missing: {result:?}");
+        assert!(result.contains("key3: value3"), "doc3 missing: {result:?}");
+    }
+
+    // MD3: Document closed by `...` with no following document.
+    // saphyr produces one document; `...` is consumed as a terminator.
+    // The formatter emits the single document without any `---`.
+    #[test]
+    fn single_document_with_dot_terminator() {
+        let input = "key: value\n...\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("key: value"), "content missing: {result:?}");
+        // No `---` separator should appear — there is only one document.
+        assert!(
+            !result.contains("---"),
+            "no separator expected for single doc: {result:?}"
+        );
+    }
 }
