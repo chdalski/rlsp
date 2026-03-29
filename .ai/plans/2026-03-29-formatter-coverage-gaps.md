@@ -1,7 +1,7 @@
 # Formatter Coverage Gaps
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -39,10 +39,10 @@ constructs.
 
 ## Steps
 
-- [ ] Add tests for comment extraction edge cases
-- [ ] Add tests for node_to_doc uncommon branches
-- [ ] Add tests for string/float formatting edge cases
-- [ ] Add tests for nested sequences and range formatting
+- [x] Add tests for comment extraction edge cases — a803a2a
+- [x] Add tests for node_to_doc uncommon branches — bf71d21
+- [x] Add tests for string/float formatting edge cases — bf71d21
+- [x] Add tests for nested sequences and range formatting — cbce995
 
 ## Tasks
 
