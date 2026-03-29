@@ -23,6 +23,18 @@ the testing strategy is non-obvious:
 - The task adds or modifies public API surface — API
   contracts need explicit coverage because callers depend
   on them
+- The task changes behavior observable by callers or
+  users — behavioral changes need explicit assertions
+  even when the code change looks small, because the
+  blast radius extends beyond the modified function
+- The modified code has no existing test coverage — run
+  a quick coverage check or grep for test imports of the
+  module. Untested code has unknown invariants that the
+  TE can surface before implementation cements them
+- The task introduces a new test file — new test files
+  establish testing patterns for a module. The TE should
+  validate the approach before the pattern propagates to
+  future tests
 
 ## When to Consult the Security Engineer
 
@@ -52,17 +64,28 @@ Skip both advisors when the task is **low risk and low
 uncertainty** — the implementation is straightforward and
 the blast radius is contained:
 
-- **Pure functions** — no I/O, no side effects, no external
-  input
+- **Pure functions with existing test patterns** — no I/O,
+  no side effects, no external input, and the codebase
+  already has tests for similar functions that establish the
+  testing approach
 - **Internal wiring** — module registration, capability
   flags, handler delegation to existing functions
-- **Pattern-following** — code structurally identical to
-  existing, reviewed code in the same codebase
+- **Pattern-following with test coverage** — code
+  structurally identical to existing, reviewed code in the
+  same codebase, where the pattern's tests also cover the
+  new instance (e.g., adding a handler when the handler
+  registration has parameterized tests)
 - **Test-only changes** — adding or modifying tests without
   changing production code
 - **Refactoring** — restructuring code without changing
   behavior or trust boundaries
 - **Documentation** — comments, README updates, plan files
+
+"Pattern-following" alone is not sufficient to skip the
+test advisor — the pattern must include its test coverage.
+Code that follows an existing implementation pattern but
+has no corresponding test pattern still has high
+uncertainty about what to test.
 
 ## Dispatch-Time Assessment (Lead)
 

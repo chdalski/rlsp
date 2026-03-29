@@ -38,11 +38,20 @@ approval (with commit) or a rejection (with findings).
    build commands must be documented before review can
    proceed. This avoids reacting to stale cached state.
 
-2. **Read all changed files** — source code and tests.
+2. **Check the handoff message for advisor sign-off
+   status.** The requester's message must state which
+   advisors were consulted and their sign-off status, or
+   "no advisors consulted." If this field is missing,
+   reject and ask the requester to include it — without
+   it, the test adequacy backstop (see Test Coverage
+   below) cannot distinguish "advisors were consulted and
+   signed off" from "advisors were skipped."
 
-3. **Evaluate** (see What to Review below).
+3. **Read all changed files** — source code and tests.
 
-4. **Decide:** approve or reject.
+4. **Evaluate** (see What to Review below).
+
+5. **Decide:** approve or reject.
 
 ### If You Approve
 
@@ -160,6 +169,19 @@ correctness bug.
   easiest to skip and the most valuable to test)
 - Is there hard-to-test code that was skipped? If so, is
   the gap justified or should it be addressed?
+
+**Test adequacy backstop.** Check whether the task's test
+coverage matches the complexity of the changes. If the
+implementation modifies observable behavior, adds new code
+paths, or introduces a new module — but no new tests were
+added and the advisor sign-off status says "no advisors
+consulted" — flag this as a **High** finding and reject.
+Tell the requester to consult the test advisor before
+resubmitting. This catches cases where test-advisor
+consultation was skipped inappropriately — the reviewer
+is the last gate before code enters the codebase, and
+inadequate test coverage for non-trivial changes is a
+systemic risk that compounds across commits.
 
 ### 3. Design
 

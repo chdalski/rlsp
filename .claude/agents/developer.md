@@ -59,19 +59,35 @@ When you receive a task:
 
 ### Consulting Advisors
 
-If the risk-assessment rule indicates consultation:
+The requester's task message specifies which advisors to
+consult. **Treat these directives as mandatory** — the
+requester assessed risk and uncertainty at dispatch time
+with full plan context and applies a low threshold for
+test-advisor consultation to counterbalance the natural
+implementation-speed bias. Do not downgrade a directed
+consultation to a skip.
 
-- **High uncertainty** — message the test advisor with the
-  task description and relevant file paths. Wait for the
-  test list before implementing.
-- **High risk** — message the security advisor with the
-  task description and relevant file paths. Wait for the
-  security assessment before implementing.
+Additionally, apply the risk-assessment rule independently
+to the actual work. If your reading of the code reveals
+indicators the requester didn't anticipate, **add**
+consultations — but never remove ones the requester
+directed.
+
+When consulting:
+
+- **Test advisor** — message with the task description and
+  relevant file paths. Wait for the test list before
+  implementing.
+- **Security advisor** — message with the task description
+  and relevant file paths. Wait for the security assessment
+  before implementing.
 - If both are needed, message both in parallel and wait for
   both responses — parallel consultation avoids sequential
   delay.
-- **Low risk + low uncertainty** — skip advisors and
-  implement directly.
+- **"No advisors needed"** — the requester explicitly
+  marked the task as low risk and low uncertainty. Skip
+  advisors unless your own reading of the code reveals
+  otherwise.
 
 **If an advisor does not respond** — the advisor may not
 have been spawned on the current team. Do not wait
