@@ -2,6 +2,109 @@
 
 A YAML language server implementing the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) using [tower-lsp](https://github.com/ebkalderon/tower-lsp) and [saphyr](https://github.com/saphyr-rs/saphyr) for YAML parsing.
 
+## Installation
+
+```sh
+cargo install rlsp-yaml
+```
+
+Prebuilt binaries for Linux, macOS, and Windows are available on [GitHub Releases](https://github.com/chdalski/rlsp/releases).
+
+## Editor Setup
+
+The server communicates over stdio using the LSP protocol. Point your editor's LSP client at the binary:
+
+```sh
+cargo build --release
+# binary at target/release/rlsp-yaml
+```
+
+### Neovim (nvim-lspconfig)
+
+```lua
+vim.lsp.start({
+  name = "rlsp-yaml",
+  cmd = { "/path/to/rlsp-yaml" },
+  filetypes = { "yaml", "yml" },
+  init_options = {
+    customTags = { "!include", "!ref" },
+    keyOrdering = false,
+    kubernetesVersion = "master",
+    schemaStore = true,
+    formatValidation = true,
+    schemas = {
+      ["https://json.schemastore.org/github-workflow"] = ".github/workflows/*.yml",
+    },
+    formatPrintWidth = 80,
+    formatSingleQuote = false,
+    httpProxy = "http://proxy.corp:8080",
+  },
+})
+```
+
+### VS Code
+
+Use a generic LSP client extension (e.g., [vscode-languageclient](https://github.com/microsoft/vscode-languageserver-node)) and configure the binary as the server command for YAML files. Pass settings via `initializationOptions`.
+
+### Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.rlsp-yaml]
+command = "/path/to/rlsp-yaml"
+
+[language-server.rlsp-yaml.config]
+customTags = ["!include", "!ref"]
+keyOrdering = false
+kubernetesVersion = "master"
+schemaStore = true
+formatValidation = true
+formatPrintWidth = 80
+formatSingleQuote = false
+# httpProxy = "http://proxy.corp:8080"
+
+[language-server.rlsp-yaml.config.schemas]
+"https://json.schemastore.org/github-workflow" = ".github/workflows/*.yml"
+
+[[language]]
+name = "yaml"
+language-servers = ["rlsp-yaml"]
+```
+
+### Zed
+
+Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.json`):
+
+```json
+{
+  "lsp": {
+    "rlsp-yaml": {
+      "binary": {
+        "path": "/path/to/rlsp-yaml"
+      },
+      "initialization_options": {
+        "customTags": ["!include", "!ref"],
+        "keyOrdering": false,
+        "kubernetesVersion": "master",
+        "schemaStore": true,
+        "formatValidation": true,
+        "formatPrintWidth": 80,
+        "formatSingleQuote": false,
+        "schemas": {
+          "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml"
+        }
+      }
+    }
+  },
+  "languages": {
+    "YAML": {
+      "language_servers": ["rlsp-yaml"]
+    }
+  }
+}
+```
+
 ## Features
 
 **Core editing support:**
@@ -44,6 +147,12 @@ A YAML language server implementing the [Language Server Protocol](https://micro
 - File watcher registration (reacts to external file changes)
 - Workspace settings (`customTags`, `keyOrdering`, `schemas`)
 
+## Configuration
+
+Settings are configured through three mechanisms: modelines (per-document comments), workspace settings (passed via `initializationOptions` or `workspace/didChangeConfiguration`), and built-in defaults.
+
+See [docs/configuration.md](docs/configuration.md) for the full reference — workspace settings, modelines, validators, formatting, and schema fetching details.
+
 ## Architecture
 
 Pure-function design: each feature module exports a function that takes text (and optionally parsed YAML or schema) and returns LSP types. The server layer (`server.rs`) handles document storage, schema caching, and delegates to these pure functions.
@@ -80,33 +189,6 @@ cargo test             # run all tests (~660 tests)
 cargo clippy           # lint (pedantic + nursery, zero warnings)
 cargo fmt              # format
 ```
-
-## Usage
-
-The server communicates over stdio using the LSP protocol. Point your editor's LSP client at the binary:
-
-```sh
-cargo build --release
-# binary at target/release/rlsp-yaml
-```
-
-**VS Code:** Use a generic LSP client extension and configure it to run the binary for YAML files.
-
-**Neovim (nvim-lspconfig):**
-
-```lua
-vim.lsp.start({
-  name = "rlsp-yaml",
-  cmd = { "/path/to/rlsp-yaml" },
-  filetypes = { "yaml", "yml" },
-})
-```
-
-## Configuration
-
-Settings are passed via `initializationOptions` or `workspace/didChangeConfiguration`. Per-document modelines override workspace settings.
-
-See [docs/configuration.md](docs/configuration.md) for the full reference — workspace settings, modelines, editor setup examples, and schema fetching details.
 
 ## License
 

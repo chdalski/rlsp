@@ -107,6 +107,10 @@ rlsp-<language>/
     └── feature-log.md         # feature decisions — update when features are added or rejected
 ```
 
+### Documentation Layout
+
+The root `README.md` is the project landing page — it links to each crate's README and nothing else. Each crate `README.md` is self-contained for users: installation, editor setup, features, and a link to `docs/configuration.md` for the full settings reference. `docs/configuration.md` is a pure settings reference — workspace settings, modelines, validators, formatting, and schema fetching. It contains no usage guidance or editor setup instructions; those live in the crate README.
+
 ## Contribution Model
 
 This project is AI-written. External contributions
