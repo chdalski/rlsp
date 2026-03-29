@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -29,12 +29,12 @@ and configuration.md is a pure settings reference.
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Slim down root README to project overview + crates table
-- [ ] Move editor setup from configuration.md to rlsp-yaml/README.md
-- [ ] Add installation section to rlsp-yaml/README.md
-- [ ] Remove editor setup from configuration.md
-- [ ] Add documentation layout subsection to CLAUDE.md
-- [ ] Verify all cross-links are correct
+- [x] Slim down root README to project overview + crates table
+- [x] Move editor setup from configuration.md to rlsp-yaml/README.md
+- [x] Add installation section to rlsp-yaml/README.md
+- [x] Remove editor setup from configuration.md
+- [x] Add documentation layout subsection to CLAUDE.md
+- [x] Verify all cross-links are correct
 
 ## Tasks
 
@@ -69,16 +69,12 @@ Setup section (lines 208-294). Keep everything else:
 workspace settings, modelines, validators, formatting,
 schema resolution, schema fetching.
 
-- [ ] Rewrite root README.md
-- [ ] Reorganize rlsp-yaml/README.md
-- [ ] Remove editor setup from configuration.md
-- [ ] Add `### Documentation Layout` subsection under
-  `## Repository Layout` in CLAUDE.md — describe the intent:
-  root README is the landing page (project overview + crate
-  links), each crate README is self-contained for users
-  (installation, editor setup, features, config link),
-  `docs/configuration.md` is pure settings reference
-- [ ] Verify cross-links between all four files
+- [x] Rewrite root README.md — `ee94187`
+- [x] Reorganize rlsp-yaml/README.md — `ee94187`
+- [x] Remove editor setup from configuration.md — `ee94187`
+- [x] Add `### Documentation Layout` subsection under
+  `## Repository Layout` in CLAUDE.md — `ee94187`
+- [x] Verify cross-links between all four files — `ee94187`
 
 ## Decisions
 
