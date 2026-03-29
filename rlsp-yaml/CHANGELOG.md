@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Documentation
+
+- Restructure documentation into three-tier layout (ee94187)
+
 ## Bug Fixes
 
 - Fix cargo fmt line-wrapping in content tests (2f8ebb4)
