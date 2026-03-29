@@ -38,7 +38,7 @@ CI and the reviewer enforce it.
 - [x] Add `expect_used` and `unwrap_used` to Cargo.toml lints
 - [x] Fix production `expect()`/`unwrap()` calls (9 total — 7092dcd)
 - [x] Add lint allows to all 21 test modules + integration test (7092dcd)
-- [ ] Fix remaining ~88 non-allowed clippy violations in tests
+- [x] Fix remaining 88 non-allowed clippy violations in tests (ac8b43f)
 - [ ] Update CI to use `--all-targets`
 - [ ] Update root CLAUDE.md build commands
 - [ ] Verify `cargo clippy --all-targets` passes clean
