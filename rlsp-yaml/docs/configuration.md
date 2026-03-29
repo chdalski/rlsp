@@ -16,6 +16,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "keyOrdering": false,
   "kubernetesVersion": "1.32.0",
   "schemaStore": true,
+  "formatValidation": true,
   "formatPrintWidth": 80,
   "formatSingleQuote": false,
   "httpProxy": "http://proxy.corp:8080",
@@ -99,6 +100,41 @@ Maximum line width for the full-document formatter. The formatter tries to fit c
 
 When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
 
+### `formatValidation`
+
+- **Type:** `boolean` (optional)
+- **Default:** `true`
+
+Enable validation of the JSON Schema `format` keyword. When enabled, string values are checked against the declared format and a **warning** diagnostic (`schemaFormat`) is emitted for values that do not conform.
+
+Supported formats:
+
+| Format | Description |
+|--------|-------------|
+| `date-time` | RFC 3339 full date-time (e.g. `2023-01-15T10:30:00Z`) |
+| `date` | RFC 3339 full date (e.g. `2023-01-15`) |
+| `time` | RFC 3339 partial-time with offset (e.g. `10:30:00Z`) |
+| `duration` | ISO 8601 duration (e.g. `P1Y2M3DT4H`) |
+| `email` | Basic email address |
+| `ipv4` | IPv4 dotted-quad address |
+| `ipv6` | IPv6 address |
+| `hostname` | RFC 1123 hostname |
+| `uri` | URI with scheme |
+| `uri-reference` | URI or relative reference |
+| `uri-template` | RFC 6570 URI template |
+| `uuid` | UUID (case-insensitive) |
+| `regex` | Valid regular expression |
+| `json-pointer` | RFC 6901 JSON Pointer |
+| `relative-json-pointer` | Relative JSON Pointer |
+
+Unknown format values are silently ignored (per the JSON Schema specification, format validation is advisory).
+
+To disable format validation:
+
+```json
+{ "formatValidation": false }
+```
+
 ### `httpProxy`
 
 - **Type:** `string` (optional)
@@ -169,6 +205,7 @@ vim.lsp.start({
     keyOrdering = false,
     kubernetesVersion = "1.32.0",
     schemaStore = true,
+    formatValidation = true,
     schemas = {
       ["https://json.schemastore.org/github-workflow"] = ".github/workflows/*.yml",
     },
@@ -196,6 +233,7 @@ Some validators are always active; others depend on settings.
 | Key ordering | `keyOrdering` | off |
 | Custom tag validation | `customTags` | off (empty = disabled) |
 | JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
+| Schema `format` keyword validation | `formatValidation` | on (when schema is active) |
 | SchemaStore auto-association | `schemaStore` | on |
 
 ## Formatting

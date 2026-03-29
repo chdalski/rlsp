@@ -146,6 +146,35 @@ fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Validation context
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Shared per-call context threaded through the validation walk.
+///
+/// Bundles the three parameters that every helper needs — the document text
+/// (split into lines for position lookup), the diagnostic accumulator, and the
+/// `format_validation` flag — so individual helpers do not need 8+ arguments.
+struct Ctx<'a> {
+    lines: &'a [&'a str],
+    diagnostics: &'a mut Vec<Diagnostic>,
+    format_validation: bool,
+}
+
+impl<'a> Ctx<'a> {
+    const fn new(
+        lines: &'a [&'a str],
+        diagnostics: &'a mut Vec<Diagnostic>,
+        format_validation: bool,
+    ) -> Self {
+        Self {
+            lines,
+            diagnostics,
+            format_validation,
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -153,13 +182,20 @@ fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
 ///
 /// `text` is the raw document text used for position lookup.
 /// Each element of `docs` is one YAML document (separated by `---`).
+/// `format_validation` controls whether the `format` keyword is validated.
 #[must_use]
-pub fn validate_schema(text: &str, docs: &[YamlOwned], schema: &JsonSchema) -> Vec<Diagnostic> {
+pub fn validate_schema(
+    text: &str,
+    docs: &[YamlOwned],
+    schema: &JsonSchema,
+    format_validation: bool,
+) -> Vec<Diagnostic> {
     let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
+    let mut ctx = Ctx::new(&lines, &mut diagnostics, format_validation);
 
     for doc in docs {
-        validate_node(doc, schema, &[], &lines, &mut diagnostics, 0);
+        validate_node(doc, schema, &[], &mut ctx, 0);
     }
 
     diagnostics
@@ -177,8 +213,7 @@ fn validate_node(
     node: &YamlOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     if depth > MAX_VALIDATION_DEPTH {
@@ -189,8 +224,8 @@ fn validate_node(
     if let Some(schema_type) = &schema.schema_type {
         let yaml_type = yaml_type_name(node);
         if !type_matches(yaml_type, schema_type) {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
@@ -211,7 +246,7 @@ fn validate_node(
         && let Some(yaml_val) = yaml_to_json(node)
         && !enum_values.contains(&yaml_val)
     {
-        let range = node_range(path, lines);
+        let range = node_range(path, ctx.lines);
         let listed: Vec<String> = enum_values
             .iter()
             .take(MAX_ENUM_DISPLAY)
@@ -226,7 +261,7 @@ fn validate_node(
         } else {
             listed.join(", ")
         };
-        diagnostics.push(make_diagnostic(
+        ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::ERROR,
             "schemaEnum",
@@ -235,11 +270,11 @@ fn validate_node(
     }
 
     // Scalar constraints
-    validate_scalar_constraints(node, schema, path, lines, diagnostics);
+    validate_scalar_constraints(node, schema, path, ctx);
 
     // Mapping-specific checks
     if let YamlOwned::Mapping(map) = node {
-        validate_mapping(map, schema, path, lines, diagnostics, depth);
+        validate_mapping(map, schema, path, ctx, depth);
     }
 
     // Sequence-specific checks
@@ -250,7 +285,7 @@ fn validate_node(
             for (i, (item, item_schema)) in seq.iter().zip(prefix_schemas.iter()).enumerate() {
                 let mut item_path = path.to_vec();
                 item_path.push(format!("[{i}]"));
-                validate_node(item, item_schema, &item_path, lines, diagnostics, depth + 1);
+                validate_node(item, item_schema, &item_path, ctx, depth + 1);
             }
         }
         // items — applies to elements beyond prefixItems
@@ -258,33 +293,26 @@ fn validate_node(
             for (i, item) in seq.iter().enumerate().skip(prefix_len) {
                 let mut item_path = path.to_vec();
                 item_path.push(format!("[{i}]"));
-                validate_node(
-                    item,
-                    items_schema,
-                    &item_path,
-                    lines,
-                    diagnostics,
-                    depth + 1,
-                );
+                validate_node(item, items_schema, &item_path, ctx, depth + 1);
             }
         }
-        validate_array_constraints(seq, schema, path, lines, diagnostics, depth);
+        validate_array_constraints(seq, schema, path, ctx, depth);
     }
 
     // Composition
-    validate_composition(node, schema, path, lines, diagnostics, depth);
+    validate_composition(node, schema, path, ctx, depth);
 
     // unevaluatedProperties (Draft 2019-09)
     if schema.unevaluated_properties.is_some() {
         if let YamlOwned::Mapping(map) = node {
-            validate_unevaluated_properties(map, schema, path, lines, diagnostics, depth);
+            validate_unevaluated_properties(map, schema, path, ctx, depth);
         }
     }
 
     // unevaluatedItems (Draft 2019-09)
     if schema.unevaluated_items.is_some() {
         if let YamlOwned::Sequence(seq) = node {
-            validate_unevaluated_items(seq, schema, path, lines, diagnostics, depth);
+            validate_unevaluated_items(seq, schema, path, ctx, depth);
         }
     }
 }
@@ -293,8 +321,7 @@ fn validate_unevaluated_properties(
     map: &saphyr::MappingOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     use saphyr::ScalarOwned;
@@ -315,8 +342,8 @@ fn validate_unevaluated_properties(
         }
         match &schema.unevaluated_properties {
             Some(AdditionalProperties::Denied) => {
-                let range = key_range(&key_str, path, lines);
-                diagnostics.push(make_diagnostic(
+                let range = key_range(&key_str, path, ctx.lines);
+                ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::WARNING,
                     "schemaUnevaluatedProperty",
@@ -331,7 +358,7 @@ fn validate_unevaluated_properties(
                 let v = map.get(k).expect("key came from map");
                 let mut child_path = path.to_vec();
                 child_path.push(key_str.clone());
-                validate_node(v, extra_schema, &child_path, lines, diagnostics, depth + 1);
+                validate_node(v, extra_schema, &child_path, ctx, depth + 1);
             }
             None => {}
         }
@@ -342,8 +369,7 @@ fn validate_unevaluated_items(
     seq: &saphyr::SequenceOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     let evaluated_count = collect_evaluated_item_count(schema);
@@ -356,14 +382,7 @@ fn validate_unevaluated_items(
         }
         let mut item_path = path.to_vec();
         item_path.push(format!("[{i}]"));
-        validate_node(
-            item,
-            unevaluated_schema,
-            &item_path,
-            lines,
-            diagnostics,
-            depth + 1,
-        );
+        validate_node(item, unevaluated_schema, &item_path, ctx, depth + 1);
     }
 }
 
@@ -371,16 +390,15 @@ fn validate_array_constraints(
     seq: &saphyr::SequenceOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     let len = seq.len() as u64;
 
     if let Some(min) = schema.min_items {
         if len < min {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMinItems",
@@ -396,8 +414,8 @@ fn validate_array_constraints(
 
     if let Some(max) = schema.max_items {
         if len > max {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMaxItems",
@@ -419,8 +437,8 @@ fn validate_array_constraints(
                 .is_some_and(|prev| prev.iter().any(|b| a == b))
         });
         if has_duplicate {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaUniqueItems",
@@ -430,15 +448,7 @@ fn validate_array_constraints(
     }
 
     if let Some(contains_schema) = &schema.contains {
-        validate_contains(
-            seq,
-            contains_schema,
-            schema,
-            path,
-            lines,
-            diagnostics,
-            depth,
-        );
+        validate_contains(seq, contains_schema, schema, path, ctx, depth);
     }
 }
 
@@ -447,15 +457,17 @@ fn validate_contains(
     contains_schema: &JsonSchema,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
+    let lines = ctx.lines;
+    let format_validation = ctx.format_validation;
     let match_count = seq
         .iter()
         .filter(|item| {
             let mut scratch = Vec::new();
-            validate_node(item, contains_schema, path, lines, &mut scratch, depth + 1);
+            let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+            validate_node(item, contains_schema, path, &mut probe, depth + 1);
             scratch.is_empty()
         })
         .count() as u64;
@@ -464,8 +476,8 @@ fn validate_contains(
     let effective_min = schema.min_contains.unwrap_or(1);
 
     if match_count < effective_min {
-        let range = node_range(path, lines);
-        diagnostics.push(make_diagnostic(
+        let range = node_range(path, ctx.lines);
+        ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::ERROR,
             "schemaContains",
@@ -480,8 +492,8 @@ fn validate_contains(
 
     if let Some(max) = schema.max_contains {
         if match_count > max {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaContains",
@@ -500,13 +512,12 @@ fn validate_scalar_constraints(
     node: &YamlOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
 ) {
     use saphyr::ScalarOwned;
 
     if let YamlOwned::Value(ScalarOwned::String(s)) = node {
-        validate_string_constraints(s, schema, path, lines, diagnostics);
+        validate_string_constraints(s, schema, path, ctx);
     }
 
     let numeric_val = match node {
@@ -525,15 +536,15 @@ fn validate_scalar_constraints(
         | YamlOwned::Representation(..) => None,
     };
     if let Some(val) = numeric_val {
-        validate_numeric_constraints(val, schema, path, lines, diagnostics);
+        validate_numeric_constraints(val, schema, path, ctx);
     }
 
     // const — compare any scalar node via yaml_to_json
     if let Some(const_val) = &schema.const_value {
         if let Some(yaml_val) = yaml_to_json(node) {
             if yaml_val != *const_val {
-                let range = node_range(path, lines);
-                diagnostics.push(make_diagnostic(
+                let range = node_range(path, ctx.lines);
+                ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
                     "schemaConst",
@@ -545,17 +556,11 @@ fn validate_scalar_constraints(
     }
 }
 
-fn validate_string_constraints(
-    s: &str,
-    schema: &JsonSchema,
-    path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
     if let Some(pattern) = &schema.pattern {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
                 "schemaPatternLimit",
@@ -566,8 +571,8 @@ fn validate_string_constraints(
             ));
         } else if let Some(re) = get_regex(pattern) {
             if !re.is_match(s) {
-                let range = node_range(path, lines);
-                diagnostics.push(make_diagnostic(
+                let range = node_range(path, ctx.lines);
+                ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
                     "schemaPattern",
@@ -579,8 +584,8 @@ fn validate_string_constraints(
                 ));
             }
         } else {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
                 "schemaPatternLimit",
@@ -596,8 +601,8 @@ fn validate_string_constraints(
 
     if let Some(min_len) = schema.min_length {
         if char_count < min_len {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMinLength",
@@ -613,8 +618,8 @@ fn validate_string_constraints(
 
     if let Some(max_len) = schema.max_length {
         if char_count > max_len {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMaxLength",
@@ -627,15 +632,464 @@ fn validate_string_constraints(
             ));
         }
     }
+
+    if ctx.format_validation {
+        if let Some(format) = &schema.format {
+            validate_format(s, format, path, ctx.lines, ctx.diagnostics);
+        }
+    }
 }
 
-fn validate_numeric_constraints(
-    val: f64,
-    schema: &JsonSchema,
+/// Check `s` against the JSON Schema `format` keyword and push a WARNING
+/// diagnostic if the value does not conform.  Unknown formats are silently
+/// ignored (per the spec, format validation is advisory).
+fn validate_format(
+    s: &str,
+    format: &str,
     path: &[String],
     lines: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let valid = match format {
+        "date-time" => is_valid_date_time(s),
+        "date" => is_valid_date(s),
+        "time" => is_valid_time(s),
+        "duration" => is_valid_duration(s),
+        "email" => is_valid_email(s),
+        "ipv4" => is_valid_ipv4(s),
+        "ipv6" => is_valid_ipv6(s),
+        "hostname" => is_valid_hostname(s),
+        "uri" => is_valid_uri(s),
+        "uri-reference" => is_valid_uri_reference(s),
+        "uri-template" => is_valid_uri_template(s),
+        "uuid" => is_valid_uuid(s),
+        "regex" => is_valid_regex(s),
+        "json-pointer" => is_valid_json_pointer(s),
+        "relative-json-pointer" => is_valid_relative_json_pointer(s),
+        // Unknown formats are intentionally ignored
+        _ => return,
+    };
+    if !valid {
+        let range = node_range(path, lines);
+        diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            "schemaFormat",
+            format!(
+                "String at {} does not match format '{format}'",
+                format_path(path)
+            ),
+        ));
+    }
+}
+
+/// RFC 3339 full date-time: `YYYY-MM-DDTHH:MM:SS[.frac](Z|+HH:MM|-HH:MM)`.
+fn is_valid_date_time(s: &str) -> bool {
+    // Split on 'T' or 't'
+    let Some(t_pos) = s.find(['T', 't']) else {
+        return false;
+    };
+    let (date_part, time_and_offset) = s.split_at(t_pos);
+    let time_and_offset = &time_and_offset[1..]; // skip the 'T'
+    is_valid_date(date_part) && is_valid_time(time_and_offset)
+}
+
+/// RFC 3339 full-date: `YYYY-MM-DD`.
+fn is_valid_date(s: &str) -> bool {
+    // Length must be exactly 10: YYYY-MM-DD
+    if s.len() != 10 {
+        return false;
+    }
+    // Safety: length checked above; these indices are always in-bounds ASCII
+    if s.as_bytes().get(4) != Some(&b'-') || s.as_bytes().get(7) != Some(&b'-') {
+        return false;
+    }
+    let Ok(year) = s[..4].parse::<u32>() else {
+        return false;
+    };
+    let Ok(month) = s[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = s[8..10].parse::<u32>() else {
+        return false;
+    };
+    if month == 0 || month > 12 || day == 0 {
+        return false;
+    }
+    let max_day = days_in_month(year, month);
+    day <= max_day
+}
+
+const fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
+    }
+}
+
+const fn is_leap_year(year: u32) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
+}
+
+/// RFC 3339 partial-time + time-offset: `HH:MM:SS[.frac](Z|+HH:MM|-HH:MM)`.
+fn is_valid_time(s: &str) -> bool {
+    // Must end with Z/z or ±HH:MM
+    let (time_part, offset_part) =
+        if let Some(stripped) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
+            (stripped, "Z")
+        } else {
+            // Find offset sign from the end
+            let Some(sign_pos) = s.rfind(['+', '-']) else {
+                return false;
+            };
+            // sign_pos must be after the time (at least HH:MM:SS = 8 chars)
+            if sign_pos < 8 {
+                return false;
+            }
+            (&s[..sign_pos], &s[sign_pos..])
+        };
+
+    // Validate time_part: HH:MM:SS[.frac]
+    let tb = time_part.as_bytes();
+    if tb.len() < 8 {
+        return false;
+    }
+    if tb.get(2) != Some(&b':') || tb.get(5) != Some(&b':') {
+        return false;
+    }
+    let Ok(hour) = time_part[..2].parse::<u32>() else {
+        return false;
+    };
+    let Ok(minute) = time_part[3..5].parse::<u32>() else {
+        return false;
+    };
+    let Ok(second) = time_part[6..8].parse::<u32>() else {
+        return false;
+    };
+    if hour > 23 || minute > 59 || second > 60 {
+        // 60 is allowed for leap seconds
+        return false;
+    }
+    // Optional fractional seconds
+    if tb.len() > 8 {
+        if tb.get(8) != Some(&b'.') {
+            return false;
+        }
+        if time_part[9..].is_empty() || !time_part[9..].bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+    }
+
+    // Validate offset
+    if offset_part == "Z" {
+        return true;
+    }
+    let offset = &offset_part[1..]; // skip sign
+    if offset.len() != 5 || offset.as_bytes().get(2) != Some(&b':') {
+        return false;
+    }
+    let Ok(off_h) = offset[..2].parse::<u32>() else {
+        return false;
+    };
+    let Ok(off_m) = offset[3..5].parse::<u32>() else {
+        return false;
+    };
+    off_h <= 23 && off_m <= 59
+}
+
+/// ISO 8601 duration: `P[nY][nM][nD][T[nH][nM][nS]]` or `PnW`.
+fn is_valid_duration(s: &str) -> bool {
+    let Some(rest) = s.strip_prefix('P') else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    // Week form: PnW
+    if let Some(w) = rest.strip_suffix('W') {
+        return !w.is_empty() && w.bytes().all(|b| b.is_ascii_digit());
+    }
+    // Split on 'T'
+    let (date_part, time_part) = rest.find('T').map_or((rest, None), |t_pos| {
+        (&rest[..t_pos], Some(&rest[t_pos + 1..]))
+    });
+    // Validate date designators: Y M D in order, each optional but non-repeating
+    if !is_valid_duration_designators(date_part, &['Y', 'M', 'D']) {
+        return false;
+    }
+    if let Some(tp) = time_part {
+        if tp.is_empty() {
+            return false; // 'T' present but nothing after it
+        }
+        if !is_valid_duration_designators(tp, &['H', 'M', 'S']) {
+            return false;
+        }
+    }
+    // At least one designator total
+    !date_part.is_empty() || time_part.is_some_and(|t| !t.is_empty())
+}
+
+/// Validate that `s` is a sequence of `nX` tokens where X appears in `designators`
+/// in order (no repeats, only forward).
+fn is_valid_duration_designators(s: &str, designators: &[char]) -> bool {
+    let mut remaining = s;
+    let mut last_idx: Option<usize> = None;
+    while !remaining.is_empty() {
+        // Read digits
+        let digit_end = remaining
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(remaining.len());
+        if digit_end == 0 {
+            return false; // designator without digits
+        }
+        if digit_end == remaining.len() {
+            return false; // digits without designator at end
+        }
+        let designator = remaining.chars().nth(digit_end).unwrap_or('\0');
+        let Some(idx) = designators.iter().position(|&d| d == designator) else {
+            return false;
+        };
+        if let Some(prev) = last_idx {
+            if idx <= prev {
+                return false; // out of order or repeated
+            }
+        }
+        last_idx = Some(idx);
+        remaining = &remaining[digit_end + designator.len_utf8()..];
+    }
+    true
+}
+
+/// Very basic email validation: `local@domain` where domain contains at least one dot.
+fn is_valid_email(s: &str) -> bool {
+    let Some(at_pos) = s.rfind('@') else {
+        return false;
+    };
+    let local = &s[..at_pos];
+    let domain = &s[at_pos + 1..];
+    !local.is_empty()
+        && !domain.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+}
+
+/// IPv4: four decimal octets in `0-255` separated by dots.
+fn is_valid_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    parts.iter().all(|p| {
+        !p.is_empty()
+            && p.len() <= 3
+            && p.bytes().all(|b| b.is_ascii_digit())
+            && p.parse::<u16>().is_ok_and(|n| n <= 255)
+            && (p.len() == 1 || !p.starts_with('0')) // no leading zeros
+    })
+}
+
+/// IPv6: eight groups of 1-4 hex digits separated by colons, with optional `::`.
+fn is_valid_ipv6(s: &str) -> bool {
+    // Allow zone ID suffix (strip %...)
+    let s = s.split('%').next().unwrap_or(s);
+    // Handle embedded IPv4 in the last group
+    let (s, ipv4_suffix) = if let Some(last_colon) = s.rfind(':') {
+        let candidate = &s[last_colon + 1..];
+        if candidate.contains('.') {
+            if !is_valid_ipv4(candidate) {
+                return false;
+            }
+            (&s[..last_colon], true)
+        } else {
+            (s, false)
+        }
+    } else {
+        (s, false)
+    };
+
+    let has_double_colon = s.contains("::");
+    // When splitting on "::", the halves may themselves be empty (e.g. "::1" → ["", "1"])
+    // Filter those out before validating individual groups.
+    let parts: Vec<&str> = if has_double_colon {
+        s.splitn(2, "::")
+            .flat_map(|h| h.split(':'))
+            .filter(|p| !p.is_empty())
+            .collect()
+    } else {
+        s.split(':').collect()
+    };
+
+    let expected = if ipv4_suffix { 6 } else { 8 };
+    let max_groups = if has_double_colon {
+        expected - 1
+    } else {
+        expected
+    };
+
+    if parts.len() > max_groups {
+        return false;
+    }
+    if !has_double_colon && parts.len() != expected {
+        return false;
+    }
+    parts
+        .iter()
+        .all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Hostname per RFC 1123: labels of `[A-Za-z0-9-]`, each ≤63 chars, total ≤253.
+fn is_valid_hostname(s: &str) -> bool {
+    if s.is_empty() || s.len() > 253 {
+        return false;
+    }
+    // Strip optional trailing dot (FQDN)
+    let s = s.strip_suffix('.').unwrap_or(s);
+    s.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    })
+}
+
+/// URI: must have a scheme followed by `:`
+fn is_valid_uri(s: &str) -> bool {
+    let Some(colon) = s.find(':') else {
+        return false;
+    };
+    let scheme = &s[..colon];
+    !scheme.is_empty()
+        && scheme
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic())
+        && scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.')
+}
+
+/// URI-reference: either a valid URI or a relative reference (starts with `/`, `?`, `#`, or `//`).
+fn is_valid_uri_reference(s: &str) -> bool {
+    if s.is_empty() {
+        return true; // empty string is a valid URI-reference
+    }
+    is_valid_uri(s)
+        || s.starts_with('/')
+        || s.starts_with('?')
+        || s.starts_with('#')
+        || s.starts_with("//")
+        || !s.contains(':') // relative-path reference
+}
+
+/// URI-template (RFC 6570): any printable ASCII string with balanced `{...}` expressions.
+fn is_valid_uri_template(s: &str) -> bool {
+    let mut depth = 0u32;
+    for b in s.bytes() {
+        match b {
+            b'{' => {
+                if depth > 0 {
+                    return false; // nested braces not allowed
+                }
+                depth += 1;
+            }
+            b'}' => {
+                if depth == 0 {
+                    return false; // unmatched closing brace
+                }
+                depth -= 1;
+            }
+            0x00..=0x1F | 0x7F => return false, // control chars
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// UUID: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (case-insensitive).
+fn is_valid_uuid(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    // Check dashes at fixed positions (length already verified to be 36)
+    if bytes.get(8) != Some(&b'-')
+        || bytes.get(13) != Some(&b'-')
+        || bytes.get(18) != Some(&b'-')
+        || bytes.get(23) != Some(&b'-')
+    {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, &b)| {
+        if i == 8 || i == 13 || i == 18 || i == 23 {
+            true // dash — already verified
+        } else {
+            b.is_ascii_hexdigit()
+        }
+    })
+}
+
+/// Validate a JSON Schema `regex` value by trying to compile it with the `regex` crate.
+fn is_valid_regex(s: &str) -> bool {
+    if s.len() > MAX_PATTERN_LEN {
+        return false;
+    }
+    RegexBuilder::new(s)
+        .size_limit(REGEX_SIZE_LIMIT)
+        .build()
+        .is_ok()
+}
+
+/// JSON Pointer (RFC 6901): empty string or starts with `/`.
+/// Each token may not contain unescaped `~` (must be `~0` or `~1`).
+fn is_valid_json_pointer(s: &str) -> bool {
+    if s.is_empty() {
+        return true;
+    }
+    if !s.starts_with('/') {
+        return false;
+    }
+    is_json_pointer_tokens_valid(s)
+}
+
+fn is_json_pointer_tokens_valid(s: &str) -> bool {
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '~' {
+            match chars.next() {
+                Some('0' | '1') => {}
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Relative JSON Pointer: non-negative integer followed by a JSON Pointer or `#`.
+fn is_valid_relative_json_pointer(s: &str) -> bool {
+    let digit_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if digit_end == 0 {
+        return false; // must start with a non-negative integer
+    }
+    let rest = &s[digit_end..];
+    if rest == "#" {
+        return true;
+    }
+    is_valid_json_pointer(rest)
+}
+
+fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
     // minimum (inclusive by default; strict if Draft-04 exclusiveMinimum is true)
     if let Some(minimum) = schema.minimum {
         let exclusive = schema.exclusive_minimum_draft04.unwrap_or(false);
@@ -645,9 +1099,9 @@ fn validate_numeric_constraints(
             val < minimum
         };
         if violation {
-            let range = node_range(path, lines);
+            let range = node_range(path, ctx.lines);
             let bound = if exclusive { "exclusive" } else { "inclusive" };
-            diagnostics.push(make_diagnostic(
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMinimum",
@@ -668,9 +1122,9 @@ fn validate_numeric_constraints(
             val > maximum
         };
         if violation {
-            let range = node_range(path, lines);
+            let range = node_range(path, ctx.lines);
             let bound = if exclusive { "exclusive" } else { "inclusive" };
-            diagnostics.push(make_diagnostic(
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMaximum",
@@ -685,8 +1139,8 @@ fn validate_numeric_constraints(
     // exclusiveMinimum (Draft-06+ number form)
     if let Some(excl_min) = schema.exclusive_minimum {
         if val <= excl_min {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMinimum",
@@ -701,8 +1155,8 @@ fn validate_numeric_constraints(
     // exclusiveMaximum (Draft-06+ number form)
     if let Some(excl_max) = schema.exclusive_maximum {
         if val >= excl_max {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMaximum",
@@ -719,8 +1173,8 @@ fn validate_numeric_constraints(
         if multiple_of > 0.0 {
             let quotient = val / multiple_of;
             if (quotient - quotient.round()).abs() >= f64::EPSILON {
-                let range = node_range(path, lines);
-                diagnostics.push(make_diagnostic(
+                let range = node_range(path, ctx.lines);
+                ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
                     "schemaMultipleOf",
@@ -738,8 +1192,7 @@ fn validate_mapping(
     map: &saphyr::MappingOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     use saphyr::ScalarOwned;
@@ -758,7 +1211,7 @@ fn validate_mapping(
         } else {
             listed.join(", ")
         };
-        diagnostics.extend(
+        ctx.diagnostics.extend(
             required
                 .iter()
                 .filter(|req_key| {
@@ -766,7 +1219,7 @@ fn validate_mapping(
                     !map.contains_key(&key_yaml)
                 })
                 .map(|req_key| {
-                    let range = mapping_range(path, lines);
+                    let range = mapping_range(path, ctx.lines);
                     make_diagnostic(
                         range,
                         DiagnosticSeverity::ERROR,
@@ -801,18 +1254,18 @@ fn validate_mapping(
         if let Some(prop_schema) = properties.and_then(|p| p.get(&key_str)) {
             let mut child_path = path.to_vec();
             child_path.push(key_str.clone());
-            validate_node(v, prop_schema, &child_path, lines, diagnostics, depth + 1);
+            validate_node(v, prop_schema, &child_path, ctx, depth + 1);
         } else {
             // Check patternProperties for keys not in properties
             let matched_by_pattern =
-                validate_pattern_properties(v, &key_str, schema, path, lines, diagnostics, depth);
+                validate_pattern_properties(v, &key_str, schema, path, ctx, depth);
 
             if !is_known && !matched_by_pattern {
                 // Check additionalProperties
                 match &schema.additional_properties {
                     Some(AdditionalProperties::Denied) => {
-                        let range = key_range(&key_str, path, lines);
-                        diagnostics.push(make_diagnostic(
+                        let range = key_range(&key_str, path, ctx.lines);
+                        ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::WARNING,
                             "schemaAdditionalProperty",
@@ -826,7 +1279,7 @@ fn validate_mapping(
                     Some(AdditionalProperties::Schema(extra_schema)) => {
                         let mut child_path = path.to_vec();
                         child_path.push(key_str.clone());
-                        validate_node(v, extra_schema, &child_path, lines, diagnostics, depth + 1);
+                        validate_node(v, extra_schema, &child_path, ctx, depth + 1);
                     }
                     None => {}
                 }
@@ -836,19 +1289,18 @@ fn validate_mapping(
         // propertyNames — validate each key as a string node against the schema
         if let Some(pn_schema) = &schema.property_names {
             let key_node = YamlOwned::Value(ScalarOwned::String(key_str.clone()));
-            validate_node(&key_node, pn_schema, path, lines, diagnostics, depth + 1);
+            validate_node(&key_node, pn_schema, path, ctx, depth + 1);
         }
     }
 
-    validate_dependencies(map, schema, path, lines, diagnostics, depth);
+    validate_dependencies(map, schema, path, ctx, depth);
 }
 
 fn validate_dependencies(
     map: &saphyr::MappingOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     use saphyr::ScalarOwned;
@@ -861,8 +1313,8 @@ fn validate_dependencies(
                 for missing in required_keys {
                     let missing_yaml = YamlOwned::Value(ScalarOwned::String(missing.clone()));
                     if !map.contains_key(&missing_yaml) {
-                        let range = mapping_range(path, lines);
-                        diagnostics.push(make_diagnostic(
+                        let range = mapping_range(path, ctx.lines);
+                        ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::ERROR,
                             "schemaDependentRequired",
@@ -888,8 +1340,7 @@ fn validate_dependencies(
                     &YamlOwned::Mapping(map.clone()),
                     dep_schema,
                     path,
-                    lines,
-                    diagnostics,
+                    ctx,
                     depth + 1,
                 );
             }
@@ -904,8 +1355,7 @@ fn validate_pattern_properties(
     key: &str,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) -> bool {
     let Some(pattern_props) = &schema.pattern_properties else {
@@ -915,8 +1365,8 @@ fn validate_pattern_properties(
     let mut matched = false;
     for (pattern, pat_schema) in pattern_props {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
                 "schemaPatternLimit",
@@ -932,18 +1382,11 @@ fn validate_pattern_properties(
                 matched = true;
                 let mut child_path = path.to_vec();
                 child_path.push(key.to_string());
-                validate_node(
-                    value,
-                    pat_schema,
-                    &child_path,
-                    lines,
-                    diagnostics,
-                    depth + 1,
-                );
+                validate_node(value, pat_schema, &child_path, ctx, depth + 1);
             }
         } else {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
                 "schemaPatternLimit",
@@ -961,27 +1404,29 @@ fn validate_composition(
     node: &YamlOwned,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
     // allOf: all branches must pass
     if let Some(all_of) = &schema.all_of {
         for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
-            validate_node(node, branch, path, lines, diagnostics, depth + 1);
+            validate_node(node, branch, path, ctx, depth + 1);
         }
     }
 
     // anyOf: at least one branch must pass; if none do, emit a diagnostic
     if let Some(any_of) = &schema.any_of {
+        let lines = ctx.lines;
+        let format_validation = ctx.format_validation;
         let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
             let mut scratch = Vec::new();
-            validate_node(node, branch, path, lines, &mut scratch, depth + 1);
+            let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+            validate_node(node, branch, path, &mut probe, depth + 1);
             scratch.is_empty()
         });
         if !any_passes {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
@@ -995,19 +1440,22 @@ fn validate_composition(
 
     // oneOf: exactly one branch must pass
     if let Some(one_of) = &schema.one_of {
+        let lines = ctx.lines;
+        let format_validation = ctx.format_validation;
         let passing = one_of
             .iter()
             .take(MAX_BRANCH_COUNT)
             .filter(|branch| {
                 let mut scratch = Vec::new();
-                validate_node(node, branch, path, lines, &mut scratch, depth + 1);
+                let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+                validate_node(node, branch, path, &mut probe, depth + 1);
                 scratch.is_empty()
             })
             .count();
 
         if passing == 0 {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
@@ -1017,8 +1465,8 @@ fn validate_composition(
                 ),
             ));
         } else if passing > 1 {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
@@ -1032,11 +1480,14 @@ fn validate_composition(
 
     // not: the value must NOT match the sub-schema
     if let Some(not_schema) = &schema.not {
+        let lines = ctx.lines;
+        let format_validation = ctx.format_validation;
         let mut scratch = Vec::new();
-        validate_node(node, not_schema, path, lines, &mut scratch, depth + 1);
+        let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+        validate_node(node, not_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
-            let range = node_range(path, lines);
-            diagnostics.push(make_diagnostic(
+            let range = node_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaNot",
@@ -1050,18 +1501,17 @@ fn validate_composition(
 
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
+        let lines = ctx.lines;
+        let format_validation = ctx.format_validation;
         let mut scratch = Vec::new();
-        validate_node(node, if_schema, path, lines, &mut scratch, depth + 1);
+        let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+        validate_node(node, if_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
-            // if matched — apply then
             if let Some(then_schema) = &schema.then_schema {
-                validate_node(node, then_schema, path, lines, diagnostics, depth + 1);
+                validate_node(node, then_schema, path, ctx, depth + 1);
             }
-        } else {
-            // if didn't match — apply else
-            if let Some(else_schema) = &schema.else_schema {
-                validate_node(node, else_schema, path, lines, diagnostics, depth + 1);
-            }
+        } else if let Some(else_schema) = &schema.else_schema {
+            validate_node(node, else_schema, path, ctx, depth + 1);
         }
     }
 }
@@ -1305,7 +1755,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema);
+        let result = validate_schema("name: Alice", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1317,7 +1767,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema);
+        let result = validate_schema("age: 30", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaRequired");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1336,7 +1786,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema);
+        let result = validate_schema("other: value", &docs, &schema, true);
         assert_eq!(result.len(), 3);
         assert!(result.iter().all(|d| code_of(d) == "schemaRequired"));
     }
@@ -1349,7 +1799,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1\nb: 2");
-        let result = validate_schema("a: 1\nb: 2", &docs, &schema);
+        let result = validate_schema("a: 1\nb: 2", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1361,7 +1811,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("key: value");
-        let result = validate_schema("key: value", &docs, &schema);
+        let result = validate_schema("key: value", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1377,7 +1827,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaRequired");
         assert!(result[0].message.contains("name"));
@@ -1393,7 +1843,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_type_matches_string() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema);
+        let result = validate_schema("name: Alice", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1402,7 +1852,7 @@ mod tests {
     fn should_produce_error_for_string_where_integer_expected() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: \"hello\"");
-        let result = validate_schema("count: \"hello\"", &docs, &schema);
+        let result = validate_schema("count: \"hello\"", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1414,7 +1864,7 @@ mod tests {
     fn should_produce_error_for_integer_where_string_expected() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: 42");
-        let result = validate_schema("name: 42", &docs, &schema);
+        let result = validate_schema("name: 42", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1425,7 +1875,7 @@ mod tests {
     fn should_produce_error_for_boolean_where_string_expected() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: true");
-        let result = validate_schema("name: true", &docs, &schema);
+        let result = validate_schema("name: true", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1436,7 +1886,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let text = "name:\n  nested: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1451,7 +1901,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("config", config_schema)]);
         let text = "config:\n  - item";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1461,7 +1911,7 @@ mod tests {
     fn should_produce_error_for_null_where_string_expected() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: ~");
-        let result = validate_schema("name: ~", &docs, &schema);
+        let result = validate_schema("name: ~", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1480,7 +1930,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("name: ~");
-        let result = validate_schema("name: ~", &docs, &schema);
+        let result = validate_schema("name: ~", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1489,7 +1939,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_no_type_specified() {
         let schema = object_schema_with_props(vec![("name", JsonSchema::default())]);
         let docs = parse_docs("name: 42");
-        let result = validate_schema("name: 42", &docs, &schema);
+        let result = validate_schema("name: 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1498,7 +1948,7 @@ mod tests {
     fn should_produce_no_diagnostics_for_integer_type_with_integer_value() {
         let schema = object_schema_with_props(vec![("port", integer_schema())]);
         let docs = parse_docs("port: 8080");
-        let result = validate_schema("port: 8080", &docs, &schema);
+        let result = validate_schema("port: 8080", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1513,7 +1963,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("enabled: true");
-        let result = validate_schema("enabled: true", &docs, &schema);
+        let result = validate_schema("enabled: true", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1529,7 +1979,7 @@ mod tests {
         )]);
         let text = "items:\n  - one\n  - two";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1549,7 +1999,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: staging");
-        let result = validate_schema("env: staging", &docs, &schema);
+        let result = validate_schema("env: staging", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1564,7 +2014,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema);
+        let result = validate_schema("env: testing", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1594,7 +2044,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("level: 2");
-        let result = validate_schema("level: 2", &docs, &schema);
+        let result = validate_schema("level: 2", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1609,7 +2059,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("level: 5");
-        let result = validate_schema("level: 5", &docs, &schema);
+        let result = validate_schema("level: 5", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
     }
@@ -1625,7 +2075,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("value: auto");
-        let result = validate_schema("value: auto", &docs, &schema);
+        let result = validate_schema("value: auto", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1639,7 +2089,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1654,7 +2104,7 @@ mod tests {
         };
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -1671,7 +2121,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema);
+        let result = validate_schema("name: Alice", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1686,7 +2136,7 @@ mod tests {
         };
         let text = "name: Alice\nextra1: a\nextra2: b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 2);
         assert!(
             result
@@ -1706,7 +2156,7 @@ mod tests {
         };
         let text = "name: Alice\nextra: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1732,7 +2182,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1\nb: 2");
-        let result = validate_schema("a: 1\nb: 2", &docs, &schema);
+        let result = validate_schema("a: 1\nb: 2", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1753,7 +2203,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema("a: 1", &docs, &schema);
+        let result = validate_schema("a: 1", &docs, &schema, true);
         assert!(!result.is_empty());
     }
 
@@ -1774,7 +2224,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema);
+        let result = validate_schema("name: Alice", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1795,7 +2245,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema);
+        let result = validate_schema("other: value", &docs, &schema, true);
         assert!(!result.is_empty());
     }
 
@@ -1816,7 +2266,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema("a: 1", &docs, &schema);
+        let result = validate_schema("a: 1", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1837,7 +2287,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema);
+        let result = validate_schema("other: value", &docs, &schema, true);
         assert!(!result.is_empty());
     }
 
@@ -1855,7 +2305,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: hello");
-        let result = validate_schema("a: hello", &docs, &schema);
+        let result = validate_schema("a: hello", &docs, &schema, true);
         assert!(!result.is_empty());
     }
 
@@ -1874,7 +2324,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("server", server_schema)]);
         let text = "server:\n  port: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1892,7 +2342,7 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -1910,7 +2360,7 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - 9090";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -1941,7 +2391,7 @@ mod tests {
         };
         let text = "a:\n  b:\n    c:\n      d: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &l1);
+        let result = validate_schema(text, &docs, &l1, true);
         assert!(result.is_empty());
     }
 
@@ -1964,7 +2414,7 @@ mod tests {
         let text = "x:\n".repeat(25) + "  value: leaf";
         let docs = parse_docs(&text);
         // Must complete without panic
-        let _ = validate_schema(&text, &docs, &schema);
+        let _ = validate_schema(&text, &docs, &schema, true);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1979,7 +2429,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema);
+        let result = validate_schema("age: 30", &docs, &schema, true);
         assert!(!result.is_empty());
         assert!(
             result
@@ -1996,7 +2446,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema);
+        let result = validate_schema("age: 30", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2009,7 +2459,7 @@ mod tests {
     fn should_set_correct_code_for_type_violation() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: hello");
-        let result = validate_schema("count: hello", &docs, &schema);
+        let result = validate_schema("count: hello", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2028,7 +2478,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema);
+        let result = validate_schema("env: testing", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2045,7 +2495,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema("name: Alice\nextra: value", &docs, &schema);
+        let result = validate_schema("name: Alice\nextra: value", &docs, &schema, true);
         let ap_diags: Vec<_> = result
             .iter()
             .filter(|d| code_of(d) == "schemaAdditionalProperty")
@@ -2067,7 +2517,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema);
+        let result = validate_schema("age: 30", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2077,7 +2527,7 @@ mod tests {
     fn should_set_error_severity_for_type_violation() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: hello");
-        let result = validate_schema("count: hello", &docs, &schema);
+        let result = validate_schema("count: hello", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2093,7 +2543,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema);
+        let result = validate_schema("env: testing", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2107,7 +2557,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema("name: Alice\nextra: value", &docs, &schema);
+        let result = validate_schema("name: Alice\nextra: value", &docs, &schema, true);
         let ap = result
             .iter()
             .find(|d| code_of(d) == "schemaAdditionalProperty")
@@ -2126,7 +2576,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2146,7 +2596,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema);
+        let result = validate_schema("env: testing", &docs, &schema, true);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(msg.contains("prod"), "message should contain 'prod'");
@@ -2165,7 +2615,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("");
-        let result = validate_schema("", &docs, &schema);
+        let result = validate_schema("", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2176,7 +2626,7 @@ mod tests {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
         };
-        let result = validate_schema("name: Alice", &[], &schema);
+        let result = validate_schema("name: Alice", &[], &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2185,7 +2635,7 @@ mod tests {
     fn should_return_empty_for_schema_with_no_constraints() {
         let schema = JsonSchema::default();
         let docs = parse_docs("anything: value\nnested:\n  key: 123");
-        let result = validate_schema("anything: value\nnested:\n  key: 123", &docs, &schema);
+        let result = validate_schema("anything: value\nnested:\n  key: 123", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2197,7 +2647,7 @@ mod tests {
             ..JsonSchema::default()
         };
         // Simulate parse failure by passing empty docs slice
-        let result = validate_schema("invalid: [yaml", &[], &schema);
+        let result = validate_schema("invalid: [yaml", &[], &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2210,7 +2660,7 @@ mod tests {
         };
         let text = "name: Alice\n---\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         // Second document is missing "name"
         let req_diags: Vec<_> = result
             .iter()
@@ -2227,7 +2677,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("anything: value");
-        let result = validate_schema("anything: value", &docs, &schema);
+        let result = validate_schema("anything: value", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2260,7 +2710,7 @@ mod tests {
         }
         let docs = parse_docs(&text);
         // Must return without panicking — result content doesn't matter
-        let _result = validate_schema(&text, &docs, &schema);
+        let _result = validate_schema(&text, &docs, &schema, true);
     }
 
     // Test 59
@@ -2289,7 +2739,7 @@ mod tests {
         text.push_str("42\n");
         let docs = parse_docs(&text);
         // Must return without panicking — depth guard may suppress leaf-level error
-        let _result = validate_schema(&text, &docs, &schema);
+        let _result = validate_schema(&text, &docs, &schema, true);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2312,7 +2762,7 @@ mod tests {
         };
         let docs = parse_docs("other: value");
         // Must return (not hang) — result content doesn't matter
-        let _result = validate_schema("other: value", &docs, &schema);
+        let _result = validate_schema("other: value", &docs, &schema, true);
     }
 
     // Test 61
@@ -2331,7 +2781,7 @@ mod tests {
         };
         // Only field_0 is present — all other branches unsatisfied
         let docs = parse_docs("field_0: value");
-        let result = validate_schema("field_0: value", &docs, &schema);
+        let result = validate_schema("field_0: value", &docs, &schema, true);
         // Non-empty: at least one diagnostic for unsatisfied branches
         assert!(!result.is_empty());
     }
@@ -2359,7 +2809,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema);
+        let result = validate_schema("age: 30", &docs, &schema, true);
         assert!(!result.is_empty());
         // Message must not contain the full 1000-char description
         for d in &result {
@@ -2385,7 +2835,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: invalid");
-        let result = validate_schema("env: invalid", &docs, &schema);
+        let result = validate_schema("env: invalid", &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaEnum");
         // Message must be bounded — 50 values * ~6 chars each would be ~300+
@@ -2446,7 +2896,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema);
+        let result = validate_schema("other: value", &docs, &schema, true);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2483,7 +2933,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema);
+        let result = validate_schema("other: value", &docs, &schema, true);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2512,7 +2962,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: ABC");
-        let result = validate_schema("code: ABC", &docs, &schema);
+        let result = validate_schema("code: ABC", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2528,7 +2978,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema("code: abc", &docs, &schema);
+        let result = validate_schema("code: abc", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2546,7 +2996,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: anything");
-        let result = validate_schema("val: anything", &docs, &schema);
+        let result = validate_schema("val: anything", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPatternLimit");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -2564,7 +3014,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: anything");
-        let result = validate_schema("val: anything", &docs, &schema);
+        let result = validate_schema("val: anything", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPatternLimit");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -2586,7 +3036,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("name: abc");
-        let result = validate_schema("name: abc", &docs, &schema);
+        let result = validate_schema("name: abc", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2602,7 +3052,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("name: hi");
-        let result = validate_schema("name: hi", &docs, &schema);
+        let result = validate_schema("name: hi", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2620,7 +3070,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("name: hello");
-        let result = validate_schema("name: hello", &docs, &schema);
+        let result = validate_schema("name: hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2636,7 +3086,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("name: toolong");
-        let result = validate_schema("name: toolong", &docs, &schema);
+        let result = validate_schema("name: toolong", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaxLength");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2658,7 +3108,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("port: 80");
-        let result = validate_schema("port: 80", &docs, &schema);
+        let result = validate_schema("port: 80", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2674,7 +3124,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("port: 0");
-        let result = validate_schema("port: 0", &docs, &schema);
+        let result = validate_schema("port: 0", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2692,7 +3142,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("port: 8080");
-        let result = validate_schema("port: 8080", &docs, &schema);
+        let result = validate_schema("port: 8080", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2708,7 +3158,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("port: 99999");
-        let result = validate_schema("port: 99999", &docs, &schema);
+        let result = validate_schema("port: 99999", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaximum");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2730,7 +3180,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema);
+        let result = validate_schema("val: 5", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
@@ -2747,7 +3197,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema);
+        let result = validate_schema("val: 5", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2763,7 +3213,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema);
+        let result = validate_schema("val: 10", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaximum");
     }
@@ -2783,7 +3233,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema);
+        let result = validate_schema("val: 5", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
@@ -2799,7 +3249,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 6");
-        let result = validate_schema("val: 6", &docs, &schema);
+        let result = validate_schema("val: 6", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2814,7 +3264,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema);
+        let result = validate_schema("val: 10", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaximum");
     }
@@ -2830,7 +3280,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 9");
-        let result = validate_schema("val: 9", &docs, &schema);
+        let result = validate_schema("val: 9", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2850,7 +3300,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 15");
-        let result = validate_schema("count: 15", &docs, &schema);
+        let result = validate_schema("count: 15", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2866,7 +3316,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 7");
-        let result = validate_schema("count: 7", &docs, &schema);
+        let result = validate_schema("count: 7", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMultipleOf");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2887,7 +3337,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("version: v1");
-        let result = validate_schema("version: v1", &docs, &schema);
+        let result = validate_schema("version: v1", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2902,7 +3352,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("version: v2");
-        let result = validate_schema("version: v2", &docs, &schema);
+        let result = validate_schema("version: v2", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaConst");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2919,7 +3369,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("level: 42");
-        let result = validate_schema("level: 42", &docs, &schema);
+        let result = validate_schema("level: 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2935,7 +3385,7 @@ mod tests {
         )]);
         let text = "obj:\n  key: other";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         // yaml_to_json returns None for mappings — const check skipped
         let const_diags: Vec<_> = result
             .iter()
@@ -2962,7 +3412,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema);
+        let result = validate_schema("val: hello", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2982,7 +3432,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 42");
-        let result = validate_schema("val: 42", &docs, &schema);
+        let result = validate_schema("val: 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -2997,7 +3447,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("hello");
-        let result = validate_schema("hello", &docs, &schema);
+        let result = validate_schema("hello", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -3013,7 +3463,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("42");
-        let result = validate_schema("42", &docs, &schema);
+        let result = validate_schema("42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3031,7 +3481,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: prod");
-        let result = validate_schema("env: prod", &docs, &schema);
+        let result = validate_schema("env: prod", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -3050,7 +3500,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: dev");
-        let result = validate_schema("env: dev", &docs, &schema);
+        let result = validate_schema("env: dev", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3069,7 +3519,7 @@ mod tests {
         // str_name should be validated as string — integer is a type violation
         let text = "str_name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -3084,7 +3534,7 @@ mod tests {
         };
         let text = "str_name: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3099,7 +3549,7 @@ mod tests {
         };
         let text = "str_name: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         // str_name matches the pattern — no additionalProperty diagnostic
         assert!(
             result
@@ -3120,7 +3570,7 @@ mod tests {
         // "other" doesn't match "^str_" and there are no properties
         let text = "other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
     }
@@ -3140,7 +3590,7 @@ mod tests {
         // patternProperties schema (string) is not applied for known properties.
         let text = "name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3160,7 +3610,7 @@ mod tests {
         // value is integer — fails string pattern, passes integer pattern
         let text = "x_num: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         // One type violation from the string pattern
         let type_diags: Vec<_> = result
             .iter()
@@ -3183,7 +3633,7 @@ mod tests {
         // "key" also falls through to additionalProperties (not matched by any pattern).
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
             && d.severity == Some(DiagnosticSeverity::WARNING)));
         assert!(
@@ -3213,7 +3663,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
         let text = "tags:\n  - a";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3225,7 +3675,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
         let text = "tags:\n  - a\n  - b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3235,7 +3685,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
         let text = "tags:\n  - a\n  - b\n  - c";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaxItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3247,7 +3697,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
         let text = "tags:\n  - a\n  - b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3257,7 +3707,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
         let text = "tags:\n  - foo\n  - bar\n  - foo";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaUniqueItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3269,7 +3719,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
         let text = "tags:\n  - foo\n  - bar\n  - baz";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3280,7 +3730,7 @@ mod tests {
             object_schema_with_props(vec![("tags", array_schema(None, None, Some(false)))]);
         let text = "tags:\n  - foo\n  - foo";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3299,7 +3749,7 @@ mod tests {
         // Invalid regex in patternProperties — warning emitted
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
             && d.severity == Some(DiagnosticSeverity::WARNING)));
     }
@@ -3317,7 +3767,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema("code: abc", &docs, &schema);
+        let result = validate_schema("code: abc", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
     }
@@ -3333,7 +3783,7 @@ mod tests {
         };
         let text = "str_name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -3355,7 +3805,7 @@ mod tests {
         };
         let text = "foo: 1\nbar_baz: 2";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3373,7 +3823,7 @@ mod tests {
         // "BadKey" contains uppercase — violates pattern
         let text = "BadKey: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3392,7 +3842,7 @@ mod tests {
         };
         let text = "ab: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
@@ -3410,7 +3860,7 @@ mod tests {
         };
         let text = "baz: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
     }
@@ -3431,7 +3881,7 @@ mod tests {
         // Both keys are lowercase — no violations
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3448,7 +3898,7 @@ mod tests {
         };
         let text = "UPPER: 1\nAlso_Bad: 2\ngood: 3";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         let pattern_diags: Vec<_> = result
             .iter()
             .filter(|d| code_of(d) == "schemaPattern")
@@ -3477,7 +3927,7 @@ mod tests {
         // credit_card present but billing_address absent
         let text = "credit_card: 1234";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaDependentRequired");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3501,7 +3951,7 @@ mod tests {
         };
         let text = "credit_card: 1234\nbilling_address: 123 Main St";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3522,7 +3972,7 @@ mod tests {
         // trigger absent — no check performed
         let text = "name: Alice";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3541,7 +3991,7 @@ mod tests {
         };
         let text = "name: Alice";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaRequired");
     }
@@ -3560,7 +4010,7 @@ mod tests {
         };
         let text = "name: Alice\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3579,7 +4029,7 @@ mod tests {
         // trigger "name" absent — dep schema not checked
         let text = "other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3607,7 +4057,7 @@ mod tests {
         )]);
         // val is a string of length 5 — if matches, then passes
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema);
+        let result = validate_schema("val: hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3630,7 +4080,7 @@ mod tests {
         )]);
         // val is a short string — if matches, then fails
         let docs = parse_docs("val: hi");
-        let result = validate_schema("val: hi", &docs, &schema);
+        let result = validate_schema("val: hi", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
@@ -3654,7 +4104,7 @@ mod tests {
         )]);
         // val is integer 5 — if doesn't match (not string), else passes (>= 0)
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema);
+        let result = validate_schema("val: 5", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3677,7 +4127,7 @@ mod tests {
         )]);
         // val is integer 3 — if doesn't match, else fails (< 10)
         let docs = parse_docs("val: 3");
-        let result = validate_schema("val: 3", &docs, &schema);
+        let result = validate_schema("val: 3", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
@@ -3701,7 +4151,7 @@ mod tests {
         )]);
         // val is string — if matches, no then → no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema);
+        let result = validate_schema("val: hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3724,7 +4174,7 @@ mod tests {
         )]);
         // val is integer — if doesn't match, no else → no diagnostic
         let docs = parse_docs("val: 42");
-        let result = validate_schema("val: 42", &docs, &schema);
+        let result = validate_schema("val: 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3747,7 +4197,7 @@ mod tests {
         )]);
         // Without if, then/else are ignored — string value produces no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema);
+        let result = validate_schema("val: hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3770,7 +4220,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_array_has_one_matching_item_no_min_max() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3779,7 +4229,7 @@ mod tests {
     fn should_produce_diagnostic_when_no_items_match_contains_schema() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 1"));
     }
@@ -3789,7 +4239,7 @@ mod tests {
     fn should_produce_diagnostic_when_min_contains_not_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 2"));
     }
@@ -3799,7 +4249,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_min_contains_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema);
+        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3808,7 +4258,7 @@ mod tests {
     fn should_produce_diagnostic_when_max_contains_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema);
+        let result = validate_schema("items:\n  - 1\n  - 2", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at most 1"));
     }
@@ -3818,7 +4268,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_max_contains_not_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema);
+        let result = validate_schema("items:\n  - 1\n  - hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3828,7 +4278,7 @@ mod tests {
         // minContains: 0 disables the "at least one" requirement
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(0), None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3845,7 +4295,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema);
+        let result = validate_schema("items:\n  - hello\n  - world", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3868,7 +4318,7 @@ mod tests {
         )]);
         // [0] is a string (ok), [1] is a string but expected integer (fail)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema);
+        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -3881,7 +4331,7 @@ mod tests {
             tuple_schema(vec![string_schema(), integer_schema()], None),
         )]);
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema);
+        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3894,7 +4344,7 @@ mod tests {
         )]);
         // [0] string ok, [1] integer ok (matches items schema)
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema);
+        let result = validate_schema("arr:\n  - hello\n  - 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3907,7 +4357,7 @@ mod tests {
         )]);
         // [0] string ok, [1] string fails items schema (expected integer)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema);
+        let result = validate_schema("arr:\n  - hello\n  - world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -3924,7 +4374,7 @@ mod tests {
         )]);
         // Only one item — only [0] is validated, [1] and [2] positions absent
         let docs = parse_docs("arr:\n  - hello");
-        let result = validate_schema("arr:\n  - hello", &docs, &schema);
+        let result = validate_schema("arr:\n  - hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3985,7 +4435,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello");
-        let result = validate_schema("name: hello", &docs, &schema);
+        let result = validate_schema("name: hello", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -4002,7 +4452,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("extra"));
     }
@@ -4021,7 +4471,7 @@ mod tests {
         };
         // "extra" is unevaluated and not an integer — diagnostic
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4038,7 +4488,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("- hello\n- 42");
-        let result = validate_schema("- hello\n- 42", &docs, &schema);
+        let result = validate_schema("- hello\n- 42", &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -4052,7 +4502,7 @@ mod tests {
         };
         // [0] is string (evaluated by prefix), [1] is string (unevaluated, fails integer)
         let docs = parse_docs("- hello\n- world");
-        let result = validate_schema("- hello\n- world", &docs, &schema);
+        let result = validate_schema("- hello\n- world", &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4074,7 +4524,7 @@ mod tests {
         };
         // "extra" is in then_schema — evaluated, no diagnostic
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema, true);
         // "name" is not in then properties — it's unevaluated → diagnostic
         // "extra" IS in then properties → no diagnostic for extra
         let unevaluated: Vec<_> = result
@@ -4089,8 +4539,216 @@ mod tests {
     fn should_not_change_behavior_when_no_unevaluated_keywords() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema("name: hello\nextra: world", &docs, &schema);
+        let result = validate_schema("name: hello\nextra: world", &docs, &schema, true);
         // Without unevaluated keywords, extra property is allowed
         assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Format validation
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn format_schema(fmt: &str) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            format: Some(fmt.to_string()),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn run_format(text: &str, fmt: &str) -> Vec<Diagnostic> {
+        let schema = format_schema(fmt);
+        let docs = parse_docs(text);
+        validate_schema(text, &docs, &schema, true)
+    }
+
+    // Test 157 — date-time: valid RFC 3339
+    #[test]
+    fn format_date_time_valid() {
+        assert!(run_format("2023-01-15T10:30:00Z", "date-time").is_empty());
+        assert!(run_format("2023-01-15T10:30:00+05:30", "date-time").is_empty());
+        assert!(run_format("2023-01-15T10:30:00.123Z", "date-time").is_empty());
+    }
+
+    // Test 158 — date-time: invalid values emit schemaFormat WARNING
+    #[test]
+    fn format_date_time_invalid() {
+        let result = run_format("not-a-date", "date-time");
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaFormat");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(result[0].message.contains("date-time"));
+
+        assert_eq!(run_format("2023-13-01T00:00:00Z", "date-time").len(), 1);
+        assert_eq!(run_format("2023-01-15 10:30:00Z", "date-time").len(), 1);
+    }
+
+    // Test 159 — date: valid YYYY-MM-DD
+    #[test]
+    fn format_date_valid() {
+        assert!(run_format("2023-01-15", "date").is_empty());
+        assert!(run_format("2024-02-29", "date").is_empty()); // leap year
+    }
+
+    // Test 160 — date: invalid
+    #[test]
+    fn format_date_invalid() {
+        assert_eq!(run_format("2023-13-01", "date").len(), 1); // month > 12
+        assert_eq!(run_format("2023-02-29", "date").len(), 1); // non-leap year
+        assert_eq!(run_format("not-a-date", "date").len(), 1);
+    }
+
+    // Test 161 — email: valid
+    #[test]
+    fn format_email_valid() {
+        assert!(run_format("user@example.com", "email").is_empty());
+        assert!(run_format("a+b@sub.domain.org", "email").is_empty());
+    }
+
+    // Test 162 — email: invalid
+    #[test]
+    fn format_email_invalid() {
+        assert_eq!(run_format("no-at-sign", "email").len(), 1);
+        assert_eq!(run_format("missing-domain-dot@nodot", "email").len(), 1);
+        assert_eq!(run_format("user-no-domain@", "email").len(), 1);
+    }
+
+    // Test 163 — ipv4: valid
+    #[test]
+    fn format_ipv4_valid() {
+        assert!(run_format("192.168.1.1", "ipv4").is_empty());
+        assert!(run_format("0.0.0.0", "ipv4").is_empty());
+        assert!(run_format("255.255.255.255", "ipv4").is_empty());
+    }
+
+    // Test 164 — ipv4: invalid
+    #[test]
+    fn format_ipv4_invalid() {
+        assert_eq!(run_format("256.0.0.1", "ipv4").len(), 1);
+        assert_eq!(run_format("192.168.1", "ipv4").len(), 1);
+        assert_eq!(run_format("192.168.1.1.1", "ipv4").len(), 1);
+        assert_eq!(run_format("01.0.0.1", "ipv4").len(), 1); // leading zero
+    }
+
+    // Test 165 — ipv6: valid
+    #[test]
+    fn format_ipv6_valid() {
+        assert!(run_format("2001:0db8:85a3:0000:0000:8a2e:0370:7334", "ipv6").is_empty());
+        assert!(run_format("::1", "ipv6").is_empty());
+        assert!(run_format("fe80::1", "ipv6").is_empty());
+    }
+
+    // Test 166 — ipv6: invalid
+    #[test]
+    fn format_ipv6_invalid() {
+        assert_eq!(
+            run_format(
+                "not::an::ipv6::address::with::too::many::groups::here",
+                "ipv6"
+            )
+            .len(),
+            1
+        );
+    }
+
+    // Test 167 — hostname: valid
+    #[test]
+    fn format_hostname_valid() {
+        assert!(run_format("example.com", "hostname").is_empty());
+        assert!(run_format("sub.example.com", "hostname").is_empty());
+        assert!(run_format("localhost", "hostname").is_empty());
+    }
+
+    // Test 168 — hostname: invalid
+    #[test]
+    fn format_hostname_invalid() {
+        assert_eq!(run_format("-invalid.com", "hostname").len(), 1);
+        assert_eq!(run_format("invalid-.com", "hostname").len(), 1);
+        assert_eq!(run_format("invalid..com", "hostname").len(), 1);
+    }
+
+    // Test 169 — uri: valid
+    #[test]
+    fn format_uri_valid() {
+        assert!(run_format("https://example.com/path", "uri").is_empty());
+        assert!(run_format("http://example.com", "uri").is_empty());
+        assert!(run_format("urn:isbn:0451450523", "uri").is_empty());
+    }
+
+    // Test 170 — uri: invalid
+    #[test]
+    fn format_uri_invalid() {
+        assert_eq!(run_format("not-a-uri", "uri").len(), 1);
+        assert_eq!(run_format("//no-scheme", "uri").len(), 1);
+    }
+
+    // Test 171 — uuid: valid
+    #[test]
+    fn format_uuid_valid() {
+        assert!(run_format("550e8400-e29b-41d4-a716-446655440000", "uuid").is_empty());
+        assert!(run_format("550E8400-E29B-41D4-A716-446655440000", "uuid").is_empty());
+    }
+
+    // Test 172 — uuid: invalid
+    #[test]
+    fn format_uuid_invalid() {
+        assert_eq!(run_format("not-a-uuid", "uuid").len(), 1);
+        assert_eq!(
+            run_format("550e8400-e29b-41d4-a716-44665544000g", "uuid").len(),
+            1
+        );
+        assert_eq!(
+            run_format("550e8400e29b41d4a716446655440000", "uuid").len(),
+            1
+        );
+    }
+
+    // Test 173 — json-pointer: valid
+    #[test]
+    fn format_json_pointer_valid() {
+        assert!(run_format("", "json-pointer").is_empty()); // empty is valid
+        assert!(run_format("/foo/bar", "json-pointer").is_empty());
+        assert!(run_format("/foo/0", "json-pointer").is_empty());
+        assert!(run_format("/a~0b", "json-pointer").is_empty()); // ~0 escape
+        assert!(run_format("/a~1b", "json-pointer").is_empty()); // ~1 escape
+    }
+
+    // Test 174 — json-pointer: invalid
+    #[test]
+    fn format_json_pointer_invalid() {
+        assert_eq!(run_format("foo", "json-pointer").len(), 1); // no leading /
+        assert_eq!(run_format("/foo~2bar", "json-pointer").len(), 1); // invalid escape
+        assert_eq!(run_format("/foo~", "json-pointer").len(), 1); // trailing ~
+    }
+
+    // Test 175 — unknown format: silently ignored
+    #[test]
+    fn format_unknown_is_ignored() {
+        let result = run_format("anything", "some-unknown-format");
+        assert!(result.is_empty());
+    }
+
+    // Test 176 — format_validation disabled: no diagnostics emitted
+    #[test]
+    fn format_validation_disabled_produces_no_format_diagnostics() {
+        let schema = format_schema("date");
+        let docs = parse_docs("not-a-date");
+        let result = validate_schema("not-a-date", &docs, &schema, false);
+        assert!(result.is_empty());
+    }
+
+    // Test 177 — regex: valid ECMAScript regex
+    #[test]
+    fn format_regex_valid() {
+        assert!(run_format("^[a-z]+$", "regex").is_empty());
+        assert!(run_format(".*", "regex").is_empty());
+    }
+
+    // Test 178 — regex: invalid pattern
+    // Note: use patterns that don't start with YAML reserved chars ([ { @)
+    #[test]
+    fn format_regex_invalid() {
+        // Unmatched parenthesis — invalid regex, YAML-safe string
+        assert_eq!(run_format("(unclosed-paren", "regex").len(), 1);
     }
 }

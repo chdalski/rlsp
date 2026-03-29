@@ -51,6 +51,8 @@ pub struct Settings {
     pub http_proxy: Option<String>,
     /// Enable color decorators (color picker) for color values. Defaults to `true` when absent.
     pub color_decorators: Option<bool>,
+    /// Enable `format` keyword validation. Defaults to `true` when absent.
+    pub format_validation: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -147,6 +149,16 @@ impl Backend {
     /// Return the configured HTTP proxy URL, or `None` if not set.
     pub(crate) fn get_http_proxy(&self) -> Option<String> {
         self.settings.lock().ok().and_then(|s| s.http_proxy.clone())
+    }
+
+    /// Return `true` if `format` keyword validation is enabled.
+    ///
+    /// Defaults to `true` when `formatValidation` is absent from settings.
+    pub(crate) fn get_format_validation(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.format_validation.unwrap_or(true))
     }
 
     /// Return the cached `SchemaStore` catalog, fetching it on first call.
@@ -255,8 +267,12 @@ impl Backend {
             };
 
             if let Some(s) = schema {
+                let format_validation = self.get_format_validation();
                 diagnostics.extend(crate::schema_validation::validate_schema(
-                    text, documents, &s,
+                    text,
+                    documents,
+                    &s,
+                    format_validation,
                 ));
             }
         }
