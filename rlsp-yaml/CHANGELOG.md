@@ -3,6 +3,29 @@
 
 ## Bug Fixes
 
+- Fix cargo fmt line-wrapping in content tests (2f8ebb4)
+
+## Documentation
+
+- Add plan for schema resolution and format validation (db14873)
+- Mark schema resolution and format plan complete (db671a9)
+- Add Helix and Zed editor setup to configuration (c0ddf40)
+- Document minProperties/maxProperties and additionalItems in feature log (2c09807)
+
+## Features
+
+- Detect JSON Schema draft from $schema URI (e82de4b)
+- Resolve $id / id base URI and thread through sub-schema parsing (f36c93b)
+- Thread ParseContext through all sub-schema parsing for remote $ref (3d10310)
+- Validate format keyword with 15 format validators (05dbcd7)
+- Add IDN/IRI format validators (075e74d)
+- Validate contentEncoding and contentMediaType keywords (9716140)
+- Default Kubernetes schema version to master (c0b7367)
+- Add minProperties/maxProperties object validation (1963542)
+- Add additionalItems validation for Draft-04/07 tuple arrays (6bcfef4)
+
+## Bug Fixes
+
 - Harden regex compilation against ReDoS (13d62b5)
 
 ## Documentation
