@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-29
 
 ## Goal
@@ -39,9 +39,9 @@ CI and the reviewer enforce it.
 - [x] Fix production `expect()`/`unwrap()` calls (9 total — 7092dcd)
 - [x] Add lint allows to all 21 test modules + integration test (7092dcd)
 - [x] Fix remaining 88 non-allowed clippy violations in tests (ac8b43f)
-- [ ] Update CI to use `--all-targets`
-- [ ] Update root CLAUDE.md build commands
-- [ ] Verify `cargo clippy --all-targets` passes clean
+- [x] Update CI to use `--all-targets` (48ec1cc)
+- [x] Update root CLAUDE.md build commands (48ec1cc)
+- [x] Verify `cargo clippy --all-targets` passes clean (48ec1cc)
 
 ## Tasks
 
