@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-29
 
 ## Goal
@@ -36,8 +36,8 @@ CI and the reviewer enforce it.
 
 - [x] Clarify requirements with user
 - [x] Add `expect_used` and `unwrap_used` to Cargo.toml lints
-- [ ] Fix 2 production `expect()` calls
-- [ ] Add lint allows to all 21 test modules + integration test
+- [x] Fix production `expect()`/`unwrap()` calls (9 total — 7092dcd)
+- [x] Add lint allows to all 21 test modules + integration test (7092dcd)
 - [ ] Fix remaining ~88 non-allowed clippy violations in tests
 - [ ] Update CI to use `--all-targets`
 - [ ] Update root CLAUDE.md build commands
