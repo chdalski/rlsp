@@ -55,7 +55,7 @@ minimal memory footprint.
 
 ```sh
 cargo fmt              # format
-cargo clippy           # lint (zero warnings enforced)
+cargo clippy --all-targets  # lint (zero warnings enforced)
 cargo build            # build
 cargo test             # run all tests
 cargo clean            # clean stale build artifacts
