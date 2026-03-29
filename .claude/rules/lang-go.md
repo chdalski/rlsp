@@ -5,12 +5,9 @@ paths:
 
 # Go
 
-Go values simplicity, readability, and pragmatism. The
-language deliberately omits features like generics-heavy
-abstractions, inheritance, and exceptions in favor of
-explicit error handling, composition, and straightforward
-code. Write Go that reads like well-structured prose:
-clear, direct, and unsurprising.
+Go values simplicity, readability, and pragmatism. Write
+Go that reads like well-structured prose: clear, direct,
+and unsurprising.
 
 ## Go Idioms
 
@@ -38,21 +35,13 @@ inheritance, and embedding gives you delegation without
 the fragile base class problem:
 
 ```go
-type BaseRepository struct {
-    db *sql.DB
-}
+type BaseRepository struct{ db *sql.DB }
 
-func (r *BaseRepository) execContext(
-    ctx context.Context,
-    query string,
-    args ...any,
-) (sql.Result, error) {
+func (r *BaseRepository) execContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
     return r.db.ExecContext(ctx, query, args...)
 }
 
-type OrderRepository struct {
-    BaseRepository
-}
+type OrderRepository struct{ BaseRepository }
 ```
 
 ### Zero Values Are Useful
@@ -193,298 +182,6 @@ if errors.As(err, &validErr) {
 }
 ```
 
-### Error Handling Pattern
-
-Handle errors immediately — deferring checks makes control
-flow harder to follow:
-
-```go
-user, err := repo.FindUser(ctx, id)
-if err != nil {
-    return fmt.Errorf("find user: %w", err)
-}
-
-orders, err := repo.FindOrders(ctx, user.ID)
-if err != nil {
-    return fmt.Errorf("find orders: %w", err)
-}
-```
-
-## Concurrency
-
-### Goroutines and Channels
-
-```go
-func processItems(
-    ctx context.Context,
-    items []Item,
-) ([]Result, error) {
-    results := make(chan Result, len(items))
-    errs := make(chan error, 1)
-
-    var wg sync.WaitGroup
-    for _, item := range items {
-        wg.Add(1)
-        go func(item Item) {
-            defer wg.Done()
-            result, err := process(ctx, item)
-            if err != nil {
-                select {
-                case errs <- err:
-                default:
-                }
-                return
-            }
-            results <- result
-        }(item)
-    }
-
-    go func() {
-        wg.Wait()
-        close(results)
-        close(errs)
-    }()
-
-    select {
-    case err := <-errs:
-        return nil, err
-    case <-ctx.Done():
-        return nil, ctx.Err()
-    default:
-    }
-
-    var collected []Result
-    for r := range results {
-        collected = append(collected, r)
-    }
-    return collected, nil
-}
-```
-
-### errgroup for Structured Concurrency
-
-Prefer errgroup over manual WaitGroup + error channel
-patterns — it handles cancellation and error propagation:
-
-```go
-import "golang.org/x/sync/errgroup"
-
-func fetchAll(
-    ctx context.Context,
-    ids []OrderID,
-    repo OrderRepository,
-) ([]*Order, error) {
-    g, ctx := errgroup.WithContext(ctx)
-    orders := make([]*Order, len(ids))
-
-    for i, id := range ids {
-        i, id := i, id
-        g.Go(func() error {
-            order, err := repo.Find(ctx, id)
-            if err != nil {
-                return err
-            }
-            orders[i] = order
-            return nil
-        })
-    }
-
-    if err := g.Wait(); err != nil {
-        return nil, err
-    }
-    return orders, nil
-}
-```
-
-### Sync Package
-
-```go
-// Use sync.Once for one-time initialization
-var (
-    instance *Service
-    once     sync.Once
-)
-
-func GetService() *Service {
-    once.Do(func() {
-        instance = &Service{}
-    })
-    return instance
-}
-
-// Use sync.Map for concurrent map access
-var cache sync.Map
-
-func Get(key string) (Value, bool) {
-    v, ok := cache.Load(key)
-    if !ok {
-        return Value{}, false
-    }
-    return v.(Value), true
-}
-```
-
-## Testing
-
-### Table-Driven Tests
-
-Table-driven tests are idiomatic Go — they centralize test
-data and make adding cases trivial:
-
-```go
-func TestCustomerID(t *testing.T) {
-    tests := []struct {
-        name    string
-        input   int64
-        wantErr bool
-    }{
-        {"positive value", 42, false},
-        {"zero value", 0, true},
-        {"negative value", -1, true},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            _, err := NewCustomerID(tt.input)
-            if (err != nil) != tt.wantErr {
-                t.Errorf(
-                    "NewCustomerID(%d) error = %v, "+
-                        "wantErr %v",
-                    tt.input, err, tt.wantErr,
-                )
-            }
-        })
-    }
-}
-```
-
-### Testify Assertions
-
-```go
-import (
-    "testing"
-
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-)
-
-func TestOrderCreation(t *testing.T) {
-    order, err := NewOrder(validItems)
-
-    require.NoError(t, err)
-    assert.Equal(t, 3, len(order.Items))
-    assert.Equal(t, StatusPending, order.Status)
-}
-```
-
-### Test Helpers
-
-```go
-func newTestOrder(t *testing.T) *Order {
-    t.Helper()
-    order, err := NewOrder([]OrderItem{
-        {ProductID: 1, Quantity: 2, Price: Money(1000)},
-    })
-    require.NoError(t, err)
-    return order
-}
-```
-
-### Mocking with Interfaces
-
-Define test doubles that implement the interface — Go's
-implicit interface satisfaction means no mocking framework
-is required for simple cases:
-
-```go
-type mockRepo struct {
-    orders map[OrderID]*Order
-    err    error
-}
-
-func (m *mockRepo) Find(
-    _ context.Context,
-    id OrderID,
-) (*Order, error) {
-    if m.err != nil {
-        return nil, m.err
-    }
-    order, ok := m.orders[id]
-    if !ok {
-        return nil, ErrNotFound
-    }
-    return order, nil
-}
-```
-
-### Test File Conventions
-
-Go places tests in `_test.go` files alongside source files
-in the same package. This co-location keeps tests close to
-the code they verify and lets tests access unexported
-identifiers when needed.
-
-### Design for Testability
-
-Keep business logic free of direct I/O — functions that call
-`fmt.Println` or write to files directly embed an effect
-that tests cannot observe or redirect without capturing
-stdout, making them slow and fragile.
-
-Accept `io.Writer` for output instead — the standard library
-uses this pattern everywhere, and tests can pass a
-`bytes.Buffer` as a zero-cost in-memory sink:
-
-```go
-// Hard to test — output is embedded
-func printReport(orders []Order) {
-    for _, o := range orders {
-        fmt.Printf("Order %d: %s\n", o.ID, o.Status)
-    }
-}
-
-// Testable — caller controls where output goes
-func writeReport(w io.Writer, orders []Order) error {
-    for _, o := range orders {
-        if _, err := fmt.Fprintf(
-            w, "Order %d: %s\n", o.ID, o.Status,
-        ); err != nil {
-            return err
-        }
-    }
-    return nil
-}
-
-// In tests
-var buf bytes.Buffer
-err := writeReport(&buf, orders)
-require.NoError(t, err)
-assert.Contains(t, buf.String(), "Order 1: pending")
-```
-
-For decision logic, return a struct describing what to do
-and let the caller execute it — the test verifies the
-decision without any I/O setup:
-
-```go
-type PricingDecision struct {
-    ApplyDiscount bool
-    DiscountPct   int
-}
-
-func evaluateOrder(order Order) PricingDecision {
-    if order.Total > 100 {
-        return PricingDecision{ApplyDiscount: true, DiscountPct: 10}
-    }
-    return PricingDecision{}
-}
-```
-
-This aligns with Go's "Accept Interfaces, Return Structs"
-idiom and is the same principle as the package-level state
-pitfall in the table below — injectable dependencies over
-hardcoded effects.
-
 ## Code Style and Tooling
 
 ### Required Tools
@@ -492,6 +189,7 @@ hardcoded effects.
 - `gofmt` for formatting (automatic, non-negotiable)
 - `go vet` for correctness checks
 - `golangci-lint` for comprehensive linting
+- `go clean -cache -testcache` before quality checks — cached passes can hide regressions
 
 ### Style Guidelines
 
@@ -521,43 +219,22 @@ type OrderID int64
 
 ## Project Structure
 
-Follow the standard Go project layout:
+Follow the standard Go project layout — `cmd/` for entry
+points, `internal/` for private code, `pkg/` for reusable
+libraries:
 
 ```text
 project/
-  cmd/
-    server/
-      main.go
+  cmd/server/main.go
   internal/
     orders/
       order.go
       order_test.go
       repository.go
-      service.go
-    users/
-      user.go
-  pkg/
-    money/
-      money.go
+    users/user.go
+  pkg/money/money.go
   go.mod
-  go.sum
 ```
-
-- `cmd/` — application entry points
-- `internal/` — private application code
-- `pkg/` — library code usable by external projects
-
-### Clean Builds
-
-Use `go clean -cache -testcache` to remove cached build and
-test results before quality checks — cached passes can hide
-regressions:
-
-- `gofmt -w .` — format
-- `go vet ./...` — correctness checks
-- `golangci-lint run` — lint
-- `go test ./...` — test
-- `go clean -cache -testcache` — clean cache
 
 ## Common Pitfalls
 

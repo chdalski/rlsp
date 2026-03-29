@@ -5,12 +5,9 @@ paths:
 
 # Rust
 
-Rust prioritizes safety, performance, and expressiveness.
-The compiler enforces memory safety and thread safety at
-compile time. Embrace the type system and borrow checker
-as design tools, not obstacles. Rust's ownership model
-naturally aligns with functional programming and
-immutability-first design.
+Rust enforces memory and thread safety at compile time.
+Embrace the type system and borrow checker as design
+tools, not obstacles.
 
 ## Ownership, Borrowing, and Lifetimes
 
@@ -101,10 +98,9 @@ connect("example.com", ConnectionMode::Secure);
 
 ### Exhaustive Struct Initialization
 
-Avoid `..Default::default()` or struct update syntax when
-constructing a value for the first time — it silently
-ignores new fields as they are added, hiding every place
-that needs updating:
+Avoid `..Default::default()` when constructing a value for
+the first time — it silently ignores new fields, hiding
+every place that needs updating:
 
 ```rust
 // Fragile — new Config fields are silently defaulted
@@ -121,9 +117,7 @@ let config = Config {
 };
 ```
 
-Exception: struct update syntax is appropriate when the
-intent is genuinely "copy all other fields from an existing
-instance" (e.g., `let updated = Config { port: 9000, ..existing }`).
+Struct update syntax is fine when copying from an existing instance.
 
 ### Result and Option
 
@@ -191,393 +185,6 @@ async fn fetch_order(
 }
 ```
 
-## Functional Patterns
-
-### Slice Patterns Over Indexing
-
-Use slice patterns instead of direct indexing — indexing
-panics at runtime if the length assumption is wrong, while
-patterns force explicit handling of every case at compile
-time:
-
-```rust
-// Panics at runtime if items is empty or too short
-let first = items[0];
-let second = items[1];
-
-// Compiler-enforced — all lengths must be handled
-match items.as_slice() {
-    [] => handle_empty(),
-    [only] => handle_one(only),
-    [first, second] => handle_two(first, second),
-    [first, rest @ ..] => handle_many(first, rest),
-}
-```
-
-### Iterator Chains Over Loops
-
-Use iterator chains instead of imperative loops when the
-criteria in `functional-style.md` are met (readability,
-less code, no manual index math, lower complexity). The
-compiler optimizes iterator chains to match hand-written
-loop performance, so there is no runtime cost.
-
-**Collect-and-push** — the most common anti-pattern. A
-`mut Vec` is created, a `for` loop pushes items
-conditionally. Always refactor:
-
-```rust
-// Anti-pattern — mutable accumulator + loop
-let mut results = Vec::new();
-for item in items {
-    if item.is_valid() {
-        results.push(item.transform());
-    }
-}
-
-// Refactored — declarative, no mutation
-let results: Vec<_> = items
-    .iter()
-    .filter(|item| item.is_valid())
-    .map(|item| item.transform())
-    .collect();
-```
-
-**Linear and reverse search** — loops that scan for a
-match. Use `.find()`, `.position()`, or `.rev()` variants:
-
-```rust
-// Anti-pattern — manual reverse search with index math
-for i in (0..current_line).rev() {
-    if lines[i].indent() < current_indent {
-        return Some(i);
-    }
-}
-
-// Refactored — no index math, no off-by-one risk
-lines[..current_line]
-    .iter()
-    .enumerate()
-    .rev()
-    .find(|(_, line)| line.indent() < current_indent)
-    .map(|(i, _)| i)
-```
-
-**When loops are correct in Rust:**
-
-- **`char_indices()` state machines** — tracking quote
-  depth, nesting level, or parser state through `match`
-  arms. A `.scan()` with a tuple accumulator is harder
-  to read.
-- **Async loops with multiple `.await` points** — a `for`
-  loop with `await` and `?` is clearer than `Stream`
-  combinators that require `StreamExt`, `TryStreamExt`,
-  `Box::pin`, and lifetime annotations.
-- **Recursive tree walks** — the recursive helper is
-  inherently imperative. Forcing it into iterators
-  requires a stack-based adapter that obscures traversal
-  logic.
-
-See `functional-style.md` for the full decision criteria.
-
-### Immutability by Default
-
-`let` bindings are immutable by default — use `mut` only
-when needed. Expression-based language reduces need for
-mutable accumulators:
-
-```rust
-// Mutation (higher mass)
-let mut total = 0;
-for price in prices {
-    total += price;
-}
-
-// Functional (lower mass)
-let total: i64 = prices.iter().sum();
-```
-
-### Function Composition
-
-Build complex operations from small, composable functions —
-each step is independently testable:
-
-```rust
-fn validate(req: Request) -> Result<Request, Error> {
-    // ...
-}
-fn enrich(req: Request) -> EnrichedRequest { /* ... */ }
-fn execute(req: EnrichedRequest) -> Result<Response, Error> {
-    // ...
-}
-
-// Composed pipeline
-fn process(req: Request) -> Result<Response, Error> {
-    let validated = validate(req)?;
-    let enriched = enrich(validated);
-    execute(enriched)
-}
-```
-
-### Higher-Order Functions
-
-```rust
-fn transform_dates<F>(
-    dates: &[NaiveDate],
-    transform: F,
-) -> Vec<NaiveDate>
-where
-    F: Fn(&NaiveDate) -> NaiveDate,
-{
-    dates.iter().map(transform).collect()
-}
-
-let shifted = transform_dates(&dates, |d| {
-    *d + Duration::days(7)
-});
-```
-
-## Domain-Driven Design
-
-### Value Objects as Newtypes
-
-```rust
-#[derive(Debug, Clone, PartialEq)]
-struct Email(String);
-
-impl Email {
-    fn new(value: String) -> Result<Self, ValidationError> {
-        if !value.contains('@') {
-            return Err(ValidationError::InvalidEmail);
-        }
-        Ok(Self(value))
-    }
-}
-```
-
-### Aggregates with Invariant Enforcement
-
-```rust
-struct Order {
-    id: OrderId,
-    items: Vec<OrderItem>,
-    status: OrderStatus,
-}
-
-impl Order {
-    fn add_item(
-        &mut self,
-        item: OrderItem,
-    ) -> Result<(), DomainError> {
-        if self.status != OrderStatus::Draft {
-            return Err(DomainError::OrderNotEditable);
-        }
-        self.items.push(item);
-        Ok(())
-    }
-}
-```
-
-### Repository Traits
-
-```rust
-#[async_trait]
-trait OrderRepository {
-    async fn find(
-        &self,
-        id: OrderId,
-    ) -> Result<Option<Order>, RepositoryError>;
-
-    async fn save(
-        &self,
-        order: &Order,
-    ) -> Result<(), RepositoryError>;
-}
-```
-
-## Async Patterns
-
-### Tokio Runtime
-
-- Use `tokio` as the async runtime consistently
-- Avoid blocking operations in async code — they stall the
-  entire executor thread
-- Use `tokio::spawn` for concurrent tasks
-- Use channels for inter-task communication
-
-```rust
-async fn process_batch(
-    items: Vec<Item>,
-    client: &HttpClient,
-) -> Vec<Result<Response, Error>> {
-    let futures: Vec<_> = items
-        .into_iter()
-        .map(|item| client.process(item))
-        .collect();
-    futures::future::join_all(futures).await
-}
-```
-
-## Testing
-
-### Framework and Tools
-
-- `cargo test` for unit and integration tests
-- `proptest` for property-based testing
-- `mockall` for mocking trait implementations
-
-### Test Organization
-
-Rust has three test locations, each with a distinct purpose
-— choosing the right one keeps tests focused and avoids
-over-mocking:
-
-- **Inline `#[cfg(test)]` modules** — unit tests inside the
-  source file; they have access to private items, which is
-  the only way to test internal invariants directly
-- **`tests/` directory** — integration tests compiled as a
-  separate crate; they can only access public API, which
-  makes them true black-box regression tests
-- **Doc tests (`///`)** — code examples in documentation
-  comments that `cargo test` runs as tests; use them for
-  happy-path demonstrations so documentation and behaviour
-  stay in sync
-
-```rust
-/// Returns a validated customer ID.
-///
-/// ```
-/// # use mylib::CustomerId;
-/// let id = CustomerId::new(42).unwrap();
-/// assert_eq!(id.value(), 42);
-/// ```
-pub fn new(value: i64) -> Result<Self, ValidationError> { ... }
-```
-
-### Design for Testability
-
-Keep business logic free of direct I/O — functions that call
-`println!` embed an effect that tests cannot observe or
-redirect without capturing stdout. Two complementary
-patterns eliminate this:
-
-**Accept `impl Write` for output** so tests pass a
-`Vec<u8>` as an in-memory sink:
-
-```rust
-// Hard to test — output is embedded
-fn print_report(orders: &[Order]) {
-    for o in orders {
-        println!("{}: {}", o.id, o.status);
-    }
-}
-
-// Testable — caller injects the sink
-fn write_report(
-    orders: &[Order],
-    out: &mut impl Write,
-) -> io::Result<()> {
-    for o in orders {
-        writeln!(out, "{}: {}", o.id, o.status)?;
-    }
-    Ok(())
-}
-
-// In tests
-let mut buf = Vec::new();
-write_report(&orders, &mut buf)?;
-assert_eq!(String::from_utf8(buf)?, "1: pending\n");
-```
-
-**Return action enums for decisions** so the caller executes
-the effect and tests verify only the decision:
-
-```rust
-enum PricingDecision {
-    ApplyDiscount { percent: u8 },
-    NoDiscount,
-}
-
-fn evaluate_order(order: &Order) -> PricingDecision {
-    if order.total > 100 {
-        PricingDecision::ApplyDiscount { percent: 10 }
-    } else {
-        PricingDecision::NoDiscount
-    }
-}
-
-#[test]
-fn high_value_order_gets_discount() {
-    let order = Order::with_total(150);
-    assert!(matches!(
-        evaluate_order(&order),
-        PricingDecision::ApplyDiscount { percent: 10 }
-    ));
-}
-```
-
-### Test Structure
-
-Use descriptive names with Arrange-Act-Assert pattern:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn customer_id_rejects_zero_value() {
-        let result = CustomerId::new(0);
-
-        assert!(matches!(
-            result,
-            Err(ValidationError::NonPositiveId)
-        ));
-    }
-
-    #[test]
-    fn order_prevents_adding_items_when_confirmed() {
-        let mut order = Order::confirmed(sample_id());
-
-        let result = order.add_item(sample_item());
-
-        assert!(matches!(
-            result,
-            Err(DomainError::OrderNotEditable)
-        ));
-    }
-}
-```
-
-### Property-Based Testing
-
-Use proptest to verify properties over random inputs — it
-finds edge cases that manual test data misses:
-
-```rust
-use proptest::prelude::*;
-
-proptest! {
-    #[test]
-    fn customer_id_always_positive(id in 1..i64::MAX) {
-        let result = CustomerId::new(id);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn customer_id_rejects_non_positive(id in i64::MIN..=0) {
-        let result = CustomerId::new(id);
-        assert!(result.is_err());
-    }
-}
-```
-
-### Inline Test Modules
-
-Rust uses `#[cfg(test)] mod tests` for inline unit tests —
-they live inside the source file and have access to private
-items, which is useful for testing internal invariants.
-
 ## Code Style and Tooling
 
 ### Required Tools
@@ -586,6 +193,8 @@ items, which is useful for testing internal invariants.
 - `cargo clippy` with zero warnings — clippy catches
   correctness and performance issues the compiler misses
 - `cargo test` must pass
+- `cargo clean` before quality checks if stale incremental
+  state is suspected — stale artifacts can hide errors
 
 ### Style Guidelines
 
@@ -604,17 +213,6 @@ items, which is useful for testing internal invariants.
 - Re-export public APIs with `pub use`
 - Use `snake_case` for file and folder names
 
-### Clean Builds
-
-Use `cargo clean` to remove cached build artifacts before
-quality checks — stale incremental compilation state can
-hide errors:
-
-- `cargo fmt` — format
-- `cargo clippy` — lint
-- `cargo test` — test
-- `cargo clean` — clean artifacts
-
 ## Recommended Crates
 
 | Category | Crate | Purpose |
@@ -630,6 +228,8 @@ hide errors:
 | Testing | `insta` | Snapshot testing |
 | Testing | `test-case` | Parameterized test cases |
 | Testing | `tokio-test` | Async I/O and task mocking |
+| Benchmarking | `criterion` | Statistical benchmarks |
+| Profiling | `flamegraph` | Flamegraph generation |
 | Security | `secrecy` | Sensitive data |
 | Collections | `im` | Immutable collections |
 
