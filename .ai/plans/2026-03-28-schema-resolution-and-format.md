@@ -1,7 +1,7 @@
 # Schema Resolution and Format Validation
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-29)
 **Created:** 2026-03-28
 
 ## Goal
@@ -41,12 +41,12 @@ for schema resolution and string format checking.
 
 ## Steps
 
-- [ ] Implement `$schema` draft detection
-- [ ] Implement `$id` / `id` base URI resolution
-- [ ] Implement remote `$ref` resolution
-- [ ] Implement `format` validation (common formats)
-- [ ] Implement `format` validation (IDN/IRI formats)
-- [ ] Implement `contentEncoding` / `contentMediaType`
+- [x] Implement `$schema` draft detection — e82de4b
+- [x] Implement `$id` / `id` base URI resolution — f36c93b
+- [x] Implement remote `$ref` resolution — 3d10310
+- [x] Implement `format` validation (common formats) — 05dbcd7
+- [x] Implement `format` validation (IDN/IRI formats) — 075e74d
+- [x] Implement `contentEncoding` / `contentMediaType` — 9716140
 
 ## Tasks
 

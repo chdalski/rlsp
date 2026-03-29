@@ -12,35 +12,35 @@ with existing infrastructure.
 
 ---
 
-### `$schema` Draft Detection [not started]
+### `$schema` Draft Detection [completed]
 
 **Description:** Parse the `$schema` keyword to detect which JSON Schema draft a schema targets. Surface the draft in hover/code lens.
 **Complexity:** Low
 **Comment:** Parse the URI, map to a draft enum. Currently all keywords from all drafts are accepted unconditionally, which works but isn't strictly correct.
 **Tier:** 1
 
-### `$id` / `id` Base URI Resolution [not started]
+### `$id` / `id` Base URI Resolution [completed]
 
 **Description:** Parse `$id` (Draft-06+) and `id` (Draft-04) to establish base URIs for relative `$ref` resolution. Thread base URI through schema parsing.
 **Complexity:** Medium-High
 **Comment:** Foundational for remote `$ref` support. Nested schemas can override the parent's base URI. Requires threading base URI through `parse_schema_with_root`.
 **Tier:** 1
 
-### Remote `$ref` Resolution [not started]
+### Remote `$ref` Resolution [completed]
 
 **Description:** Resolve `$ref` URIs that point to external schema documents. Fetch, cache, and parse referenced schemas.
 **Complexity:** Medium-High
 **Comment:** Depends on `$id` for base URI resolution. Fetch infrastructure (`fetch_schema`, SSRF guards, caching) already exists. Work is in URI resolution and cross-document fragment lookup.
 **Tier:** 1
 
-### `format` Validation [not started]
+### `format` Validation [completed]
 
 **Description:** Validate string values against JSON Schema `format` keywords (date-time, email, uri, ipv4/v6, hostname, uuid, regex, etc.). Includes IDN/IRI formats via `idna` and `iri-string` crates.
 **Complexity:** Medium
 **Comment:** Most formats are simple regex or stdlib parses. IDN/IRI handled by external crates. Configurable via `formatValidation` setting (default true for Draft-04/07, annotation-only for 2019-09+).
 **Tier:** 2
 
-### `contentEncoding` / `contentMediaType` [not started]
+### `contentEncoding` / `contentMediaType` [completed]
 
 **Description:** Validate encoded string content — decode via `contentEncoding` (base64, base32, base16) and check `contentMediaType` (application/json).
 **Complexity:** Low
