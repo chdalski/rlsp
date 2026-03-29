@@ -1,7 +1,7 @@
 # Missing JSON Schema Keywords
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-29
 
 ## Goal
@@ -43,8 +43,8 @@ These are the last gaps in the validation implementation.
 
 ## Steps
 
-- [ ] Add `minProperties`/`maxProperties` to schema
-  struct, parsing, and validation
+- [x] Add `minProperties`/`maxProperties` to schema
+  struct, parsing, and validation — 1963542
 - [ ] Add `additionalItems` to schema struct, parsing,
   and validation
 - [ ] Update feature-log with new keywords
