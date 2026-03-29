@@ -1289,6 +1289,166 @@ mod tests {
         );
     }
 
+    // Unit tests for format_float.
+
+    // FF1: NaN formats as `.nan` (line 340).
+    #[test]
+    fn format_float_nan() {
+        assert_eq!(format_float(f64::NAN), ".nan");
+    }
+
+    // FF2: Positive infinity formats as `.inf` (line 342-343).
+    #[test]
+    fn format_float_positive_infinity() {
+        assert_eq!(format_float(f64::INFINITY), ".inf");
+    }
+
+    // FF3: Negative infinity formats as `-.inf` (line 344-345).
+    #[test]
+    fn format_float_negative_infinity() {
+        assert_eq!(format_float(f64::NEG_INFINITY), "-.inf");
+    }
+
+    // FF4: Whole-number float gets `.0` appended (line 354).
+    // Rust's f64::to_string() for 42.0 produces "42" (no decimal point),
+    // so format_float appends ".0" to make it recognisable as a float.
+    #[test]
+    fn format_float_whole_number_appends_dot_zero() {
+        assert_eq!(format_float(42.0), "42.0");
+    }
+
+    // FF5: Float with decimal point passes through unchanged.
+    #[test]
+    fn format_float_with_decimal_passes_through() {
+        assert_eq!(format_float(0.5), "0.5");
+    }
+
+    // Unit tests for needs_quoting.
+
+    // NQ1: Empty string requires quoting (line 380).
+    #[test]
+    fn needs_quoting_empty_string() {
+        assert!(needs_quoting(""), "empty string must be quoted");
+    }
+
+    // NQ2: Numeric-looking string requires quoting (line 384 — looks_like_number path).
+    #[test]
+    fn needs_quoting_numeric_string() {
+        assert!(
+            needs_quoting("123"),
+            "integer-looking string must be quoted"
+        );
+        assert!(needs_quoting("3.14"), "float-looking string must be quoted");
+    }
+
+    // Unit tests for escape_double_quoted.
+
+    // EDQ1: Newline, carriage return, and tab are escaped (lines 454-458).
+    #[test]
+    fn escape_double_quoted_control_chars() {
+        assert_eq!(escape_double_quoted("a\nb"), "a\\nb");
+        assert_eq!(escape_double_quoted("a\rb"), "a\\rb");
+        assert_eq!(escape_double_quoted("a\tb"), "a\\tb");
+    }
+
+    // EDQ2: Double-quote and backslash are escaped.
+    #[test]
+    fn escape_double_quoted_quote_and_backslash() {
+        assert_eq!(escape_double_quoted("say \"hi\""), "say \\\"hi\\\"");
+        assert_eq!(escape_double_quoted("a\\b"), "a\\\\b");
+    }
+
+    // Integration tests for node_to_doc paths reachable via format_yaml.
+
+    // ND1: Tagged node — saphyr produces Tagged(...) for explicit tags (lines 315-317).
+    #[test]
+    fn tagged_node_preserves_tag() {
+        let input = "tagged: !mytag some_value\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("!mytag"),
+            "tag prefix should be preserved: {result:?}"
+        );
+        assert!(
+            result.contains("some_value"),
+            "tagged value should be preserved: {result:?}"
+        );
+    }
+
+    // ND2: Float special values round-trip through format_yaml (lines 340, 342-345, 354).
+    // saphyr parses .nan, .inf, -.inf as FloatingPoint variants.
+    #[test]
+    fn float_special_values_round_trip() {
+        let input = "nan_val: .nan\ninf_val: .inf\nneg_inf_val: -.inf\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains(".nan"),
+            ".nan should be preserved: {result:?}"
+        );
+        assert!(
+            result.contains(".inf"),
+            ".inf should be preserved: {result:?}"
+        );
+        assert!(
+            result.contains("-.inf"),
+            "-.inf should be preserved: {result:?}"
+        );
+    }
+
+    // ND3: Whole-number float gets .0 suffix (line 354).
+    // saphyr parses "42.0" as FloatingPoint(42.0); format_float renders it back as "42.0".
+    #[test]
+    fn whole_number_float_rendered_with_decimal() {
+        let input = "x: 42.0\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("42.0"),
+            "whole-number float should retain decimal: {result:?}"
+        );
+    }
+
+    // ND4: Empty string value is quoted in output (line 380 needs_quoting path).
+    // saphyr parses "" as Value(String("")); needs_quoting("") returns true.
+    #[test]
+    fn empty_string_value_is_quoted() {
+        let input = "key: \"\"\n";
+        let result = format_yaml(input, &default_opts());
+        // The empty string must be quoted — plain empty would be ambiguous.
+        assert!(
+            result.contains("\"\"") || result.contains("''"),
+            "empty string should be quoted: {result:?}"
+        );
+    }
+
+    // ND5: Numeric-looking string stays quoted (line 384 — looks_like_number path).
+    // saphyr preserves "123" (double-quoted in source) as Value(String("123")).
+    // needs_quoting("123") is true (looks_like_number), so it is re-quoted on output.
+    #[test]
+    fn numeric_looking_string_stays_quoted() {
+        let input = "version: \"123\"\n";
+        let result = format_yaml(input, &default_opts());
+        // "123" must be re-quoted so it doesn't become the integer 123.
+        assert!(
+            result.contains("\"123\"") || result.contains("'123'"),
+            "numeric-looking string should be quoted: {result:?}"
+        );
+    }
+
+    // ND6: Representation variants (Literal, Folded, SingleQuoted, DoubleQuoted, Plain)
+    // are NOT produced by saphyr's load_from_str — saphyr resolves all scalar styles to
+    // Value(String) during parsing. The Representation arm in node_to_doc (lines 296-308)
+    // is therefore not reachable through format_yaml. These branches exist to handle AST
+    // nodes produced by lower-level saphyr APIs that preserve the original scalar style.
+
+    // ND7: Alias variant (line 320) is NOT reachable through format_yaml.
+    // saphyr resolves all anchor/alias references at parse time and inlines the aliased
+    // value. The resulting AST contains only the resolved Value nodes; no Alias nodes
+    // remain. The Alias arm in node_to_doc is therefore dead via the public API.
+
+    // ND8: BadValue variant (line 322) is NOT reachable through valid YAML parsing.
+    // BadValue is a saphyr sentinel for internally invalid nodes that should never
+    // appear in a successfully parsed document. It cannot be constructed from YAML text.
+
     // AC8: Multiple trailing leading comments at EOF, including a blank-line separator.
     #[test]
     fn attach_comments_multiple_trailing_leading_comments_at_eof() {
