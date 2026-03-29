@@ -91,6 +91,20 @@ with existing infrastructure.
 **Comment:** Draft-04 keywords. Need new fields in `JsonSchema` and straightforward validation checks on sequence length and item equality.
 **Tier:** 2
 
+### Object Cardinality (`minProperties`, `maxProperties`) [completed]
+
+**Description:** Validate that a mapping has at least `minProperties` and at most `maxProperties` entries.
+**Complexity:** Low
+**Comment:** Draft-04 keywords. Mirror of `minItems`/`maxItems` for objects. New fields in `JsonSchema`, parsed in `parse_object_fields`, validated in `validate_mapping` via a `validate_mapping_constraints` helper.
+**Tier:** 2
+
+### `additionalItems` (Draft-04/07 Tuple Restriction) [completed]
+
+**Description:** Restrict elements beyond a Draft-04/07 tuple prefix (`items` array form). `false` denies extra elements; a schema validates them.
+**Complexity:** Low
+**Comment:** Draft-04 keyword. Only active when `items` is an array (tuple mode) — suppressed when `prefixItems` (Draft 2020-12) is used instead. Reuses the `AdditionalProperties` enum. Validation extracted into a `validate_sequence` helper to keep `validate_node` under the line-length lint limit.
+**Tier:** 2
+
 ### `dependencies` / `dependentRequired` / `dependentSchemas` [completed]
 
 **Description:** Validate cross-property dependencies — when property A is present, require property B or validate against an additional schema.
