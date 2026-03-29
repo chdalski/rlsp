@@ -4921,7 +4921,11 @@ mod tests {
         }
     }
 
-    fn run_content(text: &str, encoding: Option<&str>, media_type: Option<&str>) -> Vec<Diagnostic> {
+    fn run_content(
+        text: &str,
+        encoding: Option<&str>,
+        media_type: Option<&str>,
+    ) -> Vec<Diagnostic> {
         let schema = content_schema(encoding, media_type);
         let docs = parse_docs(text);
         validate_schema(text, &docs, &schema, true)
@@ -4938,7 +4942,10 @@ mod tests {
     // Test 188 — contentEncoding base64: invalid
     #[test]
     fn content_encoding_base64_invalid() {
-        assert_eq!(run_content("not-valid-base64!!!", Some("base64"), None).len(), 1);
+        assert_eq!(
+            run_content("not-valid-base64!!!", Some("base64"), None).len(),
+            1
+        );
     }
 
     // Test 189 — contentEncoding base64url: valid
@@ -4951,7 +4958,10 @@ mod tests {
     // Test 190 — contentEncoding base64url: invalid
     #[test]
     fn content_encoding_base64url_invalid() {
-        assert_eq!(run_content("not+valid/base64url!!!", Some("base64url"), None).len(), 1);
+        assert_eq!(
+            run_content("not+valid/base64url!!!", Some("base64url"), None).len(),
+            1
+        );
     }
 
     // Test 191 — contentEncoding base32: valid
@@ -4964,7 +4974,10 @@ mod tests {
     // Test 192 — contentEncoding base32: invalid
     #[test]
     fn content_encoding_base32_invalid() {
-        assert_eq!(run_content("not-valid-base32!!!", Some("base32"), None).len(), 1);
+        assert_eq!(
+            run_content("not-valid-base32!!!", Some("base32"), None).len(),
+            1
+        );
     }
 
     // Test 193 — contentEncoding base16: valid
@@ -5000,20 +5013,34 @@ mod tests {
     // Test 197 — contentMediaType application/json: invalid (no encoding)
     #[test]
     fn content_media_type_json_invalid_no_encoding() {
-        assert_eq!(run_content("not json", None, Some("application/json")).len(), 1);
+        assert_eq!(
+            run_content("not json", None, Some("application/json")).len(),
+            1
+        );
     }
 
     // Test 198 — contentEncoding + contentMediaType: valid base64-encoded JSON
     #[test]
     fn content_encoding_and_media_type_valid() {
         // base64("{"key":"value"}") = "eyJrZXkiOiJ2YWx1ZSJ9"
-        assert!(run_content("eyJrZXkiOiJ2YWx1ZSJ9", Some("base64"), Some("application/json")).is_empty());
+        assert!(
+            run_content(
+                "eyJrZXkiOiJ2YWx1ZSJ9",
+                Some("base64"),
+                Some("application/json")
+            )
+            .is_empty()
+        );
     }
 
     // Test 199 — contentEncoding + contentMediaType: encoding fails → only encoding diagnostic
     #[test]
     fn content_encoding_fails_skips_media_type_check() {
-        let diags = run_content("not-valid-base64!!!", Some("base64"), Some("application/json"));
+        let diags = run_content(
+            "not-valid-base64!!!",
+            Some("base64"),
+            Some("application/json"),
+        );
         assert_eq!(diags.len(), 1);
         assert!(diags[0].code == Some(NumberOrString::String("schemaContentEncoding".to_string())));
     }
@@ -5024,7 +5051,9 @@ mod tests {
         // base64("not json") = "bm90IGpzb24="
         let diags = run_content("bm90IGpzb24=", Some("base64"), Some("application/json"));
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].code == Some(NumberOrString::String("schemaContentMediaType".to_string())));
+        assert!(
+            diags[0].code == Some(NumberOrString::String("schemaContentMediaType".to_string()))
+        );
     }
 
     // Test 201 — contentMediaType unknown: silently ignored
@@ -5041,6 +5070,4 @@ mod tests {
         let result = validate_schema("not-valid-base64!!!", &docs, &schema, false);
         assert!(result.is_empty());
     }
-
 }
-
