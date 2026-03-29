@@ -234,6 +234,65 @@ vim.lsp.start({
 
 Use a generic LSP client extension (e.g., [vscode-languageclient](https://github.com/microsoft/vscode-languageserver-node)) and configure the binary as the server command for YAML files. Pass settings via `initializationOptions`.
 
+### Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.rlsp-yaml]
+command = "/path/to/rlsp-yaml"
+
+[language-server.rlsp-yaml.config]
+customTags = ["!include", "!ref"]
+keyOrdering = false
+kubernetesVersion = "1.32.0"
+schemaStore = true
+formatValidation = true
+formatPrintWidth = 80
+formatSingleQuote = false
+# httpProxy = "http://proxy.corp:8080"
+
+[language-server.rlsp-yaml.config.schemas]
+"https://json.schemastore.org/github-workflow" = ".github/workflows/*.yml"
+
+[[language]]
+name = "yaml"
+language-servers = ["rlsp-yaml"]
+```
+
+### Zed
+
+Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.json`):
+
+```json
+{
+  "lsp": {
+    "rlsp-yaml": {
+      "binary": {
+        "path": "/path/to/rlsp-yaml"
+      },
+      "initialization_options": {
+        "customTags": ["!include", "!ref"],
+        "keyOrdering": false,
+        "kubernetesVersion": "1.32.0",
+        "schemaStore": true,
+        "formatValidation": true,
+        "formatPrintWidth": 80,
+        "formatSingleQuote": false,
+        "schemas": {
+          "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml"
+        }
+      }
+    }
+  },
+  "languages": {
+    "YAML": {
+      "language_servers": ["rlsp-yaml"]
+    }
+  }
+}
+```
+
 ## Validators
 
 Some validators are always active; others depend on settings.
