@@ -141,6 +141,8 @@ pub struct JsonSchema {
     pub min_contains: Option<u64>,
     pub unique_items: Option<bool>,
     pub additional_properties: Option<AdditionalProperties>,
+    pub min_properties: Option<u64>,
+    pub max_properties: Option<u64>,
     pub pattern_properties: Option<Vec<(String, Self)>>,
     pub property_names: Option<Box<Self>>,
     pub all_of: Option<Vec<Self>>,
@@ -744,6 +746,9 @@ fn parse_object_fields(
             schema.properties = Some(props);
         }
     }
+
+    schema.min_properties = obj.get("minProperties").and_then(Value::as_u64);
+    schema.max_properties = obj.get("maxProperties").and_then(Value::as_u64);
 
     if let Some(map) = obj.get("patternProperties").and_then(Value::as_object) {
         let mut pat_props = Vec::new();
@@ -1929,6 +1934,15 @@ mod tests {
             s.additional_properties,
             Some(AdditionalProperties::Schema(_))
         ));
+    }
+
+    // Test 27b
+    #[test]
+    fn should_parse_min_properties_and_max_properties() {
+        let v = json!({"type": "object", "minProperties": 1, "maxProperties": 5});
+        let s = parse_schema(&v).expect("should parse");
+        assert_eq!(s.min_properties, Some(1));
+        assert_eq!(s.max_properties, Some(5));
     }
 
     // Test 28

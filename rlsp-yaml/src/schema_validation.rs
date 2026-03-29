@@ -452,6 +452,49 @@ fn validate_array_constraints(
     }
 }
 
+fn validate_mapping_constraints(
+    map: &saphyr::MappingOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    ctx: &mut Ctx<'_>,
+) {
+    let len = map.len() as u64;
+
+    if let Some(min) = schema.min_properties {
+        if len < min {
+            let range = mapping_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMinProperties",
+                format!(
+                    "Object at {} has {} properties, minimum is {}",
+                    format_path(path),
+                    len,
+                    min
+                ),
+            ));
+        }
+    }
+
+    if let Some(max) = schema.max_properties {
+        if len > max {
+            let range = mapping_range(path, ctx.lines);
+            ctx.diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMaxProperties",
+                format!(
+                    "Object at {} has {} properties, maximum is {}",
+                    format_path(path),
+                    len,
+                    max
+                ),
+            ));
+        }
+    }
+}
+
 fn validate_contains(
     seq: &saphyr::SequenceOwned,
     contains_schema: &JsonSchema,
@@ -1297,6 +1340,8 @@ fn validate_mapping(
     depth: usize,
 ) {
     use saphyr::ScalarOwned;
+
+    validate_mapping_constraints(map, schema, path, ctx);
 
     let properties = schema.properties.as_ref();
 
@@ -5068,6 +5113,63 @@ mod tests {
         let schema = content_schema(Some("base64"), Some("application/json"));
         let docs = parse_docs("not-valid-base64!!!");
         let result = validate_schema("not-valid-base64!!!", &docs, &schema, false);
+        assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Object cardinality — minProperties / maxProperties
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn object_schema_with_cardinality(min: Option<u64>, max: Option<u64>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            min_properties: min,
+            max_properties: max,
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 203
+    #[test]
+    fn should_produce_error_when_object_has_fewer_properties_than_min_properties() {
+        let schema = object_schema_with_cardinality(Some(2), None);
+        let text = "name: Alice";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMinProperties");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 204
+    #[test]
+    fn should_produce_no_diagnostics_when_object_meets_min_properties() {
+        let schema = object_schema_with_cardinality(Some(2), None);
+        let text = "name: Alice\nage: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // Test 205
+    #[test]
+    fn should_produce_error_when_object_exceeds_max_properties() {
+        let schema = object_schema_with_cardinality(None, Some(1));
+        let text = "name: Alice\nage: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaMaxProperties");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // Test 206
+    #[test]
+    fn should_produce_no_diagnostics_when_object_meets_max_properties() {
+        let schema = object_schema_with_cardinality(None, Some(2));
+        let text = "name: Alice\nage: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 }
