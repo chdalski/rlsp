@@ -1,4 +1,4 @@
-# RLSP — Rust Language Server Project
+# The Rust Language Server Project
 
 Small, fast language server implementations written in Rust with minimal memory footprint.
 
@@ -13,6 +13,10 @@ Small, fast language server implementations written in Rust with minimal memory 
 ## Contributing
 
 This project accepts bug reports and feature requests via [GitHub Issues](https://github.com/chdalski/rlsp/issues). External code contributions are not currently accepted. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+## AI Note
+
+The source is entirely AI-written — I designed the architecture and rules, the agents wrote the code.
 
 ## License
 
