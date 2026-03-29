@@ -24,6 +24,7 @@ to a check file:
 | Indicator | Check File |
 |---|---|
 | `.github/` directory exists | `github-sanity.md` |
+| `codecov.yml` or `codecov.yaml` exists at repo root | `codecov-sanity.md` |
 
 ## Steps
 
