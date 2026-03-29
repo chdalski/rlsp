@@ -127,11 +127,12 @@ changed files:
   producing inconsistent behaviour between development
   and production environments.
 - All tests pass and the build is clean.
-- The formatter passes (`cargo fmt --check`, `prettier
-  --check`, or equivalent). "What Not to Review" exempts
-  you from manually reviewing style — it does not exempt
-  you from running the automated formatter check. An
-  unformatted commit fails CI even if it is correct.
+- Run the formatter (`cargo fmt`, `prettier --write`, or
+  equivalent) unconditionally before staging. Do not use
+  `--check` — just run the formatter and let it fix any
+  issues. This is faster than a check-reject-resubmit
+  cycle and eliminates the risk of committing unformatted
+  code due to working-tree vs index divergence.
 
 ## What to Review
 
