@@ -141,6 +141,7 @@ pub struct JsonSchema {
     pub min_contains: Option<u64>,
     pub unique_items: Option<bool>,
     pub additional_properties: Option<AdditionalProperties>,
+    pub additional_items: Option<AdditionalProperties>,
     pub min_properties: Option<u64>,
     pub max_properties: Option<u64>,
     pub pattern_properties: Option<Vec<(String, Self)>>,
@@ -809,6 +810,17 @@ fn parse_array_fields(
                 .map(Box::new);
         }
         None => {}
+    }
+
+    // additionalItems — only relevant in Draft-04/07 tuple mode (array-form items, not prefixItems)
+    if obj.get("items").is_some_and(Value::is_array) && obj.get("prefixItems").is_none() {
+        schema.additional_items = parse_additional_properties(
+            obj.get("additionalItems"),
+            root,
+            base_uri,
+            ctx.as_deref_mut(),
+            depth,
+        );
     }
 
     schema.contains = obj
@@ -1943,6 +1955,45 @@ mod tests {
         let s = parse_schema(&v).expect("should parse");
         assert_eq!(s.min_properties, Some(1));
         assert_eq!(s.max_properties, Some(5));
+    }
+
+    // Test P-1
+    #[test]
+    fn should_parse_additional_items_false() {
+        let v = json!({"items": [{"type": "string"}], "additionalItems": false});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(s.prefix_items.is_some());
+        assert!(matches!(
+            s.additional_items,
+            Some(AdditionalProperties::Denied)
+        ));
+    }
+
+    // Test P-2
+    #[test]
+    fn should_parse_additional_items_schema() {
+        let v = json!({"items": [{"type": "string"}], "additionalItems": {"type": "integer"}});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(matches!(
+            s.additional_items,
+            Some(AdditionalProperties::Schema(_))
+        ));
+    }
+
+    // Test P-3
+    #[test]
+    fn should_not_parse_additional_items_when_prefix_items_set_from_prefix_items_key() {
+        let v = json!({"prefixItems": [{"type": "string"}], "additionalItems": false});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(s.additional_items.is_none());
+    }
+
+    // Test P-4
+    #[test]
+    fn should_not_parse_additional_items_when_no_array_items() {
+        let v = json!({"type": "array", "additionalItems": false});
+        let s = parse_schema(&v).expect("should parse");
+        assert!(s.additional_items.is_none());
     }
 
     // Test 28

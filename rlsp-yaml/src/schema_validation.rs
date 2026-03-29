@@ -279,24 +279,7 @@ fn validate_node(
 
     // Sequence-specific checks
     if let YamlOwned::Sequence(seq) = node {
-        // prefixItems — validate each element at its positional schema
-        let prefix_len = schema.prefix_items.as_ref().map_or(0, Vec::len);
-        if let Some(prefix_schemas) = &schema.prefix_items {
-            for (i, (item, item_schema)) in seq.iter().zip(prefix_schemas.iter()).enumerate() {
-                let mut item_path = path.to_vec();
-                item_path.push(format!("[{i}]"));
-                validate_node(item, item_schema, &item_path, ctx, depth + 1);
-            }
-        }
-        // items — applies to elements beyond prefixItems
-        if let Some(items_schema) = &schema.items {
-            for (i, item) in seq.iter().enumerate().skip(prefix_len) {
-                let mut item_path = path.to_vec();
-                item_path.push(format!("[{i}]"));
-                validate_node(item, items_schema, &item_path, ctx, depth + 1);
-            }
-        }
-        validate_array_constraints(seq, schema, path, ctx, depth);
+        validate_sequence(seq, schema, path, ctx, depth);
     }
 
     // Composition
@@ -384,6 +367,56 @@ fn validate_unevaluated_items(
         item_path.push(format!("[{i}]"));
         validate_node(item, unevaluated_schema, &item_path, ctx, depth + 1);
     }
+}
+
+fn validate_sequence(
+    seq: &saphyr::SequenceOwned,
+    schema: &JsonSchema,
+    path: &[String],
+    ctx: &mut Ctx<'_>,
+    depth: usize,
+) {
+    // prefixItems — validate each element at its positional schema
+    let prefix_len = schema.prefix_items.as_ref().map_or(0, Vec::len);
+    if let Some(prefix_schemas) = &schema.prefix_items {
+        for (i, (item, item_schema)) in seq.iter().zip(prefix_schemas.iter()).enumerate() {
+            let mut item_path = path.to_vec();
+            item_path.push(format!("[{i}]"));
+            validate_node(item, item_schema, &item_path, ctx, depth + 1);
+        }
+    }
+    // items — applies to elements beyond prefixItems
+    if let Some(items_schema) = &schema.items {
+        for (i, item) in seq.iter().enumerate().skip(prefix_len) {
+            let mut item_path = path.to_vec();
+            item_path.push(format!("[{i}]"));
+            validate_node(item, items_schema, &item_path, ctx, depth + 1);
+        }
+    } else if let Some(additional_items) = &schema.additional_items {
+        // additionalItems (Draft-04/07) — applies to elements beyond the tuple prefix
+        for (i, item) in seq.iter().enumerate().skip(prefix_len) {
+            let mut item_path = path.to_vec();
+            item_path.push(format!("[{i}]"));
+            match additional_items {
+                AdditionalProperties::Denied => {
+                    let range = node_range(&item_path, ctx.lines);
+                    ctx.diagnostics.push(make_diagnostic(
+                        range,
+                        DiagnosticSeverity::WARNING,
+                        "schemaAdditionalItems",
+                        format!(
+                            "Additional item at {}[{i}] is not allowed",
+                            format_path(path)
+                        ),
+                    ));
+                }
+                AdditionalProperties::Schema(extra_schema) => {
+                    validate_node(item, extra_schema, &item_path, ctx, depth + 1);
+                }
+            }
+        }
+    }
+    validate_array_constraints(seq, schema, path, ctx, depth);
 }
 
 fn validate_array_constraints(
@@ -5168,6 +5201,136 @@ mod tests {
     fn should_produce_no_diagnostics_when_object_meets_max_properties() {
         let schema = object_schema_with_cardinality(None, Some(2));
         let text = "name: Alice\nage: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // additionalItems (Draft-04/07 tuple arrays)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn tuple_schema_with_additional_items(
+        prefix: Vec<JsonSchema>,
+        additional_items: Option<AdditionalProperties>,
+    ) -> JsonSchema {
+        JsonSchema {
+            prefix_items: Some(prefix),
+            additional_items,
+            ..JsonSchema::default()
+        }
+    }
+
+    // Test 207
+    #[test]
+    fn should_produce_warning_for_extra_items_when_additional_items_false() {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema()],
+            Some(AdditionalProperties::Denied),
+        );
+        let text = "- hello\n- extra";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaAdditionalItems");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("[1]"),
+            "message should reference [1], got: {msg}"
+        );
+    }
+
+    // Test 208
+    #[test]
+    fn should_produce_no_diagnostics_when_array_exactly_matches_prefix_length_with_additional_items_false()
+     {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema(), integer_schema()],
+            Some(AdditionalProperties::Denied),
+        );
+        let text = "- hello\n- 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // Test 209
+    #[test]
+    fn should_produce_no_diagnostics_for_items_within_prefix_with_additional_items_false() {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema(), integer_schema()],
+            Some(AdditionalProperties::Denied),
+        );
+        let text = "- hello";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // Test 210
+    #[test]
+    fn should_produce_one_warning_per_extra_item_when_additional_items_false() {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema()],
+            Some(AdditionalProperties::Denied),
+        );
+        let text = "- hello\n- extra1\n- extra2";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|d| code_of(d) == "schemaAdditionalItems"));
+    }
+
+    // Test 211
+    #[test]
+    fn should_validate_extra_items_against_additional_items_schema_when_valid() {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema()],
+            Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+        );
+        let text = "- hello\n- 42";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // Test 212
+    #[test]
+    fn should_produce_type_diagnostic_when_extra_item_fails_additional_items_schema() {
+        let schema = tuple_schema_with_additional_items(
+            vec![string_schema()],
+            Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+        );
+        let text = "- hello\n- world";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+    }
+
+    // Test 213
+    #[test]
+    fn should_produce_no_diagnostics_when_additional_items_false_and_prefix_items_set_from_prefix_items_key()
+     {
+        // Simulates parsed outcome of Draft 2020-12 `prefixItems` + ignored `additionalItems`:
+        // additional_items is None because the parser suppresses it for prefixItems keyword.
+        let schema = JsonSchema {
+            prefix_items: Some(vec![string_schema()]),
+            additional_items: None,
+            ..JsonSchema::default()
+        };
+        let text = "- hello\n- extra";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(result.is_empty());
+    }
+
+    // Test 214
+    #[test]
+    fn should_produce_no_diagnostics_when_additional_items_absent_and_extra_items_present() {
+        let schema = tuple_schema_with_additional_items(vec![string_schema()], None);
+        let text = "- hello\n- 42\n- extra";
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
