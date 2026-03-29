@@ -1,8 +1,7 @@
 # Contributing to RLSP
 
-This project is AI-written. Every line of application code is authored,
-reviewed, and committed by AI agents — no human-written source code is
-accepted.
+RLSP is a collection of small, fast language server implementations written in Rust.
+The project is maintained by a single maintainer; external code contributions are not currently accepted.
 
 ## How to Contribute
 
