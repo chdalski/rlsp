@@ -14,7 +14,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
 {
   "customTags": ["!include", "!ref"],
   "keyOrdering": false,
-  "kubernetesVersion": "1.32.0",
+  "kubernetesVersion": "master",
   "schemaStore": true,
   "formatValidation": true,
   "formatPrintWidth": 80,
@@ -46,7 +46,7 @@ When enabled, the server warns if mapping keys are not in alphabetical order.
 ### `kubernetesVersion`
 
 - **Type:** `string`
-- **Default:** `"1.32.0"`
+- **Default:** `"master"` (tracks the latest available schemas)
 
 The Kubernetes cluster version used for automatic schema resolution. When a document contains root-level `apiVersion` and `kind` fields and no schema is configured via modeline or glob, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using this version string.
 
@@ -217,7 +217,7 @@ vim.lsp.start({
   init_options = {
     customTags = { "!include", "!ref" },
     keyOrdering = false,
-    kubernetesVersion = "1.32.0",
+    kubernetesVersion = "master",
     schemaStore = true,
     formatValidation = true,
     schemas = {
@@ -245,7 +245,7 @@ command = "/path/to/rlsp-yaml"
 [language-server.rlsp-yaml.config]
 customTags = ["!include", "!ref"]
 keyOrdering = false
-kubernetesVersion = "1.32.0"
+kubernetesVersion = "master"
 schemaStore = true
 formatValidation = true
 formatPrintWidth = 80
@@ -274,7 +274,7 @@ Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.jso
       "initialization_options": {
         "customTags": ["!include", "!ref"],
         "keyOrdering": false,
-        "kubernetesVersion": "1.32.0",
+        "kubernetesVersion": "master",
         "schemaStore": true,
         "formatValidation": true,
         "formatPrintWidth": 80,

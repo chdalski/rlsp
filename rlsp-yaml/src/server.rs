@@ -37,8 +37,8 @@ pub struct Settings {
     pub key_ordering: bool,
     /// Maps schema URL → glob pattern (upstream yaml-language-server convention).
     pub schemas: HashMap<String, String>,
-    /// Kubernetes cluster version for schema resolution (e.g. `"1.32.0"`).
-    /// Defaults to `"1.32.0"` when absent.
+    /// Kubernetes cluster version for schema resolution (e.g. `"1.29.0"`).
+    /// Defaults to `"master"` (tracks latest schemas) when absent.
     pub kubernetes_version: Option<String>,
     /// Enable `SchemaStore` automatic schema association. Defaults to `true` when absent.
     pub schema_store: Option<bool>,
@@ -56,7 +56,7 @@ pub struct Settings {
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
-const DEFAULT_KUBERNETES_VERSION: &str = "1.32.0";
+const DEFAULT_KUBERNETES_VERSION: &str = "master";
 
 // Lock acquisition order — always acquire in this sequence to prevent deadlock.
 // Every handler that needs multiple locks must follow this order and must fully
@@ -1289,6 +1289,11 @@ mod tests {
     }
 
     // ---- Kubernetes version setting ----
+
+    #[test]
+    fn default_kubernetes_version_is_master() {
+        assert_eq!(DEFAULT_KUBERNETES_VERSION, "master");
+    }
 
     #[test]
     fn settings_deserializes_kubernetes_version() {

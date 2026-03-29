@@ -1471,8 +1471,13 @@ pub fn kubernetes_schema_url(api_version: &str, kind: &str, k8s_version: &str) -
     } else {
         format!("{kind_lower}-{api_version}.json")
     };
+    let dir_prefix = if k8s_version == "master" {
+        "master-standalone-strict".to_string()
+    } else {
+        format!("v{k8s_version}-standalone-strict")
+    };
     format!(
-        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v{k8s_version}-standalone-strict/{filename}"
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{dir_prefix}/{filename}"
     )
 }
 
@@ -2813,6 +2818,36 @@ mod tests {
         // apiVersion is a mapping, kind is a mapping — neither is a string scalar
         let docs = parse_docs("apiVersion:\n  nested: true\nkind:\n  - item\n");
         assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    // Test K8s-9: master version — core API uses master-standalone-strict (no v prefix)
+    #[test]
+    fn should_build_url_with_master_standalone_strict_for_core_api() {
+        let url = kubernetes_schema_url("v1", "Pod", "master");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/pod-v1.json"
+        );
+    }
+
+    // Test K8s-10: master version — grouped API uses master-standalone-strict (no v prefix)
+    #[test]
+    fn should_build_url_with_master_standalone_strict_for_grouped_api() {
+        let url = kubernetes_schema_url("apps/v1", "Deployment", "master");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json"
+        );
+    }
+
+    // Test K8s-11: "Master" (capital M) falls through to versioned branch (case-sensitive match)
+    #[test]
+    fn should_treat_capitalised_master_as_versioned_prefix() {
+        let url = kubernetes_schema_url("v1", "Pod", "Master");
+        assert!(
+            url.contains("vMaster-standalone-strict/"),
+            "expected vMaster-standalone-strict/ in URL, got: {url}"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
