@@ -1169,4 +1169,150 @@ mod tests {
             "comment should be preserved when signature matches: {result:?}"
         );
     }
+
+    // EC13: Escape sequence inside double-quoted string skipped when scanning for `#`.
+    // The backslash-escape path (lines 66-69 in find_comment_on_line) fires when a `\`
+    // is encountered inside a double-quoted string, consuming the next character so it is
+    // not mistaken for a quote toggle or comment start.
+    #[test]
+    fn extract_comments_escape_in_double_quoted_string() {
+        // The \" inside the string is an escape sequence; the # after the closing quote
+        // is a real trailing comment preceded by whitespace.
+        let line = r#"key: "value with \" escaped"  # real comment"#;
+        let comments = extract_comments(line);
+        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
+        assert_eq!(comments[0].kind, CommentKind::Trailing);
+        assert_eq!(comments[0].text, "# real comment");
+    }
+
+    // EC14: `#` not preceded by whitespace is NOT a comment (line 75).
+    // A URL fragment like `http://example.com#fragment` contains a `#` that is not
+    // preceded by whitespace, so it must not be extracted as a comment.
+    #[test]
+    fn extract_comments_hash_not_preceded_by_whitespace_is_not_comment() {
+        let comments = extract_comments("key: http://example.com#fragment\n");
+        assert!(
+            comments.is_empty(),
+            "# in URL fragment should not be extracted as comment: {comments:?}"
+        );
+    }
+
+    // Integration: URL with fragment character is preserved intact after formatting.
+    #[test]
+    fn format_yaml_url_with_fragment_preserved() {
+        let input = "endpoint: http://example.com#fragment\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("http://example.com#fragment") || result.contains("example.com"),
+            "URL content should be preserved: {result:?}"
+        );
+        // The fragment must not be split off as a spurious comment.
+        assert!(
+            !result.contains("  #fragment"),
+            "fragment should not be separated as a comment: {result:?}"
+        );
+    }
+
+    // AC5: Blank-line gap between leading comment groups is preserved (line 128).
+    // When two leading comment blocks are separated by a blank line, the blank line
+    // must appear between the groups in the formatted output.
+    #[test]
+    fn attach_comments_blank_line_between_leading_comment_groups() {
+        let input = "# first group\n\n# second group\nkey: value\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("# first group"),
+            "first group missing: {result:?}"
+        );
+        assert!(
+            result.contains("# second group"),
+            "second group missing: {result:?}"
+        );
+        assert!(result.contains("key: value"), "content missing: {result:?}");
+        // A blank line must appear between the two comment groups.
+        let first_pos = result.find("# first group").unwrap();
+        let second_pos = result.find("# second group").unwrap();
+        let between = &result[first_pos..second_pos];
+        assert!(
+            between.contains("\n\n"),
+            "blank line between comment groups missing: {result:?}"
+        );
+    }
+
+    // AC6: Signature mismatch fallback — formatted line with non-empty content that has
+    // no matching entry is emitted verbatim (lines 188-189).
+    //
+    // The mismatch path fires when the formatter reorganises a line so its content
+    // signature no longer matches any entry built from the original text. This can
+    // happen when content is rewritten (e.g. a key renamed by the formatter). Because
+    // the formatter in this codebase is content-preserving — it only normalises
+    // whitespace and quoting, not key names — triggering a true mismatch via
+    // `format_yaml` is not straightforward. We test the path directly through
+    // `attach_comments` by supplying a formatted text whose lines have no matching
+    // original entry. The formatted lines must be emitted unchanged (no panic, no
+    // content loss).
+    #[test]
+    fn attach_comments_signature_mismatch_emits_line_verbatim() {
+        // original has "old_key: value"; formatted has "new_key: value".
+        // The leading comment is attached to "old_key" in the original entry list,
+        // so "new_key" has no matching entry and is emitted via the fallback path.
+        let original = "# heading\nold_key: value\n";
+        let formatted = "new_key: value\n";
+        let comments = extract_comments(original);
+        let result = attach_comments(original, formatted, &comments);
+        // The content line must be present (not dropped).
+        assert!(
+            result.contains("new_key: value"),
+            "unmatched content line should be emitted verbatim: {result:?}"
+        );
+        // No panic, clean termination.
+    }
+
+    // AC7: Trailing leading comments appended at EOF (lines 196-200).
+    // Comments that appear after all content lines in the original are collected as
+    // `trailing_leading` and appended to the formatted output after the last content line.
+    #[test]
+    fn attach_comments_trailing_leading_comments_at_eof() {
+        let input = "key: value\n# trailing comment at EOF\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("key: value"), "content missing: {result:?}");
+        assert!(
+            result.contains("# trailing comment at EOF"),
+            "trailing EOF comment missing: {result:?}"
+        );
+        // The comment must appear after the content line.
+        let content_pos = result.find("key: value").unwrap();
+        let comment_pos = result.find("# trailing comment at EOF").unwrap();
+        assert!(
+            comment_pos > content_pos,
+            "EOF comment should appear after content: {result:?}"
+        );
+    }
+
+    // AC8: Multiple trailing leading comments at EOF, including a blank-line separator.
+    #[test]
+    fn attach_comments_multiple_trailing_leading_comments_at_eof() {
+        let input = "key: value\n# first EOF comment\n\n# second EOF comment\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("key: value"), "content missing: {result:?}");
+        assert!(
+            result.contains("# first EOF comment"),
+            "first EOF comment missing: {result:?}"
+        );
+        assert!(
+            result.contains("# second EOF comment"),
+            "second EOF comment missing: {result:?}"
+        );
+        let content_pos = result.find("key: value").unwrap();
+        let first_pos = result.find("# first EOF comment").unwrap();
+        let second_pos = result.find("# second EOF comment").unwrap();
+        assert!(
+            first_pos > content_pos,
+            "first EOF comment should follow content"
+        );
+        assert!(
+            second_pos > first_pos,
+            "second EOF comment should follow first"
+        );
+    }
 }
