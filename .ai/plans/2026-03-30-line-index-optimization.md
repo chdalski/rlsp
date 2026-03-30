@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-30)
 **Created:** 2026-03-30
 
 ## Goal
@@ -49,8 +49,8 @@ from line 0 for every diagnostic emitted.
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Add line index to validate_key_ordering
-- [ ] Add line index to validate_schema
+- [x] Add line index to validate_key_ordering (15e783d)
+- [x] Add line index to validate_schema (15e783d)
 
 ## Tasks
 
