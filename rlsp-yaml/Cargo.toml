@@ -29,6 +29,19 @@ iri-string = "0.7"
 data-encoding = "2.9"
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 futures = "0.3"
 tiny_http = "0.12"
 tower = "0.5"
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "insight"
+harness = false

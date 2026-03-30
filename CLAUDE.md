@@ -24,6 +24,12 @@ minimal memory footprint.
 │       ├── ir.rs           # Doc IR enum and builder functions
 │       └── printer.rs      # Wadler-Lindig printer
 ├── rlsp-yaml/              # Rust YAML LSP server crate
+│   ├── benches/
+│   │   ├── fixtures/
+│   │   │   └── mod.rs       # Shared benchmark fixture generators
+│   │   ├── hot_path.rs      # Tier 1: keystroke hot-path benchmarks
+│   │   ├── latency.rs       # Tier 2: user-perceivable latency benchmarks
+│   │   └── insight.rs       # Tier 3: architectural insight benchmarks
 │   └── src/
 │       ├── main.rs         # Binary entry point
 │       ├── lib.rs          # Module declarations
@@ -58,6 +64,7 @@ cargo fmt              # format
 cargo clippy --all-targets  # lint (zero warnings enforced)
 cargo build            # build
 cargo test             # run all tests
+cargo bench            # run benchmarks (Criterion)
 cargo clean            # clean stale build artifacts
 ```
 
