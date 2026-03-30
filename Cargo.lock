@@ -936,7 +936,7 @@ version = "0.1.4"
 
 [[package]]
 name = "rlsp-yaml"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "criterion",
  "data-encoding",

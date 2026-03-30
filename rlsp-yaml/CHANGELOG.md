@@ -1,6 +1,17 @@
 # Changelog
 
 
+## Features
+
+- Add Criterion benchmark infrastructure (78a03cd)
+- Add Tier 1 hot-path benchmarks (79e74e6)
+- Add Tier 2 user-perceivable latency benchmarks (279b156)
+- Add Tier 3 architectural insight benchmarks (e0170ac)
+
+## Refactoring
+
+- Replace linear scans with pre-built key index (15e783d)
+
 ## Documentation
 
 - Remove hardcoded test count from readme (cfb6fbb)
