@@ -457,8 +457,30 @@ pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> 
     let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
 
+    // Build a key → first-line index once so check_yaml_ordering can do O(1)
+    // lookups instead of scanning all lines for every diagnostic emitted.
+    // Uses the same matching logic as the removed find_key_line: the key is
+    // the trimmed text before the first ':', which must not be empty.
+    let key_index: HashMap<String, u32> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(line_idx, line)| {
+            let trimmed = line.trim_start();
+            let colon_pos = trimmed.find(':')?;
+            let key = trimmed[..colon_pos].trim_end();
+            if key.is_empty() {
+                return None;
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            Some((key.to_string(), line_idx as u32))
+        })
+        .fold(HashMap::new(), |mut map, (key, line)| {
+            map.entry(key).or_insert(line);
+            map
+        });
+
     for doc in docs {
-        check_yaml_ordering(doc, &lines, &mut diagnostics, 0);
+        check_yaml_ordering(doc, &key_index, &mut diagnostics, 0);
     }
 
     diagnostics
@@ -467,7 +489,7 @@ pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> 
 /// Recursively check YAML nodes for key ordering, with depth limit.
 fn check_yaml_ordering(
     node: &YamlOwned,
-    lines: &[&str],
+    key_index: &HashMap<String, u32>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) {
@@ -502,8 +524,8 @@ fn check_yaml_ordering(
 
             for key in keys.iter().skip(1) {
                 if key.as_str() < max_key {
-                    // Find the line number for this key
-                    if let Some(line_num) = find_key_line(key, lines) {
+                    // Look up the line number in the pre-built index (O(1)).
+                    if let Some(&line_num) = key_index.get(key.as_str()) {
                         #[allow(clippy::cast_possible_truncation)]
                         let key_len = key.len() as u32;
                         diagnostics.push(Diagnostic {
@@ -525,13 +547,13 @@ fn check_yaml_ordering(
 
             // Recursively check nested structures
             for value in map.values() {
-                check_yaml_ordering(value, lines, diagnostics, depth + 1);
+                check_yaml_ordering(value, key_index, diagnostics, depth + 1);
             }
         }
         YamlOwned::Sequence(arr) => {
             // Recursively check array elements
             for item in arr {
-                check_yaml_ordering(item, lines, diagnostics, depth + 1);
+                check_yaml_ordering(item, key_index, diagnostics, depth + 1);
             }
         }
         YamlOwned::Value(_)
@@ -540,19 +562,6 @@ fn check_yaml_ordering(
         | YamlOwned::Tagged(_, _)
         | YamlOwned::Representation(_, _, _) => {}
     }
-}
-
-/// Find the line number where a key appears in the text.
-fn find_key_line(key: &str, lines: &[&str]) -> Option<u32> {
-    lines.iter().enumerate().find_map(|(line_idx, line)| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(key) && trimmed[key.len()..].trim_start().starts_with(':') {
-            #[allow(clippy::cast_possible_truncation)]
-            Some(line_idx as u32)
-        } else {
-            None
-        }
-    })
 }
 
 /// Validate duplicate mapping keys in YAML text.

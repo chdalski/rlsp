@@ -151,25 +151,27 @@ fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
 
 /// Shared per-call context threaded through the validation walk.
 ///
-/// Bundles the three parameters that every helper needs — the document text
-/// (split into lines for position lookup), the diagnostic accumulator, and the
-/// `format_validation` flag — so individual helpers do not need 8+ arguments.
+/// Bundles the parameters that every helper needs — the diagnostic accumulator,
+/// the `format_validation` flag, and a pre-built key index for O(1) position
+/// lookups — so individual helpers do not need many arguments.
 struct Ctx<'a> {
-    lines: &'a [&'a str],
     diagnostics: &'a mut Vec<Diagnostic>,
     format_validation: bool,
+    /// Pre-built index: key string → Range in the document.
+    /// Built once in `validate_schema`; replaces per-diagnostic O(n) scans.
+    key_index: &'a HashMap<String, Range>,
 }
 
 impl<'a> Ctx<'a> {
     const fn new(
-        lines: &'a [&'a str],
         diagnostics: &'a mut Vec<Diagnostic>,
         format_validation: bool,
+        key_index: &'a HashMap<String, Range>,
     ) -> Self {
         Self {
-            lines,
             diagnostics,
             format_validation,
+            key_index,
         }
     }
 }
@@ -192,13 +194,58 @@ pub fn validate_schema(
 ) -> Vec<Diagnostic> {
     let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
-    let mut ctx = Ctx::new(&lines, &mut diagnostics, format_validation);
+
+    // Build a key → Range index once so all position lookups are O(1)
+    // instead of scanning all lines for every diagnostic emitted.
+    // Uses the same matching logic as the removed find_key_range scan.
+    let key_index = build_key_index(&lines);
+
+    let mut ctx = Ctx::new(&mut diagnostics, format_validation, &key_index);
 
     for doc in docs {
         validate_node(doc, schema, &[], &mut ctx, 0);
     }
 
     diagnostics
+}
+
+/// Build a `HashMap` from key string to its `Range` in the document.
+///
+/// Scans `lines` once, applying the same matching logic as `find_key_range`:
+/// - Strips a leading `"- "` sequence-item marker if present
+/// - Matches `key:` and `key :` patterns (colon-only split, space within key preserved)
+/// - First occurrence of each key wins (preserves `find_key_range` semantics)
+fn build_key_index(lines: &[&str]) -> HashMap<String, Range> {
+    let mut index = HashMap::new();
+    for (line_idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let col_offset = line.len() - trimmed.len();
+        let candidate = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+
+        // Split at the first ':' and trim trailing whitespace from the key.
+        // This preserves spaces within keys (e.g. "foo bar: value" → "foo bar")
+        // and handles "key : value" (space before colon).
+        let Some(colon_pos) = candidate.find(':') else {
+            continue;
+        };
+        let key = candidate[..colon_pos].trim_end();
+        if key.is_empty() {
+            continue;
+        }
+
+        // col is the indentation of the original line, matching find_key_range.
+        let col = u32::try_from(col_offset).unwrap_or(0);
+        let end_col = col + u32::try_from(key.len()).unwrap_or(0);
+        let line_u32 = u32::try_from(line_idx).unwrap_or(0);
+        let range = Range::new(
+            Position::new(line_u32, col),
+            Position::new(line_u32, end_col),
+        );
+
+        // First-occurrence wins — matches find_key_range find_map semantics.
+        index.entry(key.to_string()).or_insert(range);
+    }
+    index
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -224,7 +271,7 @@ fn validate_node(
     if let Some(schema_type) = &schema.schema_type {
         let yaml_type = yaml_type_name(node);
         if !type_matches(yaml_type, schema_type) {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -246,7 +293,7 @@ fn validate_node(
         && let Some(yaml_val) = yaml_to_json(node)
         && !enum_values.contains(&yaml_val)
     {
-        let range = node_range(path, ctx.lines);
+        let range = node_range(path, ctx.key_index);
         let listed: Vec<String> = enum_values
             .iter()
             .take(MAX_ENUM_DISPLAY)
@@ -325,7 +372,7 @@ fn validate_unevaluated_properties(
         }
         match &schema.unevaluated_properties {
             Some(AdditionalProperties::Denied) => {
-                let range = key_range(&key_str, path, ctx.lines);
+                let range = key_range(&key_str, path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::WARNING,
@@ -401,7 +448,7 @@ fn validate_sequence(
             item_path.push(format!("[{i}]"));
             match additional_items {
                 AdditionalProperties::Denied => {
-                    let range = node_range(&item_path, ctx.lines);
+                    let range = node_range(&item_path, ctx.key_index);
                     ctx.diagnostics.push(make_diagnostic(
                         range,
                         DiagnosticSeverity::WARNING,
@@ -432,7 +479,7 @@ fn validate_array_constraints(
 
     if let Some(min) = schema.min_items {
         if len < min {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -449,7 +496,7 @@ fn validate_array_constraints(
 
     if let Some(max) = schema.max_items {
         if len > max {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -472,7 +519,7 @@ fn validate_array_constraints(
                 .is_some_and(|prev| prev.iter().any(|b| a == b))
         });
         if has_duplicate {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -497,7 +544,7 @@ fn validate_mapping_constraints(
 
     if let Some(min) = schema.min_properties {
         if len < min {
-            let range = mapping_range(path, ctx.lines);
+            let range = mapping_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -514,7 +561,7 @@ fn validate_mapping_constraints(
 
     if let Some(max) = schema.max_properties {
         if len > max {
-            let range = mapping_range(path, ctx.lines);
+            let range = mapping_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -538,13 +585,13 @@ fn validate_contains(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    let lines = ctx.lines;
+    let key_index = ctx.key_index;
     let format_validation = ctx.format_validation;
     let match_count = seq
         .iter()
         .filter(|item| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+            let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
             validate_node(item, contains_schema, path, &mut probe, depth + 1);
             scratch.is_empty()
         })
@@ -554,7 +601,7 @@ fn validate_contains(
     let effective_min = schema.min_contains.unwrap_or(1);
 
     if match_count < effective_min {
-        let range = node_range(path, ctx.lines);
+        let range = node_range(path, ctx.key_index);
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::ERROR,
@@ -570,7 +617,7 @@ fn validate_contains(
 
     if let Some(max) = schema.max_contains {
         if match_count > max {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -621,7 +668,7 @@ fn validate_scalar_constraints(
     if let Some(const_val) = &schema.const_value {
         if let Some(yaml_val) = yaml_to_json(node) {
             if yaml_val != *const_val {
-                let range = node_range(path, ctx.lines);
+                let range = node_range(path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -637,7 +684,7 @@ fn validate_scalar_constraints(
 fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
     if let Some(pattern) = &schema.pattern {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -649,7 +696,7 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
             ));
         } else if let Some(re) = get_regex(pattern) {
             if !re.is_match(s) {
-                let range = node_range(path, ctx.lines);
+                let range = node_range(path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -662,7 +709,7 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
                 ));
             }
         } else {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -679,7 +726,7 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if let Some(min_len) = schema.min_length {
         if char_count < min_len {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -696,7 +743,7 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if let Some(max_len) = schema.max_length {
         if char_count > max_len {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -713,10 +760,10 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if ctx.format_validation {
         if let Some(format) = &schema.format {
-            validate_format(s, format, path, ctx.lines, ctx.diagnostics);
+            validate_format(s, format, path, ctx.key_index, ctx.diagnostics);
         }
         if schema.content_encoding.is_some() || schema.content_media_type.is_some() {
-            validate_content(s, schema, path, ctx.lines, ctx.diagnostics);
+            validate_content(s, schema, path, ctx.key_index, ctx.diagnostics);
         }
     }
 }
@@ -728,7 +775,7 @@ fn validate_format(
     s: &str,
     format: &str,
     path: &[String],
-    lines: &[&str],
+    key_index: &HashMap<String, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let valid = match format {
@@ -755,7 +802,7 @@ fn validate_format(
         _ => return,
     };
     if !valid {
-        let range = node_range(path, lines);
+        let range = node_range(path, key_index);
         diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::WARNING,
@@ -776,7 +823,7 @@ fn validate_content(
     s: &str,
     schema: &JsonSchema,
     path: &[String],
-    lines: &[&str],
+    key_index: &HashMap<String, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Step 1: decode if contentEncoding is set
@@ -792,7 +839,7 @@ fn validate_content(
         if let Ok(bytes) = result {
             Some(bytes)
         } else {
-            let range = node_range(path, lines);
+            let range = node_range(path, key_index);
             diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -823,7 +870,7 @@ fn validate_content(
             _ => return,
         };
         if !valid {
-            let range = node_range(path, lines);
+            let range = node_range(path, key_index);
             diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1278,7 +1325,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
             val < minimum
         };
         if violation {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             let bound = if exclusive { "exclusive" } else { "inclusive" };
             ctx.diagnostics.push(make_diagnostic(
                 range,
@@ -1301,7 +1348,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
             val > maximum
         };
         if violation {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             let bound = if exclusive { "exclusive" } else { "inclusive" };
             ctx.diagnostics.push(make_diagnostic(
                 range,
@@ -1318,7 +1365,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
     // exclusiveMinimum (Draft-06+ number form)
     if let Some(excl_min) = schema.exclusive_minimum {
         if val <= excl_min {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1334,7 +1381,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
     // exclusiveMaximum (Draft-06+ number form)
     if let Some(excl_max) = schema.exclusive_maximum {
         if val >= excl_max {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1352,7 +1399,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
         if multiple_of > 0.0 {
             let quotient = val / multiple_of;
             if (quotient - quotient.round()).abs() >= f64::EPSILON {
-                let range = node_range(path, ctx.lines);
+                let range = node_range(path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -1400,7 +1447,7 @@ fn validate_mapping(
                     !map.contains_key(&key_yaml)
                 })
                 .map(|req_key| {
-                    let range = mapping_range(path, ctx.lines);
+                    let range = mapping_range(path, ctx.key_index);
                     make_diagnostic(
                         range,
                         DiagnosticSeverity::ERROR,
@@ -1445,7 +1492,7 @@ fn validate_mapping(
                 // Check additionalProperties
                 match &schema.additional_properties {
                     Some(AdditionalProperties::Denied) => {
-                        let range = key_range(&key_str, path, ctx.lines);
+                        let range = key_range(&key_str, path, ctx.key_index);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::WARNING,
@@ -1494,7 +1541,7 @@ fn validate_dependencies(
                 for missing in required_keys {
                     let missing_yaml = YamlOwned::Value(ScalarOwned::String(missing.clone()));
                     if !map.contains_key(&missing_yaml) {
-                        let range = mapping_range(path, ctx.lines);
+                        let range = mapping_range(path, ctx.key_index);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::ERROR,
@@ -1546,7 +1593,7 @@ fn validate_pattern_properties(
     let mut matched = false;
     for (pattern, pat_schema) in pattern_props {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1566,7 +1613,7 @@ fn validate_pattern_properties(
                 validate_node(value, pat_schema, &child_path, ctx, depth + 1);
             }
         } else {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1597,16 +1644,16 @@ fn validate_composition(
 
     // anyOf: at least one branch must pass; if none do, emit a diagnostic
     if let Some(any_of) = &schema.any_of {
-        let lines = ctx.lines;
+        let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
         let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+            let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
             validate_node(node, branch, path, &mut probe, depth + 1);
             scratch.is_empty()
         });
         if !any_passes {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1621,21 +1668,21 @@ fn validate_composition(
 
     // oneOf: exactly one branch must pass
     if let Some(one_of) = &schema.one_of {
-        let lines = ctx.lines;
+        let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
         let passing = one_of
             .iter()
             .take(MAX_BRANCH_COUNT)
             .filter(|branch| {
                 let mut scratch = Vec::new();
-                let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+                let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
                 validate_node(node, branch, path, &mut probe, depth + 1);
                 scratch.is_empty()
             })
             .count();
 
         if passing == 0 {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1646,7 +1693,7 @@ fn validate_composition(
                 ),
             ));
         } else if passing > 1 {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1661,13 +1708,13 @@ fn validate_composition(
 
     // not: the value must NOT match the sub-schema
     if let Some(not_schema) = &schema.not {
-        let lines = ctx.lines;
+        let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+        let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
         validate_node(node, not_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
-            let range = node_range(path, ctx.lines);
+            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1682,10 +1729,10 @@ fn validate_composition(
 
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
-        let lines = ctx.lines;
+        let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(lines, &mut scratch, format_validation);
+        let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
         validate_node(node, if_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
             if let Some(then_schema) = &schema.then_schema {
@@ -1806,58 +1853,36 @@ fn truncate_message(msg: String) -> String {
 // Range / position helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Find the range for a node identified by its path, using text scanning.
+/// Find the range for a node identified by its path.
 /// Falls back to `(0,0)-(0,0)` if not found.
-fn node_range(path: &[String], lines: &[&str]) -> Range {
+fn node_range(path: &[String], key_index: &HashMap<String, Range>) -> Range {
     path.last().map_or_else(
         || Range::new(Position::new(0, 0), Position::new(0, 0)),
-        |key| find_key_range(key, lines),
+        |key| find_key_range(key, key_index),
     )
 }
 
 /// Find the range for the opening of a mapping (for required-property errors).
-fn mapping_range(path: &[String], lines: &[&str]) -> Range {
+fn mapping_range(path: &[String], key_index: &HashMap<String, Range>) -> Range {
     path.last().map_or_else(
         || Range::new(Position::new(0, 0), Position::new(0, 0)),
-        |key| find_key_range(key, lines),
+        |key| find_key_range(key, key_index),
     )
 }
 
 /// Find the range for a specific key within the document text.
-fn key_range(key: &str, _path: &[String], lines: &[&str]) -> Range {
-    find_key_range(key, lines)
+fn key_range(key: &str, _path: &[String], key_index: &HashMap<String, Range>) -> Range {
+    find_key_range(key, key_index)
 }
 
-/// Scan `lines` for the first occurrence of `key` as a YAML mapping key.
-/// Returns the range of the key token, or `(0,0)-(0,0)` if not found.
-fn find_key_range(key: &str, lines: &[&str]) -> Range {
+/// Look up `key` in the pre-built index and return its Range.
+/// Returns `(0,0)-(0,0)` if the key is not found.
+fn find_key_range(key: &str, key_index: &HashMap<String, Range>) -> Range {
     // Strip array-index brackets if present (e.g. "[0]")
     let key = key.trim_start_matches('[').trim_end_matches(']');
-
-    lines
-        .iter()
-        .enumerate()
-        .find_map(|(line_idx, line)| {
-            let trimmed = line.trim_start();
-            // Match "key:" or "- key:" patterns
-            let candidate = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-            if candidate.starts_with(key)
-                && candidate
-                    .get(key.len()..)
-                    .is_some_and(|rest| rest.starts_with(':') || rest.starts_with(' '))
-            {
-                let col = line.len() - line.trim_start().len();
-                let col = u32::try_from(col).unwrap_or(0);
-                let end_col = col + u32::try_from(key.len()).unwrap_or(0);
-                let line_u32 = u32::try_from(line_idx).unwrap_or(0);
-                Some(Range::new(
-                    Position::new(line_u32, col),
-                    Position::new(line_u32, end_col),
-                ))
-            } else {
-                None
-            }
-        })
+    key_index
+        .get(key)
+        .copied()
         .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)))
 }
 
