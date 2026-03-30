@@ -35,6 +35,13 @@ pub fn huge() -> String {
     generate_yaml(10_000)
 }
 
+/// Deeply nested YAML — depth 20, width 3.
+///
+/// Tests Wadler-Lindig depth sensitivity in the formatter.
+pub fn deeply_nested() -> String {
+    generate_nested_yaml(20, 3)
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // YAML generators
 // ──────────────────────────────────────────────────────────────────────────────
