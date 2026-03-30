@@ -53,7 +53,7 @@ constraints).
 
 - [x] Clarify requirements with user
 - [x] Set up benchmark infrastructure and fixture generators (78a03cd)
-- [ ] Implement Tier 1 benchmarks (hot path)
+- [x] Implement Tier 1 benchmarks (hot path) (79e74e6)
 - [ ] Implement Tier 2 benchmarks (user-perceivable latency)
 - [ ] Implement Tier 3 benchmarks (architectural insight)
 
