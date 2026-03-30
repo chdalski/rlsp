@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Refactoring
+
+- Replace expect/unwrap with safe alternatives and allow test lints (7092dcd)
+
 ## Documentation
 
 - Add crate-level and API doc examples (a3b9bfa)
