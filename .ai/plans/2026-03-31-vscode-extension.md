@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-03-31)
 **Created:** 2026-03-31
 
 ## Goal
@@ -45,7 +45,7 @@ match the project's Cargo.toml lint standards.
 - [x] Add status bar, output channel, and commands — `6a688c2`
 - [x] Add CI packaging workflow — `df2b68f`
 - [x] Move extension from `editors/code/` to `rlsp-yaml/editors/code/` — `db8ae1a`
-- [ ] Update project documentation
+- [x] Update project documentation — `357ac25`
 
 ## Tasks
 

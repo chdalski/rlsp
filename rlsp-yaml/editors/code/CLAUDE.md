@@ -4,7 +4,7 @@
 
 Use the default pnpm store location. Do **not** add a `store-dir` override in `.npmrc`.
 
-The devcontainer mounts a named volume at `~/.local/share/pnpm/store` (the pnpm default). Adding a `store-dir` override creates a mismatch — the override resolves to a path inside the project tree, not the volume. The volume is already persistent across rebuilds; no project-level config is needed.
+The default store (`~/.local/share/pnpm/store`) is the correct location — no project-level configuration is needed. Adding a `store-dir` override moves the store into the project tree, which wastes disk space and conflicts with any environment that already manages the store externally.
 
 When creating a new extension (e.g., `rlsp-toml/editors/code/`), leave `.npmrc` absent or empty.
 
