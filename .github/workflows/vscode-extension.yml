@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'editors/code/**'
+      - 'rlsp-yaml/editors/code/**'
     tags:
       - 'rlsp-yaml-v*'
 
@@ -60,14 +60,14 @@ jobs:
       - name: Copy binary to extension server directory (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          mkdir -p editors/code/server/${{ matrix.target }}
-          cp target/${{ matrix.target }}/release/rlsp-yaml editors/code/server/${{ matrix.target }}/rlsp-yaml
+          mkdir -p rlsp-yaml/editors/code/server/${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/rlsp-yaml rlsp-yaml/editors/code/server/${{ matrix.target }}/rlsp-yaml
 
       - name: Copy binary to extension server directory (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          New-Item -ItemType Directory -Force -Path editors/code/server/${{ matrix.target }}
-          Copy-Item target/${{ matrix.target }}/release/rlsp-yaml.exe editors/code/server/${{ matrix.target }}/rlsp-yaml.exe
+          New-Item -ItemType Directory -Force -Path rlsp-yaml/editors/code/server/${{ matrix.target }}
+          Copy-Item target/${{ matrix.target }}/release/rlsp-yaml.exe rlsp-yaml/editors/code/server/${{ matrix.target }}/rlsp-yaml.exe
         shell: pwsh
 
       - uses: actions/setup-node@v4
@@ -80,22 +80,22 @@ jobs:
           run_install: false
 
       - name: Install dependencies
-        working-directory: editors/code
+        working-directory: rlsp-yaml/editors/code
         run: pnpm install
 
       - name: Build extension
-        working-directory: editors/code
+        working-directory: rlsp-yaml/editors/code
         run: pnpm run build
 
       - name: Run tests
-        working-directory: editors/code
+        working-directory: rlsp-yaml/editors/code
         run: pnpm run test
 
       - name: Package VSIX
-        working-directory: editors/code
+        working-directory: rlsp-yaml/editors/code
         run: pnpx @vscode/vsce package --target ${{ matrix.vsce-target }} --no-dependencies
 
       - uses: actions/upload-artifact@v4
         with:
           name: rlsp-yaml-${{ matrix.vsce-target }}
-          path: editors/code/*.vsix
+          path: rlsp-yaml/editors/code/*.vsix

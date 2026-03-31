@@ -30,6 +30,13 @@ minimal memory footprint.
 │   │   ├── hot_path.rs      # Tier 1: keystroke hot-path benchmarks
 │   │   ├── latency.rs       # Tier 2: user-perceivable latency benchmarks
 │   │   └── insight.rs       # Tier 3: architectural insight benchmarks
+│   ├── editors/
+│   │   └── code/           # VS Code extension for rlsp-yaml
+│   │       ├── package.json    # Extension manifest, settings contributions, scripts
+│   │       ├── tsconfig.json   # TypeScript config (extends @tsconfig/strictest)
+│   │       ├── eslint.config.mjs  # ESLint flat config (typescript-eslint strict)
+│   │       ├── language-configuration.json  # YAML comment/bracket config for VS Code
+│   │       └── src/            # TypeScript source (main.ts entry point)
 │   └── src/
 │       ├── main.rs         # Binary entry point
 │       ├── lib.rs          # Module declarations
@@ -53,13 +60,6 @@ minimal memory footprint.
 │       ├── semantic_tokens.rs  # Semantic token provider
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)
-├── editors/
-│   └── code/               # VS Code extension for rlsp-yaml
-│       ├── package.json    # Extension manifest, settings contributions, scripts
-│       ├── tsconfig.json   # TypeScript config (extends @tsconfig/strictest)
-│       ├── eslint.config.mjs  # ESLint flat config (typescript-eslint strict)
-│       ├── language-configuration.json  # YAML comment/bracket config for VS Code
-│       └── src/            # TypeScript source (main.ts entry point)
 ```
 
 ## Build and Test
@@ -82,7 +82,7 @@ at pedantic + nursery level; selected lints at `deny`.
 ### VS Code Extension
 
 ```sh
-cd editors/code
+cd rlsp-yaml/editors/code
 pnpm install       # install dependencies
 pnpm run build     # bundle extension (esbuild)
 pnpm run test      # run unit tests (vitest)
