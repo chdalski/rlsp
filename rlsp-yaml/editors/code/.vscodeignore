@@ -4,4 +4,3 @@ tsconfig.json
 eslint.config.mjs
 .prettierrc
 .gitignore
-.npmrc
