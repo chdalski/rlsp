@@ -2,7 +2,7 @@
   "name": "rlsp-yaml",
   "displayName": "rlsp-yaml",
   "description": "YAML language support powered by rlsp-yaml",
-  "publisher": "chdalski",
+  "publisher": "chrisski",
   "version": "0.1.0",
   "license": "MIT",
   "icon": "rlsp-yaml-logo-small.png",
