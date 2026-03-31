@@ -44,7 +44,7 @@ match the project's Cargo.toml lint standards.
 - [x] Expose all server settings in VS Code configuration — `1dc17fa`
 - [x] Add status bar, output channel, and commands — `6a688c2`
 - [x] Add CI packaging workflow — `df2b68f`
-- [ ] Move extension from `editors/code/` to `rlsp-yaml/editors/code/`
+- [x] Move extension from `editors/code/` to `rlsp-yaml/editors/code/` — `db8ae1a`
 - [ ] Update project documentation
 
 ## Tasks
