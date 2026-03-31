@@ -99,3 +99,33 @@ jobs:
         with:
           name: rlsp-yaml-${{ matrix.vsce-target }}
           path: rlsp-yaml/editors/code/*.vsix
+
+  publish-extension:
+    name: Publish to VS Code Marketplace
+    needs: build-extension
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v')
+    permissions: {}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rlsp-yaml-*
+          merge-multiple: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Publish to Marketplace
+        run: |
+          for vsix in */rlsp-yaml-*.vsix; do
+            pnpx @vscode/vsce publish --packagePath "$vsix"
+          done
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
