@@ -53,6 +53,13 @@ minimal memory footprint.
 │       ├── semantic_tokens.rs  # Semantic token provider
 │       ├── symbols.rs      # Document symbols
 │       └── validators.rs   # Diagnostic validators (anchors, flow style, key order)
+├── editors/
+│   └── code/               # VS Code extension for rlsp-yaml
+│       ├── package.json    # Extension manifest, settings contributions, scripts
+│       ├── tsconfig.json   # TypeScript config (extends @tsconfig/strictest)
+│       ├── eslint.config.mjs  # ESLint flat config (typescript-eslint strict)
+│       ├── language-configuration.json  # YAML comment/bracket config for VS Code
+│       └── src/            # TypeScript source (main.ts entry point)
 ```
 
 ## Build and Test
@@ -71,6 +78,16 @@ cargo clean            # clean stale build artifacts
 Workspace lints are defined in the root `Cargo.toml` and inherited
 via `lints.workspace = true`. All clippy warnings
 at pedantic + nursery level; selected lints at `deny`.
+
+### VS Code Extension
+
+```sh
+cd editors/code
+pnpm install       # install dependencies
+pnpm run build     # bundle extension (esbuild)
+pnpm run lint      # lint TypeScript source
+pnpm run format    # check formatting (prettier)
+```
 
 ## Release
 

@@ -1,0 +1,114 @@
+{
+  "name": "rlsp-yaml",
+  "displayName": "rlsp-yaml",
+  "description": "YAML language support powered by rlsp-yaml",
+  "publisher": "chdalski",
+  "version": "0.1.0",
+  "license": "MIT",
+  "icon": "rlsp-yaml-logo-small.png",
+  "packageManager": "pnpm@9.15.5",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./out/main.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "rlsp-yaml",
+      "properties": {
+        "rlsp-yaml.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to rlsp-yaml binary"
+        },
+        "rlsp-yaml.customTags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Custom YAML tags to recognize"
+        },
+        "rlsp-yaml.keyOrdering": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enforce alphabetical key ordering"
+        },
+        "rlsp-yaml.kubernetesVersion": {
+          "type": "string",
+          "default": "master",
+          "description": "Kubernetes schema version to use"
+        },
+        "rlsp-yaml.schemaStore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable SchemaStore.org integration"
+        },
+        "rlsp-yaml.formatValidation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run validation on format"
+        },
+        "rlsp-yaml.formatPrintWidth": {
+          "type": "number",
+          "default": 80,
+          "description": "Print width for formatting"
+        },
+        "rlsp-yaml.formatSingleQuote": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use single quotes in formatted output"
+        },
+        "rlsp-yaml.httpProxy": {
+          "type": "string",
+          "default": "",
+          "description": "HTTP proxy URL for schema fetching"
+        },
+        "rlsp-yaml.colorDecorators": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show color decorators for CSS color values"
+        },
+        "rlsp-yaml.schemas": {
+          "type": "object",
+          "default": {},
+          "description": "Maps schema URLs to glob patterns for schema assignment"
+        }
+      }
+    },
+    "commands": []
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chdalski/rlsp"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node --watch",
+    "package": "vsce package --no-dependencies",
+    "lint": "eslint src/",
+    "format": "prettier --check 'src/**/*.ts'",
+    "format:fix": "prettier --write 'src/**/*.ts'"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@tsconfig/strictest": "^2.0.0",
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
