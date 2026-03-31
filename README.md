@@ -10,6 +10,10 @@ Small, fast language server implementations written in Rust with minimal memory 
 |-------|-------------|
 | [rlsp-yaml](rlsp-yaml/README.md) | YAML language server |
 
+## VS Code Extension
+
+A dedicated VS Code extension for `rlsp-yaml` is included at [`rlsp-yaml/editors/code/`](rlsp-yaml/editors/code/). It bundles the compiled server binary and provides full YAML language support — hover, completion, validation, formatting, and more — without any manual configuration. Platform-specific VSIX packages are built for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64).
+
 ## Contributing
 
 This project accepts bug reports and feature requests via [GitHub Issues](https://github.com/chdalski/rlsp/issues). External code contributions are not currently accepted. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.

@@ -44,7 +44,7 @@ vim.lsp.start({
 
 ### VS Code
 
-Use a generic LSP client extension (e.g., [vscode-languageclient](https://github.com/microsoft/vscode-languageserver-node)) and configure the binary as the server command for YAML files. Pass settings via `initializationOptions`.
+A dedicated extension is available at [`editors/code/`](editors/code/). It bundles the compiled `rlsp-yaml` binary and configures itself automatically — no manual setup required. Platform-specific VSIX packages are built by CI and attached to each release.
 
 ### Helix
 
