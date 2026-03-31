@@ -4,3 +4,7 @@ tsconfig.json
 eslint.config.mjs
 .prettierrc
 .gitignore
+CLAUDE.md
+pnpm-lock.yaml
+vitest.config.ts
+*.vsix
