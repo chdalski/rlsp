@@ -424,7 +424,7 @@ infrastructure that you commit directly.
 
 This covers:
 - `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
-  config
+  config, TypeScript strictness config
 - `/ensure-plans-dir` outputs — plan format guide
 - Plan progress updates — plan files are named outputs of
   your plan-management instructions

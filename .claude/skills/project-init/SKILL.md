@@ -124,37 +124,46 @@ listing them helps users understand what guidance is active.
    and follow its instructions to update all `Cargo.toml`
    files in the project.
 
-6. **Detect mono-repo** — check for workspace fields,
+6. **Apply TypeScript strictness** (TypeScript projects
+   only) — if TypeScript was detected, read
+   `.claude/skills/project-init/typescript-init.md` and
+   follow its instructions to update `tsconfig.json`,
+   `eslint.config.mjs`, and `package.json` in each
+   TypeScript project root.
+
+7. **Detect mono-repo** — check for workspace fields,
    multiple manifest directories, or git submodules. If
    detected, catalog sub-projects with their paths,
    languages, and inferred purposes.
 
-7. **Map to rules** — use the language-to-rule mapping
+8. **Map to rules** — use the language-to-rule mapping
    table to determine which conditional rule files are
    active for this project.
 
-8. **Fill template** — replace auto-detected sections
+9. **Fill template** — replace auto-detected sections
    (Languages and Frameworks, Project Structure, Active
    Rules, Build and Test, Sub-Projects if applicable) with
    actual findings. Keep `<!-- TODO: ... -->` placeholders
    for human-curated sections (Overview, Architecture, Code
    Exemplars, Anti-Patterns, Trusted Sources).
 
-9. **Write context** — write the filled template to
-   `CLAUDE.md` at the project root. Then check for
-   subdirectories with their own `.git/` — for each one,
-   scan it independently (repeat steps 3-8 scoped to that
-   subdirectory) and write its own `CLAUDE.md`. Check for
-   existing `CLAUDE.md` in each location before writing.
+10. **Write context** — write the filled template to
+    `CLAUDE.md` at the project root. Then check for
+    subdirectories with their own `.git/` — for each one,
+    scan it independently (repeat steps 3-9 scoped to that
+    subdirectory) and write its own `CLAUDE.md`. Check for
+    existing `CLAUDE.md` in each location before writing.
 
-10. **Present summary** — report to the caller:
+11. **Present summary** — report to the caller:
     - Languages and frameworks detected
     - Whether mono-repo structure was found
     - Which rule files are active
     - Which sections need human curation (the TODO sections)
     - Which `Cargo.toml` files were updated with lints (Rust
       projects only)
+    - Which TypeScript config files were updated (TypeScript
+      projects only)
     - Whether any files beyond `CLAUDE.md` were modified
-      (e.g. Cargo.toml lint updates) — the lead uses this
-      to decide whether to offer cleanup during
-      clarification
+      (e.g. Cargo.toml lint updates, tsconfig.json changes)
+      — the lead uses this to decide whether to offer
+      cleanup during clarification
