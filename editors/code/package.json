@@ -84,7 +84,23 @@
         }
       }
     },
-    "commands": []
+    "commands": [
+      {
+        "command": "rlsp-yaml.restartServer",
+        "title": "Restart Server",
+        "category": "rlsp-yaml"
+      },
+      {
+        "command": "rlsp-yaml.showOutput",
+        "title": "Show Output",
+        "category": "rlsp-yaml"
+      },
+      {
+        "command": "rlsp-yaml.showVersion",
+        "title": "Show Version",
+        "category": "rlsp-yaml"
+      }
+    ]
   },
   "repository": {
     "type": "git",
