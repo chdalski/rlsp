@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-03-31)
 **Created:** 2026-03-31
 
 ## Goal
@@ -22,8 +22,8 @@ the marketplace on release tags using a `VSCE_PAT` secret.
 
 ## Steps
 
-- [ ] Update publisher ID and add extension README
-- [ ] Add marketplace publish step to CI workflow
+- [x] Update publisher ID and add extension README — `834538e`
+- [x] Add marketplace publish step to CI workflow — `027c51e`
 
 ## Tasks
 
