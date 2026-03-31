@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-03-31
 
 ## Goal
@@ -39,7 +39,7 @@ match the project's Cargo.toml lint standards.
 
 - [x] Clarify requirements with user
 - [x] Review server capabilities and settings
-- [ ] Scaffold extension project (`editors/code/`)
+- [x] Scaffold extension project (`editors/code/`) — `df38c8b`, `5c5f327`
 - [ ] Implement LSP client with binary discovery
 - [ ] Expose all server settings in VS Code configuration
 - [ ] Add status bar, output channel, and commands
