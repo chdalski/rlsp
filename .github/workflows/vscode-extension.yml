@@ -1,0 +1,101 @@
+name: VS Code Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'editors/code/**'
+    tags:
+      - 'rlsp-yaml-v*'
+
+jobs:
+  build-extension:
+    name: Build VSIX (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            vsce-target: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            vsce-target: linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            vsce-target: darwin-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            vsce-target: darwin-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            vsce-target: win32-x64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (Linux cross-compilation)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross
+
+      - name: Build binary (cross)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build binary (native)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Copy binary to extension server directory (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p editors/code/server/${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/rlsp-yaml editors/code/server/${{ matrix.target }}/rlsp-yaml
+
+      - name: Copy binary to extension server directory (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path editors/code/server/${{ matrix.target }}
+          Copy-Item target/${{ matrix.target }}/release/rlsp-yaml.exe editors/code/server/${{ matrix.target }}/rlsp-yaml.exe
+        shell: pwsh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        working-directory: editors/code
+        run: pnpm install
+
+      - name: Build extension
+        working-directory: editors/code
+        run: pnpm run build
+
+      - name: Run tests
+        working-directory: editors/code
+        run: pnpm run test
+
+      - name: Package VSIX
+        working-directory: editors/code
+        run: pnpx @vscode/vsce package --target ${{ matrix.vsce-target }} --no-dependencies
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rlsp-yaml-${{ matrix.vsce-target }}
+          path: editors/code/*.vsix
