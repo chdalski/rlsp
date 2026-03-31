@@ -41,8 +41,8 @@ match the project's Cargo.toml lint standards.
 - [x] Review server capabilities and settings
 - [x] Scaffold extension project (`editors/code/`) — `df38c8b`, `5c5f327`
 - [x] Implement LSP client with binary discovery — `1dc17fa`
-- [ ] Expose all server settings in VS Code configuration
-- [ ] Add status bar, output channel, and commands
+- [x] Expose all server settings in VS Code configuration — `1dc17fa`
+- [x] Add status bar, output channel, and commands — `6a688c2`
 - [ ] Add CI packaging workflow
 - [ ] Update project documentation
 
