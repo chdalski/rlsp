@@ -85,6 +85,7 @@ at pedantic + nursery level; selected lints at `deny`.
 cd editors/code
 pnpm install       # install dependencies
 pnpm run build     # bundle extension (esbuild)
+pnpm run test      # run unit tests (vitest)
 pnpm run lint      # lint TypeScript source
 pnpm run format    # check formatting (prettier)
 ```

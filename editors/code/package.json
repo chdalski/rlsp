@@ -94,6 +94,7 @@
     "build": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node",
     "watch": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node --watch",
     "package": "vsce package --no-dependencies",
+    "test": "vitest run",
     "lint": "eslint src/",
     "format": "prettier --check 'src/**/*.ts'",
     "format:fix": "prettier --write 'src/**/*.ts'"
@@ -103,12 +104,14 @@
   },
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.0",
+    "@types/node": "^25.5.0",
     "@types/vscode": "^1.93.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3"
   }
 }
