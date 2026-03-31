@@ -43,7 +43,8 @@ match the project's Cargo.toml lint standards.
 - [x] Implement LSP client with binary discovery — `1dc17fa`
 - [x] Expose all server settings in VS Code configuration — `1dc17fa`
 - [x] Add status bar, output channel, and commands — `6a688c2`
-- [ ] Add CI packaging workflow
+- [x] Add CI packaging workflow — `df2b68f`
+- [ ] Move extension from `editors/code/` to `rlsp-yaml/editors/code/`
 - [ ] Update project documentation
 
 ## Tasks
@@ -131,7 +132,17 @@ compiled rlsp-yaml binary for each target.
 - [ ] Extension `README.md` for marketplace listing (features,
   screenshots placeholder, configuration reference)
 
-### Task 5: Update project documentation
+### Task 5: Move extension to `rlsp-yaml/editors/code/`
+
+Each language server crate owns its extension — scoping under `rlsp-yaml/`
+ensures future crates (e.g., rlsp-toml) can have their own extensions.
+
+- [ ] `git mv editors/code rlsp-yaml/editors/code`
+- [ ] Update `.github/workflows/vscode-extension.yml` — all path references
+- [ ] Update `CLAUDE.md` project structure section
+- [ ] Verify `pnpm build` and `pnpm run test` pass from new location
+
+### Task 6: Update project documentation
 
 Update root and crate documentation to reference the VS Code extension.
 
@@ -143,8 +154,8 @@ Update root and crate documentation to reference the VS Code extension.
 
 ## Decisions
 
-- **Directory:** `editors/code/` — matches rust-analyzer convention,
-  leaves room for other editor extensions under `editors/`
+- **Directory:** `rlsp-yaml/editors/code/` — each language server crate
+  owns its extension, so future crates can have their own
 - **Package manager:** pnpm — user preference for strictness, analogous
   to the project's Rust tooling stance
 - **TypeScript config:** `@tsconfig/strictest` base — mirrors the
