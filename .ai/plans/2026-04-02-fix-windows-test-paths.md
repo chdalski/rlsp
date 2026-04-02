@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-02
 
 ## Goal
@@ -20,7 +20,7 @@ Unix-style hardcoded paths in assertions but `path.resolve()` and
 
 ## Steps
 
-- [ ] Fix platform-dependent test assertions
+- [x] Fix platform-dependent test assertions
 
 ## Tasks
 
@@ -28,12 +28,9 @@ Unix-style hardcoded paths in assertions but `path.resolve()` and
 
 Three failing tests in `rlsp-yaml/integrations/vscode/src/server.test.ts`:
 
-- [ ] Line 11: `expect(result).toBe('/usr/local/bin/rlsp-yaml')` →
-  use `path.resolve('/usr/local/bin/rlsp-yaml')`
-- [ ] Line 85: `expect(result.startsWith(EXT)).toBe(true)` →
-  use `path.join()` or `path.resolve()` for EXT so separators match
-- [ ] Line 134: `expect(result).toBe('/bin/rlsp-yaml')` →
-  use `path.resolve('/bin/rlsp-yaml')`
+- [x] Line 11: `path.resolve('/usr/local/bin/rlsp-yaml')` (774d849)
+- [x] Line 85: `path.join(EXT, '')` — normalizes separators without drive letter (774d849)
+- [x] Line 134: `path.resolve('/usr/local/../../bin/rlsp-yaml')` (774d849)
 
 ## Decisions
 
