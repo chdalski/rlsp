@@ -30,8 +30,8 @@ minimal memory footprint.
 │   │   ├── hot_path.rs      # Tier 1: keystroke hot-path benchmarks
 │   │   ├── latency.rs       # Tier 2: user-perceivable latency benchmarks
 │   │   └── insight.rs       # Tier 3: architectural insight benchmarks
-│   ├── editors/
-│   │   └── code/           # VS Code extension for rlsp-yaml
+│   ├── integrations/
+│   │   └── vscode/         # VS Code extension for rlsp-yaml
 │   │       ├── package.json    # Extension manifest, settings contributions, scripts
 │   │       ├── tsconfig.json   # TypeScript config (extends @tsconfig/strictest)
 │   │       ├── eslint.config.mjs  # ESLint flat config (typescript-eslint strict)
@@ -82,7 +82,7 @@ at pedantic + nursery level; selected lints at `deny`.
 ### VS Code Extension
 
 ```sh
-cd rlsp-yaml/editors/code
+cd rlsp-yaml/integrations/vscode
 pnpm install       # install dependencies
 pnpm run build     # bundle extension (esbuild)
 pnpm run test      # run unit tests (vitest)

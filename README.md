@@ -12,7 +12,7 @@ Small, fast language server implementations written in Rust with minimal memory 
 
 ## VS Code Extension
 
-A dedicated VS Code extension for `rlsp-yaml` is included at [`rlsp-yaml/editors/code/`](rlsp-yaml/editors/code/). It bundles the compiled server binary and provides full YAML language support — hover, completion, validation, formatting, and more — without any manual configuration. Platform-specific VSIX packages are built for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64).
+A dedicated VS Code extension for `rlsp-yaml` is included at [`rlsp-yaml/integrations/vscode/`](rlsp-yaml/integrations/vscode/). It bundles the compiled server binary and provides full YAML language support — hover, completion, validation, formatting, and more — without any manual configuration. Platform-specific VSIX packages are built for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64).
 
 ## Contributing
 

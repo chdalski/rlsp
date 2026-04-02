@@ -44,7 +44,7 @@ vim.lsp.start({
 
 ### VS Code
 
-A dedicated extension is available at [`editors/code/`](editors/code/). It bundles the compiled `rlsp-yaml` binary and configures itself automatically — no manual setup required. Platform-specific VSIX packages are built by CI and attached to each release.
+A dedicated extension is available at [`integrations/vscode/`](integrations/vscode/). It bundles the compiled `rlsp-yaml` binary and configures itself automatically — no manual setup required. Platform-specific VSIX packages are built by CI and attached to each release.
 
 ### Helix
 

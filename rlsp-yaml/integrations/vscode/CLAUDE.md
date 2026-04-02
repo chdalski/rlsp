@@ -6,7 +6,7 @@ Use the default pnpm store location. Do **not** add a `store-dir` override in `.
 
 The default store (`~/.local/share/pnpm/store`) is the correct location — no project-level configuration is needed. Adding a `store-dir` override moves the store into the project tree, which wastes disk space and conflicts with any environment that already manages the store externally.
 
-When creating a new extension (e.g., `rlsp-toml/editors/code/`), leave `.npmrc` absent or empty.
+When creating a new extension (e.g., `rlsp-toml/integrations/vscode/`), leave `.npmrc` absent or empty.
 
 ## TypeScript Strictness
 

@@ -49,7 +49,7 @@ The extension bundles a prebuilt `rlsp-yaml` binary — no separate installation
 
 ```sh
 git clone https://github.com/chdalski/rlsp
-cd rlsp/rlsp-yaml/editors/code
+cd rlsp/rlsp-yaml/integrations/vscode
 pnpm install
 pnpm run build
 ```
