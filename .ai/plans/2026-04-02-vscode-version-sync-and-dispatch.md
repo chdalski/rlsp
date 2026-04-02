@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-02
 
 ## Goal
@@ -22,7 +22,7 @@ disabled until a `VSCE_PAT` secret is configured.
 
 ## Steps
 
-- [ ] Add version sync, workflow_dispatch, and disable publish job
+- [x] Add version sync, workflow_dispatch, and disable publish job (a188d65)
 
 ## Tasks
 
@@ -30,7 +30,7 @@ disabled until a `VSCE_PAT` secret is configured.
 
 Changes to `.github/workflows/vscode-extension.yml`:
 
-- [ ] Add `workflow_dispatch` trigger with a `version` input:
+- [x] Add `workflow_dispatch` trigger with a `version` input:
   ```yaml
   workflow_dispatch:
     inputs:
@@ -38,7 +38,7 @@ Changes to `.github/workflows/vscode-extension.yml`:
         description: 'Extension version to publish (e.g., 0.5.1)'
         required: true
   ```
-- [ ] Add a version-sync step in `build-extension` job before packaging:
+- [x] Add a version-sync step in `build-extension` job before packaging:
   ```yaml
   - name: Set extension version
     working-directory: rlsp-yaml/integrations/vscode
@@ -51,9 +51,9 @@ Changes to `.github/workflows/vscode-extension.yml`:
       pnpm pkg set version="$VERSION"
   ```
   On Windows, use PowerShell equivalent.
-- [ ] Disable the `publish-extension` job by adding `if: false` (temporary
+- [x] Disable the `publish-extension` job by adding `if: false` (temporary
   until `VSCE_PAT` is configured). Add a comment explaining why.
-- [ ] Update the publish job's `if` condition to also trigger on
+- [x] Update the publish job's `if` condition to also trigger on
   `workflow_dispatch` (for when it's re-enabled):
   ```yaml
   if: false  # Disabled until VSCE_PAT secret is configured
