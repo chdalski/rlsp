@@ -52,18 +52,18 @@ impl std::fmt::Display for SchemaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UrlNotPermitted(u) => write!(f, "URL not permitted: {u}"),
-            Self::FetchFailed(e) => write!(f, "fetch failed: {e}"),
-            Self::ResponseTooLarge => write!(f, "schema response exceeded size limit"),
-            Self::ParseFailed(e) => write!(f, "schema parse failed: {e}"),
-            Self::TooDeep => write!(f, "schema nesting depth exceeded limit"),
+            Self::FetchFailed(e) => write!(f, "Fetch failed: {e}"),
+            Self::ResponseTooLarge => write!(f, "Schema response exceeded size limit"),
+            Self::ParseFailed(e) => write!(f, "Schema parse failed: {e}"),
+            Self::TooDeep => write!(f, "Schema nesting depth exceeded limit"),
             Self::TooManyRemoteFetches => {
                 write!(
                     f,
-                    "remote fetch count exceeded limit ({MAX_REMOTE_FETCH_COUNT})"
+                    "Remote fetch count exceeded limit ({MAX_REMOTE_FETCH_COUNT})"
                 )
             }
             Self::UnexpectedContentType(ct) => {
-                write!(f, "unexpected content type: {ct}")
+                write!(f, "Unexpected content type: {ct}")
             }
         }
     }
@@ -2422,7 +2422,7 @@ mod tests {
     fn schema_error_display_fetch_failed() {
         let e = SchemaError::FetchFailed("connection refused".to_string());
         let msg = e.to_string();
-        assert!(msg.contains("fetch failed"), "got: {msg}");
+        assert!(msg.contains("Fetch failed"), "got: {msg}");
         assert!(msg.contains("connection refused"), "got: {msg}");
     }
 
@@ -3662,14 +3662,14 @@ mod tests {
     fn schema_error_display_too_many_remote_fetches() {
         let e = SchemaError::TooManyRemoteFetches;
         let msg = e.to_string();
-        assert!(msg.contains("remote fetch count"), "got: {msg}");
+        assert!(msg.contains("Remote fetch count"), "got: {msg}");
     }
 
     #[test]
     fn schema_error_display_unexpected_content_type() {
         let e = SchemaError::UnexpectedContentType("text/html".to_string());
         let msg = e.to_string();
-        assert!(msg.contains("unexpected content type"), "got: {msg}");
+        assert!(msg.contains("Unexpected content type"), "got: {msg}");
         assert!(msg.contains("text/html"), "got: {msg}");
     }
 

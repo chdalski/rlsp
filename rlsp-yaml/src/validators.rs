@@ -213,7 +213,7 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
                             ),
                             severity: Some(DiagnosticSeverity::WARNING),
                             code: Some(NumberOrString::String("flowMap".to_string())),
-                            message: "Flow mapping style detected".to_string(),
+                            message: "Flow mapping style: use block style instead".to_string(),
                             source: Some("rlsp-yaml".to_string()),
                             ..Diagnostic::default()
                         });
@@ -230,7 +230,7 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
                             ),
                             severity: Some(DiagnosticSeverity::WARNING),
                             code: Some(NumberOrString::String("flowSeq".to_string())),
-                            message: "Flow sequence style detected".to_string(),
+                            message: "Flow sequence style: use block style instead".to_string(),
                             source: Some("rlsp-yaml".to_string()),
                             ..Diagnostic::default()
                         });

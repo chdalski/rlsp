@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use saphyr::{LoadableYamlNode, YamlOwned};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 pub struct ParseResult {
     pub documents: Vec<YamlOwned>,
@@ -26,6 +26,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
             let diagnostic = Diagnostic {
                 range: Range::new(start, end),
                 severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("yamlSyntax".to_string())),
                 message: err.info().to_string(),
                 source: Some("rlsp-yaml".to_string()),
                 ..Diagnostic::default()
