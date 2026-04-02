@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-02)
 **Created:** 2026-04-02
 
 ## Goal
@@ -20,7 +20,7 @@ directory can hold VS Code, Claude Code plugins, and other tool integrations.
 
 ## Steps
 
-- [ ] Move directory and update all references
+- [x] Move directory and update all references — `ed25b7c`
 
 ## Tasks
 
