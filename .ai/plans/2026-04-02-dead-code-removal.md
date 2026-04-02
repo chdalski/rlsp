@@ -1,7 +1,7 @@
 # Dead Code Removal
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-02
 
 ## Goal
@@ -45,17 +45,17 @@ prevents future agents from assuming they are live.
 
 ## Steps
 
-- [ ] Remove `SchemaDraft`, `detect_draft`, `draft` field
-- [ ] Remove `fetch_schema`
-- [ ] Remove `check_vocabulary`, `KNOWN_VOCABULARIES`,
+- [x] Remove `SchemaDraft`, `detect_draft`, `draft` field
+- [x] Remove `fetch_schema`
+- [x] Remove `check_vocabulary`, `KNOWN_VOCABULARIES`,
       `vocabulary` field and parsing
-- [ ] Remove `parse_schema_with_remote`
-- [ ] Remove all associated tests
-- [ ] Verify `cargo clippy --all-targets` and `cargo test`
+- [x] Remove `parse_schema_with_remote`
+- [x] Remove all associated tests
+- [x] Verify `cargo clippy --all-targets` and `cargo test`
 
 ## Tasks
 
-### Task 1: Remove all dead code from schema.rs
+### Task 1: Remove all dead code from schema.rs — `16a071a`
 
 Single task because all removals are in one file, have no
 dependencies between them, and the combined diff is small
@@ -94,10 +94,10 @@ enough to review atomically.
     the wrapper, remove them.
 
 **Verification:**
-- [ ] `cargo fmt`
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo test` — all tests pass
-- [ ] `cargo bench` — compiles (no need to run full suite)
+- [x] `cargo fmt`
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo test` — all tests pass
+- [x] `cargo bench` — compiles (no need to run full suite)
 
 ## Decisions
 
