@@ -25,26 +25,6 @@ const MAX_REF_DEPTH: usize = 32;
 /// resolution pass.  Caps both breadth fan-out and circular-remote-ref loops.
 const MAX_REMOTE_FETCH_COUNT: usize = 20;
 
-/// Standard vocabulary URIs for Draft 2019-09 and Draft 2020-12.
-const KNOWN_VOCABULARIES: &[&str] = &[
-    // Draft 2019-09
-    "https://json-schema.org/draft/2019-09/vocab/core",
-    "https://json-schema.org/draft/2019-09/vocab/applicator",
-    "https://json-schema.org/draft/2019-09/vocab/validation",
-    "https://json-schema.org/draft/2019-09/vocab/meta-data",
-    "https://json-schema.org/draft/2019-09/vocab/format",
-    "https://json-schema.org/draft/2019-09/vocab/content",
-    // Draft 2020-12
-    "https://json-schema.org/draft/2020-12/vocab/core",
-    "https://json-schema.org/draft/2020-12/vocab/applicator",
-    "https://json-schema.org/draft/2020-12/vocab/unevaluated",
-    "https://json-schema.org/draft/2020-12/vocab/validation",
-    "https://json-schema.org/draft/2020-12/vocab/meta-data",
-    "https://json-schema.org/draft/2020-12/vocab/format-annotation",
-    "https://json-schema.org/draft/2020-12/vocab/format-assertion",
-    "https://json-schema.org/draft/2020-12/vocab/content",
-];
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────────
@@ -103,23 +83,10 @@ pub enum AdditionalProperties {
     Schema(Box<JsonSchema>),
 }
 
-/// The JSON Schema draft version declared by the `$schema` keyword.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SchemaDraft {
-    Draft04,
-    Draft06,
-    Draft07,
-    Draft201909,
-    Draft202012,
-    #[default]
-    Unknown,
-}
-
 /// A subset of JSON Schema (Draft-04 and Draft-07) sufficient for validation,
 /// completion, and hover support.
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
-    pub draft: SchemaDraft,
     pub id: Option<String>,
     pub schema_type: Option<SchemaType>,
     pub title: Option<String>,
@@ -174,7 +141,6 @@ pub struct JsonSchema {
     pub deprecated: Option<bool>,
     pub unevaluated_properties: Option<AdditionalProperties>,
     pub unevaluated_items: Option<Box<Self>>,
-    pub vocabulary: Option<HashMap<String, bool>>,
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
@@ -460,22 +426,6 @@ pub fn fetch_schema_raw(
     Ok((value, schema))
 }
 
-/// Fetch a JSON Schema from `url` and parse it.
-///
-/// `url` should already be validated and normalised via
-/// [`validate_and_normalize_url`].  This function is blocking; call it via
-/// `tokio::task::spawn_blocking` from async contexts.
-///
-/// When `proxy` is `Some`, requests are routed through the given proxy URL.
-///
-/// # Errors
-///
-/// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
-/// failure.
-pub fn fetch_schema(url: &str, proxy: Option<&str>) -> Result<JsonSchema, SchemaError> {
-    fetch_schema_raw(url, proxy).map(|(_, schema)| schema)
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // SchemaStore catalog fetch, parse, and matching
 // ──────────────────────────────────────────────────────────────────────────────
@@ -620,15 +570,7 @@ struct ParseContext<'a> {
     visited: HashSet<String>,
 }
 
-impl<'a> ParseContext<'a> {
-    fn new(cache: &'a mut SchemaCache, proxy: Option<&'a str>) -> Self {
-        Self {
-            cache,
-            proxy,
-            visited: HashSet::new(),
-        }
-    }
-
+impl ParseContext<'_> {
     /// Record a URL as visited.  Returns `false` if the URL was already
     /// visited or the fetch limit has been reached — caller should skip fetch.
     fn try_visit(&mut self, url: &str) -> bool {
@@ -636,6 +578,17 @@ impl<'a> ParseContext<'a> {
             return false;
         }
         self.visited.insert(url.to_string())
+    }
+}
+
+#[cfg(test)]
+impl<'a> ParseContext<'a> {
+    fn new(cache: &'a mut SchemaCache, proxy: Option<&'a str>) -> Self {
+        Self {
+            cache,
+            proxy,
+            visited: HashSet::new(),
+        }
     }
 }
 
@@ -649,36 +602,6 @@ impl<'a> ParseContext<'a> {
 #[must_use]
 pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
     parse_schema_with_root(value, value, None, None, 0)
-}
-
-/// Parse a `serde_json::Value` into a [`JsonSchema`], resolving remote `$ref`s.
-///
-/// `cache` and `proxy` enable HTTP fetching for non-fragment `$ref` values.
-/// Pass `None` for cache to disable remote resolution (local refs only).
-#[must_use]
-pub fn parse_schema_with_remote(
-    value: &Value,
-    cache: &mut SchemaCache,
-    proxy: Option<&str>,
-) -> Option<JsonSchema> {
-    let mut ctx = ParseContext::new(cache, proxy);
-    parse_schema_with_root(value, value, None, Some(&mut ctx), 0)
-}
-
-/// Check `$vocabulary` declarations and return warnings for unknown required vocabularies.
-///
-/// Returns one warning string per unknown required vocabulary URI.
-/// Optional vocabularies (`false`) that are unrecognized are silently ignored per spec.
-#[must_use]
-pub fn check_vocabulary(schema: &JsonSchema) -> Vec<String> {
-    let Some(vocab) = &schema.vocabulary else {
-        return vec![];
-    };
-    vocab
-        .iter()
-        .filter(|(uri, required)| **required && !KNOWN_VOCABULARIES.contains(&uri.as_str()))
-        .map(|(uri, _)| format!("Unknown required vocabulary: {uri}"))
-        .collect()
 }
 
 /// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
@@ -866,7 +789,7 @@ fn parse_combinator_fields(
         .map(Box::new);
 }
 
-/// Populate `unevaluatedProperties`, `unevaluatedItems`, `definitions`, and `$vocabulary`
+/// Populate `unevaluatedProperties`, `unevaluatedItems`, and `definitions`
 /// on `schema` from `obj`. Extracted to keep `parse_schema_with_root` under 100 lines.
 fn parse_extension_fields(
     obj: &serde_json::Map<String, Value>,
@@ -905,16 +828,6 @@ fn parse_extension_fields(
         }
         (a, b) => a.or(b),
     };
-
-    // $vocabulary (Draft 2019-09 / 2020-12)
-    schema.vocabulary = obj
-        .get("$vocabulary")
-        .and_then(Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(k, v)| v.as_bool().map(|b| (k.clone(), b)))
-                .collect()
-        });
 }
 
 /// Resolve `relative` against `base`, returning an absolute URI string.
@@ -927,23 +840,6 @@ fn resolve_uri(base: Option<&str>, relative: &str) -> Option<String> {
     }
     let base_url = Url::parse(base?).ok()?;
     base_url.join(relative).ok().map(|u| u.to_string())
-}
-
-fn detect_draft(uri: &str) -> SchemaDraft {
-    match uri {
-        "http://json-schema.org/draft-04/schema#" | "http://json-schema.org/draft-04/schema" => {
-            SchemaDraft::Draft04
-        }
-        "http://json-schema.org/draft-06/schema#" | "http://json-schema.org/draft-06/schema" => {
-            SchemaDraft::Draft06
-        }
-        "http://json-schema.org/draft-07/schema#" | "http://json-schema.org/draft-07/schema" => {
-            SchemaDraft::Draft07
-        }
-        "https://json-schema.org/draft/2019-09/schema" => SchemaDraft::Draft201909,
-        "https://json-schema.org/draft/2020-12/schema" => SchemaDraft::Draft202012,
-        _ => SchemaDraft::Unknown,
-    }
 }
 
 fn parse_schema_with_root(
@@ -990,13 +886,6 @@ fn parse_schema_with_root(
         }
         // Fall through if unresolved — parse remaining fields
     }
-
-    // $schema — detect draft version
-    schema.draft = obj
-        .get("$schema")
-        .and_then(Value::as_str)
-        .map(detect_draft)
-        .unwrap_or_default();
 
     // $id (Draft-06+) / id (Draft-04) — update base URI for sub-schemas
     let raw_id = obj
@@ -2208,7 +2097,7 @@ mod tests {
     // network call is made.
     #[test]
     fn should_return_error_for_unreachable_url() {
-        let result = fetch_schema("http://127.0.0.1:19999/nonexistent.json", None);
+        let result = fetch_schema_raw("http://127.0.0.1:19999/nonexistent.json", None);
         assert!(result.is_err());
     }
 
@@ -2267,10 +2156,10 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Sec-4: fetch_schema rejects 127.0.0.1 before making a network call
+    // Sec-4: fetch_schema_raw rejects 127.0.0.1 before making a network call
     #[test]
     fn should_reject_loopback_ip_in_fetch() {
-        let result = fetch_schema("http://127.0.0.1:8080/schema.json", None);
+        let result = fetch_schema_raw("http://127.0.0.1:8080/schema.json", None);
         assert!(result.is_err());
     }
 
@@ -3354,189 +3243,6 @@ mod tests {
         assert_eq!(schema.dynamic_anchor, Some("myloop".to_string()));
     }
 
-    // ── $vocabulary ───────────────────────────────────────────────────────────
-
-    // Vocab-1: known vocabulary URIs parse cleanly with no warnings
-    #[test]
-    fn known_vocabularies_produce_no_warnings() {
-        let value = json!({
-            "$vocabulary": {
-                "https://json-schema.org/draft/2020-12/vocab/core": true,
-                "https://json-schema.org/draft/2020-12/vocab/validation": true,
-                "https://json-schema.org/draft/2020-12/vocab/applicator": false
-            }
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert!(schema.vocabulary.is_some());
-        let warnings = check_vocabulary(&schema);
-        assert!(warnings.is_empty());
-    }
-
-    // Vocab-2: unknown required vocabulary produces a warning
-    #[test]
-    fn unknown_required_vocabulary_produces_warning() {
-        let value = json!({
-            "$vocabulary": {
-                "https://example.com/my-custom-vocab": true
-            }
-        });
-        let schema = parse_schema(&value).unwrap();
-        let warnings = check_vocabulary(&schema);
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("https://example.com/my-custom-vocab"));
-    }
-
-    // Vocab-3: unknown optional vocabulary produces no warning
-    #[test]
-    fn unknown_optional_vocabulary_produces_no_warning() {
-        let value = json!({
-            "$vocabulary": {
-                "https://example.com/optional-vocab": false
-            }
-        });
-        let schema = parse_schema(&value).unwrap();
-        let warnings = check_vocabulary(&schema);
-        assert!(warnings.is_empty());
-    }
-
-    // Vocab-4: schema without $vocabulary has None field and no warnings
-    #[test]
-    fn schema_without_vocabulary_has_none_and_no_warnings() {
-        let value = json!({ "type": "object" });
-        let schema = parse_schema(&value).unwrap();
-        assert!(schema.vocabulary.is_none());
-        let warnings = check_vocabulary(&schema);
-        assert!(warnings.is_empty());
-    }
-
-    // Vocab-5: $vocabulary doesn't interfere with other schema fields
-    #[test]
-    fn vocabulary_does_not_interfere_with_other_fields() {
-        let value = json!({
-            "$vocabulary": {
-                "https://json-schema.org/draft/2020-12/vocab/core": true
-            },
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" }
-            }
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert!(schema.vocabulary.is_some());
-        assert!(schema.properties.is_some());
-        assert_eq!(
-            schema.schema_type,
-            Some(SchemaType::Single("object".to_string()))
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // detect_draft / SchemaDraft
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // Draft-1: Draft-04 URI with trailing # is detected
-    #[test]
-    fn draft04_uri_with_hash_is_detected() {
-        let value = json!({
-            "$schema": "http://json-schema.org/draft-04/schema#",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft04);
-    }
-
-    // Draft-2: Draft-07 URI with trailing # is detected
-    #[test]
-    fn draft07_uri_with_hash_is_detected() {
-        let value = json!({
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft07);
-    }
-
-    // Draft-3: Draft 2020-12 URI is detected
-    #[test]
-    fn draft202012_uri_is_detected() {
-        let value = json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft202012);
-    }
-
-    // Draft-4: Schema without $schema defaults to Unknown
-    #[test]
-    fn schema_without_dollar_schema_defaults_to_unknown() {
-        let value = json!({ "type": "object" });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Unknown);
-    }
-
-    // Draft-5: Schema with unrecognized $schema URI defaults to Unknown
-    #[test]
-    fn unrecognized_schema_uri_defaults_to_unknown() {
-        let value = json!({
-            "$schema": "https://example.com/my-custom-schema",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Unknown);
-    }
-
-    // Draft-6: Sub-schema $schema is parsed (no depth restriction)
-    #[test]
-    fn sub_schema_dollar_schema_is_parsed() {
-        let value = json!({
-            "type": "object",
-            "properties": {
-                "nested": {
-                    "$schema": "https://json-schema.org/draft/2019-09/schema",
-                    "type": "string"
-                }
-            }
-        });
-        let schema = parse_schema(&value).unwrap();
-        let props = schema.properties.as_ref().unwrap();
-        let nested = props.get("nested").unwrap();
-        assert_eq!(nested.draft, SchemaDraft::Draft201909);
-    }
-
-    // Draft-7: Draft-04 URI without trailing # is also detected
-    #[test]
-    fn draft04_uri_without_hash_is_detected() {
-        let value = json!({
-            "$schema": "http://json-schema.org/draft-04/schema",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft04);
-    }
-
-    // Draft-8: Draft-06 URI with trailing # is detected
-    #[test]
-    fn draft06_uri_with_hash_is_detected() {
-        let value = json!({
-            "$schema": "http://json-schema.org/draft-06/schema#",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft06);
-    }
-
-    // Draft-9: Draft 2019-09 URI is detected
-    #[test]
-    fn draft201909_uri_is_detected() {
-        let value = json!({
-            "$schema": "https://json-schema.org/draft/2019-09/schema",
-            "type": "object"
-        });
-        let schema = parse_schema(&value).unwrap();
-        assert_eq!(schema.draft, SchemaDraft::Draft201909);
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // $id / id base URI resolution
     // ══════════════════════════════════════════════════════════════════════════
@@ -3651,9 +3357,10 @@ mod tests {
     fn remote_ref_to_loopback_is_blocked_by_ssrf_guard() {
         let value = json!({ "$ref": "http://127.0.0.1/evil.json" });
         let mut cache = SchemaCache::new();
-        // parse_schema_with_remote attempts to fetch; SSRF guard blocks it.
+        // parse_schema_with_root + ParseContext attempts to fetch; SSRF guard blocks it.
         // The $ref falls back to ref_path-only schema (no remote traversal).
-        let schema = parse_schema_with_remote(&value, &mut cache, None).unwrap();
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let schema = parse_schema_with_root(&value, &value, None, Some(&mut ctx), 0).unwrap();
         // Remote fetch was blocked — schema has ref_path set but no sub-schema content.
         assert_eq!(
             schema.ref_path.as_deref(),
@@ -3814,7 +3521,8 @@ mod tests {
     fn file_scheme_ref_is_blocked_by_ssrf_guard() {
         let value = json!({ "$ref": "file:///etc/passwd" });
         let mut cache = SchemaCache::new();
-        let schema = parse_schema_with_remote(&value, &mut cache, None).unwrap();
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let schema = parse_schema_with_root(&value, &value, None, Some(&mut ctx), 0).unwrap();
         // SSRF guard blocks — ref_path preserved, nothing cached.
         assert_eq!(schema.ref_path.as_deref(), Some("file:///etc/passwd"));
         assert!(cache.get("file:///etc/passwd").is_none());
@@ -3898,7 +3606,8 @@ mod tests {
             }
         });
 
-        let schema = parse_schema_with_remote(&root, &mut cache, None);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let schema = parse_schema_with_root(&root, &root, None, Some(&mut ctx), 0);
 
         assert!(schema.is_some(), "outer schema should parse");
         let schema = schema.unwrap();
