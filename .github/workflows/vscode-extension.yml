@@ -8,6 +8,11 @@ on:
       - 'rlsp-yaml/integrations/vscode/**'
     tags:
       - 'rlsp-yaml-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Extension version to publish (e.g., 0.5.1)'
+        required: true
 
 jobs:
   build-extension:
@@ -91,6 +96,34 @@ jobs:
         working-directory: rlsp-yaml/integrations/vscode
         run: pnpm run test
 
+      - name: Set extension version
+        if: (startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch') && matrix.os != 'windows-latest'
+        working-directory: rlsp-yaml/integrations/vscode
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#rlsp-yaml-v}"
+          fi
+          pnpm pkg set "version=$VERSION"
+
+      - name: Set extension version (Windows)
+        if: (startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch') && matrix.os == 'windows-latest'
+        working-directory: rlsp-yaml/integrations/vscode
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:INPUT_VERSION) {
+            $version = $env:INPUT_VERSION
+          } else {
+            $version = $env:REF_NAME -replace '^rlsp-yaml-v', ''
+          }
+          pnpm pkg set "version=$version"
+
       - name: Package VSIX
         working-directory: rlsp-yaml/integrations/vscode
         run: pnpx @vscode/vsce package --target ${{ matrix.vsce-target }} --no-dependencies
@@ -104,7 +137,9 @@ jobs:
     name: Publish to VS Code Marketplace
     needs: build-extension
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v')
+    # Disabled until VSCE_PAT secret is configured.
+    # Re-enable with: if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch'
+    if: false
     permissions: {}
 
     steps:
