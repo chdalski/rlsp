@@ -4,3 +4,4 @@ rust_out
 .ai/reports/
 .ai/upstream-issues/
 lcov.info
+.pnpm-store/
