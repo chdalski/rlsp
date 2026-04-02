@@ -1,7 +1,7 @@
 # Wire Remote $ref Resolution into Server
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-02
 
 ## Goal
@@ -57,16 +57,16 @@ remote context) and remote `$ref`s silently fail.
 
 ## Steps
 
-- [ ] Update `fetch_schema_raw` to accept optional
+- [x] Update `fetch_schema_raw` to accept optional
       `ParseContext`
-- [ ] Update `process_schema` in `server.rs` to pass
+- [x] Update `process_schema` in `server.rs` to pass
       a `ParseContext` when fetching
-- [ ] Add integration tests for remote `$ref` resolution
-- [ ] Verify `cargo clippy --all-targets` and `cargo test`
+- [x] Add integration tests for remote `$ref` resolution
+- [x] Verify `cargo clippy --all-targets` and `cargo test`
 
 ## Tasks
 
-### Task 1: Enable remote $ref in fetch_schema_raw
+### Task 1: Enable remote $ref in fetch_schema_raw — `632f66e`
 
 Consult the security engineer before implementing — this
 task activates remote resource fetching from schema content
@@ -128,10 +128,9 @@ the server already serializes schema processing per
 document anyway.
 
 **Verification:**
-- [ ] `cargo fmt`
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo test` — all tests pass (existing remote ref
-      tests now exercise the production code path)
+- [x] `cargo fmt`
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo test` — all 1084 tests pass
 - [ ] Manual test: a YAML file with a schema that uses
       remote `$ref` should now get validation, completion,
       and hover for the referenced properties
