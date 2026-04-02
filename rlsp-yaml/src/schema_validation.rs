@@ -277,10 +277,10 @@ fn validate_node(
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
-                    "Type mismatch: expected {}, got {} at {}",
+                    "Value at {} does not match type: expected {}, got {}",
+                    format_path(path),
                     display_schema_type(schema_type),
                     yaml_type,
-                    format_path(path)
                 ),
             ));
             // Don't descend further into a type-mismatched node
@@ -1326,15 +1326,19 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
         };
         if violation {
             let range = node_range(path, ctx.key_index);
-            let bound = if exclusive { "exclusive" } else { "inclusive" };
+            let msg = if exclusive {
+                format!(
+                    "Value at {} is below exclusive minimum {minimum}",
+                    format_path(path),
+                )
+            } else {
+                format!("Value at {} is below minimum {minimum}", format_path(path),)
+            };
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMinimum",
-                format!(
-                    "Value at {} is below minimum {minimum} ({bound})",
-                    format_path(path),
-                ),
+                msg,
             ));
         }
     }
@@ -1349,15 +1353,19 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
         };
         if violation {
             let range = node_range(path, ctx.key_index);
-            let bound = if exclusive { "exclusive" } else { "inclusive" };
+            let msg = if exclusive {
+                format!(
+                    "Value at {} is above exclusive maximum {maximum}",
+                    format_path(path),
+                )
+            } else {
+                format!("Value at {} is above maximum {maximum}", format_path(path),)
+            };
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
                 "schemaMaximum",
-                format!(
-                    "Value at {} is above maximum {maximum} ({bound})",
-                    format_path(path),
-                ),
+                msg,
             ));
         }
     }
@@ -1371,7 +1379,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
                 DiagnosticSeverity::ERROR,
                 "schemaMinimum",
                 format!(
-                    "Value at {} must be greater than {excl_min} (exclusive minimum)",
+                    "Value at {} is below exclusive minimum {excl_min}",
                     format_path(path),
                 ),
             ));
@@ -1387,7 +1395,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
                 DiagnosticSeverity::ERROR,
                 "schemaMaximum",
                 format!(
-                    "Value at {} must be less than {excl_max} (exclusive maximum)",
+                    "Value at {} is above exclusive maximum {excl_max}",
                     format_path(path),
                 ),
             ));
@@ -1453,9 +1461,9 @@ fn validate_mapping(
                         DiagnosticSeverity::ERROR,
                         "schemaRequired",
                         format!(
-                            "Missing required property '{}' at {}. Expected properties: {}.",
-                            req_key,
+                            "Object at {} is missing required property '{}'. Expected: {}.",
                             format_path(path),
+                            req_key,
                             props_list
                         ),
                     )
@@ -1646,6 +1654,7 @@ fn validate_composition(
     if let Some(any_of) = &schema.any_of {
         let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
+        let branch_count = any_of.iter().take(MAX_BRANCH_COUNT).count();
         let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
             let mut scratch = Vec::new();
             let mut probe = Ctx::new(&mut scratch, format_validation, key_index);
@@ -1659,7 +1668,7 @@ fn validate_composition(
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
-                    "Value at {} does not match any of the allowed schemas",
+                    "Value at {} does not match any of the {branch_count} allowed schemas (anyOf)",
                     format_path(path)
                 ),
             ));
@@ -1670,6 +1679,7 @@ fn validate_composition(
     if let Some(one_of) = &schema.one_of {
         let key_index = ctx.key_index;
         let format_validation = ctx.format_validation;
+        let total = one_of.iter().take(MAX_BRANCH_COUNT).count();
         let passing = one_of
             .iter()
             .take(MAX_BRANCH_COUNT)
@@ -1688,7 +1698,7 @@ fn validate_composition(
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
-                    "Value at {} does not match any of the oneOf schemas",
+                    "Value at {} does not match any of the {total} oneOf schemas",
                     format_path(path)
                 ),
             ));
@@ -1699,7 +1709,7 @@ fn validate_composition(
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
-                    "Value at {} matches more than one of the oneOf schemas",
+                    "Value at {} matches {passing} of the {total} oneOf schemas (expected exactly 1)",
                     format_path(path)
                 ),
             ));
@@ -1720,7 +1730,7 @@ fn validate_composition(
                 DiagnosticSeverity::ERROR,
                 "schemaNot",
                 format!(
-                    "Value at {} must not match the excluded schema",
+                    "Value at {} must not match the schema defined in 'not'",
                     format_path(path)
                 ),
             ));
@@ -3109,8 +3119,8 @@ mod tests {
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
-            msg.contains("Expected properties:"),
-            "message should contain 'Expected properties:', got: {msg}"
+            msg.contains("Expected:"),
+            "message should contain 'Expected:', got: {msg}"
         );
         assert!(
             msg.contains("name"),
@@ -5360,5 +5370,481 @@ mod tests {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — type mismatch format
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 215
+    #[test]
+    fn type_mismatch_message_uses_value_at_path_subject() {
+        let schema = object_schema_with_props(vec![("replicas", integer_schema())]);
+        let text = "replicas: \"hello\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.starts_with("Value at"),
+            "message should start with 'Value at', got: {msg}"
+        );
+        assert!(
+            msg.contains("does not match type"),
+            "message should contain 'does not match type', got: {msg}"
+        );
+        assert!(
+            msg.contains("integer"),
+            "message should contain expected type 'integer', got: {msg}"
+        );
+        assert!(
+            msg.contains("string"),
+            "message should contain actual type 'string', got: {msg}"
+        );
+    }
+
+    // Test 216
+    #[test]
+    fn type_mismatch_message_includes_property_path() {
+        let spec_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some([("replicas".to_string(), integer_schema())].into()),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("spec", spec_schema)]);
+        let text = "spec:\n  replicas: not-an-int";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("spec.replicas"),
+            "message should contain nested path 'spec.replicas', got: {msg}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — numeric min/max unified format
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 217
+    #[test]
+    fn minimum_inclusive_draft04_message_uses_below_minimum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                minimum: Some(5.0),
+                exclusive_minimum_draft04: Some(false),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 4");
+        let result = validate_schema("val: 4", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is below minimum 5"),
+            "message should contain 'is below minimum 5', got: {msg}"
+        );
+        assert!(
+            !msg.contains("(inclusive)"),
+            "message should not contain '(inclusive)', got: {msg}"
+        );
+    }
+
+    // Test 218
+    #[test]
+    fn minimum_exclusive_draft04_message_uses_below_exclusive_minimum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                minimum: Some(5.0),
+                exclusive_minimum_draft04: Some(true),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is below exclusive minimum 5"),
+            "message should contain 'is below exclusive minimum 5', got: {msg}"
+        );
+        assert!(
+            !msg.contains("(exclusive)"),
+            "message should not contain '(exclusive)', got: {msg}"
+        );
+    }
+
+    // Test 219
+    #[test]
+    fn maximum_inclusive_draft04_message_uses_above_maximum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                maximum: Some(10.0),
+                exclusive_maximum_draft04: Some(false),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 11");
+        let result = validate_schema("val: 11", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is above maximum 10"),
+            "message should contain 'is above maximum 10', got: {msg}"
+        );
+        assert!(
+            !msg.contains("(inclusive)"),
+            "message should not contain '(inclusive)', got: {msg}"
+        );
+    }
+
+    // Test 220
+    #[test]
+    fn maximum_exclusive_draft04_message_uses_above_exclusive_maximum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                maximum: Some(10.0),
+                exclusive_maximum_draft04: Some(true),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 10");
+        let result = validate_schema("val: 10", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is above exclusive maximum 10"),
+            "message should contain 'is above exclusive maximum 10', got: {msg}"
+        );
+        assert!(
+            !msg.contains("(exclusive)"),
+            "message should not contain '(exclusive)', got: {msg}"
+        );
+    }
+
+    // Test 221
+    #[test]
+    fn exclusive_minimum_draft06_message_uses_below_exclusive_minimum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_minimum: Some(5.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 5");
+        let result = validate_schema("val: 5", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is below exclusive minimum 5"),
+            "message should contain 'is below exclusive minimum 5', got: {msg}"
+        );
+        assert!(
+            !msg.contains("must be greater than"),
+            "message should not contain old phrasing 'must be greater than', got: {msg}"
+        );
+    }
+
+    // Test 222
+    #[test]
+    fn exclusive_maximum_draft06_message_uses_above_exclusive_maximum_phrase() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                exclusive_maximum: Some(10.0),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: 10");
+        let result = validate_schema("val: 10", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("is above exclusive maximum 10"),
+            "message should contain 'is above exclusive maximum 10', got: {msg}"
+        );
+        assert!(
+            !msg.contains("must be less than"),
+            "message should not contain old phrasing 'must be less than', got: {msg}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — anyOf branch count
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 223
+    #[test]
+    fn any_of_message_includes_branch_count() {
+        let schema = JsonSchema {
+            any_of: Some(vec![
+                JsonSchema {
+                    required: Some(vec!["a".to_string()]),
+                    ..JsonSchema::default()
+                },
+                JsonSchema {
+                    required: Some(vec!["b".to_string()]),
+                    ..JsonSchema::default()
+                },
+            ]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let any_of_diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("should have a schemaType diagnostic");
+        let msg = &any_of_diag.message;
+        assert!(
+            msg.contains('2'),
+            "message should contain branch count '2', got: {msg}"
+        );
+        assert!(
+            msg.contains("(anyOf)"),
+            "message should contain '(anyOf)', got: {msg}"
+        );
+    }
+
+    // Test 224
+    #[test]
+    fn any_of_message_branch_count_capped_at_max_branch_count() {
+        // 25 branches (> MAX_BRANCH_COUNT=20) — message should show 20
+        let branches: Vec<JsonSchema> = (0..25)
+            .map(|i| JsonSchema {
+                required: Some(vec![format!("field_{i}")]),
+                ..JsonSchema::default()
+            })
+            .collect();
+        let schema = JsonSchema {
+            any_of: Some(branches),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let any_of_diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("should have a schemaType diagnostic");
+        let msg = &any_of_diag.message;
+        assert!(
+            msg.contains("20"),
+            "message should contain capped count '20', got: {msg}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — oneOf branch count
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 225
+    #[test]
+    fn one_of_zero_match_message_includes_branch_count() {
+        let schema = JsonSchema {
+            one_of: Some(vec![
+                JsonSchema {
+                    required: Some(vec!["a".to_string()]),
+                    ..JsonSchema::default()
+                },
+                JsonSchema {
+                    required: Some(vec!["b".to_string()]),
+                    ..JsonSchema::default()
+                },
+            ]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let one_of_diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("should have a schemaType diagnostic");
+        let msg = &one_of_diag.message;
+        assert!(
+            msg.contains('2'),
+            "message should contain branch count '2', got: {msg}"
+        );
+        assert!(
+            msg.contains("oneOf schemas"),
+            "message should contain 'oneOf schemas', got: {msg}"
+        );
+    }
+
+    // Test 226
+    #[test]
+    fn one_of_multi_match_message_includes_passing_count() {
+        let schema = JsonSchema {
+            one_of: Some(vec![
+                JsonSchema {
+                    required: Some(vec!["a".to_string()]),
+                    ..JsonSchema::default()
+                },
+                object_schema_with_props(vec![("a", string_schema())]),
+            ]),
+            ..JsonSchema::default()
+        };
+        // "a: hello" matches both branches
+        let docs = parse_docs("a: hello");
+        let result = validate_schema("a: hello", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let one_of_diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("should have a schemaType diagnostic");
+        let msg = &one_of_diag.message;
+        assert!(
+            msg.contains("expected exactly 1"),
+            "message should contain 'expected exactly 1', got: {msg}"
+        );
+    }
+
+    // Test 227
+    #[test]
+    fn one_of_multi_match_message_includes_total_count() {
+        let schema = JsonSchema {
+            one_of: Some(vec![
+                JsonSchema {
+                    required: Some(vec!["a".to_string()]),
+                    ..JsonSchema::default()
+                },
+                object_schema_with_props(vec![("a", string_schema())]),
+                JsonSchema {
+                    required: Some(vec!["b".to_string()]),
+                    ..JsonSchema::default()
+                },
+            ]),
+            ..JsonSchema::default()
+        };
+        // "a: hello" matches the first two branches (2 of 3)
+        let docs = parse_docs("a: hello");
+        let result = validate_schema("a: hello", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let one_of_diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("should have a schemaType diagnostic");
+        let msg = &one_of_diag.message;
+        assert!(
+            msg.contains('3'),
+            "message should contain total count '3', got: {msg}"
+        );
+        assert!(
+            msg.contains('2'),
+            "message should contain passing count '2', got: {msg}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — not schema wording
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 228
+    #[test]
+    fn not_schema_message_references_not_keyword() {
+        let schema = object_schema_with_props(vec![(
+            "val",
+            JsonSchema {
+                not: Some(Box::new(JsonSchema {
+                    schema_type: Some(SchemaType::Single("string".to_string())),
+                    ..JsonSchema::default()
+                })),
+                ..JsonSchema::default()
+            },
+        )]);
+        let docs = parse_docs("val: hello");
+        let result = validate_schema("val: hello", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("schema defined in 'not'"),
+            "message should contain \"schema defined in 'not'\", got: {msg}"
+        );
+        assert!(
+            !msg.contains("excluded schema"),
+            "message should not contain old phrasing 'excluded schema', got: {msg}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Message consistency — required property format
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Test 229
+    #[test]
+    fn required_property_message_uses_object_at_subject() {
+        let schema = JsonSchema {
+            required: Some(vec!["name".to_string()]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("age: 30");
+        let result = validate_schema("age: 30", &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("Object at"),
+            "message should contain 'Object at', got: {msg}"
+        );
+        assert!(
+            msg.contains("is missing required property"),
+            "message should contain 'is missing required property', got: {msg}"
+        );
+        assert!(
+            !msg.contains("Missing required property"),
+            "message should not use old phrasing 'Missing required property', got: {msg}"
+        );
+    }
+
+    // Test 230
+    #[test]
+    fn required_property_message_uses_expected_label() {
+        let schema = JsonSchema {
+            required: Some(vec!["name".to_string(), "age".to_string()]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("other: value");
+        let result = validate_schema("other: value", &docs, &schema, true);
+        assert!(!result.is_empty());
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("Expected:"),
+            "message should contain 'Expected:', got: {msg}"
+        );
+        assert!(
+            !msg.contains("Expected properties:"),
+            "message should not contain old label 'Expected properties:', got: {msg}"
+        );
+    }
+
+    // Test 231
+    #[test]
+    fn required_property_message_includes_nested_path() {
+        let spec_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            required: Some(vec!["replicas".to_string()]),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("spec", spec_schema)]);
+        let text = "spec:\n  other: value";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        let msg = &result[0].message;
+        assert!(
+            msg.contains("Object at spec"),
+            "message should contain 'Object at spec', got: {msg}"
+        );
+        assert!(
+            msg.contains("replicas"),
+            "message should contain the missing property name 'replicas', got: {msg}"
+        );
     }
 }
