@@ -1,7 +1,7 @@
 # Diagnostic Message Consistency
 
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-02
 
 ## Goal
@@ -53,7 +53,7 @@ Examples:
 
 ## Steps
 
-- [ ] Standardize schema validation messages
+- [x] Standardize schema validation messages
 - [ ] Standardize validator messages
 - [ ] Add diagnostic code to parser errors
 - [ ] Capitalize SchemaError Display
@@ -61,7 +61,7 @@ Examples:
 
 ## Tasks
 
-### Task 1: Standardize schema validation messages
+### Task 1: Standardize schema validation messages — `44ceffe`
 
 Consult the test engineer for a test list — this task
 modifies ~35 message strings and every existing test that
@@ -119,9 +119,9 @@ subjects. Only the "Type mismatch:" label prefix and the
 
 **Verification:**
 - Update all test assertions that match on message text
-- [ ] `cargo fmt`
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo test` — all tests pass
+- [x] `cargo fmt`
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo test` — all 1101 tests pass
 
 ### Task 2: Standardize validator and parser messages
 
