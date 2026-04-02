@@ -54,10 +54,10 @@ Examples:
 ## Steps
 
 - [x] Standardize schema validation messages
-- [ ] Standardize validator messages
-- [ ] Add diagnostic code to parser errors
-- [ ] Capitalize SchemaError Display
-- [ ] Verify `cargo clippy --all-targets` and `cargo test`
+- [x] Standardize validator messages
+- [x] Add diagnostic code to parser errors
+- [x] Capitalize SchemaError Display
+- [x] Verify `cargo clippy --all-targets` and `cargo test`
 
 ## Tasks
 
@@ -123,7 +123,7 @@ subjects. Only the "Type mismatch:" label prefix and the
 - [x] `cargo clippy --all-targets` — zero warnings
 - [x] `cargo test` — all 1101 tests pass
 
-### Task 2: Standardize validator and parser messages
+### Task 2: Standardize validator and parser messages — `f262004`
 
 **Files:** `validators.rs`, `parser.rs`
 
@@ -155,9 +155,9 @@ subjects. Only the "Type mismatch:" label prefix and the
 
 **Verification:**
 - Update affected test assertions
-- [ ] `cargo fmt`
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo test` — all tests pass
+- [x] `cargo fmt`
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo test` — all 1101 tests pass
 
 ## Decisions
 
