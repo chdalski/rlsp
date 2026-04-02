@@ -8,7 +8,7 @@ describe('findServerBinary', () => {
   describe('custom server path override', () => {
     it('returns custom path as-is when non-empty and workspace is trusted', () => {
       const result = findServerBinary(EXT, '/usr/local/bin/rlsp-yaml', true, 'linux', 'x64');
-      expect(result).toBe('/usr/local/bin/rlsp-yaml');
+      expect(result).toBe(path.resolve('/usr/local/bin/rlsp-yaml'));
     });
 
     it('falls through to bundled binary when serverPath is whitespace-only', () => {
@@ -82,7 +82,7 @@ describe('findServerBinary', () => {
   describe('path structure', () => {
     it('bundled binary path is rooted under extensionPath', () => {
       const result = findServerBinary(EXT, '', false, 'linux', 'x64');
-      expect(result.startsWith(EXT)).toBe(true);
+      expect(result.startsWith(path.join(EXT, ''))).toBe(true);
     });
 
     it('bundled binary path contains no double separators', () => {
@@ -131,7 +131,7 @@ describe('findServerBinary', () => {
       // path.resolve normalizes traversal; the result must be absolute
       const result = findServerBinary(EXT, '/usr/local/../../bin/rlsp-yaml', true, 'linux', 'x64');
       expect(path.isAbsolute(result)).toBe(true);
-      expect(result).toBe('/bin/rlsp-yaml');
+      expect(result).toBe(path.resolve('/usr/local/../../bin/rlsp-yaml'));
     });
 
     it('does not apply security checks to bundled binary path', () => {
