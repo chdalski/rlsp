@@ -1,6 +1,29 @@
 # Changelog
 
 
+## Bug Fixes
+
+- Standardize diagnostic message format (44ceffe)
+- Standardize validator, parser, and schema error messages (f262004)
+- Use platform-aware paths in server test assertions (774d849)
+
+## Documentation
+
+- Update plan progress — Task 5 complete (37500fa)
+- Add VS Code extension references to project documentation (357ac25)
+- Add extension CLAUDE.md with project conventions (a323470)
+- Mark plan complete, generalize CLAUDE.md pnpm guidance (470028b)
+
+## Features
+
+- Wire remote $ref resolution into server (632f66e)
+
+## Refactoring
+
+- Move extension to rlsp-yaml/editors/code/ (db8ae1a)
+- Rename editors/code to integrations/vscode (ed25b7c)
+- Remove dead code from schema.rs (16a071a)
+
 ## Features
 
 - Add Criterion benchmark infrastructure (78a03cd)
