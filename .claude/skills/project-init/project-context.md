@@ -1,69 +1,71 @@
-# Project Context
+# Project Context — Output Format
 
-Project-specific context that all agents need regardless of
-which files they touch. Auto-generated sections are filled
-by `/project-init`; TODO sections need human curation.
-This file is written to the project root as `CLAUDE.md`,
-where Claude Code loads it at cache level 3 alongside
-`.claude/CLAUDE.md` — both files are always in context.
+Generated `CLAUDE.md` files provide context that agents
+cannot infer from code alone: what the project is, how to
+verify work, and what non-obvious rules apply. Agents
+discover file structure, languages, and dependencies on
+their own — CLAUDE.md should not duplicate that.
 
-## Overview
+Target under 80 lines for most projects; under 200 for
+complex monorepos with many components.
 
-<!-- TODO: Add project name and a brief description of what
-this project does, who it serves, and its core purpose.
-Auto-detection cannot infer intent — only humans know why
-the project exists. -->
+## Sections
 
-## Languages and Frameworks
+Every generated `CLAUDE.md` starts with a level-1 heading
+(the project name) followed by a 2-4 sentence overview
+synthesized from README.md and manifest `description`
+fields — what the project is, who it serves, why it
+exists. If no README exists, infer from code structure
+and manifest metadata.
 
-<!-- Auto-filled by /project-init — detected from manifest
-files (package.json, Cargo.toml, pyproject.toml, go.mod).
-Lists languages, runtime versions, and key framework
-dependencies. -->
+**Build and Test** — always present. A level-2 section
+with a shell code block listing build, test, lint, format,
+and clean commands detected from manifests and config
+files. Group by language or component when the project
+uses multiple. These are the commands agents need to
+verify their work — without them, agents guess or search.
 
-## Project Structure
+**Components** — present only for workspaces and monorepos.
+A level-2 section with a markdown table (columns: Path,
+Purpose). One row per workspace member or sub-project.
+Synthesize purpose from each component's README.md first
+paragraph or manifest `description` field. Omit this
+section entirely for single-project repos.
 
-<!-- Auto-filled by /project-init — key directories and
-their purposes, detected from filesystem scanning. -->
+**Conventions** — always present. A level-2 section
+containing non-obvious project conventions detected during
+scanning and confirmed by the user. Each entry is one
+line. Preceded by an HTML comment that enables progressive
+enrichment — agents add entries during normal work when
+they discover conventions not yet documented:
 
-## Active Rules
+`<!-- Agents: add non-obvious project conventions
+discovered during work — things a future agent would need
+to know to avoid mistakes. One line each. Remove when no
+longer true. -->`
 
-<!-- Auto-filled by /project-init — maps detected languages
-to the blueprint's conditional rule files. Informational:
-rules auto-load via paths: frontmatter, but this section
-tells you what guidance is available and helps you decide
-what to customize. -->
+Write the section header and HTML comment even when no
+conventions were detected — the empty section signals to
+agents that they can add entries.
 
-## Build and Test
+**References** — always present. Same pattern as
+Conventions but for authoritative URLs: specifications,
+API docs, RFCs, design docs. The HTML comment is:
 
-<!-- Auto-filled by /project-init — build tools, test
-frameworks, and key commands detected from config files
-and manifests. -->
+`<!-- Agents: add authoritative sources used to make
+implementation decisions. One line each. -->`
 
-## Architecture
+Always include the header and comment, even when empty.
 
-<!-- TODO: Describe the high-level architecture — layers,
-modules, data flow, key abstractions. Auto-detection can
-find files but cannot infer design intent or system
-boundaries. -->
+## Re-generation
 
-## Code Exemplars
+When `/project-init` runs on an existing `CLAUDE.md`:
 
-<!-- TODO: List 2-3 files that best represent the project's
-coding style and conventions. These serve as concrete
-examples for agents to follow — style guides describe
-principles, exemplars show them in practice. -->
-
-## Anti-Patterns
-
-<!-- TODO: List project-specific "never do this" patterns.
-Every project accumulates hard-won knowledge about what
-NOT to do — patterns that cause bugs, performance issues,
-or maintenance pain in THIS specific codebase. -->
-
-## Trusted Sources
-
-<!-- TODO: List authoritative references for this project —
-API docs, RFCs, internal design docs, team wikis. Agents
-use these as ground truth when general knowledge conflicts
-with project-specific conventions. -->
+- **Regenerate**: Overview, Build and Test, Components —
+  these reflect current project state and should be
+  refreshed from manifests and README
+- **Preserve**: Conventions and References entries — these
+  contain user-confirmed and agent-discovered content that
+  cannot be re-detected automatically
+- **Add**: newly detected conventions or references not
+  already present in the preserved entries

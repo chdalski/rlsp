@@ -7,19 +7,23 @@ major structural changes.
 
 ## What it does
 
-1. Reads the project's manifest files to detect languages,
-   frameworks, and test tooling
+1. Reads manifest files to detect languages, frameworks, and
+   test tooling
 2. Applies language-specific initialization (e.g. Cargo lints
-   for Rust projects)
+   for Rust projects, TypeScript strictness config)
 3. Detects mono-repo structure and git-submodule sub-projects
-4. Fills in the project context template and writes `CLAUDE.md`
-   at the project root — and at the root of each sub-project
-   that has its own `.git/`
-5. Reports which rule files are active and which sections still
-   need human input
-6. If files were modified, offers to fix any issues introduced
-   (e.g. compiler warnings surfaced by new lint rules) by
-   creating a task and routing it into the standard workflow
+4. Synthesizes an overview from README.md and manifest
+   descriptions
+5. Detects non-obvious conventions (lint inheritance, release
+   automation, pre-commit hooks, etc.) and authoritative
+   references (spec URLs, API docs)
+6. Presents detected conventions and references to the user
+   for confirmation before writing
+7. Writes `CLAUDE.md` at the project root — and at the root
+   of each sub-project that has its own `.git/`
+8. Re-running preserves user-confirmed and agent-discovered
+   Conventions and References entries while refreshing
+   auto-detected sections
 
 ## Extending for a new language
 

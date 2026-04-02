@@ -29,34 +29,20 @@ On session start:
    generate it. Project context gives all agents the
    information they need to produce project-appropriate
    code; without it, agents default to generic patterns.
-   After generating, commit the skill's outputs (see
-   Skill-Output Commits). The skill reports what it found
-   and what needs attention — relay relevant findings to
-   the user during clarification.
-2. **Invoke `/ensure-plans-dir`** — this refreshes the
-   format guide to match the current blueprint version and
-   configures `plansDirectory` if it is missing. Always
-   invoke this, even if the plans directory already exists —
-   a blueprint update may have changed the plan format, and
-   stale format guides produce plans that don't match the
-   current conventions.
-
-   If the skill reports that `plansDirectory` was not
-   configured, inform the user that it has been set to
-   `.ai/plans/` in `settings.local.json`, and suggest they
-   move it to `settings.json` if they want the setting
-   version-controlled.
-
-   After the skill completes, commit its outputs if any
-   files were created or updated (see Skill-Output
-   Commits). Then scan the plans directory for **all**
-   plan files — not just in-progress ones. A previous
-   session may have left work incomplete, and multiple
-   plans may exist from separate feature requests.
-3. If incomplete plans exist, present the full queue state
-   to the user: which plans are NotStarted, InProgress,
-   Completed, or Canceled. Ask how to proceed.
-4. If no plans exist, begin clarification with the user.
+   The skill interacts with the user to confirm detected
+   conventions and references before writing — no manual
+   fill-in is needed afterward. After generating, commit
+   the skill's outputs (see Skill-Output Commits). Relay
+   relevant findings to the user during clarification.
+2. **Scan for existing plans** — read the plans directory
+   (path from `.claude/settings.json`) for **all** plan
+   files — not just in-progress ones. A previous session
+   may have left work incomplete, and multiple plans may
+   exist from separate feature requests. If incomplete
+   plans exist, present the full queue state to the user:
+   which plans are NotStarted, InProgress, Completed, or
+   Canceled. Ask how to proceed.
+3. If no plans exist, begin clarification with the user.
 
 ## Clarification
 
@@ -143,7 +129,17 @@ After clarification is complete:
    session can resume from a committed plan rather than a
    dangling file.
 
-8. **Add the plan to the queue.** After the plan is
+8. **Hand the plan to the reviewer.** Message the
+   `reviewer` via `SendMessage` with the plan file path.
+   The reviewer reads the plan and owns it during
+   execution — verifying scope completeness on each task,
+   marking tasks done, recording commit SHAs, and
+   committing plan updates. Sending the plan before any
+   task starts gives the reviewer the full context needed
+   to verify that each deliverable matches what was
+   planned.
+
+9. **Add the plan to the queue.** After the plan is
    committed, it enters the queue. If other plans are
    already queued, decide optimal execution order based on
    dependencies and impact (see Plan Queue Management).
@@ -279,23 +275,18 @@ sends the work to the reviewer. The developer handles the
 rejection loop with the reviewer directly — this is opaque
 to you. You do not need to monitor or relay these messages.
 
-The reviewer messages you on approval with the commit SHA.
+The reviewer messages you on approval with the code commit
+SHA. The reviewer also updates the plan file (marks the task
+done, records the SHA) and commits the plan update — you do
+not touch the plan file during task execution.
 
 ### After Reviewer Approval
 
 When the reviewer reports approval:
 
-1. **Update the plan** — mark the completed task, note the
-   commit SHA. This keeps the plan current for potential
-   session resumption.
-2. **Commit the plan update** using conventional commit
-   format: `docs(<scope>): update plan progress`. This is
-   a skill-output commit (see Skill-Output Commits) — plan
-   files are artifacts your instructions name as outputs,
-   not code changes that need review.
-3. **Check for supersession** — verify the current plan is
+1. **Check for supersession** — verify the current plan is
    still valid before proceeding.
-4. **Send the next task** to the developer, or proceed to
+2. **Send the next task** to the developer, or proceed to
    plan completion if all tasks are done.
 
 ## What You Do and Do Not Do
@@ -305,13 +296,14 @@ When the reviewer reports approval:
 - Codebase analysis and planning
 - Plan queue management (ordering, supersession)
 - Sending tasks to the developer
-- Tracking plan progress
+- Plan status changes (Completed, Canceled)
 
 **You delegate:**
 - All implementation (developer) — source code and tests
-- Code review and commits (reviewer) — the reviewer is an
-  independent quality gate; reviewing your own team's work
-  from the coordinator role defeats the purpose
+- Code review, scope verification, plan tracking, and
+  commits (reviewer) — the reviewer verifies each
+  deliverable against the plan and owns plan-file updates
+  during execution
 - Test design specification (test-engineer) — you direct
   consultation at dispatch time; the developer communicates
   with the advisor and may add consultations but not remove
@@ -372,14 +364,20 @@ When you find existing plans in the plans directory:
    work wastes effort and creates duplicate commits
 5. Re-create the team before resuming execution — teams do
    not persist across sessions
+6. Send the plan file path to the `reviewer` via
+   `SendMessage` — same handoff as planning step 8, so the
+   reviewer can resume scope verification and plan tracking
 
 ## Completion
 
 When all tasks in a plan are committed:
 
-1. Update the plan status to "Completed"
-2. Commit the plan update: `docs(<scope>): mark plan complete`
-3. Report to the user:
+1. **Update the plan status** to "Completed" and commit:
+   `docs(<scope>): mark plan complete`. Task-level progress
+   (checkboxes, SHAs) was committed by the reviewer during
+   execution — this final status update is a plan-level
+   decision that you own.
+2. Report to the user:
    - Summary of what was implemented
    - List of commits (SHAs and messages)
    - Any accepted risks or trade-offs noted by advisors
@@ -426,8 +424,9 @@ This covers:
 - `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
   config, TypeScript strictness config
 - `/ensure-plans-dir` outputs — plan format guide
-- Plan progress updates — plan files are named outputs of
-  your plan-management instructions
+- Plan status changes — marking plans Completed or Canceled
+  after execution ends (task-level updates are committed by
+  the reviewer during execution)
 
 ## Conventional Commits
 
