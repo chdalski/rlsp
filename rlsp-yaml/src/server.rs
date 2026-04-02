@@ -26,7 +26,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
 use crate::parser;
-use crate::schema::{SchemaCache, SchemaStoreCatalog};
+use crate::schema::{ParseContext, SchemaCache, SchemaStoreCatalog};
 
 /// Workspace settings received via LSP initialization options or
 /// `workspace/didChangeConfiguration`.
@@ -247,16 +247,48 @@ impl Backend {
                 .and_then(|cache| cache.get(&url).cloned());
 
             let schema = if let Some(s) = cached {
+                // Already resolved when first fetched — no further ref resolution needed.
                 Some(s)
             } else {
+                // Take the cache out of the Mutex so it can be moved into
+                // spawn_blocking (which requires 'static).  Replace with an
+                // empty cache, then put the enriched cache back after the fetch.
+                let mut taken_cache = self
+                    .schema_cache
+                    .lock()
+                    .ok()
+                    .map(|mut g| std::mem::take(&mut *g))
+                    .unwrap_or_default();
+
                 let url_clone = url.clone();
                 let proxy = self.get_http_proxy();
                 let join_result = tokio::task::spawn_blocking(move || {
-                    crate::schema::fetch_schema_raw(&url_clone, proxy.as_deref())
+                    let mut ctx = ParseContext::new(&mut taken_cache, proxy.as_deref());
+                    let result = crate::schema::fetch_schema_raw(
+                        &url_clone,
+                        proxy.as_deref(),
+                        Some(&mut ctx),
+                    );
+                    (result, taken_cache)
                 })
                 .await;
+
+                let Ok((fetch_result, returned_cache)) = join_result else {
+                    return;
+                };
+
+                // Merge the returned cache back into the live cache.  Use insert()
+                // for each entry so the first-write-wins invariant is preserved:
+                // any URL inserted by a concurrent process_schema call during the
+                // spawn_blocking window is not overwritten.
+                if let Ok(mut guard) = self.schema_cache.lock() {
+                    for (key, (value, schema)) in returned_cache.into_inner() {
+                        guard.insert(key, value, schema);
+                    }
+                }
+
                 let fetched: Option<(serde_json::Value, crate::schema::JsonSchema)> =
-                    join_result.ok().and_then(std::result::Result::ok);
+                    fetch_result.ok();
 
                 if let Some((ref v, ref s)) = fetched
                     && let Ok(mut cache) = self.schema_cache.lock()

@@ -218,7 +218,7 @@ impl SchemaCache {
         proxy: Option<&str>,
     ) -> Result<&JsonSchema, SchemaError> {
         if !self.inner.contains_key(url) {
-            let (value, schema) = fetch_schema_raw(url, proxy)?;
+            let (value, schema) = fetch_schema_raw(url, proxy, None)?;
             self.inner.insert(url.to_string(), (value, schema));
         }
         let Some((_, schema)) = self.inner.get(url) else {
@@ -233,6 +233,12 @@ impl SchemaCache {
     #[must_use]
     pub fn contains(&self, url: &str) -> bool {
         self.inner.contains_key(url)
+    }
+
+    /// Consume `self` and return the underlying map, for use when merging a
+    /// returned cache back into the live cache after a `spawn_blocking` pass.
+    pub(crate) fn into_inner(self) -> HashMap<String, (Value, JsonSchema)> {
+        self.inner
     }
 }
 
@@ -361,6 +367,17 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
     builder.build().new_agent()
 }
 
+/// Sanitize a `Content-Type` header value for use in error messages.
+///
+/// Strips non-printable characters and truncates to 256 chars so that a
+/// malicious server cannot inject control characters into diagnostic output.
+fn sanitize_content_type(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(256)
+        .collect()
+}
+
 /// Fetch a JSON Schema from `url`, returning the raw `Value` and parsed schema.
 ///
 /// `url` should already be validated and normalised via
@@ -369,6 +386,13 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
 ///
 /// When `proxy` is `Some`, requests are routed through the given proxy URL.
 ///
+/// When `ctx` is `Some`, remote `$ref` URIs within the fetched schema are
+/// resolved one level deep (depth-1 remote resolution).  `$ref`s inside those
+/// resolved remote documents are not followed further — this is intentional to
+/// cap the blast radius of a malicious schema that chains many remote refs.
+/// The breadth guard (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce
+/// an absolute cap even if this design decision is revisited later.
+///
 /// # Errors
 ///
 /// Returns a [`SchemaError`] on network failure, size-limit breach, wrong
@@ -376,6 +400,7 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
 pub fn fetch_schema_raw(
     url: &str,
     proxy: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
 ) -> Result<(Value, JsonSchema), SchemaError> {
     use std::io::Read as _;
 
@@ -390,13 +415,17 @@ pub fn fetch_schema_raw(
         .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
 
     // Verify Content-Type is JSON before reading the body.
+    // Sanitize the header value: strip non-printable chars and truncate to 256
+    // chars before embedding in the error to prevent injection via crafted headers.
     let content_type = response
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !content_type.contains("application/json") && !content_type.contains("application/schema") {
-        return Err(SchemaError::UnexpectedContentType(content_type.to_string()));
+        return Err(SchemaError::UnexpectedContentType(sanitize_content_type(
+            content_type,
+        )));
     }
 
     // Read up to MAX_SCHEMA_BYTES + 1: if more than MAX_SCHEMA_BYTES bytes
@@ -421,7 +450,11 @@ pub fn fetch_schema_raw(
 
     check_json_depth(&value, 0)?;
 
-    let schema = parse_schema(&value)
+    let schema = ctx
+        .map_or_else(
+            || parse_schema(&value),
+            |ctx| parse_schema_with_root(&value, &value, Some(url), Some(ctx), 0),
+        )
         .ok_or_else(|| SchemaError::ParseFailed("not a JSON Schema".to_string()))?;
     Ok((value, schema))
 }
@@ -563,14 +596,22 @@ fn check_json_depth(value: &Value, depth: usize) -> Result<(), SchemaError> {
 
 /// Context threaded through `parse_schema_with_root` → `resolve_ref` to enable
 /// remote `$ref` resolution with breadth and deduplication guards.
-struct ParseContext<'a> {
+pub struct ParseContext<'a> {
     cache: &'a mut SchemaCache,
     proxy: Option<&'a str>,
     /// URLs fetched during this resolution pass (dedup + breadth limit).
     visited: HashSet<String>,
 }
 
-impl ParseContext<'_> {
+impl<'a> ParseContext<'a> {
+    pub fn new(cache: &'a mut SchemaCache, proxy: Option<&'a str>) -> Self {
+        Self {
+            cache,
+            proxy,
+            visited: HashSet::new(),
+        }
+    }
+
     /// Record a URL as visited.  Returns `false` if the URL was already
     /// visited or the fetch limit has been reached — caller should skip fetch.
     fn try_visit(&mut self, url: &str) -> bool {
@@ -578,17 +619,6 @@ impl ParseContext<'_> {
             return false;
         }
         self.visited.insert(url.to_string())
-    }
-}
-
-#[cfg(test)]
-impl<'a> ParseContext<'a> {
-    fn new(cache: &'a mut SchemaCache, proxy: Option<&'a str>) -> Self {
-        Self {
-            cache,
-            proxy,
-            visited: HashSet::new(),
-        }
     }
 }
 
@@ -1184,8 +1214,10 @@ fn resolve_ref(
     }
 
     // Fetch and cache (first insertion wins — prevents $id-spoofing overwrite).
+    // Pass ctx=None so that $refs inside the fetched remote document are not
+    // themselves resolved remotely — intentional depth-1 remote resolution limit.
     if !ctx.cache.contains(&normalized) {
-        let (value, schema) = fetch_schema_raw(&normalized, ctx.proxy).ok()?;
+        let (value, schema) = fetch_schema_raw(&normalized, ctx.proxy, None).ok()?;
         ctx.cache.insert(normalized.clone(), value, schema);
     }
 
@@ -2097,7 +2129,7 @@ mod tests {
     // network call is made.
     #[test]
     fn should_return_error_for_unreachable_url() {
-        let result = fetch_schema_raw("http://127.0.0.1:19999/nonexistent.json", None);
+        let result = fetch_schema_raw("http://127.0.0.1:19999/nonexistent.json", None, None);
         assert!(result.is_err());
     }
 
@@ -2159,7 +2191,7 @@ mod tests {
     // Sec-4: fetch_schema_raw rejects 127.0.0.1 before making a network call
     #[test]
     fn should_reject_loopback_ip_in_fetch() {
-        let result = fetch_schema_raw("http://127.0.0.1:8080/schema.json", None);
+        let result = fetch_schema_raw("http://127.0.0.1:8080/schema.json", None, None);
         assert!(result.is_err());
     }
 
@@ -3639,5 +3671,153 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("unexpected content type"), "got: {msg}");
         assert!(msg.contains("text/html"), "got: {msg}");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // fetch_schema_raw + ParseContext integration (Finding 1)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // FetchCtx-1: fetch_schema_raw with a ParseContext resolves remote $refs
+    // within the fetched schema.
+    //
+    // fetch_schema_raw calls validate_and_normalize_url which blocks loopback
+    // addresses, so this test cannot use a tiny_http server for the top-level
+    // fetch.  Instead it exercises the exact code path that fetch_schema_raw
+    // takes when ctx=Some: `parse_schema_with_root(&value, &value, Some(url),
+    // Some(ctx), 0)`.  The $ref target is pre-populated in the ParseContext
+    // cache so no network call is made for it.
+    #[test]
+    fn fetch_schema_raw_ctx_resolves_remote_ref_in_fetched_body() {
+        // Simulate a top-level schema body that fetch_schema_raw would have
+        // received over the network: it contains a remote $ref.
+        let ref_url = "https://example.com/address.json";
+        let top_level_url = "https://example.com/schema.json";
+        let body: Value = json!({
+            "type": "object",
+            "properties": {
+                "home": { "$ref": ref_url }
+            }
+        });
+
+        // Pre-populate the cache with the $ref target — mirrors what would
+        // happen if the referenced schema had already been fetched.
+        let remote_value: Value = json!({ "type": "object", "description": "an address" });
+        let remote_schema = parse_schema(&remote_value).unwrap();
+        let mut cache = SchemaCache::new();
+        cache.insert(ref_url.to_string(), remote_value, remote_schema);
+
+        // Call exactly the code path that fetch_schema_raw uses when ctx=Some.
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let schema = parse_schema_with_root(&body, &body, Some(top_level_url), Some(&mut ctx), 0)
+            .expect("should parse top-level schema");
+
+        // The $ref should have been resolved from the pre-populated cache.
+        let props = schema.properties.as_ref().expect("should have properties");
+        let home = props.get("home").expect("should have home property");
+        assert_eq!(
+            home.description.as_deref(),
+            Some("an address"),
+            "remote $ref should resolve to the cached schema"
+        );
+        // The ParseContext cache is populated with the $ref target entry.
+        assert!(
+            cache.get(ref_url).is_some(),
+            "ctx cache should contain the resolved $ref target"
+        );
+    }
+
+    // FetchCtx-2: fetch_schema_raw with ctx=None does not resolve remote $refs
+    // (preserves existing behavior for callers that pass None).
+    #[test]
+    fn fetch_schema_raw_no_ctx_leaves_remote_ref_unresolved() {
+        let ref_url = "https://example.com/address.json";
+        let body: Value = json!({
+            "type": "object",
+            "properties": {
+                "home": { "$ref": ref_url }
+            }
+        });
+
+        // ctx=None — parse_schema is called, which cannot resolve remote refs.
+        let schema = parse_schema(&body).expect("should parse");
+        let props = schema.properties.as_ref().expect("should have properties");
+        let home = props.get("home").expect("should have home property");
+        // Without ctx, the $ref is stored as ref_path but not resolved.
+        assert_eq!(
+            home.ref_path.as_deref(),
+            Some(ref_url),
+            "without ctx the $ref is unresolved, only ref_path is set"
+        );
+        assert!(
+            home.description.is_none(),
+            "without ctx the remote schema description should not be present"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Content-Type sanitization (Finding 2)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Sanitize-1: non-printable control characters are stripped
+    #[test]
+    fn sanitize_content_type_strips_control_characters() {
+        let raw = "text/html\x00\x01\x1f\x7f";
+        let result = sanitize_content_type(raw);
+        assert_eq!(result, "text/html", "control chars must be stripped");
+    }
+
+    // Sanitize-2: values longer than 256 chars are truncated
+    #[test]
+    fn sanitize_content_type_truncates_at_256_chars() {
+        let raw = "a".repeat(300);
+        let result = sanitize_content_type(&raw);
+        assert_eq!(result.len(), 256, "result must be truncated to 256 chars");
+    }
+
+    // Sanitize-3: printable ASCII and spaces are preserved
+    #[test]
+    fn sanitize_content_type_preserves_printable_content() {
+        let raw = "application/json; charset=utf-8";
+        let result = sanitize_content_type(raw);
+        assert_eq!(result, raw, "printable content must be preserved");
+    }
+
+    // Sanitize-4: a tiny_http server returning an oversized Content-Type
+    // produces a truncated value after sanitization.  Uses build_agent directly
+    // to bypass validate_and_normalize_url (SSRF guard blocks loopback in
+    // fetch_schema_raw itself), same approach as Sec-R5.
+    #[test]
+    fn fetch_schema_raw_sanitizes_content_type_in_error() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let url = format!("http://{addr}/schema.json");
+
+        std::thread::spawn(move || {
+            if let Ok(req) = server.recv() {
+                // Content-Type that is longer than 256 printable chars.
+                let ct_value = format!("text/html; x={}", "a".repeat(300));
+                let ct =
+                    tiny_http::Header::from_bytes(b"Content-Type", ct_value.as_bytes()).unwrap();
+                let response = tiny_http::Response::from_string("not json").with_header(ct);
+                let _ = req.respond(response);
+            }
+        });
+
+        let agent = build_agent(None);
+        let response = agent.get(&url).call().expect("request should succeed");
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            content_type.len() > 256,
+            "server must have sent an oversized Content-Type"
+        );
+        let sanitized = sanitize_content_type(content_type);
+        assert!(
+            sanitized.len() <= 256,
+            "sanitized Content-Type must be truncated to ≤256 chars"
+        );
     }
 }
