@@ -19,6 +19,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "formatValidation": true,
   "formatPrintWidth": 80,
   "formatSingleQuote": false,
+  "yamlVersion": "1.2",
   "httpProxy": "http://proxy.corp:8080",
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
@@ -99,6 +100,29 @@ Maximum line width for the full-document formatter. The formatter tries to fit c
 - **Default:** `false`
 
 When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
+
+### `yamlVersion`
+
+- **Type:** `string` (optional)
+- **Values:** `"1.1"` or `"1.2"`
+- **Default:** `"1.2"`
+
+Controls which YAML specification version the formatter uses for quoting decisions.
+
+| Version | Keywords that require quoting |
+|---------|-------------------------------|
+| `"1.2"` | `true`, `false`, `null` (and case variants) |
+| `"1.1"` | All of the above, plus `on`, `off`, `yes`, `no` (and case variants) |
+
+In `"1.1"` mode the formatter quotes these words to prevent ambiguity — for example, `on: push` stays plain (it is a key, already in the AST as a plain scalar), but a value like `enabled: "yes"` will have its quotes preserved rather than stripped.
+
+> **Parser limitation:** the underlying parser (saphyr) always processes documents as YAML 1.2 regardless of this setting. Octal literals (`0644`) and sexagesimal values (`1:30:00`) are therefore treated as plain strings, not integers. This setting affects formatter quoting only.
+
+Override this setting for a single document with the `$yamlVersion` modeline (see below).
+
+```json
+{ "yamlVersion": "1.1" }
+```
 
 ### `formatValidation`
 
@@ -204,6 +228,23 @@ The `none` sentinel (case-insensitive) disables schema fetching and schema-drive
 ```
 
 Declares additional custom tags for the document. These are merged with the workspace `customTags` setting — both sources contribute to the allowed tag set.
+
+### YAML version modeline
+
+```yaml
+# yaml-language-server: $yamlVersion=1.1
+```
+
+Overrides the workspace `yamlVersion` setting for this document. Accepted values: `1.1` and `1.2`. Any other value is ignored and the workspace setting applies.
+
+Useful in mixed repositories where different files target different YAML versions — for example, Ansible playbooks (YAML 1.1) alongside Kubernetes manifests (YAML 1.2):
+
+```yaml
+# yaml-language-server: $yamlVersion=1.1
+# Ansible playbook — on/off/yes/no are boolean keywords here
+- hosts: all
+  become: yes
+```
 
 ## Validators
 
