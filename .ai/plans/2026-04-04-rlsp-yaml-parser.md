@@ -68,9 +68,9 @@ high-quality crates.io package.
 - [x] Implement block style productions (spec §8) — block
       scalars (literal/folded with chomping), block
       sequences, block mappings (a53be30)
-- [ ] Implement document stream productions (spec §9) —
+- [x] Implement document stream productions (spec §9) —
       document boundaries, bare/explicit documents,
-      multi-document streams
+      multi-document streams (f66342c)
 - [ ] Build event layer — token-to-event conversion with
       public streaming API
 - [ ] Build AST loader — events to node graph with
@@ -290,18 +290,18 @@ streams.
 
 **Files:** `src/stream.rs`
 
-- [ ] Document markers: `c_directives_end` (`---`),
+- [x] Document markers: `c_directives_end` (`---`),
       `c_document_end` (`...`),
       `l_document_prefix`,
       `c_forbidden` — detection of document boundary
       markers in bare content
-- [ ] Document types: `l_bare_document`,
+- [x] Document types: `l_bare_document`,
       `l_explicit_document`, `l_directive_document`
-- [ ] Stream: `l_any_document`, `l_yaml_stream` — the
+- [x] Stream: `l_any_document`, `l_yaml_stream` — the
       top-level production that drives the entire parse
-- [ ] Multi-document handling: consecutive documents with
+- [x] Multi-document handling: consecutive documents with
       and without explicit markers
-- [ ] Unit tests: single document, multi-document with
+- [x] Unit tests: single document, multi-document with
       `---`/`...`, bare documents, directive documents,
       empty documents, document-end markers in content
 
