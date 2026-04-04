@@ -95,7 +95,7 @@ or `"true"`).
 - [x] Switch formatter to `early_parse(false)` for scalar style preservation (022d9d2)
 - [x] Fix blank line preservation (formatter) (aeed0a5)
 - [x] Fix flow-to-block sequence indentation (formatter) (a9e0387)
-- [ ] Strip unnecessary quotes from Representation variants (formatter)
+- [x] Strip unnecessary quotes from Representation variants (formatter) (e8e5e6b)
 - [ ] Fix code action conversion bugs (code_actions)
 - [ ] Add conformance test suite infrastructure
 - [ ] Add real-world ecosystem fixtures
@@ -235,13 +235,13 @@ quote style. This strips syntactic quotes (e.g., `"python"` from flow
 context) while preserving semantic quotes (e.g., `"5000"`, `"true"`,
 `"on"`).
 
-- [ ] Add `needs_quoting` check for quoted Representation variants
-- [ ] Add test: `"python"` in flow sequence → `python` in block
-- [ ] Add test: `"5000"` stays quoted (looks like number)
-- [ ] Add test: `"true"` stays quoted (boolean keyword)
-- [ ] Add test: `"on"` stays quoted (YAML 1.1 keyword)
-- [ ] Add test: `'hello'` single-quoted → `hello` plain (unnecessary)
-- [ ] Verify idempotency after stripping
+- [x] Add `needs_quoting` check for quoted Representation variants
+- [x] Add test: `"python"` in flow sequence → `python` in block
+- [x] Add test: `"5000"` stays quoted (looks like number)
+- [x] Add test: `"true"` stays quoted (boolean keyword)
+- [x] Add test: `"on"` stays quoted (YAML 1.1 keyword)
+- [x] Add test: `'hello'` single-quoted → `hello` plain (unnecessary)
+- [x] Verify idempotency after stripping
 
 ### Task 8: Add conformance test suite infrastructure
 
