@@ -57,8 +57,8 @@ high-quality crates.io package.
 
 - [x] Create crate scaffold, position/span types, and
       parser combinator framework (6b1d449)
-- [ ] Implement character productions (spec §5) and
-      encoding detection
+- [x] Implement character productions (spec §5) and
+      encoding detection (cbaa4c2)
 - [ ] Implement structural productions (spec §6) —
       indentation, comments, separation, directives, node
       properties
@@ -130,9 +130,9 @@ Implement the 62 character productions from YAML 1.2 spec
 
 **Files:** `src/encoding.rs`, `src/chars.rs`
 
-- [ ] BOM detection and encoding selection (UTF-8, UTF-16
+- [x] BOM detection and encoding selection (UTF-8, UTF-16
       LE/BE, UTF-32 LE/BE)
-- [ ] Character classification productions [1]–[62]:
+- [x] Character classification productions [1]–[62]:
       `c_printable`, `nb_char`, `b_char`, `b_line_feed`,
       `b_carriage_return`, `b_break`, `b_as_line_feed`,
       `b_non_content`, `s_space`, `s_tab`, `s_white`,
@@ -141,8 +141,8 @@ Implement the 62 character productions from YAML 1.2 spec
       `ns_plain_first(c)`, `ns_plain_char(c)`,
       `ns_uri_char`, `ns_tag_char`, `c_escape`,
       `ns_esc_*` (15 escape variants), `c_ns_esc_char`
-- [ ] Line break normalization (CRLF → LF)
-- [ ] Unit tests for each character class, especially edge
+- [x] Line break normalization (CRLF → LF)
+- [x] Unit tests for each character class, especially edge
       cases: BOM handling, surrogate pairs, escape sequences
 
 ### Task 3: Structural productions (§6)
