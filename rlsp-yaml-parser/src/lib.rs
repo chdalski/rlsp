@@ -10,4 +10,5 @@ pub mod chars;
 pub mod combinator;
 pub mod encoding;
 pub mod pos;
+pub mod structure;
 pub mod token;

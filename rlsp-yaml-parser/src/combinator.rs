@@ -71,7 +71,8 @@ impl<'i> State<'i> {
     /// Advance the state past `ch`, returning the updated state.
     ///
     /// The `ch` must equal the first character of `self.input`.
-    fn advance(self, ch: char) -> Self {
+    #[must_use]
+    pub fn advance(self, ch: char) -> Self {
         let byte_len = ch.len_utf8();
         let new_input = &self.input[byte_len..];
         let new_pos = if ch == '\n' {

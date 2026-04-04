@@ -284,6 +284,25 @@ pub fn ns_tag_char<'i>() -> Parser<'i> {
     )
 }
 
+/// [102] ns-anchor-char — ns-char minus flow indicators.
+///
+/// Used to form anchor names: any non-space, non-break character that is not
+/// a flow indicator (`[`, `]`, `{`, `}`, `,`).
+#[must_use]
+pub fn ns_anchor_char<'i>() -> Parser<'i> {
+    satisfy(|ch| {
+        !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
+            && !matches!(ch, ',' | '[' | ']' | '{' | '}')
+            && matches!(ch,
+                '\x21'..='\x7E'
+                | '\u{85}'
+                | '\u{A0}'..='\u{D7FF}'
+                | '\u{E000}'..='\u{FFFD}'
+                | '\u{10000}'..='\u{10FFFF}'
+            )
+    })
+}
+
 // ---------------------------------------------------------------------------
 // §5.7 – Escape sequences [41]–[62]
 // ---------------------------------------------------------------------------
