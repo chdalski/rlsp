@@ -5,8 +5,7 @@
 ## Goal
 
 Fix the `quote_flow_item` double-quoting edge case in the block-to-flow code
-action, and triage the 99 failing yaml-test-suite conformance cases to confirm
-they are saphyr parser limitations (not rlsp-yaml bugs).
+action. Conformance triage (99 failing cases) deferred to a later session.
 
 ## Context
 
@@ -24,7 +23,6 @@ they are saphyr parser limitations (not rlsp-yaml bugs).
 ## Steps
 
 - [ ] Fix quote_flow_item double-quoting
-- [ ] Triage conformance failures
 
 ## Tasks
 
@@ -39,22 +37,6 @@ and not double-wrap them.
 - [ ] Add test: `- "true"` block → `["true"]` flow (not `[""true""]`)
 - [ ] Add test: `- 'hello'` block → `['hello']` flow
 - [ ] Verify existing code action tests still pass
-
-### Task 2: Triage conformance failures
-
-Review the 99 failing conformance cases and categorize each as:
-- **saphyr parser limitation** — saphyr can't parse the input correctly
-- **rlsp-yaml formatter bug** — our formatter changes meaning
-- **rlsp-yaml validator issue** — our diagnostics are wrong
-
-For each failure, add a brief comment in the test output or a tracking note.
-If any failures are rlsp-yaml bugs (not saphyr), file them as issues or note
-them for fixing.
-
-- [ ] Run conformance suite and capture failure details
-- [ ] Categorize each failure
-- [ ] Document findings (comment in conformance.rs or separate file)
-- [ ] If rlsp-yaml bugs found, report to lead
 
 ## Decisions
 
