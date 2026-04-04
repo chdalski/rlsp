@@ -3,6 +3,15 @@
 
 ## Bug Fixes
 
+- Upgrade lodash to fix CVE-2026-4800 and CVE-2026-2950 (1f0cb2a)
+
+## Features
+
+- Add integration test infrastructure (b4c3f17)
+- Add integration test suite (f9fa0cc)
+
+## Bug Fixes
+
 - Standardize diagnostic message format (44ceffe)
 - Standardize validator, parser, and schema error messages (f262004)
 - Use platform-aware paths in server test assertions (774d849)
