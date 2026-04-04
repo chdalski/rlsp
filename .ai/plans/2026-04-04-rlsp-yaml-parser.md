@@ -73,8 +73,8 @@ high-quality crates.io package.
       multi-document streams (f66342c)
 - [x] Build event layer — token-to-event conversion with
       public streaming API (aedf15a)
-- [ ] Build AST loader — events to node graph with
-      anchor/alias resolution and cycle detection
+- [x] Build AST loader — events to node graph with
+      anchor/alias resolution and cycle detection (24e739a)
 - [ ] Implement schema resolution — failsafe/JSON/core
       schemas, tag resolution, scalar type inference
 - [ ] Implement emitter — node-to-YAML serialization with
@@ -344,27 +344,27 @@ AST from the event stream.
 
 **Files:** `src/loader.rs`, `src/node.rs`
 
-- [ ] `Node` type parameterized by location: `Node<Loc>` —
+- [x] `Node` type parameterized by location: `Node<Loc>` —
       variants: `Scalar(value, style, tag)`,
       `Mapping(Vec<(Node<Loc>, Node<Loc>)>)`,
       `Sequence(Vec<Node<Loc>>)`, `Alias(anchor_name)` —
       each carrying `Loc` (typically `Span`)
-- [ ] Loader consumes event iterator, builds node graph
-- [ ] Anchor registration: store anchor → node mapping
+- [x] Loader consumes event iterator, builds node graph
+- [x] Anchor registration: store anchor → node mapping
       during construction
-- [ ] Alias resolution: configurable — either resolve
+- [x] Alias resolution: configurable — either resolve
       aliases inline (saphyr compat) or preserve them as
       `Alias` nodes (lossless mode for LSP)
-- [ ] Cycle detection: track active anchors to detect and
+- [x] Cycle detection: track active anchors to detect and
       report circular references
-- [ ] Multi-document: return `Vec<Node<Loc>>` for document
+- [x] Multi-document: return `Vec<Node<Loc>>` for document
       sequence
-- [ ] Comment attachment: associate comments with adjacent
+- [x] Comment attachment: associate comments with adjacent
       nodes (preceding or trailing)
-- [ ] Public API: `fn load(input: &str) -> Result<Vec<
+- [x] Public API: `fn load(input: &str) -> Result<Vec<
       Document<Span>>, Error>` where `Document` wraps a
       root node + directives metadata
-- [ ] Unit tests: simple and nested structures, anchors
+- [x] Unit tests: simple and nested structures, anchors
       and aliases (including forward references), cycles,
       multi-document, comment attachment
 
