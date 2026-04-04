@@ -56,3 +56,8 @@ pnpm run format    # check formatting (prettier)
 
 - [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
 - [release-plz](https://release-plz.ieni.dev/)
+- [YAML 1.2 Specification](https://yaml.org/spec/1.2.2/)
+- [YAML Test Suite](https://github.com/yaml/yaml-test-suite)
+- [YAML Test Matrix](https://matrix.yaml.info/)
+- [Kubernetes API Reference](https://kubernetes.io/docs/reference/)
+- [KubeSpec](https://kubespec.dev/)
