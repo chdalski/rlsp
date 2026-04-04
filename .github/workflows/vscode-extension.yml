@@ -162,9 +162,7 @@ jobs:
     name: Publish to VS Code Marketplace
     needs: [resolve-version, build-extension]
     runs-on: ubuntu-latest
-    # Disabled until VSCE_PAT secret is configured.
-    # Re-enable with: if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch'
-    if: false
+    if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch'
     permissions: {}
 
     steps:
