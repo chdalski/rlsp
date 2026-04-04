@@ -7,7 +7,7 @@ use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::{Request, Response};
 use tower_lsp::lsp_types::{
-    DiagnosticSeverity, HoverProviderCapability, InitializeResult, OneOf,
+    DiagnosticSeverity, HoverProviderCapability, InitializeResult, NumberOrString, OneOf,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
@@ -1649,5 +1649,357 @@ async fn should_use_configured_kubernetes_version_in_schema_url() {
     assert!(
         lens_str.contains("deployment-apps-v1.json"),
         "lens should reference deployment-apps-v1.json"
+    );
+}
+
+// ── Diagnostic suppression integration tests ─────────────────────────────────
+
+fn has_code(diags: &[tower_lsp::lsp_types::Diagnostic], code: &str) -> bool {
+    diags
+        .iter()
+        .any(|d| matches!(&d.code, Some(NumberOrString::String(s)) if s == code))
+}
+
+// Section 1: disable-next-line — specific code
+
+#[tokio::test]
+async fn should_suppress_duplicate_key_diagnostic_with_disable_next_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression1.yaml";
+    // Line 0: key: a, Line 1: disable comment targets line 2, Line 2: duplicate key: b
+    let text = "key: a\n# rlsp-yaml-disable-next-line duplicateKey\nkey: b\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        !has_code(&diags, "duplicateKey"),
+        "duplicateKey should be suppressed"
+    );
+}
+
+#[tokio::test]
+async fn should_not_suppress_duplicate_key_when_comment_targets_wrong_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression2.yaml";
+    // Line 0: disable comment targets line 1; duplicateKey is on line 2
+    let text = "# rlsp-yaml-disable-next-line duplicateKey\nkey: a\nkey: b\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey should still be present"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_flow_map_diagnostic_with_disable_next_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression3.yaml";
+    // Line 1: disable comment targets line 2 (the flowMap)
+    let text = "config:\n# rlsp-yaml-disable-next-line flowMap\n  settings: {a: 1}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(!has_code(&diags, "flowMap"), "flowMap should be suppressed");
+}
+
+#[tokio::test]
+async fn should_not_suppress_unlisted_code_with_disable_next_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression4.yaml";
+    // flowMap on line 2 is suppressed; duplicateKey on line 4 is not listed
+    let text =
+        "config:\n# rlsp-yaml-disable-next-line flowMap\n  settings: {a: 1}\nkey: a\nkey: b\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(!has_code(&diags, "flowMap"), "flowMap should be suppressed");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey should still be present"
+    );
+}
+
+// Section 2: disable-next-line — suppress all
+
+#[tokio::test]
+async fn should_suppress_all_diagnostics_on_next_line_with_bare_disable_next_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression5.yaml";
+    // Bare comment on line 1 targets line 2 (the flowMap)
+    let text = "config:\n# rlsp-yaml-disable-next-line\n  settings: {a: 1}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        !has_code(&diags, "flowMap"),
+        "flowMap should be suppressed by bare disable-next-line"
+    );
+}
+
+#[tokio::test]
+async fn should_not_suppress_diagnostics_on_other_lines_with_bare_disable_next_line() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression6.yaml";
+    // Comment on line 0 targets line 1 only; duplicateKey on line 2, flowMap on line 3
+    let text = "# rlsp-yaml-disable-next-line\nkey: a\nkey: b\na: {x: 1}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey on line 2 should not be suppressed"
+    );
+    assert!(
+        has_code(&diags, "flowMap"),
+        "flowMap on line 3 should not be suppressed"
+    );
+}
+
+// Section 3: disable-file — specific code
+
+#[tokio::test]
+async fn should_suppress_flow_map_diagnostics_file_wide_with_disable_file() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression7.yaml";
+    // flowMap on lines 1 and 2 — both suppressed file-wide
+    let text = "# rlsp-yaml-disable-file flowMap\na: {x: 1}\nb: {y: 2}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        !has_code(&diags, "flowMap"),
+        "all flowMap diagnostics should be suppressed"
+    );
+}
+
+#[tokio::test]
+async fn should_not_suppress_other_codes_with_disable_file_specific_code() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression8.yaml";
+    // Only flowMap suppressed; duplicateKey on lines 1-2 remains
+    let text = "# rlsp-yaml-disable-file flowMap\nkey: a\nkey: b\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(!has_code(&diags, "flowMap"), "flowMap should be suppressed");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey should still be present"
+    );
+}
+
+// Section 4: disable-file — suppress all
+
+#[tokio::test]
+async fn should_suppress_all_diagnostics_file_wide_with_bare_disable_file() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression9.yaml";
+    // Both duplicateKey (line 2) and flowMap (line 3) suppressed
+    let text = "# rlsp-yaml-disable-file\nkey: a\nkey: b\na: {x: 1}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        diags.is_empty(),
+        "all diagnostics should be suppressed by bare disable-file"
+    );
+}
+
+// Section 5: Unsuppressed diagnostics on other lines still reported
+
+#[tokio::test]
+async fn should_leave_unsuppressed_diagnostics_on_other_lines_intact() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression10.yaml";
+    // duplicateKey on line 2 suppressed; flowMap on line 3 is not
+    let text = "key: a\n# rlsp-yaml-disable-next-line duplicateKey\nkey: b\na: {x: 1}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        !has_code(&diags, "duplicateKey"),
+        "duplicateKey should be suppressed"
+    );
+    assert!(
+        has_code(&diags, "flowMap"),
+        "flowMap should still be present"
+    );
+}
+
+// Section 6: Multiple suppression comments in one file
+
+#[tokio::test]
+async fn should_apply_multiple_disable_next_line_comments_independently() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression11.yaml";
+    // Line 0: disable flowMap → targets line 1 (flowMap)
+    // Line 3: disable duplicateKey → targets line 4 (second "key: c", where duplicateKey is emitted)
+    let text = "# rlsp-yaml-disable-next-line flowMap\na: {x: 1}\nkey: c\n# rlsp-yaml-disable-next-line duplicateKey\nkey: c\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(!has_code(&diags, "flowMap"), "flowMap should be suppressed");
+    assert!(
+        !has_code(&diags, "duplicateKey"),
+        "duplicateKey should be suppressed"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_only_targeted_lines_with_multiple_comments() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression12.yaml";
+    // comment on line 1 targets line 2; flowMap on line 3 is not targeted
+    let text = "a: {x: 1}\n# rlsp-yaml-disable-next-line flowMap\nb: {y: 2}\nc: {z: 3}\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    let flow_map_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "flowMap"))
+        .collect();
+    // line 0 (a: {x:1}) and line 3 (c: {z:3}) should produce flowMap; line 2 (b: {y:2}) suppressed
+    assert_eq!(
+        flow_map_diags.len(),
+        2,
+        "exactly two flowMap diagnostics should remain (lines 0 and 3)"
+    );
+    assert!(
+        flow_map_diags.iter().any(|d| d.range.start.line == 3),
+        "flowMap on line 3 should still be present"
+    );
+    assert!(
+        !flow_map_diags.iter().any(|d| d.range.start.line == 2),
+        "flowMap on line 2 should be suppressed"
+    );
+}
+
+// Section 7: Suppression applied on didChange
+
+#[tokio::test]
+async fn should_apply_suppression_after_document_change() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression13.yaml";
+    // Open with duplicateKey present
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+    {
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert!(
+            has_code(&diags, "duplicateKey"),
+            "duplicateKey should be present before change"
+        );
+    }
+
+    // Change to add a suppression comment before the duplicate key
+    send(
+        &mut service,
+        did_change_notification(
+            uri,
+            "key: a\n# rlsp-yaml-disable-next-line duplicateKey\nkey: b\n",
+            2,
+        ),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist after change");
+    assert!(
+        !has_code(&diags, "duplicateKey"),
+        "duplicateKey should be suppressed after change"
     );
 }

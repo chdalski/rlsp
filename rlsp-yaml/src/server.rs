@@ -15,9 +15,9 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, OneOf, Position, PrepareRenameResponse, Range,
-    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
-    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+    InitializeResult, InitializedParams, Location, NumberOrString, OneOf, Position,
+    PrepareRenameResponse, Range, ReferenceParams, Registration, RenameOptions, RenameParams,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
@@ -435,6 +435,16 @@ impl Backend {
                 }
             }
         }
+
+        // Filter out suppressed diagnostics before storing and publishing.
+        let suppressions = crate::suppression::build_suppression_map(text);
+        diagnostics.retain(|diag| {
+            let code = diag.code.as_ref().and_then(|c| match c {
+                NumberOrString::String(s) => Some(s.as_str()),
+                NumberOrString::Number(_) => None,
+            });
+            !suppressions.is_suppressed(diag.range.start.line, code.unwrap_or(""))
+        });
 
         if let Ok(mut diags) = self.diagnostics.lock() {
             diags.insert(uri.clone(), diagnostics.clone());
