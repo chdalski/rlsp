@@ -10,10 +10,12 @@ pub mod block;
 pub mod chars;
 pub mod combinator;
 pub mod encoding;
+pub mod event;
 pub mod flow;
 pub mod pos;
 pub mod stream;
 pub mod structure;
 pub mod token;
 
+pub use event::parse_events;
 pub use stream::tokenize;

@@ -110,9 +110,12 @@ fn try_chomp_indent(s: State<'_>) -> Option<(i32, Chomping, State<'_>)> {
     }
 }
 
-/// Internal: parse a block scalar header and return (m, t, `remaining_state`).
-/// `m` is the explicit indentation (0 = auto-detect), `t` is Chomping.
-fn parse_block_header(state: State<'_>) -> Option<(i32, Chomping, State<'_>)> {
+/// Internal: parse a block scalar header and return `(m, t, chomp_char, remaining_state)`.
+/// `m` is the explicit indentation (0 = auto-detect), `t` is `Chomping`,
+/// `chomp_char` is `Some("-")` or `Some("+")` when explicit, `None` for `Clip`.
+fn parse_block_header(
+    state: State<'_>,
+) -> Option<(i32, Chomping, Option<&'static str>, State<'_>)> {
     // Pick the ordering that advanced furthest.
     let r1 = try_indent_chomp(state.clone());
     let r2 = try_chomp_indent(state);
@@ -125,9 +128,15 @@ fn parse_block_header(state: State<'_>) -> Option<(i32, Chomping, State<'_>)> {
         (None, None) => return None,
     };
 
+    let chomp_char = match chomp {
+        Chomping::Strip => Some("-"),
+        Chomping::Keep => Some("+"),
+        Chomping::Clip => None,
+    };
+
     // Consume optional comment + required line break.
     match s_b_comment()(after_indicators) {
-        Reply::Success { state: s_after, .. } => Some((m, chomp, s_after)),
+        Reply::Success { state: s_after, .. } => Some((m, chomp, chomp_char, s_after)),
         Reply::Failure | Reply::Error(_) => None,
     }
 }
@@ -345,14 +354,10 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
         };
         let start_pos = state.pos;
         let after_pipe = state.advance('|');
-        let pipe_token = crate::token::Token {
-            code: Code::Indicator,
-            pos: after_pipe.pos,
-            text: "",
-        };
 
         // Parse header: indentation indicator + chomping indicator + comment + break.
-        let Some((m_raw, chomp, after_header)) = parse_block_header(after_pipe.clone()) else {
+        let Some((m_raw, chomp, chomp_char, after_header)) = parse_block_header(after_pipe.clone())
+        else {
             return Reply::Failure;
         };
 
@@ -363,6 +368,22 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
             n + m_raw
         };
 
+        let header_tokens: Vec<crate::token::Token<'static>> = {
+            let mut v = vec![crate::token::Token {
+                code: Code::Indicator,
+                pos: start_pos,
+                text: "|",
+            }];
+            if let Some(ch) = chomp_char {
+                v.push(crate::token::Token {
+                    code: Code::Indicator,
+                    pos: start_pos,
+                    text: ch,
+                });
+            }
+            v
+        };
+
         if m <= n {
             // No valid content indentation found — empty scalar.
             let content_result = l_chomped_empty(m, chomp)(after_header.clone());
@@ -370,19 +391,12 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => (Vec::new(), after_header),
             };
-            let mut all = vec![
-                crate::token::Token {
-                    code: Code::BeginScalar,
-                    pos: start_pos,
-                    text: "",
-                },
-                crate::token::Token {
-                    code: Code::Indicator,
-                    pos: start_pos,
-                    text: "|",
-                },
-            ];
-            let _ = pipe_token;
+            let mut all = vec![crate::token::Token {
+                code: Code::BeginScalar,
+                pos: start_pos,
+                text: "",
+            }];
+            all.extend(header_tokens);
             all.extend(content_tokens);
             all.push(crate::token::Token {
                 code: Code::EndScalar,
@@ -403,18 +417,12 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
             Reply::Error(e) => return Reply::Error(e),
         };
 
-        let mut all = vec![
-            crate::token::Token {
-                code: Code::BeginScalar,
-                pos: start_pos,
-                text: "",
-            },
-            crate::token::Token {
-                code: Code::Indicator,
-                pos: start_pos,
-                text: "|",
-            },
-        ];
+        let mut all = vec![crate::token::Token {
+            code: Code::BeginScalar,
+            pos: start_pos,
+            text: "",
+        }];
+        all.extend(header_tokens);
         all.extend(content_tokens);
         all.push(crate::token::Token {
             code: Code::EndScalar,
@@ -540,7 +548,7 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
         let start_pos = state.pos;
         let after_gt = state.advance('>');
 
-        let Some((m_raw, chomp, after_header)) = parse_block_header(after_gt) else {
+        let Some((m_raw, chomp, chomp_char, after_header)) = parse_block_header(after_gt) else {
             return Reply::Failure;
         };
 
@@ -550,24 +558,34 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
             n + m_raw
         };
 
+        let header_tokens: Vec<crate::token::Token<'static>> = {
+            let mut v = vec![crate::token::Token {
+                code: Code::Indicator,
+                pos: start_pos,
+                text: ">",
+            }];
+            if let Some(ch) = chomp_char {
+                v.push(crate::token::Token {
+                    code: Code::Indicator,
+                    pos: start_pos,
+                    text: ch,
+                });
+            }
+            v
+        };
+
         if m <= n {
             let content_result = l_chomped_empty(m, chomp)(after_header.clone());
             let (content_tokens, final_state) = match content_result {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => (Vec::new(), after_header),
             };
-            let mut all = vec![
-                crate::token::Token {
-                    code: Code::BeginScalar,
-                    pos: start_pos,
-                    text: "",
-                },
-                crate::token::Token {
-                    code: Code::Indicator,
-                    pos: start_pos,
-                    text: ">",
-                },
-            ];
+            let mut all = vec![crate::token::Token {
+                code: Code::BeginScalar,
+                pos: start_pos,
+                text: "",
+            }];
+            all.extend(header_tokens);
             all.extend(content_tokens);
             all.push(crate::token::Token {
                 code: Code::EndScalar,
@@ -587,18 +605,12 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
             Reply::Error(e) => return Reply::Error(e),
         };
 
-        let mut all = vec![
-            crate::token::Token {
-                code: Code::BeginScalar,
-                pos: start_pos,
-                text: "",
-            },
-            crate::token::Token {
-                code: Code::Indicator,
-                pos: start_pos,
-                text: ">",
-            },
-        ];
+        let mut all = vec![crate::token::Token {
+            code: Code::BeginScalar,
+            pos: start_pos,
+            text: "",
+        }];
+        all.extend(header_tokens);
         all.extend(content_tokens);
         all.push(crate::token::Token {
             code: Code::EndScalar,
@@ -1207,7 +1219,7 @@ mod tests {
     fn c_b_block_header_indent_then_chomp() {
         let result = parse_block_header(state("2-\n"));
         assert!(result.is_some());
-        let (m, chomp, after) = result.unwrap();
+        let (m, chomp, _, after) = result.unwrap();
         assert_eq!(m, 2);
         assert_eq!(chomp, Chomping::Strip);
         assert_eq!(after.input, "");
@@ -1217,7 +1229,7 @@ mod tests {
     fn c_b_block_header_chomp_then_indent() {
         let result = parse_block_header(state("-2\n"));
         assert!(result.is_some());
-        let (m, chomp, after) = result.unwrap();
+        let (m, chomp, _, after) = result.unwrap();
         assert_eq!(m, 2);
         assert_eq!(chomp, Chomping::Strip);
         assert_eq!(after.input, "");
@@ -1227,7 +1239,7 @@ mod tests {
     fn c_b_block_header_chomp_only() {
         let result = parse_block_header(state("-\n"));
         assert!(result.is_some());
-        let (m, chomp, after) = result.unwrap();
+        let (m, chomp, _, after) = result.unwrap();
         assert_eq!(chomp, Chomping::Strip);
         assert_eq!(after.input, "");
         let _ = m;
@@ -1237,7 +1249,7 @@ mod tests {
     fn c_b_block_header_indent_only() {
         let result = parse_block_header(state("2\n"));
         assert!(result.is_some());
-        let (m, _, after) = result.unwrap();
+        let (m, _, _, after) = result.unwrap();
         assert_eq!(m, 2);
         assert_eq!(after.input, "");
     }
@@ -1246,7 +1258,7 @@ mod tests {
     fn c_b_block_header_neither_indicator() {
         let result = parse_block_header(state("\n"));
         assert!(result.is_some());
-        let (_, _, after) = result.unwrap();
+        let (_, _, _, after) = result.unwrap();
         assert_eq!(after.input, "");
     }
 
@@ -1254,7 +1266,7 @@ mod tests {
     fn c_b_block_header_with_trailing_comment() {
         let result = parse_block_header(state("2 # comment\n"));
         assert!(result.is_some());
-        let (m, _, after) = result.unwrap();
+        let (m, _, _, after) = result.unwrap();
         assert_eq!(m, 2);
         assert_eq!(after.input, "");
     }
