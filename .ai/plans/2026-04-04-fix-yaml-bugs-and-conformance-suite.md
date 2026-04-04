@@ -98,7 +98,7 @@ or `"true"`).
 - [x] Strip unnecessary quotes from Representation variants (formatter) (e8e5e6b)
 - [x] Fix code action conversion bugs (code_actions) (3737c50)
 - [x] Add conformance test suite infrastructure (1446819)
-- [ ] Add real-world ecosystem fixtures
+- [x] Add real-world ecosystem fixtures (688e1f9)
 
 ## Tasks
 
@@ -277,13 +277,13 @@ Add hand-crafted test fixtures from real Kubernetes, GitHub Actions, and
 Ansible files to test ecosystem-specific patterns the spec suite doesn't
 cover.
 
-- [ ] Add K8s fixtures: LimitRange, Deployment with containers/command,
+- [x] Add K8s fixtures: LimitRange, Deployment with containers/command,
       ConfigMap, Service with `status: {}`
-- [ ] Add GitHub Actions fixtures: workflow with `on:`, flow sequences in
+- [x] Add GitHub Actions fixtures: workflow with `on:`, flow sequences in
       `branches:`, matrix strategy
-- [ ] Add Ansible fixtures: playbook with common patterns
-- [ ] Wire fixtures into formatter round-trip tests
-- [ ] Wire fixtures into validator tests (no false positives)
+- [x] Add Ansible fixtures: playbook with common patterns
+- [x] Wire fixtures into formatter round-trip tests
+- [x] Wire fixtures into validator tests (no false positives)
 
 ### Task 10: Fix code action conversion bugs
 
