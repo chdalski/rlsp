@@ -91,11 +91,12 @@ or `"true"`).
 - [x] Clarify requirements with user
 - [x] Update CLAUDE.md references (8f943fc)
 - [x] Fix duplicate key false positives (validator) (e5e5cd8)
-- [ ] Fix empty flow collection warnings (validator)
+- [x] Fix empty flow collection warnings (validator) (f34a305)
 - [ ] Switch formatter to `early_parse(false)` for scalar style preservation
 - [ ] Fix blank line preservation (formatter)
 - [ ] Fix flow-to-block sequence indentation (formatter)
 - [ ] Strip unnecessary quotes from Representation variants (formatter)
+- [ ] Fix code action conversion bugs (code_actions)
 - [ ] Add conformance test suite infrastructure
 - [ ] Add real-world ecosystem fixtures
 
@@ -140,12 +141,12 @@ In `validate_flow_style` (line 190), after finding a matching closing
 brace/bracket, check if the content between open and close is empty
 (whitespace-only). If so, skip emitting the diagnostic.
 
-- [ ] Add empty-content check in flowMap detection (around line 207)
-- [ ] Add empty-content check in flowSeq detection (around line 224)
-- [ ] Add test: `status: {}` produces no warning
-- [ ] Add test: `items: []` produces no warning
-- [ ] Add test: `{a: 1}` still produces warning
-- [ ] Verify existing tests still pass
+- [x] Add empty-content check in flowMap detection (around line 207)
+- [x] Add empty-content check in flowSeq detection (around line 224)
+- [x] Add test: `status: {}` produces no warning
+- [x] Add test: `items: []` produces no warning
+- [x] Add test: `{a: 1}` still produces warning
+- [x] Verify existing tests still pass
 
 ### Task 4: Switch formatter to early_parse(false)
 
@@ -284,6 +285,39 @@ cover.
 - [ ] Wire fixtures into formatter round-trip tests
 - [ ] Wire fixtures into validator tests (no false positives)
 
+### Task 10: Fix code action conversion bugs
+
+The flow/block toggle code actions already exist in `code_actions.rs`:
+- `flow_map_to_block` (diagnostic-driven, line 94)
+- `flow_seq_to_block` (diagnostic-driven, line 178)
+- `block_to_flow` (context-driven, line 255)
+
+Three bugs/gaps need fixing:
+
+1. **Indentation in `flow_seq_to_block`** — the `base_indent` calculation
+   (line 198-202) has the same indentation bug as the formatter for
+   `key: [items]` inside nested structures. The fix from Task 6 should
+   inform this fix.
+
+2. **Quoting in `block_to_flow`** — when converting block to flow, items
+   that need quoting in flow context (contain `,`, `]`, `}`, etc.) must
+   have quotes added. Currently items are joined verbatim (line 316).
+
+3. **Size warning for `block_to_flow`** — when the resulting flow line
+   would exceed `print_width`, add a hint to the action title like
+   "Convert to flow style (long line)" so the user knows the result may
+   be unwieldy. Currently bails entirely on nested structures (line 299)
+   which is correct, but flat large collections should still be offered
+   with a warning.
+
+- [ ] Fix indentation in `flow_seq_to_block` for nested contexts
+- [ ] Add quoting logic in `block_to_flow` for flow-unsafe characters
+- [ ] Add size warning hint to `block_to_flow` action title
+- [ ] Add test: flow_seq_to_block inside nested sequence item mapping
+- [ ] Add test: block_to_flow adds quotes when needed
+- [ ] Add test: block_to_flow warns on long lines
+- [ ] Verify existing code action tests still pass
+
 ## Decisions
 
 - **Preserve scalar style via `early_parse(false)`** — only in the formatter's
@@ -300,5 +334,7 @@ cover.
   patterns (K8s, GHA, Ansible).
 - **Ecosystem-specific defaults are a separate follow-up** — correct base YAML
   behavior first, then tune per ecosystem using schema detection.
-- **Flow/block toggle code action is a separate follow-up** — a new LSP
-  feature, not a bug fix.
+- **Code action fixes folded into this plan** — flow/block toggle code
+  actions already exist; the bugs in them (indentation, quoting, size
+  warning) share root causes with the formatter bugs, so fixing them
+  together avoids duplicate effort.
