@@ -538,10 +538,18 @@ fn string_to_block_scalar(
 /// Quote a block sequence item for use in a flow sequence if it contains
 /// characters that are unsafe in flow context.
 ///
+/// Already-quoted items (surrounded by matching `"…"` or `'…'`) are returned
+/// as-is to prevent double-quoting.
+///
 /// Flow-unsafe: contains `,`, `[`, `]`, `{`, `}`, or starts with a character
 /// that would cause ambiguity (`#`, `&`, `*`, `!`, `|`, `>`, `'`, `"`, `%`,
 /// `@`, `` ` ``).
 fn quote_flow_item(item: &str) -> String {
+    if (item.len() >= 2 && item.starts_with('"') && item.ends_with('"'))
+        || (item.len() >= 2 && item.starts_with('\'') && item.ends_with('\''))
+    {
+        return item.to_string();
+    }
     let needs_quotes = item.contains([',', '[', ']', '{', '}'])
         || item.chars().next().is_some_and(|c| {
             matches!(
@@ -1121,5 +1129,139 @@ mod tests {
 
         // No tabs, no quoted bools, no long strings, no block children
         assert!(actions.is_empty());
+    }
+
+    // ---- quote_flow_item ----
+
+    #[test]
+    fn quote_flow_item_returns_double_quoted_string_as_is() {
+        assert_eq!(quote_flow_item("\"true\""), "\"true\"");
+    }
+
+    #[test]
+    fn quote_flow_item_returns_single_quoted_string_as_is() {
+        assert_eq!(quote_flow_item("'hello'"), "'hello'");
+    }
+
+    #[test]
+    fn quote_flow_item_returns_plain_item_unchanged() {
+        assert_eq!(quote_flow_item("plain"), "plain");
+    }
+
+    #[test]
+    fn quote_flow_item_quotes_item_with_comma() {
+        assert_eq!(
+            quote_flow_item("value, with comma"),
+            "\"value, with comma\""
+        );
+    }
+
+    #[test]
+    fn quote_flow_item_quotes_item_starting_with_hash() {
+        assert_eq!(quote_flow_item("#comment-like"), "\"#comment-like\"");
+    }
+
+    #[test]
+    fn quote_flow_item_quotes_item_containing_brackets() {
+        assert_eq!(quote_flow_item("[nested]"), "\"[nested]\"");
+    }
+
+    #[test]
+    fn quote_flow_item_does_not_double_quote_item_with_only_opening_double_quote() {
+        // Starts with `"` but does not end with `"` — not a complete quoted string.
+        // Gets wrapped: `"` + `"unclosed` + `"` = `""unclosed"`
+        assert_eq!(quote_flow_item("\"unclosed"), "\"\"unclosed\"");
+    }
+
+    #[test]
+    fn quote_flow_item_does_not_double_quote_item_with_only_closing_double_quote() {
+        // Ends with `"` but does not start with `"` — not a complete quoted string.
+        // The first char is `u` (safe) and no flow-unsafe chars, so returned as-is.
+        assert_eq!(quote_flow_item("unclosed\""), "unclosed\"");
+    }
+
+    #[test]
+    fn quote_flow_item_does_not_double_quote_single_double_quote_char() {
+        // Single `"` char: starts and ends with `"` but len == 1, so not pre-quoted.
+        // Falls through to flow-unsafe path and gets wrapped: `"` + `"` + `"` = `"""`
+        assert_eq!(quote_flow_item("\""), "\"\"\"");
+    }
+
+    #[test]
+    fn should_preserve_double_quoted_item_when_converting_block_seq_to_flow() {
+        let text = "items:\n  - \"true\"\n  - \"false\"\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("[\"true\", \"false\"]"),
+            "pre-quoted items must not be double-quoted: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_preserve_single_quoted_item_when_converting_block_seq_to_flow() {
+        let text = "items:\n  - 'hello'\n  - 'world'\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("['hello', 'world']"),
+            "pre-quoted single-quoted items must not be wrapped: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_quote_unsafe_item_alongside_pre_quoted_item() {
+        let text = "args:\n  - \"true\"\n  - value, with comma\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0]
+                .new_text
+                .contains("[\"true\", \"value, with comma\"]"),
+            "pre-quoted item preserved and unsafe item quoted: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_not_quote_plain_item_alongside_pre_quoted_item() {
+        let text = "args:\n  - \"true\"\n  - plain\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("[\"true\", plain]"),
+            "pre-quoted item preserved and plain item unquoted: {:?}",
+            edits[0].new_text
+        );
     }
 }
