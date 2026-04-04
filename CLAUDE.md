@@ -41,7 +41,7 @@ pnpm run format    # check formatting (prettier)
 - Workspace lint inheritance — root `Cargo.toml` defines `[workspace.lints]`, crates inherit via `lints.workspace = true`
 - Clippy pedantic + nursery at warn; selected lints at deny; `warnings = "deny"`
 - Maximum TypeScript strictness — `tsconfig.json` extends `@tsconfig/strictest`, ESLint uses `strictTypeChecked` + `stylisticTypeChecked`
-- Automated releases via release-plz; tag format: `<package>-v<version>`
+- Automated releases via release-plz; tag format: `<package>-v<version>`. VS Code extension uses CalVer tags: `vscode-v<YYYY.MM.NN>`
 - Conventional commits required — changelogs auto-generated via git-cliff
 - OIDC trusted publishing to crates.io — no `CARGO_REGISTRY_TOKEN` secret needed
 - pnpm as Node.js package manager
