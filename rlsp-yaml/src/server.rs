@@ -66,6 +66,12 @@ pub struct Settings {
     /// YAML specification version for formatting and diagnostics (`"1.1"` or
     /// `"1.2"`). Defaults to `"1.2"` when absent.
     pub yaml_version: Option<String>,
+    /// Enable diagnostic validation. Defaults to `true` when absent.
+    pub validate: Option<bool>,
+    /// Enable hover responses. Defaults to `true` when absent.
+    pub hover: Option<bool>,
+    /// Enable completion responses. Defaults to `true` when absent.
+    pub completion: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -347,6 +353,14 @@ impl Backend {
     }
 
     async fn parse_and_publish(&self, uri: Url, text: &str) {
+        if !self.get_validate() {
+            if let Ok(mut diags) = self.diagnostics.lock() {
+                diags.insert(uri.clone(), Vec::new());
+            }
+            self.client.publish_diagnostics(uri, Vec::new(), None).await;
+            return;
+        }
+
         let result = parser::parse_yaml(text);
         let mut diagnostics = result.diagnostics.clone();
 
@@ -508,6 +522,30 @@ impl Backend {
             .ok()
             .is_none_or(|s| s.color_decorators.unwrap_or(true))
     }
+
+    /// Return `true` if diagnostic validation is enabled (default: `true`).
+    pub(crate) fn get_validate(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.validate.unwrap_or(true))
+    }
+
+    /// Return `true` if hover responses are enabled (default: `true`).
+    pub(crate) fn get_hover_enabled(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.hover.unwrap_or(true))
+    }
+
+    /// Return `true` if completion responses are enabled (default: `true`).
+    pub(crate) fn get_completion_enabled(&self) -> bool {
+        self.settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.completion.unwrap_or(true))
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -612,6 +650,10 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        if !self.get_hover_enabled() {
+            return Ok(None);
+        }
+
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -650,6 +692,10 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        if !self.get_completion_enabled() {
+            return Ok(None);
+        }
+
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -1962,5 +2008,129 @@ mod tests {
             colors.is_empty(),
             "should return empty when color decorators are disabled"
         );
+    }
+
+    // ---- validate setting ----
+
+    #[test]
+    fn settings_deserializes_validate_false() {
+        let json = serde_json::json!({"validate": false});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.validate, Some(false));
+    }
+
+    #[test]
+    fn settings_deserializes_validate_true() {
+        let json = serde_json::json!({"validate": true});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.validate, Some(true));
+    }
+
+    #[test]
+    fn settings_defaults_validate_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.validate.is_none());
+    }
+
+    #[test]
+    fn get_validate_returns_true_by_default() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert!(backend.get_validate());
+    }
+
+    #[test]
+    fn get_validate_returns_false_when_disabled() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"validate": false})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert!(!backend.get_validate());
+    }
+
+    #[test]
+    fn get_validate_returns_true_when_explicitly_enabled() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"validate": true})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert!(backend.get_validate());
+    }
+
+    // ---- hover setting ----
+
+    #[test]
+    fn settings_deserializes_hover_false() {
+        let json = serde_json::json!({"hover": false});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.hover, Some(false));
+    }
+
+    #[test]
+    fn settings_defaults_hover_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.hover.is_none());
+    }
+
+    #[test]
+    fn get_hover_enabled_returns_true_by_default() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert!(backend.get_hover_enabled());
+    }
+
+    #[test]
+    fn get_hover_enabled_returns_false_when_disabled() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"hover": false})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert!(!backend.get_hover_enabled());
+    }
+
+    // ---- completion setting ----
+
+    #[test]
+    fn settings_deserializes_completion_false() {
+        let json = serde_json::json!({"completion": false});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.completion, Some(false));
+    }
+
+    #[test]
+    fn settings_defaults_completion_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.completion.is_none());
+    }
+
+    #[test]
+    fn get_completion_enabled_returns_true_by_default() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert!(backend.get_completion_enabled());
+    }
+
+    #[test]
+    fn get_completion_enabled_returns_false_when_disabled() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"completion": false})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert!(!backend.get_completion_enabled());
     }
 }

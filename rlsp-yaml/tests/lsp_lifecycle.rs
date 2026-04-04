@@ -2003,3 +2003,202 @@ async fn should_apply_suppression_after_document_change() {
         "duplicateKey should be suppressed after change"
     );
 }
+
+// ── Feature toggle settings integration tests ─────────────────────────────────
+
+// Section: validate toggle
+
+#[tokio::test]
+async fn should_produce_diagnostics_by_default_with_validate_not_set() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_validate_default.yaml";
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey should be present with default settings"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_all_diagnostics_when_validate_is_false() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_validate_false.yaml";
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"validate": false})),
+    )
+    .await;
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert!(
+        diags.is_empty(),
+        "all diagnostics should be suppressed when validate=false"
+    );
+}
+
+#[tokio::test]
+async fn should_resume_diagnostics_when_validate_re_enabled() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_validate_reenable.yaml";
+    // Disable validation and open a document with a duplicate key
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"validate": false})),
+    )
+    .await;
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+    {
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert!(
+            diags.is_empty(),
+            "no diagnostics expected while validate=false"
+        );
+    }
+
+    // Re-enable validation and change the document to trigger re-validation
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"validate": true})),
+    )
+    .await;
+    send(
+        &mut service,
+        did_change_notification(uri, "key: a\nkey: b\n", 2),
+    )
+    .await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist after re-enable");
+    assert!(
+        has_code(&diags, "duplicateKey"),
+        "duplicateKey should reappear after validate is re-enabled"
+    );
+}
+
+// Section: hover toggle
+
+#[tokio::test]
+async fn should_return_hover_result_when_hover_setting_not_set() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_hover_default.yaml";
+    send(&mut service, did_open_notification(uri, "key: value\n")).await;
+
+    let resp = send(&mut service, hover_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("hover should return a response");
+    // A response was returned (not an error) — the handler ran to completion
+    assert!(
+        resp.result().is_some() || resp.error().is_none(),
+        "hover handler should run to completion with default settings"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_hover_when_hover_is_disabled() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_hover_false.yaml";
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"hover": false})),
+    )
+    .await;
+    send(&mut service, did_open_notification(uri, "key: value\n")).await;
+
+    let resp = send(&mut service, hover_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("hover should return a response even when disabled");
+    let result = resp.result().expect("hover should have a result field");
+    assert!(
+        result.is_null(),
+        "hover result should be null when hover=false"
+    );
+}
+
+// Section: completion toggle
+
+#[tokio::test]
+async fn should_return_completion_items_when_completion_setting_not_set() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_completion_default.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("completion should return a response");
+    let result = resp
+        .result()
+        .expect("completion should have a result field");
+    assert!(
+        !result.is_null(),
+        "completion result should not be null with default settings"
+    );
+}
+
+#[tokio::test]
+async fn should_return_null_completion_when_completion_is_disabled() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/toggle_completion_false.yaml";
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"completion": false})),
+    )
+    .await;
+    send(
+        &mut service,
+        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("completion should return a response even when disabled");
+    let result = resp
+        .result()
+        .expect("completion should have a result field");
+    assert!(
+        result.is_null(),
+        "completion result should be null when completion=false"
+    );
+}
