@@ -32,10 +32,10 @@ performance degradation on very large files.
 ## Steps
 
 - [x] Add feature toggle settings (9ce8e80)
-- [ ] Add maxItemsComputed setting
-- [ ] Integrate toggles with LSP handlers
-- [ ] Integrate maxItemsComputed with symbols and folding
-- [ ] Add tests
+- [x] Add maxItemsComputed setting (2c45fa0)
+- [x] Integrate toggles with LSP handlers (9ce8e80)
+- [x] Integrate maxItemsComputed with symbols and folding (2c45fa0)
+- [x] Add tests (2c45fa0)
 - [ ] Update documentation
 
 ## Tasks
@@ -52,16 +52,16 @@ Add boolean settings to enable/disable individual LSP features.
 - [x] In `completion()` handler: return empty when `completion` is false
 - [x] Tests for each toggle
 
-### Task 2: Add maxItemsComputed setting
+### Task 2: Add maxItemsComputed setting (2c45fa0)
 
 Add a performance limit for document symbols and folding ranges.
 
-- [ ] Add `max_items_computed: Option<usize>` to Settings (default: 5000)
-- [ ] In document symbols handler: truncate results at limit
-- [ ] In folding ranges handler: truncate results at limit
-- [ ] Consider: should the limit apply to other computed results?
+- [x] Add `max_items_computed: Option<usize>` to Settings (default: 5000)
+- [x] In document symbols handler: truncate results at limit
+- [x] In folding ranges handler: truncate results at limit
+- [x] Consider: should the limit apply to other computed results?
       (completions, references, etc.)
-- [ ] Tests for truncation behavior
+- [x] Tests for truncation behavior
 
 ### Task 3: Update documentation
 
