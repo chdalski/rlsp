@@ -111,6 +111,7 @@
     "watch": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node --watch",
     "package": "vsce package --no-dependencies",
     "test": "vitest run",
+    "test:integration": "tsc && vscode-test",
     "lint": "eslint src/",
     "format": "prettier --check 'src/**/*.ts'",
     "format:fix": "prettier --write 'src/**/*.ts'"
@@ -125,8 +126,11 @@
   },
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^25.5.0",
     "@types/vscode": "^1.93.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
