@@ -92,7 +92,7 @@ or `"true"`).
 - [x] Update CLAUDE.md references (8f943fc)
 - [x] Fix duplicate key false positives (validator) (e5e5cd8)
 - [x] Fix empty flow collection warnings (validator) (f34a305)
-- [ ] Switch formatter to `early_parse(false)` for scalar style preservation
+- [x] Switch formatter to `early_parse(false)` for scalar style preservation (022d9d2)
 - [ ] Fix blank line preservation (formatter)
 - [ ] Fix flow-to-block sequence indentation (formatter)
 - [ ] Strip unnecessary quotes from Representation variants (formatter)
@@ -170,13 +170,13 @@ path shifts to `Representation`.
 parse function must continue using `early_parse=true` so the rest of the
 language server (schema validation, completions, hover) gets resolved values.
 
-- [ ] Find and use saphyr API for `YamlOwned` with `early_parse(false)`
-- [ ] Update `format_yaml` to use the new parse call
-- [ ] Add test: `on:` key stays unquoted after formatting
-- [ ] Add test: `"on":` key stays quoted after formatting
-- [ ] Add test: `true`/`false`/`null` plain scalars preserved
-- [ ] Add test: numeric values preserved as-is
-- [ ] Verify all existing formatter tests still pass
+- [x] Find and use saphyr API for `YamlOwned` with `early_parse(false)`
+- [x] Update `format_yaml` to use the new parse call
+- [x] Add test: `on:` key stays unquoted after formatting
+- [x] Add test: `"on":` key stays quoted after formatting
+- [x] Add test: `true`/`false`/`null` plain scalars preserved
+- [x] Add test: numeric values preserved as-is
+- [x] Verify all existing formatter tests still pass
 
 ### Task 5: Fix blank line preservation
 
