@@ -63,7 +63,7 @@ parser.
 - [x] Adjust `needs_quoting` for version (b514adc)
 - [x] Adjust validators for version (c58fd56 — no changes needed, confirmed version-agnostic)
 - [x] Add tests (c58fd56)
-- [ ] Update documentation
+- [x] Update documentation (9fdd6fb)
 
 ## Tasks
 
@@ -103,11 +103,11 @@ Adjust any version-sensitive diagnostic behavior.
 - [x] If octal/sexagesimal values affect schema validation, adjust — N/A, saphyr parses 0644 as String
 - [x] Tests for version-specific diagnostic behavior — confirmation test added
 
-### Task 4: Update documentation
+### Task 4: Update documentation (9fdd6fb)
 
-- [ ] Add `yamlVersion` to `docs/configuration.md`
-- [ ] Add `$yamlVersion` modeline syntax
-- [ ] Document 1.1 vs 1.2 behavioral differences
+- [x] Add `yamlVersion` to `docs/configuration.md`
+- [x] Add `$yamlVersion` modeline syntax
+- [x] Document 1.1 vs 1.2 behavioral differences
 
 ## Decisions
 
