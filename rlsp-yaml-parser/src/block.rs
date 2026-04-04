@@ -14,8 +14,8 @@ use crate::combinator::{
 };
 use crate::flow::{e_node, ns_flow_node};
 use crate::structure::{
-    b_comment, c_ns_properties, l_empty, s_b_comment, s_indent, s_indent_lt, s_l_comments,
-    s_separate, s_separate_in_line,
+    b_comment, c_forbidden, c_ns_properties, l_empty, s_b_comment, s_indent, s_indent_lt,
+    s_l_comments, s_separate, s_separate_in_line,
 };
 use crate::token::Code;
 
@@ -990,11 +990,18 @@ pub fn s_l_block_node(n: i32, c: Context) -> Parser<'static> {
 }
 
 /// [197] s-l+flow-in-block(n) — a flow node used inside a block context.
+///
+/// After the separator the parser must not be at a document boundary
+/// (`c-forbidden`): a flow node that would start on a `---`/`...` line is
+/// not valid content.
 #[must_use]
 pub fn s_l_flow_in_block(n: i32) -> Parser<'static> {
     seq(
         s_separate(n + 1, Context::FlowOut),
-        seq(ns_flow_node(n + 1, Context::FlowOut), s_l_comments()),
+        seq(
+            neg_lookahead(c_forbidden()),
+            seq(ns_flow_node(n + 1, Context::FlowOut), s_l_comments()),
+        ),
     )
 }
 

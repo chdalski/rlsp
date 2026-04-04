@@ -10,8 +10,8 @@ use crate::chars::{
     b_break, nb_char, ns_anchor_char, ns_dec_digit, ns_tag_char, ns_uri_char, ns_word_char, s_white,
 };
 use crate::combinator::{
-    Context, Parser, alt, char_parser, many0, many1, neg_lookahead, opt, satisfy, seq, token,
-    wrap_tokens,
+    Context, Parser, State, alt, char_parser, many0, many1, neg_lookahead, opt, satisfy, seq,
+    token, wrap_tokens,
 };
 use crate::token::Code;
 
@@ -550,6 +550,47 @@ pub fn c_ns_properties(n: i32, c: Context) -> Parser<'static> {
         opt(seq(s_separate(n, c), c_ns_tag_property())),
     );
     alt(tag_first, anchor_first)
+}
+
+// ---------------------------------------------------------------------------
+// §9.1.2 – Forbidden positions [205] (shared utility)
+// ---------------------------------------------------------------------------
+
+/// [205] c-forbidden — detects `---` or `...` at the start of a line
+/// followed by a safe terminator (whitespace, line break, or EOF).
+///
+/// This is a zero-width check: it succeeds when the current position is
+/// a document boundary, consuming no input.  Used by the stream parser and
+/// by plain scalar continuation to prevent crossing document boundaries.
+#[must_use]
+pub fn c_forbidden() -> Parser<'static> {
+    Box::new(|state: State<'_>| {
+        use crate::combinator::Reply;
+        if state.pos.column != 0 {
+            return Reply::Failure;
+        }
+        let marker = if state.input.starts_with("---") {
+            "---"
+        } else if state.input.starts_with("...") {
+            "..."
+        } else {
+            return Reply::Failure;
+        };
+        let after = &state.input[marker.len()..];
+        let terminates = after.is_empty()
+            || after.starts_with(' ')
+            || after.starts_with('\t')
+            || after.starts_with('\n')
+            || after.starts_with('\r');
+        if terminates {
+            Reply::Success {
+                tokens: Vec::new(),
+                state,
+            }
+        } else {
+            Reply::Failure
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

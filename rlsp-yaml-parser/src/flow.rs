@@ -8,11 +8,12 @@
 //! its production number in a `// [N]` comment.
 
 use crate::chars::{decode_escape, ns_anchor_char, ns_plain_char, ns_plain_first};
+use crate::combinator::neg_lookahead;
 use crate::combinator::{
     Context, Parser, Reply, State, char_parser, many0, many1, seq, token, wrap_tokens,
 };
 use crate::structure::{
-    b_l_folded, c_ns_properties, s_flow_folded, s_flow_line_prefix, s_separate,
+    b_l_folded, c_forbidden, c_ns_properties, s_flow_folded, s_flow_line_prefix, s_separate,
 };
 use crate::token::{Code, Token};
 
@@ -468,10 +469,16 @@ fn ns_plain_one_line(c: Context) -> Parser<'static> {
 }
 
 /// [133] s-ns-plain-next-line(n,c) — continuation line of a plain scalar.
+///
+/// A continuation line must not start at a document boundary (`c-forbidden`):
+/// `---` or `...` at column 0 followed by a safe terminator.
 fn s_ns_plain_next_line(n: i32, c: Context) -> Parser<'static> {
     seq(
         s_flow_folded(n),
-        seq(ns_plain_char(c), nb_ns_plain_in_line(c)),
+        seq(
+            neg_lookahead(c_forbidden()),
+            seq(ns_plain_char(c), nb_ns_plain_in_line(c)),
+        ),
     )
 }
 

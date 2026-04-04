@@ -12,5 +12,8 @@ pub mod combinator;
 pub mod encoding;
 pub mod flow;
 pub mod pos;
+pub mod stream;
 pub mod structure;
 pub mod token;
+
+pub use stream::tokenize;
