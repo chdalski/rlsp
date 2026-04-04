@@ -1980,4 +1980,41 @@ spec:
             "should detect flowMap after single-quoted section"
         );
     }
+
+    // ---- YAML version agnosticism ----
+    //
+    // All validators in this module operate on raw text or on saphyr-parsed
+    // YamlOwned values. Saphyr always parses as YAML 1.2 regardless of any
+    // `yamlVersion` setting, so the parsed representation is identical for
+    // all version settings. Consequently, no validator here requires a
+    // YamlVersion parameter — diagnostics are version-agnostic.
+    //
+    // The tests below confirm that inputs containing YAML 1.1-only boolean
+    // literals (`yes`, `no`, `on`, `off`) produce the same diagnostic output
+    // as equivalent inputs without them, locking down this invariant.
+
+    #[test]
+    fn validators_produce_same_diagnostics_regardless_of_yaml_version_setting() {
+        // `on` and `yes` are V1.1 boolean keywords; in V1.2 (saphyr's parse
+        // mode) they are plain strings. Since all validators receive only text
+        // or saphyr-parsed documents, neither `on` nor `yes` triggers any
+        // special diagnostic path — they are treated as ordinary string keys
+        // in both cases.
+        let text_with_v1_1_keywords = "on: push\nyes: true\n";
+        let text_plain = "push_trigger: push\nenabled: true\n";
+
+        // validate_duplicate_keys: no duplicates in either text.
+        assert_eq!(
+            validate_duplicate_keys(text_with_v1_1_keywords).len(),
+            validate_duplicate_keys(text_plain).len(),
+            "duplicate-key diagnostics must not differ based on v1.1 keyword presence"
+        );
+
+        // validate_flow_style: no flow collections in either text.
+        assert_eq!(
+            validate_flow_style(text_with_v1_1_keywords).len(),
+            validate_flow_style(text_plain).len(),
+            "flow-style diagnostics must not differ based on v1.1 keyword presence"
+        );
+    }
 }
