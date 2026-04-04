@@ -93,25 +93,27 @@ fn content_signature(line: &str) -> String {
 /// A content line from the original text, with its associated comments.
 struct ContentEntry {
     signature: String,
+    /// Number of blank lines that preceded this content line in the original.
+    /// Capped at 1 — multiple consecutive blank lines collapse to one.
+    blank_lines_before: usize,
     /// Leading comment lines that precede this content line.
     leading: Vec<String>,
     /// Trailing comment on this content line (if any).
     trailing: Option<String>,
 }
 
-/// Attach extracted comments back to formatted YAML output.
+/// Attach extracted comments and blank lines back to formatted YAML output.
 ///
 /// Strategy:
 /// - Build a list of content entries from the original (one per non-blank, non-leading-comment line).
-/// - For each entry, record leading comments that preceded it and any trailing comment on the line.
-/// - Walk the formatted output; when a line's signature matches the next entry, emit leading
-///   comments (indented to match the content line) before it, and append any trailing comment.
+/// - For each entry, record blank lines before it (capped at 1), leading comments that preceded
+///   it, and any trailing comment on the line.
+/// - Walk the formatted output; when a line's signature matches the next entry, emit the blank
+///   line (if any), then leading comments (indented to match the content line), then the line.
 /// - Any unmatched leading comments (e.g. at end of file) are appended at the end.
+///
+/// Always runs (even with no comments) so blank line reattachment is never skipped.
 fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> String {
-    if comments.is_empty() {
-        return formatted.to_string();
-    }
-
     // Build a quick lookup: line index -> comment.
     let line_to_comment: std::collections::HashMap<usize, &Comment> =
         comments.iter().map(|c| (c.line, c)).collect();
@@ -119,13 +121,16 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
     let mut entries: Vec<ContentEntry> = Vec::new();
     let mut pending_leading: Vec<String> = Vec::new();
     let mut pending_blanks: usize = 0;
+    let mut first_entry = true;
 
     for (idx, line) in original.lines().enumerate() {
         if let Some(comment) = line_to_comment.get(&idx) {
             match comment.kind {
                 CommentKind::Leading => {
                     // Insert a blank separator if there was a gap before this comment group.
-                    if pending_blanks > 0 && !pending_leading.is_empty() {
+                    // This handles both inter-group blanks (pending_leading non-empty) and
+                    // blanks between content and the next comment group (pending_leading empty).
+                    if pending_blanks > 0 {
                         pending_leading.push(String::new());
                     }
                     pending_blanks = 0;
@@ -134,9 +139,16 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
                 CommentKind::Trailing => {
                     entries.push(ContentEntry {
                         signature: content_signature(line),
+                        // Don't add a blank before the very first entry.
+                        blank_lines_before: if first_entry {
+                            0
+                        } else {
+                            pending_blanks.min(1)
+                        },
                         leading: std::mem::take(&mut pending_leading),
                         trailing: Some(comment.text.clone()),
                     });
+                    first_entry = false;
                     pending_blanks = 0;
                 }
             }
@@ -145,9 +157,15 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
         } else {
             entries.push(ContentEntry {
                 signature: content_signature(line),
+                blank_lines_before: if first_entry {
+                    0
+                } else {
+                    pending_blanks.min(1)
+                },
                 leading: std::mem::take(&mut pending_leading),
                 trailing: None,
             });
+            first_entry = false;
             pending_blanks = 0;
         }
     }
@@ -168,6 +186,11 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
                 if entry.signature == fmt_sig {
                     let indent_len = fmt_line.len() - fmt_line.trim_start().len();
                     let indent_str = " ".repeat(indent_len);
+
+                    // Emit blank line before this entry if the original had one.
+                    if entry.blank_lines_before > 0 {
+                        result_lines.push(String::new());
+                    }
 
                     for lc in &entry.leading {
                         if lc.is_empty() {
@@ -292,10 +315,9 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         result.push('\n');
     }
 
-    // Reattach comments to the formatted output.
-    if !comments.is_empty() {
-        result = attach_comments(text_input, &result, &comments);
-    }
+    // Reattach comments and blank lines to the formatted output.
+    // Always runs — blank line preservation requires a pass even when there are no comments.
+    result = attach_comments(text_input, &result, &comments);
 
     result
 }
@@ -1626,6 +1648,126 @@ mod tests {
             "document separator missing: {result:?}"
         );
         assert!(result.contains("b: 2"), "second doc missing: {result:?}");
+    }
+
+    // ---- Formatter: Blank Line Preservation ----
+
+    #[test]
+    fn format_yaml_blank_line_between_top_level_keys_preserved() {
+        let input = "on: push\n\npermissions:\n  contents: read\n\njobs:\n  build: {}\n";
+        let result = format_yaml(input, &default_opts());
+        // Blank line between `on: push` and `permissions:` must be present.
+        assert!(
+            result.contains("on: push\n\npermissions:"),
+            "blank line between on: and permissions: missing: {result:?}"
+        );
+        // Blank line between permissions block and jobs: must be present.
+        assert!(result.contains("jobs:"), "jobs: key missing: {result:?}");
+        let on_pos = result.find("on: push").unwrap();
+        let jobs_pos = result.find("jobs:").unwrap();
+        let between = &result[on_pos..jobs_pos];
+        assert!(
+            between.contains("\n\n"),
+            "expected at least one blank line before jobs: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_blank_line_between_nested_keys_preserved() {
+        let input = "parent:\n  a: 1\n\n  b: 2\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("a: 1\n\n") || result.contains("a: 1\n\n  b:"),
+            "blank line between nested a and b missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_multiple_consecutive_blank_lines_collapsed_to_one() {
+        let input = "a: 1\n\n\nb: 2\n";
+        let result = format_yaml(input, &default_opts());
+        // Must contain exactly one blank line, not two.
+        assert!(
+            result.contains("a: 1\n\nb: 2"),
+            "expected exactly one blank line: {result:?}"
+        );
+        assert!(
+            !result.contains("a: 1\n\n\nb: 2"),
+            "two consecutive blank lines should collapse to one: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_blank_line_preservation_is_idempotent() {
+        let input = "on: push\n\npermissions:\n  contents: read\n\njobs:\n  build: {}\n";
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(first, second, "blank line preservation is not idempotent");
+    }
+
+    #[test]
+    fn format_yaml_blank_line_between_sequence_items_preserved() {
+        let input = "items:\n  - a: 1\n\n  - b: 2\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("\n\n"),
+            "blank line between sequence items missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_blank_lines_and_comments_coexist() {
+        let input = "# section one\na: 1\n\n# section two\nb: 2\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("# section one"),
+            "first comment missing: {result:?}"
+        );
+        assert!(
+            result.contains("# section two"),
+            "second comment missing: {result:?}"
+        );
+        // Blank line between sections must be present.
+        let first_pos = result.find("a: 1").unwrap();
+        let second_pos = result.find("# section two").unwrap();
+        let between = &result[first_pos..second_pos];
+        assert!(
+            between.contains("\n\n"),
+            "blank line between sections missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_blank_line_at_end_of_file_not_added() {
+        let result = format_yaml("a: 1\n\n", &default_opts());
+        assert_eq!(
+            result, "a: 1\n",
+            "trailing blank line should be stripped: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_blank_lines_inside_block_scalar_unaffected() {
+        let input = "body: |\n  line one\n\n  line three\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains("line one"),
+            "block content missing: {result:?}"
+        );
+        assert!(
+            result.contains("line three"),
+            "block content missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_no_blank_lines_not_added() {
+        let input = "a: 1\nb: 2\n";
+        let result = format_yaml(input, &default_opts());
+        assert_eq!(
+            result, "a: 1\nb: 2\n",
+            "no blank lines should be added: {result:?}"
+        );
     }
 
     // AC8: Multiple trailing leading comments at EOF, including a blank-line separator.
