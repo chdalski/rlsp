@@ -577,13 +577,11 @@ pub fn validate_duplicate_keys(text: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     // Each entry: (indent_level, HashSet<normalized_key>).
-    // The stack tracks the current nesting of block mapping scopes.
+    // The stack tracks nesting of block mapping scopes throughout the document,
+    // including inside sequence items. Sequence items reset the stack at their indent
+    // level so that sibling items (and sibling sub-mappings within an item) get fresh
+    // scopes rather than sharing one flat key set.
     let mut scope_stack: Vec<(usize, HashSet<String>)> = Vec::new();
-
-    // Per-sequence-item scope stack: each entry is (seq_item_indent, seen_keys).
-    // When `- ` is seen at indent X, a new entry is pushed; subsequent keys at
-    // indent > X belong to that item's scope rather than the block scope.
-    let mut seq_item_scopes: Vec<(usize, HashSet<String>)> = Vec::new();
 
     for (line_idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
@@ -596,7 +594,6 @@ pub fn validate_duplicate_keys(text: &str) -> Vec<Diagnostic> {
         // Document separator resets all scopes
         if trimmed == "---" || trimmed == "..." {
             scope_stack.clear();
-            seq_item_scopes.clear();
             continue;
         }
 
@@ -609,10 +606,10 @@ pub fn validate_duplicate_keys(text: &str) -> Vec<Diagnostic> {
 
         // Detect sequence item: line starts with `- ` (or bare `-`)
         let (effective_indent, effective_trimmed) = if trimmed.starts_with("- ") || trimmed == "-" {
-            // Pop seq_item_scopes at the same or deeper indent (sibling/child items)
-            seq_item_scopes.retain(|(si, _)| *si < indent);
-            // Push a fresh scope for this sequence item
-            seq_item_scopes.push((indent, HashSet::new()));
+            // A new sequence item at `indent` resets all scopes at or deeper than `indent`.
+            // This ensures sibling items (and sibling sub-mappings within an item) each
+            // get fresh scopes rather than sharing key sets from the previous item.
+            scope_stack.retain(|(si, _)| *si < indent);
 
             if trimmed == "-" {
                 // Bare `-` with no inline key; nothing to parse as a key
@@ -637,40 +634,22 @@ pub fn validate_duplicate_keys(text: &str) -> Vec<Diagnostic> {
         // Pop scope_stack entries strictly deeper than effective_indent (they are closed)
         scope_stack.retain(|(si, _)| *si <= effective_indent);
 
-        // Determine whether this key belongs to a sequence item scope or the block scope.
-        let in_seq_item = seq_item_scopes
+        // Ensure a scope exists at effective_indent, then check/record the key.
+        if scope_stack
             .last()
-            .is_some_and(|(si, _)| *si < effective_indent);
-
-        if in_seq_item {
-            if let Some((_, seen)) = seq_item_scopes.last_mut() {
-                check_or_insert_key(
-                    seen,
-                    normalized,
-                    &key_str,
-                    line_num,
-                    key_col,
-                    &mut diagnostics,
-                );
-            }
-        } else {
-            // Ensure a scope exists at effective_indent
-            if scope_stack
-                .last()
-                .is_none_or(|(si, _)| *si != effective_indent)
-            {
-                scope_stack.push((effective_indent, HashSet::new()));
-            }
-            if let Some((_, seen)) = scope_stack.last_mut() {
-                check_or_insert_key(
-                    seen,
-                    normalized,
-                    &key_str,
-                    line_num,
-                    key_col,
-                    &mut diagnostics,
-                );
-            }
+            .is_none_or(|(si, _)| *si != effective_indent)
+        {
+            scope_stack.push((effective_indent, HashSet::new()));
+        }
+        if let Some((_, seen)) = scope_stack.last_mut() {
+            check_or_insert_key(
+                seen,
+                normalized,
+                &key_str,
+                line_num,
+                key_col,
+                &mut diagnostics,
+            );
         }
     }
 
@@ -1690,6 +1669,109 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'name'"));
+    }
+
+    // ---- Duplicate Key Validator: Sibling Mappings ----
+
+    #[test]
+    fn should_not_flag_same_key_in_sibling_mappings_under_common_parent() {
+        let text = "parent:\n  child_a:\n    cpu: 100m\n    memory: 128Mi\n  child_b:\n    cpu: 200m\n    memory: 256Mi\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_flag_kubernetes_limitrange_sibling_pattern() {
+        let text = "\
+limits:
+  max:
+    cpu: \"2\"
+    memory: 1Gi
+  min:
+    cpu: 100m
+    memory: 128Mi
+  default:
+    cpu: 500m
+    memory: 512Mi
+  defaultRequest:
+    cpu: 250m
+    memory: 256Mi
+";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_flag_kubernetes_limitrange_inside_sequence_item() {
+        // This is the actual K8s LimitRange pattern where limits entries
+        // are sequence items, and each entry has sibling mappings (max, min,
+        // default, defaultRequest) that each contain cpu and memory keys.
+        let text = "\
+spec:
+  limits:
+    - type: Container
+      max:
+        cpu: \"2\"
+        memory: 1Gi
+      min:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 250m
+        memory: 256Mi
+";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_flag_same_key_in_deeply_nested_sibling_mappings() {
+        let text =
+            "level1:\n  level2:\n    sibling_a:\n      value: 1\n    sibling_b:\n      value: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_still_detect_duplicate_in_same_sibling_mapping() {
+        let text = "parent:\n  child:\n    cpu: 100m\n    cpu: 200m\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("'cpu'"));
+        assert_eq!(result[0].range.start.line, 3);
+    }
+
+    #[test]
+    fn should_not_flag_empty_sibling_mappings_with_shared_key_in_later_sibling() {
+        let text = "parent:\n  a: ~\n  b:\n    cpu: 1\n  c:\n    cpu: 2\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_flag_same_key_in_sibling_mappings_mixed_indent_depth() {
+        let text = "resources:\n  requests:\n    cpu: 100m\n  limits:\n    cpu: 500m\n";
+        let result = validate_duplicate_keys(text);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_detect_triple_duplicate_within_single_sibling_mapping() {
+        let text = "parent:\n  child:\n    x: 1\n    x: 2\n    x: 3\n";
+        let result = validate_duplicate_keys(text);
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|d| d.message.contains("'x'")));
     }
 
     // ---- Duplicate Key Validator: Edge Cases ----
