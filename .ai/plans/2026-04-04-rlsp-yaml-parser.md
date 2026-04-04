@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -55,8 +55,8 @@ high-quality crates.io package.
 
 ## Steps
 
-- [ ] Create crate scaffold, position/span types, and
-      parser combinator framework
+- [x] Create crate scaffold, position/span types, and
+      parser combinator framework (6b1d449)
 - [ ] Implement character productions (spec §5) and
       encoding detection
 - [ ] Implement structural productions (spec §6) —
@@ -92,12 +92,12 @@ will use.
 **Files:** `rlsp-yaml-parser/Cargo.toml`, `src/lib.rs`,
 `src/pos.rs`, `src/token.rs`, `src/combinator.rs`
 
-- [ ] Create `rlsp-yaml-parser/` with Cargo.toml inheriting
+- [x] Create `rlsp-yaml-parser/` with Cargo.toml inheriting
       workspace lints, edition 2024, MSRV 1.87
-- [ ] Add to workspace members in root `Cargo.toml`
-- [ ] Define `Pos` type (byte offset, char offset, line,
+- [x] Add to workspace members in root `Cargo.toml`
+- [x] Define `Pos` type (byte offset, char offset, line,
       column) and `Span` type (start + end pos)
-- [ ] Define `Token` type with `Code` enum (~40 variants:
+- [x] Define `Token` type with `Code` enum (~40 variants:
       `BeginMapping`, `EndMapping`, `BeginScalar`,
       `EndScalar`, `Text`, `Indicator`, `BeginComment`,
       `EndComment`, `BeginAnchor`, `EndAnchor`,
@@ -106,7 +106,7 @@ will use.
       `EndSequence`, `DirectivesEnd`, `DocumentEnd`,
       `BeginNode`, `EndNode`, etc.). Every token carries a
       `Pos`.
-- [ ] Build parser combinator framework:
+- [x] Build parser combinator framework:
       - `Parser` type: `State → Reply` (state = input chars
         + position + context)
       - Core combinators: sequence (`&`), alternative (`/`),
@@ -120,7 +120,7 @@ will use.
       - Position tracking: automatic pos stamping on tokens
       - Error reporting: position + message, with recovery
         hints
-- [ ] Unit tests for every combinator (sequence, choice,
+- [x] Unit tests for every combinator (sequence, choice,
       repetition, lookahead, commit, indentation threading)
 
 ### Task 2: Character productions and encoding (§5)
