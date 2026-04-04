@@ -4,6 +4,8 @@ use rlsp_fmt::{Doc, FormatOptions, concat, format as fmt_format, hard_line, inde
 use saphyr::{ScalarOwned, ScalarStyle, YamlLoader, YamlOwned};
 use saphyr_parser::{BufferedInput, Parser};
 
+use crate::server::YamlVersion;
+
 /// Classification of a YAML comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CommentKind {
@@ -244,6 +246,8 @@ pub struct YamlFormatOptions {
     pub single_quote: bool,
     /// Add spaces inside flow braces: `{ a: 1 }` vs `{a: 1}`. Default: true.
     pub bracket_spacing: bool,
+    /// YAML specification version for quoting decisions. Default: `V1_2`.
+    pub yaml_version: YamlVersion,
 }
 
 impl Default for YamlFormatOptions {
@@ -254,6 +258,7 @@ impl Default for YamlFormatOptions {
             use_tabs: false,
             single_quote: false,
             bracket_spacing: true,
+            yaml_version: YamlVersion::V1_2,
         }
     }
 }
@@ -346,7 +351,7 @@ fn node_to_doc(node: &YamlOwned, options: &YamlFormatOptions) -> Doc {
                     // enabled, the value will be single-quoted per user preference
                     // rather than emitted as plain. Semantic quotes (values that
                     // need quoting to avoid YAML ambiguity) are always preserved.
-                    if needs_quoting(s) {
+                    if needs_quoting(s, options.yaml_version) {
                         if *style == ScalarStyle::DoubleQuoted {
                             text(format!("\"{}\"", escape_double_quoted(s)))
                         } else {
@@ -360,7 +365,7 @@ fn node_to_doc(node: &YamlOwned, options: &YamlFormatOptions) -> Doc {
                     // For plain scalars that are YAML reserved words (booleans, null,
                     // numbers), preserve them as-is. For safe plain strings, apply the
                     // single_quote formatting option so user preferences are respected.
-                    if needs_quoting(s) {
+                    if needs_quoting(s, options.yaml_version) {
                         text(s.clone())
                     } else {
                         string_to_doc(s, options)
@@ -425,7 +430,7 @@ fn format_float(f: f64) -> String {
 
 /// Convert a string scalar to a Doc, quoting as necessary.
 fn string_to_doc(s: &str, options: &YamlFormatOptions) -> Doc {
-    if needs_quoting(s) {
+    if needs_quoting(s, options.yaml_version) {
         // Must quote — use the preferred style.
         if options.single_quote && !s.contains('\'') {
             text(format!("'{s}'"))
@@ -442,37 +447,31 @@ fn string_to_doc(s: &str, options: &YamlFormatOptions) -> Doc {
 }
 
 /// Returns true if a string value requires quoting to avoid YAML ambiguity.
-fn needs_quoting(s: &str) -> bool {
+///
+/// The `version` parameter controls whether YAML 1.1-only boolean keywords
+/// (`yes`, `no`, `on`, `off` and their capitalised variants) count as reserved.
+/// In YAML 1.2 those words are plain strings and do not need quoting.
+fn needs_quoting(s: &str, version: YamlVersion) -> bool {
     if s.is_empty() {
         return true;
     }
 
-    // Values that are reserved YAML keywords when unquoted.
-    matches!(
+    // Values that are reserved YAML keywords in all versions.
+    let always_reserved = matches!(
         s,
-        "null"
-            | "~"
-            | "true"
-            | "false"
-            | "yes"
-            | "no"
-            | "on"
-            | "off"
-            | "True"
-            | "False"
-            | "Yes"
-            | "No"
-            | "On"
-            | "Off"
-            | "TRUE"
-            | "FALSE"
-            | "YES"
-            | "NO"
-            | "ON"
-            | "OFF"
-            | "NULL"
-            | "Null"
-    ) || looks_like_number(s)
+        "null" | "~" | "true" | "false" | "Null" | "NULL" | "True" | "TRUE" | "False" | "FALSE"
+    );
+
+    // Values that are reserved only under YAML 1.1.
+    let v1_1_reserved = version == YamlVersion::V1_1
+        && matches!(
+            s,
+            "yes" | "no" | "on" | "off" | "Yes" | "No" | "On" | "Off" | "YES" | "NO" | "ON" | "OFF"
+        );
+
+    always_reserved
+        || v1_1_reserved
+        || looks_like_number(s)
         || s.starts_with(|c: char| {
             matches!(
                 c,
@@ -648,6 +647,13 @@ mod tests {
 
     fn default_opts() -> YamlFormatOptions {
         YamlFormatOptions::default()
+    }
+
+    fn opts_with_version(v: YamlVersion) -> YamlFormatOptions {
+        YamlFormatOptions {
+            yaml_version: v,
+            ..default_opts()
+        }
     }
 
     // Test 1: Simple key-value formats correctly.
@@ -1396,17 +1402,23 @@ mod tests {
     // NQ1: Empty string requires quoting (line 380).
     #[test]
     fn needs_quoting_empty_string() {
-        assert!(needs_quoting(""), "empty string must be quoted");
+        assert!(
+            needs_quoting("", YamlVersion::V1_2),
+            "empty string must be quoted"
+        );
     }
 
     // NQ2: Numeric-looking string requires quoting (line 384 — looks_like_number path).
     #[test]
     fn needs_quoting_numeric_string() {
         assert!(
-            needs_quoting("123"),
+            needs_quoting("123", YamlVersion::V1_2),
             "integer-looking string must be quoted"
         );
-        assert!(needs_quoting("3.14"), "float-looking string must be quoted");
+        assert!(
+            needs_quoting("3.14", YamlVersion::V1_2),
+            "float-looking string must be quoted"
+        );
     }
 
     // Unit tests for escape_double_quoted.
@@ -1533,10 +1545,11 @@ mod tests {
 
     #[test]
     fn format_yaml_quoted_on_key_stays_quoted() {
-        let result = format_yaml("\"on\": push\n", &default_opts());
+        // `"on"` is a V1.1 boolean keyword; quotes are preserved only when V1.1 is active.
+        let result = format_yaml("\"on\": push\n", &opts_with_version(YamlVersion::V1_1));
         assert!(
             result.contains("\"on\""),
-            "explicitly quoted on: key should stay quoted: {result:?}"
+            "explicitly quoted on: key should stay quoted in V1.1: {result:?}"
         );
     }
 
@@ -2176,13 +2189,13 @@ mod tests {
         );
     }
 
-    // QS5: Double-quoted YAML 1.1 keyword → quotes preserved.
+    // QS5: Double-quoted YAML 1.1 keyword → quotes preserved in V1_1.
     #[test]
     fn format_yaml_double_quoted_on_keyword_kept_quoted() {
-        let result = format_yaml("value: \"on\"\n", &default_opts());
+        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_1));
         assert!(
             result.contains("\"on\""),
-            "quotes on YAML 1.1 keyword must be preserved: {result:?}"
+            "quotes on YAML 1.1 keyword must be preserved in V1.1 mode: {result:?}"
         );
     }
 
@@ -2254,6 +2267,176 @@ mod tests {
         assert!(
             !result.contains("\"python\""),
             "original double quotes should not be preserved: {result:?}"
+        );
+    }
+
+    // ---- needs_quoting: version-aware ----
+
+    #[test]
+    fn needs_quoting_on_is_false_in_v1_2() {
+        assert!(!needs_quoting("on", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_on_is_true_in_v1_1() {
+        assert!(needs_quoting("on", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_yes_is_false_in_v1_2() {
+        assert!(!needs_quoting("yes", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_yes_is_true_in_v1_1() {
+        assert!(needs_quoting("yes", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_off_is_false_in_v1_2() {
+        assert!(!needs_quoting("off", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_off_is_true_in_v1_1() {
+        assert!(needs_quoting("off", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_no_is_false_in_v1_2() {
+        assert!(!needs_quoting("no", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_no_is_true_in_v1_1() {
+        assert!(needs_quoting("no", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_true_is_true_in_v1_2() {
+        assert!(needs_quoting("true", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_true_is_true_in_v1_1() {
+        assert!(needs_quoting("true", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_null_is_true_in_v1_2() {
+        assert!(needs_quoting("null", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_null_is_true_in_v1_1() {
+        assert!(needs_quoting("null", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_uppercase_yes_is_false_in_v1_2() {
+        assert!(!needs_quoting("YES", YamlVersion::V1_2));
+    }
+
+    #[test]
+    fn needs_quoting_uppercase_yes_is_true_in_v1_1() {
+        assert!(needs_quoting("YES", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_empty_string_is_true_in_both_versions() {
+        assert!(needs_quoting("", YamlVersion::V1_2));
+        assert!(needs_quoting("", YamlVersion::V1_1));
+    }
+
+    #[test]
+    fn needs_quoting_numeric_string_is_true_in_both_versions() {
+        assert!(needs_quoting("123", YamlVersion::V1_2));
+        assert!(needs_quoting("123", YamlVersion::V1_1));
+    }
+
+    // ---- Formatter: Version-aware quoting ----
+
+    #[test]
+    fn format_yaml_v1_1_double_quoted_on_value_stays_quoted() {
+        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_1));
+        assert!(
+            result.contains("\"on\""),
+            "already-quoted on must stay quoted in V1.1: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_v1_2_double_quoted_on_value_stripped_to_plain() {
+        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_2));
+        assert!(
+            !result.contains("\"on\"") && !result.contains("'on'"),
+            "on is not reserved in V1.2; quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("on"),
+            "on value must appear as plain: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_v1_1_double_quoted_yes_value_stays_quoted() {
+        let result = format_yaml("value: \"yes\"\n", &opts_with_version(YamlVersion::V1_1));
+        assert!(
+            result.contains("\"yes\""),
+            "already-quoted yes must stay quoted in V1.1: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_v1_2_double_quoted_yes_value_stripped_to_plain() {
+        let result = format_yaml("value: \"yes\"\n", &opts_with_version(YamlVersion::V1_2));
+        assert!(
+            !result.contains("\"yes\"") && !result.contains("'yes'"),
+            "yes is not reserved in V1.2; quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("yes"),
+            "yes value must appear as plain: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_true_value_quoted_in_both_versions() {
+        let r1 = format_yaml("value: \"true\"\n", &opts_with_version(YamlVersion::V1_1));
+        let r2 = format_yaml("value: \"true\"\n", &opts_with_version(YamlVersion::V1_2));
+        assert!(
+            r1.contains("\"true\""),
+            "true must stay quoted in V1.1: {r1:?}"
+        );
+        assert!(
+            r2.contains("\"true\""),
+            "true must stay quoted in V1.2: {r2:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_on_key_stays_unquoted_in_v1_2() {
+        let result = format_yaml("on: push\n", &opts_with_version(YamlVersion::V1_2));
+        assert!(
+            result.contains("on:"),
+            "on: key should not be quoted in V1.2: {result:?}"
+        );
+        assert!(
+            !result.contains("\"on\"") && !result.contains("'on'"),
+            "on: key must not be quoted in V1.2: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_on_key_stays_unquoted_in_v1_1() {
+        let result = format_yaml("on: push\n", &opts_with_version(YamlVersion::V1_1));
+        assert!(
+            result.contains("on:"),
+            "on: key should remain as plain in V1.1 (plain scalars are emitted verbatim): {result:?}"
+        );
+        assert!(
+            !result.contains("\"on\"") && !result.contains("'on'"),
+            "on: plain key must not gain quotes even in V1.1: {result:?}"
         );
     }
 }

@@ -179,7 +179,6 @@ impl Backend {
     /// Priority: modeline (`$yamlVersion=`) > workspace setting > default (1.2).
     /// Invalid version strings (neither `"1.1"` nor `"1.2"`) are treated as
     /// absent — the next fallback in the chain is used.
-    #[allow(dead_code)] // consumed by downstream formatter/validator tasks
     pub(crate) fn get_yaml_version(&self, text: &str) -> YamlVersion {
         let parse_version = |s: &str| {
             if s == "1.1" {
@@ -862,6 +861,7 @@ impl LanguageServer for Backend {
         // Tab settings come from LSP params (editor override); other settings from workspace.
         let tab_size = params.options.tab_size as usize;
         let insert_spaces = params.options.insert_spaces;
+        let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
         let options = crate::formatter::YamlFormatOptions {
             print_width: settings
@@ -875,6 +875,7 @@ impl LanguageServer for Backend {
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
             bracket_spacing: true,
+            yaml_version,
         };
         drop(settings);
 
@@ -933,6 +934,7 @@ impl LanguageServer for Backend {
 
         let tab_size = params.options.tab_size as usize;
         let insert_spaces = params.options.insert_spaces;
+        let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
         let options = crate::formatter::YamlFormatOptions {
             print_width: settings
@@ -946,6 +948,7 @@ impl LanguageServer for Backend {
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
             bracket_spacing: true,
+            yaml_version,
         };
         drop(settings);
 
@@ -1795,6 +1798,48 @@ mod tests {
             edits[0].new_text.contains("b: 2"),
             "formatted line must normalise double-space: {:?}",
             edits[0].new_text
+        );
+    }
+
+    // ---- Formatting handler: version-aware plumbing ----
+
+    #[tokio::test]
+    async fn formatting_handler_uses_v1_1_from_modeline() {
+        use tower_lsp::lsp_types::{
+            DocumentFormattingParams, FormattingOptions, TextDocumentIdentifier,
+            WorkDoneProgressParams,
+        };
+
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///test.yaml").unwrap();
+        // Double-space after colon forces a formatting change, ensuring the handler
+        // runs and produces an edit. Modeline declares V1.1 so `"yes"` must stay quoted.
+        let text = "# yaml-language-server: $yamlVersion=1.1\nvalue:  \"yes\"\n";
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), text.to_string());
+        }
+
+        let params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let result = LanguageServer::formatting(backend, params).await.unwrap();
+        let edits = result.expect("formatter must produce an edit for double-space input");
+        let new_text = edits
+            .iter()
+            .map(|e| e.new_text.as_str())
+            .collect::<String>();
+        assert!(
+            new_text.contains("\"yes\""),
+            "V1.1 modeline: yes must stay quoted in formatted output: {new_text:?}"
         );
     }
 
