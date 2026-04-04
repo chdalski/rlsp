@@ -90,7 +90,7 @@ or `"true"`).
 
 - [x] Clarify requirements with user
 - [x] Update CLAUDE.md references (8f943fc)
-- [ ] Fix duplicate key false positives (validator)
+- [x] Fix duplicate key false positives (validator) (e5e5cd8)
 - [ ] Fix empty flow collection warnings (validator)
 - [ ] Switch formatter to `early_parse(false)` for scalar style preservation
 - [ ] Fix blank line preservation (formatter)
@@ -126,10 +126,10 @@ scopes at same indent, forcing a fresh scope for sibling mappings). This
 ensures that when `min:` follows `max:` at the same indent, the stale keys
 from `max:`'s children are cleared.
 
-- [ ] Fix `scope_stack.retain` condition on line 638
-- [ ] Add test: sibling mappings under common parent (K8s LimitRange pattern)
-- [ ] Add test: deeply nested sibling mappings
-- [ ] Verify existing tests still pass
+- [x] Fix `scope_stack.retain` condition on line 638
+- [x] Add test: sibling mappings under common parent (K8s LimitRange pattern)
+- [x] Add test: deeply nested sibling mappings
+- [x] Verify existing tests still pass
 
 ### Task 3: Fix empty flow collection warnings
 
