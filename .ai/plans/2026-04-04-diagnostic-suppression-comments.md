@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -39,7 +39,7 @@ Follow the established `# yaml-language-server:` prefix:
 
 ## Steps
 
-- [ ] Implement suppression comment parser
+- [x] Implement suppression comment parser (63daa76)
 - [ ] Integrate with diagnostic pipeline
 - [ ] Add per-line suppression
 - [ ] Add per-file suppression
@@ -48,17 +48,17 @@ Follow the established `# yaml-language-server:` prefix:
 
 ## Tasks
 
-### Task 1: Implement suppression comment parser
+### Task 1: Implement suppression comment parser (63daa76)
 
 Add a function to scan YAML text for suppression comments and build a
 suppression map. Follow the modeline scanning pattern in `schema.rs`.
 
-- [ ] Parse `# rlsp-yaml-disable-next-line [codes]` → suppress line N+1
-- [ ] Parse `# rlsp-yaml-disable-file [codes]` → suppress entire file
-- [ ] Handle comma-separated codes: `# rlsp-yaml-disable-next-line duplicateKey, flowMap`
-- [ ] Handle no codes (suppress all): `# rlsp-yaml-disable-next-line`
-- [ ] Return a `SuppressionMap` struct with per-line and per-file rules
-- [ ] Unit tests for parser
+- [x] Parse `# rlsp-yaml-disable-next-line [codes]` → suppress line N+1
+- [x] Parse `# rlsp-yaml-disable-file [codes]` → suppress entire file
+- [x] Handle comma-separated codes: `# rlsp-yaml-disable-next-line duplicateKey, flowMap`
+- [x] Handle no codes (suppress all): `# rlsp-yaml-disable-next-line`
+- [x] Return a `SuppressionMap` struct with per-line and per-file rules
+- [x] Unit tests for parser
 
 ### Task 2: Integrate suppression with diagnostic pipeline
 
