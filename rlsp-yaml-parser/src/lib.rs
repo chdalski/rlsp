@@ -9,6 +9,7 @@
 pub mod block;
 pub mod chars;
 pub mod combinator;
+pub mod emitter;
 pub mod encoding;
 pub mod event;
 pub mod flow;
