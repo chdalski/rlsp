@@ -203,37 +203,41 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
                 '\'' if !in_double_quote => in_single_quote = !in_single_quote,
                 '"' if !in_single_quote => in_double_quote = !in_double_quote,
                 '{' if !in_single_quote && !in_double_quote => {
-                    // Find matching closing brace
+                    // Find matching closing brace; skip empty collections (`{}`, `{ }`)
                     if let Some(close_pos) = find_closing_char(line, i, '{', '}') {
-                        #[allow(clippy::cast_possible_truncation)]
-                        diagnostics.push(Diagnostic {
-                            range: Range::new(
-                                Position::new(line_num, i as u32),
-                                Position::new(line_num, (close_pos + 1) as u32),
-                            ),
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            code: Some(NumberOrString::String("flowMap".to_string())),
-                            message: "Flow mapping style: use block style instead".to_string(),
-                            source: Some("rlsp-yaml".to_string()),
-                            ..Diagnostic::default()
-                        });
+                        if !line[i + 1..close_pos].trim().is_empty() {
+                            #[allow(clippy::cast_possible_truncation)]
+                            diagnostics.push(Diagnostic {
+                                range: Range::new(
+                                    Position::new(line_num, i as u32),
+                                    Position::new(line_num, (close_pos + 1) as u32),
+                                ),
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                code: Some(NumberOrString::String("flowMap".to_string())),
+                                message: "Flow mapping style: use block style instead".to_string(),
+                                source: Some("rlsp-yaml".to_string()),
+                                ..Diagnostic::default()
+                            });
+                        }
                     }
                 }
                 '[' if !in_single_quote && !in_double_quote => {
-                    // Find matching closing bracket
+                    // Find matching closing bracket; skip empty collections (`[]`, `[ ]`)
                     if let Some(close_pos) = find_closing_char(line, i, '[', ']') {
-                        #[allow(clippy::cast_possible_truncation)]
-                        diagnostics.push(Diagnostic {
-                            range: Range::new(
-                                Position::new(line_num, i as u32),
-                                Position::new(line_num, (close_pos + 1) as u32),
-                            ),
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            code: Some(NumberOrString::String("flowSeq".to_string())),
-                            message: "Flow sequence style: use block style instead".to_string(),
-                            source: Some("rlsp-yaml".to_string()),
-                            ..Diagnostic::default()
-                        });
+                        if !line[i + 1..close_pos].trim().is_empty() {
+                            #[allow(clippy::cast_possible_truncation)]
+                            diagnostics.push(Diagnostic {
+                                range: Range::new(
+                                    Position::new(line_num, i as u32),
+                                    Position::new(line_num, (close_pos + 1) as u32),
+                                ),
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                code: Some(NumberOrString::String("flowSeq".to_string())),
+                                message: "Flow sequence style: use block style instead".to_string(),
+                                source: Some("rlsp-yaml".to_string()),
+                                ..Diagnostic::default()
+                            });
+                        }
                     }
                 }
                 _ => {}
@@ -1300,6 +1304,69 @@ mod tests {
         let result = validate_flow_style(text);
 
         assert_eq!(result.len(), 2);
+    }
+
+    // ---- Flow Style Validator: Empty Collections ----
+
+    #[test]
+    fn should_not_warn_on_empty_flow_mapping() {
+        let result = validate_flow_style("status: {}\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_warn_on_empty_flow_sequence() {
+        let result = validate_flow_style("items: []\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_warn_on_flow_mapping_with_only_spaces() {
+        let result = validate_flow_style("status: { }\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_warn_on_flow_mapping_with_multiple_spaces() {
+        let result = validate_flow_style("status: {  }\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_not_warn_on_flow_sequence_with_only_spaces() {
+        let result = validate_flow_style("items: [  ]\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_warn_on_outer_but_not_inner_empty_flow_mapping() {
+        // Outer `{a: {}}` is non-empty → warns; inner `{}` is empty → no extra warn.
+        let result = validate_flow_style("data: {a: {}}\n");
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "flowMap")
+        );
+    }
+
+    #[test]
+    fn should_not_warn_on_multiple_empty_collections_on_one_line() {
+        let result = validate_flow_style("a: {}\nb: []\n");
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn should_warn_only_on_non_empty_when_mixed_with_empty() {
+        let result = validate_flow_style("a: {}\nb: {x: 1}\n");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 1);
     }
 
     // ---- Map Key Order Validator: Happy Paths ----
