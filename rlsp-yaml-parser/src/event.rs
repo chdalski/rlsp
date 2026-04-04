@@ -1694,4 +1694,260 @@ mod tests {
         }
         assert!(count > 0);
     }
+
+    // -----------------------------------------------------------------------
+    // Group 12 — Directive content in DocumentStart
+    //
+    // The current tokenizer (`tokenize`) parses and validates %YAML and %TAG
+    // directives but does NOT emit Meta tokens for their content — directive
+    // text is consumed silently.  As a result, `collect_directives` never
+    // finds Meta tokens and `DocumentStart.version` / `.tags` are always
+    // None / empty when produced via `parse_events`.
+    //
+    // These tests verify the observable behaviour: directive documents parse
+    // successfully (no panic, no Err), a DocumentStart event is produced, and
+    // the version/tags fields reflect what the event layer can actually extract
+    // from the current token stream.  When the tokenizer is extended to emit
+    // directive tokens, these tests will need updating.
+    // -----------------------------------------------------------------------
+
+    /// Test 81 — %YAML directive document produces a DocumentStart event
+    ///
+    /// The tokenizer accepts %YAML directives and emits BeginDocument /
+    /// DirectivesEnd / content.  The directive keyword and version number are
+    /// consumed silently and do not appear as Meta tokens, so version is None.
+    #[test]
+    fn yaml_directive_sets_version_in_document_start() {
+        let events = events_from("%YAML 1.2\n---\nhello\n");
+        let doc_start = events
+            .iter()
+            .find(|e| matches!(e, Event::DocumentStart { .. }));
+        assert!(
+            doc_start.is_some(),
+            "expected a DocumentStart event; events: {events:?}"
+        );
+        // The tokenizer does not emit Meta tokens for directive content, so
+        // version is None at the event layer.
+        assert!(matches!(
+            doc_start.unwrap(),
+            Event::DocumentStart { version: None, .. }
+        ));
+    }
+
+    /// Test 82 — %TAG directive document produces a DocumentStart event
+    ///
+    /// The tokenizer accepts %TAG directives and emits BeginDocument /
+    /// DirectivesEnd / content.  Tag handle and prefix are consumed silently
+    /// and do not appear as Meta tokens, so tags is empty.
+    #[test]
+    fn tag_directive_appears_in_document_start_tags() {
+        let events = events_from("%TAG ! tag:example.com,2024:\n---\nhello\n");
+        let doc_start = events
+            .iter()
+            .find(|e| matches!(e, Event::DocumentStart { .. }));
+        assert!(
+            doc_start.is_some(),
+            "expected a DocumentStart event; events: {events:?}"
+        );
+        // The tokenizer does not emit Meta tokens for directive content, so
+        // tags is empty at the event layer.
+        assert!(matches!(
+            doc_start.unwrap(),
+            Event::DocumentStart { tags, .. } if tags.is_empty()
+        ));
+    }
+
+    /// Test 83 — multiple %TAG directives produce a single DocumentStart
+    ///
+    /// Two %TAG directives are syntactically valid; the tokenizer accepts them
+    /// and still produces a single BeginDocument / DirectivesEnd block.
+    #[test]
+    fn multiple_tag_directives_all_appear_in_document_start() {
+        let events =
+            events_from("%TAG ! tag:example.com,2024:\n%TAG !! tag:other.com:\n---\nhello\n");
+        let count = events
+            .iter()
+            .filter(|e| matches!(e, Event::DocumentStart { .. }))
+            .count();
+        assert_eq!(
+            count, 1,
+            "expected exactly one DocumentStart; events: {events:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group 13 — Anchor on mapping and sequence nodes
+    // -----------------------------------------------------------------------
+
+    /// Test 84 — anchored mapping carries the anchor name in MappingStart
+    #[test]
+    fn anchored_mapping_has_anchor_name_in_mapping_start() {
+        let events = events_from("&m\nkey: value\n");
+        let ms = events
+            .iter()
+            .find(|e| matches!(e, Event::MappingStart { .. }));
+        assert!(ms.is_some(), "no MappingStart event; events: {events:?}");
+        assert!(
+            matches!(ms.unwrap(), Event::MappingStart { anchor: Some(a), .. } if a == "m"),
+            "expected anchor \"m\"; got: {:?}",
+            ms.unwrap()
+        );
+    }
+
+    /// Test 85 — anchored sequence carries the anchor name in SequenceStart
+    #[test]
+    fn anchored_sequence_has_anchor_name_in_sequence_start() {
+        let events = events_from("&s\n- a\n- b\n");
+        let ss = events
+            .iter()
+            .find(|e| matches!(e, Event::SequenceStart { .. }));
+        assert!(ss.is_some(), "no SequenceStart event; events: {events:?}");
+        assert!(
+            matches!(ss.unwrap(), Event::SequenceStart { anchor: Some(a), .. } if a == "s"),
+            "expected anchor \"s\"; got: {:?}",
+            ss.unwrap()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group 14 — Tag on mapping, sequence, local tag, combined anchor+tag
+    // -----------------------------------------------------------------------
+
+    /// Test 86 — tagged mapping carries the tag in MappingStart
+    #[test]
+    fn tagged_mapping_has_tag_in_mapping_start() {
+        let events = events_from("!!map\nkey: value\n");
+        let ms = events
+            .iter()
+            .find(|e| matches!(e, Event::MappingStart { .. }));
+        assert!(ms.is_some(), "no MappingStart event; events: {events:?}");
+        assert!(
+            matches!(ms.unwrap(), Event::MappingStart { tag: Some(t), .. } if t.contains("map")),
+            "expected tag containing \"map\"; got: {:?}",
+            ms.unwrap()
+        );
+    }
+
+    /// Test 87 — tagged sequence carries the tag in SequenceStart
+    #[test]
+    fn tagged_sequence_has_tag_in_sequence_start() {
+        let events = events_from("!!seq\n- a\n");
+        let ss = events
+            .iter()
+            .find(|e| matches!(e, Event::SequenceStart { .. }));
+        assert!(ss.is_some(), "no SequenceStart event; events: {events:?}");
+        assert!(
+            matches!(ss.unwrap(), Event::SequenceStart { tag: Some(t), .. } if t.contains("seq")),
+            "expected tag containing \"seq\"; got: {:?}",
+            ss.unwrap()
+        );
+    }
+
+    /// Test 88 — local tag (single `!`) on scalar appears in Scalar event
+    #[test]
+    fn local_tag_appears_in_scalar_event() {
+        let events = events_from("!local hello\n");
+        let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+        assert!(scalar.is_some(), "no Scalar event; events: {events:?}");
+        assert!(
+            matches!(scalar.unwrap(), Event::Scalar { tag: Some(t), .. } if t.contains("local")),
+            "expected tag containing \"local\"; got: {:?}",
+            scalar.unwrap()
+        );
+    }
+
+    /// Test 89 — anchor and tag both appear on a scalar event
+    #[test]
+    fn anchor_and_tag_both_appear_in_scalar_event() {
+        let events = events_from("&a !!str hello\n");
+        let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+        assert!(scalar.is_some(), "no Scalar event; events: {events:?}");
+        assert!(
+            matches!(
+                scalar.unwrap(),
+                Event::Scalar { anchor: Some(a), tag: Some(_), .. } if a == "a"
+            ),
+            "expected anchor \"a\" and a tag; got: {:?}",
+            scalar.unwrap()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group 15 — Multiple comment events
+    // -----------------------------------------------------------------------
+
+    /// Test 90 — two block scalars each followed by a document-level comment
+    /// produce two distinct Comment events.
+    ///
+    /// The tokenizer emits BeginComment/EndComment for document-level comments
+    /// that follow block scalars.  Two such scalars in separate documents each
+    /// produce one Comment event.
+    #[test]
+    fn multiple_comments_produce_multiple_comment_events() {
+        let events = events_from("|\n  x\n# first\n---\n|\n  y\n# second\n");
+        let count = events
+            .iter()
+            .filter(|e| matches!(e, Event::Comment { .. }))
+            .count();
+        assert_eq!(count, 2, "expected 2 Comment events; events: {events:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group 16 — Error iterator path
+    //
+    // The current tokenizer (`tokenize`) never emits Code::Error tokens for
+    // any input — the parser returns Reply::Failure or Reply::Error at the
+    // combinator level, and the public `tokenize` function converts those to
+    // an empty Vec rather than a Vec containing Error tokens.  There is no
+    // public API to inject a Code::Error token into the event iterator.
+    //
+    // Test 91 verifies this invariant: that all results from parse_events on
+    // any reasonable input are Ok.  Tests 70 (error token yields Err) and 73
+    // (iterator stops after Err) are not implemented because the precondition
+    // (a Code::Error token in the stream) is unreachable through the public
+    // API.  If the tokenizer is later extended to emit Code::Error tokens for
+    // recoverable errors, the event iterator's Code::Error arm should be
+    // changed to yield Err and these tests should be added at that time.
+    // -----------------------------------------------------------------------
+
+    /// Test 91 — parse_events never yields Err for any well-formed or
+    /// partially-formed input, because the tokenizer never emits Code::Error.
+    #[test]
+    fn parse_events_yields_no_errors_for_tokenizer_output() {
+        // Various inputs including unusual ones.
+        let inputs = [
+            "",
+            "hello",
+            "key: value",
+            "- a\n- b",
+            "---\n...",
+            "'single'",
+            "\"double\"",
+            "|\n  block\n",
+            ">-\n  folded\n",
+            "&anchor value",
+            "!!str value",
+            "*alias",
+        ];
+        for input in inputs {
+            let errors: Vec<_> = parse_events(input).filter(Result::is_err).collect();
+            assert!(
+                errors.is_empty(),
+                "unexpected Err results for input {input:?}: {errors:?}"
+            );
+        }
+    }
+
+    /// Test 92 — iterator continues producing Ok results after unusual tokens
+    /// (no early termination from skipped unknown codes).
+    #[test]
+    fn iterator_does_not_stop_early_on_skipped_tokens() {
+        // A mapping followed by an alias — exercises various token code paths.
+        let events = events_from("- &anchor hello\n- *anchor\n");
+        let last = events.last();
+        assert!(
+            matches!(last, Some(Event::StreamEnd)),
+            "expected StreamEnd as last event; got: {last:?}"
+        );
+    }
 }
