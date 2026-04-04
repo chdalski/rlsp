@@ -1,0 +1,12 @@
+[package]
+name = "rlsp-yaml-parser"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Spec-faithful YAML 1.2 parser with first-class comment and span support"
+
+[lints]
+workspace = true

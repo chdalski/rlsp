@@ -959,6 +959,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlsp-yaml-parser"
+version = "0.1.0"
+
+[[package]]
 name = "rustls"
 version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
