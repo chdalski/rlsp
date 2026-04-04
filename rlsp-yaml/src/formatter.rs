@@ -340,8 +340,22 @@ fn node_to_doc(node: &YamlOwned, options: &YamlFormatOptions) -> Doc {
 
             let scalar_doc = match style {
                 ScalarStyle::Literal | ScalarStyle::Folded => repr_block_to_doc(s, *style),
-                ScalarStyle::SingleQuoted => text(format!("'{s}'")),
-                ScalarStyle::DoubleQuoted => text(format!("\"{}\"", escape_double_quoted(s))),
+                ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
+                    // Strip syntactic quotes when the value doesn't need them.
+                    // `string_to_doc` handles the `single_quote` option — if it's
+                    // enabled, the value will be single-quoted per user preference
+                    // rather than emitted as plain. Semantic quotes (values that
+                    // need quoting to avoid YAML ambiguity) are always preserved.
+                    if needs_quoting(s) {
+                        if *style == ScalarStyle::DoubleQuoted {
+                            text(format!("\"{}\"", escape_double_quoted(s)))
+                        } else {
+                            text(format!("'{s}'"))
+                        }
+                    } else {
+                        string_to_doc(s, options)
+                    }
+                }
                 ScalarStyle::Plain => {
                     // For plain scalars that are YAML reserved words (booleans, null,
                     // numbers), preserve them as-is. For safe plain strings, apply the
@@ -1576,19 +1590,29 @@ mod tests {
 
     #[test]
     fn format_yaml_double_quoted_string_preserved() {
+        // Unnecessary quotes on a safe string are stripped to plain.
         let result = format_yaml("greeting: \"hello\"\n", &default_opts());
         assert!(
-            result.contains("\"hello\""),
-            "double-quoted string should be preserved: {result:?}"
+            !result.contains("\"hello\""),
+            "unnecessary double quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("hello"),
+            "value should still be present as plain: {result:?}"
         );
     }
 
     #[test]
     fn format_yaml_single_quoted_string_preserved() {
+        // Unnecessary quotes on a safe string are stripped to plain.
         let result = format_yaml("greeting: 'hello'\n", &default_opts());
         assert!(
-            result.contains("'hello'"),
-            "single-quoted string should be preserved: {result:?}"
+            !result.contains("'hello'"),
+            "unnecessary single quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("hello"),
+            "value should still be present as plain: {result:?}"
         );
     }
 
@@ -2100,5 +2124,136 @@ mod tests {
         let first = format_yaml(input, &default_opts());
         let second = format_yaml(&first, &default_opts());
         assert_eq!(first, second, "flow-to-block conversion is not idempotent");
+    }
+
+    // ---- Formatter: Unnecessary Quote Stripping ----
+
+    // QS1: Double-quoted safe string → plain.
+    #[test]
+    fn format_yaml_double_quoted_safe_string_stripped_to_plain() {
+        let result = format_yaml("value: \"python\"\n", &default_opts());
+        assert!(
+            !result.contains("\"python\""),
+            "unnecessary double quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("python"),
+            "value should be present as plain: {result:?}"
+        );
+    }
+
+    // QS2: Single-quoted safe string → plain.
+    #[test]
+    fn format_yaml_single_quoted_safe_string_stripped_to_plain() {
+        let result = format_yaml("value: 'hello'\n", &default_opts());
+        assert!(
+            !result.contains("'hello'"),
+            "unnecessary single quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains("hello"),
+            "value should be present as plain: {result:?}"
+        );
+    }
+
+    // QS3: Double-quoted number-like string → quotes preserved.
+    #[test]
+    fn format_yaml_double_quoted_number_like_string_kept_quoted() {
+        let result = format_yaml("value: \"5000\"\n", &default_opts());
+        assert!(
+            result.contains("\"5000\""),
+            "quotes on number-like string must be preserved: {result:?}"
+        );
+    }
+
+    // QS4: Double-quoted boolean keyword → quotes preserved.
+    #[test]
+    fn format_yaml_double_quoted_boolean_like_string_kept_quoted() {
+        let result = format_yaml("value: \"true\"\n", &default_opts());
+        assert!(
+            result.contains("\"true\""),
+            "quotes on boolean keyword must be preserved: {result:?}"
+        );
+    }
+
+    // QS5: Double-quoted YAML 1.1 keyword → quotes preserved.
+    #[test]
+    fn format_yaml_double_quoted_on_keyword_kept_quoted() {
+        let result = format_yaml("value: \"on\"\n", &default_opts());
+        assert!(
+            result.contains("\"on\""),
+            "quotes on YAML 1.1 keyword must be preserved: {result:?}"
+        );
+    }
+
+    // QS6: Double-quoted string containing `: ` → quotes preserved.
+    #[test]
+    fn format_yaml_double_quoted_string_with_colon_space_kept_quoted() {
+        let result = format_yaml("value: \"key: value\"\n", &default_opts());
+        assert!(
+            result.contains("\"key: value\""),
+            "quotes on string with ': ' must be preserved: {result:?}"
+        );
+    }
+
+    // QS7: Double-quoted string starting with `#` → quotes preserved.
+    #[test]
+    fn format_yaml_double_quoted_string_with_special_char_kept_quoted() {
+        let result = format_yaml("value: \"#comment\"\n", &default_opts());
+        assert!(
+            result.contains("\"#comment\""),
+            "quotes on string starting with '#' must be preserved: {result:?}"
+        );
+    }
+
+    // QS8: Quoted strings in a flow sequence stripped after block conversion.
+    #[test]
+    fn format_yaml_quoted_string_in_block_sequence_stripped() {
+        let result = format_yaml(
+            "args: [\"python\", \"-m\", \"http.server\"]\n",
+            &default_opts(),
+        );
+        // Safe strings: quotes stripped.
+        assert!(
+            !result.contains("\"python\""),
+            "\"python\" quotes should be stripped: {result:?}"
+        );
+        assert!(
+            !result.contains("\"http.server\""),
+            "\"http.server\" quotes should be stripped: {result:?}"
+        );
+        // `-m` starts with `-` which triggers needs_quoting → stays quoted.
+        assert!(
+            result.contains("\"-m\""),
+            "\"-m\" quotes must be preserved (starts with '-'): {result:?}"
+        );
+    }
+
+    // QS9: Idempotency — stripping is stable on second format pass.
+    #[test]
+    fn format_yaml_quote_stripping_is_idempotent() {
+        let input = "value: \"python\"\n";
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(first, second, "quote stripping is not idempotent");
+    }
+
+    // QS10: When `single_quote: true`, stripped value is re-quoted in single quotes.
+    #[test]
+    fn format_yaml_quote_stripping_respects_single_quote_option() {
+        let opts = YamlFormatOptions {
+            single_quote: true,
+            ..default_opts()
+        };
+        let result = format_yaml("value: \"python\"\n", &opts);
+        // `single_quote: true` means safe strings get single quotes, not plain.
+        assert!(
+            result.contains("'python'"),
+            "single_quote option should apply single quotes: {result:?}"
+        );
+        assert!(
+            !result.contains("\"python\""),
+            "original double quotes should not be preserved: {result:?}"
+        );
     }
 }
