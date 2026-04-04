@@ -65,9 +65,9 @@ high-quality crates.io package.
 - [x] Implement flow style productions (spec §7) — plain
       scalars, quoted scalars, flow sequences, flow mappings
       (adc3ba0, 6e81b80)
-- [ ] Implement block style productions (spec §8) — block
+- [x] Implement block style productions (spec §8) — block
       scalars (literal/folded with chomping), block
-      sequences, block mappings
+      sequences, block mappings (a53be30)
 - [ ] Implement document stream productions (spec §9) —
       document boundaries, bare/explicit documents,
       multi-document streams
@@ -243,28 +243,28 @@ mappings.
 
 **Files:** `src/block.rs`
 
-- [ ] Block scalar headers: `c_b_block_header(n)`,
+- [x] Block scalar headers: `c_b_block_header(n)`,
       `c_indentation_indicator(n)`,
       `c_chomping_indicator` — parse and preserve Strip,
       Clip, Keep chomping indicators
-- [ ] Literal block scalars: `c_l_literal(n)`,
+- [x] Literal block scalars: `c_l_literal(n)`,
       `l_literal_content(n,t)`, `l_nb_literal_text(n)`,
       `b_nb_literal_next(n)`, `b_chomped_last(t)`,
       `l_chomped_empty(n,t)`, `l_strip_empty(n)`,
       `l_keep_empty(n)`, `l_trail_comments(n)` —
       auto-detect indentation, handle all three chomping
       modes
-- [ ] Folded block scalars: `c_l_folded(n)`,
+- [x] Folded block scalars: `c_l_folded(n)`,
       `l_folded_content(n,t)`, `s_nb_folded_text(n)`,
       `s_nb_folded_lines(n)`, `s_nb_spaced_text(n)`,
       `s_nb_spaced_lines(n)`, `l_nb_same_lines(n)`,
       `l_nb_diff_lines(n)`, `b_l_folded(n,c)` — line
       folding rules
-- [ ] Block sequences: `l_block_sequence(n)`,
+- [x] Block sequences: `l_block_sequence(n)`,
       `c_l_block_seq_entry(n)`,
       `s_b_block_indented(n,c)`,
       `ns_l_compact_sequence(n)`
-- [ ] Block mappings: `l_block_mapping(n)`,
+- [x] Block mappings: `l_block_mapping(n)`,
       `ns_l_block_map_entry(n)`,
       `c_l_block_map_explicit_entry(n)`,
       `c_l_block_map_explicit_key(n)`,
@@ -273,12 +273,12 @@ mappings.
       `ns_s_block_map_implicit_key`,
       `c_l_block_map_implicit_value(n)`,
       `ns_l_compact_mapping(n)`
-- [ ] Block nodes: `s_l_block_node(n,c)`,
+- [x] Block nodes: `s_l_block_node(n,c)`,
       `s_l_flow_in_block(n)`, `s_l_block_in_block(n,c)`,
       `s_l_block_scalar(n,c)`, `s_l_block_collection(n,c)`,
       `s_l_block_indented(n,c)`,
       `l_block_content(n,c)`
-- [ ] Unit tests: all three chomping modes, auto-detected
+- [x] Unit tests: all three chomping modes, auto-detected
       vs explicit indentation, nested block collections,
       compact notation, block-in-flow
 
