@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #![allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 
+use std::fmt::Write as _;
+
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
 use serde_json::json;
@@ -2249,7 +2251,7 @@ async fn document_symbols_respects_max_items_computed_limit() {
     let uri = "file:///test/max_items_symbols_truncate.yaml";
     let mut yaml_text = String::new();
     for i in 0..10 {
-        yaml_text.push_str(&format!("key_{i}: value_{i}\n"));
+        let _ = writeln!(yaml_text, "key_{i}: value_{i}");
     }
     send(&mut service, did_open_notification(uri, &yaml_text)).await;
 
@@ -2397,7 +2399,7 @@ async fn folding_ranges_respects_max_items_computed_limit() {
     let uri = "file:///test/max_items_folding_truncate.yaml";
     let mut yaml_text = String::new();
     for i in 0..5 {
-        yaml_text.push_str(&format!("item_{i}:\n  key: value\n"));
+        let _ = write!(yaml_text, "item_{i}:\n  key: value\n");
     }
     send(&mut service, did_open_notification(uri, &yaml_text)).await;
 
