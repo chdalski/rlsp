@@ -196,7 +196,9 @@ fn flow_seq_to_block(
 
     let prefix = &line[..start_col];
     let base_indent = if prefix.trim_end().ends_with(':') {
-        prefix.len() - prefix.trim_start().len()
+        // Items indent 2 deeper than the key, matching `flow_map_to_block`.
+        let key_indent = prefix.len() - prefix.trim_start().len();
+        key_indent + 2
     } else {
         start_col
     };
@@ -309,9 +311,10 @@ fn block_to_flow(
     let indent_str = " ".repeat(base_indent);
 
     let flow_value = if is_sequence {
-        let items: Vec<&str> = children
+        let items: Vec<String> = children
             .iter()
             .map(|c| c.strip_prefix("- ").unwrap_or(c))
+            .map(quote_flow_item)
             .collect();
         format!("[{}]", items.join(", "))
     } else {
@@ -321,6 +324,12 @@ fn block_to_flow(
     };
 
     let new_text = format!("{indent_str}{key}: {flow_value}");
+
+    let title = if new_text.len() > 80 {
+        "Convert block to flow style (long line)".to_string()
+    } else {
+        "Convert block to flow style".to_string()
+    };
 
     #[allow(clippy::cast_possible_truncation)]
     let edit_range = Range::new(
@@ -332,7 +341,7 @@ fn block_to_flow(
     );
 
     Some(make_action(
-        "Convert block to flow style".to_string(),
+        title,
         uri,
         vec![TextEdit {
             range: edit_range,
@@ -526,6 +535,27 @@ fn string_to_block_scalar(
 
 // ---------- Helpers ----------
 
+/// Quote a block sequence item for use in a flow sequence if it contains
+/// characters that are unsafe in flow context.
+///
+/// Flow-unsafe: contains `,`, `[`, `]`, `{`, `}`, or starts with a character
+/// that would cause ambiguity (`#`, `&`, `*`, `!`, `|`, `>`, `'`, `"`, `%`,
+/// `@`, `` ` ``).
+fn quote_flow_item(item: &str) -> String {
+    let needs_quotes = item.contains([',', '[', ']', '{', '}'])
+        || item.chars().next().is_some_and(|c| {
+            matches!(
+                c,
+                '#' | '&' | '*' | '!' | '|' | '>' | '\'' | '"' | '%' | '@' | '`'
+            )
+        });
+    if needs_quotes {
+        format!("\"{item}\"")
+    } else {
+        item.to_string()
+    }
+}
+
 /// Split a flow collection's inner content by commas, respecting nesting.
 fn split_flow_items(content: &str) -> Vec<String> {
     let mut items = Vec::new();
@@ -653,6 +683,108 @@ mod tests {
         assert!(actions.iter().all(|a| !a.title.contains("flow sequence")));
     }
 
+    #[test]
+    fn should_indent_block_items_under_key_when_nested() {
+        // Key at indent 6 — items must be at indent 8 (6 + 2), not 6.
+        let text = "      command: [\"python\", \"-m\"]\n";
+        let start_col = u32::try_from(text.find('[').unwrap()).unwrap();
+        let end_col = u32::try_from(text.trim_end_matches('\n').len()).unwrap();
+        let diag = make_diagnostic(0, start_col, end_col, "flowSeq");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("flow sequence"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        let new_text = &edits[0].new_text;
+        assert!(
+            new_text.contains("      command:\n"),
+            "key should be at 6-space indent: {new_text:?}"
+        );
+        assert!(
+            new_text.contains("        - "),
+            "items should be at 8-space indent (6+2): {new_text:?}"
+        );
+        // Items at exactly 6 spaces would start with "      - " but NOT "       - "
+        // (7 spaces). Since correct items are at 8 spaces, any line starting with
+        // exactly "      - " (6 spaces then "- ") is a sign of wrong indentation.
+        for line in new_text.lines() {
+            if line.starts_with("- ") || line.trim_start().starts_with("- ") {
+                let indent = line.len() - line.trim_start().len();
+                assert!(
+                    indent != 6,
+                    "item at key-level indent (6) must not occur: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn should_indent_block_items_at_top_level_key() {
+        // Regression guard: zero-indent key → items at indent 2.
+        let text = "items: [one, two]\n";
+        let start_col = u32::try_from(text.find('[').unwrap()).unwrap();
+        let end_col = u32::try_from(text.trim_end_matches('\n').len()).unwrap();
+        let diag = make_diagnostic(0, start_col, end_col, "flowSeq");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("flow sequence"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        let new_text = &edits[0].new_text;
+        assert!(
+            new_text.contains("items:\n"),
+            "key should appear with no indent: {new_text:?}"
+        );
+        assert!(
+            new_text.contains("  - one"),
+            "items should be at 2-space indent: {new_text:?}"
+        );
+    }
+
+    #[test]
+    fn should_indent_block_items_under_key_at_indent_2() {
+        // Regression guard: key at indent 2 → items at indent 4.
+        let text = "  command: [\"a\", \"b\"]\n";
+        let start_col = u32::try_from(text.find('[').unwrap()).unwrap();
+        let end_col = u32::try_from(text.trim_end_matches('\n').len()).unwrap();
+        let diag = make_diagnostic(0, start_col, end_col, "flowSeq");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("flow sequence"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        let new_text = &edits[0].new_text;
+        assert!(
+            new_text.contains("  command:\n"),
+            "key should be at 2-space indent: {new_text:?}"
+        );
+        assert!(
+            new_text.contains("    - "),
+            "items should be at 4-space indent (2+2): {new_text:?}"
+        );
+        for line in new_text.lines() {
+            if line.trim_start().starts_with("- ") {
+                let indent = line.len() - line.trim_start().len();
+                assert!(
+                    indent != 2,
+                    "item at key-level indent (2) must not occur: {line:?}"
+                );
+            }
+        }
+    }
+
     // ---- Block to flow ----
 
     #[test]
@@ -695,6 +827,106 @@ mod tests {
         let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
 
         assert!(actions.iter().all(|a| !a.title.contains("block to flow")));
+    }
+
+    #[test]
+    fn should_quote_bracket_containing_item_when_converting_block_to_flow() {
+        let text = "args:\n  - [nested]\n  - safe\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("\"[nested]\""),
+            "bracket-containing item must be quoted: {:?}",
+            edits[0].new_text
+        );
+        assert!(
+            edits[0].new_text.contains("safe"),
+            "safe item should be present: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_quote_item_containing_comma_when_converting_block_to_flow() {
+        let text = "args:\n  - a, b\n  - c\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("\"a, b\""),
+            "comma-containing item must be quoted: {:?}",
+            edits[0].new_text
+        );
+        assert!(
+            edits[0].new_text.contains('c'),
+            "safe item should be present: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_not_quote_safe_items_when_converting_block_to_flow() {
+        // Regression guard: safe items must not get unnecessary quotes.
+        let text = "items:\n  - one\n  - two\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = &changes[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("[one, two]"),
+            "safe items should not be quoted: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn should_append_long_line_warning_when_result_exceeds_80_chars() {
+        let text = "items:\n  - long_item_aaa\n  - long_item_bbb\n  - long_item_ccc\n  - long_item_ddd\n  - long_item_eee\n  - long_item_fff\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        assert!(
+            action.title.contains("(long line)"),
+            "long result should include warning in title: {:?}",
+            action.title
+        );
+    }
+
+    #[test]
+    fn should_not_append_long_line_warning_for_short_result() {
+        let text = "items:\n  - a\n  - b\n";
+        let actions = code_actions(text, cursor_range(0, 0), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        assert_eq!(
+            action.title, "Convert block to flow style",
+            "short result must not include long-line warning: {:?}",
+            action.title
+        );
     }
 
     // ---- Tab to spaces ----
