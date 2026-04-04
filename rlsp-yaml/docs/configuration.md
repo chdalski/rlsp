@@ -246,6 +246,65 @@ Useful in mixed repositories where different files target different YAML version
   become: yes
 ```
 
+## Diagnostic Suppression
+
+Diagnostics can be silenced on a per-line or per-file basis using suppression comments. This is useful for false positives or intentional style deviations without disabling a validator globally.
+
+### Suppress the next line
+
+```yaml
+# rlsp-yaml-disable-next-line
+key: value  # all diagnostics on this line are suppressed
+```
+
+```yaml
+# rlsp-yaml-disable-next-line duplicateKey
+name: first
+name: second  # duplicateKey suppressed; other codes still reported
+```
+
+```yaml
+# rlsp-yaml-disable-next-line duplicateKey, flowMap
+```
+
+The comment must appear on the line **immediately before** the line to suppress. Only the one following line is affected.
+
+### Suppress the entire file
+
+```yaml
+# rlsp-yaml-disable-file flowMap
+config: {a: 1, b: 2}  # no flowMap warning anywhere in this file
+```
+
+```yaml
+# rlsp-yaml-disable-file
+# all diagnostics suppressed for this file
+```
+
+The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file` comment wins; subsequent ones are ignored.
+
+### Available diagnostic codes
+
+| Code | Emitted by |
+|------|-----------|
+| `duplicateKey` | Duplicate mapping key in the same scope |
+| `flowMap` | Flow mapping (`{a: 1}`) where block style is preferred |
+| `flowSeq` | Flow sequence (`[a, b]`) where block style is preferred |
+| `unusedAnchor` | Anchor defined but never aliased |
+| `unresolvedAlias` | Alias references an undefined anchor |
+| `unknownTag` | Tag not in the allowed `customTags` list |
+| `mapKeyOrder` | Mapping keys not in alphabetical order (requires `keyOrdering: true`) |
+| `yamlSyntax` | YAML parse error |
+| `schemaRequired` | Required property missing (JSON Schema `required`) |
+| `schemaType` | Value does not match declared JSON Schema type |
+| `schemaEnum` | Value not in the declared `enum` list |
+| `schemaAdditionalProperty` | Additional property not allowed by schema |
+| `schemaFormat` | Value does not match declared `format` (requires `formatValidation: true`) |
+| `schemaContentEncoding` | Value cannot be decoded with declared `contentEncoding` |
+| `schemaContentMediaType` | Decoded content does not match declared `contentMediaType` |
+
+Codes not listed here (e.g. codes produced by future validators) can also be suppressed — the suppression comment accepts any string code.
+
 ## Validators
 
 Some validators are always active; others depend on settings.
