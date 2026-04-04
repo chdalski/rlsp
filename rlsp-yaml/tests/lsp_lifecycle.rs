@@ -2202,3 +2202,265 @@ async fn should_return_null_completion_when_completion_is_disabled() {
         "completion result should be null when completion=false"
     );
 }
+
+// Section: maxItemsComputed
+
+// Test: document_symbols_returns_results_for_valid_yaml (spike)
+#[tokio::test]
+async fn document_symbols_returns_results_for_valid_yaml() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/max_items_spike.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "name: Alice\nage: 30\ncity: NYC\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    assert!(
+        !result.is_null(),
+        "documentSymbol result should not be null for valid YAML"
+    );
+    let arr = result
+        .as_array()
+        .expect("documentSymbol should be an array");
+    assert!(!arr.is_empty(), "should return symbols for 3-key document");
+}
+
+#[tokio::test]
+async fn document_symbols_respects_max_items_computed_limit() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"maxItemsComputed": 3})),
+    )
+    .await;
+
+    let uri = "file:///test/max_items_symbols_truncate.yaml";
+    let mut yaml_text = String::new();
+    for i in 0..10 {
+        yaml_text.push_str(&format!("key_{i}: value_{i}\n"));
+    }
+    send(&mut service, did_open_notification(uri, &yaml_text)).await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    let arr = result
+        .as_array()
+        .expect("documentSymbol should be an array");
+    assert_eq!(
+        arr.len(),
+        3,
+        "documentSymbol should be truncated to limit 3"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_returns_all_items_when_limit_exceeds_count() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"maxItemsComputed": 100})),
+    )
+    .await;
+
+    let uri = "file:///test/max_items_symbols_no_truncate.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    let arr = result
+        .as_array()
+        .expect("documentSymbol should be an array");
+    assert_eq!(
+        arr.len(),
+        5,
+        "all 5 symbols should be returned when limit is 100"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_returns_empty_when_max_items_computed_is_zero() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"maxItemsComputed": 0})),
+    )
+    .await;
+
+    let uri = "file:///test/max_items_symbols_zero.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "a: 1\nb: 2\nc: 3\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "documentSymbol should be null or empty when maxItemsComputed=0"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_uses_default_5000_limit_when_setting_absent() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/max_items_symbols_default.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    let arr = result
+        .as_array()
+        .expect("documentSymbol should be an array");
+    assert_eq!(
+        arr.len(),
+        5,
+        "all 5 symbols should be returned with default 5000 limit"
+    );
+}
+
+#[tokio::test]
+async fn folding_ranges_returns_results_for_nested_yaml() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/max_items_folding_spike.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "outer:\n  inner: value\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, folding_range_request(2, uri)).await;
+    let resp = resp.expect("foldingRange should return a response");
+    let result = resp.result().expect("foldingRange should have a result");
+    assert!(
+        !result.is_null(),
+        "foldingRange should not be null for nested YAML"
+    );
+    let arr = result.as_array().expect("foldingRange should be an array");
+    assert!(!arr.is_empty(), "should return at least one folding range");
+}
+
+#[tokio::test]
+async fn folding_ranges_respects_max_items_computed_limit() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"maxItemsComputed": 2})),
+    )
+    .await;
+
+    // 5 nested mappings each produces a folding range — well above the limit of 2
+    let uri = "file:///test/max_items_folding_truncate.yaml";
+    let mut yaml_text = String::new();
+    for i in 0..5 {
+        yaml_text.push_str(&format!("item_{i}:\n  key: value\n"));
+    }
+    send(&mut service, did_open_notification(uri, &yaml_text)).await;
+
+    let resp = send(&mut service, folding_range_request(2, uri)).await;
+    let resp = resp.expect("foldingRange should return a response");
+    let result = resp.result().expect("foldingRange should have a result");
+    let arr = result.as_array().expect("foldingRange should be an array");
+    assert_eq!(arr.len(), 2, "foldingRange should be truncated to limit 2");
+}
+
+#[tokio::test]
+async fn folding_ranges_returns_empty_when_max_items_computed_is_zero() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({"maxItemsComputed": 0})),
+    )
+    .await;
+
+    let uri = "file:///test/max_items_folding_zero.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "server:\n  host: localhost\n  port: 8080\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, folding_range_request(2, uri)).await;
+    let resp = resp.expect("foldingRange should return a response");
+    let result = resp.result().expect("foldingRange should have a result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "foldingRange should be null or empty when maxItemsComputed=0"
+    );
+}
+
+#[tokio::test]
+async fn folding_ranges_uses_default_5000_limit_when_setting_absent() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/max_items_folding_default.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "a:\n  x: 1\nb:\n  y: 2\nc:\n  z: 3\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, folding_range_request(2, uri)).await;
+    let resp = resp.expect("foldingRange should return a response");
+    let result = resp.result().expect("foldingRange should have a result");
+    assert!(
+        !result.is_null(),
+        "foldingRange should return results with default 5000 limit"
+    );
+    let arr = result.as_array().expect("foldingRange should be an array");
+    assert!(
+        !arr.is_empty(),
+        "should return folding ranges with default limit"
+    );
+}

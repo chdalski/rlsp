@@ -72,6 +72,9 @@ pub struct Settings {
     pub hover: Option<bool>,
     /// Enable completion responses. Defaults to `true` when absent.
     pub completion: Option<bool>,
+    /// Maximum number of items returned by document symbols and folding ranges.
+    /// Defaults to 5000 when absent.
+    pub max_items_computed: Option<usize>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -546,6 +549,16 @@ impl Backend {
             .ok()
             .is_none_or(|s| s.completion.unwrap_or(true))
     }
+
+    /// Return the maximum number of items computed for document symbols and
+    /// folding ranges. Defaults to 5000 when absent.
+    pub(crate) fn get_max_items_computed(&self) -> usize {
+        self.settings
+            .lock()
+            .ok()
+            .and_then(|s| s.max_items_computed)
+            .unwrap_or(5000)
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -793,7 +806,10 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let ranges = crate::folding::folding_ranges(&text);
+        let mut ranges = crate::folding::folding_ranges(&text);
+        let limit = self.get_max_items_computed();
+        ranges.truncate(limit);
+
         if ranges.is_empty() {
             return Ok(None);
         }
@@ -1131,7 +1147,10 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let symbols = crate::symbols::document_symbols(&text, yaml.as_ref());
+        let mut symbols = crate::symbols::document_symbols(&text, yaml.as_ref());
+        let limit = self.get_max_items_computed();
+        symbols.truncate(limit);
+
         if symbols.is_empty() {
             return Ok(None);
         }
@@ -2132,5 +2151,70 @@ mod tests {
             *s = new_settings;
         }
         assert!(!backend.get_completion_enabled());
+    }
+
+    // ---- maxItemsComputed setting ----
+
+    #[test]
+    fn settings_deserializes_max_items_computed() {
+        let json = serde_json::json!({"maxItemsComputed": 100});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.max_items_computed, Some(100));
+    }
+
+    #[test]
+    fn settings_defaults_max_items_computed_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.max_items_computed.is_none());
+    }
+
+    #[test]
+    fn settings_accepts_max_items_computed_zero() {
+        let json = serde_json::json!({"maxItemsComputed": 0});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.max_items_computed, Some(0));
+    }
+
+    #[test]
+    fn get_max_items_computed_returns_5000_when_setting_absent() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert_eq!(backend.get_max_items_computed(), 5000);
+    }
+
+    #[test]
+    fn get_max_items_computed_returns_configured_value() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"maxItemsComputed": 100})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert_eq!(backend.get_max_items_computed(), 100);
+    }
+
+    #[test]
+    fn get_max_items_computed_returns_5000_when_field_is_none() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert_eq!(backend.get_max_items_computed(), 5000);
+    }
+
+    #[test]
+    fn get_max_items_computed_returns_zero_when_configured_to_zero() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"maxItemsComputed": 0})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert_eq!(backend.get_max_items_computed(), 0);
     }
 }
