@@ -89,7 +89,7 @@ or `"true"`).
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Update CLAUDE.md references
+- [x] Update CLAUDE.md references (8f943fc)
 - [ ] Fix duplicate key false positives (validator)
 - [ ] Fix empty flow collection warnings (validator)
 - [ ] Switch formatter to `early_parse(false)` for scalar style preservation
@@ -113,7 +113,7 @@ Add to the References section:
 - Kubernetes API reference: https://kubernetes.io/docs/reference/
 - KubeSpec: https://kubespec.dev/
 
-- [ ] Add references to `/workspace/CLAUDE.md`
+- [x] Add references to `/workspace/CLAUDE.md`
 
 ### Task 2: Fix duplicate key false positives
 
