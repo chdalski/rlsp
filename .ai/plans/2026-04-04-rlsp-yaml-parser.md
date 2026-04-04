@@ -59,9 +59,9 @@ high-quality crates.io package.
       parser combinator framework (6b1d449)
 - [x] Implement character productions (spec §5) and
       encoding detection (cbaa4c2)
-- [ ] Implement structural productions (spec §6) —
+- [x] Implement structural productions (spec §6) —
       indentation, comments, separation, directives, node
-      properties
+      properties (13035d0)
 - [ ] Implement flow style productions (spec §7) — plain
       scalars, quoted scalars, flow sequences, flow mappings
 - [ ] Implement block style productions (spec §8) — block
@@ -153,31 +153,31 @@ directives, and node properties.
 
 **Files:** `src/structure.rs` (or integrated into scanner)
 
-- [ ] Indentation: `s_indent(n)`, `s_indent_lt(n)`,
+- [x] Indentation: `s_indent(n)`, `s_indent_lt(n)`,
       `s_indent_le(n)` — exact and bounded indentation
       matching
-- [ ] Separation spaces: `s_separate_in_line`,
+- [x] Separation spaces: `s_separate_in_line`,
       `s_block_line_prefix(n)`, `s_flow_line_prefix(n)`,
       `s_line_prefix(n,c)`, `l_empty(n,c)`,
       `b_l_trimmed(n,c)`, `b_as_space`, `b_l_folded(n,c)`,
       `s_flow_folded(n)`, `s_separate(n,c)`,
       `s_separate_lines(n)`
-- [ ] Comments: `c_nb_comment_text`, `b_comment`,
+- [x] Comments: `c_nb_comment_text`, `b_comment`,
       `s_b_comment`, `l_comment`, `s_l_comments` —
       comments wrapped in `BeginComment`/`EndComment` token
       pairs (first-class, not discarded)
-- [ ] Directives: `l_directive`, `ns_yaml_directive`,
+- [x] Directives: `l_directive`, `ns_yaml_directive`,
       `ns_yaml_version`, `ns_tag_directive`,
       `c_tag_handle`, `c_primary_tag_handle`,
       `c_secondary_tag_handle`, `c_named_tag_handle`,
       `ns_tag_prefix`, `c_ns_local_tag_prefix`,
       `ns_global_tag_prefix`, `ns_reserved_directive`
-- [ ] Node properties: `c_ns_properties(n,c)`,
+- [x] Node properties: `c_ns_properties(n,c)`,
       `c_ns_tag_property`, `c_verbatim_tag`,
       `c_ns_shorthand_tag`, `c_non_specific_tag`,
       `c_ns_anchor_property`, `ns_anchor_char`,
       `ns_anchor_name`
-- [ ] Unit tests: indentation at various depths, comment
+- [x] Unit tests: indentation at various depths, comment
       preservation, directive parsing, tag/anchor extraction
 
 ### Task 4: Flow style productions (§7)
