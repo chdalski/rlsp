@@ -1338,6 +1338,32 @@ pub fn extract_custom_tags(text: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// Extract a YAML version from a `yaml-language-server` modeline comment.
+///
+/// Searches the first 10 lines of `text` for a line of the form:
+/// ```text
+/// # yaml-language-server: $yamlVersion=1.1
+/// ```
+/// Only `"1.1"` and `"1.2"` are accepted; any other value is ignored.
+/// Leading and trailing whitespace around the value is stripped before
+/// validation. Returns `None` if no valid modeline is found within the first
+/// 10 lines.
+#[must_use]
+pub fn extract_yaml_version(text: &str) -> Option<String> {
+    const PREFIX: &str = "# yaml-language-server: $yamlVersion=";
+
+    for line in text.lines().take(10) {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(PREFIX) {
+            let value = rest.trim();
+            if value == "1.1" || value == "1.2" {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema association — Kubernetes auto-detection
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1693,6 +1719,89 @@ mod tests {
     fn should_extract_tags_from_modeline_on_second_line() {
         let text = "key: value\n# yaml-language-server: $tags=!include,!ref\n";
         assert_eq!(extract_custom_tags(text), vec!["!include", "!ref"]);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // extract_yaml_version
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn should_extract_version_1_1_from_modeline_on_first_line() {
+        let text = "# yaml-language-server: $yamlVersion=1.1\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), Some("1.1".to_string()));
+    }
+
+    #[test]
+    fn should_extract_version_1_2_from_modeline_on_first_line() {
+        let text = "# yaml-language-server: $yamlVersion=1.2\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
+    }
+
+    #[test]
+    fn should_extract_version_from_modeline_on_tenth_line() {
+        let mut text = String::new();
+        for _ in 0..9 {
+            text.push_str("key: value\n");
+        }
+        text.push_str("# yaml-language-server: $yamlVersion=1.1\n");
+        assert_eq!(extract_yaml_version(&text), Some("1.1".to_string()));
+    }
+
+    #[test]
+    fn should_return_none_when_yaml_version_modeline_beyond_tenth_line() {
+        let mut text = String::new();
+        for _ in 0..10 {
+            text.push_str("key: value\n");
+        }
+        text.push_str("# yaml-language-server: $yamlVersion=1.1\n");
+        assert_eq!(extract_yaml_version(&text), None);
+    }
+
+    #[test]
+    fn should_return_none_for_invalid_version_value() {
+        let text = "# yaml-language-server: $yamlVersion=2.0\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
+    #[test]
+    fn should_return_none_for_invalid_version_value_1_0() {
+        let text = "# yaml-language-server: $yamlVersion=1.0\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
+    #[test]
+    fn should_return_none_when_no_yaml_version_modeline_present() {
+        let text = "key: value\n";
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
+    #[test]
+    fn should_return_none_for_empty_input_yaml_version() {
+        assert_eq!(extract_yaml_version(""), None);
+    }
+
+    #[test]
+    fn should_strip_whitespace_around_version_value() {
+        let text = "# yaml-language-server: $yamlVersion=  1.2  \nkey: value\n";
+        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
+    }
+
+    #[test]
+    fn should_return_none_for_empty_version_value() {
+        let text = "# yaml-language-server: $yamlVersion=\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
+    #[test]
+    fn should_return_none_for_wrong_prefix_yaml_version() {
+        let text = "# yaml-ls: $yamlVersion=1.1\nkey: value\n";
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
+    #[test]
+    fn should_extract_version_from_second_line() {
+        let text = "key: value\n# yaml-language-server: $yamlVersion=1.2\n";
+        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
     }
 
     // ══════════════════════════════════════════════════════════════════════════

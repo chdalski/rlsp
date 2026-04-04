@@ -26,7 +26,17 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
 use crate::parser;
-use crate::schema::{ParseContext, SchemaCache, SchemaStoreCatalog};
+use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
+
+/// YAML specification version for formatting and diagnostic purposes.
+///
+/// Note: the underlying parser (saphyr) always parses as YAML 1.2 regardless
+/// of this setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YamlVersion {
+    V1_1,
+    V1_2,
+}
 
 /// Workspace settings received via LSP initialization options or
 /// `workspace/didChangeConfiguration`.
@@ -53,6 +63,9 @@ pub struct Settings {
     pub color_decorators: Option<bool>,
     /// Enable `format` keyword validation. Defaults to `true` when absent.
     pub format_validation: Option<bool>,
+    /// YAML specification version for formatting and diagnostics (`"1.1"` or
+    /// `"1.2"`). Defaults to `"1.2"` when absent.
+    pub yaml_version: Option<String>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -159,6 +172,30 @@ impl Backend {
             .lock()
             .ok()
             .is_none_or(|s| s.format_validation.unwrap_or(true))
+    }
+
+    /// Return the YAML version to use for `text`.
+    ///
+    /// Priority: modeline (`$yamlVersion=`) > workspace setting > default (1.2).
+    /// Invalid version strings (neither `"1.1"` nor `"1.2"`) are treated as
+    /// absent — the next fallback in the chain is used.
+    #[allow(dead_code)] // consumed by downstream formatter/validator tasks
+    pub(crate) fn get_yaml_version(&self, text: &str) -> YamlVersion {
+        let parse_version = |s: &str| {
+            if s == "1.1" {
+                YamlVersion::V1_1
+            } else {
+                YamlVersion::V1_2
+            }
+        };
+        if let Some(v) = schema::extract_yaml_version(text) {
+            return parse_version(&v);
+        }
+        self.settings
+            .lock()
+            .ok()
+            .and_then(|s| s.yaml_version.clone())
+            .map_or(YamlVersion::V1_2, |v| parse_version(&v))
     }
 
     /// Return the cached `SchemaStore` catalog, fetching it on first call.
@@ -1361,6 +1398,116 @@ mod tests {
         }
 
         assert_eq!(backend.get_kubernetes_version(), "1.29.0");
+    }
+
+    // ---- YAML version setting ----
+
+    #[test]
+    fn settings_deserializes_yaml_version() {
+        let json = serde_json::json!({"yamlVersion": "1.1"});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.yaml_version.as_deref(), Some("1.1"));
+    }
+
+    #[test]
+    fn settings_defaults_yaml_version_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.yaml_version.is_none());
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_2_when_nothing_configured() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert_eq!(backend.get_yaml_version("key: value\n"), YamlVersion::V1_2);
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_1_when_setting_is_1_1() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "1.1"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(backend.get_yaml_version("key: value\n"), YamlVersion::V1_1);
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_2_when_setting_is_1_2() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "1.2"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(backend.get_yaml_version("key: value\n"), YamlVersion::V1_2);
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_1_from_modeline_overriding_v1_2_setting() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "1.2"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        let text = "# yaml-language-server: $yamlVersion=1.1\nkey: value\n";
+        assert_eq!(backend.get_yaml_version(text), YamlVersion::V1_1);
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_2_from_modeline_overriding_v1_1_setting() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "1.1"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        let text = "# yaml-language-server: $yamlVersion=1.2\nkey: value\n";
+        assert_eq!(backend.get_yaml_version(text), YamlVersion::V1_2);
+    }
+
+    #[test]
+    fn get_yaml_version_returns_v1_2_default_when_setting_has_invalid_value() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "2.0"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(backend.get_yaml_version("key: value\n"), YamlVersion::V1_2);
+    }
+
+    #[test]
+    fn get_yaml_version_ignores_invalid_modeline_and_uses_setting() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"yamlVersion": "1.1"});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        let text = "# yaml-language-server: $yamlVersion=2.0\nkey: value\n";
+        assert_eq!(backend.get_yaml_version(text), YamlVersion::V1_1);
     }
 
     // ---- Custom tags wiring ----
