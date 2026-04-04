@@ -6,6 +6,7 @@
 //! the 211 formal productions from the spec into a parser combinator function.
 //! Comments and spans are first-class data.
 
+pub mod block;
 pub mod chars;
 pub mod combinator;
 pub mod encoding;
