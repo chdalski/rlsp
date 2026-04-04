@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -24,7 +24,7 @@ extracted pure logic.
 
 ## Steps
 
-- [ ] Add integration test infrastructure
+- [x] Add integration test infrastructure (b4c3f17)
 - [ ] Write integration test suite
 - [ ] Add integration test script and update CI
 
@@ -34,9 +34,9 @@ extracted pure logic.
 
 Set up the test runner and configuration. No test cases yet.
 
-- [ ] Add dev dependencies: `@vscode/test-cli`, `@vscode/test-electron`, `mocha`,
+- [x] Add dev dependencies: `@vscode/test-cli`, `@vscode/test-electron`, `mocha`,
   `@types/mocha`
-- [ ] Create `.vscode-test.mjs` config at `rlsp-yaml/integrations/vscode/`:
+- [x] Create `.vscode-test.mjs` config at `rlsp-yaml/integrations/vscode/`:
   ```javascript
   import { defineConfig } from '@vscode/test-cli';
 
@@ -45,12 +45,12 @@ Set up the test runner and configuration. No test cases yet.
     mocha: { timeout: 20000 },
   });
   ```
-- [ ] Create `src/test/integration/` directory for integration tests
-- [ ] Create `src/test/integration/index.ts` — mocha test runner entry point
-- [ ] Add `"test:integration"` script to `package.json`:
+- [x] Create `src/test/integration/` directory for integration tests
+- [x] Create `src/test/integration/index.ts` — mocha test runner entry point
+- [x] Add `"test:integration"` script to `package.json`:
   `"test:integration": "tsc && vscode-test"`
-- [ ] Update `tsconfig.json` `include` to cover `src/test/` if needed
-- [ ] Ensure `pnpm run test` (vitest) and `pnpm run test:integration`
+- [x] Update `tsconfig.json` `include` to cover `src/test/` if needed
+- [x] Ensure `pnpm run test` (vitest) and `pnpm run test:integration`
   (vscode-test) are separate — unit tests stay fast, integration tests
   are opt-in
 
