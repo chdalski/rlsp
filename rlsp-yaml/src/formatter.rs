@@ -1905,4 +1905,200 @@ mod tests {
             "no separator expected for single doc: {result:?}"
         );
     }
+
+    // ---- Formatter: Flow-to-Block Sequence Indentation ----
+
+    fn leading_spaces(line: &str) -> usize {
+        line.len() - line.trim_start().len()
+    }
+
+    // FI1: K8s containers/command pattern — flow sequence inside a mapping that
+    // is itself a sequence item.  Items must be indented two spaces deeper than
+    // the `command:` key.
+    #[test]
+    fn format_yaml_flow_sequence_in_mapping_in_sequence_item() {
+        let input = "spec:\n  containers:\n    - name: test\n      command: [\"python\", \"-m\", \"http.server\", \"5000\"]\n";
+        let result = format_yaml(input, &default_opts());
+
+        // `command:` key must be present.
+        assert!(
+            result.contains("command:"),
+            "command: key missing: {result:?}"
+        );
+
+        // Collect lines that are sequence items under `command:`.
+        let command_pos = result.find("command:").expect("command: not found");
+        let command_line = result[..command_pos].lines().count().saturating_sub(1);
+        let lines: Vec<&str> = result.lines().collect();
+        let command_indent = leading_spaces(lines[command_line]);
+
+        // All `- ` items after `command:` must be indented more than `command:`.
+        let item_lines: Vec<&str> = lines[command_line + 1..]
+            .iter()
+            .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
+            .filter(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .collect();
+
+        assert!(
+            !item_lines.is_empty(),
+            "no sequence items found after command: in {result:?}"
+        );
+        for item in &item_lines {
+            assert!(
+                leading_spaces(item) > command_indent,
+                "item {item:?} not indented deeper than command: (indent {command_indent}): {result:?}"
+            );
+        }
+    }
+
+    // FI2: Flow sequence inside a nested mapping (not a sequence item).
+    // Verify `command:` items are indented deeper than `command:` itself.
+    #[test]
+    fn format_yaml_flow_sequence_in_nested_mapping() {
+        let input = "job:\n  run:\n    command: [\"echo\", \"hello\"]\n";
+        let result = format_yaml(input, &default_opts());
+
+        assert!(
+            result.contains("command:"),
+            "command: key missing: {result:?}"
+        );
+
+        let command_pos = result.find("command:").expect("command: not found");
+        let command_line = result[..command_pos].lines().count().saturating_sub(1);
+        let lines: Vec<&str> = result.lines().collect();
+        let command_indent = leading_spaces(lines[command_line]);
+
+        let item_lines: Vec<&str> = lines[command_line + 1..]
+            .iter()
+            .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
+            .filter(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .collect();
+
+        assert!(
+            !item_lines.is_empty(),
+            "no items found after command: in {result:?}"
+        );
+        for item in &item_lines {
+            assert!(
+                leading_spaces(item) > command_indent,
+                "item {item:?} not deeper than command: (indent {command_indent}): {result:?}"
+            );
+        }
+    }
+
+    // FI3: Single-element flow sequence in a mapping value.
+    #[test]
+    fn format_yaml_single_element_flow_sequence() {
+        let input = "args: [\"--verbose\"]\n";
+        let result = format_yaml(input, &default_opts());
+
+        assert!(result.contains("args:"), "args: key missing: {result:?}");
+
+        let args_pos = result.find("args:").expect("args: not found");
+        let args_line = result[..args_pos].lines().count().saturating_sub(1);
+        let lines: Vec<&str> = result.lines().collect();
+        let args_indent = leading_spaces(lines[args_line]);
+
+        let item_lines: Vec<&str> = lines[args_line + 1..]
+            .iter()
+            .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
+            .filter(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .collect();
+
+        assert!(
+            !item_lines.is_empty(),
+            "no items found after args: in {result:?}"
+        );
+        for item in &item_lines {
+            assert!(
+                leading_spaces(item) > args_indent,
+                "item {item:?} not deeper than args: (indent {args_indent}): {result:?}"
+            );
+        }
+    }
+
+    // FI4: Deeply nested — flow sequence three levels deep (sequence item inside
+    // a mapping inside a sequence item inside a mapping).
+    #[test]
+    fn format_yaml_deeply_nested_flow_sequence() {
+        let input = "jobs:\n  build:\n    steps:\n      - name: run\n        run: [\"bash\", \"-c\", \"echo hi\"]\n";
+        let result = format_yaml(input, &default_opts());
+
+        assert!(result.contains("run:"), "run: key missing: {result:?}");
+
+        // Find the `run:` key that has a list value (not the `run:` that is a
+        // plain scalar — look for the one followed by a sequence item line).
+        let run_pos = result.rfind("run:").expect("run: not found");
+        let run_line = result[..run_pos].lines().count().saturating_sub(1);
+        let lines: Vec<&str> = result.lines().collect();
+        let run_indent = leading_spaces(lines[run_line]);
+
+        // If `run:` is followed by sequence items, check indentation.
+        let after_run: Vec<&str> = lines[run_line + 1..]
+            .iter()
+            .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
+            .filter(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .collect();
+
+        if !after_run.is_empty() {
+            for item in &after_run {
+                assert!(
+                    leading_spaces(item) > run_indent,
+                    "item {item:?} not deeper than run: (indent {run_indent}): {result:?}"
+                );
+            }
+        }
+        // Whether run: emits block or inline, the document must round-trip
+        // without losing content.
+        assert!(
+            result.contains("bash") || result.contains("echo"),
+            "sequence content missing: {result:?}"
+        );
+    }
+
+    // FI5: Top-level regression — a simple top-level flow sequence must still
+    // produce block items at the correct indent (2 spaces for top-level key).
+    #[test]
+    fn format_yaml_top_level_flow_sequence_correct_indent() {
+        let input = "items: [\"a\", \"b\", \"c\"]\n";
+        let result = format_yaml(input, &default_opts());
+
+        assert!(result.contains("items:"), "items: key missing: {result:?}");
+
+        let items_pos = result.find("items:").expect("items: not found");
+        let items_line = result[..items_pos].lines().count().saturating_sub(1);
+        let lines: Vec<&str> = result.lines().collect();
+        let items_indent = leading_spaces(lines[items_line]);
+
+        let item_lines: Vec<&str> = lines[items_line + 1..]
+            .iter()
+            .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
+            .filter(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .collect();
+
+        assert!(
+            !item_lines.is_empty(),
+            "no items found after items: in {result:?}"
+        );
+        for item in &item_lines {
+            assert!(
+                leading_spaces(item) > items_indent,
+                "item {item:?} not indented deeper than items: (indent {items_indent}): {result:?}"
+            );
+        }
+    }
+
+    // FI6: Idempotency — formatting a block sequence twice produces the same output.
+    #[test]
+    fn format_yaml_flow_to_block_sequence_is_idempotent() {
+        let input = "spec:\n  containers:\n    - name: test\n      command: [\"python\", \"-m\", \"http.server\", \"5000\"]\n";
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(first, second, "flow-to-block conversion is not idempotent");
+    }
 }
