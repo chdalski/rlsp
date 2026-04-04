@@ -15,6 +15,7 @@ pub mod flow;
 pub mod loader;
 pub mod node;
 pub mod pos;
+pub mod schema;
 pub mod stream;
 pub mod structure;
 pub mod token;
