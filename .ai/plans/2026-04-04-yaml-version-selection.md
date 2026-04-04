@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -58,8 +58,8 @@ parser.
 
 ## Steps
 
-- [ ] Add `yamlVersion` setting
-- [ ] Add `$yamlVersion` modeline support
+- [x] Add `yamlVersion` setting (67e1401)
+- [x] Add `$yamlVersion` modeline support (67e1401)
 - [ ] Adjust `needs_quoting` for version
 - [ ] Adjust validators for version
 - [ ] Add tests
@@ -67,18 +67,18 @@ parser.
 
 ## Tasks
 
-### Task 1: Add yamlVersion setting and modeline
+### Task 1: Add yamlVersion setting and modeline (67e1401)
 
 Add `yaml_version` to the Settings struct and a modeline parser for
 `$yamlVersion=1.1` or `$yamlVersion=1.2`.
 
-- [ ] Add `yaml_version: Option<String>` to Settings (default: None → 1.2)
-- [ ] Add `extract_yaml_version(text)` in `schema.rs` following existing
+- [x] Add `yaml_version: Option<String>` to Settings (default: None → 1.2)
+- [x] Add `extract_yaml_version(text)` in `schema.rs` following existing
       modeline pattern
-- [ ] Modeline overrides workspace setting (same priority as `$schema`)
-- [ ] Validate version is "1.1" or "1.2" — ignore invalid values
-- [ ] Unit tests for modeline parsing
-- [ ] Unit tests for setting deserialization
+- [x] Modeline overrides workspace setting (same priority as `$schema`)
+- [x] Validate version is "1.1" or "1.2" — ignore invalid values
+- [x] Unit tests for modeline parsing
+- [x] Unit tests for setting deserialization
 
 ### Task 2: Version-aware quoting in formatter
 
