@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -31,7 +31,7 @@ performance degradation on very large files.
 
 ## Steps
 
-- [ ] Add feature toggle settings
+- [x] Add feature toggle settings (9ce8e80)
 - [ ] Add maxItemsComputed setting
 - [ ] Integrate toggles with LSP handlers
 - [ ] Integrate maxItemsComputed with symbols and folding
@@ -40,17 +40,17 @@ performance degradation on very large files.
 
 ## Tasks
 
-### Task 1: Add feature toggle settings
+### Task 1: Add feature toggle settings (9ce8e80)
 
 Add boolean settings to enable/disable individual LSP features.
 
-- [ ] Add `validate: Option<bool>` to Settings (default: true)
-- [ ] Add `hover: Option<bool>` to Settings (default: true)
-- [ ] Add `completion: Option<bool>` to Settings (default: true)
-- [ ] In `parse_and_publish()`: skip validation when `validate` is false
-- [ ] In `hover()` handler: return empty when `hover` is false
-- [ ] In `completion()` handler: return empty when `completion` is false
-- [ ] Tests for each toggle
+- [x] Add `validate: Option<bool>` to Settings (default: true)
+- [x] Add `hover: Option<bool>` to Settings (default: true)
+- [x] Add `completion: Option<bool>` to Settings (default: true)
+- [x] In `parse_and_publish()`: skip validation when `validate` is false
+- [x] In `hover()` handler: return empty when `hover` is false
+- [x] In `completion()` handler: return empty when `completion` is false
+- [x] Tests for each toggle
 
 ### Task 2: Add maxItemsComputed setting
 
