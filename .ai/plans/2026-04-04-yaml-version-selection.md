@@ -60,7 +60,7 @@ parser.
 
 - [x] Add `yamlVersion` setting (67e1401)
 - [x] Add `$yamlVersion` modeline support (67e1401)
-- [ ] Adjust `needs_quoting` for version
+- [x] Adjust `needs_quoting` for version (b514adc)
 - [ ] Adjust validators for version
 - [ ] Add tests
 - [ ] Update documentation
@@ -80,19 +80,19 @@ Add `yaml_version` to the Settings struct and a modeline parser for
 - [x] Unit tests for modeline parsing
 - [x] Unit tests for setting deserialization
 
-### Task 2: Version-aware quoting in formatter
+### Task 2: Version-aware quoting in formatter (b514adc)
 
 Adjust `needs_quoting()` to accept a YAML version parameter. In 1.2 mode,
 `on`/`off`/`yes`/`no` don't need quoting (they're plain strings). In 1.1
 mode, they do.
 
-- [ ] Add version parameter to `needs_quoting()`
-- [ ] Split the reserved-words list: always-reserved (1.1+1.2) vs 1.1-only
-- [ ] Thread version through `format_yaml()` → `string_to_doc()` →
+- [x] Add version parameter to `needs_quoting()`
+- [x] Split the reserved-words list: always-reserved (1.1+1.2) vs 1.1-only
+- [x] Thread version through `format_yaml()` → `string_to_doc()` →
       `needs_quoting()`
-- [ ] Plumb version from Settings/modeline to formatter call in server.rs
-- [ ] Tests: `on:` not quoted in 1.2, quoted in 1.1
-- [ ] Tests: `true`/`false`/`null` always quoted (both versions)
+- [x] Plumb version from Settings/modeline to formatter call in server.rs
+- [x] Tests: `on:` not quoted in 1.2, quoted in 1.1
+- [x] Tests: `true`/`false`/`null` always quoted (both versions)
 
 ### Task 3: Version-aware diagnostics
 
