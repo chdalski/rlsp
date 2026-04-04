@@ -93,7 +93,7 @@ or `"true"`).
 - [x] Fix duplicate key false positives (validator) (e5e5cd8)
 - [x] Fix empty flow collection warnings (validator) (f34a305)
 - [x] Switch formatter to `early_parse(false)` for scalar style preservation (022d9d2)
-- [ ] Fix blank line preservation (formatter)
+- [x] Fix blank line preservation (formatter) (aeed0a5)
 - [ ] Fix flow-to-block sequence indentation (formatter)
 - [ ] Strip unnecessary quotes from Representation variants (formatter)
 - [ ] Fix code action conversion bugs (code_actions)
@@ -190,13 +190,13 @@ comment groups (line 126-128). Extend this: when a content entry has
 `pending_blanks > 0` and there are no pending leading comments, insert blank
 lines before the entry's output.
 
-- [ ] Track blank lines between content entries (not just comment groups)
-- [ ] Insert preserved blank lines in `attach_comments` output
-- [ ] Add test: blank lines between top-level keys preserved
-- [ ] Add test: blank lines inside nested mappings preserved
-- [ ] Add test: multiple consecutive blank lines collapsed to one
-- [ ] Add test: idempotency with blank lines
-- [ ] Verify existing tests still pass
+- [x] Track blank lines between content entries (not just comment groups)
+- [x] Insert preserved blank lines in `attach_comments` output
+- [x] Add test: blank lines between top-level keys preserved
+- [x] Add test: blank lines inside nested mappings preserved
+- [x] Add test: multiple consecutive blank lines collapsed to one
+- [x] Add test: idempotency with blank lines
+- [x] Verify existing tests still pass
 
 ### Task 6: Fix flow-to-block sequence indentation
 
