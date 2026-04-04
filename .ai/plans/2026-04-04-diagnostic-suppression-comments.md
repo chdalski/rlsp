@@ -44,7 +44,7 @@ Follow the established `# yaml-language-server:` prefix:
 - [x] Add per-line suppression (26fb7c7)
 - [x] Add per-file suppression (26fb7c7)
 - [x] Add tests (26fb7c7)
-- [ ] Update configuration docs
+- [x] Update configuration docs (470cc12)
 
 ## Tasks
 
@@ -70,10 +70,10 @@ Filter diagnostics through the suppression map before publishing.
 - [x] Per-file suppression filters all matching codes from entire file
 - [x] Integration tests with LSP lifecycle
 
-### Task 3: Update documentation
+### Task 3: Update documentation (470cc12)
 
-- [ ] Add suppression syntax to `docs/configuration.md`
-- [ ] Add examples for common suppression patterns
+- [x] Add suppression syntax to `docs/configuration.md`
+- [x] Add examples for common suppression patterns
 
 ## Decisions
 
