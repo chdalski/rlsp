@@ -35,7 +35,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 \
     libpango-1.0-0 \
     libcairo2 \
-    libdbus-1-3
+    libdbus-1-3 \
+    # libfyaml for YAML parser benchmark comparison
+    libfyaml-dev
 
 # Route ALSA through PulseAudio so applications that use ALSA directly
 # don't fail when /dev/snd is unavailable (e.g., VM or remote host).
