@@ -75,8 +75,8 @@ high-quality crates.io package.
       public streaming API (aedf15a)
 - [x] Build AST loader — events to node graph with
       anchor/alias resolution and cycle detection (24e739a)
-- [ ] Implement schema resolution — failsafe/JSON/core
-      schemas, tag resolution, scalar type inference
+- [x] Implement schema resolution — failsafe/JSON/core
+      schemas, tag resolution, scalar type inference (011e49b)
 - [ ] Implement emitter — node-to-YAML serialization with
       style and comment preservation
 - [ ] Integrate YAML test suite and reach 100% conformance
@@ -375,27 +375,27 @@ scalar type inference for failsafe, JSON, and core schemas.
 
 **Files:** `src/schema.rs`
 
-- [ ] Schema trait: pluggable schema resolution strategy
-- [ ] Failsafe schema: all scalars are strings, mappings
+- [x] Schema trait: pluggable schema resolution strategy
+- [x] Failsafe schema: all scalars are strings, mappings
       are unordered, sequences are ordered — no type
       inference
-- [ ] JSON schema: null (`null`), bool (`true`/`false`),
+- [x] JSON schema: null (`null`), bool (`true`/`false`),
       int (decimal), float (decimal with `.` or `e`/`E`),
       string (everything else)
-- [ ] Core schema (default): extends JSON with additional
+- [x] Core schema (default): extends JSON with additional
       patterns — null (`~`, empty), bool (`True`/`False`,
       `TRUE`/`FALSE`), int (octal `0o`, hex `0x`), float
       (`.inf`, `.nan`), plus unquoted string fallback
-- [ ] Tag resolution: resolve shorthand tags (`!!str`,
+- [x] Tag resolution: resolve shorthand tags (`!!str`,
       `!!int`, etc.) against tag prefixes from directives,
       handle verbatim tags (`!<uri>`), non-specific tags
       (`!`, `?`)
-- [ ] `Scalar` value type: `Null`, `Bool(bool)`,
+- [x] `Scalar` value type: `Null`, `Bool(bool)`,
       `Int(i64)`, `Float(f64)`, `String(String)` — resolved
       from raw scalar text + tag + schema
-- [ ] Public API: `fn resolve(node: &Node<Loc>, schema:
+- [x] Public API: `fn resolve(node: &Node<Loc>, schema:
       &Schema) -> ResolvedNode<Loc>`
-- [ ] Unit tests: each schema's resolution rules, tag
+- [x] Unit tests: each schema's resolution rules, tag
       precedence, edge cases (`.inf`, `0o777`, `~`,
       empty scalar, quoted scalars bypass inference)
 
