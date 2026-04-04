@@ -94,7 +94,7 @@ or `"true"`).
 - [x] Fix empty flow collection warnings (validator) (f34a305)
 - [x] Switch formatter to `early_parse(false)` for scalar style preservation (022d9d2)
 - [x] Fix blank line preservation (formatter) (aeed0a5)
-- [ ] Fix flow-to-block sequence indentation (formatter)
+- [x] Fix flow-to-block sequence indentation (formatter) (a9e0387)
 - [ ] Strip unnecessary quotes from Representation variants (formatter)
 - [ ] Fix code action conversion bugs (code_actions)
 - [ ] Add conformance test suite infrastructure
@@ -216,12 +216,12 @@ The fix may be in:
 - `rlsp-fmt/src/printer.rs`: how nested `Indent` nodes accumulate on the
   work stack
 
-- [ ] Write reproducing test with K8s containers/command pattern
-- [ ] Trace Doc IR and printer output to identify fault
-- [ ] Fix indentation logic
-- [ ] Add test: flow sequence in mapping in sequence item
-- [ ] Add test: deeply nested flow-to-block conversion
-- [ ] Verify all existing formatter tests still pass
+- [x] Write reproducing test with K8s containers/command pattern
+- [x] Trace Doc IR and printer output to identify fault
+- [x] Fix indentation logic (no fix needed — behavior already correct)
+- [x] Add test: flow sequence in mapping in sequence item
+- [x] Add test: deeply nested flow-to-block conversion
+- [x] Verify all existing formatter tests still pass
 
 ### Task 7: Strip unnecessary quotes from Representation variants
 
