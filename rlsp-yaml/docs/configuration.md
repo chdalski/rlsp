@@ -21,6 +21,10 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "formatSingleQuote": false,
   "yamlVersion": "1.2",
   "httpProxy": "http://proxy.corp:8080",
+  "validate": true,
+  "hover": true,
+  "completion": true,
+  "maxItemsComputed": 5000,
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": "deploy/**/*.yaml"
@@ -199,6 +203,52 @@ To disable color decorators:
 { "colorDecorators": false }
 ```
 
+### `validate`
+
+- **Type:** `boolean` (optional)
+- **Default:** `true`
+
+Enable or disable diagnostic validation. When `false`, the server publishes no diagnostics for any open document — syntax errors, duplicate keys, schema violations, and all other validators are suppressed. Existing diagnostics are cleared immediately when validation is disabled.
+
+```json
+{ "validate": false }
+```
+
+### `hover`
+
+- **Type:** `boolean` (optional)
+- **Default:** `true`
+
+Enable or disable hover information. When `false`, the server returns no results for `textDocument/hover` requests.
+
+```json
+{ "hover": false }
+```
+
+### `completion`
+
+- **Type:** `boolean` (optional)
+- **Default:** `true`
+
+Enable or disable completion suggestions. When `false`, the server returns no results for `textDocument/completion` requests.
+
+```json
+{ "completion": false }
+```
+
+### `maxItemsComputed`
+
+- **Type:** `number` (optional)
+- **Default:** `5000`
+
+Maximum number of items returned by document symbol (`textDocument/documentSymbol`) and folding range (`textDocument/foldingRange`) requests. Results are truncated to this limit before being returned to the client. Setting this to `0` suppresses all results from these two requests.
+
+This limit prevents performance degradation when editing very large YAML files that would otherwise produce thousands of symbols or folding regions.
+
+```json
+{ "maxItemsComputed": 1000 }
+```
+
 > **Indentation** (`tabWidth`, `useTabs`) is not configurable via workspace settings — it is taken directly from the LSP `textDocument/formatting` request, which carries the editor's indentation preferences. Configure indentation in your editor settings.
 
 ## Modelines
@@ -311,10 +361,10 @@ Some validators are always active; others depend on settings.
 
 | Validator | Controlled by | Default |
 |-----------|---------------|---------|
-| YAML syntax errors | always active | — |
-| Duplicate key detection | always active | — |
-| Unused anchor warnings | always active | — |
-| Flow style warnings | always active | — |
+| YAML syntax errors | `validate` | on |
+| Duplicate key detection | `validate` | on |
+| Unused anchor warnings | `validate` | on |
+| Flow style warnings | `validate` | on |
 | Key ordering | `keyOrdering` | off |
 | Custom tag validation | `customTags` | off (empty = disabled) |
 | JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
