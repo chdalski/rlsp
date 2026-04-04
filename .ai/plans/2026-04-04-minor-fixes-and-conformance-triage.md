@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -22,21 +22,21 @@ action. Conformance triage (99 failing cases) deferred to a later session.
 
 ## Steps
 
-- [ ] Fix quote_flow_item double-quoting
+- [x] Fix quote_flow_item double-quoting (44514c1)
 
 ## Tasks
 
-### Task 1: Fix quote_flow_item double-quoting
+### Task 1: Fix quote_flow_item double-quoting (44514c1)
 
 Fix `quote_flow_item` in `code_actions.rs` to detect already-quoted items
 and not double-wrap them.
 
-- [ ] Check if item starts and ends with matching quotes (`"..."` or `'...'`)
-- [ ] If already quoted, return as-is
-- [ ] If not quoted but needs quoting, wrap in double quotes
-- [ ] Add test: `- "true"` block → `["true"]` flow (not `[""true""]`)
-- [ ] Add test: `- 'hello'` block → `['hello']` flow
-- [ ] Verify existing code action tests still pass
+- [x] Check if item starts and ends with matching quotes (`"..."` or `'...'`)
+- [x] If already quoted, return as-is
+- [x] If not quoted but needs quoting, wrap in double quotes
+- [x] Add test: `- "true"` block → `["true"]` flow (not `[""true""]`)
+- [x] Add test: `- 'hello'` block → `['hello']` flow
+- [x] Verify existing code action tests still pass
 
 ## Decisions
 
