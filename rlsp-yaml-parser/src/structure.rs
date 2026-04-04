@@ -121,14 +121,11 @@ pub fn s_block_line_prefix(n: i32) -> Parser<'static> {
     s_indent(n)
 }
 
-/// [68] s-flow-line-prefix(n) — indentation for flow contexts: optional
+/// [68] s-flow-line-prefix(n) — indentation for flow contexts: required
 /// n-space indent then optional in-line separation.
-///
-/// Flow contexts do not enforce exact indentation — `s-indent(n)` is wrapped
-/// in `opt` so content that appears without leading spaces still parses.
 #[must_use]
 pub fn s_flow_line_prefix(n: i32) -> Parser<'static> {
-    seq(opt(s_indent(n)), opt(s_separate_in_line()))
+    seq(s_indent(n), opt(s_separate_in_line()))
 }
 
 // ---------------------------------------------------------------------------
@@ -746,9 +743,16 @@ mod tests {
     }
 
     #[test]
-    fn s_line_prefix_flow_context_allows_zero_indent() {
-        let reply = s_line_prefix(2, Context::FlowOut)(state("rest"));
+    fn s_line_prefix_flow_context_requires_indent_for_nonzero_n() {
+        let reply = s_line_prefix(2, Context::FlowOut)(state("  rest"));
         assert!(is_success(&reply));
+        assert_eq!(remaining(&reply), "rest");
+    }
+
+    #[test]
+    fn s_line_prefix_flow_context_fails_when_indent_below_n() {
+        let reply = s_line_prefix(2, Context::FlowOut)(state("rest"));
+        assert!(is_failure(&reply));
     }
 
     #[test]
