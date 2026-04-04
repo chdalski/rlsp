@@ -61,8 +61,8 @@ parser.
 - [x] Add `yamlVersion` setting (67e1401)
 - [x] Add `$yamlVersion` modeline support (67e1401)
 - [x] Adjust `needs_quoting` for version (b514adc)
-- [ ] Adjust validators for version
-- [ ] Add tests
+- [x] Adjust validators for version (c58fd56 — no changes needed, confirmed version-agnostic)
+- [x] Add tests (c58fd56)
 - [ ] Update documentation
 
 ## Tasks
@@ -94,14 +94,14 @@ mode, they do.
 - [x] Tests: `on:` not quoted in 1.2, quoted in 1.1
 - [x] Tests: `true`/`false`/`null` always quoted (both versions)
 
-### Task 3: Version-aware diagnostics
+### Task 3: Version-aware diagnostics (c58fd56)
 
 Adjust any version-sensitive diagnostic behavior.
 
-- [ ] Evaluate if any validators need version awareness (e.g., duplicate
-      key semantics are the same in both versions)
-- [ ] If octal/sexagesimal values affect schema validation, adjust
-- [ ] Tests for version-specific diagnostic behavior
+- [x] Evaluate if any validators need version awareness (e.g., duplicate
+      key semantics are the same in both versions) — no changes needed
+- [x] If octal/sexagesimal values affect schema validation, adjust — N/A, saphyr parses 0644 as String
+- [x] Tests for version-specific diagnostic behavior — confirmation test added
 
 ### Task 4: Update documentation
 
