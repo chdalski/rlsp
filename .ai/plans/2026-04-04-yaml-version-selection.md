@@ -8,11 +8,28 @@ Add YAML version selection (1.1 vs 1.2) as a workspace setting and
 per-document modeline. YAML 1.1 treats `on`/`off`/`yes`/`no` as booleans
 and has different octal number syntax — Ansible assumes 1.1, Kubernetes and
 GitHub Actions assume 1.2. Without this setting, users in mixed-version repos
-can't get correct validation for all files.
+can't get correct output for all files.
+
+**Important limitation:** saphyr (our YAML parser) is YAML 1.2 only. It only
+recognizes `true`/`false` as booleans — `on`/`off`/`yes`/`no` are always
+parsed as strings. There is no 1.1 parsing mode. This setting therefore
+affects **formatter output and diagnostics only**, not parsing. Specifically:
+- **Formatter:** controls which values `needs_quoting()` considers reserved
+  (1.1 mode adds `on`/`off`/`yes`/`no` to the quoting list so output is
+  safe for 1.1 consumers like Ansible)
+- **Diagnostics:** may adjust version-sensitive warnings
+- **Parser:** unchanged — always resolves values per YAML 1.2 core schema
+
+This is sufficient for the primary use case (producing output safe for
+1.1-consuming tools) but does NOT provide true 1.1 value resolution (where
+`on:` is parsed as `true:`). True 1.1 support would require a different
+parser.
 
 ## Context
 
-- We currently assume YAML 1.2 throughout (saphyr defaults to 1.2)
+- saphyr is YAML 1.2 only — `scalar.rs` resolves only `true`/`false` as
+  booleans; `on`/`off`/`yes`/`no` become strings
+- The saphyr emitter does quote 1.1 keywords for interop safety (line 455)
 - The `needs_quoting` function in `formatter.rs` lists YAML 1.1 boolean
   keywords (`on`, `off`, `yes`, `no`, etc.) — these need quoting in 1.1
   but not in 1.2
@@ -98,6 +115,7 @@ Adjust any version-sensitive diagnostic behavior.
   Most modern tools (K8s, GHA) use 1.2. Ansible users can opt into 1.1.
 - **Modeline overrides setting** — follows the same priority as `$schema`.
   A mixed repo can use 1.2 globally with `$yamlVersion=1.1` in Ansible files.
-- **Formatter and validators both need version awareness** — quoting is the
-  most visible difference, but validators should also understand version
-  context.
+- **Formatter and diagnostics only — not the parser** — saphyr is YAML 1.2
+  only with no 1.1 mode. This setting controls quoting decisions and
+  diagnostic behavior, not value resolution. True 1.1 parsing (where `on:`
+  resolves to `true:`) would require replacing the parser.
