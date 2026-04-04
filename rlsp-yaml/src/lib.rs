@@ -24,5 +24,6 @@ pub mod schema_validation;
 pub mod selection;
 pub mod semantic_tokens;
 pub mod server;
+pub mod suppression;
 pub mod symbols;
 pub mod validators;
