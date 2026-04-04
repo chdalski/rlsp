@@ -77,8 +77,8 @@ high-quality crates.io package.
       anchor/alias resolution and cycle detection (24e739a)
 - [x] Implement schema resolution — failsafe/JSON/core
       schemas, tag resolution, scalar type inference (011e49b)
-- [ ] Implement emitter — node-to-YAML serialization with
-      style and comment preservation
+- [x] Implement emitter — node-to-YAML serialization with
+      style and comment preservation (41b4b4a)
 - [ ] Integrate YAML test suite and reach 100% conformance
 - [ ] Add benchmarks with libfyaml comparison baseline
 
@@ -406,26 +406,26 @@ with style and comment preservation.
 
 **Files:** `src/emitter.rs`
 
-- [ ] Emitter configuration: indent width, line width,
+- [x] Emitter configuration: indent width, line width,
       default scalar style, default collection style
       (block vs flow)
-- [ ] Scalar emission: respect `ScalarStyle` from node —
+- [x] Scalar emission: respect `ScalarStyle` from node —
       plain, single-quoted, double-quoted, literal block,
       folded block (with correct chomping)
-- [ ] Mapping emission: block style (key: value with
+- [x] Mapping emission: block style (key: value with
       indentation) and flow style ({key: value})
-- [ ] Sequence emission: block style (- item) and flow
+- [x] Sequence emission: block style (- item) and flow
       style ([item1, item2])
-- [ ] Comment emission: preserve comments in their
+- [x] Comment emission: preserve comments in their
       original positions relative to nodes
-- [ ] Anchor/alias emission: emit `&anchor` on first
+- [x] Anchor/alias emission: emit `&anchor` on first
       occurrence, `*anchor` on aliases
-- [ ] Multi-document emission: `---` separators, `...`
+- [x] Multi-document emission: `---` separators, `...`
       terminators, directive preambles
-- [ ] Tag emission: shorthand and verbatim tags
-- [ ] Public API: `fn emit(documents: &[Document<Loc>],
+- [x] Tag emission: shorthand and verbatim tags
+- [x] Public API: `fn emit(documents: &[Document<Loc>],
       config: &EmitConfig) -> String`
-- [ ] Unit tests: round-trip (parse → emit → re-parse →
+- [x] Unit tests: round-trip (parse → emit → re-parse →
       compare) for all node types, style preservation,
       comment preservation, multi-document
 
