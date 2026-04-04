@@ -97,7 +97,7 @@ or `"true"`).
 - [x] Fix flow-to-block sequence indentation (formatter) (a9e0387)
 - [x] Strip unnecessary quotes from Representation variants (formatter) (e8e5e6b)
 - [x] Fix code action conversion bugs (code_actions) (3737c50)
-- [ ] Add conformance test suite infrastructure
+- [x] Add conformance test suite infrastructure (1446819)
 - [ ] Add real-world ecosystem fixtures
 
 ## Tasks
@@ -264,12 +264,12 @@ Integration approach:
 - Evaluate the best inclusion method (git submodule, vendored copy, or crate
   dependency) at implementation time based on what's actually available.
 
-- [ ] Investigate saphyr's yaml-test-suite integration approach
-- [ ] Download yaml-test-suite data files (method TBD based on investigation)
-- [ ] Create `tests/conformance.rs` test module
-- [ ] Implement formatter round-trip conformance tests
-- [ ] Implement parser error conformance tests
-- [ ] Document which tests pass/fail and why (saphyr limitations)
+- [x] Investigate saphyr's yaml-test-suite integration approach
+- [x] Download yaml-test-suite data files (method TBD based on investigation)
+- [x] Create `tests/conformance.rs` test module
+- [x] Implement formatter round-trip conformance tests
+- [x] Implement parser error conformance tests
+- [x] Document which tests pass/fail and why (saphyr limitations)
 
 ### Task 9: Add real-world ecosystem fixtures
 
