@@ -144,6 +144,11 @@ jobs:
         working-directory: rlsp-yaml/integrations/vscode
         run: pnpm run test
 
+      - name: Run integration tests
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        working-directory: rlsp-yaml/integrations/vscode
+        run: xvfb-run -a pnpm run test:integration
+
       - name: Set extension version
         if: needs.resolve-version.outputs.version != ''
         working-directory: rlsp-yaml/integrations/vscode
