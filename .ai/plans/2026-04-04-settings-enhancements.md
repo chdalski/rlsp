@@ -36,7 +36,7 @@ performance degradation on very large files.
 - [x] Integrate toggles with LSP handlers (9ce8e80)
 - [x] Integrate maxItemsComputed with symbols and folding (2c45fa0)
 - [x] Add tests (2c45fa0)
-- [ ] Update documentation
+- [x] Update documentation (199f589)
 
 ## Tasks
 
@@ -63,10 +63,10 @@ Add a performance limit for document symbols and folding ranges.
       (completions, references, etc.)
 - [x] Tests for truncation behavior
 
-### Task 3: Update documentation
+### Task 3: Update documentation (199f589)
 
-- [ ] Add all new settings to `docs/configuration.md`
-- [ ] Document default values and behavior when disabled
+- [x] Add all new settings to `docs/configuration.md`
+- [x] Document default values and behavior when disabled
 
 ## Decisions
 
