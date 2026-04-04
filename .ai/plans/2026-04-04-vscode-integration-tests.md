@@ -26,7 +26,7 @@ extracted pure logic.
 
 - [x] Add integration test infrastructure (b4c3f17)
 - [x] Write integration test suite (f9fa0cc)
-- [ ] Add integration test script and update CI
+- [x] Add integration test script and update CI (11ddcc4)
 
 ## Tasks
 
@@ -79,8 +79,8 @@ Write the actual test cases inside the VS Code extension host.
 
 Wire up the integration tests to run locally and in CI.
 
-- [ ] Add `xvfb-run` wrapper for Linux CI to provide a headless display
-- [ ] Add integration test step to `.github/workflows/vscode-extension.yml`
+- [x] Add `xvfb-run` wrapper for Linux CI to provide a headless display
+- [x] Add integration test step to `.github/workflows/vscode-extension.yml`
   (only on linux-x64 runner — no need to run in all matrix entries):
   ```yaml
   - name: Run integration tests (Linux)
@@ -88,7 +88,7 @@ Wire up the integration tests to run locally and in CI.
     working-directory: rlsp-yaml/integrations/vscode
     run: xvfb-run -a pnpm run test:integration
   ```
-- [ ] Verify integration tests pass locally and document how to run them
+- [x] Verify integration tests pass locally and document how to run them
 
 ## Decisions
 
