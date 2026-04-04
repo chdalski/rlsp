@@ -62,8 +62,9 @@ high-quality crates.io package.
 - [x] Implement structural productions (spec §6) —
       indentation, comments, separation, directives, node
       properties (13035d0)
-- [ ] Implement flow style productions (spec §7) — plain
+- [x] Implement flow style productions (spec §7) — plain
       scalars, quoted scalars, flow sequences, flow mappings
+      (adc3ba0, 6e81b80)
 - [ ] Implement block style productions (spec §8) — block
       scalars (literal/folded with chomping), block
       sequences, block mappings
@@ -189,10 +190,10 @@ all parsers.
 
 **Files:** `src/flow.rs`
 
-- [ ] Alias nodes: `c_ns_alias_node` — wrapped in
+- [x] Alias nodes: `c_ns_alias_node` — wrapped in
       `BeginAlias`/`EndAlias` tokens with anchor name
-- [ ] Empty nodes: `e_node`, `e_scalar`
-- [ ] Flow scalars:
+- [x] Empty nodes: `e_node`, `e_scalar`
+- [x] Flow scalars:
   - Double-quoted: `c_double_quoted(n,c)`,
     `nb_double_char`, `ns_double_char`,
     `c_double_quoted(n,c)`, multi-line with `nb_ns_double_in_line`,
@@ -204,10 +205,10 @@ all parsers.
     `ns_plain_multi_line(n,c)`, `s_ns_plain_next_line(n,c)`,
     `nb_ns_plain_in_line(c)` — context-sensitive (flow
     indicators forbidden in flow context)
-- [ ] Flow sequences: `c_flow_sequence(n,c)`,
+- [x] Flow sequences: `c_flow_sequence(n,c)`,
       `ns_s_flow_seq_entries(n,c)`,
       `ns_flow_seq_entry(n,c)`
-- [ ] Flow mappings: `c_flow_mapping(n,c)`,
+- [x] Flow mappings: `c_flow_mapping(n,c)`,
       `ns_s_flow_map_entries(n,c)`,
       `ns_flow_map_entry(n,c)`,
       `ns_flow_map_explicit_entry(n,c)`,
@@ -222,7 +223,7 @@ all parsers.
       `ns_flow_pair_yaml_key_entry(n,c)`,
       `c_ns_flow_pair_json_key_entry(n,c)`,
       `c_s_implicit_json_key(c)`
-- [ ] Flow-in-block: `ns_flow_node(n,c)`,
+- [x] Flow-in-block: `ns_flow_node(n,c)`,
       `c_ns_flow_content(n,c)`,
       `ns_flow_content(n,c)`,
       `ns_flow_yaml_content(n,c)`,
@@ -230,7 +231,7 @@ all parsers.
       `ns_flow_yaml_node(n,c)`,
       `c_flow_json_node(n,c)`,
       `ns_flow_pair_yaml_key_entry`
-- [ ] Unit tests: nested flow collections, colon-adjacent
+- [x] Unit tests: nested flow collections, colon-adjacent
       values, multiline flow keys, empty collections,
       mixed flow/block
 
