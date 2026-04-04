@@ -40,10 +40,10 @@ Follow the established `# yaml-language-server:` prefix:
 ## Steps
 
 - [x] Implement suppression comment parser (63daa76)
-- [ ] Integrate with diagnostic pipeline
-- [ ] Add per-line suppression
-- [ ] Add per-file suppression
-- [ ] Add tests
+- [x] Integrate with diagnostic pipeline (26fb7c7)
+- [x] Add per-line suppression (26fb7c7)
+- [x] Add per-file suppression (26fb7c7)
+- [x] Add tests (26fb7c7)
 - [ ] Update configuration docs
 
 ## Tasks
@@ -60,15 +60,15 @@ suppression map. Follow the modeline scanning pattern in `schema.rs`.
 - [x] Return a `SuppressionMap` struct with per-line and per-file rules
 - [x] Unit tests for parser
 
-### Task 2: Integrate suppression with diagnostic pipeline
+### Task 2: Integrate suppression with diagnostic pipeline (26fb7c7)
 
 Filter diagnostics through the suppression map before publishing.
 
-- [ ] Call suppression parser in `parse_and_publish()`
-- [ ] Filter `Vec<Diagnostic>` — remove diagnostics matching suppression rules
-- [ ] Match by line number (per-line) and diagnostic code (per-code)
-- [ ] Per-file suppression filters all matching codes from entire file
-- [ ] Integration tests with LSP lifecycle
+- [x] Call suppression parser in `parse_and_publish()`
+- [x] Filter `Vec<Diagnostic>` — remove diagnostics matching suppression rules
+- [x] Match by line number (per-line) and diagnostic code (per-code)
+- [x] Per-file suppression filters all matching codes from entire file
+- [x] Integration tests with LSP lifecycle
 
 ### Task 3: Update documentation
 
