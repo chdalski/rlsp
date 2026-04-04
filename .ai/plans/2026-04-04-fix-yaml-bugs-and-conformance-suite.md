@@ -96,7 +96,7 @@ or `"true"`).
 - [x] Fix blank line preservation (formatter) (aeed0a5)
 - [x] Fix flow-to-block sequence indentation (formatter) (a9e0387)
 - [x] Strip unnecessary quotes from Representation variants (formatter) (e8e5e6b)
-- [ ] Fix code action conversion bugs (code_actions)
+- [x] Fix code action conversion bugs (code_actions) (3737c50)
 - [ ] Add conformance test suite infrastructure
 - [ ] Add real-world ecosystem fixtures
 
@@ -310,13 +310,13 @@ Three bugs/gaps need fixing:
    which is correct, but flat large collections should still be offered
    with a warning.
 
-- [ ] Fix indentation in `flow_seq_to_block` for nested contexts
-- [ ] Add quoting logic in `block_to_flow` for flow-unsafe characters
-- [ ] Add size warning hint to `block_to_flow` action title
-- [ ] Add test: flow_seq_to_block inside nested sequence item mapping
-- [ ] Add test: block_to_flow adds quotes when needed
-- [ ] Add test: block_to_flow warns on long lines
-- [ ] Verify existing code action tests still pass
+- [x] Fix indentation in `flow_seq_to_block` for nested contexts
+- [x] Add quoting logic in `block_to_flow` for flow-unsafe characters
+- [x] Add size warning hint to `block_to_flow` action title
+- [x] Add test: flow_seq_to_block inside nested sequence item mapping
+- [x] Add test: block_to_flow adds quotes when needed
+- [x] Add test: block_to_flow warns on long lines
+- [x] Verify existing code action tests still pass
 
 ## Decisions
 
