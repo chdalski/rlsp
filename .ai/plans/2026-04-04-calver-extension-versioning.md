@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-04
 
 ## Goal
@@ -24,7 +24,7 @@ simple and predictable.
 
 ## Steps
 
-- [ ] Update version-sync steps in CI workflow
+- [x] Update version-sync steps in CI workflow (55ca46e)
 
 ## Tasks
 
@@ -33,18 +33,18 @@ simple and predictable.
 Update `.github/workflows/vscode-extension.yml` to add a
 `resolve-version` job and simplify the version-sync steps:
 
-- [ ] Change the `workflow_dispatch` input: make `version` optional,
+- [x] Change the `workflow_dispatch` input: make `version` optional,
   add description reflecting CalVer format `YYYY.MM.NN`
-- [ ] Replace the two platform-specific version-sync steps with a
+- [x] Replace the two platform-specific version-sync steps with a
   single step that: queries `vscode-v*` tags for the current month,
   auto-increments `NN`, sets the version, and creates + pushes a
   `vscode-v{version}` tag. If `workflow_dispatch` provides a version,
   use it directly instead of auto-incrementing.
-- [ ] Update checkout step to `fetch-depth: 0` (or fetch tags) so
+- [x] Update checkout step to `fetch-depth: 0` (or fetch tags) so
   `git tag -l` can find existing tags
-- [ ] Update `build-extension` job permissions to `contents: write`
+- [x] Update `build-extension` job permissions to `contents: write`
   (needed to push the tag)
-- [ ] Add a `resolve-version` job that runs before `build-extension`:
+- [x] Add a `resolve-version` job that runs before `build-extension`:
   - Runs on `ubuntu-latest`, `contents: write` permissions
   - Checkout with `fetch-depth: 0` (needs all tags)
   - If `workflow_dispatch` with version input: use it directly
@@ -52,14 +52,14 @@ Update `.github/workflows/vscode-extension.yml` to add a
   - Create and push the `vscode-v{version}` tag
   - Output the version string for downstream jobs
   - Only runs on tags or dispatch (same `if` as version-sync had)
-- [ ] Update `build-extension` to depend on `resolve-version` (for
+- [x] Update `build-extension` to depend on `resolve-version` (for
   tag/dispatch triggers) and consume its version output
-- [ ] Replace the two platform-specific version-sync steps with a
+- [x] Replace the two platform-specific version-sync steps with a
   single cross-platform step that reads the version from the
   `resolve-version` job output and sets it via `pnpm pkg set`
-- [ ] `build-extension` permissions can stay at `contents: read`
+- [x] `build-extension` permissions can stay at `contents: read`
   (tag push is in `resolve-version`)
-- [ ] Keep `build-extension` runnable without `resolve-version` on
+- [x] Keep `build-extension` runnable without `resolve-version` on
   plain push to main (no version sync needed for CI-only builds)
 
 ## Decisions
