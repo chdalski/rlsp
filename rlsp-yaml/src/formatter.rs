@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_fmt::{Doc, FormatOptions, concat, format as fmt_format, hard_line, indent, join, text};
-use saphyr::{LoadableYamlNode, ScalarOwned, ScalarStyle, YamlOwned};
+use saphyr::{ScalarOwned, ScalarStyle, YamlLoader, YamlOwned};
+use saphyr_parser::{BufferedInput, Parser};
 
 /// Classification of a YAML comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,8 +242,19 @@ impl Default for YamlFormatOptions {
 /// Comments are extracted from the input and reattached to the formatted output.
 #[must_use]
 pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
-    let Ok(documents) = YamlOwned::load_from_str(text_input) else {
-        return text_input.to_string();
+    // Use early_parse(false) so scalars are preserved as Representation(text, style, tag)
+    // instead of being resolved to Value variants. This prevents keys like `on:` from
+    // being quoted and preserves the original scalar style (plain, quoted, block).
+    // Only the formatter uses this setting; parser.rs continues to use early_parse(true)
+    // so the rest of the language server gets resolved typed values.
+    let documents = {
+        let mut loader = YamlLoader::<YamlOwned>::default();
+        loader.early_parse(false);
+        let mut parser = Parser::new(BufferedInput::new(text_input.chars()));
+        match parser.load(&mut loader, true) {
+            Ok(()) => loader.into_documents(),
+            Err(_) => return text_input.to_string(),
+        }
     };
 
     if documents.is_empty() {
@@ -293,18 +305,37 @@ fn node_to_doc(node: &YamlOwned, options: &YamlFormatOptions) -> Doc {
     match node {
         YamlOwned::Value(scalar) => scalar_to_doc(scalar, options),
 
-        YamlOwned::Representation(s, style, _tag) => {
-            // Preserve original representation for block scalars (literal/folded).
-            // For plain/quoted scalars, render as text with the original style applied.
-            match style {
-                ScalarStyle::Literal | ScalarStyle::Folded => {
-                    // Block scalars span multiple lines; embed as-is using hard lines.
-                    // Split on \n and join with hard_line() so the printer tracks columns.
-                    repr_block_to_doc(s, *style)
+        YamlOwned::Representation(s, style, tag) => {
+            // Prefix with a user-defined tag if present (e.g. `!mytag`).
+            // Core Schema tags (!!str, !!int, …) are not preserved — only user tags.
+            let tag_prefix = tag.as_ref().and_then(|t| {
+                if t.is_yaml_core_schema() {
+                    None
+                } else {
+                    Some(format!("!{} ", t.suffix))
                 }
+            });
+
+            let scalar_doc = match style {
+                ScalarStyle::Literal | ScalarStyle::Folded => repr_block_to_doc(s, *style),
                 ScalarStyle::SingleQuoted => text(format!("'{s}'")),
-                ScalarStyle::DoubleQuoted => text(format!("\"{s}\"")),
-                ScalarStyle::Plain => text(s.clone()),
+                ScalarStyle::DoubleQuoted => text(format!("\"{}\"", escape_double_quoted(s))),
+                ScalarStyle::Plain => {
+                    // For plain scalars that are YAML reserved words (booleans, null,
+                    // numbers), preserve them as-is. For safe plain strings, apply the
+                    // single_quote formatting option so user preferences are respected.
+                    if needs_quoting(s) {
+                        text(s.clone())
+                    } else {
+                        string_to_doc(s, options)
+                    }
+                }
+            };
+
+            if let Some(prefix) = tag_prefix {
+                concat(vec![text(prefix), scalar_doc])
+            } else {
+                scalar_doc
             }
         }
 
@@ -1436,19 +1467,166 @@ mod tests {
     }
 
     // ND6: Representation variants (Literal, Folded, SingleQuoted, DoubleQuoted, Plain)
-    // are NOT produced by saphyr's load_from_str — saphyr resolves all scalar styles to
-    // Value(String) during parsing. The Representation arm in node_to_doc (lines 296-308)
-    // is therefore not reachable through format_yaml. These branches exist to handle AST
-    // nodes produced by lower-level saphyr APIs that preserve the original scalar style.
+    // are produced by format_yaml because the formatter uses early_parse(false), which
+    // preserves all scalars as Representation nodes rather than resolving them to Value.
+    // Tests for these branches are in the "Scalar Style Preservation" section below.
 
-    // ND7: Alias variant (line 320) is NOT reachable through format_yaml.
+    // ND7: Alias variant is NOT reachable through format_yaml.
     // saphyr resolves all anchor/alias references at parse time and inlines the aliased
-    // value. The resulting AST contains only the resolved Value nodes; no Alias nodes
-    // remain. The Alias arm in node_to_doc is therefore dead via the public API.
+    // value. The resulting AST contains only the resolved nodes; no Alias nodes remain.
 
-    // ND8: BadValue variant (line 322) is NOT reachable through valid YAML parsing.
+    // ND8: BadValue variant is NOT reachable through valid YAML parsing.
     // BadValue is a saphyr sentinel for internally invalid nodes that should never
     // appear in a successfully parsed document. It cannot be constructed from YAML text.
+
+    // ---- Formatter: Scalar Style Preservation (early_parse false) ----
+
+    #[test]
+    fn format_yaml_on_key_stays_unquoted() {
+        // `on` is a YAML 1.1 boolean keyword; early_parse(false) preserves it as plain.
+        let result = format_yaml("on: push\n", &default_opts());
+        assert!(
+            result.contains("on:"),
+            "on: key should not be quoted: {result:?}"
+        );
+        assert!(
+            !result.contains("\"on\"") && !result.contains("'on'"),
+            "on: key must not be quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_quoted_on_key_stays_quoted() {
+        let result = format_yaml("\"on\": push\n", &default_opts());
+        assert!(
+            result.contains("\"on\""),
+            "explicitly quoted on: key should stay quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_true_plain_scalar_preserved() {
+        let result = format_yaml("enabled: true\n", &default_opts());
+        assert!(
+            result.contains("true"),
+            "true should be preserved: {result:?}"
+        );
+        assert!(
+            !result.contains("\"true\"") && !result.contains("'true'"),
+            "true must not be quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_false_plain_scalar_preserved() {
+        let result = format_yaml("active: false\n", &default_opts());
+        assert!(
+            result.contains("false"),
+            "false should be preserved: {result:?}"
+        );
+        assert!(
+            !result.contains("\"false\"") && !result.contains("'false'"),
+            "false must not be quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_null_plain_scalar_preserved() {
+        let result = format_yaml("value: null\n", &default_opts());
+        assert!(
+            result.contains("null"),
+            "null should be preserved: {result:?}"
+        );
+        assert!(
+            !result.contains("\"null\"") && !result.contains("'null'"),
+            "null must not be quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_integer_preserved() {
+        let result = format_yaml("port: 8080\n", &default_opts());
+        assert!(
+            result.contains("8080"),
+            "integer should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_double_quoted_string_preserved() {
+        let result = format_yaml("greeting: \"hello\"\n", &default_opts());
+        assert!(
+            result.contains("\"hello\""),
+            "double-quoted string should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_single_quoted_string_preserved() {
+        let result = format_yaml("greeting: 'hello'\n", &default_opts());
+        assert!(
+            result.contains("'hello'"),
+            "single-quoted string should be preserved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_literal_block_scalar_preserved() {
+        let input = "body: |\n  line one\n  line two\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains('|'),
+            "literal block indicator missing: {result:?}"
+        );
+        assert!(
+            result.contains("line one"),
+            "block content missing: {result:?}"
+        );
+        assert!(
+            result.contains("line two"),
+            "block content missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_folded_block_scalar_preserved() {
+        let input = "body: >\n  folded line\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains('>'),
+            "folded block indicator missing: {result:?}"
+        );
+        assert!(
+            result.contains("folded line"),
+            "block content missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_other_yaml11_booleans_unquoted() {
+        // `yes` and `no` are YAML 1.1 boolean keywords; preserved as plain scalars.
+        let result = format_yaml("yes: no\n", &default_opts());
+        assert!(
+            result.contains("yes:"),
+            "yes: key should not be quoted: {result:?}"
+        );
+        assert!(
+            result.contains("no"),
+            "no value should not be quoted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_multi_document_round_trip_with_early_parse_false() {
+        let input = "a: 1\n---\nb: 2\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("a: 1"), "first doc missing: {result:?}");
+        assert!(
+            result.contains("---"),
+            "document separator missing: {result:?}"
+        );
+        assert!(result.contains("b: 2"), "second doc missing: {result:?}");
+    }
 
     // AC8: Multiple trailing leading comments at EOF, including a blank-line separator.
     #[test]

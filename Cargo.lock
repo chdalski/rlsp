@@ -948,6 +948,7 @@ dependencies = [
  "regex",
  "rlsp-fmt",
  "saphyr",
+ "saphyr-parser",
  "serde",
  "serde_json",
  "tiny_http",
