@@ -71,8 +71,8 @@ high-quality crates.io package.
 - [x] Implement document stream productions (spec §9) —
       document boundaries, bare/explicit documents,
       multi-document streams (f66342c)
-- [ ] Build event layer — token-to-event conversion with
-      public streaming API
+- [x] Build event layer — token-to-event conversion with
+      public streaming API (aedf15a)
 - [ ] Build AST loader — events to node graph with
       anchor/alias resolution and cycle detection
 - [ ] Implement schema resolution — failsafe/JSON/core
@@ -312,28 +312,28 @@ public streaming API.
 
 **Files:** `src/event.rs`
 
-- [ ] Event types: `StreamStart`, `StreamEnd`,
+- [x] Event types: `StreamStart`, `StreamEnd`,
       `DocumentStart(explicit, version, tags)`,
       `DocumentEnd(explicit)`, `MappingStart(anchor, tag)`,
       `MappingEnd`, `SequenceStart(anchor, tag)`,
       `SequenceEnd`, `Scalar(value, style, anchor, tag)`,
       `Alias(name)`, `Comment(text)` — each paired with
       `Pos`
-- [ ] `ScalarStyle` enum: `Plain`, `SingleQuoted`,
+- [x] `ScalarStyle` enum: `Plain`, `SingleQuoted`,
       `DoubleQuoted`, `Literal(Chomp)`, `Folded(Chomp)` —
       preserves original style and chomping
-- [ ] Token-to-event state machine: consume filtered
+- [x] Token-to-event state machine: consume filtered
       token stream, emit events. Handle Begin/End token
       pairs, accumulate Text tokens into scalar values,
       track anchors and tags from token metadata
-- [ ] Public API: `fn parse_events(input: &str) -> impl
+- [x] Public API: `fn parse_events(input: &str) -> impl
       Iterator<Item = Result<(Event, Pos), Error>>` —
       streaming iterator, no need to parse entire input
       before yielding first event
-- [ ] Error recovery: on parse error, emit error event
+- [x] Error recovery: on parse error, emit error event
       with position and message, attempt to continue
       parsing from next document boundary
-- [ ] Unit tests: event sequence for simple mapping, nested
+- [x] Unit tests: event sequence for simple mapping, nested
       structures, multi-document, scalars with all styles,
       anchors/aliases, comments, error recovery
 
