@@ -13,6 +13,7 @@ thiserror = "2"
 
 [dev-dependencies]
 saphyr = "0.0.6"
+rstest = "0.26"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

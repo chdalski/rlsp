@@ -10,11 +10,8 @@
 //   - Otherwise — we verify that `parse_events` produces no `Err` items
 //     (the entire event stream is successfully parsed).
 //
-// At the end the test prints a summary:
-//   N passed, M skipped, K failed
-//
-// Failures are printed but the test DOES panic with a non-zero count so that
-// CI fails on regressions.
+// rstest `#[files]` generates one independent test per matched file,
+// giving per-file pass/fail visibility in test output.
 
 #![allow(
     clippy::indexing_slicing,
@@ -24,9 +21,11 @@
     clippy::print_stderr
 )]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rlsp_yaml_parser::parse_events;
+use rstest::rstest;
 use saphyr::{LoadableYamlNode, YamlOwned};
 
 // ---- Test-case data model ---------------------------------------------------
@@ -139,84 +138,33 @@ fn parses_clean(input: &str) -> bool {
     parse_events(input).all(|r| r.is_ok())
 }
 
-// ---- Main test function -----------------------------------------------------
+// ---- Parameterized conformance test -----------------------------------------
 
-#[test]
-fn yaml_test_suite_conformance() {
-    let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/yaml-test-suite/src");
+#[rstest]
+#[timeout(Duration::from_secs(5))]
+fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
+    let cases = load_cases_from_file(&path);
+    assert!(!cases.is_empty(), "no cases loaded from {path:?}");
 
-    if !data_dir.exists() {
-        eprintln!("[conformance] yaml-test-suite data not found at {data_dir:?}, skipping test.");
-        return;
-    }
-
-    let mut entries: Vec<_> = std::fs::read_dir(&data_dir)
-        .expect("read yaml-test-suite/src dir")
-        .filter_map(std::result::Result::ok)
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "yaml" || ext == "yml")
-        })
-        .collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    let mut all_cases: Vec<ConformanceCase> = Vec::new();
-    for entry in &entries {
-        all_cases.extend(load_cases_from_file(&entry.path()));
-    }
-
-    let total = all_cases.len();
-    let mut passed = 0usize;
-    let mut failures: Vec<String> = Vec::new();
-
-    for case in &all_cases {
+    for case in &cases {
         let tag = format!("{}[{}] {}", case.file, case.index, case.name);
 
         if case.fail {
-            // Error case: our parser must produce at least one error.
-            if has_parse_error(&case.yaml) {
-                passed += 1;
-            } else {
-                failures.push(format!(
-                    "FAIL (expected parse error, got clean parse) {tag}\n  yaml: {:?}",
-                    &case.yaml[..case.yaml.len().min(120)]
-                ));
-            }
+            assert!(
+                has_parse_error(&case.yaml),
+                "expected parse error but got clean parse: {tag}\n  yaml: {:?}",
+                &case.yaml[..case.yaml.len().min(120)]
+            );
         } else {
-            // Valid case: our parser must produce a clean event stream.
-            if parses_clean(&case.yaml) {
-                passed += 1;
-            } else {
-                // Collect the first error for the failure message.
-                let first_err = parse_events(&case.yaml)
-                    .find_map(std::result::Result::err)
-                    .map(|e| e.to_string())
-                    .unwrap_or_default();
-                failures.push(format!(
-                    "FAIL (unexpected parse error) {tag}\n  error: {first_err}\n  yaml: {:?}",
-                    &case.yaml[..case.yaml.len().min(120)]
-                ));
-            }
+            let first_err = parse_events(&case.yaml)
+                .find_map(std::result::Result::err)
+                .map(|e| e.to_string());
+            assert!(
+                parses_clean(&case.yaml),
+                "unexpected parse error: {tag}\n  error: {}\n  yaml: {:?}",
+                first_err.unwrap_or_default(),
+                &case.yaml[..case.yaml.len().min(120)]
+            );
         }
     }
-
-    let failed = failures.len();
-    let skipped = total - passed - failed;
-
-    eprintln!(
-        "\n[conformance] {total} cases: {passed} passed, {skipped} skipped, {failed} failed\n"
-    );
-
-    if !failures.is_empty() {
-        for f in &failures {
-            eprintln!("{f}");
-        }
-        eprintln!();
-    }
-
-    assert_eq!(
-        failed, 0,
-        "{failed} conformance failure(s) — see stderr for details"
-    );
 }
