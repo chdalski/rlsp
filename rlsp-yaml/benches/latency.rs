@@ -8,7 +8,8 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::document_store::DocumentStore;
 use rlsp_yaml::semantic_tokens::semantic_tokens;
-use saphyr::{LoadableYamlNode, YamlOwned};
+use rlsp_yaml_parser::node::Document;
+use rlsp_yaml_parser::pos::Span;
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -23,8 +24,8 @@ use tower_lsp::lsp_types::{Position, Url};
 fn bench_completion(c: &mut Criterion) {
     let schema = fixtures::generate_schema(50, 3);
     let text = fixtures::generate_nested_yaml(20, 3);
-    // Completion still uses saphyr types during migration.
-    let docs: Vec<YamlOwned> = YamlOwned::load_from_str(&text).unwrap_or_default();
+    // Completion now uses rlsp-yaml-parser types.
+    let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
 
     // Cursor positions at known nesting depths.
     // Each depth level occupies 3 lines: 2 leaf props + 1 nested key.

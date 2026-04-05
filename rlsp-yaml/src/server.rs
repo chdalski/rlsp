@@ -675,10 +675,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
             let text = store.get(&uri).map(str::to_string);
-            let yaml = store.get_yaml(&uri).cloned();
-            (text, yaml)
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -703,7 +703,7 @@ impl LanguageServer for Backend {
 
         Ok(crate::hover::hover_at(
             &text,
-            yaml.as_ref(),
+            docs.as_ref(),
             position,
             schema.as_ref(),
         ))
@@ -718,10 +718,10 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
 
         // Lock ordering: document_store → schema_associations → schema_cache
-        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
             let text = store.get(&uri).map(str::to_string);
-            let yaml = store.get_yaml(&uri).cloned();
-            (text, yaml)
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -745,7 +745,7 @@ impl LanguageServer for Backend {
                 .and_then(|cache| cache.get(&url).cloned())
         });
 
-        let items = crate::completion::complete_at(&text, yaml.as_ref(), position, schema.as_ref());
+        let items = crate::completion::complete_at(&text, docs.as_ref(), position, schema.as_ref());
         if items.is_empty() {
             return Ok(None);
         }
@@ -1140,10 +1140,10 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
 
-        let (text, yaml) = if let Ok(store) = self.document_store.lock() {
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
             let text = store.get(&uri).map(str::to_string);
-            let yaml = store.get_yaml(&uri).cloned();
-            (text, yaml)
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -1152,7 +1152,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let mut symbols = crate::symbols::document_symbols(&text, yaml.as_ref());
+        let mut symbols = crate::symbols::document_symbols(&text, docs.as_ref());
         let limit = self.get_max_items_computed();
         symbols.truncate(limit);
 

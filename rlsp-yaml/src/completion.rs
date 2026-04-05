@@ -2,7 +2,8 @@
 
 use std::collections::HashSet;
 
-use saphyr::YamlOwned;
+use rlsp_yaml_parser::node::Document;
+use rlsp_yaml_parser::pos::Span;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, InsertTextFormat,
     MarkupContent, MarkupKind, Position,
@@ -30,7 +31,7 @@ const MAX_ENUM_LABEL_LEN: usize = 50;
 #[must_use]
 pub fn complete_at(
     text: &str,
-    documents: Option<&Vec<YamlOwned>>,
+    documents: Option<&Vec<Document<Span>>>,
     position: Position,
     schema: Option<&JsonSchema>,
 ) -> Vec<CompletionItem> {
@@ -1005,9 +1006,8 @@ mod tests {
         Position::new(line, character)
     }
 
-    fn parse_docs(text: &str) -> Option<Vec<YamlOwned>> {
-        use saphyr::LoadableYamlNode;
-        YamlOwned::load_from_str(text).ok()
+    fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
+        rlsp_yaml_parser::load(text).ok()
     }
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
@@ -1272,7 +1272,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_no_documents() {
         let text = "key: value\n";
-        let empty: Vec<YamlOwned> = Vec::new();
+        let empty: Vec<Document<Span>> = Vec::new();
         let result = complete_at(text, Some(&empty), pos(0, 0), None);
 
         assert!(
@@ -1770,7 +1770,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_schema_completion_on_empty_document() {
         let schema = object_schema(vec![("name", string_schema())]);
-        let docs: Option<Vec<YamlOwned>> = None;
+        let docs: Option<Vec<Document<Span>>> = None;
         let result = complete_at("", docs.as_ref(), pos(0, 0), Some(&schema));
 
         assert!(result.is_empty(), "should return empty for empty document");
