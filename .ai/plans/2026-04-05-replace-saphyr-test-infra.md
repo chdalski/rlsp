@@ -45,7 +45,7 @@ corrupting test data). Finally, write the crate README.
 - [x] Remove saphyr from dev-dependencies
 - [x] Verify conformance results match (351/351) or fix
       any regressions from corrected test data
-- [ ] Write rlsp-yaml-parser/README.md
+- [x] Write rlsp-yaml-parser/README.md
 
 ## Tasks
 
@@ -102,17 +102,17 @@ Zero unit test regressions.
 
 Write `rlsp-yaml-parser/README.md` for crates.io.
 
-- [ ] Crate description and purpose
-- [ ] Key features: spec-faithful, 100% conformance,
+- [x] Crate description and purpose
+- [x] Key features: spec-faithful, 100% conformance,
       first-class comments, lossless spans, alias
       preservation, security controls
-- [ ] Quick usage example (parse events, load AST)
-- [ ] API overview (tokenize, parse_events, load, emit,
+- [x] Quick usage example (parse events, load AST)
+- [x] API overview (tokenize, parse_events, load, emit,
       schema resolution)
-- [ ] Conformance status (351/351 YAML test suite)
-- [ ] Benchmark summary (vs libfyaml baseline)
-- [ ] License (MIT)
-- [ ] Link to rlsp project
+- [x] Conformance status (351/351 YAML test suite)
+- [x] Benchmark summary (vs libfyaml baseline)
+- [x] License (MIT)
+- [x] Link to rlsp project
 
 **Acceptance criteria:** README exists, is accurate, and
 follows the convention from root CLAUDE.md ("crate README
@@ -120,6 +120,9 @@ is self-contained for users").
 
 **Files:**
 - `rlsp-yaml-parser/README.md` — new
+- `rlsp-yaml-parser/src/loader.rs` — stale comment fix
+
+**Commit:** `7a32bac`
 
 ## Decisions
 
