@@ -372,4 +372,7 @@ happen before commit.
 
 - Formatting and style caught by linters
 - Generated code or vendored dependencies
-- Code not changed in the current task
+- Code not changed in the current task — **exception:**
+  when a task removes a dependency, scan the entire crate
+  for stale references (comments, docs, variable names)
+  to the removed dependency and flag them

@@ -60,6 +60,16 @@ is unused and should be removed. If it returns no results
 at all — including test files — remove it regardless of
 which dependency section it is in.
 
+## Stale References
+
+When removing a dependency, also search the crate for
+**comments and documentation** that reference it by name.
+A comment saying "saphyr compatibility" after saphyr has
+been removed confuses future readers and agents into
+thinking the dependency still exists. Search for the
+dependency name across all source files — not just import
+statements — and update or remove stale references.
+
 ## What This Does NOT Mean
 
 This rule does not require auditing all project
