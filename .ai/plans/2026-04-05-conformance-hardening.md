@@ -73,15 +73,15 @@ Fix 9 valid-YAML failures in block scalar parsing and line
 folding. These are spec §6 (empty lines, flow folding) and
 §8 (literal/folded block scalars, chomping).
 
-- [ ] 5GBF — Spec Example 6.5. Empty Lines
-- [ ] 6WPF — Spec Example 6.8. Flow Folding
-- [ ] 7T8X — Spec Example 8.10. Folded Lines
-- [ ] F6MC — More indented lines at beginning of folded
-- [ ] F8F9 — Spec Example 8.5. Chomping Trailing Lines
-- [ ] H2RW — Blank lines
-- [ ] M29M — Literal Block Scalar
-- [ ] MYW6 — Block Scalar Strip
-- [ ] NB6Z — Multiline plain with tabs on empty lines
+- [x] 5GBF — Spec Example 6.5. Empty Lines
+- [x] 6WPF — Spec Example 6.8. Flow Folding
+- [x] 7T8X — Spec Example 8.10. Folded Lines
+- [x] F6MC — More indented lines at beginning of folded
+- [x] F8F9 — Spec Example 8.5. Chomping Trailing Lines
+- [x] H2RW — Blank lines
+- [x] M29M — Literal Block Scalar
+- [x] MYW6 — Block Scalar Strip
+- [x] NB6Z — Multiline plain with tabs on empty lines
 
 **Files:** `block.rs`, `structure.rs`
 
@@ -90,12 +90,12 @@ folding. These are spec §6 (empty lines, flow folding) and
 Fix 6 valid-YAML failures in block sequence/mapping
 handling.
 
-- [ ] 93JH — Block Mappings in Block Sequence
-- [ ] 9U5K — Spec Example 2.12. Compact Nested Mapping
-- [ ] JQ4R — Spec Example 8.14. Block Sequence
-- [ ] S3PD — Spec Example 8.18. Implicit Block Mapping
-- [ ] V9D5 — Spec Example 8.19. Compact Block Mappings
-- [ ] 735Y — Spec Example 8.20. Block Node Types
+- [x] 93JH — Block Mappings in Block Sequence
+- [x] 9U5K — Spec Example 2.12. Compact Nested Mapping
+- [x] JQ4R — Spec Example 8.14. Block Sequence
+- [x] S3PD — Spec Example 8.18. Implicit Block Mapping
+- [x] V9D5 — Spec Example 8.19. Compact Block Mappings
+- [ ] 735Y — Spec Example 8.20. Block Node Types (deferred — whitespace-before-colon conflict)
 
 **Files:** `block.rs`
 
@@ -104,13 +104,13 @@ handling.
 Fix 7 valid-YAML failures in flow collections and multiline
 flow keys/values.
 
-- [ ] 8KB6 — Multiline plain flow mapping key without value
-- [ ] 9BXH — Multiline double-quoted flow mapping key
-- [ ] 9SA2 — Multiline double-quoted flow mapping key
-- [ ] M7NX — Nested flow collections
-- [ ] NJ66 — Multiline plain flow mapping key
-- [ ] VJP3 — Flow collections over many lines
-- [ ] LP6E — Whitespace after scalars in flow
+- [ ] 8KB6 — Multiline plain flow mapping key without value (deferred — FlowKey/context conflict)
+- [x] 9BXH — Multiline double-quoted flow mapping key
+- [x] 9SA2 — Multiline double-quoted flow mapping key
+- [x] M7NX — Nested flow collections
+- [ ] NJ66 — Multiline plain flow mapping key (deferred — FlowKey/context conflict)
+- [ ] VJP3 — Flow collections over many lines (deferred — stream-level issue)
+- [x] LP6E — Whitespace after scalars in flow
 
 **Files:** `flow.rs`
 
@@ -119,14 +119,14 @@ flow keys/values.
 Fix 8 valid-YAML failures in anchor handling and node
 properties.
 
-- [ ] 6BFJ — Mapping, key and flow sequence item anchors
-- [ ] 6M2F — Aliases in Explicit Block Mapping
-- [ ] 7BMT — Node and Mapping Key Anchors
-- [ ] E76Z — Aliases in Implicit Block Mapping
-- [ ] U3XV — Node and Mapping Key Anchors
-- [ ] 9WXW — Spec Example 6.18. Primary Tag Handle
-- [ ] HMQ5 — Spec Example 6.23. Node Properties
-- [ ] P76L — Spec Example 6.19. Secondary Tag Handle
+- [x] 6BFJ — Mapping, key and flow sequence item anchors
+- [x] 6M2F — Aliases in Explicit Block Mapping
+- [ ] 7BMT — Node and Mapping Key Anchors (deferred — multi-anchor patterns)
+- [ ] E76Z — Aliases in Implicit Block Mapping (deferred — whitespace-before-colon conflict)
+- [ ] U3XV — Node and Mapping Key Anchors (deferred — multi-anchor patterns)
+- [x] 9WXW — Spec Example 6.18. Primary Tag Handle
+- [ ] HMQ5 — Spec Example 6.23. Node Properties (deferred — whitespace-before-colon conflict)
+- [x] P76L — Spec Example 6.19. Secondary Tag Handle (fixed in Task 5)
 
 **Files:** `structure.rs`, `flow.rs`, `block.rs`
 
@@ -135,14 +135,14 @@ properties.
 Fix 8 valid-YAML failures in plain and quoted scalar
 handling.
 
-- [ ] 5MUD — Colon and adjacent value on next line
-- [ ] DBG4 — Spec Example 7.10. Plain Characters
-- [ ] FBC9 — Allowed characters in plain scalars
-- [ ] K3WX — Colon and adjacent value after comment
-- [ ] S7BG — Colon followed by comma
-- [ ] NAT4 — Various empty/newline quoted strings
-- [ ] Q8AD — Spec Example 7.5. Double Quoted Line Breaks
-- [ ] T4YY — Spec Example 7.9. Single Quoted Lines
+- [x] 5MUD — Colon and adjacent value on next line
+- [x] DBG4 — Spec Example 7.10. Plain Characters
+- [ ] FBC9 — Allowed characters in plain scalars (deferred — multiline continuation)
+- [x] K3WX — Colon and adjacent value after comment
+- [x] S7BG — Colon followed by comma
+- [ ] NAT4 — Various empty/newline quoted strings (deferred — empty quoted edge cases)
+- [x] Q8AD — Spec Example 7.5. Double Quoted Line Breaks
+- [ ] T4YY — Spec Example 7.9. Single Quoted Lines (deferred — single-quoted multiline)
 
 **Files:** `flow.rs`, `chars.rs`
 
@@ -151,19 +151,25 @@ handling.
 Fix 14 remaining valid-YAML failures: document handling,
 tabs, complex keys, and spec examples.
 
-- [ ] 82AN — Three dashes and content without space
-- [ ] M7A3 — Spec Example 9.3. Bare Documents
-- [ ] QT73 — Comment and document-end marker
-- [ ] S4T7 — Document with footer
-- [ ] UT92 — Spec Example 9.4. Explicit Documents
-- [ ] DC7X — Various trailing tabs
-- [ ] DK95 — Tabs that look like indentation (2 failures)
-- [ ] Y79Y — Tabs in various contexts (1 failure)
-- [ ] 4FJ6 — Nested implicit complex keys
-- [ ] M2N8 — Question mark edge cases
-- [ ] NKF9 — Empty keys in block and flow mapping
-- [ ] AZW3, M5DY, RZP5, RZT7, S9E8, UGM3, XW4D, ZF4X —
-      spec examples (mixed issues)
+- [x] 82AN — Three dashes and content without space
+- [x] M7A3 — Spec Example 9.3. Bare Documents
+- [ ] QT73 — Comment and document-end marker (deferred — multiline flow in explicit docs)
+- [x] S4T7 — Document with footer
+- [ ] UT92 — Spec Example 9.4. Explicit Documents (deferred — multiline flow in explicit docs)
+- [x] DC7X — Various trailing tabs
+- [ ] DK95 — Tabs that look like indentation (deferred — tab-in-indentation detection)
+- [ ] Y79Y — Tabs in various contexts (deferred — tab-in-indentation detection)
+- [x] 4FJ6 — Nested implicit complex keys
+- [x] M2N8 — Question mark edge cases (fixed in Task 4)
+- [x] NKF9 — Empty keys in block and flow mapping
+- [ ] AZW3 — spec example (deferred)
+- [x] M5DY — spec example
+- [ ] RZP5 — spec example (deferred — verbatim tags)
+- [x] RZT7 — spec example
+- [ ] S9E8 — spec example (deferred — explicit key/value with comments)
+- [ ] UGM3 — spec example (deferred — verbatim tags)
+- [ ] XW4D — spec example (deferred — explicit key/value with comments)
+- [x] ZF4X — spec example
 
 **Files:** `stream.rs`, `block.rs`, `flow.rs`, `structure.rs`
 
