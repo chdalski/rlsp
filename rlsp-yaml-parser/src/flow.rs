@@ -16,7 +16,7 @@ use crate::combinator::{
 };
 use crate::structure::{
     b_l_folded, c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix,
-    s_separate,
+    s_separate, s_separate_ge, s_separate_in_line,
 };
 use crate::token::{Code, Token};
 
@@ -884,24 +884,29 @@ fn ns_flow_map_implicit_entry(n: i32, c: Context) -> Parser<'static> {
     })
 }
 
-/// [144] c-ns-flow-map-json-key-entry(n,c) — JSON node key then optional value.
+/// [147] c-ns-flow-map-json-key-entry(n,c) — JSON node key then optional value.
+///
+/// Per spec, the key uses the parent context `c` (not `FlowKey`), which
+/// allows multiline quoted scalars as keys in flow collections.
 fn c_ns_flow_map_json_key_entry(n: i32, c: Context) -> Parser<'static> {
     wrap_tokens(
         Code::BeginPair,
         Code::EndPair,
         Box::new(move |state| {
-            // Key must be a JSON node (quoted scalar or flow collection).
-            let (key_tokens, after_key) = match c_flow_json_node(n, Context::FlowKey)(state.clone())
-            {
+            // Key uses the parent context c per spec [147].
+            let (key_tokens, after_key) = match c_flow_json_node(n, c)(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 other @ (Reply::Failure | Reply::Error(_)) => return other,
             };
-            // Optional value: adjacent first, then separate.
+            // Per spec [147]: optional `s-separate(n,c)?` then adjacent value,
+            // or e-node. Skip optional separation (including whitespace/newlines)
+            // before checking for `:`.
+            let after_sep = skip_flow_sep(n, after_key.clone());
             let (value_tokens, final_state) =
-                match c_ns_flow_map_adjacent_value(n, c)(after_key.clone()) {
+                match c_ns_flow_map_adjacent_value(n, c)(after_sep.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
                     Reply::Failure | Reply::Error(_) => {
-                        match c_ns_flow_map_separate_value(n, c)(after_key.clone()) {
+                        match c_ns_flow_map_separate_value(n, c)(after_sep.clone()) {
                             Reply::Success { tokens, state } => (tokens, state),
                             Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
                         }
@@ -923,15 +928,22 @@ fn ns_flow_map_yaml_key_entry(n: i32, c: Context) -> Parser<'static> {
         Code::BeginPair,
         Code::EndPair,
         Box::new(move |state| {
-            // Key in FlowKey context.
+            // Key in FlowKey context (single-line keys).
             let (key_tokens, after_key) =
                 match ns_flow_yaml_node(n, Context::FlowKey)(state.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
                     other @ (Reply::Failure | Reply::Error(_)) => return other,
                 };
-            // Optional value: separated or adjacent.
+            // Per spec [146]: optional separation before the value.
+            // Use inline separation only (not cross-line) because the key is
+            // in FlowKey context (single-line). Cross-line sep would allow `:` on
+            // the next line, breaking DK4H.
+            let after_sep = match s_separate_in_line()(after_key.clone()) {
+                Reply::Success { state, .. } => state,
+                Reply::Failure | Reply::Error(_) => after_key.clone(),
+            };
             let (value_tokens, final_state) =
-                match c_ns_flow_map_separate_value(n, c)(after_key.clone()) {
+                match c_ns_flow_map_separate_value(n, c)(after_sep.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
                     Reply::Failure | Reply::Error(_) => {
                         match c_ns_flow_map_adjacent_value(n, c)(after_key.clone()) {
@@ -1214,8 +1226,12 @@ pub fn c_ns_flow_pair(n: i32, c: Context) -> Parser<'static> {
 // ---------------------------------------------------------------------------
 
 /// Skip optional separation whitespace (including newlines) in flow context.
+///
+/// Uses `s_separate_ge` which allows continuation lines with >= n spaces
+/// of indentation, matching the flow context requirement that deeper
+/// indentation is permitted inside flow collections.
 fn skip_flow_sep(n: i32, state: State<'static>) -> State<'static> {
-    match s_separate(n, state.c)(state.clone()) {
+    match s_separate_ge(n, state.c)(state.clone()) {
         Reply::Success { state, .. } => state,
         Reply::Failure | Reply::Error(_) => state,
     }
