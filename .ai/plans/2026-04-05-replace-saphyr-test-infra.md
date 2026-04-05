@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-05
 
 ## Goal
@@ -38,12 +38,12 @@ corrupting test data). Finally, write the crate README.
 
 ## Steps
 
-- [ ] Write a simple line-based test metadata parser to
+- [x] Write a simple line-based test metadata parser to
       replace saphyr
-- [ ] Replace saphyr usage in conformance.rs with the new
+- [x] Replace saphyr usage in conformance.rs with the new
       parser
-- [ ] Remove saphyr from dev-dependencies
-- [ ] Verify conformance results match (351/351) or fix
+- [x] Remove saphyr from dev-dependencies
+- [x] Verify conformance results match (351/351) or fix
       any regressions from corrected test data
 - [ ] Write rlsp-yaml-parser/README.md
 
@@ -66,26 +66,28 @@ The metadata format is:
 - Entries with a `skip` field are omitted
 
 **What to implement:**
-- [ ] A `parse_test_metadata(content: &str) -> Vec<ConformanceCase>` function
-- [ ] Handles `- ` entry boundaries
-- [ ] Parses `name`, `yaml`, `fail`, `skip` fields (ignore
+- [x] A `parse_test_metadata(content: &str) -> Vec<ConformanceCase>` function
+- [x] Handles `- ` entry boundaries
+- [x] Parses `name`, `yaml`, `fail`, `skip` fields (ignore
       `tags`, `from`, `tree`, `json`, `dump` — not used)
-- [ ] Handles block scalar values (`yaml: |` with indented
+- [x] Handles block scalar values (`yaml: |` with indented
       continuation lines)
-- [ ] Handles inline string values (`name: Some Name`)
-- [ ] Handles field inheritance (fields persist across
+- [x] Handles inline string values (`name: Some Name`)
+- [x] Handles field inheritance (fields persist across
       entries except `fail`)
-- [ ] Applies `visual_to_raw` conversion to `yaml` field
-- [ ] Replace `load_cases_from_file` in conformance.rs to
+- [x] Applies `visual_to_raw` conversion to `yaml` field
+- [x] Replace `load_cases_from_file` in conformance.rs to
       use the new parser instead of saphyr
-- [ ] Remove `saphyr` from `[dev-dependencies]` in
+- [x] Remove `saphyr` from `[dev-dependencies]` in
       Cargo.toml
-- [ ] Remove `use saphyr::*` imports from conformance.rs
-- [ ] Verify: 351/351 conformance, 922 unit tests, clippy
+- [x] Remove `use saphyr::*` imports from conformance.rs
+- [x] Verify: 351/351 conformance, 922 unit tests, clippy
       clean, fmt clean
-- [ ] If conformance count changes (more or fewer tests
+- [x] If conformance count changes (more or fewer tests
       discovered, or different pass/fail results), document
       what changed and fix any new failures
+
+**Commit:** `979ed81`
 
 **Acceptance criteria:** saphyr completely removed from
 `rlsp-yaml-parser`. Same or better conformance results.
