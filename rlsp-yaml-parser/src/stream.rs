@@ -159,22 +159,32 @@ pub fn l_any_document() -> Parser<'static> {
     )
 }
 
+/// [210] l-document-suffix — `...` document-end marker with trailing comments.
+#[must_use]
+pub fn l_document_suffix() -> Parser<'static> {
+    seq(c_document_end(), s_l_comments())
+}
+
 /// [211] l-yaml-stream — a YAML byte stream: zero or more documents.
 ///
-/// A stream consists of an optional leading prefix (BOM + comments), then
-/// zero or more documents each optionally followed by separating prefixes.
+/// Per spec: `l-document-prefix* l-any-document?
+///            ( l-document-suffix+ l-document-prefix* l-any-document?
+///            | l-document-prefix* l-explicit-document? )*`
 ///
-/// Note: `l-document-prefix` can succeed consuming zero bytes (it is
-/// entirely optional).  To prevent infinite loops in `many0`, we use a
-/// progress-guarded repetition for prefixes: only repeat when at least one
-/// byte was consumed.
+/// After each document, either document-suffix(es) `...` or more document
+/// prefixes may appear. `l-document-prefix` can succeed consuming zero bytes,
+/// so we use progress-guarded repetition to prevent infinite loops.
 #[must_use]
 pub fn l_yaml_stream() -> Parser<'static> {
     seq(
         many0_progressing(l_document_prefix()),
         many0(seq(
             l_any_document(),
-            many0_progressing(l_document_prefix()),
+            // After a document: consume optional `...` suffix(es) and prefix(es).
+            seq(
+                many0(l_document_suffix()),
+                many0_progressing(l_document_prefix()),
+            ),
         )),
     )
 }

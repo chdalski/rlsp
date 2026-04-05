@@ -242,18 +242,47 @@ impl<'input> OwnedEventIter<'input> {
                     }
                     self.pos += 1;
                 }
-                Code::Text | Code::LineFeed | Code::LineFold => {
+                Code::Text => {
                     text.push_str(t.text);
                     self.pos += 1;
                 }
-                Code::BeginMapping
+                Code::LineFeed => {
+                    // LineFeed token represents a newline in the scalar value.
+                    // The token text may be empty (e.g., from b-chomped-last).
+                    if t.text.is_empty() {
+                        text.push('\n');
+                    } else {
+                        text.push_str(t.text);
+                    }
+                    self.pos += 1;
+                }
+                Code::LineFold => {
+                    // LineFold token represents a space in folded scalar value.
+                    if t.text.is_empty() {
+                        text.push(' ');
+                    } else {
+                        text.push_str(t.text);
+                    }
+                    self.pos += 1;
+                }
+                Code::BeginComment => {
+                    // Skip all tokens until EndComment — trail comments inside
+                    // the scalar (per spec [167]/[168]) are structural, not content.
+                    self.pos += 1;
+                    while let Some(inner) = self.tokens.get(self.pos) {
+                        self.pos += 1;
+                        if inner.code == Code::EndComment {
+                            break;
+                        }
+                    }
+                }
+                Code::EndComment
+                | Code::BeginMapping
                 | Code::EndMapping
                 | Code::BeginSequence
                 | Code::EndSequence
                 | Code::BeginScalar
                 | Code::EndScalar
-                | Code::BeginComment
-                | Code::EndComment
                 | Code::BeginAnchor
                 | Code::EndAnchor
                 | Code::BeginAlias
@@ -1272,34 +1301,26 @@ mod tests {
     // Group 7 — Comment events
     // -----------------------------------------------------------------------
 
-    /// Test 46 — comment at document level produces Comment event.
-    ///
-    /// The tokenizer emits `BeginComment`/`EndComment` for comments that
-    /// appear at the document level (e.g., after a block scalar).  Inline
-    /// comments embedded in plain scalar text are not separated out by the
-    /// tokenizer, so we use a block literal followed by a comment line.
+    /// Test 46 — trail comments after a block scalar are consumed inside the
+    /// scalar per spec [167]/[168] and do not produce separate Comment events.
     #[test]
-    fn inline_comment_produces_comment_event() {
+    fn trail_comment_after_block_scalar_is_consumed() {
         let events = events_from("|\n  hello\n# world\n");
-        assert!(
-            events.iter().any(|e| matches!(e, Event::Comment { .. })),
-            "no comment event; events: {events:?}"
-        );
+        // The scalar parses successfully with the correct value.
+        let has_scalar = events
+            .iter()
+            .any(|e| matches!(e, Event::Scalar { value, .. } if value == "hello\n"));
+        assert!(has_scalar, "expected scalar with value 'hello\\n'");
     }
 
-    /// Test 47 — comment text does not include the # marker
+    /// Test 47 — no errors parsing a document with trail comments.
     #[test]
-    fn comment_text_does_not_include_hash() {
-        let events = events_from("|\n  hello\n# world\n");
-        if let Some(Event::Comment { text }) =
-            events.iter().find(|e| matches!(e, Event::Comment { .. }))
-        {
-            let trimmed = text.trim();
-            assert!(
-                !trimmed.starts_with('#'),
-                "comment text should not start with '#': {text:?}"
-            );
-        }
+    fn document_with_trail_comments_parses_without_error() {
+        let results: Vec<_> = parse_events("|\n  hello\n# world\n").collect();
+        assert!(
+            results.iter().all(Result::is_ok),
+            "expected no errors; results: {results:?}"
+        );
     }
 
     /// Test 48 — comment text contains the comment content
@@ -1884,20 +1905,20 @@ mod tests {
     // Group 15 — Multiple comment events
     // -----------------------------------------------------------------------
 
-    /// Test 90 — two block scalars each followed by a document-level comment
-    /// produce two distinct Comment events.
-    ///
-    /// The tokenizer emits BeginComment/EndComment for document-level comments
-    /// that follow block scalars.  Two such scalars in separate documents each
-    /// produce one Comment event.
+    /// Test 90 — two block scalars each followed by trail comments parse
+    /// successfully. Trail comments are consumed inside the scalar per spec.
     #[test]
-    fn multiple_comments_produce_multiple_comment_events() {
-        let events = events_from("|\n  x\n# first\n---\n|\n  y\n# second\n");
-        let count = events
+    fn block_scalars_with_trail_comments_parse_successfully() {
+        let results: Vec<_> = parse_events("|\n  x\n# first\n---\n|\n  y\n# second\n").collect();
+        assert!(
+            results.iter().all(Result::is_ok),
+            "expected no errors; results: {results:?}"
+        );
+        let scalar_count = results
             .iter()
-            .filter(|e| matches!(e, Event::Comment { .. }))
+            .filter(|r| matches!(r, Ok((Event::Scalar { .. }, _))))
             .count();
-        assert_eq!(count, 2, "expected 2 Comment events; events: {events:?}");
+        assert_eq!(scalar_count, 2, "expected 2 scalars");
     }
 
     // -----------------------------------------------------------------------

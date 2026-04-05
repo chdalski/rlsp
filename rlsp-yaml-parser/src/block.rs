@@ -15,7 +15,7 @@ use crate::combinator::{
 use crate::flow::{e_node, ns_flow_node};
 use crate::structure::{
     b_comment, c_forbidden, c_ns_properties, l_empty, s_b_comment, s_indent, s_indent_content,
-    s_indent_lt, s_l_comments, s_separate, s_separate_ge, s_separate_in_line,
+    s_indent_le, s_indent_lt, s_l_comments, s_separate, s_separate_ge, s_separate_in_line,
 };
 use crate::token::Code;
 
@@ -235,37 +235,49 @@ fn b_chomped_last(t: Chomping) -> Parser<'static> {
     })
 }
 
+/// Blank line for chomping: at most n indentation spaces, optional trailing
+/// whitespace (tabs), then a line break. This is `s-indent(≤n) b-non-content`
+/// per spec, extended to allow trailing tabs on blank lines.
+fn l_chomped_blank(n: i32) -> Parser<'static> {
+    seq(s_indent_le(n), seq(many0(s_white()), b_break()))
+}
+
 /// [167] l-strip-empty(n) — blank lines (for strip/clip chomping tail).
 ///
-/// Consumes blank lines (lines with at most n spaces then a break) without
-/// emitting tokens.
+/// Per spec: `( s-indent(≤n) b-non-content )* l-trail-comments(n)?`.
 fn l_strip_empty(n: i32) -> Parser<'static> {
-    many0(seq(
-        opt(seq(s_indent_lt(n + 1), neg_lookahead(s_white()))),
-        b_break(),
-    ))
+    seq(many0(l_chomped_blank(n)), opt(l_trail_comments(n)))
 }
 
 /// [168] l-keep-empty(n) — blank lines emitting Break tokens (for keep chomping).
+///
+/// Per spec: `l-empty(n,BLOCK-IN)* l-trail-comments(n)?`.
 fn l_keep_empty(n: i32) -> Parser<'static> {
-    many0(seq(opt(s_indent_lt(n + 1)), token(Code::Break, b_break())))
+    seq(
+        many0(token(Code::Break, l_chomped_blank(n))),
+        opt(l_trail_comments(n)),
+    )
 }
 
 /// [169] l-trail-comments(n) — trailing comment lines after a block scalar.
+///
+/// Per spec: `s-indent(<n) c-nb-comment-text b-comment l-comment*`.
+/// The first line must have fewer than n indentation spaces and start with `#`.
 fn l_trail_comments(n: i32) -> Parser<'static> {
+    use crate::structure::l_comment;
     seq(
-        s_b_comment(),
-        many0(wrap_tokens(
+        wrap_tokens(
             Code::BeginComment,
             Code::EndComment,
             seq(
-                s_indent_lt(n + 1),
+                s_indent_lt(n),
                 seq(
                     token(Code::Indicator, char_parser('#')),
                     seq(token(Code::Text, many0(nb_char())), b_comment()),
                 ),
             ),
-        )),
+        ),
+        many0(l_comment()),
     )
 }
 
@@ -446,9 +458,13 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
 // ---------------------------------------------------------------------------
 
 /// [176] s-nb-folded-text(n) — one line of folded scalar content (non-spaced).
+///
+/// Uses `s_indent_content(n)` to consume exactly n spaces (allowing lines
+/// with > n spaces to proceed — the extra spaces become part of the content
+/// after `neg_lookahead(s_white())` rejects them as "spaced" text).
 fn s_nb_folded_text(n: i32) -> Parser<'static> {
     seq(
-        s_indent(n),
+        s_indent_content(n),
         seq(
             neg_lookahead(s_white()),
             token(Code::Text, many1(nb_char())),
@@ -458,21 +474,40 @@ fn s_nb_folded_text(n: i32) -> Parser<'static> {
 
 /// [178] s-nb-spaced-text(n) — a more-indented or whitespace-starting line.
 ///
-/// These lines are not folded — they are kept as-is.
+/// These lines are not folded — they are kept as-is. Uses `s_indent_content(n)`
+/// to consume exactly n spaces. The remaining content (including the leading
+/// whitespace that makes this "spaced") is emitted as Text.
+/// Requires at least one nb-char after the leading whitespace to avoid matching
+/// blank lines (which should be handled by l-empty/l-chomped-empty instead).
 fn s_nb_spaced_text(n: i32) -> Parser<'static> {
-    seq(
-        s_indent(n),
-        seq(s_white(), token(Code::Text, many0(nb_char()))),
-    )
+    Box::new(move |state| {
+        // Consume exactly n spaces of indentation.
+        let after_indent = match s_indent_content(n)(state) {
+            Reply::Success { state, .. } => state,
+            Reply::Failure => return Reply::Failure,
+            Reply::Error(e) => return Reply::Error(e),
+        };
+        // Next char must be s-white (space or tab) — the "more indented" marker.
+        match after_indent.peek() {
+            Some(' ' | '\t') => {}
+            _ => return Reply::Failure,
+        }
+        // Emit the whitespace + remaining content as a single Text token.
+        // Use many1(nb_char()) to require at least one non-break char after the
+        // leading whitespace, preventing blank lines from matching.
+        token(Code::Text, seq(s_white(), many1(nb_char())))(after_indent)
+    })
 }
 
 /// [177] s-nb-folded-lines(n) — folded continuation lines.
+///
+/// Per spec: `s-nb-folded-text(n) ( b-l-folded(n,BLOCK-IN) s-nb-folded-text(n) )*`.
 fn s_nb_folded_lines(n: i32) -> Parser<'static> {
     seq(
         s_nb_folded_text(n),
         many0(seq(
             token(Code::LineFold, b_break()),
-            seq(many0(l_empty(n, Context::FlowIn)), s_nb_folded_text(n)),
+            seq(many0(l_empty(n, Context::BlockIn)), s_nb_folded_text(n)),
         )),
     )
 }
@@ -760,6 +795,41 @@ fn ns_l_compact_sequence(n: i32) -> Parser<'static> {
 // §8.2.2 – Block mappings [187]–[195]
 // ---------------------------------------------------------------------------
 
+/// Skip blank lines (whitespace-only lines) before a mapping entry.
+/// These can appear between entries and are not structural.
+fn skip_blank_lines(state: State<'_>) -> State<'_> {
+    let mut s = state;
+    loop {
+        // Check if the current line is whitespace-only.
+        let remaining = s.input;
+        let ws_len = remaining
+            .chars()
+            .take_while(|&ch| ch == ' ' || ch == '\t')
+            .count();
+        let after_ws = &remaining[ws_len..];
+        if after_ws.starts_with('\n') {
+            // Skip this blank line.
+            let mut next = s;
+            for ch in remaining[..ws_len].chars() {
+                next = next.advance(ch);
+            }
+            next = next.advance('\n');
+            s = next;
+        } else if after_ws.starts_with("\r\n") {
+            let mut next = s;
+            for ch in remaining[..ws_len].chars() {
+                next = next.advance(ch);
+            }
+            next = next.advance('\r');
+            next = next.advance('\n');
+            s = next;
+        } else {
+            break;
+        }
+    }
+    s
+}
+
 /// [187] l+block-mapping(n) — a block mapping at indentation n.
 ///
 /// Auto-detects the entry indentation `n+m` (m ≥ 0) from the first entry's column.
@@ -771,10 +841,35 @@ pub fn l_block_mapping(n: i32) -> Parser<'static> {
         if detected < n {
             return Reply::Failure;
         }
+        // Parse entries, skipping blank lines between them.
         wrap_tokens(
             Code::BeginMapping,
             Code::EndMapping,
-            many1(ns_l_block_map_entry(detected)),
+            Box::new(move |state| {
+                // First entry (required).
+                let (first_tokens, after_first) = match ns_l_block_map_entry(detected)(state) {
+                    Reply::Success { tokens, state } => (tokens, state),
+                    Reply::Failure => return Reply::Failure,
+                    Reply::Error(e) => return Reply::Error(e),
+                };
+                let mut all_tokens = first_tokens;
+                let mut current = after_first;
+                // Subsequent entries (optional), skipping blank lines.
+                loop {
+                    let skipped = skip_blank_lines(current.clone());
+                    match ns_l_block_map_entry(detected)(skipped.clone()) {
+                        Reply::Success { tokens, state } => {
+                            all_tokens.extend(tokens);
+                            current = state;
+                        }
+                        Reply::Failure | Reply::Error(_) => break,
+                    }
+                }
+                Reply::Success {
+                    tokens: all_tokens,
+                    state: current,
+                }
+            }),
         )(state)
     })
 }
@@ -1045,6 +1140,8 @@ pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
             };
 
         // Literal or folded scalar.
+        // Trail comments are consumed inside the scalar via l-chomped-empty
+        // per spec [167]/[168], using the scalar's content indent n.
         let scalar_result = alt(c_l_literal(n), c_l_folded(n))(after_props.clone());
         let (scalar_tokens, after_scalar) = match scalar_result {
             Reply::Success { tokens, state } => (tokens, state),
@@ -1052,19 +1149,12 @@ pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
             Reply::Error(e) => return Reply::Error(e),
         };
 
-        // Optional trailing comments after the block scalar.
-        let (trail_tokens, final_state) = match l_trail_comments(n)(after_scalar.clone()) {
-            Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_scalar),
-        };
-
         let mut all = sep_tokens;
         all.extend(prop_tokens);
         all.extend(scalar_tokens);
-        all.extend(trail_tokens);
         Reply::Success {
             tokens: all,
-            state: final_state,
+            state: after_scalar,
         }
     })
 }
@@ -1555,29 +1645,26 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn l_trail_comments_accepts_comment_after_blank() {
-        let reply = l_trail_comments(0)(state("\n# comment\n"));
+    fn l_trail_comments_accepts_comment_at_lower_indent() {
+        // n=2: trail comment at 0 spaces indent (< 2).
+        let reply = l_trail_comments(2)(state("# comment\n"));
         assert!(is_success(&reply));
-        let c = codes(l_trail_comments(0)(state("\n# comment\n")));
-        assert!(c.contains(&Code::BeginComment) || c.contains(&Code::EndComment));
+        let c = codes(l_trail_comments(2)(state("# comment\n")));
+        assert!(c.contains(&Code::BeginComment));
     }
 
     #[test]
     fn l_trail_comments_accepts_multiple_comments() {
-        let reply = l_trail_comments(0)(state("\n# one\n# two\n"));
+        // n=2: trail comments at indent < 2.
+        let reply = l_trail_comments(2)(state("# one\n# two\n"));
         assert!(is_success(&reply));
     }
 
     #[test]
     fn l_trail_comments_fails_on_non_comment() {
-        let reply = l_trail_comments(0)(state("\nplaintext\n"));
-        // l_trail_comments starts with s_b_comment which accepts a bare newline.
-        // The overall call succeeds (consuming the newline) but "plaintext" remains.
-        // The spec says l-trail-comments = s-b-comment ( l-comment )* — so one bare
-        // newline is enough for s-b-comment to succeed.  We verify "plaintext" is unconsumed.
-        if is_success(&reply) {
-            assert!(remaining(&reply).starts_with("plaintext"));
-        }
+        // n=2: content that isn't a comment should fail.
+        let reply = l_trail_comments(2)(state("plaintext\n"));
+        assert!(is_failure(&reply));
     }
 
     #[test]

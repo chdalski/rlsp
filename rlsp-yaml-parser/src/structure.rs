@@ -223,10 +223,17 @@ pub fn s_line_prefix(n: i32, c: Context) -> Parser<'static> {
 
 /// [70] l-empty(n,c) — an empty line: optional prefix then a line break.
 ///
-/// The line may carry spaces up to the indentation level.
+/// Per spec: `( s-line-prefix(n,c) | s-indent(≤n) ) b-as-line-feed`.
+/// For block contexts, lines must have at most n leading spaces (or exactly n
+/// for the prefix path). For flow contexts, lines may have more than n spaces
+/// because `s-flow-line-prefix` allows additional separation whitespace.
+/// Trailing tabs are allowed on empty lines in all contexts.
 #[must_use]
 pub fn l_empty(n: i32, c: Context) -> Parser<'static> {
-    seq(alt(s_line_prefix(n, c), s_indent_le(n)), b_break())
+    seq(
+        alt(s_line_prefix(n, c), s_indent_le(n)),
+        seq(many0(s_white()), b_break()),
+    )
 }
 
 /// [71] b-l-trimmed(n,c) — a line break followed by zero or more empty lines.
@@ -251,13 +258,28 @@ pub fn b_l_folded(n: i32, c: Context) -> Parser<'static> {
     alt(b_l_trimmed(n, c), b_as_space())
 }
 
+/// Flow-context empty line: any whitespace then break.
+/// Used in `s-flow-folded` because flow empty lines can have any indentation.
+fn l_empty_flow(n: i32) -> Parser<'static> {
+    seq(
+        alt(s_flow_line_prefix_ge(n), s_indent_le(n)),
+        seq(many0(s_white()), b_break()),
+    )
+}
+
 /// [74] s-flow-folded(n) — flow scalar folding: optional whitespace,
 /// folded break, then flow line prefix.
+///
+/// Uses a flow-specific empty line matcher that allows deeper indentation
+/// on blank lines within flow contexts.
 #[must_use]
 pub fn s_flow_folded(n: i32) -> Parser<'static> {
+    // b-l-folded(n, FlowIn) inlined with flow-specific l-empty:
+    // alt(seq(b_break(), many1(l_empty_flow(n))), b_as_space())
+    let b_l_folded_flow = alt(seq(b_break(), many1(l_empty_flow(n))), b_as_space());
     seq(
         opt(s_separate_in_line()),
-        seq(b_l_folded(n, Context::FlowIn), s_flow_line_prefix_ge(n)),
+        seq(b_l_folded_flow, s_flow_line_prefix_ge(n)),
     )
 }
 
