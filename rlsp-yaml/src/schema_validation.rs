@@ -4,10 +4,27 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use regex::RegexBuilder;
-use saphyr::YamlOwned;
+use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::pos::Span;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+use crate::scalar_helpers;
 use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+
+/// Helper: check if a mapping's entries contain a key with the given string value.
+fn entries_contains_key(entries: &[(Node<Span>, Node<Span>)], key: &str) -> bool {
+    entries
+        .iter()
+        .any(|(k, _)| matches!(k, Node::Scalar { value, .. } if value == key))
+}
+
+/// Helper: extract a string key from a node.
+fn node_key_str(node: &Node<Span>) -> Option<String> {
+    match node {
+        Node::Scalar { value, .. } => Some(value.clone()),
+        Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
+    }
+}
 
 /// Maximum length of a `pattern` string we will compile and match, as a
 /// guard against pathological `ReDoS` inputs.
@@ -188,7 +205,7 @@ impl<'a> Ctx<'a> {
 #[must_use]
 pub fn validate_schema(
     text: &str,
-    docs: &[YamlOwned],
+    docs: &[Document<Span>],
     schema: &JsonSchema,
     format_validation: bool,
 ) -> Vec<Diagnostic> {
@@ -203,7 +220,7 @@ pub fn validate_schema(
     let mut ctx = Ctx::new(&mut diagnostics, format_validation, &key_index);
 
     for doc in docs {
-        validate_node(doc, schema, &[], &mut ctx, 0);
+        validate_node(&doc.root, schema, &[], &mut ctx, 0);
     }
 
     diagnostics
@@ -257,7 +274,7 @@ fn build_key_index(lines: &[&str]) -> HashMap<String, Range> {
 /// `path` is the property path to the current node (for diagnostic messages).
 /// `depth` guards against stack overflow on deeply nested structures.
 fn validate_node(
-    node: &YamlOwned,
+    node: &Node<Span>,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -320,13 +337,13 @@ fn validate_node(
     validate_scalar_constraints(node, schema, path, ctx);
 
     // Mapping-specific checks
-    if let YamlOwned::Mapping(map) = node {
-        validate_mapping(map, schema, path, ctx, depth);
+    if let Node::Mapping { entries, .. } = node {
+        validate_mapping(entries, schema, path, ctx, depth);
     }
 
     // Sequence-specific checks
-    if let YamlOwned::Sequence(seq) = node {
-        validate_sequence(seq, schema, path, ctx, depth);
+    if let Node::Sequence { items, .. } = node {
+        validate_sequence(items, schema, path, ctx, depth);
     }
 
     // Composition
@@ -334,38 +351,29 @@ fn validate_node(
 
     // unevaluatedProperties (Draft 2019-09)
     if schema.unevaluated_properties.is_some() {
-        if let YamlOwned::Mapping(map) = node {
-            validate_unevaluated_properties(map, schema, path, ctx, depth);
+        if let Node::Mapping { entries, .. } = node {
+            validate_unevaluated_properties(entries, schema, path, ctx, depth);
         }
     }
 
     // unevaluatedItems (Draft 2019-09)
     if schema.unevaluated_items.is_some() {
-        if let YamlOwned::Sequence(seq) = node {
-            validate_unevaluated_items(seq, schema, path, ctx, depth);
+        if let Node::Sequence { items, .. } = node {
+            validate_unevaluated_items(items, schema, path, ctx, depth);
         }
     }
 }
 
 fn validate_unevaluated_properties(
-    map: &saphyr::MappingOwned,
+    entries: &[(Node<Span>, Node<Span>)],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    use saphyr::ScalarOwned;
-    for k in map.keys() {
-        let key_str = match k {
-            YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
-            YamlOwned::Value(ScalarOwned::Integer(i)) => i.to_string(),
-            YamlOwned::Value(_)
-            | YamlOwned::Sequence(_)
-            | YamlOwned::Mapping(_)
-            | YamlOwned::Alias(_)
-            | YamlOwned::BadValue
-            | YamlOwned::Tagged(_, _)
-            | YamlOwned::Representation(_, _, _) => continue,
+    for (k, v) in entries {
+        let Some(key_str) = node_key_str(k) else {
+            continue;
         };
         if collect_evaluated_properties(schema, &key_str) {
             continue;
@@ -385,9 +393,6 @@ fn validate_unevaluated_properties(
                 ));
             }
             Some(AdditionalProperties::Schema(extra_schema)) => {
-                let Some(v) = map.get(k) else {
-                    continue;
-                };
                 let mut child_path = path.to_vec();
                 child_path.push(key_str.clone());
                 validate_node(v, extra_schema, &child_path, ctx, depth + 1);
@@ -398,7 +403,7 @@ fn validate_unevaluated_properties(
 }
 
 fn validate_unevaluated_items(
-    seq: &saphyr::SequenceOwned,
+    seq: &[Node<Span>],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -419,7 +424,7 @@ fn validate_unevaluated_items(
 }
 
 fn validate_sequence(
-    seq: &saphyr::SequenceOwned,
+    seq: &[Node<Span>],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -469,7 +474,7 @@ fn validate_sequence(
 }
 
 fn validate_array_constraints(
-    seq: &saphyr::SequenceOwned,
+    seq: &[Node<Span>],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -535,12 +540,12 @@ fn validate_array_constraints(
 }
 
 fn validate_mapping_constraints(
-    map: &saphyr::MappingOwned,
+    entries: &[(Node<Span>, Node<Span>)],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    let len = map.len() as u64;
+    let len = entries.len() as u64;
 
     if let Some(min) = schema.min_properties {
         if len < min {
@@ -578,7 +583,7 @@ fn validate_mapping_constraints(
 }
 
 fn validate_contains(
-    seq: &saphyr::SequenceOwned,
+    seq: &[Node<Span>],
     contains_schema: &JsonSchema,
     schema: &JsonSchema,
     path: &[String],
@@ -634,34 +639,41 @@ fn validate_contains(
 }
 
 fn validate_scalar_constraints(
-    node: &YamlOwned,
+    node: &Node<Span>,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    use saphyr::ScalarOwned;
+    use rlsp_yaml_parser::event::ScalarStyle;
+    if let Node::Scalar { value, style, .. } = node {
+        let is_plain = matches!(style, ScalarStyle::Plain);
 
-    if let YamlOwned::Value(ScalarOwned::String(s)) = node {
-        validate_string_constraints(s, schema, path, ctx);
-    }
-
-    let numeric_val = match node {
-        YamlOwned::Value(ScalarOwned::Integer(i)) =>
+        // String constraints apply to all scalars that resolve to string type.
+        // Quoted/block scalars are always strings; plain scalars are strings
+        // only if they don't match null/bool/int/float patterns.
+        if !is_plain
+            || (!scalar_helpers::is_null(value)
+                && !scalar_helpers::is_bool(value)
+                && !scalar_helpers::is_integer(value)
+                && !scalar_helpers::is_float(value))
         {
-            #[allow(clippy::cast_precision_loss)]
-            Some(*i as f64)
+            validate_string_constraints(value, schema, path, ctx);
         }
-        YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => Some(**f),
-        YamlOwned::Value(_)
-        | YamlOwned::Sequence(_)
-        | YamlOwned::Mapping(_)
-        | YamlOwned::Alias(_)
-        | YamlOwned::BadValue
-        | YamlOwned::Tagged(..)
-        | YamlOwned::Representation(..) => None,
-    };
-    if let Some(val) = numeric_val {
-        validate_numeric_constraints(val, schema, path, ctx);
+
+        // Numeric constraints only apply to plain scalars.
+        if is_plain {
+            let numeric_val = scalar_helpers::parse_integer(value)
+                .map(|i| {
+                    #[allow(clippy::cast_precision_loss)]
+                    {
+                        i as f64
+                    }
+                })
+                .or_else(|| scalar_helpers::parse_float(value));
+            if let Some(val) = numeric_val {
+                validate_numeric_constraints(val, schema, path, ctx);
+            }
+        }
     }
 
     // const — compare any scalar node via yaml_to_json
@@ -1423,15 +1435,13 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
 }
 
 fn validate_mapping(
-    map: &saphyr::MappingOwned,
+    entries: &[(Node<Span>, Node<Span>)],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    use saphyr::ScalarOwned;
-
-    validate_mapping_constraints(map, schema, path, ctx);
+    validate_mapping_constraints(entries, schema, path, ctx);
 
     let properties = schema.properties.as_ref();
 
@@ -1450,10 +1460,7 @@ fn validate_mapping(
         ctx.diagnostics.extend(
             required
                 .iter()
-                .filter(|req_key| {
-                    let key_yaml = YamlOwned::Value(ScalarOwned::String((*req_key).clone()));
-                    !map.contains_key(&key_yaml)
-                })
+                .filter(|req_key| !entries_contains_key(entries, req_key))
                 .map(|req_key| {
                     let range = mapping_range(path, ctx.key_index);
                     make_diagnostic(
@@ -1472,17 +1479,9 @@ fn validate_mapping(
     }
 
     // Validate known properties and check for additional properties
-    for (k, v) in map {
-        let key_str = match k {
-            YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
-            YamlOwned::Value(ScalarOwned::Integer(i)) => i.to_string(),
-            YamlOwned::Value(_)
-            | YamlOwned::Sequence(_)
-            | YamlOwned::Mapping(_)
-            | YamlOwned::Alias(_)
-            | YamlOwned::BadValue
-            | YamlOwned::Tagged(_, _)
-            | YamlOwned::Representation(_, _, _) => continue,
+    for (k, v) in entries {
+        let Some(key_str) = node_key_str(k) else {
+            continue;
         };
 
         let is_known = properties.is_some_and(|p| p.contains_key(&key_str));
@@ -1524,31 +1523,37 @@ fn validate_mapping(
 
         // propertyNames — validate each key as a string node against the schema
         if let Some(pn_schema) = &schema.property_names {
-            let key_node = YamlOwned::Value(ScalarOwned::String(key_str.clone()));
+            // Create a temporary scalar node for the key string.
+            let key_node = Node::Scalar {
+                value: key_str.clone(),
+                style: rlsp_yaml_parser::event::ScalarStyle::Plain,
+                anchor: None,
+                tag: None,
+                loc: rlsp_yaml_parser::pos::Span {
+                    start: rlsp_yaml_parser::pos::Pos::ORIGIN,
+                    end: rlsp_yaml_parser::pos::Pos::ORIGIN,
+                },
+            };
             validate_node(&key_node, pn_schema, path, ctx, depth + 1);
         }
     }
 
-    validate_dependencies(map, schema, path, ctx, depth);
+    validate_dependencies(entries, schema, path, ctx, depth);
 }
 
 fn validate_dependencies(
-    map: &saphyr::MappingOwned,
+    entries: &[(Node<Span>, Node<Span>)],
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    use saphyr::ScalarOwned;
-
     // dependentRequired: if trigger key is present, listed keys must also be present
     if let Some(dep_req) = &schema.dependent_required {
         for (trigger, required_keys) in dep_req {
-            let trigger_yaml = YamlOwned::Value(ScalarOwned::String(trigger.clone()));
-            if map.contains_key(&trigger_yaml) {
+            if entries_contains_key(entries, trigger) {
                 for missing in required_keys {
-                    let missing_yaml = YamlOwned::Value(ScalarOwned::String(missing.clone()));
-                    if !map.contains_key(&missing_yaml) {
+                    if !entries_contains_key(entries, missing) {
                         let range = mapping_range(path, ctx.key_index);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
@@ -1570,15 +1575,18 @@ fn validate_dependencies(
     // dependentSchemas: if trigger key is present, validate the whole mapping
     if let Some(dep_sch) = &schema.dependent_schemas {
         for (trigger, dep_schema) in dep_sch {
-            let trigger_yaml = YamlOwned::Value(ScalarOwned::String(trigger.clone()));
-            if map.contains_key(&trigger_yaml) {
-                validate_node(
-                    &YamlOwned::Mapping(map.clone()),
-                    dep_schema,
-                    path,
-                    ctx,
-                    depth + 1,
-                );
+            if entries_contains_key(entries, trigger) {
+                // Reconstruct a mapping node to validate against the dep schema.
+                let mapping_node = Node::Mapping {
+                    entries: entries.to_vec(),
+                    anchor: None,
+                    tag: None,
+                    loc: rlsp_yaml_parser::pos::Span {
+                        start: rlsp_yaml_parser::pos::Pos::ORIGIN,
+                        end: rlsp_yaml_parser::pos::Pos::ORIGIN,
+                    },
+                };
+                validate_node(&mapping_node, dep_schema, path, ctx, depth + 1);
             }
         }
     }
@@ -1587,7 +1595,7 @@ fn validate_dependencies(
 /// Validate `value` against any `patternProperties` patterns that match `key`.
 /// Returns `true` if the key was matched by at least one pattern.
 fn validate_pattern_properties(
-    value: &YamlOwned,
+    value: &Node<Span>,
     key: &str,
     schema: &JsonSchema,
     path: &[String],
@@ -1637,7 +1645,7 @@ fn validate_pattern_properties(
 }
 
 fn validate_composition(
-    node: &YamlOwned,
+    node: &Node<Span>,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -1758,20 +1766,30 @@ fn validate_composition(
 // Type mapping
 // ──────────────────────────────────────────────────────────────────────────────
 
-const fn yaml_type_name(node: &YamlOwned) -> &'static str {
-    use saphyr::ScalarOwned;
+fn yaml_type_name(node: &Node<Span>) -> &'static str {
+    use rlsp_yaml_parser::event::ScalarStyle;
     match node {
-        YamlOwned::Value(ScalarOwned::String(_)) => "string",
-        YamlOwned::Value(ScalarOwned::Integer(_)) => "integer",
-        YamlOwned::Value(ScalarOwned::FloatingPoint(_)) => "number",
-        YamlOwned::Value(ScalarOwned::Boolean(_)) => "boolean",
-        YamlOwned::Value(ScalarOwned::Null) => "null",
-        YamlOwned::Mapping(_) => "object",
-        YamlOwned::Sequence(_) => "array",
-        YamlOwned::Alias(_)
-        | YamlOwned::BadValue
-        | YamlOwned::Tagged(_, _)
-        | YamlOwned::Representation(_, _, _) => "unknown",
+        Node::Scalar { value, style, .. } => {
+            // Only plain (unquoted) scalars undergo type inference.
+            // Quoted and block scalars are always strings.
+            if !matches!(style, ScalarStyle::Plain) {
+                return "string";
+            }
+            if scalar_helpers::is_null(value) {
+                "null"
+            } else if scalar_helpers::is_bool(value) {
+                "boolean"
+            } else if scalar_helpers::is_integer(value) {
+                "integer"
+            } else if scalar_helpers::is_float(value) {
+                "number"
+            } else {
+                "string"
+            }
+        }
+        Node::Mapping { .. } => "object",
+        Node::Sequence { .. } => "array",
+        Node::Alias { .. } => "unknown",
     }
 }
 
@@ -1805,22 +1823,30 @@ fn display_schema_type(schema_type: &SchemaType) -> String {
 // YAML → JSON conversion (for enum comparison)
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn yaml_to_json(node: &YamlOwned) -> Option<serde_json::Value> {
-    use saphyr::ScalarOwned;
+fn yaml_to_json(node: &Node<Span>) -> Option<serde_json::Value> {
+    use rlsp_yaml_parser::event::ScalarStyle;
     match node {
-        YamlOwned::Value(ScalarOwned::String(s)) => Some(serde_json::Value::String(s.clone())),
-        YamlOwned::Value(ScalarOwned::Integer(i)) => Some(serde_json::Value::Number((*i).into())),
-        YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => {
-            serde_json::Number::from_f64(**f).map(serde_json::Value::Number)
+        Node::Scalar { value, style, .. } => {
+            // Quoted/block scalars are always strings — skip type inference.
+            if !matches!(style, ScalarStyle::Plain) {
+                return Some(serde_json::Value::String(value.clone()));
+            }
+            if scalar_helpers::is_null(value) {
+                Some(serde_json::Value::Null)
+            } else if scalar_helpers::is_bool(value) {
+                Some(serde_json::Value::Bool(matches!(
+                    value.as_str(),
+                    "true" | "True" | "TRUE"
+                )))
+            } else if let Some(i) = scalar_helpers::parse_integer(value) {
+                Some(serde_json::Value::Number(i.into()))
+            } else if let Some(f) = scalar_helpers::parse_float(value) {
+                serde_json::Number::from_f64(f).map(serde_json::Value::Number)
+            } else {
+                Some(serde_json::Value::String(value.clone()))
+            }
         }
-        YamlOwned::Value(ScalarOwned::Boolean(b)) => Some(serde_json::Value::Bool(*b)),
-        YamlOwned::Value(ScalarOwned::Null) => Some(serde_json::Value::Null),
-        YamlOwned::Sequence(_)
-        | YamlOwned::Mapping(_)
-        | YamlOwned::Alias(_)
-        | YamlOwned::BadValue
-        | YamlOwned::Tagged(_, _)
-        | YamlOwned::Representation(_, _, _) => None,
+        Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
     }
 }
 
@@ -1925,9 +1951,8 @@ mod tests {
     use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
     use serde_json::json;
 
-    fn parse_docs(text: &str) -> Vec<YamlOwned> {
-        use saphyr::LoadableYamlNode;
-        YamlOwned::load_from_str(text).unwrap_or_default()
+    fn parse_docs(text: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     fn string_schema() -> JsonSchema {

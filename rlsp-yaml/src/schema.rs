@@ -1374,37 +1374,27 @@ pub fn extract_yaml_version(text: &str) -> Option<String> {
 /// are plain string scalars.  Returns `None` if the document slice is empty,
 /// the root node is not a mapping, or either key is absent / non-string.
 #[must_use]
-pub fn detect_kubernetes_resource(docs: &[saphyr::YamlOwned]) -> Option<(String, String)> {
-    use saphyr::{ScalarOwned, YamlOwned};
+pub fn detect_kubernetes_resource(
+    docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::pos::Span>],
+) -> Option<(String, String)> {
+    use rlsp_yaml_parser::node::Node;
 
-    let root = docs.first()?;
-    let YamlOwned::Mapping(map) = root else {
+    let root = &docs.first()?.root;
+    let Node::Mapping { entries, .. } = root else {
         return None;
     };
 
     let mut api_version: Option<String> = None;
     let mut kind: Option<String> = None;
 
-    for (k, v) in map {
+    for (k, v) in entries {
         let key = match k {
-            YamlOwned::Value(ScalarOwned::String(s)) => s.as_str(),
-            YamlOwned::Representation(..)
-            | YamlOwned::Value(_)
-            | YamlOwned::Sequence(_)
-            | YamlOwned::Mapping(_)
-            | YamlOwned::Tagged(..)
-            | YamlOwned::Alias(_)
-            | YamlOwned::BadValue => continue,
+            Node::Scalar { value, .. } => value.as_str(),
+            Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => continue,
         };
         let val = match v {
-            YamlOwned::Value(ScalarOwned::String(s)) => s.clone(),
-            YamlOwned::Representation(..)
-            | YamlOwned::Value(_)
-            | YamlOwned::Sequence(_)
-            | YamlOwned::Mapping(_)
-            | YamlOwned::Tagged(..)
-            | YamlOwned::Alias(_)
-            | YamlOwned::BadValue => continue,
+            Node::Scalar { value, .. } => value.clone(),
+            Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => continue,
         };
         match key {
             "apiVersion" => api_version = Some(val),
@@ -2838,9 +2828,10 @@ mod tests {
     // detect_kubernetes_resource + kubernetes_schema_url
     // ══════════════════════════════════════════════════════════════════════════
 
-    fn parse_docs(text: &str) -> Vec<saphyr::YamlOwned> {
-        use saphyr::LoadableYamlNode;
-        saphyr::YamlOwned::load_from_str(text).unwrap_or_default()
+    fn parse_docs(
+        text: &str,
+    ) -> Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::pos::Span>> {
+        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     // Test K8s-1: core API (v1 Pod) — detection and URL

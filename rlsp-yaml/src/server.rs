@@ -273,7 +273,7 @@ impl Backend {
         uri: &Url,
         schema_url: &str,
         diagnostics: &mut Vec<Diagnostic>,
-        documents: &[saphyr::YamlOwned],
+        documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::pos::Span>],
         text: &str,
     ) {
         let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();
@@ -367,14 +367,6 @@ impl Backend {
         let result = parser::parse_yaml(text);
         let mut diagnostics = result.diagnostics.clone();
 
-        // Legacy saphyr parse for downstream consumers not yet migrated to
-        // rlsp-yaml-parser (validators, schema, hover, completion, symbols).
-        // TODO(migration): Remove once Tasks 2-4 are complete.
-        let legacy_docs: Vec<saphyr::YamlOwned> = {
-            use saphyr::LoadableYamlNode;
-            saphyr::YamlOwned::load_from_str(text).unwrap_or_default()
-        };
-
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validators::validate_unused_anchors(text));
         diagnostics.extend(crate::validators::validate_flow_style(text));
@@ -385,14 +377,17 @@ impl Backend {
         // any other lock below.
         let key_ordering = self.get_key_ordering();
         if key_ordering {
-            diagnostics.extend(crate::validators::validate_key_ordering(text, &legacy_docs));
+            diagnostics.extend(crate::validators::validate_key_ordering(
+                text,
+                &result.documents,
+            ));
         }
 
         let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
         allowed_tags.extend(crate::schema::extract_custom_tags(text));
         diagnostics.extend(crate::validators::validate_custom_tags(
             text,
-            &legacy_docs,
+            &result.documents,
             &allowed_tags,
         ));
 
@@ -414,7 +409,7 @@ impl Backend {
                 // key ordering, duplicate keys) already ran above and their
                 // diagnostics are retained.
             } else {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
                     .await;
             }
         } else {
@@ -429,15 +424,15 @@ impl Backend {
             if let Some(schema_url) =
                 crate::schema::match_schema_by_filename(filename, &associations)
             {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
                     .await;
             } else if let Some((api_version, kind)) =
-                crate::schema::detect_kubernetes_resource(&legacy_docs)
+                crate::schema::detect_kubernetes_resource(&result.documents)
             {
                 // Third fallback: Kubernetes auto-detection.
                 let schema_url =
                     crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
                     .await;
             } else if schema_store_enabled {
                 // Fourth fallback: SchemaStore catalog.
@@ -449,7 +444,7 @@ impl Backend {
                             &uri,
                             &schema_url,
                             &mut diagnostics,
-                            &legacy_docs,
+                            &result.documents,
                             text,
                         )
                         .await;

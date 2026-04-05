@@ -2,7 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use saphyr::{ScalarOwned, YamlOwned};
+use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::pos::Span;
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
 };
@@ -280,7 +281,7 @@ fn find_closing_char(line: &str, start: usize, open: char, close: char) -> Optio
 #[must_use]
 pub fn validate_custom_tags<S: std::hash::BuildHasher>(
     text: &str,
-    docs: &[YamlOwned],
+    docs: &[Document<Span>],
     allowed_tags: &HashSet<String, S>,
 ) -> Vec<Diagnostic> {
     if allowed_tags.is_empty() {
@@ -294,7 +295,7 @@ pub fn validate_custom_tags<S: std::hash::BuildHasher>(
 
     for doc in docs {
         collect_tag_diagnostics(
-            doc,
+            &doc.root,
             &lines,
             allowed_tags,
             &mut seen_counts,
@@ -308,7 +309,7 @@ pub fn validate_custom_tags<S: std::hash::BuildHasher>(
 
 /// Recursively walk a YAML node and emit diagnostics for unknown tags.
 fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
-    node: &YamlOwned,
+    node: &Node<Span>,
     lines: &[&str],
     allowed_tags: &HashSet<String, S>,
     seen_counts: &mut HashMap<String, usize>,
@@ -320,35 +321,35 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
         return;
     }
 
-    match node {
-        YamlOwned::Tagged(tag, inner) => {
-            let tag_str = tag.to_string();
-            if !allowed_tags.contains(&tag_str) {
-                let occurrence = *seen_counts.get(&tag_str).unwrap_or(&0);
-                seen_counts.insert(tag_str.clone(), occurrence + 1);
-
-                if let Some(range) = find_tag_occurrence(lines, &tag_str, occurrence) {
-                    diagnostics.push(Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unknownTag".to_string())),
-                        message: format!("Unknown tag: {tag_str}"),
-                        source: Some("rlsp-yaml".to_string()),
-                        ..Diagnostic::default()
-                    });
-                }
-            }
-            collect_tag_diagnostics(
-                inner,
-                lines,
-                allowed_tags,
-                seen_counts,
-                diagnostics,
-                depth + 1,
-            );
+    // Check the tag field on this node (all variants carry an optional tag).
+    let tag = match node {
+        Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
+            tag.as_deref()
         }
-        YamlOwned::Mapping(map) => {
-            for (key, value) in map {
+        Node::Alias { .. } => None,
+    };
+    if let Some(tag_str) = tag {
+        if !allowed_tags.contains(tag_str) {
+            let occurrence = *seen_counts.get(tag_str).unwrap_or(&0);
+            seen_counts.insert(tag_str.to_string(), occurrence + 1);
+
+            if let Some(range) = find_tag_occurrence(lines, tag_str, occurrence) {
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unknownTag".to_string())),
+                    message: format!("Unknown tag: {tag_str}"),
+                    source: Some("rlsp-yaml".to_string()),
+                    ..Diagnostic::default()
+                });
+            }
+        }
+    }
+
+    // Recurse into children.
+    match node {
+        Node::Mapping { entries, .. } => {
+            for (key, value) in entries {
                 collect_tag_diagnostics(
                     key,
                     lines,
@@ -367,8 +368,8 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
                 );
             }
         }
-        YamlOwned::Sequence(arr) => {
-            for item in arr {
+        Node::Sequence { items, .. } => {
+            for item in items {
                 collect_tag_diagnostics(
                     item,
                     lines,
@@ -379,10 +380,7 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
                 );
             }
         }
-        YamlOwned::Value(_)
-        | YamlOwned::Alias(_)
-        | YamlOwned::BadValue
-        | YamlOwned::Representation(_, _, _) => {}
+        Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
@@ -455,9 +453,8 @@ fn is_inside_quotes(line: &str, pos: usize) -> bool {
 /// Returns warning diagnostics for map keys that are not in alphabetical order.
 /// Uses case-sensitive lexicographic comparison.
 ///
-/// The `docs` parameter contains the parsed YAML documents from saphyr.
 #[must_use]
-pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> {
+pub fn validate_key_ordering(text: &str, docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
 
@@ -484,7 +481,7 @@ pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> 
         });
 
     for doc in docs {
-        check_yaml_ordering(doc, &key_index, &mut diagnostics, 0);
+        check_yaml_ordering(&doc.root, &key_index, &mut diagnostics, 0);
     }
 
     diagnostics
@@ -492,7 +489,7 @@ pub fn validate_key_ordering(text: &str, docs: &[YamlOwned]) -> Vec<Diagnostic> 
 
 /// Recursively check YAML nodes for key ordering, with depth limit.
 fn check_yaml_ordering(
-    node: &YamlOwned,
+    node: &Node<Span>,
     key_index: &HashMap<String, u32>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
@@ -503,22 +500,18 @@ fn check_yaml_ordering(
     }
 
     match node {
-        YamlOwned::Mapping(map) => {
-            // Extract keys in order
-            let keys: Vec<String> = map
-                .keys()
-                .filter_map(|k| match k {
-                    YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
-                    YamlOwned::Value(ScalarOwned::Integer(i)) => Some(i.to_string()),
-                    YamlOwned::Value(ScalarOwned::FloatingPoint(f)) => Some(f.to_string()),
-                    YamlOwned::Value(ScalarOwned::Boolean(b)) => Some(b.to_string()),
-                    YamlOwned::Sequence(_)
-                    | YamlOwned::Mapping(_)
-                    | YamlOwned::Alias(_)
-                    | YamlOwned::Value(ScalarOwned::Null)
-                    | YamlOwned::BadValue
-                    | YamlOwned::Tagged(_, _)
-                    | YamlOwned::Representation(_, _, _) => None,
+        Node::Mapping { entries, .. } => {
+            // Extract keys in order — skip null keys (they have no ordering semantics).
+            let keys: Vec<String> = entries
+                .iter()
+                .filter_map(|(k, _)| match k {
+                    Node::Scalar { value, .. } if !crate::scalar_helpers::is_null(value) => {
+                        Some(value.clone())
+                    }
+                    Node::Scalar { .. }
+                    | Node::Mapping { .. }
+                    | Node::Sequence { .. }
+                    | Node::Alias { .. } => None,
                 })
                 .collect();
 
@@ -550,29 +543,25 @@ fn check_yaml_ordering(
             }
 
             // Recursively check nested structures
-            for value in map.values() {
+            for (_, value) in entries {
                 check_yaml_ordering(value, key_index, diagnostics, depth + 1);
             }
         }
-        YamlOwned::Sequence(arr) => {
+        Node::Sequence { items, .. } => {
             // Recursively check array elements
-            for item in arr {
+            for item in items {
                 check_yaml_ordering(item, key_index, diagnostics, depth + 1);
             }
         }
-        YamlOwned::Value(_)
-        | YamlOwned::Alias(_)
-        | YamlOwned::BadValue
-        | YamlOwned::Tagged(_, _)
-        | YamlOwned::Representation(_, _, _) => {}
+        Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
 /// Validate duplicate mapping keys in YAML text.
 ///
 /// Returns error diagnostics for any key that appears more than once within
-/// the same mapping block. Works on raw text because saphyr silently
-/// deduplicates keys in its AST.
+/// the same mapping block. Works on raw text because parsed ASTs
+/// silently deduplicate keys.
 ///
 /// Each YAML document (separated by `---`) is scoped independently.
 #[must_use]
@@ -1374,10 +1363,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_alphabetically_ordered_keys() {
         let text = "apple: 1\nbanana: 2\ncherry: 3\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1386,10 +1372,7 @@ mod tests {
     #[test]
     fn should_detect_out_of_order_keys() {
         let text = "banana: 2\napple: 1\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -1402,10 +1385,7 @@ mod tests {
     #[test]
     fn should_return_correct_range_for_out_of_order_key() {
         let text = "banana: 2\napple: 1\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -1415,10 +1395,7 @@ mod tests {
     #[test]
     fn should_detect_multiple_out_of_order_keys() {
         let text = "charlie: 3\nalpha: 1\nbravo: 2\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 2);
@@ -1429,10 +1406,7 @@ mod tests {
     #[test]
     fn should_check_ordering_within_nested_mappings() {
         let text = "outer:\n  zebra: 1\n  alpha: 2\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "alpha is out of order within outer");
@@ -1441,10 +1415,7 @@ mod tests {
     #[test]
     fn should_check_ordering_at_each_level_independently() {
         let text = "b_parent:\n  a_child: 1\na_parent:\n  key: val\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "a_parent is out of order at top level");
@@ -1455,10 +1426,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_empty_document_ordering() {
         let text = "";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1467,10 +1435,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_single_key() {
         let text = "only: value\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1480,10 +1445,7 @@ mod tests {
     fn should_handle_numeric_string_keys() {
         // Implementation choice: lexicographic comparison ("10" < "2" lexicographically)
         let text = "2: two\n10: ten\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // "10" comes after "2" but should come before (lexicographically "1" < "2")
@@ -1493,10 +1455,7 @@ mod tests {
     #[test]
     fn should_ignore_sequence_items_for_ordering() {
         let text = "items:\n  - zebra\n  - alpha\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1505,10 +1464,7 @@ mod tests {
     #[test]
     fn should_handle_multi_document_key_ordering() {
         let text = "z: 1\n---\na: 2\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // First doc has single key, second doc has single key
@@ -1519,10 +1475,7 @@ mod tests {
     fn should_be_case_sensitive() {
         // Implementation choice: case-sensitive comparison ("Apple" != "apple", "Apple" < "apple")
         let text = "Apple: 1\napple: 2\n";
-        let docs = {
-            use saphyr::LoadableYamlNode;
-            YamlOwned::load_from_str(text).unwrap()
-        };
+        let docs = rlsp_yaml_parser::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // "Apple" < "apple" lexicographically (uppercase comes before lowercase in ASCII)
@@ -1531,9 +1484,8 @@ mod tests {
 
     // ---- Custom Tags Validator: helpers ----
 
-    fn parse_docs(text: &str) -> Vec<YamlOwned> {
-        use saphyr::LoadableYamlNode;
-        YamlOwned::load_from_str(text).unwrap()
+    fn parse_docs(text: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(text).unwrap()
     }
 
     fn allowed(tags: &[&str]) -> HashSet<String> {
@@ -1983,11 +1935,11 @@ spec:
 
     // ---- YAML version agnosticism ----
     //
-    // All validators in this module operate on raw text or on saphyr-parsed
-    // YamlOwned values. Saphyr always parses as YAML 1.2 regardless of any
-    // `yamlVersion` setting, so the parsed representation is identical for
-    // all version settings. Consequently, no validator here requires a
-    // YamlVersion parameter — diagnostics are version-agnostic.
+    // All validators in this module operate on raw text or on parsed
+    // Document<Span>/Node<Span> values. The parser always parses as YAML 1.2
+    // regardless of any `yamlVersion` setting, so the parsed representation
+    // is identical for all version settings. Consequently, no validator here
+    // requires a YamlVersion parameter — diagnostics are version-agnostic.
     //
     // The tests below confirm that inputs containing YAML 1.1-only boolean
     // literals (`yes`, `no`, `on`, `off`) produce the same diagnostic output
@@ -1995,9 +1947,9 @@ spec:
 
     #[test]
     fn validators_produce_same_diagnostics_regardless_of_yaml_version_setting() {
-        // `on` and `yes` are V1.1 boolean keywords; in V1.2 (saphyr's parse
+        // `on` and `yes` are V1.1 boolean keywords; in V1.2 (the parser's
         // mode) they are plain strings. Since all validators receive only text
-        // or saphyr-parsed documents, neither `on` nor `yes` triggers any
+        // or parsed documents, neither `on` nor `yes` triggers any
         // special diagnostic path — they are treated as ordinary string keys
         // in both cases.
         let text_with_v1_1_keywords = "on: push\nyes: true\n";

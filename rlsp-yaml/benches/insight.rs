@@ -14,7 +14,7 @@ use rlsp_yaml::validators::{
 };
 use rlsp_yaml_parser::node::Document;
 use rlsp_yaml_parser::pos::Span;
-use saphyr::{LoadableYamlNode, MarkedYamlOwned, YamlOwned};
+use saphyr::{LoadableYamlNode, MarkedYamlOwned};
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -26,8 +26,8 @@ use tower_lsp::lsp_types::{Position, Url};
 /// Identifies which validator dominates total validation time.
 fn bench_validators_individual(c: &mut Criterion) {
     let text = fixtures::large();
-    // Validators still use saphyr types during migration.
-    let docs: Vec<YamlOwned> = YamlOwned::load_from_str(&text).unwrap_or_default();
+    // Validators now use rlsp-yaml-parser types.
+    let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
     let allowed_tags = std::collections::HashSet::new();
 
     let mut group = c.benchmark_group("validators_individual");
