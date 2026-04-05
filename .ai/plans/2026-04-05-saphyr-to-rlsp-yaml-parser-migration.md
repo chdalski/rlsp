@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-05)
 **Created:** 2026-04-05
 
 ## Goal
@@ -62,7 +62,7 @@ validation as the final step.
 - [x] Migrate validators.rs, schema.rs, schema_validation.rs
 - [x] Migrate selection.rs and formatter.rs
 - [x] Remove saphyr dependencies, update tests, clean up
-- [ ] Wire up contentSchema validation
+- [x] Wire up contentSchema validation
 
 ## Tasks
 
@@ -184,20 +184,22 @@ decoding infrastructure exists (`data-encoding` crate,
 content, validate the decoded result against the
 `contentSchema` if one is specified.
 
-- [ ] Add `content_schema: Option<Box<Self>>` field to
+- [x] Add `content_schema: Option<Box<Self>>` field to
       `JsonSchema` struct in `schema.rs`
-- [ ] Parse `"contentSchema"` keyword in
+- [x] Parse `"contentSchema"` keyword in
       `parse_schema_with_root`
-- [ ] After successful content decoding in
+- [x] After successful content decoding in
       `schema_validation.rs`, if `content_schema` is
       present, parse the decoded content as YAML and
       validate it against the sub-schema
-- [ ] Unit tests: contentSchema with base64-encoded JSON,
+- [x] Unit tests: contentSchema with base64-encoded JSON,
       contentSchema with plain text, contentSchema
       validation failure
-- [ ] Verify `cargo clippy` and `cargo test` pass
+- [x] Verify `cargo clippy` and `cargo test` pass
 
 **Files:** `schema.rs`, `schema_validation.rs`
+
+**Commit:** a26559b
 
 ## Decisions
 
