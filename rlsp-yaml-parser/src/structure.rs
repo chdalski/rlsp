@@ -507,6 +507,11 @@ pub fn ns_tag_directive<'i>() -> Parser<'i> {
 /// A directive must be terminated by a line break (not EOF).  After the
 /// directive name/params, an optional inline comment may appear before the
 /// break.
+///
+/// Known directive names (`YAML`, `TAG`) commit: once the keyword matches,
+/// if the rest is malformed the parser reports an error rather than falling
+/// through to `ns-reserved-directive`. This matches the spec's intent that
+/// `YAML` and `TAG` are reserved directive names.
 #[must_use]
 pub fn l_directive<'i>() -> Parser<'i> {
     seq(
@@ -516,7 +521,6 @@ pub fn l_directive<'i>() -> Parser<'i> {
                 ns_yaml_directive(),
                 alt(ns_tag_directive(), ns_reserved_directive()),
             ),
-            // Optional trailing comment then a required newline.
             seq(
                 opt(seq(s_separate_in_line(), c_nb_comment_text())),
                 b_break(),
@@ -709,12 +713,15 @@ pub fn s_separate_lines(n: i32) -> Parser<'static> {
 /// Only `block-key` and `flow-key` contexts use `s-separate-in-line`; all
 /// other contexts (block-out, block-in, flow-out, flow-in) use
 /// `s-separate-lines(n)`.
+///
+/// Flow contexts (`FlowOut`, `FlowIn`) use `s_separate_lines_flow` which accepts
+/// ≥ n spaces on continuation lines, because flow content can be indented
+/// more deeply than the parent indent level.
 #[must_use]
 pub fn s_separate(n: i32, c: Context) -> Parser<'static> {
     match c {
-        Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::FlowIn => {
-            s_separate_lines(n)
-        }
+        Context::BlockOut | Context::BlockIn => s_separate_lines(n),
+        Context::FlowOut | Context::FlowIn => s_separate_lines_flow(n),
         Context::BlockKey | Context::FlowKey => s_separate_in_line(),
     }
 }

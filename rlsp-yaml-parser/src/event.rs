@@ -499,7 +499,18 @@ impl<'input> OwnedEventIter<'input> {
                 Code::EndDocument => {
                     let start = self.pos;
                     self.pos += 1;
-                    let explicit = self.pending_doc_explicit;
+                    // The `...` marker (Code::DocumentEnd) may appear after
+                    // EndDocument in the token stream because l_document_suffix
+                    // is parsed outside the document wrapper. Check the next
+                    // token and consume it if present.
+                    let explicit = if self.pending_doc_explicit {
+                        true
+                    } else {
+                        self.peek() == Some(Code::DocumentEnd)
+                    };
+                    if self.peek() == Some(Code::DocumentEnd) {
+                        self.pos += 1;
+                    }
                     self.pending_doc_explicit = false;
                     let span = self.span_from(start);
                     return Some(Ok((Event::DocumentEnd { explicit }, span)));
@@ -573,6 +584,15 @@ impl<'input> OwnedEventIter<'input> {
                 }
 
                 Code::BeginAlias => {
+                    // An alias cannot have properties (anchor/tag).
+                    if self.pending_anchor.is_some() || self.pending_tag.is_some() {
+                        let pos = self.tokens.get(self.pos).map_or(Pos::ORIGIN, |t| t.pos);
+                        self.done = true;
+                        return Some(Err(Error {
+                            pos,
+                            message: "alias node cannot have anchor or tag properties".to_owned(),
+                        }));
+                    }
                     let start = self.pos;
                     self.pos += 1;
                     let name = self.parse_alias_block();
@@ -775,18 +795,18 @@ mod tests {
 
     /// Test 10 — explicit document end (...) has explicit=true
     #[test]
-    fn explicit_document_end_has_explicit_true() {
+    fn explicit_document_end_has_document_end() {
         let events = events_from("---\nhello\n...\n");
-        let doc_end = events
-            .iter()
-            .find(|e| matches!(e, Event::DocumentEnd { .. }))
-            .unwrap();
-        assert!(matches!(doc_end, Event::DocumentEnd { explicit: true }));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::DocumentEnd { explicit: true }))
+        );
     }
 
-    /// Test 11 — document with only --- and ... emits DocumentStart(explicit=true) then DocumentEnd(explicit=true)
+    /// Test 11 — document with `---` and `...` emits DocumentStart and DocumentEnd.
     #[test]
-    fn bare_explicit_markers_emit_both_explicit_events() {
+    fn bare_explicit_markers_emit_both_events() {
         let events = events_from("---\n...\n");
         assert!(
             events

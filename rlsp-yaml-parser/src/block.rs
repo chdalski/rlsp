@@ -792,12 +792,52 @@ fn s_b_block_indented(n: i32, c: Context) -> Parser<'static> {
     })
 }
 
+/// Sequence entry without leading indent — for the first compact entry.
+fn c_l_block_seq_entry_no_indent(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        let Some('-') = state.peek() else {
+            return Reply::Failure;
+        };
+        let dash_pos = state.pos;
+        let after_dash = state.advance('-');
+        if let Some(ch) = after_dash.peek() {
+            if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+                return Reply::Failure;
+            }
+        }
+        let dash_token = crate::token::Token {
+            code: Code::Indicator,
+            pos: dash_pos,
+            text: "-",
+        };
+        let value_result = s_b_block_indented(n, Context::BlockIn)(after_dash.clone());
+        let (value_tokens, final_state) = match value_result {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure => return Reply::Failure,
+            Reply::Error(e) => return Reply::Error(e),
+        };
+        let mut all = vec![dash_token];
+        all.extend(value_tokens);
+        Reply::Success {
+            tokens: all,
+            state: final_state,
+        }
+    })
+}
+
 /// [186] ns-l-compact-sequence(n) — compact nested sequence (no leading indent).
+///
+/// First entry has no leading indent (starts at current position after
+/// `s-b+block-indented` consumed the `m` spaces). Continuation entries
+/// use `s-indent(n)` per spec.
 fn ns_l_compact_sequence(n: i32) -> Parser<'static> {
     wrap_tokens(
         Code::BeginSequence,
         Code::EndSequence,
-        seq(c_l_block_seq_entry(n), many0(c_l_block_seq_entry(n))),
+        seq(
+            c_l_block_seq_entry_no_indent(n),
+            many0(c_l_block_seq_entry(n)),
+        ),
     )
 }
 
@@ -914,7 +954,11 @@ fn c_l_block_map_explicit_entry(n: i32) -> Parser<'static> {
     )
 }
 
-/// [190] c-l-block-map-explicit-key(n) — `? ` then block-indented content.
+/// [190] c-l-block-map-explicit-key(n) — `?` then block-indented content.
+///
+/// The `?` indicator must be followed by whitespace, a line break, or EOF
+/// to be recognized as an explicit key. `?foo` is a plain scalar, not an
+/// explicit key.
 fn c_l_block_map_explicit_key(n: i32) -> Parser<'static> {
     Box::new(move |state| {
         let Some('?') = state.peek() else {
@@ -922,6 +966,12 @@ fn c_l_block_map_explicit_key(n: i32) -> Parser<'static> {
         };
         let q_pos = state.pos;
         let after_q = state.advance('?');
+
+        // `?` must be followed by whitespace, break, or EOF to be an indicator.
+        match after_q.peek() {
+            None | Some(' ' | '\t' | '\n' | '\r') => {}
+            Some(_) => return Reply::Failure,
+        }
 
         let q_token = crate::token::Token {
             code: Code::Indicator,
@@ -985,10 +1035,7 @@ fn l_block_map_explicit_value(n: i32) -> Parser<'static> {
 /// [192] ns-l-block-map-implicit-entry(n) — key then `:` value.
 ///
 /// Per spec: `( ns-s-block-map-implicit-key | e-node ) c-l-block-map-implicit-value(n)`.
-/// The key can be empty (e-node) when `:` appears without a preceding key.
-/// Does NOT consume whitespace before `:` — that is handled by compact-specific
-/// entry parsers. In the regular block mapping, `key : [flow]` must fall through
-/// to flow-in-block.
+/// Uses `c_l_block_map_implicit_value` which handles optional whitespace before `:`.
 fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
     wrap_tokens(
         Code::BeginPair,
@@ -997,44 +1044,32 @@ fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
             let (key_tokens, after_key) = match ns_s_block_map_implicit_key()(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => {
-                    if is_value_indicator(state.input) {
-                        (Vec::new(), state.clone())
+                    // Empty key with optional whitespace before `:`.
+                    let check = match s_separate_in_line()(state.clone()) {
+                        Reply::Success { state: s, .. } if is_value_indicator(s.input) => s,
+                        Reply::Success { .. } | Reply::Failure | Reply::Error(_) => state.clone(),
+                    };
+                    if is_value_indicator(check.input) {
+                        (Vec::new(), check)
                     } else {
                         return Reply::Failure;
                     }
                 }
             };
-            // Require `:` value indicator immediately (no whitespace).
-            if !is_value_indicator(after_key.input) {
-                return Reply::Failure;
-            }
-            let colon_pos = after_key.pos;
-            let after_colon = after_key.advance(':');
-            let colon_token = crate::token::Token {
-                code: Code::Indicator,
-                pos: colon_pos,
-                text: ":",
-            };
-            let value_result = alt(
-                seq(
-                    s_separate(n, Context::BlockOut),
-                    s_l_block_node(n, Context::BlockOut),
-                ),
-                alt(
-                    s_l_block_node(n, Context::BlockIn),
-                    seq(e_node(), s_l_comments()),
-                ),
-            )(after_colon.clone());
-            let (value_tokens, final_state) = match value_result {
-                Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
-            };
-            let mut all = key_tokens;
-            all.push(colon_token);
-            all.extend(value_tokens);
-            Reply::Success {
-                tokens: all,
-                state: final_state,
+            match c_l_block_map_implicit_value(n)(after_key) {
+                Reply::Success {
+                    mut tokens,
+                    state: final_state,
+                } => {
+                    let mut all = key_tokens;
+                    all.append(&mut tokens);
+                    Reply::Success {
+                        tokens: all,
+                        state: final_state,
+                    }
+                }
+                Reply::Failure => Reply::Failure,
+                Reply::Error(e) => Reply::Error(e),
             }
         }),
     )
@@ -1062,9 +1097,21 @@ fn is_value_indicator(input: &str) -> bool {
 #[must_use]
 pub fn ns_s_block_map_implicit_key() -> Parser<'static> {
     Box::new(|state| {
-        // Try alias node first (*alias).
-        if let reply @ Reply::Success { .. } = crate::flow::c_ns_alias_node()(state.clone()) {
-            return reply;
+        // Try alias node first (*alias), with optional trailing whitespace.
+        if let Reply::Success {
+            tokens,
+            state: after_alias,
+        } = crate::flow::c_ns_alias_node()(state.clone())
+        {
+            // Per spec [154]: s-separate-in-line?
+            let final_state = match s_separate_in_line()(after_alias.clone()) {
+                Reply::Success { state, .. } => state,
+                Reply::Failure | Reply::Error(_) => after_alias,
+            };
+            return Reply::Success {
+                tokens,
+                state: final_state,
+            };
         }
 
         // Optional node properties (anchor/tag) before the key content.
@@ -1094,11 +1141,16 @@ pub fn ns_s_block_map_implicit_key() -> Parser<'static> {
                 tokens: key_tokens,
                 state: after_key,
             } => {
+                // Per spec [154]: s-separate-in-line?
+                let final_state = match s_separate_in_line()(after_key.clone()) {
+                    Reply::Success { state, .. } => state,
+                    Reply::Failure | Reply::Error(_) => after_key,
+                };
                 let mut all = prop_tokens;
                 all.extend(key_tokens);
                 Reply::Success {
                     tokens: all,
-                    state: after_key,
+                    state: final_state,
                 }
             }
             Reply::Failure => {
@@ -1260,15 +1312,16 @@ pub fn s_l_block_in_block(n: i32, c: Context) -> Parser<'static> {
 #[must_use]
 pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        // Optional separator.
-        let (sep_tokens, after_sep) = match s_separate(n + 1, c)(state.clone()) {
+        // Optional separator — use _ge to allow content at deeper indentation.
+        let (sep_tokens, after_sep) = match s_separate_ge(n + 1, c)(state.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
         };
 
-        // Optional properties.
+        // Optional properties. Separator after properties uses _ge for
+        // deeper indentation.
         let (prop_tokens, after_props) =
-            match seq(c_ns_properties(n + 1, c), s_separate(n + 1, c))(after_sep.clone()) {
+            match seq(c_ns_properties(n + 1, c), s_separate_ge(n + 1, c))(after_sep.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => (Vec::new(), after_sep.clone()),
             };
@@ -1297,9 +1350,11 @@ pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
 #[must_use]
 pub fn s_l_block_collection(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        // Optional properties + separator.
+        // Optional properties + separator. Uses s_separate_ge for the property
+        // separator because properties on a continuation line may be indented
+        // deeper than n+1 (e.g., anchor on its own line at indent 2 when n=0).
         let (prop_tokens, after_props) =
-            match seq(s_separate(n + 1, c), c_ns_properties(n + 1, c))(state.clone()) {
+            match seq(s_separate_ge(n + 1, c), c_ns_properties(n + 1, c))(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
             };
@@ -1314,19 +1369,50 @@ pub fn s_l_block_collection(n: i32, c: Context) -> Parser<'static> {
         //   l+block-sequence(seq-spaces(n,c)) | l+block-mapping(n+1)
         // Fall back to indentation level n if the n+1 attempt fails.
         let m = seq_spaces(n, c);
-        let (coll_tokens, final_state) =
-            match alt(l_block_sequence(m), l_block_mapping(n + 1))(after_comments) {
+        // Try with properties.
+        let with_props = alt(l_block_sequence(m), l_block_mapping(n + 1))(after_comments);
+
+        // If properties were consumed, also try without — the anchor/tag may
+        // belong to the first entry's key, not the collection. Take whichever
+        // consumes more input.
+        if !prop_tokens.is_empty() {
+            let (retry_comments, retry_after) = match s_l_comments()(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure => return Reply::Failure,
-                Reply::Error(e) => return Reply::Error(e),
+                Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
+            };
+            let without_props = alt(l_block_sequence(m), l_block_mapping(n + 1))(retry_after);
+
+            let with_end = match &with_props {
+                Reply::Success { state, .. } => state.pos.byte_offset,
+                Reply::Failure | Reply::Error(_) => 0,
+            };
+            let without_end = match &without_props {
+                Reply::Success { state, .. } => state.pos.byte_offset,
+                Reply::Failure | Reply::Error(_) => 0,
             };
 
-        let mut all = prop_tokens;
-        all.extend(comment_tokens);
-        all.extend(coll_tokens);
-        Reply::Success {
-            tokens: all,
-            state: final_state,
+            if without_end > with_end {
+                match without_props {
+                    Reply::Success { tokens, state } => {
+                        let mut all = retry_comments;
+                        all.extend(tokens);
+                        return Reply::Success { tokens: all, state };
+                    }
+                    Reply::Failure => return Reply::Failure,
+                    Reply::Error(e) => return Reply::Error(e),
+                }
+            }
+        }
+
+        match with_props {
+            Reply::Success { tokens, state } => {
+                let mut all = prop_tokens;
+                all.extend(comment_tokens);
+                all.extend(tokens);
+                Reply::Success { tokens: all, state }
+            }
+            Reply::Failure => Reply::Failure,
+            Reply::Error(e) => Reply::Error(e),
         }
     })
 }

@@ -399,14 +399,19 @@ fn ns_plain_safe_in<'i>() -> Parser<'i> {
     })
 }
 
-/// [125] ns-plain-safe(c) — context-dispatched plain-safe character.
+/// [125]–[128] ns-plain-safe(c) — context-dispatched plain-safe character.
+///
+/// Per spec [126]/[128]: FLOW-OUT and BLOCK-KEY use ns-plain-safe-out (= ns-char).
+/// Per spec [127]/[128]: FLOW-IN and FLOW-KEY use ns-plain-safe-in (= ns-char - c-flow-indicator).
 #[must_use]
 pub fn ns_plain_safe<'i>(c: Context) -> Parser<'i> {
     match c {
-        // [57] ns-plain-safe(FLOW-OUT) = ns-plain-safe(BLOCK) = ns-char
-        Context::BlockOut | Context::BlockIn | Context::FlowOut => ns_plain_safe_out(),
-        // [58] ns-plain-safe(FLOW-IN) = ns-char - c-flow-indicator
-        Context::FlowIn | Context::BlockKey | Context::FlowKey => ns_plain_safe_in(),
+        // [126]/[128] ns-plain-safe(FLOW-OUT) = ns-plain-safe(BLOCK-KEY) = ns-char
+        Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::BlockKey => {
+            ns_plain_safe_out()
+        }
+        // [127]/[128] ns-plain-safe(FLOW-IN) = ns-plain-safe(FLOW-KEY) = ns-char - c-flow-indicator
+        Context::FlowIn | Context::FlowKey => ns_plain_safe_in(),
     }
 }
 
@@ -478,8 +483,8 @@ pub fn ns_plain_char<'i>(c: Context) -> Parser<'i> {
         ch != ':'
             && ch != '#'
             && match c {
-                // [57] ns-plain-safe(FLOW-OUT) = ns-plain-safe(BLOCK) = ns-char
-                Context::BlockOut | Context::BlockIn | Context::FlowOut => {
+                // [126]/[128] ns-plain-safe(FLOW-OUT/BLOCK-KEY) = ns-char
+                Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::BlockKey => {
                     !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
                         && matches!(ch,
                             '\x21'..='\x7E'
@@ -489,8 +494,8 @@ pub fn ns_plain_char<'i>(c: Context) -> Parser<'i> {
                             | '\u{10000}'..='\u{10FFFF}'
                         )
                 }
-                // [58] ns-plain-safe(FLOW-IN) = ns-char - c-flow-indicator
-                Context::FlowIn | Context::BlockKey | Context::FlowKey => {
+                // [127]/[128] ns-plain-safe(FLOW-IN/FLOW-KEY) = ns-char - c-flow-indicator
+                Context::FlowIn | Context::FlowKey => {
                     !matches!(ch, ',' | '[' | ']' | '{' | '}')
                         && !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
                         && matches!(ch,

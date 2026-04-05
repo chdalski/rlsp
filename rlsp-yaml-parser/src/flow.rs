@@ -15,8 +15,8 @@ use crate::combinator::{
     Context, Parser, Reply, State, char_parser, many0, many1, seq, token, wrap_tokens,
 };
 use crate::structure::{
-    b_l_folded, c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix_ge,
-    s_separate, s_separate_ge, s_separate_in_line,
+    c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix_ge, s_separate,
+    s_separate_ge,
 };
 use crate::token::{Code, Token};
 
@@ -454,63 +454,99 @@ fn nb_single_one_line<'i>() -> Parser<'i> {
     many0(nb_single_char())
 }
 
-/// [120] s-single-next-line(n) — line folding inside single-quoted scalars.
-fn s_single_next_line(n: i32) -> Parser<'static> {
-    Box::new(move |state| {
-        let fold_result = b_l_folded(n, Context::FlowIn)(state.clone());
-        match fold_result {
-            Reply::Failure | Reply::Error(_) => fold_result,
+/// nb-ns-single-in-line — interleaved whitespace and non-space chars on one line.
+///
+/// Matches `( s-white* ns-single-char )*` — the single-quoted analogue of
+/// `nb-ns-double-in-line` [114].
+fn nb_ns_single_in_line<'i>() -> Parser<'i> {
+    many0(Box::new(|state: State<'_>| {
+        let (ws_tokens, after_ws) = match many0(s_white())(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        match ns_single_char()(after_ws) {
             Reply::Success {
-                tokens: fold_tokens,
-                state: after_fold,
+                tokens: ns_tokens,
+                state: final_state,
             } => {
-                let (prefix_tokens, after_prefix) =
-                    match s_flow_line_prefix_ge(n)(after_fold.clone()) {
-                        Reply::Success { tokens, state } => (tokens, state),
-                        Reply::Failure | Reply::Error(_) => (Vec::new(), after_fold),
-                    };
-                let (ns_tokens, after_ns) = match many0(ns_single_char())(after_prefix) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => return Reply::Failure,
-                };
-                let (more_tokens, final_state) = match s_single_next_line(n)(after_ns.clone()) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => {
-                        match many0(nb_single_char())(after_ns.clone()) {
-                            Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_ns),
-                        }
-                    }
-                };
-                let mut all = fold_tokens;
-                all.extend(prefix_tokens);
+                let mut all = ws_tokens;
                 all.extend(ns_tokens);
-                all.extend(more_tokens);
                 Reply::Success {
                     tokens: all,
                     state: final_state,
                 }
             }
+            Reply::Failure => Reply::Failure,
+            other @ Reply::Error(_) => other,
+        }
+    }))
+}
+
+/// [124] s-single-next-line(n) — line folding inside single-quoted scalars.
+///
+/// Per spec [124]:
+///   `s-flow-folded(n)
+///    ( ns-single-char nb-ns-single-in-line
+///      ( s-single-next-line(n) | s-white* ) )?`
+///
+/// The continuation part after `s-flow-folded` is optional.
+fn s_single_next_line(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        let (fold_tokens, after_fold) = match s_flow_folded(n)(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+
+        // Optional continuation: ns-single-char nb-ns-single-in-line ( recurse | s-white* )
+        let (first_tokens, after_first) = match ns_single_char()(after_fold.clone()) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure | Reply::Error(_) => {
+                return Reply::Success {
+                    tokens: fold_tokens,
+                    state: after_fold,
+                };
+            }
+        };
+        let (inline_tokens, after_inline) = match nb_ns_single_in_line()(after_first) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        let (tail_tokens, final_state) = match s_single_next_line(n)(after_inline.clone()) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
+                Reply::Success { tokens, state } => (tokens, state),
+                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+            },
+        };
+        let mut all = fold_tokens;
+        all.extend(first_tokens);
+        all.extend(inline_tokens);
+        all.extend(tail_tokens);
+        Reply::Success {
+            tokens: all,
+            state: final_state,
         }
     })
 }
 
-/// [121] nb-single-multi-line(n) — multi-line body of single-quoted scalar.
+/// [125] nb-single-multi-line(n) — multi-line body of single-quoted scalar.
+///
+/// Per spec [125]: `nb-ns-single-in-line ( s-single-next-line(n) | s-white* )`.
 fn nb_single_multi_line(n: i32) -> Parser<'static> {
     Box::new(move |state| {
-        let (ns_tokens, after_ns) = match many0(ns_single_char())(state) {
+        let (inline_tokens, after_inline) = match nb_ns_single_in_line()(state) {
             Reply::Success { tokens, state } => (tokens, state),
             other @ (Reply::Failure | Reply::Error(_)) => return other,
         };
-        let (rest_tokens, final_state) = match s_single_next_line(n)(after_ns.clone()) {
+        let (tail_tokens, final_state) = match s_single_next_line(n)(after_inline.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => match many0(nb_single_char())(after_ns.clone()) {
+            Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_ns),
+                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
             },
         };
-        let mut all = ns_tokens;
-        all.extend(rest_tokens);
+        let mut all = inline_tokens;
+        all.extend(tail_tokens);
         Reply::Success {
             tokens: all,
             state: final_state,
@@ -577,7 +613,32 @@ pub fn c_single_quoted(n: i32, c: Context) -> Parser<'static> {
 /// [132] nb-ns-plain-in-line(c) — whitespace + ns-plain-char sequences after first char.
 fn nb_ns_plain_in_line(c: Context) -> Parser<'static> {
     use crate::chars::s_white;
-    many0(seq(many0(s_white()), ns_plain_char(c)))
+    many0(Box::new(move |state: State<'_>| {
+        let before_ws = state.pos.byte_offset;
+        let (ws_tokens, after_ws) = match many0(s_white())(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure | Reply::Error(_) => unreachable!("many0 always succeeds"),
+        };
+        let had_ws = after_ws.pos.byte_offset > before_ws;
+        // Per spec [130]: `#` requires preceding ns-char (non-whitespace).
+        if had_ws && after_ws.peek() == Some('#') {
+            return Reply::Failure;
+        }
+        match ns_plain_char(c)(after_ws) {
+            Reply::Success {
+                tokens: char_tokens,
+                state: final_state,
+            } => {
+                let mut all = ws_tokens;
+                all.extend(char_tokens);
+                Reply::Success {
+                    tokens: all,
+                    state: final_state,
+                }
+            }
+            other @ (Reply::Failure | Reply::Error(_)) => other,
+        }
+    }))
 }
 
 /// [134] ns-plain-one-line(c) — a plain scalar that fits on one line.
@@ -590,13 +651,34 @@ fn ns_plain_one_line(c: Context) -> Parser<'static> {
 /// A continuation line must not start at a document boundary (`c-forbidden`):
 /// `---` or `...` at column 0 followed by a safe terminator.
 fn s_ns_plain_next_line(n: i32, c: Context) -> Parser<'static> {
-    seq(
-        s_flow_folded(n),
-        seq(
+    Box::new(move |state| {
+        let (fold_tokens, after_fold) = match s_flow_folded(n)(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        // `#` after fold is a comment (preceded by whitespace from fold prefix).
+        if after_fold.peek() == Some('#') {
+            return Reply::Failure;
+        }
+        let rest = seq(
             neg_lookahead(c_forbidden()),
             seq(ns_plain_char(c), nb_ns_plain_in_line(c)),
-        ),
-    )
+        );
+        match rest(after_fold) {
+            Reply::Success {
+                tokens: rest_tokens,
+                state: final_state,
+            } => {
+                let mut all = fold_tokens;
+                all.extend(rest_tokens);
+                Reply::Success {
+                    tokens: all,
+                    state: final_state,
+                }
+            }
+            other @ (Reply::Failure | Reply::Error(_)) => other,
+        }
+    })
 }
 
 /// [135] ns-plain-multi-line(n,c) — a plain scalar spanning multiple lines.
@@ -634,6 +716,7 @@ pub fn c_flow_sequence(n: i32, c: Context) -> Parser<'static> {
         Code::BeginSequence,
         Code::EndSequence,
         Box::new(move |state| {
+            let outer_c = state.c;
             // Opening `[`.
             let (open_tokens, after_open) = match token(Code::Indicator, char_parser('['))(state) {
                 Reply::Success { tokens, state } => (tokens, state),
@@ -646,12 +729,11 @@ pub fn c_flow_sequence(n: i32, c: Context) -> Parser<'static> {
                 c: inner_c,
                 ..after_sep
             };
-            // Optional entries.
+            // Optional entries per spec [136].
             let (entries_tokens, after_entries) =
-                match ns_s_flow_seq_entries(n, inner_c)(inner_state) {
+                match ns_s_flow_seq_entries(n, inner_c)(inner_state.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure => return Reply::Failure,
-                    Reply::Error(e) => return Reply::Error(e),
+                    Reply::Failure | Reply::Error(_) => (Vec::new(), inner_state),
                 };
             // Optional trailing separation.
             let after_sep2 = skip_flow_sep(n, after_entries);
@@ -666,7 +748,10 @@ pub fn c_flow_sequence(n: i32, c: Context) -> Parser<'static> {
                     all.extend(close_tokens);
                     Reply::Success {
                         tokens: all,
-                        state: final_state,
+                        state: State {
+                            c: outer_c,
+                            ..final_state
+                        },
                     }
                 }
                 Reply::Failure | Reply::Error(_) => Reply::Failure,
@@ -681,11 +766,11 @@ pub fn c_flow_sequence(n: i32, c: Context) -> Parser<'static> {
 /// an implicit empty entry, which is represented by emitting no tokens.
 fn ns_s_flow_seq_entries(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        // First entry — optional (may be empty before a comma).
-        let (first_tokens, after_first) = match ns_flow_seq_entry(n, c)(state.clone()) {
+        // First entry is required per spec [137].
+        let (first_tokens, after_first) = match ns_flow_seq_entry(n, c)(state) {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Error(e) => return Reply::Error(e),
-            Reply::Failure => (Vec::new(), state),
+            Reply::Failure => return Reply::Failure,
         };
         // Zero or more `, entry` repetitions.
         let mut all_tokens = first_tokens;
@@ -699,11 +784,17 @@ fn ns_s_flow_seq_entries(n: i32, c: Context) -> Parser<'static> {
                     tokens: comma_tokens,
                     state: after_comma,
                 } => {
-                    let after_sep2 = skip_flow_sep(n, after_comma);
+                    let after_sep2 = skip_flow_sep(n, after_comma.clone());
                     let (entry_tokens, after_entry) =
                         match ns_flow_seq_entry(n, c)(after_sep2.clone()) {
                             Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_sep2),
+                            Reply::Failure | Reply::Error(_) => {
+                                // Double comma = invalid.
+                                if after_sep2.peek() == Some(',') {
+                                    return Reply::Failure;
+                                }
+                                (Vec::new(), after_sep2)
+                            }
                         };
                     all_tokens.extend(comma_tokens);
                     all_tokens.extend(entry_tokens);
@@ -719,13 +810,38 @@ fn ns_s_flow_seq_entries(n: i32, c: Context) -> Parser<'static> {
 }
 
 /// [138] ns-flow-seq-entry(n,c) — a single entry in a flow sequence.
+///
+/// Per spec: `ns-flow-pair(n,c) | ns-flow-node(n,c)`. When `ns-flow-pair`
+/// succeeds but the remaining input doesn't start with a flow terminator
+/// (`,`, `]`, `}`, whitespace, or line break), the pair may have consumed
+/// too little — try `ns-flow-node` and take the longer match.
 fn ns_flow_seq_entry(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        // Try flow pair first, then flow node.
         let pair = c_ns_flow_pair(n, c)(state.clone());
-        match pair {
-            Reply::Success { .. } | Reply::Error(_) => pair,
-            Reply::Failure => ns_flow_node(n, c)(state),
+        match &pair {
+            Reply::Success {
+                state: pair_state, ..
+            } => {
+                // Check if the pair result looks complete: remaining input
+                // starts with a flow terminator or whitespace/break.
+                let next = pair_state.peek();
+                let looks_complete = matches!(next, None | Some(',' | ']' | '}' | ' ' | '\t'));
+                if looks_complete {
+                    return pair;
+                }
+                // Pair consumed too little — try ns-flow-node for a longer match.
+                let node = ns_flow_node(n, c)(state);
+                let node_end = match &node {
+                    Reply::Success { state, .. } => state.pos.byte_offset,
+                    Reply::Failure | Reply::Error(_) => 0,
+                };
+                if node_end > pair_state.pos.byte_offset {
+                    node
+                } else {
+                    pair
+                }
+            }
+            Reply::Failure | Reply::Error(_) => ns_flow_node(n, c)(state),
         }
     })
 }
@@ -743,6 +859,7 @@ pub fn c_flow_mapping(n: i32, c: Context) -> Parser<'static> {
         Code::BeginMapping,
         Code::EndMapping,
         Box::new(move |state| {
+            let outer_c = state.c;
             // Opening `{`.
             let (open_tokens, after_open) = match token(Code::Indicator, char_parser('{'))(state) {
                 Reply::Success { tokens, state } => (tokens, state),
@@ -772,7 +889,10 @@ pub fn c_flow_mapping(n: i32, c: Context) -> Parser<'static> {
                     all.extend(close_tokens);
                     Reply::Success {
                         tokens: all,
-                        state: final_state,
+                        state: State {
+                            c: outer_c,
+                            ..final_state
+                        },
                     }
                 }
                 Reply::Failure | Reply::Error(_) => Reply::Failure,
@@ -923,25 +1043,21 @@ fn c_ns_flow_map_json_key_entry(n: i32, c: Context) -> Parser<'static> {
 }
 
 /// [146] ns-flow-map-yaml-key-entry(n,c) — YAML key then optional value.
+///
+/// The key uses the parent context `c` per spec [146], allowing multiline
+/// plain scalars as mapping keys in flow contexts.
 fn ns_flow_map_yaml_key_entry(n: i32, c: Context) -> Parser<'static> {
     wrap_tokens(
         Code::BeginPair,
         Code::EndPair,
         Box::new(move |state| {
-            // Key in FlowKey context (single-line keys).
-            let (key_tokens, after_key) =
-                match ns_flow_yaml_node(n, Context::FlowKey)(state.clone()) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    other @ (Reply::Failure | Reply::Error(_)) => return other,
-                };
-            // Per spec [146]: optional separation before the value.
-            // Use inline separation only (not cross-line) because the key is
-            // in FlowKey context (single-line). Cross-line sep would allow `:` on
-            // the next line, breaking DK4H.
-            let after_sep = match s_separate_in_line()(after_key.clone()) {
-                Reply::Success { state, .. } => state,
-                Reply::Failure | Reply::Error(_) => after_key.clone(),
+            // Key uses parent context c for multiline support.
+            let (key_tokens, after_key) = match ns_flow_yaml_node(n, c)(state.clone()) {
+                Reply::Success { tokens, state } => (tokens, state),
+                other @ (Reply::Failure | Reply::Error(_)) => return other,
             };
+            // Optional separation before the value (cross-line allowed).
+            let after_sep = skip_flow_sep(n, after_key.clone());
             let (value_tokens, final_state) =
                 match c_ns_flow_map_separate_value(n, c)(after_sep.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
@@ -1011,6 +1127,17 @@ fn c_ns_flow_map_separate_value(n: i32, c: Context) -> Parser<'static> {
         match after_colon.peek() {
             None => {
                 // Colon at EOF — emit indicator, no value.
+                Reply::Success {
+                    tokens: vec![Token {
+                        code: Code::Indicator,
+                        pos: colon_pos,
+                        text: &colon_input[..1],
+                    }],
+                    state: after_colon,
+                }
+            }
+            Some(',' | '}' | ']') => {
+                // Flow terminator after `:` — emit indicator with empty (e-node) value.
                 Reply::Success {
                     tokens: vec![Token {
                         code: Code::Indicator,
@@ -1217,7 +1344,53 @@ pub fn c_ns_flow_pair(n: i32, c: Context) -> Parser<'static> {
             Reply::Success { .. } | Reply::Error(_) => return explicit,
             Reply::Failure => {}
         }
-        ns_flow_map_implicit_entry(n, c)(state)
+        // Per spec [160]: implicit pairs in sequences use ns-s-implicit-yaml-key
+        // [154] which restricts YAML keys to FlowKey context (single-line).
+        // Flow mapping entries use parent context via ns_flow_map_implicit_entry.
+        // Here we use FlowKey for the YAML key to prevent `key\n:value` in sequences.
+        let yaml_key = wrap_tokens(
+            Code::BeginPair,
+            Code::EndPair,
+            Box::new(move |s: State<'static>| {
+                let (key_tokens, after_key) =
+                    match ns_flow_yaml_node(n, Context::FlowKey)(s.clone()) {
+                        Reply::Success { tokens, state } => (tokens, state),
+                        Reply::Failure | Reply::Error(_) => return Reply::Failure,
+                    };
+                // Per spec [154]: s-separate-in-line? after key.
+                let after_sep = match crate::structure::s_separate_in_line()(after_key.clone()) {
+                    Reply::Success { state, .. } => state,
+                    Reply::Failure | Reply::Error(_) => after_key.clone(),
+                };
+                let (value_tokens, final_state) =
+                    match c_ns_flow_map_separate_value(n, c)(after_sep.clone()) {
+                        Reply::Success { tokens, state } => (tokens, state),
+                        Reply::Failure | Reply::Error(_) => {
+                            match c_ns_flow_map_adjacent_value(n, c)(after_sep.clone()) {
+                                Reply::Success { tokens, state } => (tokens, state),
+                                Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
+                            }
+                        }
+                    };
+                let mut all = key_tokens;
+                all.extend(value_tokens);
+                Reply::Success {
+                    tokens: all,
+                    state: final_state,
+                }
+            }),
+        )(state.clone());
+        match yaml_key {
+            Reply::Success { .. } | Reply::Error(_) => return yaml_key,
+            Reply::Failure => {}
+        }
+        // JSON key and empty key entries.
+        let json = c_ns_flow_map_json_key_entry(n, c)(state.clone());
+        match json {
+            Reply::Success { .. } | Reply::Error(_) => return json,
+            Reply::Failure => {}
+        }
+        c_ns_flow_map_empty_key_entry(n, c)(state)
     })
 }
 
@@ -1894,9 +2067,9 @@ mod tests {
     }
 
     #[test]
-    fn c_flow_sequence_accepts_empty_node_entries() {
+    fn c_flow_sequence_rejects_leading_comma() {
         let reply = c_flow_sequence(0, Context::FlowOut)(state("[ , ] rest"));
-        assert!(is_success(&reply));
+        assert!(is_failure(&reply));
     }
 
     #[test]

@@ -93,9 +93,15 @@ pub fn l_document_prefix() -> Parser<'static> {
     seq(opt(char_parser('\u{FEFF}')), many0(l_comment_line()))
 }
 
-/// A single blank-or-comment line: optional `# …` then a line break.
+/// A comment, blank, or whitespace-only line in a document prefix.
+/// Whitespace before `#` is consumed. Whitespace-only lines (spaces/tabs) are
+/// also consumed here since they cannot be block scalar content before `---`.
 fn l_comment_line() -> Parser<'static> {
-    seq(opt(c_nb_comment_text()), b_break())
+    use crate::chars::s_white;
+    alt(
+        seq(many0(s_white()), seq(c_nb_comment_text(), b_break())),
+        alt(seq(many1(s_white()), b_break()), b_break()),
+    )
 }
 
 /// `# <non-break-chars>*` — comment text without the leading whitespace.
@@ -128,23 +134,16 @@ pub fn l_bare_document() -> Parser<'static> {
 
 /// [207] l-explicit-document — a document introduced by `---`.
 ///
-/// The `---` marker is followed by optional block content, then an optional
-/// `...` end marker with trailing comments.
+/// The `---` marker is followed by optional block content.
 ///
 /// Emits `BeginDocument` / `DirectivesEnd` token / optional content /
-/// optional `DocumentEnd` token / `EndDocument`.
+/// `EndDocument`.
 #[must_use]
 pub fn l_explicit_document() -> Parser<'static> {
     wrap_tokens(
         Code::BeginDocument,
         Code::EndDocument,
-        seq(
-            c_directives_end(),
-            seq(
-                opt(l_document_content()),
-                opt(seq(c_document_end(), s_l_comments())),
-            ),
-        ),
+        seq(c_directives_end(), opt(l_document_content())),
     )
 }
 
@@ -157,13 +156,66 @@ fn l_document_content() -> Parser<'static> {
 ///
 /// Emits `BeginDocument` / directive tokens / `DirectivesEnd` token /
 /// optional content / optional `DocumentEnd` token / `EndDocument`.
+///
+/// Rejects duplicate `%YAML` directives per spec §6.8.1: "at most one YAML
+/// directive" per document.
 #[must_use]
 pub fn l_directive_document() -> Parser<'static> {
     wrap_tokens(
         Code::BeginDocument,
         Code::EndDocument,
-        seq(many1(l_directive()), l_explicit_document_body()),
+        seq(
+            directives_no_dup_yaml(),
+            seq(
+                many0_progressing(l_document_prefix()),
+                l_explicit_document_body(),
+            ),
+        ),
     )
+}
+
+/// Parse one or more directives, rejecting duplicate `%YAML` directives.
+fn directives_no_dup_yaml() -> Parser<'static> {
+    Box::new(|state| {
+        let mut all_tokens = Vec::new();
+        let mut current = state;
+        let mut yaml_seen = false;
+        let mut count = 0;
+
+        loop {
+            // Check if this is a %YAML directive before parsing.
+            let is_yaml = current.input.starts_with("%YAML")
+                && current
+                    .input
+                    .as_bytes()
+                    .get(5)
+                    .is_some_and(|&b| b == b' ' || b == b'\t');
+
+            match l_directive()(current.clone()) {
+                Reply::Success { tokens, state } => {
+                    if is_yaml {
+                        if yaml_seen {
+                            // Duplicate %YAML — reject the entire directive block.
+                            return Reply::Failure;
+                        }
+                        yaml_seen = true;
+                    }
+                    all_tokens.extend(tokens);
+                    current = state;
+                    count += 1;
+                }
+                Reply::Failure | Reply::Error(_) => break,
+            }
+        }
+
+        if count == 0 {
+            return Reply::Failure;
+        }
+        Reply::Success {
+            tokens: all_tokens,
+            state: current,
+        }
+    })
 }
 
 /// The body of an explicit document (everything after the directives).
@@ -171,13 +223,7 @@ pub fn l_directive_document() -> Parser<'static> {
 /// This mirrors `l-explicit-document` but without the outer `BeginDocument`/
 /// `EndDocument` wrap, since `l-directive-document` owns that wrapper.
 fn l_explicit_document_body() -> Parser<'static> {
-    seq(
-        c_directives_end(),
-        seq(
-            opt(l_document_content()),
-            opt(seq(c_document_end(), s_l_comments())),
-        ),
-    )
+    seq(c_directives_end(), opt(l_document_content()))
 }
 
 // ---------------------------------------------------------------------------
@@ -210,17 +256,85 @@ pub fn l_document_suffix() -> Parser<'static> {
 /// so we use progress-guarded repetition to prevent infinite loops.
 #[must_use]
 pub fn l_yaml_stream() -> Parser<'static> {
-    seq(
-        many0_progressing(l_document_prefix()),
-        many0(seq(
-            l_any_document(),
-            // After a document: consume optional `...` suffix(es) and prefix(es).
-            seq(
-                many0(l_document_suffix()),
-                many0_progressing(l_document_prefix()),
-            ),
-        )),
-    )
+    Box::new(|state| {
+        let mut all_tokens: Vec<crate::token::Token<'static>> = Vec::new();
+        let mut current = state;
+
+        // l-document-prefix*
+        if let Reply::Success { tokens, state } =
+            many0_progressing(l_document_prefix())(current.clone())
+        {
+            all_tokens.extend(tokens);
+            current = state;
+        }
+
+        // First position: eof | c-document-end | l-any-document
+        if current.input.is_empty() {
+            // EOF
+        } else if let Reply::Success { tokens, state } = l_document_suffix()(current.clone()) {
+            all_tokens.extend(tokens);
+            current = state;
+        } else if let Reply::Success { tokens, state } = l_any_document()(current.clone()) {
+            all_tokens.extend(tokens);
+            current = state;
+        }
+
+        // Continuation per spec [211]:
+        //   ( l-document-suffix+ l-document-prefix* l-any-document?
+        //   | l-document-prefix* l-explicit-document? )*
+        loop {
+            let before = current.pos.byte_offset;
+
+            // Branch 1: suffix(es) then prefix(es) then any document
+            if let Reply::Success { tokens, state } = many1(l_document_suffix())(current.clone()) {
+                let mut bt = tokens;
+                let mut bs = state;
+                if let Reply::Success { tokens, state } =
+                    many0_progressing(l_document_prefix())(bs.clone())
+                {
+                    bt.extend(tokens);
+                    bs = state;
+                }
+                if let Reply::Success { tokens, state } = l_any_document()(bs.clone()) {
+                    bt.extend(tokens);
+                    bs = state;
+                }
+                if bs.pos.byte_offset > before {
+                    all_tokens.extend(bt);
+                    current = bs;
+                    continue;
+                }
+            }
+
+            // Branch 2: prefix(es) then optional explicit document
+            {
+                let mut bt: Vec<crate::token::Token<'static>> = Vec::new();
+                let mut bs = current.clone();
+                if let Reply::Success { tokens, state } =
+                    many0_progressing(l_document_prefix())(bs.clone())
+                {
+                    bt.extend(tokens);
+                    bs = state;
+                }
+                if let Reply::Success { tokens, state } = l_explicit_document()(bs.clone()) {
+                    bt.extend(tokens);
+                    bs = state;
+                }
+                if bs.pos.byte_offset > before {
+                    all_tokens.extend(bt);
+                    current = bs;
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        Reply::Success {
+            tokens: all_tokens,
+            state: current,
+        }
+    })
 }
 
 /// Like `many0` but only repeats when the parser consumed at least one byte.
@@ -289,7 +403,6 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
     match l_yaml_stream()(state) {
         Reply::Success { mut tokens, state } => {
             if !state.input.is_empty()
-                && state.pos.byte_offset > 0
                 && !state
                     .input
                     .chars()
@@ -603,10 +716,10 @@ mod tests {
     }
 
     #[test]
-    fn l_explicit_document_with_end_marker() {
+    fn l_explicit_document_leaves_end_marker() {
         let reply = l_explicit_document()(state("---\nhello\n...\n"));
         assert!(is_success(&reply));
-        assert!(has_code(&reply, Code::DocumentEnd));
+        assert_eq!(remaining(&reply), "...\n");
     }
 
     #[test]
