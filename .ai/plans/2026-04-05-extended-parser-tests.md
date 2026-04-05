@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-05
 
 ## Goal
@@ -36,7 +36,7 @@ written for our API.
 
 ## Steps
 
-- [ ] Add UTF-8 and encoding edge case tests
+- [x] Add UTF-8 and encoding edge case tests — `d972cb4`
 - [ ] Add emitter round-trip test corpus
 - [ ] Add security and robustness stress tests
 - [ ] Add duplicate key and error reporting tests
@@ -48,21 +48,21 @@ written for our API.
 Test that the parser correctly handles or rejects malformed
 input at the byte/character level.
 
-- [ ] Reject incomplete 2-byte UTF-8 sequences
-- [ ] Reject incomplete 3-byte UTF-8 sequences
-- [ ] Reject incomplete 4-byte UTF-8 sequences
-- [ ] Reject lone continuation bytes (0x80-0xBF without
+- [x] Reject incomplete 2-byte UTF-8 sequences
+- [x] Reject incomplete 3-byte UTF-8 sequences
+- [x] Reject incomplete 4-byte UTF-8 sequences
+- [x] Reject lone continuation bytes (0x80-0xBF without
       lead byte)
-- [ ] Reject overlong encodings (e.g., 0xC0 0x80 for NUL)
-- [ ] Reject invalid bytes 0xFE and 0xFF
-- [ ] Reject truncated UTF-8 at end of stream
-- [ ] Accept valid UTF-8 including multibyte (emoji, CJK,
+- [x] Reject overlong encodings (e.g., 0xC0 0x80 for NUL)
+- [x] Reject invalid bytes 0xFE and 0xFF
+- [x] Reject truncated UTF-8 at end of stream
+- [x] Accept valid UTF-8 including multibyte (emoji, CJK,
       Arabic)
-- [ ] Handle NUL byte (0x00) in scalar values — reject or
+- [x] Handle NUL byte (0x00) in scalar values — reject or
       handle per spec
-- [ ] Handle NUL byte in comments
-- [ ] Handle BOM (0xEF 0xBB 0xBF) at start of stream
-- [ ] Handle BOM mid-stream (should be rejected or treated
+- [x] Handle NUL byte in comments
+- [x] Handle BOM (0xEF 0xBB 0xBF) at start of stream
+- [x] Handle BOM mid-stream (should be rejected or treated
       as content)
 
 **Files:** `rlsp-yaml-parser/tests/encoding.rs` — new
