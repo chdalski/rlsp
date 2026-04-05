@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-05
 
 ## Goal
@@ -54,9 +54,9 @@ validation as the final step.
 
 ## Steps
 
-- [ ] Add rlsp-yaml-parser dependency and create type
+- [x] Add rlsp-yaml-parser dependency and create type
       helpers
-- [ ] Migrate parser.rs, document_store.rs, server.rs
+- [x] Migrate parser.rs, document_store.rs, server.rs
       (entry points)
 - [ ] Migrate symbols.rs, hover.rs, completion.rs
 - [ ] Migrate validators.rs, schema.rs, schema_validation.rs
@@ -73,25 +73,27 @@ shared helper functions. Migrate `parser.rs`,
 `document_store.rs`, and `server.rs` — the entry points
 that load YAML and store the AST.
 
-- [ ] Add `rlsp-yaml-parser = { path = "../rlsp-yaml-parser" }`
+- [x] Add `rlsp-yaml-parser = { path = "../rlsp-yaml-parser" }`
       to `[dependencies]` in `rlsp-yaml/Cargo.toml`
-- [ ] Create a type alias or re-export module for the new
+- [x] Create a type alias or re-export module for the new
       types (`Node`, `Span`, `Pos`, `Document`, `ScalarStyle`)
-- [ ] Create `scalar_type_helpers` — functions to infer
+- [x] Create `scalar_type_helpers` — functions to infer
       scalar type from string content (null, bool, int,
       float, string) using the same rules as
       `rlsp-yaml-parser::schema::CoreSchema`
-- [ ] Migrate `parser.rs`: replace `YamlOwned::load_from_str`
+- [x] Migrate `parser.rs`: replace `YamlOwned::load_from_str`
       with `rlsp_yaml_parser::load`, update error handling
       from `Marker` to `Pos`, update `ParseResult` to use
       `Node<Span>` (or `Document<Span>`)
-- [ ] Migrate `document_store.rs`: replace `YamlOwned` and
+- [x] Migrate `document_store.rs`: replace `YamlOwned` and
       `MarkedYamlOwned` storage with `Document<Span>` /
       `Node<Span>`
-- [ ] Migrate `server.rs`: update type signatures
+- [x] Migrate `server.rs`: update type signatures
 
 **Files:** `Cargo.toml`, `parser.rs`, `document_store.rs`,
 `server.rs`, new helper module
+
+**Commit:** a4af8bc
 
 ### Task 2: LSP features — symbols, hover, completion
 
