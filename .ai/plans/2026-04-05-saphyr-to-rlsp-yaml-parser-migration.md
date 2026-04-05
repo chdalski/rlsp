@@ -61,7 +61,7 @@ validation as the final step.
 - [x] Migrate symbols.rs, hover.rs, completion.rs
 - [x] Migrate validators.rs, schema.rs, schema_validation.rs
 - [x] Migrate selection.rs and formatter.rs
-- [ ] Remove saphyr dependencies, update tests, clean up
+- [x] Remove saphyr dependencies, update tests, clean up
 - [ ] Wire up contentSchema validation
 
 ## Tasks
@@ -158,20 +158,22 @@ comment extraction and handles scalar formatting by type.
 Remove saphyr dependencies entirely and fix all remaining
 references.
 
-- [ ] Remove `saphyr = "0.0.6"` from `[dependencies]`
-- [ ] Remove `saphyr-parser = "0.0.6"` from `[dependencies]`
-- [ ] Grep entire crate for remaining `saphyr` references
+- [x] Remove `saphyr = "0.0.6"` from `[dependencies]`
+- [x] Remove `saphyr-parser = "0.0.6"` from `[dependencies]`
+- [x] Grep entire crate for remaining `saphyr` references
       (imports, comments, docs) and remove/update them
-- [ ] Update `tests/ecosystem_fixtures.rs` to use new types
-- [ ] Run full test suite: all existing tests must pass
-- [ ] `cargo clippy --all-targets` zero warnings
-- [ ] `cargo fmt --check` clean
-- [ ] Update `CLAUDE.md` Components table if needed
-- [ ] Update `rlsp-yaml/README.md` to reference
+- [x] Update `tests/ecosystem_fixtures.rs` to use new types
+- [x] Run full test suite: all existing tests must pass
+- [x] `cargo clippy --all-targets` zero warnings
+- [x] `cargo fmt --check` clean
+- [x] Update `CLAUDE.md` Components table if needed
+- [x] Update `rlsp-yaml/README.md` to reference
       rlsp-yaml-parser instead of saphyr
 
 **Files:** `Cargo.toml`, all source files, README,
 CLAUDE.md
+
+**Commit:** 20218c5
 
 ### Task 6: Wire up contentSchema validation
 
