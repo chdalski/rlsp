@@ -1591,6 +1591,8 @@ fn validate_mapping(
                     start: rlsp_yaml_parser::pos::Pos::ORIGIN,
                     end: rlsp_yaml_parser::pos::Pos::ORIGIN,
                 },
+                leading_comments: Vec::new(),
+                trailing_comment: None,
             };
             validate_node(&key_node, pn_schema, path, ctx, depth + 1);
         }
@@ -1643,6 +1645,8 @@ fn validate_dependencies(
                         start: rlsp_yaml_parser::pos::Pos::ORIGIN,
                         end: rlsp_yaml_parser::pos::Pos::ORIGIN,
                     },
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 };
                 validate_node(&mapping_node, dep_schema, path, ctx, depth + 1);
             }

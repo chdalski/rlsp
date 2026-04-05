@@ -425,6 +425,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         }
     }
 
@@ -506,6 +508,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         // key appears at indent 0; "value" is on same line after ": "
@@ -532,6 +536,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         // Empty plain scalar must be quoted to distinguish from null.
@@ -546,6 +552,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'null'"), "result: {result:?}");
@@ -559,6 +567,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'true'"), "result: {result:?}");
@@ -572,6 +582,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'false'"), "result: {result:?}");
@@ -585,6 +597,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'~'"), "result: {result:?}");
@@ -598,6 +612,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'.inf'"), "result: {result:?}");
@@ -615,6 +631,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'hello world'"), "result: {result:?}");
@@ -628,6 +646,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("'it''s'"), "result: {result:?}");
@@ -645,6 +665,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("\"hello world\""), "result: {result:?}");
@@ -658,6 +680,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains(r#""say \"hi\"""#), "result: {result:?}");
@@ -671,6 +695,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("\"line1\\nline2\""), "result: {result:?}");
@@ -688,6 +714,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("|\n"), "result: {result:?}");
@@ -702,6 +730,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("|-\n"), "result: {result:?}");
@@ -715,6 +745,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("|+\n"), "result: {result:?}");
@@ -732,6 +764,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains(">\n"), "result: {result:?}");
@@ -746,6 +780,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains(">-\n"), "result: {result:?}");
@@ -759,6 +795,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains(">+\n"), "result: {result:?}");
@@ -775,6 +813,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("name: Alice"), "result: {result:?}");
@@ -787,6 +827,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("a: 1"), "result: {result:?}");
@@ -800,6 +842,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("- a"), "result: {result:?}");
@@ -814,6 +858,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("{}"), "result: {result:?}");
@@ -826,6 +872,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("[]"), "result: {result:?}");
@@ -846,6 +894,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(result.contains("{key: val}"), "result: {result:?}");
@@ -862,6 +912,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(result.contains("[a, b]"), "result: {result:?}");
@@ -878,6 +930,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(result.contains("{}"), "result: {result:?}");
@@ -894,6 +948,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(result.contains("[]"), "result: {result:?}");
@@ -910,6 +966,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(result.contains("{a: 1, b: 2}"), "result: {result:?}");
@@ -927,6 +985,8 @@ mod tests {
             anchor: Some("ref".to_owned()),
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("&ref shared"), "result: {result:?}");
@@ -942,15 +1002,21 @@ mod tests {
                     anchor: Some("a".to_owned()),
                     tag: None,
                     loc: null_span(),
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 },
                 Node::Alias {
                     name: "a".to_owned(),
                     loc: null_span(),
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 },
             ],
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("&a val"), "result: {result:?}");
@@ -964,6 +1030,8 @@ mod tests {
             anchor: Some("m".to_owned()),
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("&m"), "result: {result:?}");
@@ -976,6 +1044,8 @@ mod tests {
             anchor: Some("s".to_owned()),
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("&s"), "result: {result:?}");
@@ -993,6 +1063,8 @@ mod tests {
             anchor: None,
             tag: Some("tag:yaml.org,2002:int".to_owned()),
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("!!int"), "result: {result:?}");
@@ -1006,6 +1078,8 @@ mod tests {
             anchor: None,
             tag: Some("!local".to_owned()),
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(result.contains("!local"), "result: {result:?}");
@@ -1019,6 +1093,8 @@ mod tests {
             anchor: None,
             tag: Some("http://example.com/tag".to_owned()),
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         assert!(
@@ -1112,12 +1188,16 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let root = Node::Mapping {
             entries: vec![(scalar("outer"), inner)],
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("outer:"), "result: {result:?}");
@@ -1131,12 +1211,16 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let root = Node::Sequence {
             items: vec![inner],
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &default_config());
         assert!(result.contains("- "), "result: {result:?}");
@@ -1186,6 +1270,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(root)], &config);
         assert!(load(&result).is_ok(), "reload failed: {result:?}");
@@ -1199,6 +1285,8 @@ mod tests {
             anchor: None,
             tag: None,
             loc: null_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
         };
         let result = emit(&[doc(node)], &default_config());
         // After reload, the value should still be the string "null" (quoted),

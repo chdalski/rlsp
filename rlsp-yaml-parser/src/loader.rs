@@ -306,6 +306,8 @@ impl<'opt> LoadState<'opt> {
                                 start: Pos::ORIGIN,
                                 end: Pos::ORIGIN,
                             },
+                            leading_comments: Vec::new(),
+                            trailing_comment: None,
                         }
                     } else {
                         self.parse_node(&events, &mut pos)?
@@ -353,6 +355,8 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.clone(),
                     tag: tag.clone(),
                     loc: span,
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 };
                 if let Some(name) = anchor {
                     self.register_anchor(name.clone(), node.clone())?;
@@ -375,13 +379,17 @@ impl<'opt> LoadState<'opt> {
 
                 let mut entries: Vec<(Node<Span>, Node<Span>)> = Vec::new();
                 while !matches!(events.get(*pos), Some((Event::MappingEnd, _)) | None) {
-                    // Skip comments inside mappings.
-                    if let Some((Event::Comment { .. }, _)) = events.get(*pos) {
-                        *pos += 1;
-                        continue;
+                    // Collect leading comments before the next key.
+                    let leading = collect_leading_comments(events, pos);
+                    let mut key = self.parse_node(events, pos)?;
+                    attach_leading_comments(&mut key, leading);
+
+                    let mut value = self.parse_node(events, pos)?;
+                    // Attach trailing comment on the value node, if present.
+                    if let Some(trail) = collect_trailing_comment(events, pos) {
+                        attach_trailing_comment(&mut value, trail);
                     }
-                    let key = self.parse_node(events, pos)?;
-                    let value = self.parse_node(events, pos)?;
+
                     entries.push((key, value));
                 }
                 // Consume MappingEnd.
@@ -395,6 +403,8 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.clone(),
                     tag,
                     loc: span,
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 };
                 if let Some(name) = anchor {
                     self.register_anchor(name, node.clone())?;
@@ -416,12 +426,14 @@ impl<'opt> LoadState<'opt> {
 
                 let mut items: Vec<Node<Span>> = Vec::new();
                 while !matches!(events.get(*pos), Some((Event::SequenceEnd, _)) | None) {
-                    // Skip comments inside sequences.
-                    if let Some((Event::Comment { .. }, _)) = events.get(*pos) {
-                        *pos += 1;
-                        continue;
+                    // Collect leading comments before the next item.
+                    let leading = collect_leading_comments(events, pos);
+                    let mut item = self.parse_node(events, pos)?;
+                    attach_leading_comments(&mut item, leading);
+                    // Attach trailing comment on the item, if present.
+                    if let Some(trail) = collect_trailing_comment(events, pos) {
+                        attach_trailing_comment(&mut item, trail);
                     }
-                    let item = self.parse_node(events, pos)?;
                     items.push(item);
                 }
                 // Consume SequenceEnd.
@@ -435,6 +447,8 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.clone(),
                     tag,
                     loc: span,
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
                 };
                 if let Some(name) = anchor {
                     self.register_anchor(name, node.clone())?;
@@ -496,6 +510,8 @@ impl<'opt> LoadState<'opt> {
             LoadMode::Lossless => Ok(Node::Alias {
                 name: name.to_owned(),
                 loc,
+                leading_comments: Vec::new(),
+                trailing_comment: None,
             }),
             LoadMode::Resolved => {
                 let anchored = self.anchor_map.get(name).cloned().ok_or_else(|| {
@@ -524,7 +540,7 @@ impl<'opt> LoadState<'opt> {
         }
 
         match node {
-            Node::Alias { ref name, loc } => {
+            Node::Alias { ref name, loc, .. } => {
                 if in_progress.contains(name) {
                     return Err(LoadError::CircularAlias { name: name.clone() });
                 }
@@ -544,6 +560,8 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 tag,
                 loc,
+                leading_comments,
+                trailing_comment,
             } => {
                 let mut expanded_entries = Vec::with_capacity(entries.len());
                 for (k, v) in entries {
@@ -556,6 +574,8 @@ impl<'opt> LoadState<'opt> {
                     anchor,
                     tag,
                     loc,
+                    leading_comments,
+                    trailing_comment,
                 })
             }
             Node::Sequence {
@@ -563,6 +583,8 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 tag,
                 loc,
+                leading_comments,
+                trailing_comment,
             } => {
                 let mut expanded_items = Vec::with_capacity(items.len());
                 for item in items {
@@ -573,6 +595,8 @@ impl<'opt> LoadState<'opt> {
                     anchor,
                     tag,
                     loc,
+                    leading_comments,
+                    trailing_comment,
                 })
             }
             // Scalars and already-resolved nodes — pass through.
@@ -595,6 +619,8 @@ const fn empty_scalar() -> Node<Span> {
             start: Pos::ORIGIN,
             end: Pos::ORIGIN,
         },
+        leading_comments: Vec::new(),
+        trailing_comment: None,
     }
 }
 
@@ -606,6 +632,8 @@ fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             style,
             anchor,
             tag,
+            leading_comments,
+            trailing_comment,
             ..
         } => Node::Scalar {
             value,
@@ -613,27 +641,126 @@ fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             tag,
             loc,
+            leading_comments,
+            trailing_comment,
         },
         Node::Mapping {
             entries,
             anchor,
             tag,
+            leading_comments,
+            trailing_comment,
             ..
         } => Node::Mapping {
             entries,
             anchor,
             tag,
             loc,
+            leading_comments,
+            trailing_comment,
         },
         Node::Sequence {
-            items, anchor, tag, ..
+            items,
+            anchor,
+            tag,
+            leading_comments,
+            trailing_comment,
+            ..
         } => Node::Sequence {
             items,
             anchor,
             tag,
             loc,
+            leading_comments,
+            trailing_comment,
         },
-        Node::Alias { name, .. } => Node::Alias { name, loc },
+        Node::Alias {
+            name,
+            leading_comments,
+            trailing_comment,
+            ..
+        } => Node::Alias {
+            name,
+            loc,
+            leading_comments,
+            trailing_comment,
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Comment attachment helpers
+// ---------------------------------------------------------------------------
+
+/// Collect all leading Comment events at `*pos` that are on their own line
+/// (span.end.line > span.start.line — non-zero span).  Advances `*pos` past them.
+/// Returns the comment texts, each prefixed with `#`.
+fn collect_leading_comments(events: &[(Event, Span)], pos: &mut usize) -> Vec<String> {
+    let mut leading = Vec::new();
+    while let Some((Event::Comment { text }, span)) = events.get(*pos) {
+        if span.end.line > span.start.line {
+            leading.push(format!("#{text}"));
+            *pos += 1;
+        } else {
+            break;
+        }
+    }
+    leading
+}
+
+/// If the next event is a trailing Comment (zero-width span: start == end),
+/// consume it and return the comment text prefixed with `#`.
+fn collect_trailing_comment(events: &[(Event, Span)], pos: &mut usize) -> Option<String> {
+    if let Some((Event::Comment { text }, span)) = events.get(*pos) {
+        if span.start == span.end {
+            let result = format!("#{text}");
+            *pos += 1;
+            return Some(result);
+        }
+    }
+    None
+}
+
+/// Attach `leading_comments` to a node's `leading_comments` field.
+fn attach_leading_comments(node: &mut Node<Span>, comments: Vec<String>) {
+    if comments.is_empty() {
+        return;
+    }
+    match node {
+        Node::Scalar {
+            leading_comments, ..
+        }
+        | Node::Mapping {
+            leading_comments, ..
+        }
+        | Node::Sequence {
+            leading_comments, ..
+        }
+        | Node::Alias {
+            leading_comments, ..
+        } => {
+            *leading_comments = comments;
+        }
+    }
+}
+
+/// Attach a trailing comment to a node's `trailing_comment` field.
+fn attach_trailing_comment(node: &mut Node<Span>, comment: String) {
+    match node {
+        Node::Scalar {
+            trailing_comment, ..
+        }
+        | Node::Mapping {
+            trailing_comment, ..
+        }
+        | Node::Sequence {
+            trailing_comment, ..
+        }
+        | Node::Alias {
+            trailing_comment, ..
+        } => {
+            *trailing_comment = Some(comment);
+        }
     }
 }
 
@@ -1761,5 +1888,215 @@ mod tests {
             result.unwrap_err(),
             LoadError::AliasExpansionLimitExceeded { .. }
         ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Comment-field tests (LCF series)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::doc_markdown
+)]
+mod comment_tests {
+    use super::*;
+
+    // LCF-1: trailing_comment_on_mapping_value_attached_to_value_node
+    #[test]
+    fn trailing_comment_on_mapping_value_attached_to_value_node() {
+        let docs = load("a: 1  # note\nb: 2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected Mapping, got {root:?}");
+        };
+        assert_eq!(entries.len(), 2);
+        // Value node for 'a'
+        let (_, val_a) = &entries[0];
+        assert_eq!(
+            val_a.trailing_comment(),
+            Some("# note"),
+            "value 'a' trailing comment: {val_a:?}"
+        );
+        // Value node for 'b' has no trailing comment
+        let (_, val_b) = &entries[1];
+        assert_eq!(
+            val_b.trailing_comment(),
+            None,
+            "value 'b' should have no trailing comment: {val_b:?}"
+        );
+    }
+
+    // LCF-2: leading_comment_before_non_first_mapping_key_attached_to_key_node
+    #[test]
+    fn leading_comment_before_non_first_mapping_key_attached_to_key_node() {
+        let docs = load("a: 1\n# before b\nb: 2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected Mapping, got {root:?}");
+        };
+        assert_eq!(entries.len(), 2);
+        // Key node 'a' has no leading comments
+        let (key_a, _) = &entries[0];
+        assert!(
+            key_a.leading_comments().is_empty(),
+            "key 'a' should have no leading comments: {key_a:?}"
+        );
+        // Key node 'b' has the leading comment
+        let (key_b, _) = &entries[1];
+        assert_eq!(
+            key_b.leading_comments(),
+            &["# before b"],
+            "key 'b' leading comments: {key_b:?}"
+        );
+    }
+
+    // LCF-3: scalar_with_no_comments_has_empty_fields
+    #[test]
+    fn scalar_with_no_comments_has_empty_fields() {
+        let docs = load("key: value\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected Mapping");
+        };
+        for (k, v) in entries {
+            assert!(
+                k.leading_comments().is_empty(),
+                "key has unexpected leading comments"
+            );
+            assert!(
+                k.trailing_comment().is_none(),
+                "key has unexpected trailing comment"
+            );
+            assert!(
+                v.leading_comments().is_empty(),
+                "value has unexpected leading comments"
+            );
+            assert!(
+                v.trailing_comment().is_none(),
+                "value has unexpected trailing comment"
+            );
+        }
+    }
+
+    // LCF-4: multiple_leading_comments_before_non_first_key_all_attached
+    #[test]
+    fn multiple_leading_comments_before_non_first_key_all_attached() {
+        let docs = load("a: 1\n# first\n# second\nb: 2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected Mapping");
+        };
+        let (key_b, _) = &entries[1];
+        assert_eq!(
+            key_b.leading_comments(),
+            &["# first", "# second"],
+            "key 'b' leading comments: {key_b:?}"
+        );
+    }
+
+    // LCF-5: trailing_comment_on_sequence_item_attached_to_item_node
+    #[test]
+    fn trailing_comment_on_sequence_item_attached_to_item_node() {
+        let docs = load("- a  # first item\n- b\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected Sequence, got {root:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0].trailing_comment(),
+            Some("# first item"),
+            "item 0 trailing comment: {:?}",
+            items[0]
+        );
+        assert_eq!(
+            items[1].trailing_comment(),
+            None,
+            "item 1 should have no trailing comment: {:?}",
+            items[1]
+        );
+    }
+
+    // LCF-6: leading_comment_before_non_first_sequence_item_attached_to_item_node
+    #[test]
+    fn leading_comment_before_non_first_sequence_item_attached_to_item_node() {
+        let docs = load("- one\n# between\n- two\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected Sequence, got {root:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(
+            items[0].leading_comments().is_empty(),
+            "item 0 should have no leading comments: {:?}",
+            items[0]
+        );
+        assert_eq!(
+            items[1].leading_comments(),
+            &["# between"],
+            "item 1 leading comments: {:?}",
+            items[1]
+        );
+    }
+
+    // LCF-7: comment_text_stored_with_hash_prefix
+    #[test]
+    fn comment_text_stored_with_hash_prefix() {
+        let docs = load("a: 1  # my note\nb: 2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected Mapping");
+        };
+        let (_, val_a) = &entries[0];
+        let trail = val_a.trailing_comment().expect("expected trailing comment");
+        assert!(
+            trail.starts_with('#'),
+            "trailing comment should start with '#': {trail:?}"
+        );
+        assert_eq!(trail, "# my note");
+    }
+
+    // LCF-8: document_prefix_leading_comment_is_not_in_doc_comments_and_not_on_nodes
+    // Documents the known limitation: pre-document comments are discarded by the tokenizer.
+    #[test]
+    fn document_prefix_leading_comment_not_in_doc_comments_and_not_on_nodes() {
+        let docs = load("# preamble\nkey: value\n").unwrap();
+        // doc.comments is always empty (tokenizer discards pre-document comments)
+        assert!(
+            docs[0].comments.is_empty(),
+            "doc.comments should be empty: {:?}",
+            docs[0].comments
+        );
+        // Root node's leading_comments is also empty
+        assert!(
+            docs[0].root.leading_comments().is_empty(),
+            "root leading_comments should be empty: {:?}",
+            docs[0].root.leading_comments()
+        );
+    }
+
+    // LCF-9: comment_between_documents_appears_in_doc_comments_or_root_leading
+    #[test]
+    fn comment_between_documents_not_silently_lost() {
+        let docs = load("first: 1\n---\n# between docs\nsecond: 2\n").unwrap();
+        assert_eq!(docs.len(), 2, "expected 2 documents");
+        let in_doc_comments = docs[1].comments.iter().any(|c| c.contains("between docs"));
+        let in_root_leading = docs[1]
+            .root
+            .leading_comments()
+            .iter()
+            .any(|c| c.contains("between docs"));
+        assert!(
+            in_doc_comments || in_root_leading,
+            "between-document comment should be captured in doc.comments or root \
+             leading_comments, but was silently lost. doc[1].comments={:?}, \
+             root.leading_comments()={:?}",
+            docs[1].comments,
+            docs[1].root.leading_comments()
+        );
     }
 }

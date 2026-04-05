@@ -7,49 +7,18 @@ use rlsp_yaml_parser::pos::Span;
 
 use crate::server::YamlVersion;
 
-/// Classification of a YAML comment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CommentKind {
-    /// On the same line as code: `key: value  # comment`
-    Trailing,
-    /// On a line by itself (possibly with leading whitespace): `# comment`
-    Leading,
-}
-
-/// A comment extracted from raw YAML text.
+/// A document-prefix leading comment extracted from raw YAML text.
+///
+/// These are comments that appear before the first content node in a document.
+/// The YAML tokenizer (`l_document_prefix`) discards them before producing
+/// events, so they cannot be recovered from the AST.  This struct is used
+/// only to preserve them during formatting.
 #[derive(Debug, Clone)]
 struct Comment {
     /// 0-based line number in the original text.
     line: usize,
     /// The comment text including `#` (e.g. `# this is a comment`).
     text: String,
-    /// Classification.
-    kind: CommentKind,
-}
-
-/// Scan raw YAML text and extract all comments with their positions.
-///
-/// A `#` starts a comment if it is not inside a quoted string and is either:
-/// - the first non-whitespace character on the line (Leading), or
-/// - preceded by at least one whitespace character (Trailing).
-fn extract_comments(text: &str) -> Vec<Comment> {
-    let mut comments = Vec::new();
-    for (line_idx, line) in text.lines().enumerate() {
-        if let Some((byte_pos, comment_text)) = find_comment_on_line(line) {
-            let before = &line[..byte_pos];
-            let kind = if before.trim().is_empty() {
-                CommentKind::Leading
-            } else {
-                CommentKind::Trailing
-            };
-            comments.push(Comment {
-                line: line_idx,
-                text: comment_text,
-                kind,
-            });
-        }
-    }
-    comments
 }
 
 /// Find the comment portion of a single line, respecting quoted strings.
@@ -93,26 +62,26 @@ fn content_signature(line: &str) -> String {
     }
 }
 
-/// A content line from the original text, with its associated comments.
+/// A content line from the original text, with its blank-line and doc-prefix comment context.
 struct ContentEntry {
     signature: String,
     /// Number of blank lines that preceded this content line in the original.
     /// Capped at 1 — multiple consecutive blank lines collapse to one.
     blank_lines_before: usize,
-    /// Leading comment lines that precede this content line.
+    /// Document-prefix leading comment lines that precede this content line.
     leading: Vec<String>,
-    /// Trailing comment on this content line (if any).
-    trailing: Option<String>,
 }
 
-/// Attach extracted comments and blank lines back to formatted YAML output.
+/// Attach document-prefix leading comments and blank lines back to the formatted output.
 ///
 /// Strategy:
-/// - Build a list of content entries from the original (one per non-blank, non-leading-comment line).
-/// - For each entry, record blank lines before it (capped at 1), leading comments that preceded
-///   it, and any trailing comment on the line.
-/// - Walk the formatted output; when a line's signature matches the next entry, emit the blank
-///   line (if any), then leading comments (indented to match the content line), then the line.
+/// - Build a list of content entries from the original (one per non-blank,
+///   non-doc-prefix-comment line).  Each entry records blank lines before it and any
+///   doc-prefix leading comments attached to it.
+/// - Walk the formatted output; when a line's signature matches the next entry, emit the
+///   blank line (if any), then leading comments (indented to match the content line), then
+///   the line.  Entries with empty signatures (comment-only lines now embedded by the
+///   AST-based formatter) are skipped; their blank-lines-before count is carried forward.
 /// - Any unmatched leading comments (e.g. at end of file) are appended at the end.
 ///
 /// Always runs (even with no comments) so blank line reattachment is never skipped.
@@ -128,33 +97,13 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
 
     for (idx, line) in original.lines().enumerate() {
         if let Some(comment) = line_to_comment.get(&idx) {
-            match comment.kind {
-                CommentKind::Leading => {
-                    // Insert a blank separator if there was a gap before this comment group.
-                    // This handles both inter-group blanks (pending_leading non-empty) and
-                    // blanks between content and the next comment group (pending_leading empty).
-                    if pending_blanks > 0 {
-                        pending_leading.push(String::new());
-                    }
-                    pending_blanks = 0;
-                    pending_leading.push(comment.text.clone());
-                }
-                CommentKind::Trailing => {
-                    entries.push(ContentEntry {
-                        signature: content_signature(line),
-                        // Don't add a blank before the very first entry.
-                        blank_lines_before: if first_entry {
-                            0
-                        } else {
-                            pending_blanks.min(1)
-                        },
-                        leading: std::mem::take(&mut pending_leading),
-                        trailing: Some(comment.text.clone()),
-                    });
-                    first_entry = false;
-                    pending_blanks = 0;
-                }
+            // All comments from extract_doc_prefix_comments are Leading.
+            // Insert a blank separator if there was a gap before this comment group.
+            if pending_blanks > 0 {
+                pending_leading.push(String::new());
             }
+            pending_blanks = 0;
+            pending_leading.push(comment.text.clone());
         } else if line.trim().is_empty() {
             pending_blanks += 1;
         } else {
@@ -166,7 +115,6 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
                     pending_blanks.min(1)
                 },
                 leading: std::mem::take(&mut pending_leading),
-                trailing: None,
             });
             first_entry = false;
             pending_blanks = 0;
@@ -183,35 +131,57 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
     for fmt_line in formatted.lines() {
         let fmt_sig = content_signature(fmt_line);
 
-        // Match this formatted line to the next entry by signature.
-        if !fmt_sig.is_empty() {
-            if let Some(entry) = next_entry {
-                if entry.signature == fmt_sig {
-                    let indent_len = fmt_line.len() - fmt_line.trim_start().len();
-                    let indent_str = " ".repeat(indent_len);
-
-                    // Emit blank line before this entry if the original had one.
-                    if entry.blank_lines_before > 0 {
+        if fmt_sig.is_empty() {
+            // This is a blank or comment-only line already emitted by the AST-based
+            // formatter.  Check whether the corresponding entry in the original text
+            // had blank lines before it (indicating a blank section separator) and
+            // emit that blank before the comment line.
+            if matches!(next_entry, Some(e) if e.signature.is_empty()) {
+                if let Some(e) = next_entry {
+                    if e.blank_lines_before > 0 {
                         result_lines.push(String::new());
                     }
-
-                    for lc in &entry.leading {
-                        if lc.is_empty() {
-                            result_lines.push(String::new());
-                        } else {
-                            result_lines.push(format!("{indent_str}{lc}"));
-                        }
-                    }
-
-                    if let Some(tc) = &entry.trailing {
-                        result_lines.push(format!("{fmt_line}  {tc}"));
-                    } else {
-                        result_lines.push(fmt_line.to_string());
-                    }
-
-                    next_entry = entry_iter.next();
-                    continue;
                 }
+                next_entry = entry_iter.next();
+            }
+            result_lines.push(fmt_line.to_string());
+            continue;
+        }
+
+        // Non-empty signature line: match against the next entry.
+        // Skip any remaining empty-sig entries (e.g. if there were multiple
+        // comment lines for this section) and carry any unmatched blank count.
+        let mut carried_blanks = 0usize;
+        while matches!(next_entry, Some(e) if e.signature.is_empty()) {
+            if let Some(e) = next_entry {
+                carried_blanks = carried_blanks.max(e.blank_lines_before);
+            }
+            next_entry = entry_iter.next();
+        }
+
+        if let Some(entry) = next_entry {
+            if entry.signature == fmt_sig {
+                let indent_len = fmt_line.len() - fmt_line.trim_start().len();
+                let indent_str = " ".repeat(indent_len);
+
+                // Emit blank line before this entry if the original had one,
+                // or if a skipped empty-sig entry carried a blank count.
+                if entry.blank_lines_before > 0 || carried_blanks > 0 {
+                    result_lines.push(String::new());
+                }
+
+                for lc in &entry.leading {
+                    if lc.is_empty() {
+                        result_lines.push(String::new());
+                    } else {
+                        result_lines.push(format!("{indent_str}{lc}"));
+                    }
+                }
+
+                result_lines.push(fmt_line.to_string());
+
+                next_entry = entry_iter.next();
+                continue;
             }
         }
 
@@ -268,7 +238,11 @@ impl Default for YamlFormatOptions {
 ///
 /// Returns the formatted text. If the input fails to parse, returns the
 /// original text unchanged so the caller never loses content.
-/// Comments are extracted from the input and reattached to the formatted output.
+///
+/// Inter-node comments (between mapping entries and sequence items) are read
+/// directly from the AST node fields populated by the loader.  Document-prefix
+/// leading comments (before the first content node) are discarded by the
+/// tokenizer and recovered via a raw-text scan of the preamble only.
 #[must_use]
 pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // The parser preserves scalar styles (plain, quoted, block) and tags natively.
@@ -282,8 +256,9 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         return String::new();
     }
 
-    // Extract comments from the raw text before formatting.
-    let comments = extract_comments(text_input);
+    // Extract only document-prefix comments (lines before the first content line).
+    // Inter-node comments are embedded directly by node_to_doc via AST fields.
+    let prefix_comments = extract_doc_prefix_comments(text_input);
 
     let fmt_options = FormatOptions {
         print_width: options.print_width,
@@ -313,11 +288,42 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         result.push('\n');
     }
 
-    // Reattach comments and blank lines to the formatted output.
+    // Reattach document-prefix comments and blank lines to the formatted output.
     // Always runs — blank line preservation requires a pass even when there are no comments.
-    result = attach_comments(text_input, &result, &comments);
+    result = attach_comments(text_input, &result, &prefix_comments);
 
     result
+}
+
+/// Extract only the leading comments that appear before the first content line
+/// in the input.  These are comments the YAML tokenizer discards at the
+/// `l_document_prefix` level and that therefore do not appear in the AST.
+///
+/// Stops at the first non-blank, non-comment line so inter-node comments
+/// (which the loader now attaches to AST nodes) are not returned here.
+fn extract_doc_prefix_comments(text: &str) -> Vec<Comment> {
+    let mut comments = Vec::new();
+    for (line_idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            // Skip blank lines in the prefix region.
+            continue;
+        }
+        if let Some((byte_pos, comment_text)) = find_comment_on_line(line) {
+            let before = &line[..byte_pos];
+            if before.trim().is_empty() {
+                // Leading comment — still in prefix region.
+                comments.push(Comment {
+                    line: line_idx,
+                    text: comment_text,
+                });
+                continue;
+            }
+        }
+        // First non-blank, non-comment line — stop scanning.
+        break;
+    }
+    comments
 }
 
 /// Convert a `Node<Span>` to a `Doc` IR node.
@@ -517,11 +523,11 @@ fn mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlFormatOpti
     join(&sep, pairs)
 }
 
-/// Convert a single key-value pair to Doc.
+/// Convert a single key-value pair to Doc, including any AST-attached comments.
 fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     let key_doc = node_to_doc(key, options);
 
-    match value {
+    let pair_doc = match value {
         // Block mappings: `key:\n  child: val` — hard_line inside indent.
         Node::Mapping { entries, .. } if !entries.is_empty() => concat(vec![
             key_doc,
@@ -539,6 +545,27 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
             let value_doc = node_to_doc(value, options);
             concat(vec![key_doc, text(": "), value_doc])
         }
+    };
+
+    // Append trailing comment from the value node.
+    let pair_doc = if let Some(tc) = value.trailing_comment() {
+        concat(vec![pair_doc, text(format!("  {tc}"))])
+    } else {
+        pair_doc
+    };
+
+    // Prepend leading comments from the key node.
+    let leading = key.leading_comments();
+    if leading.is_empty() {
+        pair_doc
+    } else {
+        let mut parts: Vec<Doc> = Vec::new();
+        for lc in leading {
+            parts.push(text(lc.clone()));
+            parts.push(hard_line());
+        }
+        parts.push(pair_doc);
+        concat(parts)
     }
 }
 
@@ -555,9 +582,9 @@ fn sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptions) -> Doc {
     join(&sep, items)
 }
 
-/// Render a single sequence item with its `- ` prefix.
+/// Render a single sequence item with its `- ` prefix, including AST-attached comments.
 fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
-    match item {
+    let item_doc = match item {
         Node::Mapping { entries, .. } if !entries.is_empty() => {
             // `- key: val\n  key2: val2` — first pair on the dash line, remaining
             // pairs indented one level so they align under the first key.
@@ -579,6 +606,27 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
             concat(vec![text("- "), node_to_doc(item, options)])
         }
+    };
+
+    // Append trailing comment from the item node.
+    let item_doc = if let Some(tc) = item.trailing_comment() {
+        concat(vec![item_doc, text(format!("  {tc}"))])
+    } else {
+        item_doc
+    };
+
+    // Prepend leading comments from the item node.
+    let leading = item.leading_comments();
+    if leading.is_empty() {
+        item_doc
+    } else {
+        let mut parts: Vec<Doc> = Vec::new();
+        for lc in leading {
+            parts.push(text(lc.clone()));
+            parts.push(hard_line());
+        }
+        parts.push(item_doc);
+        concat(parts)
     }
 }
 
@@ -980,331 +1028,6 @@ mod tests {
         assert!(
             result.contains("value") && result.contains("notacomment"),
             "quoted string content should be present: {result:?}"
-        );
-    }
-
-    // Unit tests for extract_comments.
-
-    // EC1: Empty input yields no comments.
-    #[test]
-    fn extract_comments_empty_input() {
-        let comments = extract_comments("");
-        assert!(comments.is_empty(), "expected no comments: {comments:?}");
-    }
-
-    // EC2: No comments in plain YAML.
-    #[test]
-    fn extract_comments_no_comments() {
-        let comments = extract_comments("key: value\n");
-        assert!(comments.is_empty(), "expected no comments: {comments:?}");
-    }
-
-    // EC3: Trailing comment — text and kind.
-    #[test]
-    fn extract_comments_trailing_comment() {
-        let comments = extract_comments("key: value  # my comment\n");
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Trailing);
-        assert_eq!(comments[0].text, "# my comment");
-    }
-
-    // EC4: Leading comment — text and kind.
-    #[test]
-    fn extract_comments_leading_comment() {
-        let comments = extract_comments("# my comment\nkey: value\n");
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Leading);
-        assert_eq!(comments[0].text, "# my comment");
-        assert_eq!(comments[0].line, 0);
-    }
-
-    // EC5: Leading comment with indentation — the full `#...` text is preserved.
-    #[test]
-    fn extract_comments_leading_comment_indented() {
-        // The indented `#` is still a leading comment because the portion before it is
-        // all whitespace. The comment text starts from `#` (leading spaces before `#`
-        // are not included in the comment text — they are the line's indentation).
-        let comments = extract_comments("  # indented comment\n  key: value\n");
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Leading);
-        assert_eq!(comments[0].text, "# indented comment");
-    }
-
-    // EC6: `#` with no space after it is still a comment.
-    #[test]
-    fn extract_comments_no_space_after_hash() {
-        let comments = extract_comments("key: value  #comment\n");
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Trailing);
-        assert_eq!(comments[0].text, "#comment");
-    }
-
-    // EC7: Empty comment body (just `#`).
-    #[test]
-    fn extract_comments_empty_comment() {
-        let comments = extract_comments("key: value  #\n");
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Trailing);
-        assert_eq!(comments[0].text, "#");
-    }
-
-    // EC8: `#` inside double- and single-quoted strings is NOT extracted.
-    #[test]
-    fn extract_comments_hash_in_quoted_string_not_extracted() {
-        let comments_double = extract_comments("key: \"value # not a comment\"\n");
-        assert!(
-            comments_double.is_empty(),
-            "double-quoted hash should not be extracted: {comments_double:?}"
-        );
-        let comments_single = extract_comments("key: 'value # not a comment'\n");
-        assert!(
-            comments_single.is_empty(),
-            "single-quoted hash should not be extracted: {comments_single:?}"
-        );
-    }
-
-    // EC9: Multiple trailing comments on consecutive lines.
-    #[test]
-    fn extract_comments_multiple_trailing_on_consecutive_lines() {
-        let comments = extract_comments("a: 1  # first\nb: 2  # second\n");
-        assert_eq!(comments.len(), 2, "expected two comments: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Trailing);
-        assert_eq!(comments[0].text, "# first");
-        assert_eq!(comments[0].line, 0);
-        assert_eq!(comments[1].kind, CommentKind::Trailing);
-        assert_eq!(comments[1].text, "# second");
-        assert_eq!(comments[1].line, 1);
-    }
-
-    // EC10: Two consecutive leading comments before one content line.
-    #[test]
-    fn extract_comments_consecutive_leading_comments() {
-        let comments = extract_comments("# first\n# second\nkey: value\n");
-        assert_eq!(comments.len(), 2, "expected two comments: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Leading);
-        assert_eq!(comments[0].text, "# first");
-        assert_eq!(comments[0].line, 0);
-        assert_eq!(comments[1].kind, CommentKind::Leading);
-        assert_eq!(comments[1].text, "# second");
-        assert_eq!(comments[1].line, 1);
-    }
-
-    // EC11: Comment at document start.
-    #[test]
-    fn extract_comments_comment_at_document_start() {
-        let comments = extract_comments("# preamble\nkey: value\n");
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].kind, CommentKind::Leading);
-        assert_eq!(comments[0].line, 0);
-        assert_eq!(comments[0].text, "# preamble");
-    }
-
-    // EC12: Comment at document end (no following content line).
-    // The comment is still Leading (its own line) and stored with its line number.
-    #[test]
-    fn extract_comments_comment_at_document_end() {
-        let comments = extract_comments("key: value\n# trailing\n");
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].kind, CommentKind::Leading);
-        assert_eq!(comments[0].line, 1);
-        assert_eq!(comments[0].text, "# trailing");
-    }
-
-    // Unit tests for attach_comments.
-
-    // AC1: Trailing comment reattached by signature matching.
-    #[test]
-    fn attach_comments_trailing_reattached_by_signature() {
-        let original = "key: value  # comment\n";
-        let formatted = "key: value\n";
-        let comments = extract_comments(original);
-        let result = attach_comments(original, formatted, &comments);
-        assert!(result.contains("key: value"), "content missing: {result:?}");
-        assert!(result.contains("# comment"), "comment missing: {result:?}");
-        for line in result.lines() {
-            if line.contains("key: value") {
-                assert!(
-                    line.contains("# comment"),
-                    "comment should be on same line: {line:?}"
-                );
-            }
-        }
-    }
-
-    // AC2: Leading comment reattached before its target line.
-    #[test]
-    fn attach_comments_leading_reattached_before_target_line() {
-        let original = "# heading\nkey: value\n";
-        let formatted = "key: value\n";
-        let comments = extract_comments(original);
-        let result = attach_comments(original, formatted, &comments);
-        assert!(result.contains("# heading"), "comment missing: {result:?}");
-        let comment_pos = result.find("# heading").unwrap();
-        let key_pos = result.find("key: value").unwrap();
-        assert!(
-            comment_pos < key_pos,
-            "comment should precede content: {result:?}"
-        );
-    }
-
-    // AC3: Unmatched trailing comment (orphan) is dropped, no panic.
-    #[test]
-    fn attach_comments_unmatched_trailing_dropped() {
-        let original = "old_key: v  # orphan\n";
-        let formatted = "new_key: v\n";
-        let comments = extract_comments(original);
-        // No panic, and the orphan comment is not injected.
-        let result = attach_comments(original, formatted, &comments);
-        assert_eq!(
-            result, "new_key: v\n",
-            "unmatched comment should be dropped: {result:?}"
-        );
-    }
-
-    // AC4: Empty comments slice returns formatted unchanged.
-    #[test]
-    fn attach_comments_no_comments_returns_formatted_unchanged() {
-        let original = "key: value\n";
-        let formatted = "key: value\n";
-        let result = attach_comments(original, formatted, &[]);
-        assert_eq!(result, formatted);
-    }
-
-    // Integration test: comment on a line whose whitespace is normalized by the formatter.
-    // Signature matching uses trimmed content, so extra internal spaces cause a mismatch.
-    // This documents the current limitation: comments on reformatted lines may be dropped.
-    #[test]
-    fn format_yaml_comment_on_reformatted_line() {
-        // "key:   value" normalizes to "key: value" after formatting.
-        // The content signatures differ so the trailing comment is dropped.
-        // This test documents the known limitation — no panic, content is correct.
-        let input = "key: value  # note\n";
-        let result = format_yaml(input, &default_opts());
-        // Content must be present.
-        assert!(result.contains("key: value"), "content missing: {result:?}");
-        // When signatures match (no internal reformatting on this line), comment is preserved.
-        assert!(
-            result.contains("# note"),
-            "comment should be preserved when signature matches: {result:?}"
-        );
-    }
-
-    // EC13: Escape sequence inside double-quoted string skipped when scanning for `#`.
-    // The backslash-escape path (lines 66-69 in find_comment_on_line) fires when a `\`
-    // is encountered inside a double-quoted string, consuming the next character so it is
-    // not mistaken for a quote toggle or comment start.
-    #[test]
-    fn extract_comments_escape_in_double_quoted_string() {
-        // The \" inside the string is an escape sequence; the # after the closing quote
-        // is a real trailing comment preceded by whitespace.
-        let line = r#"key: "value with \" escaped"  # real comment"#;
-        let comments = extract_comments(line);
-        assert_eq!(comments.len(), 1, "expected one comment: {comments:?}");
-        assert_eq!(comments[0].kind, CommentKind::Trailing);
-        assert_eq!(comments[0].text, "# real comment");
-    }
-
-    // EC14: `#` not preceded by whitespace is NOT a comment (line 75).
-    // A URL fragment like `http://example.com#fragment` contains a `#` that is not
-    // preceded by whitespace, so it must not be extracted as a comment.
-    #[test]
-    fn extract_comments_hash_not_preceded_by_whitespace_is_not_comment() {
-        let comments = extract_comments("key: http://example.com#fragment\n");
-        assert!(
-            comments.is_empty(),
-            "# in URL fragment should not be extracted as comment: {comments:?}"
-        );
-    }
-
-    // Integration: URL with fragment character is preserved intact after formatting.
-    #[test]
-    fn format_yaml_url_with_fragment_preserved() {
-        let input = "endpoint: http://example.com#fragment\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("http://example.com#fragment") || result.contains("example.com"),
-            "URL content should be preserved: {result:?}"
-        );
-        // The fragment must not be split off as a spurious comment.
-        assert!(
-            !result.contains("  #fragment"),
-            "fragment should not be separated as a comment: {result:?}"
-        );
-    }
-
-    // AC5: Blank-line gap between leading comment groups is preserved (line 128).
-    // When two leading comment blocks are separated by a blank line, the blank line
-    // must appear between the groups in the formatted output.
-    #[test]
-    fn attach_comments_blank_line_between_leading_comment_groups() {
-        let input = "# first group\n\n# second group\nkey: value\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("# first group"),
-            "first group missing: {result:?}"
-        );
-        assert!(
-            result.contains("# second group"),
-            "second group missing: {result:?}"
-        );
-        assert!(result.contains("key: value"), "content missing: {result:?}");
-        // A blank line must appear between the two comment groups.
-        let first_pos = result.find("# first group").unwrap();
-        let second_pos = result.find("# second group").unwrap();
-        let between = &result[first_pos..second_pos];
-        assert!(
-            between.contains("\n\n"),
-            "blank line between comment groups missing: {result:?}"
-        );
-    }
-
-    // AC6: Signature mismatch fallback — formatted line with non-empty content that has
-    // no matching entry is emitted verbatim (lines 188-189).
-    //
-    // The mismatch path fires when the formatter reorganises a line so its content
-    // signature no longer matches any entry built from the original text. This can
-    // happen when content is rewritten (e.g. a key renamed by the formatter). Because
-    // the formatter in this codebase is content-preserving — it only normalises
-    // whitespace and quoting, not key names — triggering a true mismatch via
-    // `format_yaml` is not straightforward. We test the path directly through
-    // `attach_comments` by supplying a formatted text whose lines have no matching
-    // original entry. The formatted lines must be emitted unchanged (no panic, no
-    // content loss).
-    #[test]
-    fn attach_comments_signature_mismatch_emits_line_verbatim() {
-        // original has "old_key: value"; formatted has "new_key: value".
-        // The leading comment is attached to "old_key" in the original entry list,
-        // so "new_key" has no matching entry and is emitted via the fallback path.
-        let original = "# heading\nold_key: value\n";
-        let formatted = "new_key: value\n";
-        let comments = extract_comments(original);
-        let result = attach_comments(original, formatted, &comments);
-        // The content line must be present (not dropped).
-        assert!(
-            result.contains("new_key: value"),
-            "unmatched content line should be emitted verbatim: {result:?}"
-        );
-        // No panic, clean termination.
-    }
-
-    // AC7: Trailing leading comments appended at EOF (lines 196-200).
-    // Comments that appear after all content lines in the original are collected as
-    // `trailing_leading` and appended to the formatted output after the last content line.
-    #[test]
-    fn attach_comments_trailing_leading_comments_at_eof() {
-        let input = "key: value\n# trailing comment at EOF\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("key: value"), "content missing: {result:?}");
-        assert!(
-            result.contains("# trailing comment at EOF"),
-            "trailing EOF comment missing: {result:?}"
-        );
-        // The comment must appear after the content line.
-        let content_pos = result.find("key: value").unwrap();
-        let comment_pos = result.find("# trailing comment at EOF").unwrap();
-        assert!(
-            comment_pos > content_pos,
-            "EOF comment should appear after content: {result:?}"
         );
     }
 
