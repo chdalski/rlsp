@@ -774,7 +774,10 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
         if let Some(format) = &schema.format {
             validate_format(s, format, path, ctx.key_index, ctx.diagnostics);
         }
-        if schema.content_encoding.is_some() || schema.content_media_type.is_some() {
+        if schema.content_encoding.is_some()
+            || schema.content_media_type.is_some()
+            || schema.content_schema.is_some()
+        {
             validate_content(s, schema, path, ctx.key_index, ctx.diagnostics);
         }
     }
@@ -827,10 +830,12 @@ fn validate_format(
     }
 }
 
-/// Validates `contentEncoding` and `contentMediaType` keywords.
+/// Validates `contentEncoding`, `contentMediaType`, and `contentSchema` keywords.
 ///
-/// Decodes the string using the declared encoding, then (if both are set)
-/// checks the decoded bytes against the declared media type.
+/// Decodes the string using the declared encoding, then (if set) checks the
+/// decoded bytes against the declared media type. Finally, if `contentSchema`
+/// is present, parses the (possibly decoded) content as YAML and validates
+/// the result against the sub-schema.
 fn validate_content(
     s: &str,
     schema: &JsonSchema,
@@ -845,7 +850,7 @@ fn validate_content(
             "base64url" => data_encoding::BASE64URL.decode(s.as_bytes()),
             "base32" => data_encoding::BASE32.decode(s.as_bytes()),
             "base16" => data_encoding::HEXUPPER_PERMISSIVE.decode(s.as_bytes()),
-            // Unknown encoding — skip both checks
+            // Unknown encoding — skip all checks
             _ => return,
         };
         if let Ok(bytes) = result {
@@ -861,7 +866,7 @@ fn validate_content(
                     format_path(path)
                 ),
             ));
-            // Encoding failed — skip media type check
+            // Encoding failed — skip media type and schema checks
             return;
         }
     } else {
@@ -871,28 +876,81 @@ fn validate_content(
 
     // Step 2: check media type if set
     if let Some(media_type) = &schema.content_media_type {
-        let valid = match media_type.as_str() {
-            "application/json" => {
-                let text = decoded_bytes
-                    .as_ref()
-                    .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
-                text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok())
+        if media_type == "application/json" {
+            let text = decoded_bytes
+                .as_ref()
+                .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
+            let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
+            if !valid {
+                let range = node_range(path, key_index);
+                diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    "schemaContentMediaType",
+                    format!(
+                        "String at {} does not contain valid {media_type} content",
+                        format_path(path)
+                    ),
+                ));
+                // Media type check failed — skip contentSchema validation
+                return;
             }
-            // Unknown media type — skip
-            _ => return,
-        };
-        if !valid {
-            let range = node_range(path, key_index);
-            diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::WARNING,
-                "schemaContentMediaType",
-                format!(
-                    "String at {} does not contain valid {media_type} content",
-                    format_path(path)
-                ),
-            ));
         }
+        // Unknown media type — fall through to contentSchema if present
+    }
+
+    // Step 3: validate decoded content against contentSchema if present
+    validate_content_schema(
+        s,
+        decoded_bytes.as_deref(),
+        schema,
+        path,
+        key_index,
+        diagnostics,
+    );
+}
+
+/// If `contentSchema` is present, parse the (possibly decoded) content as YAML
+/// and validate the parsed result against the sub-schema.
+fn validate_content_schema(
+    raw: &str,
+    decoded_bytes: Option<&[u8]>,
+    schema: &JsonSchema,
+    path: &[String],
+    key_index: &HashMap<String, Range>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(content_schema) = &schema.content_schema else {
+        return;
+    };
+
+    // Determine the text to parse: decoded bytes (as UTF-8) or raw string.
+    let content_text = decoded_bytes
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .unwrap_or(raw);
+
+    // Parse the content as YAML.
+    let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
+        let range = node_range(path, key_index);
+        diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            "schemaContentSchema",
+            format!(
+                "Decoded content at {} could not be parsed as YAML",
+                format_path(path)
+            ),
+        ));
+        return;
+    };
+
+    // Validate each parsed document against the content schema.
+    for doc in &docs {
+        let mut content_path = path.to_vec();
+        content_path.push("(content)".to_string());
+        let content_key_index = build_key_index(&content_text.lines().collect::<Vec<_>>());
+        let mut ctx = Ctx::new(diagnostics, true, &content_key_index);
+        validate_node(&doc.root, content_schema, &content_path, &mut ctx, 0);
     }
 }
 
@@ -5208,6 +5266,288 @@ mod tests {
         let docs = parse_docs("not-valid-base64!!!");
         let result = validate_schema("not-valid-base64!!!", &docs, &schema, false);
         assert!(result.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // contentSchema
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn content_schema_with_sub(
+        encoding: Option<&str>,
+        media_type: Option<&str>,
+        sub_schema: JsonSchema,
+    ) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            content_encoding: encoding.map(str::to_string),
+            content_media_type: media_type.map(str::to_string),
+            content_schema: Some(Box::new(sub_schema)),
+            ..JsonSchema::default()
+        }
+    }
+
+    // contentSchema with base64-encoded JSON that matches the sub-schema
+    #[test]
+    fn content_schema_base64_json_valid() {
+        // base64("42") = "NDI="
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
+        let docs = parse_docs("\"NDI=\"");
+        assert!(
+            validate_schema("\"NDI=\"", &docs, &schema, true).is_empty(),
+            "valid base64-encoded integer should pass contentSchema validation"
+        );
+    }
+
+    // contentSchema with base64-encoded JSON that fails the sub-schema
+    #[test]
+    fn content_schema_base64_json_type_mismatch() {
+        // base64("\"hello\"") = "ImhlbGxvIg=="
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
+        let docs = parse_docs("\"ImhlbGxvIg==\"");
+        let result = validate_schema("\"ImhlbGxvIg==\"", &docs, &schema, true);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaType"),
+            "string decoded where integer expected should produce schemaType error: {result:?}"
+        );
+    }
+
+    // contentSchema without encoding — validate raw string as YAML
+    #[test]
+    fn content_schema_no_encoding_validates_raw_string() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(None, None, sub);
+        // The raw YAML value "42" (as a quoted string) should be parsed as YAML integer
+        let docs = parse_docs("\"42\"");
+        assert!(
+            validate_schema("\"42\"", &docs, &schema, true).is_empty(),
+            "raw string '42' should validate as integer against contentSchema"
+        );
+    }
+
+    // contentSchema without encoding — validation failure
+    #[test]
+    fn content_schema_no_encoding_type_mismatch() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(None, None, sub);
+        let docs = parse_docs("\"hello\"");
+        let result = validate_schema("\"hello\"", &docs, &schema, true);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaType"),
+            "string 'hello' should fail integer contentSchema: {result:?}"
+        );
+    }
+
+    // contentSchema with encoding failure — contentSchema not checked
+    #[test]
+    fn content_schema_skipped_when_encoding_fails() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
+        let docs = parse_docs("\"not-valid-base64!!!\"");
+        let result = validate_schema("\"not-valid-base64!!!\"", &docs, &schema, true);
+        // Should get encoding error but NOT contentSchema type error
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaContentEncoding"),
+            "should report encoding error: {result:?}"
+        );
+        assert!(
+            !result.iter().any(|d| code_of(d) == "schemaType"),
+            "should NOT check contentSchema when encoding fails: {result:?}"
+        );
+    }
+
+    // contentSchema with media type failure — contentSchema not checked
+    #[test]
+    fn content_schema_skipped_when_media_type_fails() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(None, Some("application/json"), sub);
+        let docs = parse_docs("\"not json at all\"");
+        let result = validate_schema("\"not json at all\"", &docs, &schema, true);
+        assert!(
+            result
+                .iter()
+                .any(|d| code_of(d) == "schemaContentMediaType"),
+            "should report media type error: {result:?}"
+        );
+        assert!(
+            !result.iter().any(|d| code_of(d) == "schemaType"),
+            "should NOT check contentSchema when media type fails: {result:?}"
+        );
+    }
+
+    // TE test 5: contentSchema validates embedded YAML mapping via base64
+    // (using base64 encoding to avoid the known parser limitation with
+    // colon-space inside double-quoted strings)
+    #[test]
+    fn content_schema_validates_embedded_yaml_mapping() {
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            },
+        );
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some(props),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), None, sub);
+        // base64("name: alice\n") = "bmFtZTogYWxpY2UK"
+        let text = "\"bmFtZTogYWxpY2UK\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(
+            result.is_empty(),
+            "embedded YAML mapping should validate: {result:?}"
+        );
+    }
+
+    // TE test 6: contentSchema embedded mapping with type mismatch via base64
+    #[test]
+    fn content_schema_validates_embedded_yaml_mapping_invalid() {
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "name".to_string(),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            },
+        );
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some(props),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), None, sub);
+        // base64("name: 42\n") = "bmFtZTogNDIK"
+        let text = "\"bmFtZTogNDIK\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(
+            !result.is_empty(),
+            "embedded mapping with integer name should fail string check: {result:?}"
+        );
+    }
+
+    // TE test 7: contentSchema skipped when format_validation is off
+    #[test]
+    fn content_schema_skipped_when_format_validation_off() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(None, None, sub);
+        let docs = parse_docs("\"hello\"");
+        // format_validation = false → content keywords not checked
+        let result = validate_schema("\"hello\"", &docs, &schema, false);
+        assert!(
+            result.is_empty(),
+            "contentSchema should not be checked when format_validation is off: {result:?}"
+        );
+    }
+
+    // TE test 11: all three checks pass (encoding + media type + contentSchema)
+    #[test]
+    fn content_schema_with_encoding_and_media_type_all_pass() {
+        // base64({"key": "value"}) = eyJrZXkiOiAidmFsdWUifQ==
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
+        let text = "\"eyJrZXkiOiAidmFsdWUifQ==\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(
+            result.is_empty(),
+            "all three checks should pass: {result:?}"
+        );
+    }
+
+    // TE test 13: valid base64 but decoded YAML is unparseable
+    #[test]
+    fn content_schema_decoded_yaml_invalid() {
+        // base64(": bad: [") = OiBiYWQ6IFs=
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), None, sub);
+        let text = "\"OiBiYWQ6IFs=\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaContentSchema"),
+            "unparseable decoded YAML should produce schemaContentSchema: {result:?}"
+        );
+    }
+
+    // TE test 14: empty content with contentSchema
+    #[test]
+    fn content_schema_with_empty_decoded_content() {
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(None, None, sub);
+        let text = "\"\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        // load("") returns 0 documents — nothing to validate, no diagnostics.
+        assert!(
+            result.is_empty(),
+            "empty content should produce no diagnostics: {result:?}"
+        );
+    }
+
+    // TE test 15: nested sub-schema runs full validation (via base64
+    // to avoid known parser limitation with colon-space in double-quoted strings)
+    #[test]
+    fn content_schema_nested_sub_schema_uses_full_validation() {
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "value".to_string(),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            },
+        );
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some(props),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), None, sub);
+        // base64("value: 42\n") = "dmFsdWU6IDQyCg=="
+        // Embedded YAML: value is 42 (integer), but schema expects string
+        let text = "\"dmFsdWU6IDQyCg==\"";
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert!(
+            !result.is_empty(),
+            "nested schema should catch type mismatch: {result:?}"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════

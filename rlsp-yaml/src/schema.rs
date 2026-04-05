@@ -94,6 +94,7 @@ pub struct JsonSchema {
     pub format: Option<String>,
     pub content_encoding: Option<String>,
     pub content_media_type: Option<String>,
+    pub content_schema: Option<Box<Self>>,
     pub properties: Option<HashMap<String, Self>>,
     pub required: Option<Vec<String>>,
     pub enum_values: Option<Vec<Value>>,
@@ -678,6 +679,24 @@ fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSc
     schema.content_media_type = string_field(obj, "contentMediaType");
 }
 
+/// Parse the `contentSchema` keyword from the schema object.
+///
+/// This is a separate function because it needs the recursive parsing context
+/// (`root`, `base_uri`, `ctx`, `depth`) that `parse_scalar_fields` does not have.
+fn parse_content_schema(
+    schema: &mut JsonSchema,
+    obj: &serde_json::Map<String, Value>,
+    root: &Value,
+    base_uri: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
+    depth: usize,
+) {
+    if let Some(cs) = obj.get("contentSchema") {
+        schema.content_schema =
+            parse_schema_with_root(cs, root, base_uri, ctx, depth + 1).map(Box::new);
+    }
+}
+
 /// Populate `properties` and `patternProperties` on `schema` from `obj`.
 fn parse_object_fields(
     obj: &serde_json::Map<String, Value>,
@@ -935,6 +954,14 @@ fn parse_schema_with_root(
     schema.schema_type = parse_type(obj.get("type"));
 
     parse_scalar_fields(obj, &mut schema);
+    parse_content_schema(
+        &mut schema,
+        obj,
+        root,
+        effective_base,
+        ctx.as_deref_mut(),
+        depth,
+    );
 
     // required
     schema.required = obj.get("required").and_then(Value::as_array).map(|arr| {
