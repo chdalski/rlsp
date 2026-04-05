@@ -819,6 +819,10 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
             }
         }
     }
+
+    // Checks for ZXT5 and S98Z are in event.rs::validate_input, which runs
+    // as a pre-event validation pass. Token injection here does not propagate
+    // through the event layer.
 }
 
 // ---------------------------------------------------------------------------

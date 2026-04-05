@@ -117,6 +117,8 @@ pub enum Event {
 /// ```
 pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event, Span), Error>> + '_ {
     let tokens = crate::tokenize(input);
+    // Pre-validation: check for patterns the parser accepts but the spec forbids.
+    let pre_error = validate_input(input, &tokens);
     OwnedEventIter {
         tokens,
         pos: 0,
@@ -125,8 +127,132 @@ pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event, Span), E
         pending_anchor: None,
         pending_tag: None,
         pending_doc_explicit: false,
+        pre_error,
         _phantom: std::marker::PhantomData,
     }
+}
+
+/// Check input for patterns the PEG parser accepts but the YAML spec forbids.
+/// Returns an error position if a violation is found.
+#[allow(
+    clippy::too_many_lines,
+    clippy::indexing_slicing,
+    clippy::wildcard_enum_match_arm
+)]
+fn validate_input(input: &str, tokens: &[crate::token::Token<'_>]) -> Option<crate::pos::Pos> {
+    use crate::token::Code;
+
+    // Already has an error from the tokenizer — skip.
+    if tokens.iter().any(|t| t.code == Code::Error) {
+        return None;
+    }
+
+    // Collect flow sequence byte ranges from tokens.
+    let mut flow_stack: Vec<(usize, bool)> = Vec::new();
+    let mut flow_seq: Vec<(usize, usize)> = Vec::new();
+
+    for t in tokens {
+        match t.code {
+            Code::Indicator if t.text == "[" || t.text == "{" => {
+                flow_stack.push((t.pos.byte_offset, t.text == "["));
+            }
+            Code::Indicator if t.text == "]" || t.text == "}" => {
+                if let Some((s, is_s)) = flow_stack.pop() {
+                    if is_s {
+                        flow_seq.push((s, t.pos.byte_offset + 1));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let bytes = input.as_bytes();
+
+    // ZXT5: adjacent value ":value" after newline in flow SEQUENCE.
+    // Per spec §7.4, flow sequence entries use implicit key context which
+    // does not permit adjacent-value syntax across line breaks.
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b':' || i == 0 {
+            continue;
+        }
+        let is_in_seq = flow_seq.iter().any(|&(s, e)| i > s && i < e);
+        if !is_in_seq {
+            continue;
+        }
+        if i + 1 >= bytes.len() {
+            continue;
+        }
+        if matches!(
+            bytes[i + 1],
+            b' ' | b'\t' | b'\n' | b'\r' | b',' | b']' | b'}'
+        ) {
+            continue;
+        }
+        // Colon followed by non-space inside a flow sequence. Check if there's
+        // a newline between the previous non-whitespace char and this colon.
+        let before = &input[..i];
+        if let Some(pp) = before.rfind(|ch: char| !ch.is_ascii_whitespace()) {
+            if before[pp + 1..].contains('\n') {
+                return Some(crate::pos::Pos {
+                    byte_offset: i,
+                    char_offset: i,
+                    line: 0,
+                    column: 0,
+                });
+            }
+        }
+    }
+
+    // S98Z: block scalar with only blank lines at varying indentation.
+    let lines: Vec<&str> = input.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let indicator_pos = line.rfind(['|', '>']);
+        let Some(ip) = indicator_pos else { continue };
+        if ip > 0 && !matches!(line.as_bytes().get(ip - 1), Some(b' ' | b'\t')) {
+            continue;
+        }
+        let after_ind = &line[ip + 1..];
+        let after_trimmed =
+            after_ind.trim_start_matches(|ch: char| matches!(ch, '+' | '-' | '0'..='9'));
+        if !after_trimmed.is_empty()
+            && !after_trimmed.starts_with(' ')
+            && !after_trimmed.starts_with('\t')
+            && !after_trimmed.starts_with('#')
+        {
+            continue;
+        }
+        let base = line.len() - line.trim_start().len();
+        let mut max_blank_sp = 0usize;
+        for j in (i + 1)..lines.len() {
+            let cl = lines[j];
+            if cl.is_empty() {
+                continue;
+            }
+            let sp = cl.chars().take_while(|&ch| ch == ' ').count();
+            let rest = &cl[sp..];
+            if rest.is_empty() || rest == "\r" {
+                if sp > base {
+                    max_blank_sp = max_blank_sp.max(sp);
+                }
+                continue;
+            }
+            // End of scalar (at or below base indent) or first content line.
+            // If blank lines had more spaces than this line's indent, reject.
+            if max_blank_sp > 0 && max_blank_sp > sp {
+                let off: usize = lines[..j].iter().map(|l| l.len() + 1).sum();
+                return Some(crate::pos::Pos {
+                    byte_offset: off,
+                    char_offset: off,
+                    line: 0,
+                    column: 0,
+                });
+            }
+            break;
+        }
+    }
+
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +274,8 @@ struct OwnedEventIter<'input> {
     /// Whether the upcoming `DocumentEnd` event should be `explicit=true`.
     /// Set when we encounter a `DocumentEnd` token (the `...` marker).
     pending_doc_explicit: bool,
+    /// Pre-validation error detected before event iteration starts.
+    pre_error: Option<crate::pos::Pos>,
     _phantom: std::marker::PhantomData<&'input str>,
 }
 
@@ -653,6 +781,14 @@ impl Iterator for OwnedEventIter<'_> {
                 end: origin,
             };
             return Some(Ok((Event::StreamStart, span)));
+        }
+        // Emit pre-validation error if present.
+        if let Some(pos) = self.pre_error.take() {
+            self.done = true;
+            return Some(Err(Error {
+                pos,
+                message: "unexpected or invalid YAML input".to_owned(),
+            }));
         }
         self.next_owned_event()
     }
