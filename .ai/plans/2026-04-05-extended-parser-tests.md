@@ -38,7 +38,7 @@ written for our API.
 
 - [x] Add UTF-8 and encoding edge case tests — `d972cb4`
 - [x] Add emitter round-trip test corpus — `b6c01e4`
-- [ ] Add security and robustness stress tests
+- [x] Add security and robustness stress tests — `b505a65`
 - [ ] Add duplicate key and error reporting tests
 
 ## Tasks
@@ -100,21 +100,21 @@ equivalent results across all YAML features.
 Test that the parser handles adversarial and pathological
 input safely — no panics, no unbounded memory, no hangs.
 
-- [ ] Alias bomb (billion laughs) — verify expansion limit
+- [x] Alias bomb (billion laughs) — verify expansion limit
       triggers error, not OOM
-- [ ] Deep nesting (1000+ levels) — verify depth limit
+- [x] Deep nesting (1000+ levels) — verify depth limit
       triggers error
-- [ ] Circular alias reference — verify cycle detection
-- [ ] Very long scalar (10MB+) — verify no panic
-- [ ] Very long line (100K+ chars) — verify no panic
-- [ ] Very many documents (10K+) — verify no hang
-- [ ] Very many anchors (100K+) — verify anchor count limit
-- [ ] Pathological backtracking input — verify parser
+- [x] Circular alias reference — verify cycle detection
+- [x] Very long scalar (10MB+) — verify no panic
+- [x] Very long line (100K+ chars) — verify no panic
+- [x] Very many documents (10K+) — verify no hang
+- [x] Very many anchors (100K+) — verify anchor count limit
+- [x] Pathological backtracking input — verify parser
       completes in reasonable time
-- [ ] Empty input, whitespace-only input, comment-only input
-- [ ] Binary garbage (random bytes) — verify error, no panic
-- [ ] Input with every possible byte value (0x00-0xFF)
-- [ ] Maximum indentation depth
+- [x] Empty input, whitespace-only input, comment-only input
+- [x] Binary garbage (random bytes) — verify error, no panic
+- [x] Input with every possible byte value (0x00-0xFF)
+- [x] Maximum indentation depth
 
 **Files:** `rlsp-yaml-parser/tests/robustness.rs` — new
 
