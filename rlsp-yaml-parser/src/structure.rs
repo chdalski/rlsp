@@ -314,47 +314,51 @@ pub fn b_comment<'i>() -> Parser<'i> {
 /// comment is present.  A bare newline (no comment) succeeds with no tokens.
 #[must_use]
 pub fn s_b_comment<'i>() -> Parser<'i> {
-    // The comment content parser: whitespace then the comment text as a Text token.
-    let comment_parser = wrap_tokens(
-        Code::BeginComment,
-        Code::EndComment,
-        seq(
-            s_separate_in_line(),
-            seq(
+    use crate::combinator::Reply;
+    Box::new(|state| {
+        // Optional: s-separate-in-line then optional c-nb-comment-text.
+        let (has_sep, after_ws) = match s_separate_in_line()(state.clone()) {
+            Reply::Success { state: s, .. } => (true, s),
+            Reply::Failure | Reply::Error(_) => (false, state.clone()),
+        };
+        // Try comment text (#...) — only when separation whitespace was present.
+        if has_sep && after_ws.peek() == Some('#') {
+            let comment_body = seq(
                 token(Code::Indicator, char_parser('#')),
                 token(Code::Text, many0(nb_char())),
-            ),
-        ),
-    );
-    Box::new(move |state| {
-        match comment_parser(state.clone()) {
-            crate::combinator::Reply::Success {
-                tokens,
-                state: after_comment,
-            } => {
-                // Consume the trailing break/EOF (not part of comment).
-                match b_comment()(after_comment) {
-                    crate::combinator::Reply::Success {
-                        tokens: break_tokens,
+            );
+            if let Reply::Success {
+                tokens: body_tokens,
+                state: after_body,
+            } = comment_body(after_ws.clone())
+            {
+                // b-comment after comment text.
+                if let Reply::Success {
+                    tokens: break_tokens,
+                    state: final_state,
+                } = b_comment()(after_body)
+                {
+                    let mut all = vec![crate::token::Token {
+                        code: Code::BeginComment,
+                        pos: final_state.pos,
+                        text: "",
+                    }];
+                    all.extend(body_tokens);
+                    all.push(crate::token::Token {
+                        code: Code::EndComment,
+                        pos: final_state.pos,
+                        text: "",
+                    });
+                    all.extend(break_tokens);
+                    return Reply::Success {
+                        tokens: all,
                         state: final_state,
-                    } => {
-                        let mut all = tokens;
-                        all.extend(break_tokens);
-                        crate::combinator::Reply::Success {
-                            tokens: all,
-                            state: final_state,
-                        }
-                    }
-                    other @ (crate::combinator::Reply::Failure
-                    | crate::combinator::Reply::Error(_)) => other,
+                    };
                 }
             }
-            crate::combinator::Reply::Failure => {
-                // No comment — just consume the break/EOF.
-                b_comment()(state)
-            }
-            crate::combinator::Reply::Error(e) => crate::combinator::Reply::Error(e),
         }
+        // No comment text — consume optional whitespace then b-comment.
+        b_comment()(after_ws)
     })
 }
 

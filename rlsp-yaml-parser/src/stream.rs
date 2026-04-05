@@ -13,7 +13,7 @@
 use crate::block::s_l_block_node;
 use crate::chars::b_break;
 use crate::combinator::{
-    Context, Parser, Reply, State, alt, char_parser, many0, many1, neg_lookahead, opt, seq, token,
+    Context, Parser, Reply, State, alt, char_parser, many0, many1, neg_lookahead, opt, seq,
     wrap_tokens,
 };
 use crate::structure::{c_forbidden, l_directive, s_l_comments};
@@ -25,24 +25,58 @@ use crate::token::{Code, Token};
 
 /// [202] c-directives-end — `---` at the start of a line.
 ///
-/// Emits a single `DirectivesEnd` token.
+/// Emits a single `DirectivesEnd` token. The `---` must be followed by
+/// whitespace, a line break, or EOF to be a valid document marker (otherwise
+/// it could be content like `---word`).
 #[must_use]
 pub fn c_directives_end() -> Parser<'static> {
-    token(
-        Code::DirectivesEnd,
-        seq(char_parser('-'), seq(char_parser('-'), char_parser('-'))),
-    )
+    Box::new(|state| {
+        use crate::combinator::Reply;
+        let dashes = seq(char_parser('-'), seq(char_parser('-'), char_parser('-')));
+        match dashes(state) {
+            Reply::Success { state: after, .. } => {
+                // Must be followed by whitespace, break, or EOF.
+                match after.peek() {
+                    None | Some(' ' | '\t' | '\n' | '\r') => Reply::Success {
+                        tokens: vec![crate::token::Token {
+                            code: Code::DirectivesEnd,
+                            pos: after.pos,
+                            text: "",
+                        }],
+                        state: after,
+                    },
+                    Some(_) => Reply::Failure,
+                }
+            }
+            other @ (Reply::Failure | Reply::Error(_)) => other,
+        }
+    })
 }
 
 /// [203] c-document-end — `...` at the start of a line.
 ///
-/// Emits a single `DocumentEnd` token.
+/// Emits a single `DocumentEnd` token. Like `c-directives-end`, requires
+/// whitespace, break, or EOF after the marker.
 #[must_use]
 pub fn c_document_end() -> Parser<'static> {
-    token(
-        Code::DocumentEnd,
-        seq(char_parser('.'), seq(char_parser('.'), char_parser('.'))),
-    )
+    Box::new(|state| {
+        use crate::combinator::Reply;
+        let dots = seq(char_parser('.'), seq(char_parser('.'), char_parser('.')));
+        match dots(state) {
+            Reply::Success { state: after, .. } => match after.peek() {
+                None | Some(' ' | '\t' | '\n' | '\r') => Reply::Success {
+                    tokens: vec![crate::token::Token {
+                        code: Code::DocumentEnd,
+                        pos: after.pos,
+                        text: "",
+                    }],
+                    state: after,
+                },
+                Some(_) => Reply::Failure,
+            },
+            other @ (Reply::Failure | Reply::Error(_)) => other,
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -254,9 +288,15 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
     let state: State<'static> = State::new(extended);
     match l_yaml_stream()(state) {
         Reply::Success { mut tokens, state } => {
-            if !state.input.is_empty() && state.pos.byte_offset > 0 {
+            if !state.input.is_empty()
+                && state.pos.byte_offset > 0
+                && !state
+                    .input
+                    .chars()
+                    .all(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r'))
+            {
                 // Parser consumed some input then stopped — remaining content is
-                // invalid YAML.
+                // invalid YAML. Trailing whitespace at EOF is tolerated.
                 tokens.push(Token {
                     code: Code::Error,
                     pos: state.pos,
