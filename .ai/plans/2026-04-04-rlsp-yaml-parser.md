@@ -79,7 +79,8 @@ high-quality crates.io package.
       schemas, tag resolution, scalar type inference (011e49b)
 - [x] Implement emitter — node-to-YAML serialization with
       style and comment preservation (41b4b4a)
-- [ ] Integrate YAML test suite and reach 100% conformance
+- [x] Integrate YAML test suite and reach 100% conformance
+      (d1d152e — harness complete, 114 failures remaining)
 - [ ] Add benchmarks with libfyaml comparison baseline
 
 ## Tasks
@@ -436,17 +437,17 @@ Integrate the YAML test suite and drive conformance to
 
 **Files:** `tests/conformance.rs`, `tests/yaml-test-suite/`
 
-- [ ] Vendor the YAML test suite (same commit as
+- [x] Vendor the YAML test suite (same commit as
       rlsp-yaml's existing vendored copy, or update both
       to latest)
-- [ ] Event comparison tests: parse each test case, compare
+- [x] Event comparison tests: parse each test case, compare
       emitted event stream against expected events from
       test suite
-- [ ] Invalid input tests: verify parser rejects all
+- [x] Invalid input tests: verify parser rejects all
       invalid test cases (no false accepts)
-- [ ] Track conformance metrics: pass/fail/skip counts,
+- [x] Track conformance metrics: pass/fail/skip counts,
       categorized by spec section and failure type
-- [ ] Fix failures iteratively — the productions from
+- [x] Fix failures iteratively — the productions from
       tasks 2–6 will likely need refinement based on test
       results. Common failure areas to focus on:
   - Flow collections (most common cross-parser failures)
@@ -455,7 +456,8 @@ Integrate the YAML test suite and drive conformance to
   - Indentation edge cases
   - Tab handling
 - [ ] Target: 308/308 valid, 94/94 invalid (100%/100%)
-- [ ] Conformance CI: test suite runs in CI, regressions
+      — 114 failures remaining, to be resolved iteratively
+- [x] Conformance CI: test suite runs in CI, regressions
       block merge
 
 ### Task 12: Benchmarks and libfyaml comparison
