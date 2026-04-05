@@ -60,7 +60,7 @@ invalid YAML we incorrectly accept (missing error detection).
 - [x] Fix flow multiline and collection failures (4/7 tests; 8KB6,NJ66,VJP3 deferred) — b619517
 - [x] Fix anchor/property handling failures (3/8 tests; E76Z,HMQ5,P76L,7BMT,U3XV deferred) — 45ac394
 - [x] Fix plain/quoted scalar failures (5/8 tests + P76L bonus; FBC9,T4YY,NAT4 deferred) — fb583af
-- [ ] Fix document handling and tab failures (9 tests)
+- [x] Fix document handling and tab failures (10/19 tests; QT73,UT92,AZW3,DK95,Y79Y,RZP5,S9E8,UGM3,XW4D deferred) — fc19ac1
 - [ ] Fix complex/empty key and spec example failures (11 tests)
 - [ ] Add invalid input rejection (56 tests)
 - [ ] Verify 0 conformance failures, 0 unit test regressions
