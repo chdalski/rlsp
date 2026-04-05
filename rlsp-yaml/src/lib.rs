@@ -19,6 +19,7 @@ pub mod on_type_formatting;
 pub mod parser;
 pub mod references;
 pub mod rename;
+pub mod scalar_helpers;
 pub mod schema;
 pub mod schema_validation;
 pub mod selection;

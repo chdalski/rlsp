@@ -11,6 +11,7 @@ use rlsp_yaml::schema_validation::validate_schema;
 use rlsp_yaml::validators::{
     validate_duplicate_keys, validate_flow_style, validate_key_ordering, validate_unused_anchors,
 };
+use saphyr::{LoadableYamlNode, YamlOwned};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tier 1 — hot-path benchmarks
@@ -33,12 +34,15 @@ fn bench_parse_and_validate(c: &mut Criterion) {
     for (name, text) in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
             b.iter(|| {
-                let result = parse_yaml(text);
-                let docs = &result.documents;
+                let _result = parse_yaml(text);
+                // Validators still use saphyr types during migration.
+                let legacy_docs: Vec<YamlOwned> =
+                    YamlOwned::load_from_str(text).unwrap_or_default();
                 let _ = validate_unused_anchors(text);
                 let _ = validate_flow_style(text);
-                let _ = rlsp_yaml::validators::validate_custom_tags(text, docs, &allowed_tags);
-                let _ = validate_key_ordering(text, docs);
+                let _ =
+                    rlsp_yaml::validators::validate_custom_tags(text, &legacy_docs, &allowed_tags);
+                let _ = validate_key_ordering(text, &legacy_docs);
                 let _ = validate_duplicate_keys(text);
             });
         });
@@ -61,9 +65,13 @@ fn bench_schema_validation(c: &mut Criterion) {
     ];
 
     // Parse YAML outside the benchmark loop — measures validation cost only.
+    // Schema validation still uses saphyr types during migration.
     let parsed: Vec<(&str, String, Vec<_>)> = sizes
         .iter()
-        .map(|(name, text)| (*name, text.clone(), parse_yaml(text).documents))
+        .map(|(name, text)| {
+            let docs: Vec<YamlOwned> = YamlOwned::load_from_str(text).unwrap_or_default();
+            (*name, text.clone(), docs)
+        })
         .collect();
 
     let mut group = c.benchmark_group("schema_validation");

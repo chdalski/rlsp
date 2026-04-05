@@ -1059,6 +1059,7 @@ dependencies = [
  "once_cell",
  "regex",
  "rlsp-fmt",
+ "rlsp-yaml-parser",
  "saphyr",
  "saphyr-parser",
  "serde",

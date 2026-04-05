@@ -6,14 +6,13 @@ mod fixtures;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::hover::hover_at;
-use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::references::find_references;
 use rlsp_yaml::selection::selection_ranges;
 use rlsp_yaml::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
     validate_unused_anchors,
 };
-use saphyr::{LoadableYamlNode, MarkedYamlOwned};
+use saphyr::{LoadableYamlNode, MarkedYamlOwned, YamlOwned};
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -25,8 +24,8 @@ use tower_lsp::lsp_types::{Position, Url};
 /// Identifies which validator dominates total validation time.
 fn bench_validators_individual(c: &mut Criterion) {
     let text = fixtures::large();
-    let parse_result = parse_yaml(&text);
-    let docs = parse_result.documents;
+    // Validators still use saphyr types during migration.
+    let docs: Vec<YamlOwned> = YamlOwned::load_from_str(&text).unwrap_or_default();
     let allowed_tags = std::collections::HashSet::new();
 
     let mut group = c.benchmark_group("validators_individual");
@@ -64,8 +63,8 @@ fn bench_validators_individual(c: &mut Criterion) {
 fn bench_hover_and_references(c: &mut Criterion) {
     let schema = fixtures::generate_schema(20, 2);
     let text = fixtures::generate_anchor_yaml(100);
-    let parse_result = parse_yaml(&text);
-    let docs = parse_result.documents;
+    // Hover still uses saphyr types during migration.
+    let docs: Vec<YamlOwned> = YamlOwned::load_from_str(&text).unwrap_or_default();
 
     let uri: Url = "file:///bench/anchors.yaml"
         .parse()

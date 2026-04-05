@@ -30,8 +30,8 @@ use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
 
 /// YAML specification version for formatting and diagnostic purposes.
 ///
-/// Note: the underlying parser (saphyr) always parses as YAML 1.2 regardless
-/// of this setting.
+/// Note: the underlying parser (rlsp-yaml-parser) always parses as YAML 1.2
+/// regardless of this setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum YamlVersion {
     V1_1,
@@ -367,6 +367,14 @@ impl Backend {
         let result = parser::parse_yaml(text);
         let mut diagnostics = result.diagnostics.clone();
 
+        // Legacy saphyr parse for downstream consumers not yet migrated to
+        // rlsp-yaml-parser (validators, schema, hover, completion, symbols).
+        // TODO(migration): Remove once Tasks 2-4 are complete.
+        let legacy_docs: Vec<saphyr::YamlOwned> = {
+            use saphyr::LoadableYamlNode;
+            saphyr::YamlOwned::load_from_str(text).unwrap_or_default()
+        };
+
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validators::validate_unused_anchors(text));
         diagnostics.extend(crate::validators::validate_flow_style(text));
@@ -377,17 +385,14 @@ impl Backend {
         // any other lock below.
         let key_ordering = self.get_key_ordering();
         if key_ordering {
-            diagnostics.extend(crate::validators::validate_key_ordering(
-                text,
-                &result.documents,
-            ));
+            diagnostics.extend(crate::validators::validate_key_ordering(text, &legacy_docs));
         }
 
         let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
         allowed_tags.extend(crate::schema::extract_custom_tags(text));
         diagnostics.extend(crate::validators::validate_custom_tags(
             text,
-            &result.documents,
+            &legacy_docs,
             &allowed_tags,
         ));
 
@@ -409,7 +414,7 @@ impl Backend {
                 // key ordering, duplicate keys) already ran above and their
                 // diagnostics are retained.
             } else {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
                     .await;
             }
         } else {
@@ -424,15 +429,15 @@ impl Backend {
             if let Some(schema_url) =
                 crate::schema::match_schema_by_filename(filename, &associations)
             {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
                     .await;
             } else if let Some((api_version, kind)) =
-                crate::schema::detect_kubernetes_resource(&result.documents)
+                crate::schema::detect_kubernetes_resource(&legacy_docs)
             {
                 // Third fallback: Kubernetes auto-detection.
                 let schema_url =
                     crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
+                self.process_schema(&uri, &schema_url, &mut diagnostics, &legacy_docs, text)
                     .await;
             } else if schema_store_enabled {
                 // Fourth fallback: SchemaStore catalog.
@@ -444,7 +449,7 @@ impl Backend {
                             &uri,
                             &schema_url,
                             &mut diagnostics,
-                            &result.documents,
+                            &legacy_docs,
                             text,
                         )
                         .await;
