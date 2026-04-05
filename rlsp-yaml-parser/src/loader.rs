@@ -70,8 +70,7 @@ type Result<T> = std::result::Result<T, LoadError>;
 pub enum LoadMode {
     /// Preserve aliases as [`Node::Alias`] nodes (default, safe for LSP).
     Lossless,
-    /// Expand aliases inline (saphyr compatibility); subject to
-    /// `max_expanded_nodes` limit.
+    /// Expand aliases inline; subject to `max_expanded_nodes` limit.
     Resolved,
 }
 
