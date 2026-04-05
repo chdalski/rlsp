@@ -77,28 +77,54 @@ migration. Report findings before proceeding.
 
 ### Task 2: Remove comment workaround in formatter
 
-If the comment extract/reattach workaround still exists,
-replace it with direct use of comments from the parsed
-AST (`Document.comments` or comment nodes in the tree).
+The formatter currently works around missing inline
+comments by raw-text scanning (`extract_comments`) and
+signature-matching reattachment (`attach_comments`) —
+~300 lines of workaround code.
 
-- [ ] Identify the comment extraction code path
-- [ ] Replace with AST-based comment access
-- [ ] Verify formatter tests pass
+The parser already emits Comment events with correct
+spans. The loader discards them inside collections
+(`*pos += 1; continue` at loader.rs:378-382 and
+419-423). Fix the **loader** to attach comments to
+adjacent nodes instead of discarding them, then replace
+the formatter's raw-text workaround with AST-based
+comment access.
+
+- [ ] Add comment storage to the node model in
+      `rlsp-yaml-parser/src/node.rs`
+- [ ] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
+      to store comments on adjacent nodes instead of
+      discarding them inside mappings/sequences
+- [ ] Replace `extract_comments`/`attach_comments` in
+      `formatter.rs` with AST-based comment access
+- [ ] Verify formatter comment tests pass
 - [ ] Verify comment preservation in round-trip tests
 
-**Files:** `formatter.rs`
+**Files:** `rlsp-yaml-parser/src/node.rs`,
+`rlsp-yaml-parser/src/loader.rs`, `formatter.rs`
 
-### Task 3: Simplify span access in selection
+### Task 3: Fix container spans and simplify selection
 
-If recursive span computation still exists, replace with
-direct `node.loc` span access.
+Container nodes (Mapping, Sequence) currently have
+incomplete spans — the loader uses only the
+MappingStart/SequenceStart event span, discarding the
+MappingEnd/SequenceEnd span (loader.rs:387-390 and
+427-430). Fix the **loader** to combine start and end
+event spans, then remove the recursive `effective_start`/
+`effective_end` workaround in `selection.rs`.
 
-- [ ] Identify `effective_start`/`effective_end` or similar
-      recursive helpers
-- [ ] Replace with direct span field access where possible
+- [ ] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
+      to read MappingEnd/SequenceEnd spans and construct
+      full container spans: `Span { start: start.start,
+      end: end.end }`
+- [ ] Remove `effective_start`, `effective_end`, and
+      `is_zero_span` from `selection.rs`
+- [ ] Replace recursive span computation in
+      `collect_ancestor_spans` with direct `node.loc`
+      access
 - [ ] Verify selection range tests pass
 
-**Files:** `selection.rs`
+**Files:** `rlsp-yaml-parser/src/loader.rs`, `selection.rs`
 
 ### Task 4: Simplify duplicate key detection
 
@@ -137,3 +163,15 @@ preservation, document boundaries.
   not behavior change. All existing tests must continue to
   pass. If a workaround removal changes observable behavior,
   that's a separate feature decision.
+- **Verify parser capabilities before claiming limitations.**
+  A previous execution of this plan incorrectly marked two
+  workarounds as "needs parser enhancements" when the parser
+  already provided the required data — Comment events and
+  MappingEnd/SequenceEnd spans. The issue was in the loader
+  layer, not the parser. Before concluding that a workaround
+  cannot be removed due to parser limitations: (1) check
+  what the tokenizer/event layer actually emits, (2) check
+  whether the loader consumes or discards that data, and
+  (3) identify the specific layer that needs the change.
+  "The parser doesn't support X" is not acceptable without
+  citing the specific production or event that is missing.
