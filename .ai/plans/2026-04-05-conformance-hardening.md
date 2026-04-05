@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-05
 
 ## Goal
@@ -55,7 +55,7 @@ invalid YAML we incorrectly accept (missing error detection).
 
 ## Steps
 
-- [ ] Fix block scalar and folding failures (9 tests)
+- [x] Fix block scalar and folding failures (9 tests) — 8db865e
 - [ ] Fix block structure failures (6 tests)
 - [ ] Fix flow multiline and collection failures (7 tests)
 - [ ] Fix anchor/property handling failures (8 tests)
