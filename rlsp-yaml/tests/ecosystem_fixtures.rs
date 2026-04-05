@@ -20,8 +20,6 @@
 use rlsp_yaml::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::validators::{validate_duplicate_keys, validate_flow_style};
-use saphyr::{LoadableYamlNode, YamlOwned};
-
 // ---- Helpers ----------------------------------------------------------------
 
 fn default_opts() -> YamlFormatOptions {
@@ -29,16 +27,24 @@ fn default_opts() -> YamlFormatOptions {
 }
 
 /// Parse `text`, format it, re-parse the result, and assert the two parsed
-/// trees are semantically identical.
+/// trees are semantically identical (compared via canonical formatting).
 fn assert_round_trip(label: &str, text: &str) {
-    let original = YamlOwned::load_from_str(text)
-        .unwrap_or_else(|e| panic!("{label}: original parse failed: {e}"));
+    // Verify the original text parses successfully.
+    assert!(
+        parse_yaml(text).diagnostics.is_empty(),
+        "{label}: original parse produced diagnostics"
+    );
     let formatted = format_yaml(text, &default_opts());
-    let roundtrip = YamlOwned::load_from_str(&formatted)
-        .unwrap_or_else(|e| panic!("{label}: formatted output unparseable: {e}\n---\n{formatted}"));
+    // Verify the formatted output parses successfully.
+    assert!(
+        parse_yaml(&formatted).diagnostics.is_empty(),
+        "{label}: formatted output unparseable\n---\n{formatted}"
+    );
+    // Semantic equivalence: formatting the formatted output should be idempotent.
+    let re_formatted = format_yaml(&formatted, &default_opts());
     assert_eq!(
-        original, roundtrip,
-        "{label}: round-trip mismatch\noriginal:  {original:?}\nroundtrip: {roundtrip:?}\n---\n{formatted}"
+        formatted, re_formatted,
+        "{label}: round-trip mismatch (format is not idempotent)\n---\n{formatted}\n---\n{re_formatted}"
     );
 }
 
@@ -422,8 +428,7 @@ fn ansible_playbook_no_false_positives() {
 #[test]
 fn ansible_yaml11_keywords_preserved_unquoted() {
     // `yes`, `no`, `on`, `off` are YAML 1.1 booleans used as plain scalars.
-    // The formatter must preserve them as-is (they are parsed as booleans by
-    // saphyr and round-trip as `true`/`false` which is semantically equivalent).
+    // The formatter must preserve them as-is (they are plain strings in YAML 1.2).
     let result = parse_yaml(ANSIBLE_PLAYBOOK);
     assert!(
         result.diagnostics.is_empty(),

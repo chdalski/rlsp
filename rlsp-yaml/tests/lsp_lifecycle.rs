@@ -710,7 +710,7 @@ async fn should_publish_combined_parser_and_validator_diagnostics() {
     send(&mut service, initialized_notification()).await;
 
     // This text has both a parse error and an unused anchor in the valid portion
-    // Note: saphyr will fail to parse if there's a syntax error, so we can't
+    // Note: the parser will fail to parse if there's a syntax error, so we can't
     // test combined parse + validator errors easily. Instead, test that validator
     // diagnostics are published for valid YAML.
     let uri = "file:///test/validators.yaml";

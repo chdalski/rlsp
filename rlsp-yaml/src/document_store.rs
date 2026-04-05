@@ -4,20 +4,13 @@ use std::collections::HashMap;
 
 use rlsp_yaml_parser::node::Document;
 use rlsp_yaml_parser::pos::Span;
-use saphyr::{LoadableYamlNode, MarkedYamlOwned, YamlOwned};
 use tower_lsp::lsp_types::Url;
 
 use crate::parser;
 
 struct StoredDocument {
     text: String,
-    /// AST from rlsp-yaml-parser (new parser).
     documents: Option<Vec<Document<Span>>>,
-    /// Legacy AST from saphyr — kept during migration for downstream consumers
-    /// (hover, completion, symbols, validators, schema) not yet migrated.
-    /// TODO(migration): Remove once all consumers use `documents`.
-    yaml: Option<Vec<YamlOwned>>,
-    marked_yaml: Option<Vec<MarkedYamlOwned>>,
 }
 
 #[derive(Default)]
@@ -33,7 +26,6 @@ impl DocumentStore {
 
     pub fn open(&mut self, uri: Url, text: String) {
         let parsed = parser::parse_yaml(&text);
-        let (yaml, marked_yaml) = parse_legacy(&text);
         let docs = if parsed.documents.is_empty() {
             None
         } else {
@@ -44,8 +36,6 @@ impl DocumentStore {
             StoredDocument {
                 text,
                 documents: docs,
-                yaml,
-                marked_yaml,
             },
         );
     }
@@ -53,15 +43,12 @@ impl DocumentStore {
     pub fn change(&mut self, uri: &Url, text: String) {
         if let Some(doc) = self.documents.get_mut(uri) {
             let parsed = parser::parse_yaml(&text);
-            let (yaml, marked_yaml) = parse_legacy(&text);
             doc.text = text;
             doc.documents = if parsed.documents.is_empty() {
                 None
             } else {
                 Some(parsed.documents)
             };
-            doc.yaml = yaml;
-            doc.marked_yaml = marked_yaml;
         }
     }
 
@@ -74,24 +61,10 @@ impl DocumentStore {
         self.documents.get(uri).map(|doc| doc.text.as_str())
     }
 
-    /// Returns the new-parser AST (`Document<Span>`) for the given URI.
+    /// Returns the parsed AST (`Document<Span>`) for the given URI.
     #[must_use]
     pub fn get_documents(&self, uri: &Url) -> Option<&Vec<Document<Span>>> {
         self.documents.get(uri)?.documents.as_ref()
-    }
-
-    /// Returns the legacy saphyr AST for the given URI.
-    /// TODO(migration): Remove once all downstream consumers are migrated.
-    #[must_use]
-    pub fn get_yaml(&self, uri: &Url) -> Option<&Vec<YamlOwned>> {
-        self.documents.get(uri)?.yaml.as_ref()
-    }
-
-    /// Returns the legacy marked saphyr AST for the given URI.
-    /// TODO(migration): Remove once selection.rs is migrated.
-    #[must_use]
-    pub fn get_marked_yaml(&self, uri: &Url) -> Option<&Vec<MarkedYamlOwned>> {
-        self.documents.get(uri)?.marked_yaml.as_ref()
     }
 
     #[must_use]
@@ -101,16 +74,6 @@ impl DocumentStore {
             .map(|(uri, doc)| (uri.clone(), doc.text.clone()))
             .collect()
     }
-}
-
-/// Parse text into legacy saphyr ASTs. Returns `(yaml, marked_yaml)`.
-/// TODO(migration): Remove once all consumers use rlsp-yaml-parser.
-fn parse_legacy(text: &str) -> (Option<Vec<YamlOwned>>, Option<Vec<MarkedYamlOwned>>) {
-    let yaml = YamlOwned::load_from_str(text)
-        .ok()
-        .filter(|v| !v.is_empty());
-    let marked = MarkedYamlOwned::load_from_str(text).ok();
-    (yaml, marked)
 }
 
 #[cfg(test)]
@@ -243,16 +206,16 @@ mod tests {
     }
 
     #[test]
-    fn should_store_parsed_yaml_alongside_text() {
+    fn should_store_parsed_documents_alongside_text() {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
         store.open(uri.clone(), "key: value\n".to_string());
 
         assert_eq!(store.get(&uri), Some("key: value\n"));
-        let yaml = store.get_yaml(&uri);
-        assert!(yaml.is_some());
-        assert_eq!(yaml.expect("yaml present").len(), 1);
+        let docs = store.get_documents(&uri);
+        assert!(docs.is_some());
+        assert_eq!(docs.expect("documents present").len(), 1);
     }
 
     #[test]
@@ -260,21 +223,36 @@ mod tests {
         let store = DocumentStore::new();
         let uri = test_uri("unknown.yaml");
 
-        assert!(store.get_yaml(&uri).is_none());
+        assert!(store.get_documents(&uri).is_none());
     }
 
     #[test]
-    fn should_update_parsed_yaml_on_change() {
+    fn should_update_parsed_documents_on_change() {
+        use rlsp_yaml_parser::node::Node;
+
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
         store.open(uri.clone(), "key: old\n".to_string());
         store.change(&uri, "key: new\n".to_string());
 
-        let yaml = store.get_yaml(&uri).expect("yaml present");
-        assert_eq!(yaml.len(), 1);
-        let val = yaml.first().expect("yaml present")["key"].as_str();
-        assert_eq!(val, Some("new"));
+        let docs = store.get_documents(&uri).expect("documents present");
+        assert_eq!(docs.len(), 1);
+        // Verify the root mapping contains the updated value.
+        match &docs[0].root {
+            Node::Mapping { entries, .. } => {
+                let (_, val) = &entries[0];
+                match val {
+                    Node::Scalar { value, .. } => assert_eq!(value, "new"),
+                    Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                        panic!("expected Scalar value")
+                    }
+                }
+            }
+            Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                panic!("expected Mapping root")
+            }
+        }
     }
 
     #[test]
@@ -285,7 +263,7 @@ mod tests {
         store.open(uri.clone(), "key: value\n".to_string());
         store.close(&uri);
 
-        assert!(store.get_yaml(&uri).is_none());
+        assert!(store.get_documents(&uri).is_none());
     }
 
     #[test]
@@ -320,42 +298,19 @@ mod tests {
         store.open(uri.clone(), "key: [bad".to_string());
 
         assert_eq!(store.get(&uri), Some("key: [bad"));
-        assert!(store.get_yaml(&uri).is_none());
-    }
-
-    #[test]
-    fn should_store_new_parser_documents() {
-        let mut store = DocumentStore::new();
-        let uri = test_uri("doc.yaml");
-
-        store.open(uri.clone(), "key: value\n".to_string());
-
-        let docs = store.get_documents(&uri);
-        assert!(docs.is_some());
-        assert_eq!(docs.expect("documents present").len(), 1);
-    }
-
-    #[test]
-    fn should_return_none_for_new_parser_documents_of_unknown_uri() {
-        let store = DocumentStore::new();
-        let uri = test_uri("unknown.yaml");
-
         assert!(store.get_documents(&uri).is_none());
     }
 
     #[test]
-    fn should_update_new_parser_documents_on_change() {
+    fn should_store_multi_document_yaml() {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "a: 1\n".to_string());
-        store.change(&uri, "a: 1\n---\nb: 2\n".to_string());
+        store.open(uri.clone(), "a: 1\n---\nb: 2\n".to_string());
 
         let docs = store.get_documents(&uri).expect("documents present");
         assert_eq!(docs.len(), 2);
     }
-
-    // TE tests 47-48: new-type verification through get_documents
 
     #[test]
     fn should_return_document_span_vec_from_get_documents() {

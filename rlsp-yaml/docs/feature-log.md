@@ -265,7 +265,7 @@ with existing infrastructure.
 
 **Description:** Emit diagnostics when duplicate keys are found in a YAML mapping.
 **Complexity:** Medium
-**Comment:** Text-based detection (saphyr deduplicates in AST). Document-scoped with flow-style and sequence-item scope handling.
+**Comment:** Text-based detection (parsed ASTs deduplicate keys). Document-scoped with flow-style and sequence-item scope handling.
 **Tier:** 1
 
 ### Tab-to-Spaces On-Type Formatting [won't implement]

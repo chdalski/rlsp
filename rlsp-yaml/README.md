@@ -1,6 +1,6 @@
 # rlsp-yaml
 
-A YAML language server implementing the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) using [tower-lsp](https://github.com/ebkalderon/tower-lsp) and [saphyr](https://github.com/saphyr-rs/saphyr) for YAML parsing.
+A YAML language server implementing the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) using [tower-lsp](https://github.com/ebkalderon/tower-lsp) and [rlsp-yaml-parser](../rlsp-yaml-parser) for YAML parsing.
 
 ## Installation
 
@@ -162,7 +162,7 @@ src/
 ├── main.rs              # Binary entry point
 ├── lib.rs               # Module declarations
 ├── server.rs            # LSP Backend + LanguageServer trait impl
-├── parser.rs            # YAML parsing (saphyr)
+├── parser.rs            # YAML parsing (rlsp-yaml-parser)
 ├── document_store.rs    # In-memory document cache
 ├── schema.rs            # JSON Schema types, fetching, caching
 ├── schema_validation.rs # Schema-driven diagnostics

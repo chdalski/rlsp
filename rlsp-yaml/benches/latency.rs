@@ -67,7 +67,7 @@ fn bench_semantic_tokens(c: &mut Criterion) {
 
 /// `DocumentStore::change()` — measures the parse cost.
 ///
-/// Each call re-parses via both rlsp-yaml-parser and saphyr (legacy).
+/// Each call re-parses via rlsp-yaml-parser.
 /// The document is pre-opened so only the change path is measured.
 fn bench_document_store_change(c: &mut Criterion) {
     let sizes = [

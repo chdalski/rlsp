@@ -120,7 +120,7 @@ Controls which YAML specification version the formatter uses for quoting decisio
 
 In `"1.1"` mode the formatter quotes these words to prevent ambiguity — for example, `on: push` stays plain (it is a key, already in the AST as a plain scalar), but a value like `enabled: "yes"` will have its quotes preserved rather than stripped.
 
-> **Parser limitation:** the underlying parser (saphyr) always processes documents as YAML 1.2 regardless of this setting. Octal literals (`0644`) and sexagesimal values (`1:30:00`) are therefore treated as plain strings, not integers. This setting affects formatter quoting only.
+> **Parser limitation:** the underlying parser (rlsp-yaml-parser) always processes documents as YAML 1.2 regardless of this setting. Octal literals (`0644`) and sexagesimal values (`1:30:00`) are therefore treated as plain strings, not integers. This setting affects formatter quoting only.
 
 Override this setting for a single document with the `$yamlVersion` modeline (see below).
 
@@ -384,7 +384,7 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 
 **Range formatting** uses the same settings and formatter as full-document formatting. The full document is formatted internally and the resulting lines that correspond to the requested range are returned as the edit. This ensures consistent line-breaking decisions — the printer needs surrounding context to make correct choices.
 
-The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks saphyr's AST and emits IR nodes that the engine renders with line-width awareness.
+The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks the parsed AST and emits IR nodes that the engine renders with line-width awareness.
 
 ## Schema Resolution Priority
 
