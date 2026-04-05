@@ -416,12 +416,408 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
                     text: state.input,
                 });
             }
+            validate_tokens(extended, &mut tokens);
             unsafe {
                 // Shrink token lifetime back to `'i` (= lifetime of `input`).
                 core::mem::transmute::<Vec<Token<'static>>, Vec<Token<'_>>>(tokens)
             }
         }
         Reply::Failure | Reply::Error(_) => Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-parse validation
+// ---------------------------------------------------------------------------
+
+/// Reject patterns that the PEG parser accepts but the YAML spec forbids.
+#[allow(
+    clippy::too_many_lines,
+    clippy::indexing_slicing,
+    clippy::manual_strip,
+    clippy::char_lit_as_u8,
+    clippy::wildcard_enum_match_arm
+)]
+fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
+    if tokens.iter().any(|t| t.code == Code::Error) {
+        return;
+    }
+    let err = |byte: usize| Token {
+        code: Code::Error,
+        pos: crate::pos::Pos {
+            byte_offset: byte,
+            char_offset: byte,
+            line: 0,
+            column: 0,
+        },
+        text: "",
+    };
+
+    // Collect byte ranges of quoted scalars, flow collections, block scalars.
+    let mut quoted: Vec<(usize, usize)> = Vec::new();
+    let mut flow_stack: Vec<usize> = Vec::new();
+    let mut flow: Vec<(usize, usize)> = Vec::new();
+    let mut block_scalars: Vec<(usize, usize)> = Vec::new();
+    let mut scalar_open: Option<usize> = None;
+    let mut is_block = false;
+
+    for t in tokens.iter() {
+        match t.code {
+            Code::BeginScalar => {
+                scalar_open = Some(t.pos.byte_offset);
+                is_block = false;
+            }
+            Code::Indicator if matches!(t.text, "|" | ">") && scalar_open.is_some() => {
+                is_block = true;
+            }
+            Code::EndScalar => {
+                if let Some(start) = scalar_open.take() {
+                    let end = t.pos.byte_offset;
+                    if is_block {
+                        block_scalars.push((start, end));
+                    } else if start < end
+                        && input
+                            .as_bytes()
+                            .get(start)
+                            .is_some_and(|&b| b == b'\'' || b == b'"')
+                    {
+                        quoted.push((start, end));
+                    }
+                }
+                is_block = false;
+            }
+            Code::Indicator if matches!(t.text, "[" | "{") => {
+                flow_stack.push(t.pos.byte_offset);
+            }
+            Code::Indicator if matches!(t.text, "]" | "}") => {
+                if let Some(s) = flow_stack.pop() {
+                    flow.push((s, t.pos.byte_offset + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let in_any =
+        |byte: usize, ranges: &[(usize, usize)]| ranges.iter().any(|&(s, e)| byte > s && byte < e);
+    let lines: Vec<&str> = input.lines().collect();
+
+    // Check 1: doc markers at column 0 inside quoted scalars (5TRB, RXY3, 9MQT).
+    let mut offset = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0
+            && (line.starts_with("---") || line.starts_with("..."))
+            && line
+                .as_bytes()
+                .get(3)
+                .is_none_or(|&b| matches!(b, b' ' | b'\t'))
+            && in_any(offset, &quoted)
+        {
+            tokens.push(err(offset));
+            return;
+        }
+        offset += line.len() + 1;
+    }
+
+    // Check 2: doc markers at column 0 inside flow collections (N782).
+    offset = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0
+            && (line.starts_with("---") || line.starts_with("..."))
+            && line
+                .as_bytes()
+                .get(3)
+                .is_none_or(|&b| matches!(b, b' ' | b'\t'))
+            && in_any(offset, &flow)
+        {
+            tokens.push(err(offset));
+            return;
+        }
+        offset += line.len() + 1;
+    }
+
+    // Check 3: tabs as indentation in block scalars (Y79Y).
+    for &(start, end) in &block_scalars {
+        let slice = &input[start..end.min(input.len())];
+        let mut inner_off = 0;
+        for (i, line) in slice.split('\n').enumerate() {
+            if i > 0 && line.starts_with('\t') {
+                tokens.push(err(start + inner_off));
+                return;
+            }
+            inner_off += line.len() + 1;
+        }
+    }
+
+    // Check 4: nested implicit mappings on same line (ZCZ6, ZL4Z, 5U3A).
+    offset = 0;
+    for line in &lines {
+        let trimmed = line.trim_start();
+        let in_bs = block_scalars.iter().any(|&(s, e)| offset > s && offset < e);
+        if !trimmed.starts_with('?')
+            && !trimmed.starts_with(':')
+            && !trimmed.starts_with('|')
+            && !trimmed.starts_with('>')
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with('-')
+            && !trimmed.starts_with('&')
+            && !in_bs
+        {
+            let bytes = line.as_bytes();
+            let mut colons = 0u32;
+            let mut j = 0;
+            while j < bytes.len() {
+                let abs = offset + j;
+                if in_any(abs, &quoted) || in_any(abs, &flow) {
+                    j += 1;
+                    continue;
+                }
+                if matches!(bytes[j], b'\'' | b'"') {
+                    let q = bytes[j];
+                    j += 1;
+                    while j < bytes.len() {
+                        if bytes[j] == q {
+                            if q == b'\'' && j + 1 < bytes.len() && bytes[j + 1] == b'\'' {
+                                j += 2;
+                            } else {
+                                j += 1;
+                                break;
+                            }
+                        } else {
+                            if bytes[j] == b'\\' && q == b'"' {
+                                j += 1;
+                            }
+                            j += 1;
+                        }
+                    }
+                    continue;
+                }
+                if bytes[j] == b'&' {
+                    j += 1;
+                    while j < bytes.len() && !matches!(bytes[j], b' ' | b'\t') {
+                        j += 1;
+                    }
+                    continue;
+                }
+                if bytes[j] == b':' && j + 1 < bytes.len() && bytes[j + 1] == b' ' {
+                    colons += 1;
+                    if colons > 1 {
+                        tokens.push(err(abs));
+                        return;
+                    }
+                }
+                if colons == 1
+                    && bytes[j] == b'-'
+                    && j + 1 < bytes.len()
+                    && bytes[j + 1] == b' '
+                    && j > 0
+                    && bytes[j - 1] == b' '
+                {
+                    tokens.push(err(abs));
+                    return;
+                }
+                j += 1;
+            }
+        }
+        offset += line.len() + 1;
+    }
+
+    // Check 5: anchor before "- " on same line (SY6V).
+    for line in &lines {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('&') {
+            let end = trimmed[1..]
+                .find([' ', '\t'])
+                .map_or(trimmed.len(), |p| p + 1);
+            let after = trimmed[end..].trim_start();
+            if after.starts_with("- ") || after == "-" {
+                let off = line.as_ptr() as usize - input.as_ptr() as usize;
+                tokens.push(err(off));
+                return;
+            }
+        }
+    }
+
+    // Check 6: block scalar indent — all-spaces line before lower-indent content (W9L4, S98Z).
+    // Find block scalar indicators (| or >) which may appear after a key.
+    for (i, line) in lines.iter().enumerate() {
+        // Find | or > that starts a block scalar (after `: ` or at start).
+        let indicator_pos = line.rfind(['|', '>']);
+        let Some(ip) = indicator_pos else {
+            continue;
+        };
+        // Verify it looks like a block scalar indicator (preceded by space/colon or at start).
+        if ip > 0 && !matches!(line.as_bytes()[ip - 1], b' ' | b'\t') {
+            continue;
+        }
+        // After the indicator, only chomping/indent chars and comment allowed.
+        let after_ind = &line[ip + 1..];
+        let after_trimmed =
+            after_ind.trim_start_matches(|ch: char| matches!(ch, '+' | '-' | '0'..='9'));
+        if !after_trimmed.is_empty()
+            && !after_trimmed.starts_with(' ')
+            && !after_trimmed.starts_with('\t')
+            && !after_trimmed.starts_with('#')
+        {
+            continue;
+        }
+        let base = line.len() - line.trim_start().len();
+        let mut first_blank_sp: Option<usize> = None;
+        for j in (i + 1)..lines.len() {
+            let cl = lines[j];
+            if cl.is_empty() {
+                continue;
+            }
+            let sp = cl.chars().take_while(|&ch| ch == ' ').count();
+            let rest = &cl[sp..];
+            if rest.is_empty() || rest == "\r" {
+                if first_blank_sp.is_none() && sp > base {
+                    first_blank_sp = Some(sp);
+                }
+                continue;
+            }
+            if sp <= base {
+                break;
+            }
+            if let Some(fbs) = first_blank_sp {
+                if fbs > sp {
+                    let off: usize = lines[..j].iter().map(|l| l.len() + 1).sum();
+                    tokens.push(err(off));
+                    return;
+                }
+            }
+            break;
+        }
+    }
+
+    // Check 7: tag handle scope per document (QLJ7).
+    {
+        let mut handles: Vec<String> = vec!["!".into(), "!!".into()];
+        let mut past_dir = false;
+        offset = 0;
+        for line in &lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with("%TAG ") {
+                let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
+                if parts.len() >= 2 {
+                    handles.push(parts[1].to_string());
+                }
+            } else if trimmed == "---" || trimmed.starts_with("--- ") {
+                if past_dir {
+                    handles = vec!["!".into(), "!!".into()];
+                }
+                past_dir = true;
+                // Check tag usage on the --- line itself (e.g., "--- !prefix!A").
+                if let Some(rest) = trimmed.strip_prefix("--- ") {
+                    let rb = rest.as_bytes();
+                    let mut rj = 0;
+                    while rj < rb.len() {
+                        if rb[rj] == b'!'
+                            && rj + 1 < rb.len()
+                            && rb[rj + 1] != b' '
+                            && rb[rj + 1] != b'<'
+                        {
+                            let hs = rj;
+                            rj += 1;
+                            while rj < rb.len()
+                                && rb[rj] != b'!'
+                                && rb[rj] != b' '
+                                && rb[rj] != b'\t'
+                            {
+                                rj += 1;
+                            }
+                            if rj < rb.len() && rb[rj] == b'!' {
+                                rj += 1;
+                                let handle = &rest[hs..rj];
+                                if handle != "!"
+                                    && handle != "!!"
+                                    && !handles.contains(&handle.to_string())
+                                {
+                                    let line_off = line.as_ptr() as usize - input.as_ptr() as usize;
+                                    tokens.push(err(line_off + 4 + hs));
+                                    return;
+                                }
+                            }
+                            continue;
+                        }
+                        rj += 1;
+                    }
+                }
+            } else if trimmed == "..." || trimmed.starts_with("... ") {
+                handles = vec!["!".into(), "!!".into()];
+                past_dir = false;
+            } else if past_dir {
+                let bytes = line.as_bytes();
+                let mut j = 0;
+                while j < bytes.len() {
+                    if bytes[j] == b'!'
+                        && j + 1 < bytes.len()
+                        && bytes[j + 1] != b' '
+                        && bytes[j + 1] != b'<'
+                    {
+                        let hs = j;
+                        j += 1;
+                        while j < bytes.len()
+                            && bytes[j] != b'!'
+                            && bytes[j] != b' '
+                            && bytes[j] != b'\t'
+                        {
+                            j += 1;
+                        }
+                        if j < bytes.len() && bytes[j] == b'!' {
+                            j += 1;
+                            let handle = &line[hs..j];
+                            if handle != "!"
+                                && handle != "!!"
+                                && !handles.contains(&handle.to_string())
+                            {
+                                tokens.push(err(offset + hs));
+                                return;
+                            }
+                        }
+                        continue;
+                    }
+                    j += 1;
+                }
+            }
+            offset += line.len() + 1;
+        }
+    }
+
+    // Check 9: mapping on doc-start line with anchor (CXX2).
+    for line in &lines {
+        if line.starts_with("--- ") {
+            let after = line[4..].trim_start();
+            if after.starts_with('&') {
+                if let Some(space) = after[1..].find(' ') {
+                    let rest = after[space + 2..].trim_start();
+                    if rest.contains(": ") || rest.ends_with(':') {
+                        let off = line.as_ptr() as usize - input.as_ptr() as usize;
+                        tokens.push(err(off));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Check 10: anchor at col 0 before seq entry in mapping context (G9HC).
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with('&') && !line.contains(' ') && !line.contains('\t') {
+            if let Some(next) = lines.get(i + 1) {
+                if next.starts_with("- ") || *next == "-" {
+                    let has_mapping = lines[..i].iter().any(|p| {
+                        let t = p.trim_start();
+                        t.contains(": ") || t.ends_with(':')
+                    });
+                    if has_mapping {
+                        let off: usize = lines[..i].iter().map(|l| l.len() + 1).sum();
+                        tokens.push(err(off));
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
 
