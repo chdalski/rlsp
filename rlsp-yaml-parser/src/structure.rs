@@ -389,7 +389,10 @@ pub fn l_comment<'i>() -> Parser<'i> {
 pub fn s_l_comments<'i>() -> Parser<'i> {
     seq(
         s_b_comment(),
-        many0(alt(l_comment(), alt(seq(many0(s_white()), b_break()), b_break()))),
+        many0(alt(
+            l_comment(),
+            alt(seq(many0(s_white()), b_break()), b_break()),
+        )),
     )
 }
 
