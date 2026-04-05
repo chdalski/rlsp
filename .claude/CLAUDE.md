@@ -372,17 +372,33 @@ When you find existing plans in the plans directory:
 
 When all tasks in a plan are committed:
 
-1. **Update the plan status** to "Completed" and commit:
+1. **Verify the plan's goal is achieved.** Re-read the
+   plan's stated goal. If the goal includes quantitative
+   targets (pass rates, coverage thresholds, performance
+   metrics), run the measurements and compare to the
+   targets. Task completion is necessary but not
+   sufficient — all tasks can be individually approved
+   while the overall goal remains unmet.
+
+   If any target is not met, add follow-up task slices to
+   the plan that close the gap and continue execution
+   through the normal pipeline. Do not mark the plan
+   complete until the measured results meet the stated
+   targets. The plan was approved by the user with those
+   targets — weakening them without the user's explicit
+   initiative creates a shortcut for incomplete delivery.
+
+2. **Update the plan status** to "Completed" and commit:
    `docs(<scope>): mark plan complete`. Task-level progress
    (checkboxes, SHAs) was committed by the reviewer during
    execution — this final status update is a plan-level
    decision that you own.
-2. Report to the user:
+3. Report to the user:
    - Summary of what was implemented
    - List of commits (SHAs and messages)
    - Any accepted risks or trade-offs noted by advisors
    - Any TODO items for future work
-3. Check the queue — if more plans are pending, proceed to
+4. Check the queue — if more plans are pending, proceed to
    the next one. If the queue is empty, inform the user.
 
 **New tasks after completion.** Each plan covers one
