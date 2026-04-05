@@ -58,7 +58,7 @@ validation as the final step.
       helpers
 - [x] Migrate parser.rs, document_store.rs, server.rs
       (entry points)
-- [ ] Migrate symbols.rs, hover.rs, completion.rs
+- [x] Migrate symbols.rs, hover.rs, completion.rs
 - [ ] Migrate validators.rs, schema.rs, schema_validation.rs
 - [ ] Migrate selection.rs and formatter.rs
 - [ ] Remove saphyr dependencies, update tests, clean up
@@ -100,15 +100,17 @@ that load YAML and store the AST.
 Migrate the three LSP feature files. These all do pattern
 matching on `YamlOwned` variants.
 
-- [ ] Migrate `symbols.rs`: replace `YamlOwned::Value(
+- [x] Migrate `symbols.rs`: replace `YamlOwned::Value(
       ScalarOwned::String(s))` with `Node::Scalar { value, .. }`,
       replace `YamlOwned::Mapping(map)` with
       `Node::Mapping { entries, .. }`, etc.
-- [ ] Migrate `hover.rs`: same pattern matching changes +
+- [x] Migrate `hover.rs`: same pattern matching changes +
       update scalar type display to use inferred types
-- [ ] Migrate `completion.rs`: same pattern matching changes
+- [x] Migrate `completion.rs`: same pattern matching changes
 
 **Files:** `symbols.rs`, `hover.rs`, `completion.rs`
+
+**Commit:** 8b0d3d9
 
 ### Task 3: Validation — validators, schema, schema_validation
 
