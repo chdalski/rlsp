@@ -56,7 +56,7 @@ invalid YAML we incorrectly accept (missing error detection).
 ## Steps
 
 - [x] Fix block scalar and folding failures (9 tests) — 8db865e
-- [ ] Fix block structure failures (6 tests)
+- [x] Fix block structure failures (5/6 tests; 735Y deferred) — 9984a77
 - [ ] Fix flow multiline and collection failures (7 tests)
 - [ ] Fix anchor/property handling failures (8 tests)
 - [ ] Fix plain/quoted scalar failures (8 tests)
