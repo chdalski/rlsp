@@ -58,7 +58,7 @@ invalid YAML we incorrectly accept (missing error detection).
 - [x] Fix block scalar and folding failures (9 tests) — 8db865e
 - [x] Fix block structure failures (5/6 tests; 735Y deferred) — 9984a77
 - [x] Fix flow multiline and collection failures (4/7 tests; 8KB6,NJ66,VJP3 deferred) — b619517
-- [ ] Fix anchor/property handling failures (8 tests)
+- [x] Fix anchor/property handling failures (3/8 tests; E76Z,HMQ5,P76L,7BMT,U3XV deferred) — 45ac394
 - [ ] Fix plain/quoted scalar failures (8 tests)
 - [ ] Fix document handling and tab failures (9 tests)
 - [ ] Fix complex/empty key and spec example failures (11 tests)
