@@ -1,0 +1,155 @@
+**Repository:** root
+**Status:** NotStarted
+**Created:** 2026-04-05
+
+## Goal
+
+Add extended test coverage to `rlsp-yaml-parser` beyond the
+YAML test suite. The test suite validates spec conformance
+but doesn't cover robustness edge cases: malformed UTF-8,
+NUL bytes, deeply nested structures, duplicate keys, emitter
+round-trips across scalar styles, and panic safety under
+adversarial input. These tests are original — inspired by
+the categories that mature parsers (libfyaml) cover, but
+written for our API.
+
+## Context
+
+- `rlsp-yaml-parser` passes 351/351 YAML test suite
+- 922 unit tests cover individual productions and API
+- Missing coverage areas identified from libfyaml's test
+  suite (383 custom tests across 6 categories):
+  - UTF-8 validation and malformed input handling
+  - NUL bytes in various positions
+  - Emitter round-trip across all scalar/collection styles
+  - Duplicate key detection edge cases
+  - Panic safety under adversarial input (fuzzing targets)
+  - Security controls under stress (alias bombs, deep
+    nesting)
+- Key files:
+  - `rlsp-yaml-parser/src/` — parser source
+  - `rlsp-yaml-parser/tests/conformance.rs` — existing
+    conformance tests
+  - `rlsp-yaml-parser/src/loader.rs` — alias expansion
+    limits, nesting depth
+  - `rlsp-yaml-parser/src/emitter.rs` — YAML serialization
+
+## Steps
+
+- [ ] Add UTF-8 and encoding edge case tests
+- [ ] Add emitter round-trip test corpus
+- [ ] Add security and robustness stress tests
+- [ ] Add duplicate key and error reporting tests
+
+## Tasks
+
+### Task 1: UTF-8 and encoding edge cases
+
+Test that the parser correctly handles or rejects malformed
+input at the byte/character level.
+
+- [ ] Reject incomplete 2-byte UTF-8 sequences
+- [ ] Reject incomplete 3-byte UTF-8 sequences
+- [ ] Reject incomplete 4-byte UTF-8 sequences
+- [ ] Reject lone continuation bytes (0x80-0xBF without
+      lead byte)
+- [ ] Reject overlong encodings (e.g., 0xC0 0x80 for NUL)
+- [ ] Reject invalid bytes 0xFE and 0xFF
+- [ ] Reject truncated UTF-8 at end of stream
+- [ ] Accept valid UTF-8 including multibyte (emoji, CJK,
+      Arabic)
+- [ ] Handle NUL byte (0x00) in scalar values — reject or
+      handle per spec
+- [ ] Handle NUL byte in comments
+- [ ] Handle BOM (0xEF 0xBB 0xBF) at start of stream
+- [ ] Handle BOM mid-stream (should be rejected or treated
+      as content)
+
+**Files:** `rlsp-yaml-parser/tests/encoding.rs` — new
+
+### Task 2: Emitter round-trip corpus
+
+Test that parse → emit → re-parse produces semantically
+equivalent results across all YAML features.
+
+- [ ] Plain scalars (simple, multiline, with special chars)
+- [ ] Single-quoted scalars (with escaped quotes, multiline)
+- [ ] Double-quoted scalars (with escape sequences,
+      multiline, Unicode escapes)
+- [ ] Literal block scalars (clip, strip, keep chomping)
+- [ ] Folded block scalars (clip, strip, keep, with
+      more-indented lines)
+- [ ] Block sequences (simple, nested, compact)
+- [ ] Block mappings (simple, nested, compact, explicit keys)
+- [ ] Flow sequences (simple, nested, empty, trailing comma)
+- [ ] Flow mappings (simple, nested, empty, adjacent values)
+- [ ] Anchors and aliases (round-trip preserves anchors)
+- [ ] Tags (shorthand, verbatim, non-specific)
+- [ ] Multi-document (with ---, ..., directives)
+- [ ] Comments (inline, full-line, between entries)
+- [ ] Mixed styles (flow inside block, block inside flow)
+- [ ] Empty documents and empty collections
+- [ ] Complex keys (flow collection as key, multiline key)
+- [ ] JSON-in-YAML (pure JSON parsed as YAML)
+- [ ] Large documents (1000+ entries, deeply nested)
+
+**Files:** `rlsp-yaml-parser/tests/round_trip.rs` — new
+
+### Task 3: Security and robustness stress tests
+
+Test that the parser handles adversarial and pathological
+input safely — no panics, no unbounded memory, no hangs.
+
+- [ ] Alias bomb (billion laughs) — verify expansion limit
+      triggers error, not OOM
+- [ ] Deep nesting (1000+ levels) — verify depth limit
+      triggers error
+- [ ] Circular alias reference — verify cycle detection
+- [ ] Very long scalar (10MB+) — verify no panic
+- [ ] Very long line (100K+ chars) — verify no panic
+- [ ] Very many documents (10K+) — verify no hang
+- [ ] Very many anchors (100K+) — verify anchor count limit
+- [ ] Pathological backtracking input — verify parser
+      completes in reasonable time
+- [ ] Empty input, whitespace-only input, comment-only input
+- [ ] Binary garbage (random bytes) — verify error, no panic
+- [ ] Input with every possible byte value (0x00-0xFF)
+- [ ] Maximum indentation depth
+
+**Files:** `rlsp-yaml-parser/tests/robustness.rs` — new
+
+### Task 4: Duplicate key and error reporting tests
+
+Test error detection and reporting quality for common
+real-world mistakes.
+
+- [ ] Duplicate plain scalar keys in block mapping
+- [ ] Duplicate quoted vs unquoted keys (same value)
+- [ ] Duplicate keys in flow mapping
+- [ ] Duplicate keys in nested mappings (different scopes
+      — should NOT be flagged)
+- [ ] Duplicate keys with different types (int vs string
+      representation)
+- [ ] Error positions point to correct line and column
+- [ ] Error messages are descriptive (not just "parse error")
+- [ ] Multiple errors in one document (error recovery)
+- [ ] Error on invalid merge key values
+- [ ] Error on unterminated quoted scalars
+- [ ] Error on unterminated flow collections
+
+**Files:** `rlsp-yaml-parser/tests/error_reporting.rs` — new
+
+## Decisions
+
+- **Original tests, not copies.** All test cases are written
+  from scratch for our API. Inspired by the categories that
+  libfyaml covers, but no copied test data or assertions.
+- **Separate test files by category.** Each category gets
+  its own integration test file for clear organization and
+  independent execution.
+- **No fuzzing harness in this plan.** The robustness tests
+  are hand-crafted adversarial inputs. A proper fuzzing
+  setup (cargo-fuzz / proptest) is separate future work.
+- **Round-trip tests use our own emitter.** Parse with our
+  parser, emit with our emitter, re-parse, compare ASTs.
+  This tests both parser and emitter together.
