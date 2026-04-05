@@ -559,6 +559,15 @@ impl<'input> OwnedEventIter<'input> {
                     return Some(Ok((Event::Comment { text }, span)));
                 }
 
+                Code::Error => {
+                    let pos = self.tokens.get(self.pos).map_or(Pos::ORIGIN, |t| t.pos);
+                    self.done = true;
+                    return Some(Err(Error {
+                        pos,
+                        message: "unexpected or invalid YAML input".to_owned(),
+                    }));
+                }
+
                 Code::EndNode
                 | Code::BeginPair
                 | Code::EndPair
@@ -575,8 +584,7 @@ impl<'input> OwnedEventIter<'input> {
                 | Code::LineFold
                 | Code::White
                 | Code::Indent
-                | Code::Break
-                | Code::Error => {
+                | Code::Break => {
                     self.pos += 1;
                 }
             }

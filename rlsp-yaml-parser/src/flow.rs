@@ -7,13 +7,16 @@
 //! Each function is named after the spec production and cross-referenced by
 //! its production number in a `// [N]` comment.
 
-use crate::chars::{decode_escape, ns_anchor_char, ns_plain_char, ns_plain_first};
+use crate::chars::{
+    b_non_content, decode_escape, ns_anchor_char, ns_plain_char, ns_plain_first, s_white,
+};
 use crate::combinator::neg_lookahead;
 use crate::combinator::{
     Context, Parser, Reply, State, char_parser, many0, many1, seq, token, wrap_tokens,
 };
 use crate::structure::{
-    b_l_folded, c_forbidden, c_ns_properties, s_flow_folded, s_flow_line_prefix, s_separate,
+    b_l_folded, c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix,
+    s_separate,
 };
 use crate::token::{Code, Token};
 
@@ -153,67 +156,181 @@ fn nb_double_one_line<'i>() -> Parser<'i> {
     many0(nb_double_char())
 }
 
-/// [112] s-double-next-line(n) — line folding inside double-quoted scalars.
-fn s_double_next_line(n: i32) -> Parser<'static> {
-    Box::new(move |state| {
-        // Consume a folded break (trimmed or single space).
-        let fold_result = b_l_folded(n, Context::FlowIn)(state.clone());
-        match fold_result {
-            Reply::Failure | Reply::Error(_) => fold_result,
+/// [114] nb-ns-double-in-line — interleaved spaces and non-space chars on one line.
+///
+/// Matches zero or more groups of (optional whitespace + one ns-double-char).
+/// This is `(s-white* ns-double-char)*`.
+fn nb_ns_double_in_line<'i>() -> Parser<'i> {
+    many0(Box::new(|state: State<'_>| {
+        let (ws_tokens, after_ws) = match many0(s_white())(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        match ns_double_char()(after_ws) {
             Reply::Success {
-                tokens: fold_tokens,
-                state: after_fold,
+                tokens: ns_tokens,
+                state: final_state,
             } => {
-                // Consume flow line prefix after the fold.
-                let (prefix_tokens, after_prefix) = match s_flow_line_prefix(n)(after_fold.clone())
-                {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_fold),
-                };
-                // Consume ns-double-char*.
-                let (ns_tokens, after_ns) = match many0(ns_double_char())(after_prefix) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => return Reply::Failure,
-                };
-                // Try recursive continuation or fall back to one-line remainder.
-                let (more_tokens, final_state) = match s_double_next_line(n)(after_ns.clone()) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => {
-                        match many0(nb_double_char())(after_ns.clone()) {
-                            Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_ns),
-                        }
-                    }
-                };
-                let mut all = fold_tokens;
-                all.extend(prefix_tokens);
+                let mut all = ws_tokens;
                 all.extend(ns_tokens);
-                all.extend(more_tokens);
                 Reply::Success {
                     tokens: all,
                     state: final_state,
                 }
             }
+            // No ns-double-char after whitespace — backtrack: do not consume the whitespace.
+            Reply::Failure => Reply::Failure,
+            other @ Reply::Error(_) => other,
+        }
+    }))
+}
+
+/// [112] s-double-escaped(n) — backslash-escaped line break in double-quoted scalars.
+///
+/// Handles `\` at end of line: `s-white* '\' b-non-content l-empty(n,flow-in)* s-flow-line-prefix(n)`.
+fn s_double_escaped(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        // Optional leading whitespace before `\`.
+        let (ws_tokens, after_ws) = match many0(s_white())(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        // Must be followed by `\`.
+        let Some('\\') = after_ws.peek() else {
+            return Reply::Failure;
+        };
+        let backslash_pos = after_ws.pos;
+        let after_backslash = after_ws.advance('\\');
+        let backslash_token = crate::token::Token {
+            code: Code::Text,
+            pos: backslash_pos,
+            text: "\\",
+        };
+        // Non-content break.
+        let (break_tokens, after_break) = match b_non_content()(after_backslash) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure => return Reply::Failure,
+            other @ Reply::Error(_) => return other,
+        };
+        // Zero or more empty lines.
+        let (empty_tokens, after_empty) = match many0(l_empty(n, Context::FlowIn))(after_break) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        // Flow line prefix for the continuation (spec [112]: exact n spaces).
+        let (prefix_tokens, final_state) = match s_flow_line_prefix(n)(after_empty) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure => return Reply::Failure,
+            other @ Reply::Error(_) => return other,
+        };
+        let mut all = ws_tokens;
+        all.push(backslash_token);
+        all.extend(break_tokens);
+        all.extend(empty_tokens);
+        all.extend(prefix_tokens);
+        Reply::Success {
+            tokens: all,
+            state: final_state,
         }
     })
 }
 
-/// [113] nb-double-multi-line(n) — multi-line body of double-quoted scalar.
-fn nb_double_multi_line(n: i32) -> Parser<'static> {
+/// [113] s-double-break(n) — break transition in double-quoted scalars.
+///
+/// Either an escaped break (`s-double-escaped`) or a flow-folded break.
+fn s_double_break(n: i32) -> Parser<'static> {
+    // s-double-escaped takes priority over s-flow-folded.
+    Box::new(move |state| match s_double_escaped(n)(state.clone()) {
+        reply @ Reply::Success { .. } => reply,
+        Reply::Failure | Reply::Error(_) => s_flow_folded(n)(state),
+    })
+}
+
+/// [115] s-double-next-line(n) — continuation line inside double-quoted scalars.
+///
+/// Per spec [115]: `s-double-break(n) (ns-double-char nb-ns-double-in-line
+/// (s-double-next-line(n) | s-white*) | "")`.
+fn s_double_next_line(n: i32) -> Parser<'static> {
     Box::new(move |state| {
-        let (ns_tokens, after_ns) = match many0(ns_double_char())(state) {
+        // Consume the break transition.
+        let (break_tokens, after_break) = match s_double_break(n)(state) {
             Reply::Success { tokens, state } => (tokens, state),
             other @ (Reply::Failure | Reply::Error(_)) => return other,
         };
-        let (rest_tokens, final_state) = match s_double_next_line(n)(after_ns.clone()) {
+        // Optional content on the continuation line.
+        // Try ns-double-char first; if absent, the break alone is valid ("").
+        let Some(ch) = after_break.peek() else {
+            // EOF after break — no more content.
+            return Reply::Success {
+                tokens: break_tokens,
+                state: after_break,
+            };
+        };
+        // Check if first char is ns-double-char (not space/tab and not `"` or `\n`/`\r`).
+        if matches!(ch, ' ' | '\t' | '"') {
+            // Not starting with ns-double-char — empty continuation.
+            return Reply::Success {
+                tokens: break_tokens,
+                state: after_break,
+            };
+        }
+        let (first_tokens, after_first) = match ns_double_char()(after_break.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => match many0(nb_double_char())(after_ns.clone()) {
+            // Not an ns-double-char — empty continuation after break.
+            Reply::Failure | Reply::Error(_) => {
+                return Reply::Success {
+                    tokens: break_tokens,
+                    state: after_break,
+                };
+            }
+        };
+        // Consume the rest of the line: (s-white* ns-double-char)*.
+        let (inline_tokens, after_inline) = match nb_ns_double_in_line()(after_first) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        // Try another continuation or trailing whitespace.
+        let (tail_tokens, final_state) = match s_double_next_line(n)(after_inline.clone()) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure | Reply::Error(_) => {
+                // Trailing s-white* at end of scalar.
+                match many0(s_white())(after_inline.clone()) {
+                    Reply::Success { tokens, state } => (tokens, state),
+                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+                }
+            }
+        };
+        let mut all = break_tokens;
+        all.extend(first_tokens);
+        all.extend(inline_tokens);
+        all.extend(tail_tokens);
+        Reply::Success {
+            tokens: all,
+            state: final_state,
+        }
+    })
+}
+
+/// [116] nb-double-multi-line(n) — multi-line body of double-quoted scalar.
+///
+/// Per spec [116]: `nb-ns-double-in-line (s-double-next-line(n) | s-white*)`.
+fn nb_double_multi_line(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        // Consume interleaved non-space content (may include spaces between ns chars).
+        let (inline_tokens, after_inline) = match nb_ns_double_in_line()(state) {
+            Reply::Success { tokens, state } => (tokens, state),
+            other @ (Reply::Failure | Reply::Error(_)) => return other,
+        };
+        // Try a continuation line, or accept trailing whitespace for last line.
+        let (tail_tokens, final_state) = match s_double_next_line(n)(after_inline.clone()) {
+            Reply::Success { tokens, state } => (tokens, state),
+            Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_ns),
+                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
             },
         };
-        let mut all = ns_tokens;
-        all.extend(rest_tokens);
+        let mut all = inline_tokens;
+        all.extend(tail_tokens);
         Reply::Success {
             tokens: all,
             state: final_state,
@@ -489,14 +606,19 @@ fn ns_plain_multi_line(n: i32, c: Context) -> Parser<'static> {
 
 /// [131] ns-plain(n,c) — a plain scalar, single- or multi-line.
 ///
+/// Per spec [131], block-key and flow-key contexts use only the one-line form.
+/// All other contexts allow continuation lines.
+///
 /// Emits `BeginScalar` / `Text` / `EndScalar`.
 #[must_use]
 pub fn ns_plain(n: i32, c: Context) -> Parser<'static> {
-    wrap_tokens(
-        Code::BeginScalar,
-        Code::EndScalar,
-        token(Code::Text, ns_plain_multi_line(n, c)),
-    )
+    let inner: Parser<'static> = match c {
+        Context::BlockKey | Context::FlowKey => token(Code::Text, ns_plain_one_line(c)),
+        Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::FlowIn => {
+            token(Code::Text, ns_plain_multi_line(n, c))
+        }
+    };
+    wrap_tokens(Code::BeginScalar, Code::EndScalar, inner)
 }
 
 // ---------------------------------------------------------------------------

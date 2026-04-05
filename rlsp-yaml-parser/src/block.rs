@@ -14,8 +14,8 @@ use crate::combinator::{
 };
 use crate::flow::{e_node, ns_flow_node};
 use crate::structure::{
-    b_comment, c_forbidden, c_ns_properties, l_empty, s_b_comment, s_indent, s_indent_lt,
-    s_l_comments, s_separate, s_separate_in_line,
+    b_comment, c_forbidden, c_ns_properties, l_empty, s_b_comment, s_indent, s_indent_content,
+    s_indent_lt, s_l_comments, s_separate, s_separate_ge, s_separate_in_line,
 };
 use crate::token::Code;
 
@@ -284,10 +284,15 @@ fn l_chomped_empty(n: i32, t: Chomping) -> Parser<'static> {
 /// [171] l-nb-literal-text(n) — one line of literal scalar content.
 ///
 /// Emits the content as a Text token (without the indentation spaces).
+///
+/// Uses `s_indent_content(n)` which requires at least n leading spaces and
+/// consumes exactly n, leaving any extras for `nb-char+`.  This matches the
+/// spec: a line with more than n spaces contributes the extra spaces as scalar
+/// content.
 fn l_nb_literal_text(n: i32) -> Parser<'static> {
     seq(
         many0(l_empty(n, Context::BlockIn)),
-        seq(s_indent(n), token(Code::Text, many1(nb_char()))),
+        seq(s_indent_content(n), token(Code::Text, many1(nb_char()))),
     )
 }
 
@@ -716,8 +721,6 @@ fn c_l_block_seq_entry(n: i32) -> Parser<'static> {
 /// Accepts compact sequences/mappings inline, or a block node on the next line.
 fn s_b_block_indented(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        let m = seq_spaces(n, c);
-
         // Try compact sequence or compact mapping inline.
         let compact = alt(ns_l_compact_sequence(n + 1), ns_l_compact_mapping(n + 1));
 
@@ -737,8 +740,9 @@ fn s_b_block_indented(n: i32, c: Context) -> Parser<'static> {
             Reply::Failure | Reply::Error(_) => {}
         }
 
-        // Try block node on next line or empty node.
-        let block_node = alt(s_l_block_node(m, c), seq(e_node(), s_l_comments()));
+        // Per spec [185]: s-l+block-node(n,c) or (e-node s-l-comments).
+        // The n here is the same n passed to s-b+block-indented, not n+m.
+        let block_node = alt(s_l_block_node(n, c), seq(e_node(), s_l_comments()));
         block_node(state)
     })
 }
@@ -1009,7 +1013,7 @@ pub fn s_l_block_node(n: i32, c: Context) -> Parser<'static> {
 #[must_use]
 pub fn s_l_flow_in_block(n: i32) -> Parser<'static> {
     seq(
-        s_separate(n + 1, Context::FlowOut),
+        s_separate_ge(n + 1, Context::FlowOut),
         seq(
             neg_lookahead(c_forbidden()),
             seq(ns_flow_node(n + 1, Context::FlowOut), s_l_comments()),
@@ -1082,22 +1086,16 @@ pub fn s_l_block_collection(n: i32, c: Context) -> Parser<'static> {
             Reply::Failure | Reply::Error(_) => (Vec::new(), after_props.clone()),
         };
 
-        // Block sequence or mapping.
+        // Block sequence or mapping per spec [200]:
+        //   l+block-sequence(seq-spaces(n,c)) | l+block-mapping(n+1)
+        // Fall back to indentation level n if the n+1 attempt fails.
         let m = seq_spaces(n, c);
-        let coll_result =
-            alt(l_block_sequence(m + 1), l_block_mapping(n + 1))(after_comments.clone());
-        let (coll_tokens, final_state) = match coll_result {
-            Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure => {
-                // Try at n.
-                match alt(l_block_sequence(n), l_block_mapping(n))(after_comments) {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure => return Reply::Failure,
-                    Reply::Error(e) => return Reply::Error(e),
-                }
-            }
-            Reply::Error(e) => return Reply::Error(e),
-        };
+        let (coll_tokens, final_state) =
+            match alt(l_block_sequence(m), l_block_mapping(n + 1))(after_comments) {
+                Reply::Success { tokens, state } => (tokens, state),
+                Reply::Failure => return Reply::Failure,
+                Reply::Error(e) => return Reply::Error(e),
+            };
 
         let mut all = prop_tokens;
         all.extend(comment_tokens);
@@ -1956,10 +1954,11 @@ mod tests {
 
     #[test]
     fn s_l_block_node_accepts_block_mapping_in_block_out() {
-        let reply = s_l_block_node(0, Context::BlockOut)(state("\nkey: value\n"));
+        // Per spec [200], block collection at n=0 requires mapping at indent n+1=1.
+        let reply = s_l_block_node(0, Context::BlockOut)(state("\n key: value\n"));
         assert!(is_success(&reply));
         let c = codes(s_l_block_node(0, Context::BlockOut)(state(
-            "\nkey: value\n",
+            "\n key: value\n",
         )));
         assert!(c.contains(&Code::BeginMapping));
     }
@@ -2017,10 +2016,11 @@ mod tests {
 
     #[test]
     fn s_l_block_collection_accepts_block_mapping() {
-        let reply = s_l_block_collection(0, Context::BlockOut)(state("\na: 1\nb: 2\n"));
+        // Per spec [200], block collection at n=0 requires mapping at indent n+1=1.
+        let reply = s_l_block_collection(0, Context::BlockOut)(state("\n a: 1\n b: 2\n"));
         assert!(is_success(&reply));
         let c = codes(s_l_block_collection(0, Context::BlockOut)(state(
-            "\na: 1\nb: 2\n",
+            "\n a: 1\n b: 2\n",
         )));
         assert!(c.contains(&Code::BeginMapping));
     }

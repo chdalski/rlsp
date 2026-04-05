@@ -11,5 +11,8 @@ description = "Spec-faithful YAML 1.2 parser with first-class comment and span s
 [dependencies]
 thiserror = "2"
 
+[dev-dependencies]
+saphyr = "0.0.6"
+
 [lints]
 workspace = true

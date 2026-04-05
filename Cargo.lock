@@ -962,6 +962,7 @@ dependencies = [
 name = "rlsp-yaml-parser"
 version = "0.1.0"
 dependencies = [
+ "saphyr",
  "thiserror",
 ]
 

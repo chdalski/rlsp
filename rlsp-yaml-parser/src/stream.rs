@@ -220,6 +220,11 @@ fn many0_progressing(p: Parser<'static>) -> Parser<'static> {
 /// Returns an empty `Vec` when the input is empty.  Tokens include all
 /// structural markers (`BeginDocument`, `EndDocument`, `DirectivesEnd`, etc.)
 /// as well as content tokens (`Text`, `Indicator`, etc.).
+///
+/// When the parser fails or does not consume all input, a final
+/// `Code::Error` token is appended at the error/remainder position.
+/// Callers (notably `parse_events`) treat this token as a signal to emit
+/// a parse error.
 #[must_use]
 pub fn tokenize(input: &str) -> Vec<Token<'_>> {
     // `Parser<'static>` (the type returned by combinators in this module)
@@ -238,10 +243,21 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
     let extended: &'static str = unsafe { &*std::ptr::from_ref::<str>(input) };
     let state: State<'static> = State::new(extended);
     match l_yaml_stream()(state) {
-        Reply::Success { tokens, .. } => unsafe {
-            // Shrink token lifetime back to `'i` (= lifetime of `input`).
-            core::mem::transmute::<Vec<Token<'static>>, Vec<Token<'_>>>(tokens)
-        },
+        Reply::Success { mut tokens, state } => {
+            if !state.input.is_empty() && state.pos.byte_offset > 0 {
+                // Parser consumed some input then stopped — remaining content is
+                // invalid YAML.
+                tokens.push(Token {
+                    code: Code::Error,
+                    pos: state.pos,
+                    text: state.input,
+                });
+            }
+            unsafe {
+                // Shrink token lifetime back to `'i` (= lifetime of `input`).
+                core::mem::transmute::<Vec<Token<'static>>, Vec<Token<'_>>>(tokens)
+            }
+        }
         Reply::Failure | Reply::Error(_) => Vec::new(),
     }
 }

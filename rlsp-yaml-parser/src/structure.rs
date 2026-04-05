@@ -45,6 +45,31 @@ pub fn s_indent(n: i32) -> Parser<'static> {
     })
 }
 
+/// s-indent-content(n) — require at least n spaces, consume exactly n.
+///
+/// Used for block scalar content lines per spec [63]: `s-indent(n)` consumes
+/// n spaces even when more are available. Extra spaces become content for
+/// `nb-char+` to consume.  Unlike the struct-level `s-indent`, this succeeds
+/// when count ≥ n rather than count == n.
+#[must_use]
+pub fn s_indent_content(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        let count = i32::try_from(state.input.chars().take_while(|&ch| ch == ' ').count())
+            .unwrap_or(i32::MAX);
+        if count < n {
+            return crate::combinator::Reply::Failure;
+        }
+        let mut s = state;
+        for _ in 0..n {
+            s = s.advance(' ');
+        }
+        crate::combinator::Reply::Success {
+            tokens: Vec::new(),
+            state: s,
+        }
+    })
+}
+
 /// [64] s-indent(<n) — fewer than n spaces (0..n-1 spaces).
 #[must_use]
 pub fn s_indent_lt(n: i32) -> Parser<'static> {
@@ -72,6 +97,30 @@ pub fn s_indent_le(n: i32) -> Parser<'static> {
         let count = i32::try_from(state.input.chars().take_while(|&ch| ch == ' ').count())
             .unwrap_or(i32::MAX);
         if count > n {
+            return crate::combinator::Reply::Failure;
+        }
+        let mut s = state;
+        for _ in 0..count {
+            s = s.advance(' ');
+        }
+        crate::combinator::Reply::Success {
+            tokens: Vec::new(),
+            state: s,
+        }
+    })
+}
+
+/// s-indent(≥n) — at least n spaces (consumes all leading spaces when ≥ n).
+///
+/// Used for flow-context line prefixes where any indentation at or beyond
+/// the minimum level is valid (e.g., continuation lines inside nested flow
+/// collections).
+#[must_use]
+pub fn s_indent_ge(n: i32) -> Parser<'static> {
+    Box::new(move |state| {
+        let count = i32::try_from(state.input.chars().take_while(|&ch| ch == ' ').count())
+            .unwrap_or(i32::MAX);
+        if count < n {
             return crate::combinator::Reply::Failure;
         }
         let mut s = state;
@@ -121,11 +170,33 @@ pub fn s_block_line_prefix(n: i32) -> Parser<'static> {
     s_indent(n)
 }
 
-/// [68] s-flow-line-prefix(n) — indentation for flow contexts: required
+/// [68] s-flow-line-prefix(n) — indentation for flow contexts: exactly
 /// n-space indent then optional in-line separation.
 #[must_use]
 pub fn s_flow_line_prefix(n: i32) -> Parser<'static> {
     seq(s_indent(n), opt(s_separate_in_line()))
+}
+
+/// s-flow-line-prefix-ge(n) — like s-flow-line-prefix but accepts ≥ n spaces.
+///
+/// Flow collections allow continuation lines with more than n spaces of
+/// indentation. Used when separating content inside flow sequences and
+/// mappings where deeper indentation is permitted.
+#[must_use]
+pub fn s_flow_line_prefix_ge(n: i32) -> Parser<'static> {
+    seq(s_indent_ge(n), opt(s_separate_in_line()))
+}
+
+/// s-separate-lines-flow(n) — like s-separate-lines but for flow contexts.
+///
+/// Accepts ≥ n spaces on continuation lines, allowing deeply-indented
+/// content inside flow collections.
+#[must_use]
+pub fn s_separate_lines_flow(n: i32) -> Parser<'static> {
+    alt(
+        seq(s_l_comments(), s_flow_line_prefix_ge(n)),
+        s_separate_in_line(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +257,7 @@ pub fn b_l_folded(n: i32, c: Context) -> Parser<'static> {
 pub fn s_flow_folded(n: i32) -> Parser<'static> {
     seq(
         opt(s_separate_in_line()),
-        seq(b_l_folded(n, Context::FlowIn), s_flow_line_prefix(n)),
+        seq(b_l_folded(n, Context::FlowIn), s_flow_line_prefix_ge(n)),
     )
 }
 
@@ -617,6 +688,20 @@ pub fn s_separate(n: i32, c: Context) -> Parser<'static> {
     match c {
         Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::FlowIn => {
             s_separate_lines(n)
+        }
+        Context::BlockKey | Context::FlowKey => s_separate_in_line(),
+    }
+}
+
+/// s-separate-ge(n,c) — like s-separate but accepts ≥ n spaces of indentation.
+///
+/// Used for separating flow content within block context where deeper
+/// indentation than the minimum is permitted.
+#[must_use]
+pub fn s_separate_ge(n: i32, c: Context) -> Parser<'static> {
+    match c {
+        Context::BlockOut | Context::BlockIn | Context::FlowOut | Context::FlowIn => {
+            s_separate_lines_flow(n)
         }
         Context::BlockKey | Context::FlowKey => s_separate_in_line(),
     }
