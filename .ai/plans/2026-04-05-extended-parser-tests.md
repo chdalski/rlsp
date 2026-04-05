@@ -37,7 +37,7 @@ written for our API.
 ## Steps
 
 - [x] Add UTF-8 and encoding edge case tests — `d972cb4`
-- [ ] Add emitter round-trip test corpus
+- [x] Add emitter round-trip test corpus — `b6c01e4`
 - [ ] Add security and robustness stress tests
 - [ ] Add duplicate key and error reporting tests
 
@@ -72,26 +72,26 @@ input at the byte/character level.
 Test that parse → emit → re-parse produces semantically
 equivalent results across all YAML features.
 
-- [ ] Plain scalars (simple, multiline, with special chars)
-- [ ] Single-quoted scalars (with escaped quotes, multiline)
-- [ ] Double-quoted scalars (with escape sequences,
+- [x] Plain scalars (simple, multiline, with special chars)
+- [x] Single-quoted scalars (with escaped quotes, multiline)
+- [x] Double-quoted scalars (with escape sequences,
       multiline, Unicode escapes)
-- [ ] Literal block scalars (clip, strip, keep chomping)
-- [ ] Folded block scalars (clip, strip, keep, with
+- [x] Literal block scalars (clip, strip, keep chomping)
+- [x] Folded block scalars (clip, strip, keep, with
       more-indented lines)
-- [ ] Block sequences (simple, nested, compact)
-- [ ] Block mappings (simple, nested, compact, explicit keys)
-- [ ] Flow sequences (simple, nested, empty, trailing comma)
-- [ ] Flow mappings (simple, nested, empty, adjacent values)
-- [ ] Anchors and aliases (round-trip preserves anchors)
-- [ ] Tags (shorthand, verbatim, non-specific)
-- [ ] Multi-document (with ---, ..., directives)
-- [ ] Comments (inline, full-line, between entries)
-- [ ] Mixed styles (flow inside block, block inside flow)
-- [ ] Empty documents and empty collections
-- [ ] Complex keys (flow collection as key, multiline key)
-- [ ] JSON-in-YAML (pure JSON parsed as YAML)
-- [ ] Large documents (1000+ entries, deeply nested)
+- [x] Block sequences (simple, nested, compact)
+- [x] Block mappings (simple, nested, compact, explicit keys)
+- [x] Flow sequences (simple, nested, empty, trailing comma)
+- [x] Flow mappings (simple, nested, empty, adjacent values)
+- [x] Anchors and aliases (round-trip preserves anchors)
+- [x] Tags (shorthand, verbatim, non-specific)
+- [x] Multi-document (with ---, ..., directives)
+- [x] Comments (inline, full-line, between entries)
+- [x] Mixed styles (flow inside block, block inside flow)
+- [x] Empty documents and empty collections
+- [x] Complex keys (flow collection as key, multiline key)
+- [x] JSON-in-YAML (pure JSON parsed as YAML)
+- [x] Large documents (1000+ entries, deeply nested)
 
 **Files:** `rlsp-yaml-parser/tests/round_trip.rs` — new
 
