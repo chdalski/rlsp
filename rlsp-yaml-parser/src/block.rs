@@ -1040,46 +1040,59 @@ fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
     )
 }
 
-/// [193] ns-s-block-map-implicit-key — optional properties then scalar as key.
+/// [193] ns-s-block-map-implicit-key — optional properties then content as key.
 ///
-/// Keys must fit on one line (block-key context). Optional anchor/tag
-/// properties may precede the scalar.
+/// Per spec [154]: `ns-flow-yaml-node(0,BLOCK-KEY) s-separate-in-line?`.
+/// Handles: alias nodes, anchored/tagged scalars, plain scalars, quoted scalars,
+/// and flow collections as keys. Properties-only keys (anchor/tag without content)
+/// are allowed when `:` follows immediately or after whitespace.
 #[must_use]
 pub fn ns_s_block_map_implicit_key() -> Parser<'static> {
     Box::new(|state| {
-        // Optional node properties (anchor/tag) before the key scalar.
+        // Try alias node first (*alias).
+        if let reply @ Reply::Success { .. } = crate::flow::c_ns_alias_node()(state.clone()) {
+            return reply;
+        }
+
+        // Optional node properties (anchor/tag) before the key content.
         let (prop_tokens, after_props) =
             match seq(c_ns_properties(0, Context::BlockKey), s_separate_in_line())(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
             };
 
-        // Key scalar: double-quoted, single-quoted, or plain.
+        // Key content: quoted scalar, plain scalar, or flow collection.
         let key_result = alt(
             crate::flow::c_double_quoted(0, Context::BlockKey),
             alt(
                 crate::flow::c_single_quoted(0, Context::BlockKey),
-                crate::flow::ns_plain(0, Context::BlockKey),
+                alt(
+                    crate::flow::ns_plain(0, Context::BlockKey),
+                    alt(
+                        crate::flow::c_flow_sequence(0, Context::BlockKey),
+                        crate::flow::c_flow_mapping(0, Context::BlockKey),
+                    ),
+                ),
             ),
         )(after_props.clone());
 
         match key_result {
             Reply::Success {
                 tokens: key_tokens,
-                state: final_state,
+                state: after_key,
             } => {
                 let mut all = prop_tokens;
                 all.extend(key_tokens);
                 Reply::Success {
                     tokens: all,
-                    state: final_state,
+                    state: after_key,
                 }
             }
             Reply::Failure => {
                 if prop_tokens.is_empty() {
                     Reply::Failure
                 } else {
-                    // Properties without scalar — treat properties alone as success.
+                    // Properties without content — valid as empty-node key.
                     Reply::Success {
                         tokens: prop_tokens,
                         state: after_props,
