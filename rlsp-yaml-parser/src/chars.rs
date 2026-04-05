@@ -403,10 +403,10 @@ fn ns_plain_safe_in<'i>() -> Parser<'i> {
 #[must_use]
 pub fn ns_plain_safe<'i>(c: Context) -> Parser<'i> {
     match c {
-        Context::BlockOut | Context::BlockIn => ns_plain_safe_out(),
-        Context::FlowOut | Context::FlowIn | Context::BlockKey | Context::FlowKey => {
-            ns_plain_safe_in()
-        }
+        // [57] ns-plain-safe(FLOW-OUT) = ns-plain-safe(BLOCK) = ns-char
+        Context::BlockOut | Context::BlockIn | Context::FlowOut => ns_plain_safe_out(),
+        // [58] ns-plain-safe(FLOW-IN) = ns-char - c-flow-indicator
+        Context::FlowIn | Context::BlockKey | Context::FlowKey => ns_plain_safe_in(),
     }
 }
 
@@ -478,7 +478,8 @@ pub fn ns_plain_char<'i>(c: Context) -> Parser<'i> {
         ch != ':'
             && ch != '#'
             && match c {
-                Context::BlockOut | Context::BlockIn => {
+                // [57] ns-plain-safe(FLOW-OUT) = ns-plain-safe(BLOCK) = ns-char
+                Context::BlockOut | Context::BlockIn | Context::FlowOut => {
                     !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
                         && matches!(ch,
                             '\x21'..='\x7E'
@@ -488,7 +489,8 @@ pub fn ns_plain_char<'i>(c: Context) -> Parser<'i> {
                             | '\u{10000}'..='\u{10FFFF}'
                         )
                 }
-                Context::FlowOut | Context::FlowIn | Context::BlockKey | Context::FlowKey => {
+                // [58] ns-plain-safe(FLOW-IN) = ns-char - c-flow-indicator
+                Context::FlowIn | Context::BlockKey | Context::FlowKey => {
                     !matches!(ch, ',' | '[' | ']' | '{' | '}')
                         && !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
                         && matches!(ch,

@@ -997,17 +997,17 @@ fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
             let (key_tokens, after_key) = match ns_s_block_map_implicit_key()(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => {
-                    if state.peek() == Some(':') {
+                    if is_value_indicator(state.input) {
                         (Vec::new(), state.clone())
                     } else {
                         return Reply::Failure;
                     }
                 }
             };
-            // Require `:` immediately (no whitespace).
-            let Some(':') = after_key.peek() else {
+            // Require `:` value indicator immediately (no whitespace).
+            if !is_value_indicator(after_key.input) {
                 return Reply::Failure;
-            };
+            }
             let colon_pos = after_key.pos;
             let after_colon = after_key.advance(':');
             let colon_token = crate::token::Token {
@@ -1038,6 +1038,19 @@ fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
             }
         }),
     )
+}
+
+/// Check if `:` at the given position is a value indicator (followed by
+/// whitespace, break, or EOF). `:` followed by a non-space ns-char is
+/// part of a plain scalar, not a value separator.
+fn is_value_indicator(input: &str) -> bool {
+    if !input.starts_with(':') {
+        return false;
+    }
+    match input[1..].chars().next() {
+        None | Some(' ' | '\t' | '\n' | '\r') => true,
+        Some(_) => false,
+    }
 }
 
 /// [193] ns-s-block-map-implicit-key — optional properties then content as key.
@@ -1115,9 +1128,9 @@ fn c_l_block_map_implicit_value(n: i32) -> Parser<'static> {
             Reply::Success { state: s, .. } if s.peek() == Some(':') => s,
             Reply::Success { .. } | Reply::Failure | Reply::Error(_) => state.clone(),
         };
-        let Some(':') = check_state.peek() else {
+        if !is_value_indicator(check_state.input) {
             return Reply::Failure;
-        };
+        }
         let colon_pos = check_state.pos;
         let after_colon = check_state.advance(':');
 
@@ -1161,7 +1174,7 @@ fn ns_l_compact_implicit_entry(n: i32) -> Parser<'static> {
             let (key_tokens, after_key) = match ns_s_block_map_implicit_key()(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => {
-                    if state.peek() == Some(':') {
+                    if is_value_indicator(state.input) {
                         (Vec::new(), state.clone())
                     } else {
                         return Reply::Failure;

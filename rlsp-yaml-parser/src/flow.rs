@@ -15,7 +15,7 @@ use crate::combinator::{
     Context, Parser, Reply, State, char_parser, many0, many1, seq, token, wrap_tokens,
 };
 use crate::structure::{
-    b_l_folded, c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix,
+    b_l_folded, c_forbidden, c_ns_properties, l_empty, s_flow_folded, s_flow_line_prefix_ge,
     s_separate, s_separate_ge, s_separate_in_line,
 };
 use crate::token::{Code, Token};
@@ -217,8 +217,8 @@ fn s_double_escaped(n: i32) -> Parser<'static> {
             Reply::Success { tokens, state } => (tokens, state),
             other @ (Reply::Failure | Reply::Error(_)) => return other,
         };
-        // Flow line prefix for the continuation (spec [112]: exact n spaces).
-        let (prefix_tokens, final_state) = match s_flow_line_prefix(n)(after_empty) {
+        // Flow line prefix for the continuation — use _ge to accept deeper indent.
+        let (prefix_tokens, final_state) = match s_flow_line_prefix_ge(n)(after_empty) {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Failure => return Reply::Failure,
             other @ Reply::Error(_) => return other,
@@ -464,11 +464,11 @@ fn s_single_next_line(n: i32) -> Parser<'static> {
                 tokens: fold_tokens,
                 state: after_fold,
             } => {
-                let (prefix_tokens, after_prefix) = match s_flow_line_prefix(n)(after_fold.clone())
-                {
-                    Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_fold),
-                };
+                let (prefix_tokens, after_prefix) =
+                    match s_flow_line_prefix_ge(n)(after_fold.clone()) {
+                        Reply::Success { tokens, state } => (tokens, state),
+                        Reply::Failure | Reply::Error(_) => (Vec::new(), after_fold),
+                    };
                 let (ns_tokens, after_ns) = match many0(ns_single_char())(after_prefix) {
                     Reply::Success { tokens, state } => (tokens, state),
                     Reply::Failure | Reply::Error(_) => return Reply::Failure,
