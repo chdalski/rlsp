@@ -63,7 +63,8 @@ invalid YAML we incorrectly accept (missing error detection).
 - [x] Fix document handling and tab failures (10/19 tests; QT73,UT92,AZW3,DK95,Y79Y,RZP5,S9E8,UGM3,XW4D deferred) — fc19ac1
 - [x] Fix remaining valid-YAML failures and deferred items (14 tests) + 1 invalid rejection — 644b55c
 - [x] Add invalid input rejection (12/15 tests; S98Z,ZXT5,Y79Y[2] deferred) — 19822fe
-- [ ] Verify 0 conformance failures, 0 unit test regressions
+- [x] Fix final 3 failures (ZXT5, S98Z, Y79Y[2]) via pre-event validation — 80c213d
+- [x] Verify 0 conformance failures, 0 unit test regressions — 351/351, 922/0 ✓
 
 ## Tasks
 
@@ -192,18 +193,18 @@ Add error detection for remaining 15 invalid-YAML cases.
 - [x] Anchor misuse (CXX2, G9HC, SY6V) — 19822fe
 - [x] Directive/document violations (5TRB, 9MQT, RXY3) — 19822fe
 - [x] Other: tabs, tags, keys (QLJ7, W9L4, Y79Y[0]) — 19822fe
-- [ ] ZXT5 — adjacent value after newline in flow (regression risk)
-- [ ] S98Z — block scalar blank-line indent auto-detection
-- [ ] Y79Y[2] — tab on empty line in flow sequence (parser limitation)
+- [x] ZXT5 — pre-event validation in event.rs (spec §7.4) — 80c213d
+- [x] S98Z — fixed blank-line indent condition in event.rs — 80c213d
+- [x] Y79Y[2] — fixed via flow_seq tracking refinement — 80c213d
 
-**Files:** `stream.rs`
+**Files:** `event.rs`, `stream.rs`
 
 ### Task 9: Final verification
 
-- [ ] Conformance test passes: 0 failures
-- [ ] All 922+ unit tests pass: 0 regressions
-- [ ] `cargo clippy --all-targets` zero warnings
-- [ ] `cargo fmt --check` clean
+- [x] Conformance test passes: 351/351 (0 failures) — 80c213d
+- [x] All 922 unit tests pass: 0 regressions — 80c213d
+- [x] `cargo clippy --all-targets` zero warnings — 80c213d
+- [x] `cargo fmt --check` clean — 80c213d
 
 ## Decisions
 
