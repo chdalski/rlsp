@@ -59,7 +59,7 @@ stopped.
 1. **Run a clean build.** Check the project root `CLAUDE.md`
    for build and test commands. Run the clean command, then
    run all tests. If `CLAUDE.md` is missing or lacks build
-   commands, reject immediately and tell the requester —
+   commands, reject immediately and message the requester —
    build commands must be documented before review can
    proceed. This avoids reacting to stale cached state.
 
@@ -86,6 +86,28 @@ stopped.
    codebase as apparently-complete work, and the gap is
    only discovered when users hit the missing
    functionality.
+
+   **Investigation and audit deliverables.** When the
+   deliverable is an investigation or audit rather than
+   code, apply scope verification to the *conclusions*,
+   not just the findings. Factual accuracy ("the
+   workaround exists") does not validate the conclusion
+   ("not actionable") — the implementor's bias toward
+   scope reduction means infeasibility claims consistently
+   overstate the barrier. For each item reported as "not
+   actionable" or "requires major work":
+   - Check whether the barrier is an external dependency
+     or a change in the project's own code. A dependency
+     barrier may genuinely block; an internal change is
+     work to be scoped, not a blocker — this distinction
+     determines whether the item is truly infeasible or
+     simply unfinished
+   - Check whether the conclusion is supported by specific
+     evidence (file path, function, scope estimate) or
+     only by a category label ("needs X enhancement")
+   - If specific evidence is missing, reject and ask the
+     implementor to provide it — the `claim-verification`
+     rule requires concrete justification for infeasibility
 
 5. **Evaluate** (see What to Review below).
 
@@ -188,7 +210,7 @@ changed files:
 
 - No dependency appears in both production and dev/test
   sections of the package manifest — if it does, reject
-  and tell the requester to resolve the miscategorization.
+  and message the requester to resolve the miscategorization.
   A dependency listed in both sections causes version
   conflicts, inflates the production bundle, and is
   resolved differently per section by package managers,

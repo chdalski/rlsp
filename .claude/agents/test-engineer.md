@@ -110,7 +110,7 @@ for sign-off:
    difficult; this checkpoint catches that.
 2. Verify all tests pass (ask the requester for test output
    or run them yourself).
-3. If tests were altered without justification, tell the
+3. If tests were altered without justification, message the
    requester to restore them and re-run.
 4. Send your **post-implementation test sign-off** to the
    requester. This confirms test coverage matches the

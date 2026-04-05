@@ -45,13 +45,22 @@ already exists or the format guide appears current.
    Claude Code merges both files at startup, so the setting
    takes effect immediately.
 
-2. **Sync the format guide** — read the canonical template
-   from `.claude/skills/ensure-plans-dir/plan-format.md`.
-   Then read `<plansDirectory>/CLAUDE.md` if it exists. If
-   the file does not exist or its content differs from the
-   template, write the template to
-   `<plansDirectory>/CLAUDE.md` using Write. If the content
-   is identical, no write is needed. The template and the
-   format guide are now both in context — plans must follow
+2. **Sync the format guide** — always read both files and
+   compare them:
+
+   a. Read the canonical template from
+      `.claude/skills/ensure-plans-dir/plan-format.md`.
+   b. Read `<plansDirectory>/CLAUDE.md` if it exists.
+   c. If the file does not exist or its content differs
+      from the template, write the template to
+      `<plansDirectory>/CLAUDE.md` using Write.
+   d. Report whether an update was written or the files
+      were already identical.
+
+   This step is unconditional — execute it every time,
+   even if the format guide appears current. A previous
+   session may have written the guide from a stale
+   template, and the only way to detect drift is to
+   compare against the canonical source. Plans must follow
    this format so future sessions can parse them without
    guessing at conventions.
