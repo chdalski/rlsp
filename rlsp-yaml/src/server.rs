@@ -844,10 +844,10 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<SelectionRange>>> {
         let uri = params.text_document.uri;
 
-        let (text, marked_yaml) = if let Ok(store) = self.document_store.lock() {
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
             let text = store.get(&uri).map(str::to_string);
-            let marked_yaml = store.get_marked_yaml(&uri).cloned();
-            (text, marked_yaml)
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -856,8 +856,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let result =
-            crate::selection::selection_ranges(&text, marked_yaml.as_ref(), &params.positions);
+        let result = crate::selection::selection_ranges(&text, docs.as_ref(), &params.positions);
         if result.is_empty() {
             return Ok(None);
         }

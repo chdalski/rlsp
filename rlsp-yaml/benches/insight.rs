@@ -14,7 +14,6 @@ use rlsp_yaml::validators::{
 };
 use rlsp_yaml_parser::node::Document;
 use rlsp_yaml_parser::pos::Span;
-use saphyr::{LoadableYamlNode, MarkedYamlOwned};
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -96,8 +95,8 @@ fn bench_hover_and_references(c: &mut Criterion) {
 /// Measures AST traversal cost as selection expands outward from cursor.
 fn bench_selection_ranges(c: &mut Criterion) {
     let text = fixtures::generate_nested_yaml(20, 3);
-    let marked_docs =
-        MarkedYamlOwned::load_from_str(&text).expect("fixture YAML parses without error");
+    let docs: Vec<Document<Span>> =
+        rlsp_yaml_parser::load(&text).expect("fixture YAML parses without error");
 
     // Cursor positions at known nesting depths (depth * 3 lines, depth * 2 cols).
     let positions_by_depth: &[(&str, &[Position])] = &[
@@ -112,7 +111,7 @@ fn bench_selection_ranges(c: &mut Criterion) {
             BenchmarkId::from_parameter(label),
             positions,
             |b, positions| {
-                b.iter(|| selection_ranges(&text, Some(&marked_docs), positions));
+                b.iter(|| selection_ranges(&text, Some(&docs), positions));
             },
         );
     }
