@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-05
 
 ## Goal
@@ -47,7 +47,7 @@ the code and improves performance.
 
 ## Steps
 
-- [ ] Audit each workaround — verify it still exists and
+- [x] Audit each workaround — verify it still exists and
       is removable
 - [ ] Simplify comment handling in formatter
 - [ ] Simplify span access in selection
@@ -58,20 +58,26 @@ the code and improves performance.
 
 ## Tasks
 
-### Task 1: Audit workarounds
+### Task 1: Audit workarounds (DONE — no code commit, read-only audit)
 
 Read the relevant source files and determine which of the
 6 workarounds still exist after the migration. Some may
 have been partially or fully removed during the type
 migration. Report findings before proceeding.
 
-- [ ] Check formatter.rs for comment extract/reattach logic
-- [ ] Check selection.rs for recursive span computation
-- [ ] Check validators.rs for text-based duplicate key scan
-- [ ] Check for eager alias resolution patterns
-- [ ] Check formatter.rs for chomping indicator handling
-- [ ] Check document boundary handling
-- [ ] Report which workarounds remain and their locations
+- [x] Check formatter.rs for comment extract/reattach logic
+- [x] Check selection.rs for recursive span computation
+- [x] Check validators.rs for text-based duplicate key scan
+- [x] Check for eager alias resolution patterns
+- [x] Check formatter.rs for chomping indicator handling
+- [x] Check document boundary handling
+- [x] Report which workarounds remain and their locations
+
+**Result:** 3 of 6 workarounds remain: #1 (comment
+extract/reattach), #2 (recursive span computation),
+#3 (text-based duplicate key scan). Workarounds #4
+(alias resolution), #5 (chomping), #6 (document
+boundaries) are already gone.
 
 **Files:** all `rlsp-yaml/src/*.rs`
 
