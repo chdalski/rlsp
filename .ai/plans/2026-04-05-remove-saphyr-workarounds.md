@@ -49,7 +49,7 @@ the code and improves performance.
 
 - [x] Audit each workaround — verify it still exists and
       is removable
-- [ ] Simplify comment handling in formatter
+- [x] Simplify comment handling in formatter (c640283)
 - [ ] Simplify span access in selection
 - [ ] Simplify duplicate key detection in validators
 - [ ] Leverage lossless alias mode where beneficial
@@ -81,7 +81,7 @@ boundaries) are already gone.
 
 **Files:** all `rlsp-yaml/src/*.rs`
 
-### Task 2: Remove comment workaround in formatter
+### Task 2: Remove comment workaround in formatter (DONE — c640283)
 
 The formatter currently works around missing inline
 comments by raw-text scanning (`extract_comments`) and
@@ -96,15 +96,15 @@ adjacent nodes instead of discarding them, then replace
 the formatter's raw-text workaround with AST-based
 comment access.
 
-- [ ] Add comment storage to the node model in
+- [x] Add comment storage to the node model in
       `rlsp-yaml-parser/src/node.rs`
-- [ ] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
+- [x] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
       to store comments on adjacent nodes instead of
       discarding them inside mappings/sequences
-- [ ] Replace `extract_comments`/`attach_comments` in
+- [x] Replace `extract_comments`/`attach_comments` in
       `formatter.rs` with AST-based comment access
-- [ ] Verify formatter comment tests pass
-- [ ] Verify comment preservation in round-trip tests
+- [x] Verify formatter comment tests pass
+- [x] Verify comment preservation in round-trip tests
 
 **Files:** `rlsp-yaml-parser/src/node.rs`,
 `rlsp-yaml-parser/src/loader.rs`, `formatter.rs`
