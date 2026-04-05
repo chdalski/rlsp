@@ -258,6 +258,11 @@ For each task slice in the plan:
    - Which advisors to consult (from the risk check above),
      or "no advisors needed" if the task is low risk and
      low uncertainty
+   - Who to submit completed work to for review (the
+     review agent's name for `SendMessage`) — the
+     developer's instructions reference this rather than
+     hardcoding a teammate name, keeping the agent file
+     reusable across workflows
 
    Send one task at a time — the developer works on a single
    task until it is committed, then receives the next one.
@@ -282,12 +287,36 @@ not touch the plan file during task execution.
 
 ### After Reviewer Approval
 
+Steps 1–3 below execute after every task approval — do not
+skip step 2 based on task complexity or developer
+performance.
+
 When the reviewer reports approval:
 
 1. **Check for supersession** — verify the current plan is
    still valid before proceeding.
-2. **Send the next task** to the developer, or proceed to
-   plan completion if all tasks are done.
+2. **Cycle the team** if more tasks remain. Delete the
+   current team via `TeamDelete`, then recreate it via
+   `TeamCreate` with all four agents. This gives every
+   agent — especially the developer — a clean context
+   window. Without cycling, the developer accumulates
+   failed attempts, stale reasoning, and trial-and-error
+   patterns from prior tasks, which degrades instruction
+   adherence and produces increasingly fragile fixes.
+   Cached content at levels 1–4 (system prompt, tools,
+   CLAUDE.md, rules) is unaffected — only the per-teammate
+   message history (level 5) resets.
+
+   After recreating the team, re-send the plan file path
+   to the `reviewer` via `SendMessage` — same handoff as
+   planning step 8. The reviewer reads the plan file
+   (which carries checkboxes and SHAs from prior tasks)
+   to resume scope tracking.
+3. **Send the next task** to the developer, or proceed to
+   plan completion if all tasks are done. Include relevant
+   cross-task context (patterns established, decisions
+   made, constraints discovered) — you are the only agent
+   with continuity across task cycles.
 
 ## What You Do and Do Not Do
 
@@ -404,20 +433,15 @@ When all tasks in a plan are committed:
 **New tasks after completion.** Each plan covers one
 feature or task. When the user requests a new task:
 
-1. **Delete the current team** via `TeamDelete` — teammates
-   carry conversation history from the completed plan, and
-   stale context from plan A pollutes decisions in plan B.
-   Deleting clears this accumulated state.
+1. **Delete the current team** via `TeamDelete` — the team
+   from the final task is still active, and the Planning
+   phase creates a fresh team — only one team can be
+   active per session.
 2. **Restart the full cycle** — clarification → planning →
    queue insertion (which includes `TeamCreate` in the
    Planning phase). Do not reuse the previous plan or skip
    clarification — the new task has its own scope, risk
    profile, and advisor needs.
-
-The new team gets fresh context windows. Cached content at
-levels 1–4 (system prompt, tools, CLAUDE.md, session state)
-is unaffected — only the per-teammate message history
-(level 5) resets, which is the desired outcome.
 
 ## Skill-Output Commits
 
