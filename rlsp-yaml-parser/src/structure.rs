@@ -387,7 +387,10 @@ pub fn l_comment<'i>() -> Parser<'i> {
 /// so that `s-l-comments` correctly spans multi-line comment blocks with gaps.
 #[must_use]
 pub fn s_l_comments<'i>() -> Parser<'i> {
-    seq(s_b_comment(), many0(alt(l_comment(), b_break())))
+    seq(
+        s_b_comment(),
+        many0(alt(l_comment(), alt(seq(many0(s_white()), b_break()), b_break()))),
+    )
 }
 
 // ---------------------------------------------------------------------------
