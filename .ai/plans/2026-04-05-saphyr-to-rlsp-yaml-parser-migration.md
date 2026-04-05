@@ -59,7 +59,7 @@ validation as the final step.
 - [x] Migrate parser.rs, document_store.rs, server.rs
       (entry points)
 - [x] Migrate symbols.rs, hover.rs, completion.rs
-- [ ] Migrate validators.rs, schema.rs, schema_validation.rs
+- [x] Migrate validators.rs, schema.rs, schema_validation.rs
 - [ ] Migrate selection.rs and formatter.rs
 - [ ] Remove saphyr dependencies, update tests, clean up
 - [ ] Wire up contentSchema validation
@@ -119,16 +119,18 @@ pattern matching users. `schema_validation.rs` (5,850 lines)
 is the largest file and uses numeric type inference
 extensively.
 
-- [ ] Migrate `validators.rs`: pattern matching refactor
-- [ ] Migrate `schema.rs`: pattern matching + type
+- [x] Migrate `validators.rs`: pattern matching refactor
+- [x] Migrate `schema.rs`: pattern matching + type
       introspection changes
-- [ ] Migrate `schema_validation.rs`: extensive pattern
+- [x] Migrate `schema_validation.rs`: extensive pattern
       matching + replace `ScalarOwned::Integer(i)` /
       `ScalarOwned::FloatingPoint(f)` with string parsing
       via helper functions
 
 **Files:** `validators.rs`, `schema.rs`,
 `schema_validation.rs`
+
+**Commit:** 906ce2e
 
 ### Task 4: Selection and formatter
 
