@@ -60,7 +60,7 @@ validation as the final step.
       (entry points)
 - [x] Migrate symbols.rs, hover.rs, completion.rs
 - [x] Migrate validators.rs, schema.rs, schema_validation.rs
-- [ ] Migrate selection.rs and formatter.rs
+- [x] Migrate selection.rs and formatter.rs
 - [ ] Remove saphyr dependencies, update tests, clean up
 - [ ] Wire up contentSchema validation
 
@@ -139,17 +139,19 @@ Migrate the two most structurally different files.
 `formatter.rs` uses low-level saphyr_parser APIs for
 comment extraction and handles scalar formatting by type.
 
-- [ ] Migrate `selection.rs`: replace all `Marker` method
+- [x] Migrate `selection.rs`: replace all `Marker` method
       calls (`.line()`, `.col()`) with `Pos` field access
       (`.line`, `.column`), replace `MarkedYamlOwned` with
       `Node<Span>`, replace span computation workarounds
       with native span access
-- [ ] Migrate `formatter.rs`: replace saphyr_parser comment
+- [x] Migrate `formatter.rs`: replace saphyr_parser comment
       extraction with `Document.comments`, replace
       `ScalarOwned` formatting switch with string-based
       formatting, remove `YamlLoader` usage
 
 **Files:** `selection.rs`, `formatter.rs`
+
+**Commit:** 6dce350
 
 ### Task 5: Remove saphyr and clean up
 
