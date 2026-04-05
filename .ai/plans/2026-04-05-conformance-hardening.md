@@ -61,8 +61,8 @@ invalid YAML we incorrectly accept (missing error detection).
 - [x] Fix anchor/property handling failures (3/8 tests; E76Z,HMQ5,P76L,7BMT,U3XV deferred) — 45ac394
 - [x] Fix plain/quoted scalar failures (5/8 tests + P76L bonus; FBC9,T4YY,NAT4 deferred) — fb583af
 - [x] Fix document handling and tab failures (10/19 tests; QT73,UT92,AZW3,DK95,Y79Y,RZP5,S9E8,UGM3,XW4D deferred) — fc19ac1
-- [ ] Fix complex/empty key and spec example failures (11 tests)
-- [ ] Add invalid input rejection (56 tests)
+- [x] Fix remaining valid-YAML failures and deferred items (14 tests) + 1 invalid rejection — 644b55c
+- [ ] Add invalid input rejection (remaining 15 tests)
 - [ ] Verify 0 conformance failures, 0 unit test regressions
 
 ## Tasks
@@ -104,11 +104,11 @@ handling.
 Fix 7 valid-YAML failures in flow collections and multiline
 flow keys/values.
 
-- [ ] 8KB6 — Multiline plain flow mapping key without value (deferred — FlowKey/context conflict)
+- [x] 8KB6 — Multiline plain flow mapping key without value (fixed in Task 7 — 644b55c)
 - [x] 9BXH — Multiline double-quoted flow mapping key
 - [x] 9SA2 — Multiline double-quoted flow mapping key
 - [x] M7NX — Nested flow collections
-- [ ] NJ66 — Multiline plain flow mapping key (deferred — FlowKey/context conflict)
+- [x] NJ66 — Multiline plain flow mapping key (fixed in Task 7 — 644b55c)
 - [ ] VJP3 — Flow collections over many lines (deferred — stream-level issue)
 - [x] LP6E — Whitespace after scalars in flow
 
@@ -121,9 +121,9 @@ properties.
 
 - [x] 6BFJ — Mapping, key and flow sequence item anchors
 - [x] 6M2F — Aliases in Explicit Block Mapping
-- [ ] 7BMT — Node and Mapping Key Anchors (deferred — multi-anchor patterns)
+- [x] 7BMT — Node and Mapping Key Anchors (fixed in Task 7 — 644b55c)
 - [ ] E76Z — Aliases in Implicit Block Mapping (deferred — whitespace-before-colon conflict)
-- [ ] U3XV — Node and Mapping Key Anchors (deferred — multi-anchor patterns)
+- [x] U3XV — Node and Mapping Key Anchors (fixed in Task 7 — 644b55c)
 - [x] 9WXW — Spec Example 6.18. Primary Tag Handle
 - [ ] HMQ5 — Spec Example 6.23. Node Properties (deferred — whitespace-before-colon conflict)
 - [x] P76L — Spec Example 6.19. Secondary Tag Handle (fixed in Task 5)
@@ -137,12 +137,12 @@ handling.
 
 - [x] 5MUD — Colon and adjacent value on next line
 - [x] DBG4 — Spec Example 7.10. Plain Characters
-- [ ] FBC9 — Allowed characters in plain scalars (deferred — multiline continuation)
+- [x] FBC9 — Allowed characters in plain scalars (fixed in Task 7 — 644b55c)
 - [x] K3WX — Colon and adjacent value after comment
 - [x] S7BG — Colon followed by comma
 - [ ] NAT4 — Various empty/newline quoted strings (deferred — empty quoted edge cases)
 - [x] Q8AD — Spec Example 7.5. Double Quoted Line Breaks
-- [ ] T4YY — Spec Example 7.9. Single Quoted Lines (deferred — single-quoted multiline)
+- [x] T4YY — Spec Example 7.9. Single Quoted Lines (fixed in Task 7 — 644b55c)
 
 **Files:** `flow.rs`, `chars.rs`
 
@@ -155,14 +155,14 @@ tabs, complex keys, and spec examples.
 - [x] M7A3 — Spec Example 9.3. Bare Documents
 - [ ] QT73 — Comment and document-end marker (deferred — multiline flow in explicit docs)
 - [x] S4T7 — Document with footer
-- [ ] UT92 — Spec Example 9.4. Explicit Documents (deferred — multiline flow in explicit docs)
+- [x] UT92 — Spec Example 9.4. Explicit Documents (fixed in Task 7 — 644b55c)
 - [x] DC7X — Various trailing tabs
 - [ ] DK95 — Tabs that look like indentation (deferred — tab-in-indentation detection)
 - [ ] Y79Y — Tabs in various contexts (deferred — tab-in-indentation detection)
 - [x] 4FJ6 — Nested implicit complex keys
 - [x] M2N8 — Question mark edge cases (fixed in Task 4)
 - [x] NKF9 — Empty keys in block and flow mapping
-- [ ] AZW3 — spec example (deferred)
+- [x] AZW3 — spec example (fixed in Task 7 — 644b55c)
 - [x] M5DY — spec example
 - [ ] RZP5 — spec example (deferred — verbatim tags)
 - [x] RZT7 — spec example
@@ -173,23 +173,29 @@ tabs, complex keys, and spec examples.
 
 **Files:** `stream.rs`, `block.rs`, `flow.rs`, `structure.rs`
 
-### Task 7: Invalid input rejection
+### Task 7: Remaining valid-YAML fixes + initial invalid rejection
 
-Add error detection for 56 invalid-YAML cases we currently
-accept. These require adding validation checks at various
-points in the parser.
+Fix deferred valid-YAML failures from Tasks 2-6 and begin
+invalid-YAML rejection. 14 valid-YAML + 1 invalid-YAML
+fixed in 644b55c. 15 invalid-YAML failures remain.
 
-- [ ] Bad indentation detection (7 tests)
-- [ ] Invalid mapping/sequence structure (9 tests)
-- [ ] Invalid flow syntax (7 tests)
-- [ ] Comment boundary violations (4 tests)
-- [ ] Anchor misuse (6 tests)
-- [ ] Directive/document violations (12 tests)
-- [ ] Other: tabs, tags, keys (11 tests)
+- [x] Deferred valid-YAML fixes (14 tests) — 644b55c
+- [x] SF5V — duplicate %YAML directive rejection — 644b55c
+
+### Task 8: Invalid input rejection (remaining 15 tests)
+
+Add error detection for remaining 15 invalid-YAML cases.
+
+- [ ] Bad indentation detection
+- [ ] Invalid mapping/sequence structure (5U3A, ZCZ6, ZL4Z)
+- [ ] Invalid flow syntax (N782, ZXT5)
+- [ ] Anchor misuse (CXX2, G9HC, SY6V)
+- [ ] Directive/document violations (5TRB, 9MQT, RXY3)
+- [ ] Other: tabs, tags, keys (QLJ7, W9L4, Y79Y, S98Z)
 
 **Files:** all parser source files
 
-### Task 8: Final verification
+### Task 9: Final verification
 
 - [ ] Conformance test passes: 0 failures
 - [ ] All 922+ unit tests pass: 0 regressions
