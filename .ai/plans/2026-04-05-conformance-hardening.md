@@ -62,7 +62,7 @@ invalid YAML we incorrectly accept (missing error detection).
 - [x] Fix plain/quoted scalar failures (5/8 tests + P76L bonus; FBC9,T4YY,NAT4 deferred) — fb583af
 - [x] Fix document handling and tab failures (10/19 tests; QT73,UT92,AZW3,DK95,Y79Y,RZP5,S9E8,UGM3,XW4D deferred) — fc19ac1
 - [x] Fix remaining valid-YAML failures and deferred items (14 tests) + 1 invalid rejection — 644b55c
-- [ ] Add invalid input rejection (remaining 15 tests)
+- [x] Add invalid input rejection (12/15 tests; S98Z,ZXT5,Y79Y[2] deferred) — 19822fe
 - [ ] Verify 0 conformance failures, 0 unit test regressions
 
 ## Tasks
@@ -185,15 +185,18 @@ fixed in 644b55c. 15 invalid-YAML failures remain.
 ### Task 8: Invalid input rejection (remaining 15 tests)
 
 Add error detection for remaining 15 invalid-YAML cases.
+12/15 fixed via post-parse validation in `stream.rs` (19822fe).
 
-- [ ] Bad indentation detection
-- [ ] Invalid mapping/sequence structure (5U3A, ZCZ6, ZL4Z)
-- [ ] Invalid flow syntax (N782, ZXT5)
-- [ ] Anchor misuse (CXX2, G9HC, SY6V)
-- [ ] Directive/document violations (5TRB, 9MQT, RXY3)
-- [ ] Other: tabs, tags, keys (QLJ7, W9L4, Y79Y, S98Z)
+- [x] Invalid mapping/sequence structure (5U3A, ZCZ6, ZL4Z) — 19822fe
+- [x] Invalid flow syntax (N782) — 19822fe
+- [x] Anchor misuse (CXX2, G9HC, SY6V) — 19822fe
+- [x] Directive/document violations (5TRB, 9MQT, RXY3) — 19822fe
+- [x] Other: tabs, tags, keys (QLJ7, W9L4, Y79Y[0]) — 19822fe
+- [ ] ZXT5 — adjacent value after newline in flow (regression risk)
+- [ ] S98Z — block scalar blank-line indent auto-detection
+- [ ] Y79Y[2] — tab on empty line in flow sequence (parser limitation)
 
-**Files:** all parser source files
+**Files:** `stream.rs`
 
 ### Task 9: Final verification
 
