@@ -81,7 +81,8 @@ high-quality crates.io package.
       style and comment preservation (41b4b4a)
 - [x] Integrate YAML test suite and reach 100% conformance
       (d1d152e — harness complete, 114 failures remaining)
-- [ ] Add benchmarks with libfyaml comparison baseline
+- [x] Add benchmarks with libfyaml comparison baseline
+      (d735435)
 
 ## Tasks
 
@@ -469,24 +470,24 @@ performance baseline.
 `benches/memory.rs`, `benches/fixtures.rs`,
 devcontainer config updates
 
-- [ ] Install libfyaml in devcontainer (add to Dockerfile:
+- [x] Install libfyaml in devcontainer (add to Dockerfile:
       build from source or install package)
-- [ ] libfyaml FFI bindings: minimal `extern "C"` bindings
+- [x] libfyaml FFI bindings: minimal `extern "C"` bindings
       for `fy_parse_load_string` / event iteration — just
       enough for benchmark comparison, not a full binding
-- [ ] Throughput benchmark: parse MB/s across document
+- [x] Throughput benchmark: parse MB/s across document
       sizes (tiny ~100B, medium ~10KB, large ~100KB, huge
       ~1MB) and styles (block-heavy, flow-heavy, scalar-
       heavy, mixed). Compare rlsp-yaml-parser vs libfyaml.
-- [ ] Latency benchmark: time-to-first-event for
+- [x] Latency benchmark: time-to-first-event for
       streaming parse. Measures responsiveness for LSP use
       case where partial results matter.
-- [ ] Memory benchmark: peak allocation during parse of
+- [x] Memory benchmark: peak allocation during parse of
       large documents. Use a custom allocator or
       `jemalloc-ctl` stats.
-- [ ] Fixture generation: reusable module generating
+- [x] Fixture generation: reusable module generating
       synthetic YAML at various sizes and complexity levels
-- [ ] Criterion integration: HTML reports, statistical
+- [x] Criterion integration: HTML reports, statistical
       significance testing, regression detection
 - [ ] Document baseline results in crate README
 
