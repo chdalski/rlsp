@@ -39,7 +39,7 @@ written for our API.
 - [x] Add UTF-8 and encoding edge case tests — `d972cb4`
 - [x] Add emitter round-trip test corpus — `b6c01e4`
 - [x] Add security and robustness stress tests — `b505a65`
-- [ ] Add duplicate key and error reporting tests
+- [x] Add duplicate key and error reporting tests — `fef078a`
 
 ## Tasks
 
@@ -123,19 +123,19 @@ input safely — no panics, no unbounded memory, no hangs.
 Test error detection and reporting quality for common
 real-world mistakes.
 
-- [ ] Duplicate plain scalar keys in block mapping
-- [ ] Duplicate quoted vs unquoted keys (same value)
-- [ ] Duplicate keys in flow mapping
-- [ ] Duplicate keys in nested mappings (different scopes
+- [x] Duplicate plain scalar keys in block mapping
+- [x] Duplicate quoted vs unquoted keys (same value)
+- [x] Duplicate keys in flow mapping
+- [x] Duplicate keys in nested mappings (different scopes
       — should NOT be flagged)
-- [ ] Duplicate keys with different types (int vs string
+- [x] Duplicate keys with different types (int vs string
       representation)
-- [ ] Error positions point to correct line and column
-- [ ] Error messages are descriptive (not just "parse error")
-- [ ] Multiple errors in one document (error recovery)
-- [ ] Error on invalid merge key values
-- [ ] Error on unterminated quoted scalars
-- [ ] Error on unterminated flow collections
+- [x] Error positions point to correct line and column
+- [x] Error messages are descriptive (not just "parse error")
+- [x] Multiple errors in one document (error recovery)
+- [x] Error on invalid merge key values
+- [x] Error on unterminated quoted scalars
+- [x] Error on unterminated flow collections
 
 **Files:** `rlsp-yaml-parser/tests/error_reporting.rs` — new
 
