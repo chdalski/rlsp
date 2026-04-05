@@ -751,32 +751,42 @@ fn c_l_block_seq_entry(n: i32) -> Parser<'static> {
     })
 }
 
-/// [185] s-b-block-indented(n,c) — content after a sequence `- `.
+/// [185] s-b+block-indented(n,c) — content after a sequence `- `.
 ///
-/// Accepts compact sequences/mappings inline, or a block node on the next line.
+/// Per spec: `( s-indent(m) ( ns-l-compact-sequence(n+1+m) |
+///              ns-l-compact-mapping(n+1+m) ) )
+///            | s-l+block-node(n,c) | ( e-node s-l-comments )`.
+///
+/// The `m` is the number of extra spaces after the `-` indicator.
+/// Compact forms use `n+1+m` as the indent level for continuation entries.
 fn s_b_block_indented(n: i32, c: Context) -> Parser<'static> {
     Box::new(move |state| {
-        // Try compact sequence or compact mapping inline.
-        let compact = alt(ns_l_compact_sequence(n + 1), ns_l_compact_mapping(n + 1));
+        // Detect m: count leading spaces (the indent after `-`).
+        let m = i32::try_from(state.input.chars().take_while(|&ch| ch == ' ').count()).unwrap_or(0);
 
-        // Try: optional sep then compact.
-        let after_sep = {
-            let sep_result = s_separate_in_line()(state.clone());
-            match sep_result {
-                Reply::Success { state: s, .. } => s,
-                Reply::Failure | Reply::Error(_) => state.clone(),
+        if m > 0 {
+            // Consume the m spaces.
+            let mut after_indent = state.clone();
+            for _ in 0..m {
+                after_indent = after_indent.advance(' ');
             }
-        };
 
-        match compact(after_sep.clone()) {
-            Reply::Success { tokens, state } => {
-                return Reply::Success { tokens, state };
+            // Try compact sequence or compact mapping at n+1+m.
+            let compact_n = n + 1 + m;
+            let compact = alt(
+                ns_l_compact_sequence(compact_n),
+                ns_l_compact_mapping(compact_n),
+            );
+
+            match compact(after_indent.clone()) {
+                Reply::Success { tokens, state } => {
+                    return Reply::Success { tokens, state };
+                }
+                Reply::Failure | Reply::Error(_) => {}
             }
-            Reply::Failure | Reply::Error(_) => {}
         }
 
         // Per spec [185]: s-l+block-node(n,c) or (e-node s-l-comments).
-        // The n here is the same n passed to s-b+block-indented, not n+m.
         let block_node = alt(s_l_block_node(n, c), seq(e_node(), s_l_comments()));
         block_node(state)
     })
@@ -973,14 +983,60 @@ fn l_block_map_explicit_value(n: i32) -> Parser<'static> {
 }
 
 /// [192] ns-l-block-map-implicit-entry(n) — key then `:` value.
+///
+/// Per spec: `( ns-s-block-map-implicit-key | e-node ) c-l-block-map-implicit-value(n)`.
+/// The key can be empty (e-node) when `:` appears without a preceding key.
+/// Does NOT consume whitespace before `:` — that is handled by compact-specific
+/// entry parsers. In the regular block mapping, `key : [flow]` must fall through
+/// to flow-in-block.
 fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
     wrap_tokens(
         Code::BeginPair,
         Code::EndPair,
-        seq(
-            ns_s_block_map_implicit_key(),
-            c_l_block_map_implicit_value(n),
-        ),
+        Box::new(move |state| {
+            let (key_tokens, after_key) = match ns_s_block_map_implicit_key()(state.clone()) {
+                Reply::Success { tokens, state } => (tokens, state),
+                Reply::Failure | Reply::Error(_) => {
+                    if state.peek() == Some(':') {
+                        (Vec::new(), state.clone())
+                    } else {
+                        return Reply::Failure;
+                    }
+                }
+            };
+            // Require `:` immediately (no whitespace).
+            let Some(':') = after_key.peek() else {
+                return Reply::Failure;
+            };
+            let colon_pos = after_key.pos;
+            let after_colon = after_key.advance(':');
+            let colon_token = crate::token::Token {
+                code: Code::Indicator,
+                pos: colon_pos,
+                text: ":",
+            };
+            let value_result = alt(
+                seq(
+                    s_separate(n, Context::BlockOut),
+                    s_l_block_node(n, Context::BlockOut),
+                ),
+                alt(
+                    s_l_block_node(n, Context::BlockIn),
+                    seq(e_node(), s_l_comments()),
+                ),
+            )(after_colon.clone());
+            let (value_tokens, final_state) = match value_result {
+                Reply::Success { tokens, state } => (tokens, state),
+                Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+            };
+            let mut all = key_tokens;
+            all.push(colon_token);
+            all.extend(value_tokens);
+            Reply::Success {
+                tokens: all,
+                state: final_state,
+            }
+        }),
     )
 }
 
@@ -1036,13 +1092,21 @@ pub fn ns_s_block_map_implicit_key() -> Parser<'static> {
 }
 
 /// [194] c-l-block-map-implicit-value(n) — `:` then block node or empty.
+///
+/// Per spec, the implicit key ends with `s-separate-in-line?` [154].
+/// Consumes optional whitespace before `:` to handle `key : value` patterns.
 fn c_l_block_map_implicit_value(n: i32) -> Parser<'static> {
     Box::new(move |state| {
-        let Some(':') = state.peek() else {
+        // Skip optional whitespace before `:`.
+        let check_state = match s_separate_in_line()(state.clone()) {
+            Reply::Success { state: s, .. } if s.peek() == Some(':') => s,
+            Reply::Success { .. } | Reply::Failure | Reply::Error(_) => state.clone(),
+        };
+        let Some(':') = check_state.peek() else {
             return Reply::Failure;
         };
-        let colon_pos = state.pos;
-        let after_colon = state.advance(':');
+        let colon_pos = check_state.pos;
+        let after_colon = check_state.advance(':');
 
         let colon_token = crate::token::Token {
             code: Code::Indicator,
@@ -1050,16 +1114,13 @@ fn c_l_block_map_implicit_value(n: i32) -> Parser<'static> {
             text: ":",
         };
 
-        // After colon: try block node (with or without separator), then empty.
         let value_result = alt(
             seq(
                 s_separate(n, Context::BlockOut),
                 s_l_block_node(n, Context::BlockOut),
             ),
             alt(
-                // Block node without preceding separator (e.g. next-line block scalar/collection).
                 s_l_block_node(n, Context::BlockIn),
-                // Empty value with trailing comments.
                 seq(e_node(), s_l_comments()),
             ),
         )(after_colon.clone());
@@ -1078,14 +1139,61 @@ fn c_l_block_map_implicit_value(n: i32) -> Parser<'static> {
     })
 }
 
+/// Compact implicit entry — allows whitespace before `:` per spec [154].
+fn ns_l_compact_implicit_entry(n: i32) -> Parser<'static> {
+    wrap_tokens(
+        Code::BeginPair,
+        Code::EndPair,
+        Box::new(move |state| {
+            let (key_tokens, after_key) = match ns_s_block_map_implicit_key()(state.clone()) {
+                Reply::Success { tokens, state } => (tokens, state),
+                Reply::Failure | Reply::Error(_) => {
+                    if state.peek() == Some(':') {
+                        (Vec::new(), state.clone())
+                    } else {
+                        return Reply::Failure;
+                    }
+                }
+            };
+            match c_l_block_map_implicit_value(n)(after_key) {
+                Reply::Success {
+                    mut tokens,
+                    state: final_state,
+                } => {
+                    let mut all = key_tokens;
+                    all.append(&mut tokens);
+                    Reply::Success {
+                        tokens: all,
+                        state: final_state,
+                    }
+                }
+                Reply::Failure => Reply::Failure,
+                Reply::Error(e) => Reply::Error(e),
+            }
+        }),
+    )
+}
+
+/// Block map entry without leading indent — explicit (`?`) or implicit key.
+/// Used in compact mappings where the first entry has no indent prefix.
+fn ns_l_block_map_entry_no_indent(n: i32) -> Parser<'static> {
+    alt(
+        c_l_block_map_explicit_entry(n),
+        ns_l_compact_implicit_entry(n),
+    )
+}
+
 /// [195] ns-l-compact-mapping(n) — compact nested mapping (no leading indent).
+///
+/// Per spec: `ns-l-block-map-entry(n) ( s-indent(n) ns-l-block-map-entry(n) )*`.
+/// Allows both explicit (`?`) and implicit key entries.
 fn ns_l_compact_mapping(n: i32) -> Parser<'static> {
     wrap_tokens(
         Code::BeginMapping,
         Code::EndMapping,
         seq(
-            ns_l_block_map_implicit_entry(n),
-            many0(seq(s_indent(n), ns_l_block_map_implicit_entry(n))),
+            ns_l_block_map_entry_no_indent(n),
+            many0(seq(s_indent(n), ns_l_block_map_entry_no_indent(n))),
         ),
     )
 }
