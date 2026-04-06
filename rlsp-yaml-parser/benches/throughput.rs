@@ -106,6 +106,18 @@ fn bench_throughput_by_size(c: &mut Criterion) {
     }
     group.finish();
 
+    let mut group = c.benchmark_group("throughput/rlsp_events");
+    for (name, yaml) in cases {
+        group.throughput(Throughput::Bytes(yaml.len() as u64));
+        group.bench_with_input(BenchmarkId::new("parse_events", name), yaml, |b, yaml| {
+            b.iter(|| {
+                let count = rlsp_yaml_parser::parse_events(black_box(yaml)).count();
+                black_box(count)
+            });
+        });
+    }
+    group.finish();
+
     let mut group = c.benchmark_group("throughput/libfyaml");
     for (name, yaml) in cases {
         group.throughput(Throughput::Bytes(yaml.len() as u64));
@@ -134,6 +146,18 @@ fn bench_throughput_by_style(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(yaml.len() as u64));
         group.bench_with_input(BenchmarkId::new("load", name), yaml, |b, yaml| {
             b.iter(|| black_box(rlsp_yaml_parser::load(black_box(yaml))));
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("throughput_style/rlsp_events");
+    for (name, yaml) in cases {
+        group.throughput(Throughput::Bytes(yaml.len() as u64));
+        group.bench_with_input(BenchmarkId::new("parse_events", name), yaml, |b, yaml| {
+            b.iter(|| {
+                let count = rlsp_yaml_parser::parse_events(black_box(yaml)).count();
+                black_box(count)
+            });
         });
     }
     group.finish();
