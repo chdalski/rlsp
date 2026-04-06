@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-06)
 **Created:** 2026-04-06
 
 ## Goal
@@ -52,7 +52,7 @@ trigger in `vscode-extension.yml` dead code.
 
 - [x] Add `trigger-vscode` job to `release-plz.yml`
 - [x] Remove dead `tags` trigger from `vscode-extension.yml`
-- [ ] Manually trigger VS Code workflow for 0.6.0 release
+- [x] Manually trigger VS Code workflow for 0.6.0 release
 
 ## Tasks
 
@@ -89,7 +89,7 @@ After Task 1 is committed and pushed, manually trigger the
 VS Code extension workflow to release the 0.6.0 extension
 that was missed.
 
-- [ ] Run `gh workflow run vscode-extension.yml`
+- [x] Run `gh workflow run vscode-extension.yml`
 - [ ] Verify the workflow starts successfully
 
 ## Decisions
