@@ -430,6 +430,51 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
 // Post-parse validation
 // ---------------------------------------------------------------------------
 
+/// Returns true if `byte` falls strictly inside any range in `ranges`.
+/// `ranges` must be sorted by start offset.
+/// Works correctly for both non-overlapping and overlapping ranges.
+fn in_sorted_ranges(byte: usize, ranges: &[(usize, usize)], max_ends: &[usize]) -> bool {
+    // All candidates have start <= byte; use partition_point to find the boundary.
+    let idx = ranges.partition_point(|&(s, _)| s <= byte);
+    if idx == 0 {
+        return false;
+    }
+    // max_ends[idx-1] is the maximum end seen in ranges[..idx].
+    // If it's <= byte, no range in the prefix can contain byte.
+    let Some(&me) = max_ends.get(idx - 1) else {
+        return false;
+    };
+    if me <= byte {
+        return false;
+    }
+    // Scan backward through candidates; prune once max_ends[k] <= byte.
+    let mut k = idx;
+    while k > 0 {
+        k -= 1;
+        let prune = max_ends.get(k).copied().unwrap_or(0);
+        if prune <= byte {
+            break;
+        }
+        if let Some(&(s, e)) = ranges.get(k) {
+            if byte > s && byte < e {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Precompute prefix-maximum of end values for a sorted range slice.
+fn prefix_max_ends(ranges: &[(usize, usize)]) -> Vec<usize> {
+    let mut v = Vec::with_capacity(ranges.len());
+    let mut max = 0usize;
+    for &(_, e) in ranges {
+        max = max.max(e);
+        v.push(max);
+    }
+    v
+}
+
 /// Reject patterns that the PEG parser accepts but the YAML spec forbids.
 #[allow(
     clippy::too_many_lines,
@@ -498,9 +543,25 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
         }
     }
 
-    let in_any =
-        |byte: usize, ranges: &[(usize, usize)]| ranges.iter().any(|&(s, e)| byte > s && byte < e);
+    // Sort ranges by start offset so in_sorted_ranges can use binary search.
+    quoted.sort_unstable_by_key(|&(s, _)| s);
+    flow.sort_unstable_by_key(|&(s, _)| s);
+    block_scalars.sort_unstable_by_key(|&(s, _)| s);
+    let quoted_max_ends = prefix_max_ends(&quoted);
+    let flow_max_ends = prefix_max_ends(&flow);
+    let block_scalars_max_ends = prefix_max_ends(&block_scalars);
+
     let lines: Vec<&str> = input.lines().collect();
+    // offsets[i] = byte offset of the start of lines[i].
+    let offsets: Vec<usize> = {
+        let mut v = Vec::with_capacity(lines.len());
+        let mut acc = 0usize;
+        for l in &lines {
+            v.push(acc);
+            acc += l.len() + 1;
+        }
+        v
+    };
 
     // Check 1: doc markers at column 0 inside quoted scalars (5TRB, RXY3, 9MQT).
     let mut offset = 0;
@@ -511,7 +572,7 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
                 .as_bytes()
                 .get(3)
                 .is_none_or(|&b| matches!(b, b' ' | b'\t'))
-            && in_any(offset, &quoted)
+            && in_sorted_ranges(offset, &quoted, &quoted_max_ends)
         {
             tokens.push(err(offset));
             return;
@@ -528,7 +589,7 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
                 .as_bytes()
                 .get(3)
                 .is_none_or(|&b| matches!(b, b' ' | b'\t'))
-            && in_any(offset, &flow)
+            && in_sorted_ranges(offset, &flow, &flow_max_ends)
         {
             tokens.push(err(offset));
             return;
@@ -553,7 +614,7 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
     offset = 0;
     for line in &lines {
         let trimmed = line.trim_start();
-        let in_bs = block_scalars.iter().any(|&(s, e)| offset > s && offset < e);
+        let in_bs = in_sorted_ranges(offset, &block_scalars, &block_scalars_max_ends);
         if !trimmed.starts_with('?')
             && !trimmed.starts_with(':')
             && !trimmed.starts_with('|')
@@ -568,7 +629,9 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
             let mut j = 0;
             while j < bytes.len() {
                 let abs = offset + j;
-                if in_any(abs, &quoted) || in_any(abs, &flow) {
+                if in_sorted_ranges(abs, &quoted, &quoted_max_ends)
+                    || in_sorted_ranges(abs, &flow, &flow_max_ends)
+                {
                     j += 1;
                     continue;
                 }
@@ -681,8 +744,7 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
             }
             if let Some(fbs) = first_blank_sp {
                 if fbs > sp {
-                    let off: usize = lines[..j].iter().map(|l| l.len() + 1).sum();
-                    tokens.push(err(off));
+                    tokens.push(err(offsets[j]));
                     return;
                 }
             }
@@ -802,21 +864,19 @@ fn validate_tokens<'a>(input: &'a str, tokens: &mut Vec<Token<'a>>) {
     }
 
     // Check 10: anchor at col 0 before seq entry in mapping context (G9HC).
+    let mut has_mapping_so_far = false;
     for (i, line) in lines.iter().enumerate() {
         if line.starts_with('&') && !line.contains(' ') && !line.contains('\t') {
             if let Some(next) = lines.get(i + 1) {
-                if next.starts_with("- ") || *next == "-" {
-                    let has_mapping = lines[..i].iter().any(|p| {
-                        let t = p.trim_start();
-                        t.contains(": ") || t.ends_with(':')
-                    });
-                    if has_mapping {
-                        let off: usize = lines[..i].iter().map(|l| l.len() + 1).sum();
-                        tokens.push(err(off));
-                        return;
-                    }
+                if (next.starts_with("- ") || *next == "-") && has_mapping_so_far {
+                    tokens.push(err(offsets[i]));
+                    return;
                 }
             }
+        }
+        let t = line.trim_start();
+        if t.contains(": ") || t.ends_with(':') {
+            has_mapping_so_far = true;
         }
     }
 
