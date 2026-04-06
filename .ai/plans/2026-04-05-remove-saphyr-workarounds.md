@@ -52,9 +52,9 @@ the code and improves performance.
 - [x] Simplify comment handling in formatter (c640283)
 - [x] Simplify span access in selection (4694575)
 - [x] Simplify duplicate key detection in validators (600fbcf)
-- [ ] Leverage lossless alias mode where beneficial
-- [ ] Leverage chomping preservation in formatter
-- [ ] Verify all tests pass after each simplification
+- [x] Leverage lossless alias mode where beneficial (12d8cdc)
+- [x] Leverage chomping preservation in formatter (12d8cdc)
+- [x] Verify all tests pass after each simplification (12d8cdc)
 
 ## Tasks
 
@@ -143,19 +143,19 @@ with AST-based key comparison using preserved keys.
 
 **Files:** `validators.rs`
 
-### Task 5: Leverage remaining new capabilities
+### Task 5: Leverage remaining new capabilities (DONE — 12d8cdc)
 
 Address any remaining workarounds: alias mode, chomping
 preservation, document boundaries.
 
-- [ ] Switch to lossless alias mode if beneficial for
+- [x] Switch to lossless alias mode if beneficial for
       anchor/alias navigation features
-- [ ] Verify chomping indicators are correctly used in
+- [x] Verify chomping indicators are correctly used in
       formatter output
-- [ ] Clean up any document boundary workarounds
-- [ ] Final verification: all tests pass, clippy clean
+- [x] Clean up any document boundary workarounds
+- [x] Final verification: all tests pass, clippy clean
 
-**Files:** various
+**Files:** `rlsp-yaml/src/validators.rs`
 
 ## Decisions
 
