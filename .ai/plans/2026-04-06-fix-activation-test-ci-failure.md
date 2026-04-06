@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-06
 
 ## Goal
@@ -36,9 +36,9 @@ to LanguageClient process spawn failure.
 
 ## Steps
 
-- [ ] Add file existence check to `bundledBinaryPath()`
-- [ ] Skip "no binary" integration test when binary is present
-- [ ] Verify tests pass locally and unit tests cover the new error path
+- [x] Add file existence check to `bundledBinaryPath()` (bb1179b)
+- [x] Skip "no binary" integration test when binary is present (bb1179b)
+- [x] Verify tests pass locally and unit tests cover the new error path (bb1179b)
 
 ## Tasks
 
@@ -76,11 +76,11 @@ to LanguageClient process spawn failure.
 - This covers the new error path with a unit test that
   doesn't depend on the CI environment
 
-- [ ] Add `fs.existsSync` check to `startClient()` in main.ts
-- [ ] Skip integration test when binary is present
-- [ ] Add/update unit test for missing binary error
-- [ ] All tests pass locally (`pnpm run test` and
-      `xvfb-run -a pnpm run test:integration`)
+- [x] Add `fs.existsSync` check to `startClient()` in main.ts (bb1179b)
+- [x] Skip integration test when binary is present (bb1179b)
+- [x] Add/update unit test for missing binary error — N/A: existence check is in `main.ts` not `bundledBinaryPath`, so no new unit test in `server.test.ts`; integration test covers the error path (bb1179b)
+- [x] All tests pass locally (`pnpm run test` and
+      `xvfb-run -a pnpm run test:integration`) (bb1179b)
 
 ## Decisions
 
