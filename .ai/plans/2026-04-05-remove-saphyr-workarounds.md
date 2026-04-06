@@ -50,7 +50,7 @@ the code and improves performance.
 - [x] Audit each workaround — verify it still exists and
       is removable
 - [x] Simplify comment handling in formatter (c640283)
-- [ ] Simplify span access in selection
+- [x] Simplify span access in selection (4694575)
 - [ ] Simplify duplicate key detection in validators
 - [ ] Leverage lossless alias mode where beneficial
 - [ ] Leverage chomping preservation in formatter
@@ -109,7 +109,7 @@ comment access.
 **Files:** `rlsp-yaml-parser/src/node.rs`,
 `rlsp-yaml-parser/src/loader.rs`, `formatter.rs`
 
-### Task 3: Fix container spans and simplify selection
+### Task 3: Fix container spans and simplify selection (DONE — 4694575)
 
 Container nodes (Mapping, Sequence) currently have
 incomplete spans — the loader uses only the
@@ -119,16 +119,16 @@ MappingEnd/SequenceEnd span (loader.rs:387-390 and
 event spans, then remove the recursive `effective_start`/
 `effective_end` workaround in `selection.rs`.
 
-- [ ] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
+- [x] Update the loader (`rlsp-yaml-parser/src/loader.rs`)
       to read MappingEnd/SequenceEnd spans and construct
       full container spans: `Span { start: start.start,
       end: end.end }`
-- [ ] Remove `effective_start`, `effective_end`, and
+- [x] Remove `effective_start`, `effective_end`, and
       `is_zero_span` from `selection.rs`
-- [ ] Replace recursive span computation in
+- [x] Replace recursive span computation in
       `collect_ancestor_spans` with direct `node.loc`
       access
-- [ ] Verify selection range tests pass
+- [x] Verify selection range tests pass
 
 **Files:** `rlsp-yaml-parser/src/loader.rs`, `selection.rs`
 
