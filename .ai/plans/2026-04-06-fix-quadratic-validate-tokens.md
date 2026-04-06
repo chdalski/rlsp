@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-06
 
 ## Goal
@@ -66,7 +66,7 @@ work.
 
 - [x] Investigate and confirm O(n²) root cause
 - [x] Investigate allocation hot spots
-- [ ] Fix O(n²) patterns in validate_tokens()
+- [x] Fix O(n²) patterns in validate_tokens() (39ba760)
 - [ ] Replace Vec<Token> with SmallVec in Reply
 - [ ] Run benchmarks and update documentation
 
@@ -109,11 +109,11 @@ function.
 5. All existing tests must pass: `cargo test -p rlsp-yaml-parser`
 6. Clippy must pass: `cargo clippy --all-targets`
 
-- [ ] Replace `in_any` with binary search
-- [ ] Pre-compute cumulative line offsets
-- [ ] Make Check 10 has_mapping incremental
-- [ ] All tests pass
-- [ ] Clippy clean
+- [x] Replace `in_any` with binary search
+- [x] Pre-compute cumulative line offsets
+- [x] Make Check 10 has_mapping incremental
+- [x] All tests pass
+- [x] Clippy clean
 
 ### Task 2: SmallVec in combinator Reply
 
