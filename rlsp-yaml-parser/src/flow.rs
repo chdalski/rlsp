@@ -19,6 +19,7 @@ use crate::structure::{
     s_separate_ge,
 };
 use crate::token::{Code, Token};
+use smallvec::{SmallVec, smallvec};
 
 // ---------------------------------------------------------------------------
 // §7.1 – Alias nodes [104]
@@ -47,7 +48,7 @@ pub fn c_ns_alias_node<'i>() -> Parser<'i> {
 #[must_use]
 pub fn e_scalar<'i>() -> Parser<'i> {
     Box::new(|state| Reply::Success {
-        tokens: Vec::new(),
+        tokens: SmallVec::new(),
         state,
     })
 }
@@ -56,7 +57,7 @@ pub fn e_scalar<'i>() -> Parser<'i> {
 #[must_use]
 pub fn e_node<'i>() -> Parser<'i> {
     Box::new(|state| Reply::Success {
-        tokens: Vec::new(),
+        tokens: SmallVec::new(),
         state,
     })
 }
@@ -100,7 +101,7 @@ pub fn nb_double_char<'i>() -> Parser<'i> {
                         let text = &start_input[..total_bytes];
                         // Emit escape as a Text token (there is no Escape code variant).
                         Reply::Success {
-                            tokens: vec![Token {
+                            tokens: smallvec![Token {
                                 code: Code::Text,
                                 pos: start_pos,
                                 text,
@@ -125,7 +126,7 @@ pub fn nb_double_char<'i>() -> Parser<'i> {
                 let new_state = state.advance(ch);
                 let byte_len = ch.len_utf8();
                 Reply::Success {
-                    tokens: vec![Token {
+                    tokens: smallvec![Token {
                         code: Code::Text,
                         pos: start_pos,
                         text: &start_input[..byte_len],
@@ -296,7 +297,7 @@ fn s_double_next_line(n: i32) -> Parser<'static> {
                 // Trailing s-white* at end of scalar.
                 match many0(s_white())(after_inline.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_inline),
                 }
             }
         };
@@ -326,7 +327,7 @@ fn nb_double_multi_line(n: i32) -> Parser<'static> {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_inline),
             },
         };
         let mut all = inline_tokens;
@@ -425,7 +426,7 @@ pub fn nb_single_char<'i>() -> Parser<'i> {
         let new_state = state.advance(ch);
         let byte_len = ch.len_utf8();
         Reply::Success {
-            tokens: vec![Token {
+            tokens: smallvec![Token {
                 code: Code::Text,
                 pos: start_pos,
                 text: &start_input[..byte_len],
@@ -515,7 +516,7 @@ fn s_single_next_line(n: i32) -> Parser<'static> {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_inline),
             },
         };
         let mut all = fold_tokens;
@@ -542,7 +543,7 @@ fn nb_single_multi_line(n: i32) -> Parser<'static> {
             Reply::Success { tokens, state } => (tokens, state),
             Reply::Failure | Reply::Error(_) => match many0(s_white())(after_inline.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_inline),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_inline),
             },
         };
         let mut all = inline_tokens;
@@ -733,7 +734,7 @@ pub fn c_flow_sequence(n: i32, c: Context) -> Parser<'static> {
             let (entries_tokens, after_entries) =
                 match ns_s_flow_seq_entries(n, inner_c)(inner_state.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), inner_state),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), inner_state),
                 };
             // Optional trailing separation.
             let after_sep2 = skip_flow_sep(n, after_entries);
@@ -793,7 +794,7 @@ fn ns_s_flow_seq_entries(n: i32, c: Context) -> Parser<'static> {
                                 if after_sep2.peek() == Some(',') {
                                     return Reply::Failure;
                                 }
-                                (Vec::new(), after_sep2)
+                                (SmallVec::new(), after_sep2)
                             }
                         };
                     all_tokens.extend(comma_tokens);
@@ -909,7 +910,7 @@ fn ns_s_flow_map_entries(n: i32, c: Context) -> Parser<'static> {
             Reply::Error(e) => return Reply::Error(e),
             Reply::Failure => {
                 return Reply::Success {
-                    tokens: Vec::new(),
+                    tokens: SmallVec::new(),
                     state,
                 };
             }
@@ -929,7 +930,7 @@ fn ns_s_flow_map_entries(n: i32, c: Context) -> Parser<'static> {
                     let (entry_tokens, after_entry) =
                         match ns_flow_map_entry(n, c)(after_sep2.clone()) {
                             Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_sep2),
+                            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_sep2),
                         };
                     all_tokens.extend(comma_tokens);
                     all_tokens.extend(entry_tokens);
@@ -969,12 +970,12 @@ fn ns_flow_map_explicit_entry(n: i32, c: Context) -> Parser<'static> {
             // Key (optional — may be empty).
             let (key_tokens, after_key) = match ns_flow_yaml_node(n, c)(after_sep.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_sep),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_sep),
             };
             // Optional value.
             let (value_tokens, final_state) = match c_ns_flow_map_value(n, c)(after_key.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_key),
             };
             let mut all = q_tokens;
             all.extend(key_tokens);
@@ -1028,7 +1029,7 @@ fn c_ns_flow_map_json_key_entry(n: i32, c: Context) -> Parser<'static> {
                     Reply::Failure | Reply::Error(_) => {
                         match c_ns_flow_map_separate_value(n, c)(after_sep.clone()) {
                             Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
+                            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_key),
                         }
                     }
                 };
@@ -1064,7 +1065,7 @@ fn ns_flow_map_yaml_key_entry(n: i32, c: Context) -> Parser<'static> {
                     Reply::Failure | Reply::Error(_) => {
                         match c_ns_flow_map_adjacent_value(n, c)(after_key.clone()) {
                             Reply::Success { tokens, state } => (tokens, state),
-                            Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
+                            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_key),
                         }
                     }
                 };
@@ -1099,12 +1100,12 @@ fn c_ns_flow_map_empty_key_entry(n: i32, c: Context) -> Parser<'static> {
             let after_sep = skip_flow_sep(n, after_colon.clone());
             let (value_tokens, final_state) = match ns_flow_node(n, c)(after_sep.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_colon),
             };
             let mut all = vec![colon_token];
             all.extend(value_tokens);
             Reply::Success {
-                tokens: all,
+                tokens: SmallVec::from_vec(all),
                 state: final_state,
             }
         }),
@@ -1128,7 +1129,7 @@ fn c_ns_flow_map_separate_value(n: i32, c: Context) -> Parser<'static> {
             None => {
                 // Colon at EOF — emit indicator, no value.
                 Reply::Success {
-                    tokens: vec![Token {
+                    tokens: smallvec![Token {
                         code: Code::Indicator,
                         pos: colon_pos,
                         text: &colon_input[..1],
@@ -1139,7 +1140,7 @@ fn c_ns_flow_map_separate_value(n: i32, c: Context) -> Parser<'static> {
             Some(',' | '}' | ']') => {
                 // Flow terminator after `:` — emit indicator with empty (e-node) value.
                 Reply::Success {
-                    tokens: vec![Token {
+                    tokens: smallvec![Token {
                         code: Code::Indicator,
                         pos: colon_pos,
                         text: &colon_input[..1],
@@ -1160,12 +1161,12 @@ fn c_ns_flow_map_separate_value(n: i32, c: Context) -> Parser<'static> {
                 let after_sep = skip_flow_sep(n, after_colon.clone());
                 let (value_tokens, final_state) = match ns_flow_node(n, c)(after_sep.clone()) {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_colon),
                 };
                 let mut all = vec![colon_token];
                 all.extend(value_tokens);
                 Reply::Success {
-                    tokens: all,
+                    tokens: SmallVec::from_vec(all),
                     state: final_state,
                 }
             }
@@ -1191,12 +1192,12 @@ fn c_ns_flow_map_adjacent_value(n: i32, c: Context) -> Parser<'static> {
         let after_sep = skip_flow_sep(n, after_colon.clone());
         let (value_tokens, final_state) = match ns_flow_node(n, c)(after_sep.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_colon),
         };
         let mut all = vec![colon_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -1272,7 +1273,7 @@ pub fn ns_flow_yaml_node(n: i32, c: Context) -> Parser<'static> {
                 let (content_tokens, final_state) =
                     match ns_flow_content(n, c)(content_state.clone()) {
                         Reply::Success { tokens, state } => (tokens, state),
-                        Reply::Failure | Reply::Error(_) => (Vec::new(), after_props),
+                        Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_props),
                     };
                 let mut all = props_tokens;
                 all.extend(content_tokens);
@@ -1302,7 +1303,7 @@ pub fn c_flow_json_node(n: i32, c: Context) -> Parser<'static> {
                 };
                 (tokens, sep_state)
             }
-            Reply::Failure | Reply::Error(_) => (Vec::new(), state),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), state),
         };
         match c_flow_json_content(n, c)(content_state) {
             Reply::Success {
@@ -1368,7 +1369,7 @@ pub fn c_ns_flow_pair(n: i32, c: Context) -> Parser<'static> {
                         Reply::Failure | Reply::Error(_) => {
                             match c_ns_flow_map_adjacent_value(n, c)(after_sep.clone()) {
                                 Reply::Success { tokens, state } => (tokens, state),
-                                Reply::Failure | Reply::Error(_) => (Vec::new(), after_key),
+                                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_key),
                             }
                         }
                     };
@@ -1448,7 +1449,7 @@ mod tests {
         matches!(reply, Reply::Failure)
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success"),

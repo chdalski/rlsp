@@ -533,7 +533,7 @@ mod tests {
         matches!(reply, Reply::Failure)
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success"),

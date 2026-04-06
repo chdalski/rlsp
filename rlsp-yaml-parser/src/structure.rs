@@ -14,6 +14,7 @@ use crate::combinator::{
     token, wrap_tokens,
 };
 use crate::token::Code;
+use smallvec::SmallVec;
 
 // ---------------------------------------------------------------------------
 // §6.1 – Indentation [63]–[65]
@@ -39,7 +40,7 @@ pub fn s_indent(n: i32) -> Parser<'static> {
             s = s.advance(' ');
         }
         crate::combinator::Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: s,
         }
     })
@@ -64,7 +65,7 @@ pub fn s_indent_content(n: i32) -> Parser<'static> {
             s = s.advance(' ');
         }
         crate::combinator::Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: s,
         }
     })
@@ -84,7 +85,7 @@ pub fn s_indent_lt(n: i32) -> Parser<'static> {
             s = s.advance(' ');
         }
         crate::combinator::Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: s,
         }
     })
@@ -104,7 +105,7 @@ pub fn s_indent_le(n: i32) -> Parser<'static> {
             s = s.advance(' ');
         }
         crate::combinator::Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: s,
         }
     })
@@ -128,7 +129,7 @@ pub fn s_indent_ge(n: i32) -> Parser<'static> {
             s = s.advance(' ');
         }
         crate::combinator::Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: s,
         }
     })
@@ -153,7 +154,7 @@ pub fn s_separate_in_line<'i>() -> Parser<'i> {
             crate::combinator::Reply::Failure if state.pos.column == 0 => {
                 // At start of line with no whitespace — zero-consumption success.
                 crate::combinator::Reply::Success {
-                    tokens: Vec::new(),
+                    tokens: SmallVec::new(),
                     state,
                 }
             }
@@ -300,7 +301,7 @@ pub fn b_comment<'i>() -> Parser<'i> {
         if state.input.is_empty() {
             // EOF is a valid comment terminator.
             return crate::combinator::Reply::Success {
-                tokens: Vec::new(),
+                tokens: SmallVec::new(),
                 state,
             };
         }
@@ -351,7 +352,7 @@ pub fn s_b_comment<'i>() -> Parser<'i> {
                     });
                     all.extend(break_tokens);
                     return Reply::Success {
-                        tokens: all,
+                        tokens: all.into(),
                         state: final_state,
                     };
                 }
@@ -622,7 +623,7 @@ pub fn c_non_specific_tag<'i>() -> Parser<'i> {
             // neg_lookahead consumed no input, but we need the seq to complete.
             // The neg_lookahead is embedded in the token above; pad with empty.
             Box::new(|state| crate::combinator::Reply::Success {
-                tokens: Vec::new(),
+                tokens: SmallVec::new(),
                 state,
             }),
         ),
@@ -691,7 +692,7 @@ pub fn c_forbidden() -> Parser<'static> {
             || after.starts_with('\r');
         if terminates {
             Reply::Success {
-                tokens: Vec::new(),
+                tokens: SmallVec::new(),
                 state,
             }
         } else {
@@ -773,7 +774,7 @@ mod tests {
         matches!(reply, Reply::Failure)
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success"),

@@ -2,6 +2,17 @@
 
 use crate::pos::Pos;
 use crate::token::{Code, Token};
+use smallvec::{SmallVec, smallvec};
+
+/// Token storage for a single combinator reply.
+///
+/// Inline capacity of 1 covers the most common replies (0–1 tokens) with no
+/// heap allocation.  Larger replies spill to the heap transparently.
+/// Capacity 1 rather than 2 keeps stack overhead manageable for deeply
+/// recursive parsers: `Token` is ~40 bytes, so `[Token; 2]` would add ~80
+/// bytes of inline storage per reply frame, risking stack overflow at the
+/// configured nesting depth limit.
+pub type TokenVec<'i> = SmallVec<[Token<'i>; 1]>;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -108,7 +119,7 @@ impl<'i> State<'i> {
 pub enum Reply<'i> {
     /// The parser matched; tokens are accumulated; state is the updated state.
     Success {
-        tokens: Vec<Token<'i>>,
+        tokens: TokenVec<'i>,
         state: State<'i>,
     },
     /// The parser did not match; no input was consumed; the state is
@@ -172,7 +183,7 @@ where
         }
         let new_state = state.advance(ch);
         Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: new_state,
         }
     })
@@ -246,7 +257,7 @@ pub fn many0<'i>(p: Parser<'i>) -> Parser<'i> {
             match p(state.clone()) {
                 Reply::Failure => {
                     return Reply::Success {
-                        tokens: all_tokens,
+                        tokens: SmallVec::from_vec(all_tokens),
                         state,
                     };
                 }
@@ -267,23 +278,26 @@ pub fn many1<'i>(p: Parser<'i>) -> Parser<'i> {
         Reply::Failure => Reply::Failure,
         Reply::Error(e) => Reply::Error(e),
         Reply::Success {
-            tokens: mut first_tokens,
+            tokens: first_tokens,
             state: mut current_state,
-        } => loop {
-            match p(current_state.clone()) {
-                Reply::Failure => {
-                    return Reply::Success {
-                        tokens: first_tokens,
-                        state: current_state,
-                    };
-                }
-                Reply::Error(e) => return Reply::Error(e),
-                Reply::Success { tokens, state: s } => {
-                    first_tokens.extend(tokens);
-                    current_state = s;
+        } => {
+            let mut all_tokens: Vec<Token<'i>> = first_tokens.into_vec();
+            loop {
+                match p(current_state.clone()) {
+                    Reply::Failure => {
+                        return Reply::Success {
+                            tokens: SmallVec::from_vec(all_tokens),
+                            state: current_state,
+                        };
+                    }
+                    Reply::Error(e) => return Reply::Error(e),
+                    Reply::Success { tokens, state: s } => {
+                        all_tokens.extend(tokens);
+                        current_state = s;
+                    }
                 }
             }
-        },
+        }
     })
 }
 
@@ -292,7 +306,7 @@ pub fn many1<'i>(p: Parser<'i>) -> Parser<'i> {
 pub fn opt<'i>(p: Parser<'i>) -> Parser<'i> {
     Box::new(move |state: State<'i>| match p(state.clone()) {
         Reply::Failure => Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state,
         },
         other @ (Reply::Success { .. } | Reply::Error(_)) => other,
@@ -320,7 +334,7 @@ pub fn exclude<'i>(p: Parser<'i>, q: Parser<'i>) -> Parser<'i> {
 pub fn lookahead<'i>(p: Parser<'i>) -> Parser<'i> {
     Box::new(move |state: State<'i>| match p(state.clone()) {
         Reply::Success { .. } => Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state,
         },
         Reply::Failure => Reply::Failure,
@@ -335,7 +349,7 @@ pub fn neg_lookahead<'i>(p: Parser<'i>) -> Parser<'i> {
     Box::new(move |state: State<'i>| match p(state.clone()) {
         Reply::Success { .. } => Reply::Failure,
         Reply::Failure => Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state,
         },
         // Propagate errors unchanged even in negative lookahead.
@@ -375,7 +389,7 @@ pub fn wrap_tokens<'i>(begin: Code, end: Code, p: Parser<'i>) -> Parser<'i> {
                 state: final_state,
             } => {
                 let end_pos = final_state.pos;
-                let mut tokens = Vec::with_capacity(inner.len() + 2);
+                let mut tokens = TokenVec::with_capacity(inner.len() + 2);
                 tokens.push(Token {
                     code: begin,
                     pos: begin_pos,
@@ -414,7 +428,7 @@ pub fn token<'i>(code: Code, p: Parser<'i>) -> Parser<'i> {
                 let consumed_bytes = final_state.pos.byte_offset - start_pos.byte_offset;
                 let text = &start_input[..consumed_bytes];
                 Reply::Success {
-                    tokens: vec![Token {
+                    tokens: smallvec![Token {
                         code,
                         pos: start_pos,
                         text,
@@ -450,7 +464,7 @@ mod tests {
         }
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success"),
@@ -909,5 +923,98 @@ mod tests {
         );
         let reply = p(state("ac"));
         assert_eq!(remaining(&reply), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // SmallVec inline/heap boundary
+    // -----------------------------------------------------------------------
+
+    fn extract_tokens(reply: Reply<'_>) -> TokenVec<'_> {
+        match reply {
+            Reply::Success { tokens, .. } => tokens,
+            Reply::Failure | Reply::Error(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn reply_success_zero_tokens_is_inline() {
+        let p = satisfy(|ch| ch == 'a');
+        let ts = extract_tokens(p(state("a")));
+        assert_eq!(ts.len(), 0);
+        assert!(!ts.spilled());
+    }
+
+    #[test]
+    fn reply_success_one_token_is_inline() {
+        let p = token(Code::Text, char_parser('a'));
+        let ts = extract_tokens(p(state("a")));
+        assert_eq!(ts.len(), 1);
+        assert!(!ts.spilled());
+    }
+
+    #[test]
+    fn reply_success_two_tokens_spills_to_heap() {
+        // Inline capacity is 1, so 2 tokens spill.
+        let p = seq(
+            token(Code::Text, char_parser('a')),
+            token(Code::Text, char_parser('b')),
+        );
+        let ts = extract_tokens(p(state("ab")));
+        assert_eq!(ts.len(), 2);
+        assert!(ts.spilled());
+    }
+
+    #[test]
+    fn reply_success_three_tokens_spills_to_heap() {
+        let p = wrap_tokens(
+            Code::BeginScalar,
+            Code::EndScalar,
+            token(Code::Text, char_parser('a')),
+        );
+        let ts = extract_tokens(p(state("a")));
+        assert_eq!(ts.len(), 3);
+        assert!(ts.spilled());
+    }
+
+    #[test]
+    fn token_codes_are_correct_after_heap_spill() {
+        let p = wrap_tokens(
+            Code::BeginScalar,
+            Code::EndScalar,
+            token(Code::Text, char_parser('a')),
+        );
+        let ts = extract_tokens(p(state("a")));
+        let codes: Vec<Code> = ts.into_iter().map(|t| t.code).collect();
+        assert_eq!(codes, vec![Code::BeginScalar, Code::Text, Code::EndScalar]);
+    }
+
+    #[test]
+    fn many0_accumulates_all_tokens_correctly_above_inline_capacity() {
+        let p = many0(token(Code::Text, char_parser('a')));
+        let ts = extract_tokens(p(state("aaa")));
+        assert_eq!(ts.len(), 3);
+        assert!(ts.iter().all(|t| t.code == Code::Text));
+    }
+
+    #[test]
+    fn many1_accumulates_all_tokens_correctly_above_inline_capacity() {
+        let p = many1(token(Code::Text, char_parser('a')));
+        let ts = extract_tokens(p(state("aaa")));
+        assert_eq!(ts.len(), 3);
+        assert!(ts.iter().all(|t| t.code == Code::Text));
+    }
+
+    #[test]
+    fn seq_merges_tokens_correctly_when_combined_count_exceeds_inline_capacity() {
+        let p = seq(
+            token(Code::Text, char_parser('a')),
+            seq(
+                token(Code::Text, char_parser('b')),
+                token(Code::Text, char_parser('c')),
+            ),
+        );
+        let ts = extract_tokens(p(state("abc")));
+        let codes: Vec<Code> = ts.into_iter().map(|t| t.code).collect();
+        assert_eq!(codes, vec![Code::Text, Code::Text, Code::Text]);
     }
 }

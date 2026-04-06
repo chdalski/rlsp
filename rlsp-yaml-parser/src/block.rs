@@ -18,6 +18,7 @@ use crate::structure::{
     s_indent_le, s_indent_lt, s_l_comments, s_separate, s_separate_ge, s_separate_in_line,
 };
 use crate::token::Code;
+use smallvec::{SmallVec, smallvec};
 
 // ---------------------------------------------------------------------------
 // Chomping indicator — Strip / Clip / Keep
@@ -61,7 +62,7 @@ fn c_indentation_indicator(state: State<'_>) -> Reply<'_> {
             let after = state.advance(ch);
             let n = i32::from(ch as u8 - b'0');
             Reply::Success {
-                tokens: vec![crate::token::Token {
+                tokens: smallvec![crate::token::Token {
                     code: Code::Meta,
                     pos: after.pos,
                     text: "",
@@ -75,7 +76,7 @@ fn c_indentation_indicator(state: State<'_>) -> Reply<'_> {
             }
         }
         _ => Reply::Success {
-            tokens: Vec::new(),
+            tokens: SmallVec::new(),
             state: State {
                 input: state.input,
                 pos: state.pos,
@@ -208,7 +209,7 @@ fn b_chomped_last(t: Chomping) -> Parser<'static> {
                 // EOF is valid for b-chomped-last when the scalar ends at EOF.
                 if state.input.is_empty() {
                     return Reply::Success {
-                        tokens: Vec::new(),
+                        tokens: SmallVec::new(),
                         state,
                     };
                 }
@@ -219,11 +220,11 @@ fn b_chomped_last(t: Chomping) -> Parser<'static> {
                 state: after_break, ..
             } => match t {
                 Chomping::Strip => Reply::Success {
-                    tokens: Vec::new(),
+                    tokens: SmallVec::new(),
                     state: after_break,
                 },
                 Chomping::Clip | Chomping::Keep => Reply::Success {
-                    tokens: vec![crate::token::Token {
+                    tokens: smallvec![crate::token::Token {
                         code: Code::LineFeed,
                         pos: state.pos,
                         text: "",
@@ -331,21 +332,21 @@ fn l_literal_content(n: i32, t: Chomping) -> Parser<'static> {
                 let cont_result = many0(b_nb_literal_next(n))(after_first.clone());
                 let (cont_tokens, after_cont) = match cont_result {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_first),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_first),
                 };
 
                 // b-chomped-last.
                 let last_result = b_chomped_last(t)(after_cont.clone());
                 let (last_tokens, after_last) = match last_result {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_cont),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_cont),
                 };
 
                 // l-chomped-empty.
                 let tail_result = l_chomped_empty(n, t)(after_last.clone());
                 let (tail_tokens, final_state) = match tail_result {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_last),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_last),
                 };
 
                 let mut all = first_tokens;
@@ -406,7 +407,7 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
             let content_result = l_chomped_empty(m, chomp)(after_header.clone());
             let (content_tokens, final_state) = match content_result {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_header),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_header),
             };
             let mut all = vec![crate::token::Token {
                 code: Code::BeginScalar,
@@ -421,7 +422,7 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
                 text: "",
             });
             return Reply::Success {
-                tokens: all,
+                tokens: SmallVec::from_vec(all),
                 state: final_state,
             };
         }
@@ -447,7 +448,7 @@ pub fn c_l_literal(n: i32) -> Parser<'static> {
             text: "",
         });
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -556,13 +557,13 @@ fn l_folded_content(n: i32, t: Chomping) -> Parser<'static> {
                 let last_result = b_chomped_last(t)(after_content.clone());
                 let (last_tokens, after_last) = match last_result {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_content),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_content),
                 };
 
                 let tail_result = l_chomped_empty(n, t)(after_last.clone());
                 let (tail_tokens, final_state) = match tail_result {
                     Reply::Success { tokens, state } => (tokens, state),
-                    Reply::Failure | Reply::Error(_) => (Vec::new(), after_last),
+                    Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_last),
                 };
 
                 let mut all = content_tokens;
@@ -618,7 +619,7 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
             let content_result = l_chomped_empty(m, chomp)(after_header.clone());
             let (content_tokens, final_state) = match content_result {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_header),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_header),
             };
             let mut all = vec![crate::token::Token {
                 code: Code::BeginScalar,
@@ -633,7 +634,7 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
                 text: "",
             });
             return Reply::Success {
-                tokens: all,
+                tokens: SmallVec::from_vec(all),
                 state: final_state,
             };
         }
@@ -658,7 +659,7 @@ pub fn c_l_folded(n: i32) -> Parser<'static> {
             text: "",
         });
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -745,7 +746,7 @@ fn c_l_block_seq_entry(n: i32) -> Parser<'static> {
         let mut all = vec![dash_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -819,7 +820,7 @@ fn c_l_block_seq_entry_no_indent(n: i32) -> Parser<'static> {
         let mut all = vec![dash_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -982,13 +983,13 @@ fn c_l_block_map_explicit_key(n: i32) -> Parser<'static> {
         let value_result = s_b_block_indented(n, Context::BlockOut)(after_q.clone());
         let (value_tokens, final_state) = match value_result {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_q),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_q),
         };
 
         let mut all = vec![q_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -1020,13 +1021,13 @@ fn l_block_map_explicit_value(n: i32) -> Parser<'static> {
         let value_result = s_b_block_indented(n, Context::BlockOut)(after_colon.clone());
         let (value_tokens, final_state) = match value_result {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_colon),
         };
 
         let mut all = vec![colon_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -1050,7 +1051,7 @@ fn ns_l_block_map_implicit_entry(n: i32) -> Parser<'static> {
                         Reply::Success { .. } | Reply::Failure | Reply::Error(_) => state.clone(),
                     };
                     if is_value_indicator(check.input) {
-                        (Vec::new(), check)
+                        (SmallVec::new(), check)
                     } else {
                         return Reply::Failure;
                     }
@@ -1118,7 +1119,7 @@ pub fn ns_s_block_map_implicit_key() -> Parser<'static> {
         let (prop_tokens, after_props) =
             match seq(c_ns_properties(0, Context::BlockKey), s_separate_in_line())(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), state.clone()),
             };
 
         // Key content: quoted scalar, plain scalar, or flow collection.
@@ -1205,13 +1206,13 @@ fn c_l_block_map_implicit_value(n: i32) -> Parser<'static> {
 
         let (value_tokens, final_state) = match value_result {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_colon),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_colon),
         };
 
         let mut all = vec![colon_token];
         all.extend(value_tokens);
         Reply::Success {
-            tokens: all,
+            tokens: SmallVec::from_vec(all),
             state: final_state,
         }
     })
@@ -1227,7 +1228,7 @@ fn ns_l_compact_implicit_entry(n: i32) -> Parser<'static> {
                 Reply::Success { tokens, state } => (tokens, state),
                 Reply::Failure | Reply::Error(_) => {
                     if is_value_indicator(state.input) {
-                        (Vec::new(), state.clone())
+                        (SmallVec::new(), state.clone())
                     } else {
                         return Reply::Failure;
                     }
@@ -1315,7 +1316,7 @@ pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
         // Optional separator — use _ge to allow content at deeper indentation.
         let (sep_tokens, after_sep) = match s_separate_ge(n + 1, c)(state.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), state.clone()),
         };
 
         // Optional properties. Separator after properties uses _ge for
@@ -1323,7 +1324,7 @@ pub fn s_l_block_scalar(n: i32, c: Context) -> Parser<'static> {
         let (prop_tokens, after_props) =
             match seq(c_ns_properties(n + 1, c), s_separate_ge(n + 1, c))(after_sep.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), after_sep.clone()),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_sep.clone()),
             };
 
         // Literal or folded scalar.
@@ -1356,13 +1357,13 @@ pub fn s_l_block_collection(n: i32, c: Context) -> Parser<'static> {
         let (prop_tokens, after_props) =
             match seq(s_separate_ge(n + 1, c), c_ns_properties(n + 1, c))(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), state.clone()),
             };
 
         // Optional s-l-comments before the collection.
         let (comment_tokens, after_comments) = match s_l_comments()(after_props.clone()) {
             Reply::Success { tokens, state } => (tokens, state),
-            Reply::Failure | Reply::Error(_) => (Vec::new(), after_props.clone()),
+            Reply::Failure | Reply::Error(_) => (SmallVec::new(), after_props.clone()),
         };
 
         // Block sequence or mapping per spec [200]:
@@ -1378,7 +1379,7 @@ pub fn s_l_block_collection(n: i32, c: Context) -> Parser<'static> {
         if !prop_tokens.is_empty() {
             let (retry_comments, retry_after) = match s_l_comments()(state.clone()) {
                 Reply::Success { tokens, state } => (tokens, state),
-                Reply::Failure | Reply::Error(_) => (Vec::new(), state.clone()),
+                Reply::Failure | Reply::Error(_) => (SmallVec::new(), state.clone()),
             };
             let without_props = alt(l_block_sequence(m), l_block_mapping(n + 1))(retry_after);
 
@@ -1449,7 +1450,7 @@ mod tests {
         matches!(reply, Reply::Failure)
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success, got failure/error"),

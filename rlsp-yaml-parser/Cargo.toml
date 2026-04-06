@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Spec-faithful YAML 1.2 parser with first-class comment and span support"
 
 [dependencies]
+smallvec = "1"
 thiserror = "2"
 
 [dev-dependencies]

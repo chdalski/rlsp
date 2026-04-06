@@ -1027,6 +1027,7 @@ version = "0.2.0"
 dependencies = [
  "criterion 0.5.1",
  "rstest",
+ "smallvec",
  "thiserror",
 ]
 

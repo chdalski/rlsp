@@ -13,11 +13,12 @@
 use crate::block::s_l_block_node;
 use crate::chars::b_break;
 use crate::combinator::{
-    Context, Parser, Reply, State, alt, char_parser, many0, many1, neg_lookahead, opt, seq,
-    wrap_tokens,
+    Context, Parser, Reply, State, TokenVec, alt, char_parser, many0, many1, neg_lookahead, opt,
+    seq, wrap_tokens,
 };
 use crate::structure::{c_forbidden, l_directive, s_l_comments};
 use crate::token::{Code, Token};
+use smallvec::smallvec;
 
 // ---------------------------------------------------------------------------
 // §9.1 – Document boundary markers [202]–[203]
@@ -38,7 +39,7 @@ pub fn c_directives_end() -> Parser<'static> {
                 // Must be followed by whitespace, break, or EOF.
                 match after.peek() {
                     None | Some(' ' | '\t' | '\n' | '\r') => Reply::Success {
-                        tokens: vec![crate::token::Token {
+                        tokens: smallvec![crate::token::Token {
                             code: Code::DirectivesEnd,
                             pos: after.pos,
                             text: "",
@@ -65,7 +66,7 @@ pub fn c_document_end() -> Parser<'static> {
         match dots(state) {
             Reply::Success { state: after, .. } => match after.peek() {
                 None | Some(' ' | '\t' | '\n' | '\r') => Reply::Success {
-                    tokens: vec![crate::token::Token {
+                    tokens: smallvec![crate::token::Token {
                         code: Code::DocumentEnd,
                         pos: after.pos,
                         text: "",
@@ -212,7 +213,7 @@ fn directives_no_dup_yaml() -> Parser<'static> {
             return Reply::Failure;
         }
         Reply::Success {
-            tokens: all_tokens,
+            tokens: TokenVec::from_vec(all_tokens),
             state: current,
         }
     })
@@ -331,7 +332,7 @@ pub fn l_yaml_stream() -> Parser<'static> {
         }
 
         Reply::Success {
-            tokens: all_tokens,
+            tokens: TokenVec::from_vec(all_tokens),
             state: current,
         }
     })
@@ -362,7 +363,7 @@ fn many0_progressing(p: Parser<'static>) -> Parser<'static> {
             }
         }
         Reply::Success {
-            tokens: all_tokens,
+            tokens: TokenVec::from_vec(all_tokens),
             state,
         }
     })
@@ -401,7 +402,10 @@ pub fn tokenize(input: &str) -> Vec<Token<'_>> {
     let extended: &'static str = unsafe { &*std::ptr::from_ref::<str>(input) };
     let state: State<'static> = State::new(extended);
     match l_yaml_stream()(state) {
-        Reply::Success { mut tokens, state } => {
+        Reply::Success { tokens, state } => {
+            // Convert SmallVec → Vec before the transmute: the public API
+            // returns Vec<Token<'_>> and validate_tokens takes &mut Vec.
+            let mut tokens: Vec<Token<'static>> = tokens.into_vec();
             if !state.input.is_empty()
                 && !state
                     .input
@@ -913,7 +917,7 @@ mod tests {
         matches!(reply, Reply::Failure)
     }
 
-    fn remaining<'a>(reply: &'a Reply<'a>) -> &'a str {
+    fn remaining<'i>(reply: &Reply<'i>) -> &'i str {
         match reply {
             Reply::Success { state, .. } => state.input,
             Reply::Failure | Reply::Error(_) => panic!("expected success, got failure/error"),
@@ -1428,5 +1432,28 @@ mod tests {
         // Verify no token has Code::Error.
         let tokens = tokenize("key: value\n");
         assert!(!tokens.iter().any(|t| t.code == Code::Error));
+    }
+
+    // -----------------------------------------------------------------------
+    // Group 9: SmallVec → Vec conversion path (spike + additional)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tokenize_returns_correct_vec_type_and_tokens_after_smallvec_conversion() {
+        // Spike: verify SmallVec→Vec conversion path in tokenize() is correct.
+        let tokens = tokenize("key: value\n");
+        assert!(!tokens.is_empty());
+        assert!(!tokens.iter().any(|t| t.code == Code::Error));
+        assert!(tokens.iter().any(|t| t.code == Code::BeginDocument));
+        assert!(tokens.iter().any(|t| t.code == Code::EndDocument));
+    }
+
+    #[test]
+    fn tokenize_multi_token_document_all_tokens_have_correct_provenance() {
+        let tokens = tokenize("a: b\nc: d\n");
+        assert!(!tokens.iter().any(|t| t.code == Code::Error));
+        for t in tokens.iter().filter(|t| t.code == Code::Text) {
+            assert!(!t.text.is_empty(), "Text token must have non-empty text");
+        }
     }
 }
