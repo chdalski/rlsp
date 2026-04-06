@@ -67,7 +67,7 @@ work.
 - [x] Investigate and confirm O(n²) root cause
 - [x] Investigate allocation hot spots
 - [x] Fix O(n²) patterns in validate_tokens() (39ba760)
-- [ ] Replace Vec<Token> with SmallVec in Reply
+- [x] Replace Vec<Token> with SmallVec in Reply (15f84d6)
 - [ ] Run benchmarks and update documentation
 
 ## Tasks
@@ -160,12 +160,12 @@ failure, single-token matches).
 5. All existing tests must pass.
 6. Clippy must pass.
 
-- [ ] Add smallvec dependency
-- [ ] Change Reply to use SmallVec
-- [ ] Update all combinator functions
-- [ ] Update callers (stream.rs, event.rs, loader.rs)
-- [ ] All tests pass
-- [ ] Clippy clean
+- [x] Add smallvec dependency
+- [x] Change Reply to use SmallVec
+- [x] Update all combinator functions
+- [x] Update callers (stream.rs, block.rs, flow.rs, structure.rs)
+- [x] All tests pass
+- [x] Clippy clean
 
 ### Task 3: Run benchmarks and update documentation
 
