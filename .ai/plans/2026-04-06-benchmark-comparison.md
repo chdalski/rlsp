@@ -36,7 +36,7 @@ document.
 
 - [x] Add rlsp `parse_events` to throughput benchmarks
 - [x] Add libfyaml full-drain to latency benchmarks
-- [ ] Add real-world YAML fixture (Kubernetes deployment)
+- [x] Add real-world YAML fixture (Kubernetes deployment)
 - [ ] Run all benchmarks and collect results
 - [ ] Write benchmark comparison document
 
@@ -69,7 +69,7 @@ Files: `benches/throughput.rs`, `benches/latency.rs`
 - [x] `latency/libfyaml_full` group (by size)
 - [x] All benchmarks compile and run
 
-### Task 2: Add real-world YAML fixture
+### Task 2: Add real-world YAML fixture ✓ 92fdac7
 
 Add a representative Kubernetes Deployment manifest to the
 fixture module and benchmark it across all three targets.
@@ -93,9 +93,9 @@ fixture module and benchmark it across all three targets.
 Files: `benches/fixtures.rs`, `benches/throughput.rs`,
 `benches/latency.rs`, `benches/memory.rs`
 
-- [ ] `kubernetes_deployment()` fixture function
-- [ ] Real-world benchmark groups in all three bench files
-- [ ] All benchmarks compile and run
+- [x] `kubernetes_deployment()` fixture function
+- [x] Real-world benchmark groups in all three bench files
+- [x] All benchmarks compile and run
 
 ### Task 3: Run benchmarks and document results
 
