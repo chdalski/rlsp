@@ -48,7 +48,7 @@ fn bench_validators_individual(c: &mut Criterion) {
     });
 
     group.bench_function("validate_duplicate_keys", |b| {
-        b.iter(|| validate_duplicate_keys(&text));
+        b.iter(|| validate_duplicate_keys(&docs));
     });
 
     group.finish();

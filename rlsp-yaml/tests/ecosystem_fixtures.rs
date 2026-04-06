@@ -51,7 +51,8 @@ fn assert_round_trip(label: &str, text: &str) {
 /// Assert that the given valid YAML text produces no duplicate-key or
 /// flow-style false-positive diagnostics.
 fn assert_no_false_positives(label: &str, text: &str) {
-    let dup_diags = validate_duplicate_keys(text);
+    let docs = parse_yaml(text).documents;
+    let dup_diags = validate_duplicate_keys(&docs);
     assert!(
         dup_diags.is_empty(),
         "{label}: unexpected duplicate-key diagnostics: {dup_diags:?}"

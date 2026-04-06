@@ -370,7 +370,9 @@ impl Backend {
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validators::validate_unused_anchors(text));
         diagnostics.extend(crate::validators::validate_flow_style(text));
-        diagnostics.extend(crate::validators::validate_duplicate_keys(text));
+        diagnostics.extend(crate::validators::validate_duplicate_keys(
+            &result.documents,
+        ));
 
         // Custom tag validation: merge workspace settings tags with per-document modeline tags.
         // get_custom_tags() and get_key_ordering() acquire and release the settings lock before

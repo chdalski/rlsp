@@ -44,7 +44,7 @@ fn bench_parse_and_validate(c: &mut Criterion) {
                     &allowed_tags,
                 );
                 let _ = validate_key_ordering(text, &result.documents);
-                let _ = validate_duplicate_keys(text);
+                let _ = validate_duplicate_keys(&result.documents);
             });
         });
     }
