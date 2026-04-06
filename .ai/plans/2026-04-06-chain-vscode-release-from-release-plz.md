@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-06
 
 ## Goal
@@ -50,8 +50,8 @@ trigger in `vscode-extension.yml` dead code.
 
 ## Steps
 
-- [ ] Add `trigger-vscode` job to `release-plz.yml`
-- [ ] Remove dead `tags` trigger from `vscode-extension.yml`
+- [x] Add `trigger-vscode` job to `release-plz.yml`
+- [x] Remove dead `tags` trigger from `vscode-extension.yml`
 - [ ] Manually trigger VS Code workflow for 0.6.0 release
 
 ## Tasks
@@ -79,9 +79,9 @@ from `on.push` — it is dead code (never fires due to
 trigger for CI and the `workflow_dispatch` trigger for
 releases.
 
-- [ ] Add `trigger-vscode` job to `release-plz.yml`
-- [ ] Remove dead `tags` trigger from `vscode-extension.yml`
-- [ ] Verify workflow YAML is valid
+- [x] Add `trigger-vscode` job to `release-plz.yml` (6442554)
+- [x] Remove dead `tags` trigger from `vscode-extension.yml` (6442554)
+- [x] Verify workflow YAML is valid (6442554)
 
 ### Task 2: Trigger VS Code 0.6.0 release
 
