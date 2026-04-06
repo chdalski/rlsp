@@ -137,58 +137,14 @@ const fn node_span(node: &Node<Span>) -> Span {
     }
 }
 
-/// Compute effective start Pos for a node, recursing into containers
-/// whose own span is zero to find their first child's start.
-fn effective_start(node: &Node<Span>) -> Option<rlsp_yaml_parser::pos::Pos> {
-    let span = node_span(node);
-    if !is_zero_span(&span) {
-        return Some(span.start);
-    }
-    match node {
-        Node::Mapping { entries, .. } => entries
-            .iter()
-            .filter_map(|(k, _)| effective_start(k))
-            .min_by_key(|p| (p.line, p.column)),
-        Node::Sequence { items, .. } => items
-            .iter()
-            .filter_map(effective_start)
-            .min_by_key(|p| (p.line, p.column)),
-        Node::Scalar { .. } | Node::Alias { .. } => None,
-    }
-}
-
-/// Compute effective end Pos for a node, recursing into containers
-/// whose own span is zero to find their last child's end.
-fn effective_end(node: &Node<Span>) -> Option<rlsp_yaml_parser::pos::Pos> {
-    let span = node_span(node);
-    if !is_zero_span(&span) {
-        return Some(span.end);
-    }
-    match node {
-        Node::Mapping { entries, .. } => entries
-            .iter()
-            .filter_map(|(_, v)| effective_end(v))
-            .max_by_key(|p| (p.line, p.column)),
-        Node::Sequence { items, .. } => items
-            .iter()
-            .filter_map(effective_end)
-            .max_by_key(|p| (p.line, p.column)),
-        Node::Scalar { .. } | Node::Alias { .. } => None,
-    }
-}
-
-/// A span is "zero" if start == end (container nodes in the parser may have this).
-fn is_zero_span(span: &Span) -> bool {
-    span.start == span.end
-}
-
 /// Recursively collect ancestor spans for the cursor, innermost-first.
 ///
 /// `rlsp-yaml-parser` Pos convention: line is 1-based, column is 0-based.
 /// LSP Position: both 0-based.
 ///
-/// Container nodes (Mapping, Sequence) may have zero spans — their
-/// extent is computed from their children's spans.
+/// Container nodes (Mapping, Sequence) carry full spans from the loader
+/// (start from the opening token, end from the closing token), so `node.loc`
+/// is used directly without any recursive child-span fallback.
 fn collect_ancestor_spans(
     node: &Node<Span>,
     line: usize,
@@ -202,9 +158,7 @@ fn collect_ancestor_spans(
             for (key, value) in entries {
                 let key_span = node_span(key);
                 let key_line_0 = key_span.start.line.saturating_sub(1);
-
-                // Determine value's end, accounting for zero-span containers
-                let val_end = effective_end(value).unwrap_or(key_span.end);
+                let val_end = node_span(value).end;
                 let entry_end_line_0 = val_end.line.saturating_sub(1);
 
                 if line < key_line_0 || line > entry_end_line_0 {
@@ -214,11 +168,10 @@ fn collect_ancestor_spans(
                 // Recurse into value first (innermost wins)
                 collect_ancestor_spans(value, line, col, ancestor_spans);
                 if ancestor_spans.len() > depth_before {
-                    let entry_span = Span {
+                    ancestor_spans.push(Span {
                         start: key_span.start,
                         end: val_end,
-                    };
-                    ancestor_spans.push(entry_span);
+                    });
                     break;
                 }
 
@@ -226,21 +179,19 @@ fn collect_ancestor_spans(
                 if key_line_0 == line && col >= key_span.start.column && col <= key_span.end.column
                 {
                     ancestor_spans.push(key_span);
-                    let entry_span = Span {
+                    ancestor_spans.push(Span {
                         start: key_span.start,
                         end: val_end,
-                    };
-                    ancestor_spans.push(entry_span);
+                    });
                     break;
                 }
 
                 // Cursor is within the entry's line range but not in key or value
                 if key_line_0 == line {
-                    let entry_span = Span {
+                    ancestor_spans.push(Span {
                         start: key_span.start,
                         end: val_end,
-                    };
-                    ancestor_spans.push(entry_span);
+                    });
                     break;
                 }
             }
@@ -248,36 +199,21 @@ fn collect_ancestor_spans(
         Node::Sequence { items, .. } => {
             for item in items {
                 let item_span = node_span(item);
-                let has_real_span = !is_zero_span(&item_span);
+                let start_line_0 = item_span.start.line.saturating_sub(1);
+                let end_line_0 = item_span.end.line.saturating_sub(1);
 
-                let eff_start = effective_start(item);
-                let eff_end = if has_real_span {
-                    Some(item_span.end)
-                } else {
-                    effective_end(item)
-                };
-
-                if let (Some(start_pos), Some(end_pos)) = (eff_start, eff_end) {
-                    let start_line_0 = start_pos.line.saturating_sub(1);
-                    let end_line_0 = end_pos.line.saturating_sub(1);
-                    if line < start_line_0 || line > end_line_0 {
-                        continue;
-                    }
+                if line < start_line_0 || line > end_line_0 {
+                    continue;
                 }
 
                 collect_ancestor_spans(item, line, col, ancestor_spans);
                 if ancestor_spans.len() > depth_before {
-                    if let (Some(start_pos), Some(end_pos)) = (eff_start, eff_end) {
-                        ancestor_spans.push(Span {
-                            start: start_pos,
-                            end: end_pos,
-                        });
-                    }
+                    ancestor_spans.push(item_span);
                     break;
                 }
 
-                // Leaf item with real span and cursor within it
-                if has_real_span && col >= item_span.start.column {
+                // Leaf item — cursor is within its line range
+                if col >= item_span.start.column {
                     ancestor_spans.push(item_span);
                     break;
                 }
@@ -674,5 +610,187 @@ mod tests {
         let docs = parse_docs(text);
         let result = selection_ranges(text, docs.as_ref(), &[pos(2, 4)]);
         let _ = result;
+    }
+
+    // ---- Tests for real-span traversal (containers have correct spans after loader fix) ----
+
+    /// Test 14 — nested mapping value selection produces correct line bounds.
+    ///
+    /// With real container spans, `node.loc` is used directly; no recursive
+    /// `effective_start`/`effective_end` fallback is needed.
+    #[test]
+    fn nested_mapping_value_selection_has_correct_line_bounds() {
+        let text = "server:\n  host: localhost\n  port: 8080\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 8)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+        assert_eq!(
+            sr.range.start.line, 2,
+            "innermost should be on line 2 (port value)"
+        );
+
+        let parent = sr
+            .parent
+            .as_ref()
+            .expect("should have parent (port: 8080 entry)");
+        assert_eq!(
+            parent.range.start.line, 2,
+            "entry range should start on line 2"
+        );
+
+        let grandparent = parent
+            .parent
+            .as_ref()
+            .expect("should have grandparent (server mapping)");
+        assert!(
+            grandparent.range.start.line <= 1,
+            "server mapping should start at line 0 or 1, got {}",
+            grandparent.range.start.line
+        );
+    }
+
+    /// Test 15 — sequence item selection produces correct line bounds.
+    ///
+    /// Sequence items were the primary consumer of `effective_start`/`effective_end`
+    /// for zero-span containers. With real spans, direct `node.loc` access suffices.
+    #[test]
+    fn sequence_item_selection_has_correct_line_bounds() {
+        let text = "items:\n  - alpha\n  - beta\n  - gamma\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(3, 5)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+        assert_eq!(
+            sr.range.start.line, 3,
+            "innermost should be on line 3 (gamma)"
+        );
+
+        assert!(
+            sr.parent.is_some(),
+            "should have parent covering sequence items"
+        );
+        assert!(
+            sr.parent.as_ref().expect("parent").parent.is_some(),
+            "should have at least three levels of parent chain"
+        );
+    }
+
+    /// Test 17 — cursor on key of nested mapping expands correctly.
+    ///
+    /// `collect_ancestor_spans` key-detection logic must work after replacing
+    /// `effective_end(value).unwrap_or(key_span.end)` with direct `node.loc.end`.
+    #[test]
+    fn cursor_on_key_of_nested_mapping_expands_correctly() {
+        let text = "outer:\n  inner: leaf\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 2)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+        // Innermost: the `inner` key span
+        assert_eq!(sr.range.start.line, 1, "key span should be on line 1");
+
+        let parent = sr
+            .parent
+            .as_ref()
+            .expect("should have parent (inner: leaf entry)");
+        assert_eq!(
+            parent.range.start.line, 1,
+            "entry range should start at line 1"
+        );
+
+        let grandparent = parent.parent.as_ref().expect("should have grandparent");
+        assert!(
+            grandparent.range.start.line <= 1,
+            "outer mapping parent should start at line 0 or 1, got {}",
+            grandparent.range.start.line
+        );
+    }
+
+    /// Test 18 — three-level nesting produces at least 4 levels in the selection chain.
+    #[test]
+    fn deeply_nested_sequence_selection_chain_depth() {
+        let text = "list:\n  - nested:\n      - leaf\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 8)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+
+        let mut depth = 1usize;
+        let mut current = sr;
+        while let Some(ref p) = current.parent {
+            depth += 1;
+            current = p;
+        }
+        assert!(
+            depth >= 4,
+            "expected at least 4 levels in selection chain, got {depth}"
+        );
+    }
+
+    /// Test 19 — regression: top-level key:value selection has exact line 0 bounds.
+    #[test]
+    fn regression_value_range_start_line_is_zero_for_top_level_key() {
+        let text = "key: value\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 6)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+        assert_eq!(sr.range.start.line, 0, "value range start should be line 0");
+        assert_eq!(sr.range.end.line, 0, "value range end should be line 0");
+
+        let parent = sr
+            .parent
+            .as_ref()
+            .expect("should have parent (key-value entry)");
+        assert_eq!(
+            parent.range.start.line, 0,
+            "entry range start should be line 0"
+        );
+        assert_eq!(parent.range.end.line, 0, "entry range end should be line 0");
+    }
+
+    /// Test 20 — regression: nested mapping selection has correct grandparent line.
+    ///
+    /// With real container spans, the outer `server` mapping now has a proper span
+    /// that covers both lines. The grandparent range should start at line 0.
+    #[test]
+    fn regression_nested_mapping_host_line_is_one() {
+        let text = "server:\n  host: localhost\n";
+        let docs = parse_docs(text);
+        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 8)]);
+
+        assert_eq!(result.len(), 1);
+        let sr = &result[0];
+        assert_eq!(
+            sr.range.start.line, 1,
+            "value (localhost) should be on line 1"
+        );
+        assert_eq!(sr.range.end.line, 1, "value end should also be line 1");
+
+        let parent = sr
+            .parent
+            .as_ref()
+            .expect("should have parent (host: localhost)");
+        assert_eq!(parent.range.start.line, 1, "entry should start on line 1");
+
+        let grandparent = parent
+            .parent
+            .as_ref()
+            .expect("should have grandparent (server mapping)");
+        assert_eq!(
+            grandparent.range.start.line, 0,
+            "server mapping should start at line 0 (has real span now)"
+        );
+
+        assert!(
+            grandparent.parent.is_some(),
+            "should have great-grandparent (document root)"
+        );
     }
 }

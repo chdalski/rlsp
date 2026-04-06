@@ -1254,9 +1254,22 @@ mod tests {
         let docs = load(yaml).expect("parse failed");
         let result = emit(&docs, &default_config());
         let reloaded = reload_one(&result);
-        let original = load(yaml).unwrap().into_iter().next().unwrap().root;
-        // Value-level equality (ignore location spans).
-        assert_eq!(format!("{reloaded:?}"), format!("{original:?}"));
+        // Value-level equality: the reloaded mapping must contain the same key/value scalars.
+        // Spans are intentionally not compared — the emitter may change whitespace.
+        let Node::Mapping { entries, .. } = reloaded else {
+            panic!("expected Mapping after reload");
+        };
+        let [(key, val)] = entries.as_slice() else {
+            panic!("expected exactly one entry, got {}", entries.len());
+        };
+        assert!(
+            matches!(key, Node::Scalar { value, .. } if value == "greeting"),
+            "key mismatch: {key:?}"
+        );
+        assert!(
+            matches!(val, Node::Scalar { value, .. } if value == "hello"),
+            "value mismatch: {val:?}"
+        );
     }
 
     #[test]

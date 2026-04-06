@@ -392,17 +392,24 @@ impl<'opt> LoadState<'opt> {
 
                     entries.push((key, value));
                 }
-                // Consume MappingEnd.
-                if matches!(events.get(*pos), Some((Event::MappingEnd, _))) {
+                // Consume MappingEnd and capture its span to form the full container span.
+                let end_span = if let Some((Event::MappingEnd, end)) = events.get(*pos) {
+                    let s = *end;
                     *pos += 1;
-                }
+                    s
+                } else {
+                    span
+                };
                 self.depth -= 1;
 
                 let node = Node::Mapping {
                     entries,
                     anchor: anchor.clone(),
                     tag,
-                    loc: span,
+                    loc: Span {
+                        start: span.start,
+                        end: end_span.end,
+                    },
                     leading_comments: Vec::new(),
                     trailing_comment: None,
                 };
@@ -436,17 +443,24 @@ impl<'opt> LoadState<'opt> {
                     }
                     items.push(item);
                 }
-                // Consume SequenceEnd.
-                if matches!(events.get(*pos), Some((Event::SequenceEnd, _))) {
+                // Consume SequenceEnd and capture its span to form the full container span.
+                let end_span = if let Some((Event::SequenceEnd, end)) = events.get(*pos) {
+                    let s = *end;
                     *pos += 1;
-                }
+                    s
+                } else {
+                    span
+                };
                 self.depth -= 1;
 
                 let node = Node::Sequence {
                     items,
                     anchor: anchor.clone(),
                     tag,
-                    loc: span,
+                    loc: Span {
+                        start: span.start,
+                        end: end_span.end,
+                    },
                     leading_comments: Vec::new(),
                     trailing_comment: None,
                 };
