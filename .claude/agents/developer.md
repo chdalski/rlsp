@@ -203,8 +203,13 @@ entire pipeline.
    linters — `cargo fmt`, `prettier`, `gofmt`, etc.
    reformat beyond the files you edited.
 
-4. **Submit for review.** Your task assignment specifies
-   the review agent. Message them via `SendMessage` with:
+4. **Submit for review — only after all sign-offs from
+   step 2 are obtained.** If you consulted advisors but
+   have not received explicit sign-off from every one, do
+   not proceed — wait or re-request. Submitting without
+   sign-offs causes the reviewer to reject. Your task
+   assignment specifies the review agent. Message them via
+   `SendMessage` with:
    - Which task slice this covers
    - **Baseline commit SHA** — the `HEAD` SHA from task
      start. The reviewer uses this to squash WIP commits

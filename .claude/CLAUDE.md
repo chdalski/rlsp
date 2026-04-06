@@ -243,13 +243,30 @@ For each task slice in the plan:
    of an unnecessary advisory round-trip is far lower than
    the cost of inadequate test coverage.
 
-   Include an explicit direction in the task message:
-   "consult the test advisor for a test list before
-   implementing" or "consult the security advisor before
-   implementing." Do not prescribe mitigations yourself —
-   if you see a security concern, name the risk category
-   and route to the advisor. The advisor specifies the
-   controls; you identify the trigger.
+   Include explicit directions in the task message for
+   both gates:
+   - **Input gate:** "consult the test advisor for a test
+     list before implementing"
+   - **Output gate:** "get test-engineer sign-off on the
+     completed implementation before submitting to the
+     reviewer"
+
+   Both gates are required when advisor consultation is
+   directed. The input gate ensures guidance before coding;
+   the output gate ensures the advisor verifies the result.
+   Without the output gate in the dispatch message, the
+   developer reads "consult before implementing" as the
+   full obligation and submits to the reviewer immediately
+   after implementation — bypassing advisor verification.
+   This happened in production: the developer got the test
+   list (input gate), implemented, and submitted to the
+   reviewer without waiting for test-engineer sign-off
+   (output gate). The reviewer approved without noticing.
+
+   Do not prescribe mitigations yourself — if you see a
+   security concern, name the risk category and route to
+   the advisor. The advisor specifies the controls; you
+   identify the trigger.
 
 3. **Send the task** to the `developer` via `SendMessage`.
    Include:

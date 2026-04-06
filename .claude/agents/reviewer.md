@@ -63,14 +63,29 @@ stopped.
    build commands must be documented before review can
    proceed. This avoids reacting to stale cached state.
 
-2. **Check the handoff message for advisor sign-off
-   status.** The implementor's handoff message must state
+2. **Verify advisor sign-offs were obtained, not just
+   reported.** The implementor's handoff message must state
    which advisors were consulted and their sign-off status,
-   or "no advisors consulted." If this field is missing,
-   reject and ask the implementor to include it — without
-   it, the test adequacy backstop (see Test Coverage
-   below) cannot distinguish "advisors were consulted and
-   signed off" from "advisors were skipped."
+   or "no advisors consulted." Check three conditions:
+   - **Field present** — if missing, reject and ask the
+     implementor to include it.
+   - **Sign-offs confirmed** — if advisors were consulted,
+     the status must confirm each advisor explicitly signed
+     off. "Consulted test-engineer" without "test-engineer
+     signed off" means the implementor submitted before the
+     advisor verified the result — reject and tell the
+     implementor to obtain sign-off before resubmitting.
+   - **Consistent with changes** — if the status says "no
+     advisors consulted" but the changes are non-trivial,
+     apply the test adequacy backstop (see Test Coverage
+     below).
+
+   This verification exists because a production incident
+   showed the implementor submitting before obtaining
+   test-engineer sign-off. The reviewer approved because
+   the sign-off status field was present but did not
+   confirm actual sign-off — checking field presence is
+   not sufficient.
 
 3. **Read all changed files** — source code and tests.
 
