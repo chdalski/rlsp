@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-06
 
 ## Goal
@@ -34,15 +34,15 @@ document.
 
 ## Steps
 
-- [ ] Add rlsp `parse_events` to throughput benchmarks
-- [ ] Add libfyaml full-drain to latency benchmarks
+- [x] Add rlsp `parse_events` to throughput benchmarks
+- [x] Add libfyaml full-drain to latency benchmarks
 - [ ] Add real-world YAML fixture (Kubernetes deployment)
 - [ ] Run all benchmarks and collect results
 - [ ] Write benchmark comparison document
 
 ## Tasks
 
-### Task 1: Add event-level parity to benchmarks
+### Task 1: Add event-level parity to benchmarks ✓ ec00e1d
 
 Fix the apples-to-oranges comparison so both parsers are
 measured at the same abstraction level.
@@ -64,10 +64,10 @@ measured at the same abstraction level.
 
 Files: `benches/throughput.rs`, `benches/latency.rs`
 
-- [ ] `throughput/rlsp_events` group (by size)
-- [ ] `throughput_style/rlsp_events` group (by style)
-- [ ] `latency/libfyaml_full` group (by size)
-- [ ] All benchmarks compile and run
+- [x] `throughput/rlsp_events` group (by size)
+- [x] `throughput_style/rlsp_events` group (by style)
+- [x] `latency/libfyaml_full` group (by size)
+- [x] All benchmarks compile and run
 
 ### Task 2: Add real-world YAML fixture
 
