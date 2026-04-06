@@ -166,3 +166,157 @@ pub fn large() -> String {
 pub fn huge() -> String {
     mixed(HUGE_TARGET)
 }
+
+// ---------------------------------------------------------------------------
+// Real-world: Kubernetes Deployment manifest (~3 KB)
+// ---------------------------------------------------------------------------
+
+/// A realistic Kubernetes Deployment manifest (~3 KB).
+///
+/// Hardcoded string literal — deterministic and representative of real LSP input.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn kubernetes_deployment() -> String {
+    r#"apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-frontend
+  namespace: production
+  labels:
+    app: web-frontend
+    version: "1.4.2"
+    tier: frontend
+    managed-by: helm
+  annotations:
+    deployment.kubernetes.io/revision: "3"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"Deployment"}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: /metrics
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-frontend
+      tier: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: web-frontend
+        version: "1.4.2"
+        tier: frontend
+      annotations:
+        checksum/config: "abc123def456"
+    spec:
+      serviceAccountName: web-frontend-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - web-frontend
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: web-frontend
+          image: registry.example.com/web-frontend:1.4.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: production
+            - name: LOG_LEVEL
+              value: info
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: connection-string
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: redis-config
+                  key: host
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/app/config
+              readOnly: true
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: cache-dir
+              mountPath: /var/cache/app
+      volumes:
+        - name: config-volume
+          configMap:
+            name: web-frontend-config
+            items:
+              - key: app.yaml
+                path: app.yaml
+              - key: logging.yaml
+                path: logging.yaml
+        - name: tmp-dir
+          emptyDir: {}
+        - name: cache-dir
+          emptyDir:
+            sizeLimit: 256Mi
+      imagePullSecrets:
+        - name: registry-credentials
+      terminationGracePeriodSeconds: 30
+"#
+    .to_owned()
+}

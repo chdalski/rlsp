@@ -175,5 +175,44 @@ fn bench_throughput_by_style(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_throughput_by_size, bench_throughput_by_style);
+fn bench_throughput_real_world(c: &mut Criterion) {
+    let yaml = fixtures::kubernetes_deployment();
+
+    let mut group = c.benchmark_group("throughput_real/rlsp");
+    group.throughput(Throughput::Bytes(yaml.len() as u64));
+    group.bench_function("load", |b| {
+        b.iter(|| {
+            let result = rlsp_yaml_parser::load(black_box(&yaml));
+            black_box(result)
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("throughput_real/rlsp_events");
+    group.throughput(Throughput::Bytes(yaml.len() as u64));
+    group.bench_function("parse_events", |b| {
+        b.iter(|| {
+            let count = rlsp_yaml_parser::parse_events(black_box(&yaml)).count();
+            black_box(count)
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("throughput_real/libfyaml");
+    group.throughput(Throughput::Bytes(yaml.len() as u64));
+    group.bench_function("parse_events", |b| {
+        b.iter(|| {
+            let count = unsafe { libfyaml_parse_all(black_box(&yaml)) };
+            black_box(count)
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_throughput_by_size,
+    bench_throughput_by_style,
+    bench_throughput_real_world
+);
 criterion_main!(benches);

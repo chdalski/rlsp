@@ -184,10 +184,51 @@ fn bench_parse_events_full_libfyaml(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_real_world_latency(c: &mut Criterion) {
+    let yaml = fixtures::kubernetes_deployment();
+
+    let mut group = c.benchmark_group("latency_real/rlsp");
+    group.bench_function("first_event", |b| {
+        b.iter(|| {
+            let mut events = rlsp_yaml_parser::parse_events(black_box(&yaml));
+            black_box(events.next())
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("latency_real/libfyaml");
+    group.bench_function("first_event", |b| {
+        b.iter(|| {
+            let got = unsafe { libfyaml_first_event(black_box(&yaml)) };
+            black_box(got)
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("latency_real/rlsp_full");
+    group.bench_function("parse_events", |b| {
+        b.iter(|| {
+            let count = rlsp_yaml_parser::parse_events(black_box(&yaml)).count();
+            black_box(count)
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("latency_real/libfyaml_full");
+    group.bench_function("parse_events", |b| {
+        b.iter(|| {
+            let count = unsafe { libfyaml_parse_all(black_box(&yaml)) };
+            black_box(count)
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_time_to_first_event,
     bench_parse_events_full,
-    bench_parse_events_full_libfyaml
+    bench_parse_events_full_libfyaml,
+    bench_real_world_latency
 );
 criterion_main!(benches);

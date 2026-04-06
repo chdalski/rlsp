@@ -150,10 +150,30 @@ fn bench_alloc_stats(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_memory_real_world(c: &mut Criterion) {
+    let yaml = fixtures::kubernetes_deployment();
+
+    let mut group = c.benchmark_group("memory/real_world");
+    group.bench_function("load", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                reset_counters();
+                let _ = black_box(rlsp_yaml_parser::load(black_box(&yaml)));
+                let (bytes, _count) = read_counters();
+                black_box(bytes);
+            }
+            start.elapsed()
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_memory_load,
     bench_memory_parse_events,
-    bench_alloc_stats
+    bench_alloc_stats,
+    bench_memory_real_world
 );
 criterion_main!(benches);
