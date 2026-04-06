@@ -16,9 +16,9 @@ jobs:
   resolve-version:
     name: Resolve extension version
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     permissions:
-      contents: write
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -46,18 +46,6 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved extension version: $VERSION"
-
-      - name: Create version tag
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          TAG="vscode-v${VERSION}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists"
-            exit 1
-          fi
-          git tag "$TAG"
-          git push origin "$TAG"
 
   build-extension:
     name: Build VSIX (${{ matrix.target }})
@@ -165,7 +153,7 @@ jobs:
     name: Publish to VS Code Marketplace
     needs: [resolve-version, build-extension]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/rlsp-yaml-v') || github.event_name == 'workflow_dispatch'
+    if: needs.resolve-version.outputs.version != ''
     permissions: {}
 
     steps:
@@ -190,3 +178,27 @@ jobs:
           done
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  tag-version:
+    name: Tag extension version
+    needs: [resolve-version, publish-extension]
+    runs-on: ubuntu-latest
+    if: needs.resolve-version.outputs.version != ''
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create version tag
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          TAG="vscode-v${VERSION}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists"
+            exit 1
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
