@@ -44,6 +44,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  trigger-vscode:
+    name: Trigger VS Code extension release
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check if rlsp-yaml was released
+        id: check
+        env:
+          RELEASES: ${{ needs.release-plz-release.outputs.releases }}
+        run: |
+          FOUND=$(echo "$RELEASES" | jq -r '[.[] | select(.package_name == "rlsp-yaml")] | length > 0')
+          echo "found=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger VS Code extension workflow
+        if: steps.check.outputs.found == 'true'
+        run: gh workflow run vscode-extension.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   filter-binaries:
     name: Filter binary releases
     needs: release-plz-release

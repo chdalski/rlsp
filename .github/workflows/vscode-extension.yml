@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - 'rlsp-yaml/integrations/vscode/**'
-    tags:
-      - 'rlsp-yaml-v*'
   workflow_dispatch:
     inputs:
       version:
