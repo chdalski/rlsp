@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { commands, workspace, window, type ExtensionContext } from 'vscode';
 import { LanguageClient, State } from 'vscode-languageclient/node';
 import { makeRestartServer, makeShowOutput, makeShowVersion } from './commands.js';
@@ -17,6 +18,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const startClient = async (): Promise<LanguageClient> => {
     const serverPath = workspace.getConfiguration('rlsp-yaml').get('server.path', '');
     const binaryPath = findServerBinary(context.extensionPath, serverPath, workspace.isTrusted);
+    if (!existsSync(binaryPath)) {
+      throw new Error(
+        `rlsp-yaml: server binary not found at "${binaryPath}". ` +
+          `Install rlsp-yaml manually and set rlsp-yaml.server.path.`,
+      );
+    }
     const lc = createLanguageClient(binaryPath, outputChannel);
 
     lc.onDidChangeState((event) => {
