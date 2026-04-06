@@ -561,7 +561,7 @@ fn check_yaml_ordering(
 ///
 /// Returns error diagnostics for any key that appears more than once within
 /// the same mapping. Operates on the parsed AST, which preserves all keys
-/// even when duplicate (unlike saphyr which deduplicated them silently).
+/// even when duplicate.
 ///
 /// Each document and each nested mapping is scoped independently.
 #[must_use]
