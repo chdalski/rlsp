@@ -57,58 +57,58 @@ Median throughput (MB/s) from Criterion. The `rlsp/load` column includes tree co
 
 | Fixture | rlsp/load | rlsp/events | libfyaml/events | rlsp/events vs libfyaml |
 |---------|----------:|------------:|----------------:|------------------------:|
-| tiny_100B (~100 B) | 726 KiB/s | 494 KiB/s | 33.1 MiB/s | 67× slower |
-| medium_10KB (~10 KB) | 590 KiB/s | 591 KiB/s | 98.9 MiB/s | 167× slower |
-| large_100KB (~100 KB) | 578 KiB/s | 583 KiB/s | 112 MiB/s | 192× slower |
-| huge_1MB (~1 MB) | 306 KiB/s | 309 KiB/s | 105 MiB/s | 339× slower |
+| tiny_100B (~100 B) | 703 KiB/s | 496 KiB/s | 31.5 MiB/s | 65× slower |
+| medium_10KB (~10 KB) | 614 KiB/s | 592 KiB/s | 98.9 MiB/s | 171× slower |
+| large_100KB (~100 KB) | 615 KiB/s | 643 KiB/s | 99.1 MiB/s | 158× slower |
+| huge_1MB (~1 MB) | 638 KiB/s | 636 KiB/s | 115 MiB/s | 185× slower |
 
 Raw timings (median):
 
 | Fixture | rlsp/load | rlsp/events | libfyaml/events |
 |---------|----------:|------------:|----------------:|
-| tiny_100B | 151.95 µs | 223.22 µs | 3.26 µs |
-| medium_10KB | 16.57 ms | 16.55 ms | 96.6 µs |
-| large_100KB | 168.96 ms | 167.51 ms | 851.6 µs |
-| huge_1MB | 3.196 s | 3.165 s | 9.07 ms |
+| tiny_100B | 156.95 µs | 222.37 µs | 3.42 µs |
+| medium_10KB | 15.916 ms | 16.531 ms | 96.6 µs |
+| large_100KB | 158.73 ms | 151.94 ms | 962.7 µs |
+| huge_1MB | 1.531 s | 1.536 s | 8.29 ms |
 
 ### Throughput by YAML style (~100 KB each)
 
 | Style | rlsp/load | rlsp/events | libfyaml/events | rlsp/events vs libfyaml |
 |-------|----------:|------------:|----------------:|------------------------:|
-| block_heavy | 509 KiB/s | 519 KiB/s | 95.8 MiB/s | 184× slower |
-| block_sequence | 1.002 MiB/s | 1.036 MiB/s | 197 MiB/s | 190× slower |
-| flow_heavy | 595 KiB/s | 591 KiB/s | 83.6 MiB/s | 141× slower |
-| scalar_heavy | 1.029 MiB/s | 1.064 MiB/s | 189 MiB/s | 178× slower |
-| mixed | 582 KiB/s | 585 KiB/s | 109 MiB/s | 186× slower |
+| block_heavy | 514 KiB/s | 517 KiB/s | 95.3 MiB/s | 189× slower |
+| block_sequence | 999 KiB/s | 1020 KiB/s | 207 MiB/s | 208× slower |
+| flow_heavy | 572 KiB/s | 587 KiB/s | 81.0 MiB/s | 141× slower |
+| scalar_heavy | 1.217 MiB/s | 1.233 MiB/s | 200 MiB/s | 163× slower |
+| mixed | 623 KiB/s | 644 KiB/s | 111 MiB/s | 176× slower |
 
 ### Throughput — real-world (Kubernetes Deployment, ~3 KB)
 
 | API | Time (median) | Throughput |
 |-----|-------------:|----------:|
-| rlsp/load | 3.916 ms | 970 KiB/s |
-| rlsp/parse_events | 3.812 ms | 996 KiB/s |
-| libfyaml/parse_events | 28.67 µs | 129 MiB/s |
+| rlsp/load | 4.082 ms | 930 KiB/s |
+| rlsp/parse_events | 3.945 ms | 963 KiB/s |
+| libfyaml/parse_events | 29.24 µs | 127 MiB/s |
 
 ### Latency — time to first event
 
 | Fixture | rlsp/first_event | libfyaml/first_event | ratio |
 |---------|----------------:|---------------------:|------:|
-| tiny_100B | 148.82 µs | 949 ns | 157× |
-| medium_10KB | 16.02 ms | 923 ns | 17,357× |
-| large_100KB | 174.84 ms | 933 ns | 187,398× |
-| huge_1MB | 3.498 s | 918 ns | 3,810,241× |
-| kubernetes_3KB | 3.671 ms | 947 ns | 3,879× |
+| tiny_100B | 178.10 µs | 1.049 µs | 170× |
+| medium_10KB | 18.337 ms | 1.108 µs | 16,547× |
+| large_100KB | 172.29 ms | 1.091 µs | 157,918× |
+| huge_1MB | 1.654 s | 1.106 µs | 1,495,480× |
+| kubernetes_3KB | 4.438 ms | 1.183 µs | 3,752× |
 
-> **Note:** libfyaml's near-constant ~950 ns first-event latency across all document sizes reflects lazy parsing — it starts emitting events before scanning the full input. rlsp-yaml-parser currently scans and tokenizes the entire input before yielding the first event, so first-event latency scales linearly with document size.
+> **Note:** libfyaml's near-constant ~1.1 µs first-event latency across all document sizes reflects lazy parsing — it starts emitting events before scanning the full input. rlsp-yaml-parser currently scans and tokenizes the entire input before yielding the first event, so first-event latency scales linearly with document size.
 
 ### Latency — full event drain
 
 | Fixture | rlsp/parse_events | libfyaml/parse_events |
 |---------|------------------:|----------------------:|
-| tiny_100B | 223.14 µs | 3.159 µs |
-| medium_10KB | 16.16 ms | 89.9 µs |
-| large_100KB | 170.35 ms | 858.2 µs |
-| kubernetes_3KB | 3.782 ms | 28.19 µs |
+| tiny_100B | 245.52 µs | 3.97 µs |
+| medium_10KB | 19.478 ms | 128.9 µs |
+| large_100KB | 167.70 ms | 1.006 ms |
+| kubernetes_3KB | 4.475 ms | 35.79 µs |
 
 ### Memory allocation profile (rlsp only)
 
@@ -118,43 +118,51 @@ Measured with `CountingAllocator`; single parse in a release build.
 
 | Fixture | Bytes allocated | Allocations |
 |---------|---------------:|------------:|
-| tiny_100B (~100 B) | 317,823 | 10,237 |
-| medium_10KB (~10 KB) | 24,003,948 | 763,857 |
-| large_100KB (~100 KB) | 225,991,169 | 7,216,701 |
-| kubernetes_3KB (~3 KB) | 2,557,802 | 68,731 |
+| tiny_100B (~100 B) | 327,071 | 10,214 |
+| medium_10KB (~10 KB) | 24,531,116 | 761,884 |
+| large_100KB (~100 KB) | 229,717,505 | 7,198,120 |
+| kubernetes_3KB (~3 KB) | 2,228,779 | 59,297 |
 
 #### `parse_events()` — event streaming
 
 | Fixture | Bytes allocated | Allocations |
 |---------|---------------:|------------:|
-| tiny_100B (~100 B) | 306,768 | 10,216 |
-| medium_10KB (~10 KB) | 23,284,255 | 762,601 |
-| large_100KB (~100 KB) | 219,005,984 | 7,205,058 |
-| kubernetes_3KB (~3 KB) | 2,482,386 | 68,609 |
+| tiny_100B (~100 B) | 316,016 | 10,193 |
+| medium_10KB (~10 KB) | 23,811,423 | 760,628 |
+| large_100KB (~100 KB) | 222,732,320 | 7,186,477 |
+| kubernetes_3KB (~3 KB) | 2,177,936 | 59,192 |
 
-The allocation overhead per byte is approximately 2.19 KB allocated per input byte (`load`, large fixture: 225 MB / 100 KB), reflecting that rlsp preserves full span information, comments, and a complete AST node per token — significantly more metadata per node than a bare event stream.
+The allocation overhead per byte is approximately 2.23 KB allocated per input byte (`load`, large fixture: 229 MB / 100 KB), reflecting that rlsp preserves full span information, comments, and a complete AST node per token — significantly more metadata per node than a bare event stream.
 
 ## Analysis
 
-### Event-level comparison: ~150–340× throughput gap
+### Scaling ratio improved: O(n²) eliminated in validate_tokens
 
-On the fair apples-to-apples comparison (`rlsp::parse_events` vs `libfyaml::parse_events`), libfyaml is 150–340× faster. The gap grows with document size, suggesting O(n²) behavior in rlsp's parser for large inputs (the huge_1MB fixture takes 3.165 s vs 9.07 ms). For documents up to 10 KB — the typical LSP file size — the 167× gap means ~16 ms vs ~97 µs per parse.
+The `huge_1MB` / `large_100KB` timing ratio for `rlsp::parse_events` dropped from ~19× (before) to ~10× (1.536 s / 151.94 ms), confirming the O(n²) behavior in `validate_tokens()` has been eliminated. Throughput for the huge fixture improved from ~309 KiB/s to ~636 KiB/s — roughly 2× faster on 1 MB documents.
+
+### Allocation reduction: SmallVec inline storage
+
+Allocations for the Kubernetes fixture dropped from 68,609 (parse_events) and 68,731 (load) to 59,192 and 59,297 respectively — a ~13.7% reduction. This comes from replacing `Vec<Token>` with `SmallVec<[Token; 1]>` in the combinator `Reply` type, which avoids a heap allocation for the common single-token case.
+
+### Event-level comparison: ~65–185× throughput gap
+
+On the fair apples-to-apples comparison (`rlsp::parse_events` vs `libfyaml::parse_events`), libfyaml is 65–185× faster depending on document size. For documents up to 10 KB — the typical LSP file size — the gap is ~171×, meaning ~16 ms vs ~97 µs per parse.
 
 ### rlsp/load vs rlsp/parse_events: tree construction is cheap
 
-For medium and large fixtures, `load()` and `parse_events()` have nearly identical throughput (590 vs 591 KiB/s at 10 KB; 578 vs 583 KiB/s at 100 KB). The tree construction step itself is not the bottleneck — the parser and tokenizer dominate. The allocation count difference is small (~1,256 extra allocs for load vs parse_events at 10 KB).
+For medium and large fixtures, `load()` and `parse_events()` have nearly identical throughput (614 vs 592 KiB/s at 10 KB; 615 vs 643 KiB/s at 100 KB). The tree construction step itself is not the bottleneck — the parser and tokenizer dominate.
 
 ### libfyaml first-event latency is O(1); rlsp is O(n)
 
-libfyaml emits its first event in ~950 ns regardless of document size (constant). rlsp's first-event time tracks full-parse time, confirming it buffers the entire input before yielding. For the LSP use case — where the server wants to respond before a large document finishes loading — this is the most significant functional gap. A streaming tokenizer that yields events incrementally would bring first-event latency down to O(1).
+libfyaml emits its first event in ~1.1 µs regardless of document size (constant). rlsp's first-event time tracks full-parse time, confirming it buffers the entire input before yielding. For the LSP use case — where the server wants to respond before a large document finishes loading — this is the most significant functional gap. A streaming tokenizer that yields events incrementally would bring first-event latency down to O(1).
 
 ### Style sensitivity
 
-Flow-heavy YAML is ~2× slower than block sequences for both parsers. libfyaml handles `block_sequence` fastest (197 MiB/s), while rlsp's `scalar_heavy` and `block_sequence` benchmarks show its best throughput (1.0–1.1 MiB/s), both consistent with less nested structure being cheaper to parse.
+Flow-heavy YAML is ~1.5–2× slower than block sequences for both parsers. libfyaml handles `block_sequence` fastest (207 MiB/s), while rlsp's `scalar_heavy` and `block_sequence` benchmarks show its best throughput (1.0–1.2 MiB/s), both consistent with less nested structure being cheaper to parse.
 
 ### Allocation rate is very high
 
-rlsp allocates ~2.2 KB of heap per byte of input for `load()`, and ~2.1 KB per byte for `parse_events()`. The counts (~72 allocations per byte of input at the Kubernetes fixture scale) indicate fine-grained allocation per token or span. Reducing allocations — via arena allocation or pooling — would be the highest-impact memory optimization.
+rlsp allocates ~2.2 KB of heap per byte of input for `load()`, and ~2.1 KB per byte for `parse_events()`. The counts (~59 allocations per byte of input at the Kubernetes fixture scale) indicate fine-grained allocation per token or span. Reducing allocations — via arena allocation or pooling — would be the highest-impact memory optimization.
 
 ### Trade-off: correctness and span fidelity vs raw speed
 
