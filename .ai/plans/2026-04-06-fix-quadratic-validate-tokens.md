@@ -68,7 +68,7 @@ work.
 - [x] Investigate allocation hot spots
 - [x] Fix O(n²) patterns in validate_tokens() (39ba760)
 - [x] Replace Vec<Token> with SmallVec in Reply (15f84d6)
-- [ ] Run benchmarks and update documentation
+- [x] Run benchmarks and update documentation (7c2ca4c)
 
 ## Tasks
 
@@ -180,10 +180,10 @@ Run the full benchmark suite and update
 4. Update all tables in `benchmarks.md` with new numbers
 5. Update the Analysis section to reflect improvements
 
-- [ ] Run benchmarks
-- [ ] Verify scaling ratio ≤12×
-- [ ] Verify allocation reduction
-- [ ] Update benchmarks.md tables and analysis
+- [x] Run benchmarks
+- [x] Verify scaling ratio ≤12×
+- [x] Verify allocation reduction
+- [x] Update benchmarks.md tables and analysis
 
 ## Decisions
 
