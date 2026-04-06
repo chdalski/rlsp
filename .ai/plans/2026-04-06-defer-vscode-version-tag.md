@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-06
 
 ## Goal
@@ -40,10 +40,10 @@ removed tag trigger.
 
 ## Steps
 
-- [ ] Remove tag creation from `resolve-version`
-- [ ] Add `tag-version` job after `build-extension`
-- [ ] Remove dead tag ref conditions
-- [ ] Update `publish-extension` dependency chain
+- [x] Remove tag creation from `resolve-version`
+- [x] Add `tag-version` job after `build-extension`
+- [x] Remove dead tag ref conditions
+- [x] Update `publish-extension` dependency chain
 
 ## Tasks
 
@@ -79,11 +79,11 @@ All changes in `.github/workflows/vscode-extension.yml`:
   2. Create and push the tag (same logic as the removed
      step, using `needs.resolve-version.outputs.version`)
 
-- [ ] Modify `resolve-version` — remove tag step, downgrade
-      permissions, remove dead condition
-- [ ] Modify `publish-extension` — remove dead condition
-- [ ] Add `tag-version` job after `publish-extension`
-- [ ] Verify YAML is structurally valid
+- [x] Modify `resolve-version` — remove tag step, downgrade
+      permissions, remove dead condition (3cffa76)
+- [x] Modify `publish-extension` — remove dead condition (3cffa76)
+- [x] Add `tag-version` job after `publish-extension` (3cffa76)
+- [x] Verify YAML is structurally valid (3cffa76)
 
 ## Decisions
 
