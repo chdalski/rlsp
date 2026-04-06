@@ -3,6 +3,47 @@
 
 ## Bug Fixes
 
+- Upgrade lodash to fix CVE-2026-4800 and CVE-2026-2950 (1f0cb2a)
+- Fix false duplicate-key diagnostics for sibling mappings (e5e5cd8)
+- Suppress flow-style warnings for empty collections (f34a305)
+- Preserve blank lines between mapping entries (aeed0a5)
+- Strip unnecessary quotes from Representation variants (e8e5e6b)
+- Fix code action conversion bugs (3737c50)
+- Prevent double-quoting of already-quoted items in block-to-flow conversion (44514c1)
+- Use full container spans and simplify selection range logic (4694575)
+- Restore alias key duplicate detection and add edge case tests (74e2fed)
+
+## Documentation
+
+- Document yamlVersion setting and modeline (9fdd6fb)
+- Document diagnostic suppression comments (470cc12)
+- Document feature toggles and maxItemsComputed settings (199f589)
+
+## Features
+
+- Add integration test infrastructure (b4c3f17)
+- Add integration test suite (f9fa0cc)
+- Switch formatter to early_parse(false) for style preservation (022d9d2)
+- Add yamlVersion setting and modeline support (67e1401)
+- Version-aware quoting in formatter (b514adc)
+- Add diagnostic suppression comment parser (63daa76)
+- Integrate diagnostic suppression with pipeline (26fb7c7)
+- Add validate, hover, and completion feature toggles (9ce8e80)
+- Add maxItemsComputed setting for symbols and folding (2c45fa0)
+- Add rlsp-yaml-parser dependency and migrate entry points (a4af8bc)
+- Migrate symbols, hover, and completion to rlsp-yaml-parser (8b0d3d9)
+- Migrate validators, schema, and schema_validation to rlsp-yaml-parser (906ce2e)
+- Migrate selection.rs and formatter.rs to rlsp-yaml-parser (6dce350)
+- Wire up contentSchema validation (a26559b)
+- Replace raw-text comment workaround with AST-based comments (c640283)
+
+## Refactoring
+
+- Use fmt::Write instead of push_str+format in tests (df9b991)
+- Replace text-scanning duplicate key detection with AST-based approach (600fbcf)
+
+## Bug Fixes
+
 - Standardize diagnostic message format (44ceffe)
 - Standardize validator, parser, and schema error messages (f262004)
 - Use platform-aware paths in server test assertions (774d849)
