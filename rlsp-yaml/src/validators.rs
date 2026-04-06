@@ -588,16 +588,20 @@ fn check_node_for_duplicate_keys(
         Node::Mapping { entries, .. } => {
             let mut seen: HashSet<String> = HashSet::new();
             for (key, value) in entries {
-                if let Node::Scalar {
-                    value: key_str,
-                    loc,
-                    ..
-                } = key
-                {
-                    if seen.contains(key_str) {
-                        push_duplicate_diagnostic(diagnostics, key_str, loc);
+                let key_str_and_loc: Option<(String, &Span)> = match key {
+                    Node::Scalar {
+                        value: key_str,
+                        loc,
+                        ..
+                    } => Some((key_str.clone(), loc)),
+                    Node::Alias { name, loc, .. } => Some((format!("*{name}"), loc)),
+                    Node::Mapping { .. } | Node::Sequence { .. } => None,
+                };
+                if let Some((key_str, loc)) = key_str_and_loc {
+                    if seen.contains(&key_str) {
+                        push_duplicate_diagnostic(diagnostics, &key_str, loc);
                     } else {
-                        seen.insert(key_str.clone());
+                        seen.insert(key_str);
                     }
                 }
                 // Recurse into the key (e.g. complex keys) and value
@@ -1464,6 +1468,58 @@ mod tests {
         let result = parse_duplicate(text);
 
         assert!(result.is_empty());
+    }
+
+    // ---- Duplicate Key Validator: Alias Keys ----
+
+    #[test]
+    fn should_detect_duplicate_alias_keys() {
+        // *ref used as a mapping key twice — behavioral parity with old text scanner
+        // which treated `*anchor` as a plain-text key value.
+        // Explicit key syntax (`? *anchor`) is required to use an alias as a mapping key.
+        let text = "x: &anchor foo\n? *anchor\n: 1\n? *anchor\n: 2\n";
+        let result = parse_duplicate(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "duplicateKey")
+        );
+        assert!(result[0].message.contains("*anchor"));
+    }
+
+    #[test]
+    fn should_not_flag_single_alias_key() {
+        let text = "x: &anchor foo\n? *anchor\n: 1\nother: 2\n";
+        let result = parse_duplicate(text);
+
+        assert!(result.is_empty());
+    }
+
+    // ---- Duplicate Key Validator: Empty/Null String Keys ----
+
+    #[test]
+    fn should_detect_duplicate_empty_string_keys() {
+        let text = "\"\": 1\n\"\": 2\n";
+        let result = parse_duplicate(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "duplicateKey")
+        );
+    }
+
+    // ---- Duplicate Key Validator: Unicode Keys ----
+
+    #[test]
+    fn should_detect_duplicate_unicode_keys() {
+        let text = "café: 1\ncafé: 2\n";
+        let result = parse_duplicate(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(result[0].message.contains("café"));
     }
 
     // ---- Duplicate Key Validator: Sequence Items ----
