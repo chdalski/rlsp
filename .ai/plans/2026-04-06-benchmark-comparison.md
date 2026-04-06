@@ -37,8 +37,8 @@ document.
 - [x] Add rlsp `parse_events` to throughput benchmarks
 - [x] Add libfyaml full-drain to latency benchmarks
 - [x] Add real-world YAML fixture (Kubernetes deployment)
-- [ ] Run all benchmarks and collect results
-- [ ] Write benchmark comparison document
+- [x] Run all benchmarks and collect results
+- [x] Write benchmark comparison document
 
 ## Tasks
 
@@ -97,7 +97,7 @@ Files: `benches/fixtures.rs`, `benches/throughput.rs`,
 - [x] Real-world benchmark groups in all three bench files
 - [x] All benchmarks compile and run
 
-### Task 3: Run benchmarks and document results
+### Task 3: Run benchmarks and document results ✓ e54c71b
 
 Run all benchmarks, collect Criterion output, and write the
 comparison document.
@@ -119,9 +119,9 @@ comparison document.
 
 Files: `rlsp-yaml-parser/docs/benchmarks.md`
 
-- [ ] All benchmarks run successfully
-- [ ] Results document with tables and analysis
-- [ ] Methodology section documents limitations
+- [x] All benchmarks run successfully
+- [x] Results document with tables and analysis
+- [x] Methodology section documents limitations
 
 ## Decisions
 
