@@ -51,7 +51,7 @@ the code and improves performance.
       is removable
 - [x] Simplify comment handling in formatter (c640283)
 - [x] Simplify span access in selection (4694575)
-- [ ] Simplify duplicate key detection in validators
+- [x] Simplify duplicate key detection in validators (600fbcf)
 - [ ] Leverage lossless alias mode where beneficial
 - [ ] Leverage chomping preservation in formatter
 - [ ] Verify all tests pass after each simplification
@@ -132,14 +132,14 @@ event spans, then remove the recursive `effective_start`/
 
 **Files:** `rlsp-yaml-parser/src/loader.rs`, `selection.rs`
 
-### Task 4: Simplify duplicate key detection
+### Task 4: Simplify duplicate key detection (DONE — 600fbcf)
 
 If text-based duplicate key scanning still exists, replace
 with AST-based key comparison using preserved keys.
 
-- [ ] Identify the text-scanning duplicate key detection
-- [ ] Replace with AST-based comparison
-- [ ] Verify validator tests pass
+- [x] Identify the text-scanning duplicate key detection
+- [x] Replace with AST-based comparison
+- [x] Verify validator tests pass
 
 **Files:** `validators.rs`
 
