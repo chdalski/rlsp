@@ -225,7 +225,7 @@ user has explicitly approved this scope.
 - [x] Confirm scope and approach with user
 - [x] Bootstrap new crate (Task 1) — `8531e28`
 - [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
-- [ ] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`
+- [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
 - [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
 - [ ] Implement block collections (Tasks 10-12)
 - [ ] Implement flow collections (Tasks 13-14)
@@ -372,24 +372,26 @@ test pattern that subsequent tasks follow).
 Add `DocumentStart`/`DocumentEnd` events and handle the
 `---`/`...` markers and bare (no-marker) documents.
 
-- [ ] Tokenizer recognizes `---` at column 0 followed by
+**Status:** Completed in commit `494286e`.
+
+- [x] Tokenizer recognizes `---` at column 0 followed by
   whitespace/EOL/EOF as a document start marker
-- [ ] Tokenizer recognizes `...` at column 0 followed by
+- [x] Tokenizer recognizes `...` at column 0 followed by
   whitespace/EOL/EOF as a document end marker
-- [ ] Emit `DocumentStart { explicit: bool }` and
+- [x] Emit `DocumentStart { explicit: bool }` and
   `DocumentEnd { explicit: bool }` events
-- [ ] Handle multi-document streams (e.g.,
+- [x] Handle multi-document streams (e.g.,
   `---\n---\n---\n`)
-- [ ] Handle bare documents (no markers — explicit=false)
-- [ ] Handle the `directives + ---` document start
+- [x] Handle bare documents (no markers — explicit=false)
+- [x] Handle the `directives + ---` document start
   (directives covered in Task 18, but the parser must not
   reject them here)
-- [ ] Conformance tests for empty docs and bare doc
+- [x] Conformance tests for empty docs and bare doc
   markers must pass; identify which YAML test suite files
   this covers and ensure they pass
-- [ ] Add unit tests for the new tokenizer states
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): document boundaries and bare documents`
+- [x] Add unit tests for the new tokenizer states
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): document boundaries and bare documents`
 
 **Reference impl consultation:**
 1. Local: `rlsp-yaml-parser/src/stream.rs`
