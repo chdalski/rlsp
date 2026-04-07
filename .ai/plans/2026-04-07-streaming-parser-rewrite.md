@@ -827,69 +827,54 @@ new crate, and run.
 **Reference impl consultation:** Not applicable.
 **Advisors:** None.
 
-### Task 22: Audit and clean up panic sites
+### Task 22: Enable `clippy::panic` and clean up panic sites
 
-Pre-migration cleanup. Task 8 established that the lexer
-has ~60 `unwrap_or_else(|| panic!("..."))` call sites in
-production code. These express invariant assertions in a
-form that bypasses the `unwrap_used = "deny"` clippy lint,
-making them hard to audit: a reviewer can't tell a
-legitimate invariant ("peek returned Some but consume
-returned None" — a LineBuffer API guarantee) from a
-developer dodging the lint without tracing the call site.
+Task 8's review surfaced ~60 `unwrap_or_else(|| panic!("..."))`
+call sites in `rlsp-yaml-parser-temp/src/lexer.rs`. These
+express invariant assertions in a form that bypasses the
+existing `unwrap_used = "deny"` / `expect_used = "deny"`
+clippy lints, making them hard to audit: a reviewer can't
+tell a legitimate invariant ("peek returned Some but
+consume returned None" — a LineBuffer API guarantee) from
+a developer dodging the lint without tracing the call site.
 
-This task audits every panic site and converts it to a
-documented, reviewable form. The goal is NOT to remove
-panics where they're legitimate — invariant violations
-should still panic — but to make the intent explicit so
-Task 23's migration security audit can confirm no panic
-leaks into user-input paths.
+**Approach:** enable `clippy::panic = "deny"` at the
+workspace level. This lint catches every literal `panic!`
+macro invocation, including `unwrap_or_else(|| panic!(...))`
+since the closure body contains `panic!`. The lint becomes
+the audit: `cargo clippy` lists exactly which sites need
+to be fixed, and the list can never grow undetected.
 
-Must run BEFORE Task 23's migration because the migration
-deletes the old crate and replaces public surface; the
-security advisor's audit at Task 23 is easier when panic
-sites have clear intent annotations.
+**Execution order:** Originally planned as pre-migration
+cleanup. Executed **out of order** between Task 8 and
+Task 9 per user direction — forcing the lint on now
+prevents Tasks 9-21 from adding more panic sites and
+bounds the cleanup scope.
 
-**Acceptance target:** zero `unwrap_or_else(|| panic!(...))`
-occurrences in `rlsp-yaml-parser-temp/src/` (tests are
-exempt — panics in unit tests are equivalent to `expect()`
-and not in scope).
+**Conversion rules:**
+- **Invariant assertions** (the majority): `unwrap_or_else(|| panic!("..."))` → `let Some(x) = ... else { unreachable!("...") }`. `unreachable!` is a distinct macro, not caught by `clippy::panic`, and signals "I've proved this can't happen" at the call site.
+- **Real error cases:** convert to a `Result` return. No exceptions.
+- **Test assertions:** `unwrap_or_else(|| panic!("should parse"))` in unit tests → either `unreachable!("should parse")` or `#[expect(clippy::panic, reason = "test assertion")]` on the test function. Prefer the former.
 
-- [ ] Survey all `unwrap_or_else(|| panic!(...))` sites:
-  `grep -rn 'unwrap_or_else(|| panic!' rlsp-yaml-parser-temp/src/`
-  and categorize each as:
-  - (A) **Caller contract invariant** — the caller has
-    already verified the value is present (e.g., peek-then-
-    consume on the same buffer)
-  - (B) **Data-shape invariant** — a slice bound or field
-    that the surrounding code structure guarantees
-  - (C) **Defensive assertion** — "this shouldn't happen
-    but I'm being defensive"
-  - (D) **Lint bypass** — there's an actual failure case
-    the developer didn't want to handle properly
-- [ ] For each category:
-  - **(A)**: rewrite as `let Some(x) = ... else { unreachable!("API contract: ...") }` or refactor the API (e.g., add a `take_next()` method that combines peek+consume atomically)
-  - **(B)**: rewrite as `let Some(x) = ... else { unreachable!("structural: ...") }` or `#[expect(clippy::unwrap_used, reason = "...")]` + `.unwrap()`
-  - **(C)**: decide — either promote to a real error return (preferred) or downgrade to `debug_assert!(...)` (invariant check in debug builds only)
-  - **(D)**: must be converted to a `Result` return. No exceptions.
-- [ ] Add a clippy lint denial for the pattern itself:
-  investigate whether `clippy::panic` or a custom lint can
-  catch `unwrap_or_else(|| panic!(...))`. If one exists,
-  enable it at workspace level to prevent regression.
-- [ ] Verify with grep: zero production-code occurrences
-  of `unwrap_or_else(|| panic!` in
-  `rlsp-yaml-parser-temp/src/`
-- [ ] All 300+ existing tests still pass
-- [ ] `cargo clippy --workspace --all-targets` clean
-- [ ] `cargo fmt` clean
+**Acceptance target:** zero production-code `panic!`
+violations when `clippy::panic = "deny"` is enabled
+workspace-wide.
+
+- [ ] Add `panic = "deny"` to `[workspace.lints.clippy]` in root `Cargo.toml`
+- [ ] Run `cargo clippy --workspace --all-targets` and collect the full violation list
+- [ ] Convert each violation following the rules above
+- [ ] Verify `cargo clippy --workspace --all-targets` is clean
+- [ ] Verify `cargo test --workspace` still passes (all 392+ tests)
+- [ ] Verify `cargo fmt --check` is clean
+- [ ] Verify existing crates (`rlsp-yaml-parser`, `rlsp-yaml`, `rlsp-fmt`) still build and pass tests — the lint is workspace-wide, so they may have their own violations to fix
 
 **Reference impl consultation:** Not applicable — this is
-internal refactoring.
+internal refactoring driven by a lint.
 
 **Advisors:** test-engineer (verify no test regressions
-after restructuring); security-engineer (audit the final
-set of remaining panics to confirm none are on
-user-input paths).
+after restructuring); security-engineer (confirm the
+remaining panics — which are all `unreachable!` or tests —
+cannot be triggered by user input).
 
 ### Task 23: Migration — replace rlsp-yaml-parser
 
