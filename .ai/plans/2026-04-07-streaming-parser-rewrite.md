@@ -226,7 +226,7 @@ user has explicitly approved this scope.
 - [x] Bootstrap new crate (Task 1) — `8531e28`
 - [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
 - [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
-- [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
+- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`
 - [ ] Implement block collections (Tasks 10-12)
 - [ ] Implement flow collections (Tasks 13-14)
 - [ ] Implement anchors, tags, aliases, comments (Tasks 15-17)
@@ -408,25 +408,34 @@ machine pattern subsequent tasks build on).
 Implement plain scalar tokenization and the `Scalar` event
 with `style: ScalarStyle::Plain`.
 
-- [ ] Define `ScalarStyle` enum: Plain, SingleQuoted,
+**Status:** Completed in commit `e624786`.
+
+- [x] Define `ScalarStyle` enum: Plain, SingleQuoted,
   DoubleQuoted, Literal(Chomp), Folded(Chomp)
-- [ ] Define `Chomp` enum: Strip, Clip, Keep
-- [ ] Tokenizer recognizes plain scalars per YAML 1.2
+  (Plain only — other variants deferred to their tasks)
+- [x] Tokenizer recognizes plain scalars per YAML 1.2
   productions (`ns-plain-first`, `ns-plain-safe`,
   `ns-plain-char`)
-- [ ] Distinguish plain scalars from indicators (`:`, `-`,
+- [x] Distinguish plain scalars from indicators (`:`, `-`,
   `?`, `&`, `*`, `!`, `|`, `>`, `[`, `]`, `{`, `}`, `,`,
   `#`)
-- [ ] Multi-line plain scalars (line folding rules)
-- [ ] Plain scalars borrow from input where possible
+- [x] Multi-line plain scalars (line folding rules)
+- [x] Plain scalars borrow from input where possible
   (`Cow::Borrowed`); only owned when line folding requires
   building a new string
-- [ ] Emit `Scalar { value, style: Plain, anchor: None,
+- [x] Emit `Scalar { value, style: Plain, anchor: None,
   tag: None }` events
-- [ ] Conformance tests covering plain scalars must pass
-- [ ] Unit tests for the tokenizer plain-scalar state
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): plain scalars`
+- [x] Conformance tests covering plain scalars must pass
+- [x] Unit tests for the tokenizer plain-scalar state
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): plain scalars`
+
+**Note:** The `Chomp` enum (Strip/Clip/Keep) was originally
+listed as a Task 6 sub-task but was deferred to Task 8 with
+lead approval — it has no consumer in Task 6 (only
+`Literal(Chomp)` and `Folded(Chomp)` use it), so defining
+it now would be dead code per YAGNI. Task 8 will introduce
+it naturally as part of literal block scalar parsing.
 
 **Reference impl consultation:**
 1. Local: `block.rs` and `flow.rs` plain scalar productions
