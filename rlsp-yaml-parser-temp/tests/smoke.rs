@@ -1123,6 +1123,248 @@ mod scalars {
 }
 
 // ---------------------------------------------------------------------------
+// mod quoted_scalars — single- and double-quoted scalar integration tests (Task 7)
+// ---------------------------------------------------------------------------
+
+mod quoted_scalars {
+    use std::borrow::Cow;
+
+    use super::*;
+
+    fn single(value: &str) -> Event<'_> {
+        Event::Scalar {
+            value: value.into(),
+            style: ScalarStyle::SingleQuoted,
+            anchor: None,
+            tag: None,
+        }
+    }
+
+    fn double(value: &str) -> Event<'_> {
+        Event::Scalar {
+            value: value.into(),
+            style: ScalarStyle::DoubleQuoted,
+            anchor: None,
+            tag: None,
+        }
+    }
+
+    // IT-1 (spike): single-quoted scalar emits Scalar with SingleQuoted style.
+    // Use bare document (no --- marker) so quoted scalar starts on its own line,
+    // avoiding the inline_scalar slot which is plain-scalar only.
+    #[test]
+    fn single_quoted_scalar_emits_scalar_event_with_single_quoted_style() {
+        let events = event_variants("'hello'\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                single("hello"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-2: double-quoted scalar emits Scalar with DoubleQuoted style.
+    #[test]
+    fn double_quoted_scalar_emits_scalar_event_with_double_quoted_style() {
+        let events = event_variants("\"hello\"\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                double("hello"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-3: double-quoted escape produces correct value.
+    #[test]
+    fn double_quoted_escape_produces_correct_value() {
+        // Input: `"with\nescape"` — `\n` is an escape sequence → literal newline.
+        let events = event_variants("\"with\\nescape\"\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                double("with\nescape"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-4: unicode escape in double-quoted produces correct codepoint.
+    #[test]
+    fn unicode_escape_in_double_quoted_produces_correct_codepoint() {
+        let events = event_variants("\"\\u00E9\"\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                double("é"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-5: single-quoted with escaped quote.
+    #[test]
+    fn single_quoted_with_escaped_quote() {
+        let events = event_variants("'it''s'\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                single("it's"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-6: single-quoted span covers including delimiters.
+    #[test]
+    fn single_quoted_span_covers_including_delimiters() {
+        // "'hello'\n" — `'hello'` starts at byte 0.
+        // Span should be [0, 7) covering `'hello'` (7 bytes).
+        let results = parse_to_vec("'hello'\n");
+        let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert_eq!(
+            span.start.byte_offset, 0,
+            "span must start at opening quote"
+        );
+        assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
+    }
+
+    // IT-7: double-quoted span covers including delimiters.
+    #[test]
+    fn double_quoted_span_covers_including_delimiters() {
+        // "\"hello\"\n" — `"hello"` starts at byte 0.
+        // Span should cover 7 bytes: `"hello"`.
+        let results = parse_to_vec("\"hello\"\n");
+        let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert_eq!(
+            span.start.byte_offset, 0,
+            "span must start at opening quote"
+        );
+        assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
+    }
+
+    // IT-8: single-quoted empty scalar.
+    #[test]
+    fn single_quoted_empty_scalar() {
+        let events = event_variants("''\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                single(""),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-9: double-quoted empty scalar.
+    #[test]
+    fn double_quoted_empty_scalar() {
+        let events = event_variants("\"\"\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                double(""),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-10: double-quoted malformed escape propagates Err.
+    #[test]
+    fn double_quoted_malformed_escape_propagates_err() {
+        let results = parse_to_vec("\"\\uD800\"\n");
+        assert!(
+            results.iter().any(Result::is_err),
+            "expected at least one Err in results"
+        );
+    }
+
+    // IT-11: double-quoted unterminated propagates Err.
+    #[test]
+    fn double_quoted_unterminated_propagates_err() {
+        let results = parse_to_vec("\"unterminated\n");
+        assert!(
+            results.iter().any(Result::is_err),
+            "expected at least one Err in results"
+        );
+    }
+
+    // IT-12: single-quoted Cow borrow for no-escape content.
+    #[test]
+    fn single_quoted_cow_borrow_for_no_escape() {
+        let results = parse_to_vec("'hello'\n");
+        let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert!(
+            matches!(value, Cow::Borrowed(_)),
+            "single-quoted with no escapes must be Cow::Borrowed"
+        );
+    }
+
+    // IT-13: double-quoted Cow borrow for no-escape content.
+    #[test]
+    fn double_quoted_cow_borrow_for_no_escape() {
+        let results = parse_to_vec("\"hello\"\n");
+        let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert!(
+            matches!(value, Cow::Borrowed(_)),
+            "double-quoted with no escapes must be Cow::Borrowed"
+        );
+    }
+
+    // IT-14: plain scalar regression guard — adding quoted paths must not break plain.
+    #[test]
+    fn single_quoted_follows_plain_scalar_fallback() {
+        let events = event_variants("--- plain");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "plain".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // mod conformance — yaml-test-suite fixture tests (Task 5 scope)
 // ---------------------------------------------------------------------------
 //
@@ -1315,6 +1557,111 @@ mod conformance {
                 Event::Scalar {
                     value: "text".into(),
                     style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 7 conformance fixtures — quoted scalars
+    // ---------------------------------------------------------------------------
+
+    // CF-Q1: 4GC6 — "Spec Example 7.7. Single Quoted Characters"
+    // yaml: `'here''s to "quotes"'`
+    // Expected scalar value: `here's to "quotes"`
+    #[test]
+    fn cf_q1_4gc6_single_quoted_characters() {
+        // Spike test — validates that single-quoted parsing works end-to-end.
+        let input = "'here''s to \"quotes\"'\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "here's to \"quotes\"".into(),
+                    style: ScalarStyle::SingleQuoted,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-Q2: 2LFX — "Spec Example 6.13. Reserved Directives [1.3]"
+    // yaml: `%FOO  bar baz # ...\n---\n"foo"\n`
+    // Expected scalar value: `foo`
+    #[test]
+    fn cf_q2_2lfx_double_quoted_after_directive() {
+        let input = "%FOO  bar baz # Should be ignored\n                  # with a warning.\n---\n\"foo\"\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: ScalarStyle::DoubleQuoted,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-Q3: double-quoted scalar on its own line after a directive and `---`.
+    // Based on 2LFX (not 6LVF): `%FOO ...\n---\n"foo"\n`.  The full 6LVF
+    // fixture (`--- "foo"` on the same line as `---`) is not exercised here
+    // because inline quoted scalars after `---` are not yet supported —
+    // consume_marker_line dispatches through scan_plain_line_block (plain
+    // only).  See the TODO in consume_marker_line for the deferred fix.
+    #[test]
+    fn cf_q3_quoted_scalar_after_directive_and_doc_marker() {
+        // 2LFX variant: `%FOO ...\n---\n"foo"\n` — quoted scalar on its own line.
+        let input = "%FOO  bar baz # Should be ignored\n                  # with a warning.\n---\n\"foo\"\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: ScalarStyle::DoubleQuoted,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-Q4: 4UYU — "Colon in Double Quoted String"
+    // yaml: `"foo: bar\": baz"`
+    // Expected scalar value: `foo: bar": baz`
+    #[test]
+    fn cf_q4_4uyu_colon_in_double_quoted() {
+        let input = "\"foo: bar\\\": baz\"\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo: bar\": baz".into(),
+                    style: ScalarStyle::DoubleQuoted,
                     anchor: None,
                     tag: None,
                 },

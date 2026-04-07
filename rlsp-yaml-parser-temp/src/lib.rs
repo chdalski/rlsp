@@ -72,6 +72,49 @@ impl<'input> EventIter<'input> {
             pending: None,
         }
     }
+
+    /// Try to consume one scalar from the current lexer position.
+    ///
+    /// Returns:
+    /// - `Ok(Some(...))` — a scalar event was produced.
+    /// - `Ok(None)` — no scalar recognised at this position.
+    /// - `Err(e)` — a parse error (e.g. invalid escape sequence).
+    fn try_consume_scalar(&mut self) -> Result<Option<(Event<'input>, Span)>, Error> {
+        if let Some((value, span)) = self.lexer.try_consume_single_quoted(0)? {
+            return Ok(Some((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::SingleQuoted,
+                    anchor: None,
+                    tag: None,
+                },
+                span,
+            )));
+        }
+        if let Some((value, span)) = self.lexer.try_consume_double_quoted(0)? {
+            return Ok(Some((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::DoubleQuoted,
+                    anchor: None,
+                    tag: None,
+                },
+                span,
+            )));
+        }
+        if let Some((value, span)) = self.lexer.try_consume_plain_scalar(0) {
+            return Ok(Some((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                span,
+            )));
+        }
+        Ok(None)
+    }
 }
 
 /// Build a span that covers exactly the 3-byte document marker at `marker_pos`.
@@ -192,18 +235,11 @@ impl<'input> Iterator for EventIter<'input> {
                             zero_span(marker_pos),
                         )));
                     }
-                    // Try to parse a plain scalar at the current position.
-                    // parent_indent is 0 for top-level document content.
-                    if let Some((value, span)) = self.lexer.try_consume_plain_scalar(0) {
-                        return Some(Ok((
-                            Event::Scalar {
-                                value,
-                                style: ScalarStyle::Plain,
-                                anchor: None,
-                                tag: None,
-                            },
-                            span,
-                        )));
+                    // Try scalars: single-quoted, double-quoted, plain (in priority order).
+                    match self.try_consume_scalar() {
+                        Ok(Some(event)) => return Some(Ok(event)),
+                        Err(e) => return Some(Err(e)),
+                        Ok(None) => {}
                     }
                     // Fallback: unrecognised content line — consume and loop.
                     // Tasks 10-12 will handle collections (sequences/mappings).

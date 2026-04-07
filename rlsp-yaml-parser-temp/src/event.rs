@@ -24,9 +24,11 @@ use std::borrow::Cow;
 pub enum ScalarStyle {
     /// An unquoted plain scalar (YAML 1.2 §7.3.3).
     Plain,
-    // SingleQuoted (Task 7), DoubleQuoted (Task 7),
-    // Literal(Chomp) (Task 8), Folded(Chomp) (Task 9)
-    // are added in their respective tasks.
+    /// A `'single-quoted'` scalar (YAML 1.2 §7.3.2).
+    SingleQuoted,
+    /// A `"double-quoted"` scalar (YAML 1.2 §7.3.1).
+    DoubleQuoted,
+    // Literal(Chomp) (Task 8), Folded(Chomp) (Task 9) added in their tasks.
 }
 
 /// A high-level YAML parse event.
