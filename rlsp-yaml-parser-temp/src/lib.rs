@@ -9,6 +9,8 @@ mod loader;
 mod pos;
 mod scanner;
 
+pub use pos::{Pos, Span};
+
 pub fn parse_events(input: &str) -> impl Iterator<Item = ()> + '_ {
     let _ = input;
     std::iter::empty()
