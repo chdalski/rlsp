@@ -223,7 +223,7 @@ user has explicitly approved this scope.
 - [x] Investigate combinator architecture and streaming
   feasibility (done in planning)
 - [x] Confirm scope and approach with user
-- [ ] Bootstrap new crate (Task 1)
+- [x] Bootstrap new crate (Task 1) — `8531e28`
 - [ ] Build line buffer and scanner foundations (Tasks 2-3)
 - [ ] Implement empty stream and document boundaries (Tasks 4-5)
 - [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
@@ -241,20 +241,22 @@ user has explicitly approved this scope.
 
 Create the new crate skeleton in the workspace.
 
-- [ ] Create `rlsp-yaml-parser-temp/Cargo.toml` with same
+**Status:** Completed in commit `8531e28`.
+
+- [x] Create `rlsp-yaml-parser-temp/Cargo.toml` with same
   workspace integration as `rlsp-yaml-parser`
-- [ ] Add `rlsp-yaml-parser-temp` to workspace members in
+- [x] Add `rlsp-yaml-parser-temp` to workspace members in
   root `Cargo.toml`
-- [ ] Create `rlsp-yaml-parser-temp/src/lib.rs` with empty
+- [x] Create `rlsp-yaml-parser-temp/src/lib.rs` with empty
   module declarations and a placeholder `parse_events()`
   that returns an empty iterator
-- [ ] Create empty source files for: `pos.rs`, `chars.rs`,
+- [x] Create empty source files for: `pos.rs`, `chars.rs`,
   `lines.rs`, `scanner.rs`, `lexer.rs`, `event.rs`,
   `loader.rs`, `error.rs`
-- [ ] `cargo build -p rlsp-yaml-parser-temp` succeeds
-- [ ] `cargo clippy -p rlsp-yaml-parser-temp --all-targets`
+- [x] `cargo build -p rlsp-yaml-parser-temp` succeeds
+- [x] `cargo clippy -p rlsp-yaml-parser-temp --all-targets`
   passes with zero warnings
-- [ ] Commit message: `feat(parser-temp): bootstrap streaming parser crate skeleton`
+- [x] Commit message: `feat(parser-temp): bootstrap streaming parser crate skeleton`
 
 **Reference impl consultation:** Not applicable (skeleton only).
 **Advisors:** None.
