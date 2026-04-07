@@ -9,6 +9,7 @@ mod loader;
 mod pos;
 mod scanner;
 
+pub use lines::{BreakType, Line, LineBuffer};
 pub use pos::{Pos, Span};
 
 pub fn parse_events(input: &str) -> impl Iterator<Item = ()> + '_ {
