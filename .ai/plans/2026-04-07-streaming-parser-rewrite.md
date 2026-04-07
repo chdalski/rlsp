@@ -224,9 +224,9 @@ user has explicitly approved this scope.
   feasibility (done in planning)
 - [x] Confirm scope and approach with user
 - [x] Bootstrap new crate (Task 1) — `8531e28`
-- [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
+- [x] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
 - [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
-- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`, Task 7 `c06c0b2`
+- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`, Task 7 `c06c0b2`, Task 8 `ddc3038`
 - [ ] Implement block collections (Tasks 10-12)
 - [ ] Implement flow collections (Tasks 13-14)
 - [ ] Implement anchors, tags, aliases, comments (Tasks 15-17)
@@ -482,20 +482,22 @@ need careful bounds checking).
 
 ### Task 8: Literal block scalars
 
-- [ ] Literal block scalar header: `|` followed by
+**Status:** Completed in commit `ddc3038`.
+
+- [x] Literal block scalar header: `|` followed by
   optional chomp indicator (`+`/`-`) and optional explicit
   indent digit
-- [ ] Auto-detect indentation when no explicit digit:
+- [x] Auto-detect indentation when no explicit digit:
   scan forward (using the line buffer's block-scalar peek
   mode) to find the first content line
-- [ ] Collect content lines preserving newlines
-- [ ] Apply chomping rules (Strip/Clip/Keep) at end
-- [ ] Emit `Scalar { value: Cow::Owned(String), style: Literal(chomp), ... }`
-- [ ] Handle empty block scalars
-- [ ] Handle block scalars at end of input
-- [ ] Conformance tests for literal block scalars must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): literal block scalars`
+- [x] Collect content lines preserving newlines
+- [x] Apply chomping rules (Strip/Clip/Keep) at end
+- [x] Emit `Scalar { value: Cow::Owned(String), style: Literal(chomp), ... }`
+- [x] Handle empty block scalars
+- [x] Handle block scalars at end of input
+- [x] Conformance tests for literal block scalars must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): literal block scalars`
 
 **Reference impl consultation:**
 1. Local: `block.rs` `c_l_literal()`,
