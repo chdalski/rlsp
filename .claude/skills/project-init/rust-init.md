@@ -22,6 +22,7 @@ wildcard_enum_match_arm = "deny"             # silently ignores new variants whe
 unneeded_field_pattern = "deny"              # dead pattern arms that hide refactoring bugs
 fn_params_excessive_bools = "deny"           # boolean params are easy to swap — use enums
 must_use_candidate = "deny"                  # functions whose return value should not be ignored
+panic = "deny"                               # explicit panic!() — use proper error handling
 expect_used = "deny"                         # panics with a message — use proper error handling
 unwrap_used = "deny"                         # panics on None/Err — use proper error handling
 
@@ -43,6 +44,7 @@ wildcard_enum_match_arm = "deny"
 unneeded_field_pattern = "deny"
 fn_params_excessive_bools = "deny"
 must_use_candidate = "deny"
+panic = "deny"
 expect_used = "deny"
 unwrap_used = "deny"
 
