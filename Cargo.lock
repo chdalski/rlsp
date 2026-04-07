@@ -1032,6 +1032,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlsp-yaml-parser-temp"
+version = "0.0.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "rstest"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

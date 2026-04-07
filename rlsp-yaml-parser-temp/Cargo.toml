@@ -1,0 +1,15 @@
+[package]
+name = "rlsp-yaml-parser-temp"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Streaming YAML 1.2 parser (work in progress, will replace rlsp-yaml-parser)"
+
+[dependencies]
+thiserror = "2"
+
+[lints]
+workspace = true
