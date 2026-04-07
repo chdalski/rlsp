@@ -26,6 +26,33 @@ pub enum BreakType {
     Eof,
 }
 
+impl BreakType {
+    /// Advance `pos` past this line break.
+    ///
+    /// Each break type requires distinct logic because `Pos::advance(char)`
+    /// operates on individual characters and cannot distinguish bare `\r`
+    /// from `\r\n`.
+    #[must_use]
+    pub const fn advance(self, mut pos: Pos) -> Pos {
+        match self {
+            Self::Lf => pos.advance('\n'),
+            Self::CrLf => {
+                pos.byte_offset += '\r'.len_utf8();
+                pos.char_offset += 1;
+                pos.advance('\n')
+            }
+            Self::Cr => {
+                pos.byte_offset += '\r'.len_utf8();
+                pos.char_offset += 1;
+                pos.line += 1;
+                pos.column = 0;
+                pos
+            }
+            Self::Eof => pos,
+        }
+    }
+}
+
 /// A single logical line extracted from the input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Line<'input> {
@@ -297,25 +324,7 @@ fn advance_pos_past_line(line: &Line<'_>) -> Pos {
     for ch in line.content.chars() {
         pos = pos.advance(ch);
     }
-    match line.break_type {
-        BreakType::Lf => pos = pos.advance('\n'),
-        BreakType::CrLf => {
-            // Advance past the \r byte without touching line/column…
-            pos.byte_offset += '\r'.len_utf8();
-            pos.char_offset += 1;
-            // …then let \n bump the line counter.
-            pos = pos.advance('\n');
-        }
-        BreakType::Cr => {
-            // \r is a line terminator: bump byte/char and reset line/column.
-            pos.byte_offset += '\r'.len_utf8();
-            pos.char_offset += 1;
-            pos.line += 1;
-            pos.column = 0;
-        }
-        BreakType::Eof => {} // no terminator
-    }
-    pos
+    line.break_type.advance(pos)
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +334,94 @@ fn advance_pos_past_line(line: &Line<'_>) -> Pos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // BreakType::advance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn break_type_advance_lf() {
+        let pos = Pos::ORIGIN;
+        let after = BreakType::Lf.advance(pos);
+        assert_eq!(after.byte_offset, 1);
+        assert_eq!(after.char_offset, 1);
+        assert_eq!(after.line, 2);
+        assert_eq!(after.column, 0);
+    }
+
+    #[test]
+    fn break_type_advance_crlf() {
+        let pos = Pos::ORIGIN;
+        let after = BreakType::CrLf.advance(pos);
+        // \r = 1 byte, \n = 1 byte → 2 bytes total
+        assert_eq!(after.byte_offset, 2);
+        assert_eq!(after.char_offset, 2);
+        assert_eq!(after.line, 2);
+        assert_eq!(after.column, 0);
+    }
+
+    #[test]
+    fn break_type_advance_cr_increments_line() {
+        let pos = Pos::ORIGIN;
+        let after = BreakType::Cr.advance(pos);
+        assert_eq!(after.line, 2);
+    }
+
+    #[test]
+    fn break_type_advance_cr_resets_column() {
+        let pos = Pos {
+            byte_offset: 3,
+            char_offset: 3,
+            line: 1,
+            column: 3,
+        };
+        let after = BreakType::Cr.advance(pos);
+        assert_eq!(after.column, 0);
+        assert_eq!(after.byte_offset, 4); // \r = 1 byte
+        assert_eq!(after.line, 2);
+    }
+
+    #[test]
+    fn break_type_advance_lf_at_non_origin_pos() {
+        let pos = Pos {
+            byte_offset: 5,
+            char_offset: 5,
+            line: 2,
+            column: 3,
+        };
+        let after = BreakType::Lf.advance(pos);
+        assert_eq!(after.byte_offset, 6);
+        assert_eq!(after.char_offset, 6);
+        assert_eq!(after.line, 3);
+        assert_eq!(after.column, 0);
+    }
+
+    #[test]
+    fn break_type_advance_crlf_at_non_origin_pos() {
+        let pos = Pos {
+            byte_offset: 5,
+            char_offset: 5,
+            line: 2,
+            column: 3,
+        };
+        let after = BreakType::CrLf.advance(pos);
+        assert_eq!(after.byte_offset, 7); // \r (1) + \n (1) = +2
+        assert_eq!(after.char_offset, 7);
+        assert_eq!(after.line, 3);
+        assert_eq!(after.column, 0);
+    }
+
+    #[test]
+    fn break_type_advance_eof_is_noop() {
+        let pos = Pos {
+            byte_offset: 5,
+            char_offset: 4,
+            line: 3,
+            column: 2,
+        };
+        let after = BreakType::Eof.advance(pos);
+        assert_eq!(after, pos);
+    }
 
     // -----------------------------------------------------------------------
     // new and initial state

@@ -40,6 +40,25 @@ pub enum Event<'input> {
     /// zero-width span at the position immediately after the last byte of
     /// input.
     StreamEnd,
+    /// A document has started.
+    ///
+    /// `explicit` is `true` when the document was introduced with `---`.
+    /// `false` for bare documents (no marker).
+    ///
+    /// Note: `version` and `tags` (from `%YAML` / `%TAG` directives) are
+    /// deferred to Task 18.
+    DocumentStart {
+        /// Whether the document was introduced with `---`.
+        explicit: bool,
+    },
+    /// A document has ended.
+    ///
+    /// `explicit` is `true` when the document was closed with `...`.
+    /// `false` for implicitly-ended documents.
+    DocumentEnd {
+        /// Whether the document was closed with `...`.
+        explicit: bool,
+    },
 
     // Suppress the "unused lifetime" warning until scalar variants land.
     #[doc(hidden)]
