@@ -10,7 +10,7 @@ mod pos;
 mod scanner;
 
 pub use error::Error;
-pub use event::Event;
+pub use event::{Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use pos::{Pos, Span};
 
@@ -160,7 +160,7 @@ impl<'input> Iterator for EventIter<'input> {
                     // directives — they are consumed here as regular lines.)
                     self.lexer.skip_empty_lines();
 
-                    if self.lexer.at_eof() {
+                    if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
                         // Implicit document end at EOF.  `drain_to_end` is a
                         // no-op here (buffer is already empty) but confirms the
                         // final position and keeps the method reachable for
@@ -192,9 +192,21 @@ impl<'input> Iterator for EventIter<'input> {
                             zero_span(marker_pos),
                         )));
                     }
-                    // Regular content line — consume and loop to process
-                    // the next line in InDocument.  Scalar/mapping/sequence
-                    // parsing is deferred to Tasks 6+.
+                    // Try to parse a plain scalar at the current position.
+                    // parent_indent is 0 for top-level document content.
+                    if let Some((value, span)) = self.lexer.try_consume_plain_scalar(0) {
+                        return Some(Ok((
+                            Event::Scalar {
+                                value,
+                                style: ScalarStyle::Plain,
+                                anchor: None,
+                                tag: None,
+                            },
+                            span,
+                        )));
+                    }
+                    // Fallback: unrecognised content line — consume and loop.
+                    // Tasks 10-12 will handle collections (sequences/mappings).
                     self.lexer.consume_line();
                     // continue loop (no recursion)
                 }

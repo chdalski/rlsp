@@ -12,21 +12,24 @@
 //! # Planned variants
 //!
 //! Future tasks will add:
-//! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 5)
-//! - `DocumentEnd { explicit: bool }` (Task 5)
-//! - `Scalar { value: Cow<'input, str>, style: ScalarStyle, anchor: Option<...>, tag: Option<...> }` (Task 6+)
-//! - `MappingStart / MappingEnd` (Task 9+)
-//! - `SequenceStart / SequenceEnd` (Task 9+)
-//! - `Alias { name: Cow<'input, str> }` (Task 12+)
-//!
-//! The `'input` lifetime parameter is present now so that adding
-//! `Cow<'input, str>` fields in later tasks does not break the public API.
+//! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 18)
+//! - `MappingStart / MappingEnd` (Task 10+)
+//! - `SequenceStart / SequenceEnd` (Task 10+)
+//! - `Alias { name: Cow<'input, str> }` (Task 15+)
+
+use std::borrow::Cow;
+
+/// The style in which a scalar value was written in the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarStyle {
+    /// An unquoted plain scalar (YAML 1.2 §7.3.3).
+    Plain,
+    // SingleQuoted (Task 7), DoubleQuoted (Task 7),
+    // Literal(Chomp) (Task 8), Folded(Chomp) (Task 9)
+    // are added in their respective tasks.
+}
 
 /// A high-level YAML parse event.
-///
-/// Parameterized by `'input` so that future scalar variants can borrow
-/// directly from the input string via `Cow<'input, str>` without requiring
-/// an API-breaking change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event<'input> {
     /// The YAML stream has started.
@@ -59,8 +62,22 @@ pub enum Event<'input> {
         /// Whether the document was closed with `...`.
         explicit: bool,
     },
-
-    // Suppress the "unused lifetime" warning until scalar variants land.
-    #[doc(hidden)]
-    _Phantom(std::marker::PhantomData<&'input ()>),
+    /// A scalar value.
+    ///
+    /// `value` borrows from input when no transformation is required (the
+    /// vast majority of plain scalars).  It owns when line folding produces
+    /// a string that doesn't exist contiguously in the input.
+    ///
+    /// `anchor` and `tag` are `None` until Tasks 15/16 implement anchor and
+    /// tag tokenization respectively.
+    Scalar {
+        /// The scalar's decoded value.
+        value: Cow<'input, str>,
+        /// The style in which the scalar appeared in the source.
+        style: ScalarStyle,
+        /// The anchor name, if any (e.g. `&foo`).  Populated in Task 15.
+        anchor: Option<&'input str>,
+        /// The tag, if any (e.g. `!!str`).  Populated in Task 16.
+        tag: Option<&'input str>,
+    },
 }

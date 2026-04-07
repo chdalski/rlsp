@@ -10,7 +10,7 @@
 //! [`parse_to_vec`] collects the full event stream into a `Vec` without
 //! hiding errors.  It is the canonical test helper for all grammar tasks.
 
-use rlsp_yaml_parser_temp::{Error, Event, Pos, Span, parse_events};
+use rlsp_yaml_parser_temp::{Error, Event, Pos, ScalarStyle, Span, parse_events};
 
 // ---------------------------------------------------------------------------
 // Shared helper for extracting event variants from parse_to_vec
@@ -508,15 +508,19 @@ mod documents {
     #[test]
     fn content_after_dash_marker_space_separated_starts_document() {
         // Space after `---` qualifies as a marker (4th byte is space).
-        // The `value` on the same line is consumed by InDocument (scalar
-        // handling deferred).  For Task 5, the document is started and
-        // implicitly ended.
+        // The inline content "value" is extracted as a plain scalar by Task 6.
         let events = event_variants("--- value\n");
         assert_eq!(
             events,
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "value".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -529,15 +533,22 @@ mod documents {
 
     #[test]
     fn indented_dash_is_not_a_directives_end_marker() {
-        // "  ---" has indent=2; it is bare-document content (not a marker).
-        // BetweenDocs fires the bare-doc path: DocumentStart{explicit:false},
-        // then InDocument consumes the line, then EOF → DocumentEnd{false}.
+        // "  ---" has indent=2; it is a plain scalar (not a marker).
+        // `---` is allowed as a plain scalar when it is indented — ns-plain-first
+        // allows `-` when followed by a safe ns-char, and the next two `-` chars
+        // are ns-chars.
         let events = event_variants("  ---\n");
         assert_eq!(
             events,
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "---".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -627,6 +638,12 @@ mod documents {
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -635,13 +652,19 @@ mod documents {
 
     #[test]
     fn multi_line_content_yields_single_bare_doc() {
-        // Both lines consumed inside InDocument; only one DocumentStart/End.
+        // Both lines fold into a single plain scalar ("foo bar").
         let events = event_variants("foo\nbar\n");
         assert_eq!(
             events,
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo bar".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -657,6 +680,12 @@ mod documents {
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -665,13 +694,19 @@ mod documents {
 
     #[test]
     fn bare_doc_with_explicit_end_marker() {
-        // InDocument sees `...` → DocumentEnd{explicit:true}.
+        // InDocument sees scalar, then `...` → DocumentEnd{explicit:true}.
         let events = event_variants("foo\n...\n");
         assert_eq!(
             events,
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: true },
                 Event::StreamEnd,
             ]
@@ -680,7 +715,7 @@ mod documents {
 
     #[test]
     fn bare_doc_followed_by_explicit_doc() {
-        // InDocument sees `---` → implicit DocumentEnd for the bare doc, then
+        // InDocument emits scalar, sees `---` → implicit DocumentEnd, then
         // DocumentStart{explicit:true} for the new one.
         let events = event_variants("foo\n---\n");
         assert_eq!(
@@ -688,6 +723,12 @@ mod documents {
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::DocumentStart { explicit: true },
                 Event::DocumentEnd { explicit: false },
@@ -704,8 +745,20 @@ mod documents {
             [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "foo".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: true },
                 Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "bar".into(),
+                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -728,10 +781,11 @@ mod documents {
 
     #[test]
     fn bare_doc_end_at_eof_span_is_zero_width_after_last_content() {
-        // "foo\n" = 4 bytes; DocumentEnd{false} at position after last byte.
+        // "foo\n" = 4 bytes; sequence: StreamStart, DocStart, Scalar, DocEnd.
+        // DocEnd is at index 3 now (Scalar is at index 2).
         let results = parse_to_vec("foo\n");
-        let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(2) else {
-            panic!("expected bare DocumentEnd as third event");
+        let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(3) else {
+            panic!("expected bare DocumentEnd as fourth event");
         };
         assert_eq!(
             span.start, span.end,
@@ -742,10 +796,11 @@ mod documents {
 
     #[test]
     fn bare_doc_end_before_explicit_doc_span_is_zero_width_at_marker_pos() {
-        // "foo\n---\n": implicit DocumentEnd at byte 4 (position of `---`).
+        // "foo\n---\n": StreamStart, DocStart, Scalar, DocEnd(implicit), DocStart, DocEnd.
+        // Implicit DocEnd is at index 3.
         let results = parse_to_vec("foo\n---\n");
-        let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(2) else {
-            panic!("expected implicit DocumentEnd as third event");
+        let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(3) else {
+            panic!("expected implicit DocumentEnd at index 3");
         };
         assert_eq!(
             span.start, span.end,
@@ -836,6 +891,238 @@ mod documents {
 }
 
 // ---------------------------------------------------------------------------
+// mod scalars — plain scalar integration tests (Task 6)
+// ---------------------------------------------------------------------------
+
+mod scalars {
+    use super::*;
+
+    // Helper: make a plain `Scalar` event for easy comparison.
+    fn plain(value: &str) -> Event<'_> {
+        Event::Scalar {
+            value: value.into(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            tag: None,
+        }
+    }
+
+    // IT-S1 — single plain scalar in bare document.
+    #[test]
+    fn plain_scalar_emits_scalar_event() {
+        let events = event_variants("hello");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("hello"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S2 — plain scalar with explicit `---` and `...` markers.
+    #[test]
+    fn plain_scalar_explicit_doc_markers() {
+        let events = event_variants("---\nhello\n...\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                plain("hello"),
+                Event::DocumentEnd { explicit: true },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S3 — multi-line plain scalar folds to spaces.
+    #[test]
+    fn multi_line_plain_scalar_folds_to_spaces() {
+        // "foo\n  bar\n  baz\n" → "foo bar baz"
+        let events = event_variants("foo\n  bar\n  baz\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("foo bar baz"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S4 — plain scalar with embedded URL (`:` disambiguation).
+    #[test]
+    fn plain_scalar_with_url() {
+        let events = event_variants("http://example.com");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("http://example.com"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S5 — plain scalar with `#` not preceded by whitespace.
+    #[test]
+    fn plain_scalar_with_hash_inside() {
+        let events = event_variants("a#b");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("a#b"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S6 — plain scalar terminated by inline comment.
+    #[test]
+    fn plain_scalar_terminated_by_comment() {
+        // "foo # comment\n" → scalar "foo" (trailing space stripped, comment excluded).
+        let events = event_variants("foo # comment\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("foo"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S7 — blank line in multi-line plain scalar folds to newline.
+    #[test]
+    fn multi_line_plain_scalar_blank_line_folds_to_newline() {
+        // "foo\n\nbar\n" → "foo\nbar"
+        let events = event_variants("foo\n\nbar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("foo\nbar"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S8 — span start byte offset for plain scalar.
+    #[test]
+    fn plain_scalar_span_start_at_byte_zero() {
+        let results = parse_to_vec("hello");
+        let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert_eq!(span.start.byte_offset, 0);
+    }
+
+    // IT-S9 — span end byte offset for plain scalar.
+    #[test]
+    fn plain_scalar_span_end_after_value() {
+        // "hello" = 5 bytes; span end at byte 5.
+        let results = parse_to_vec("hello");
+        let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert_eq!(span.end.byte_offset, 5);
+    }
+
+    // IT-S10 — span start for indented scalar.
+    #[test]
+    fn plain_scalar_indented_span_start() {
+        // "  hello" — leading 2 spaces, scalar starts at byte 2.
+        let results = parse_to_vec("  hello");
+        let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
+            panic!("expected Scalar as third event");
+        };
+        assert_eq!(span.start.byte_offset, 2);
+    }
+
+    // IT-S11 — plain scalar with backslashes (no escaping in plain scalars).
+    #[test]
+    fn plain_scalar_with_backslashes() {
+        let events = event_variants("plain\\value\\with\\backslashes");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("plain\\value\\with\\backslashes"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S12 — two blank lines in multi-line scalar fold to two newlines.
+    #[test]
+    fn multi_line_plain_scalar_two_blank_lines_fold_to_two_newlines() {
+        // "foo\n\n\nbar\n" — two blank lines → "foo\n\nbar"
+        let events = event_variants("foo\n\n\nbar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("foo\n\nbar"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S13 — trailing space on continuation lines is stripped before folding.
+    #[test]
+    fn multi_line_plain_scalar_continuation_trailing_space_stripped() {
+        // "foo\nbar   \nbaz\n" — trailing spaces on "bar" stripped; → "foo bar baz"
+        let events = event_variants("foo\nbar   \nbaz\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                plain("foo bar baz"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-S14 — inline scalar on same line as `---` marker.
+    #[test]
+    fn plain_scalar_inline_after_directives_end_marker() {
+        // "--- text\n" — "text" follows the marker on the same line.
+        let events = event_variants("--- text\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                plain("text"),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // mod conformance — yaml-test-suite fixture tests (Task 5 scope)
 // ---------------------------------------------------------------------------
 //
@@ -877,5 +1164,163 @@ mod conformance {
     fn qt73_comment_and_document_end() {
         let events = event_variants("# comment\n...\n");
         assert_eq!(events, [Event::StreamStart, Event::StreamEnd]);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 6 conformance fixtures — plain scalars
+    // ---------------------------------------------------------------------------
+
+    // CF-5: 4V8U — "Plain scalar with backslashes"
+    // yaml: `---\nplain\value\with\backslashes\n`
+    #[test]
+    fn cf5_4v8u_plain_scalar_with_backslashes() {
+        // From yaml-test-suite/src/4V8U.yaml
+        let input = "---\nplain\\value\\with\\backslashes\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "plain\\value\\with\\backslashes".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-6: EX5H — "Multiline Scalar at Top Level [1.3]"
+    // yaml: `---\na\nb  \n  c\nd\n\ne\n` (with trailing spaces on b-line stripped)
+    // Expected scalar: "a b c d\ne"
+    // Note: ␣␣ in the fixture is two trailing spaces that get stripped.
+    #[test]
+    fn cf6_ex5h_multiline_scalar_at_top_level() {
+        // From yaml-test-suite/src/EX5H.yaml
+        // The fixture yaml field (after visual notation):
+        //   "---\na\nb  \n  c\nd\n\ne\n"
+        // (b has two trailing spaces that are stripped during folding)
+        let input = "---\na\nb  \n  c\nd\n\ne\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "a b c d\ne".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-7: 9YRD — "Multiline Scalar at Top Level" (bare document, YAML 1.2)
+    // yaml: `a\nb  \n  c\nd\n\ne\n`
+    // Expected scalar: "a b c d\ne"
+    #[test]
+    fn cf7_9yrd_multiline_scalar_bare_doc() {
+        // From yaml-test-suite/src/9YRD.yaml
+        let input = "a\nb  \n  c\nd\n\ne\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "a b c d\ne".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-8: HS5T — "Spec Example 7.12. Plain Lines"
+    // Tests tab-prefixed continuation, blank line folding, trailing-space stripping.
+    // Expected scalar: "1st non-empty\n2nd non-empty 3rd non-empty"
+    #[test]
+    fn cf8_hs5t_plain_lines_spec_example() {
+        // From yaml-test-suite/src/HS5T.yaml
+        // Visual notation: ␣ = space, → = tab
+        let input = "1st non-empty\n\n 2nd non-empty \n\t3rd non-empty\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                Event::Scalar {
+                    value: "1st non-empty\n2nd non-empty 3rd non-empty".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-9: 27NA — "Spec Example 5.9. Directive Indicator"
+    // Tests inline scalar on the same line as `---`: `--- text` → scalar "text".
+    // Also tests %YAML directive (skipped in BetweenDocs).
+    #[test]
+    fn cf9_27na_directive_indicator_spec_example() {
+        // From yaml-test-suite/src/27NA.yaml
+        // yaml: "%YAML 1.2\n--- text\n"
+        let input = "%YAML 1.2\n--- text\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "text".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // CF-9b: 27NA — exact name from TE spec
+    #[test]
+    fn yaml27na_directive_indicator_spec_example() {
+        // From yaml-test-suite/src/27NA.yaml — %YAML 1.2 + `--- text`
+        // The scalar "text" follows the directives-end marker on the same line.
+        let input = "%YAML 1.2\n--- text\n";
+        let events = event_variants(input);
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                Event::Scalar {
+                    value: "text".into(),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
     }
 }
