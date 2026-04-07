@@ -224,7 +224,7 @@ user has explicitly approved this scope.
   feasibility (done in planning)
 - [x] Confirm scope and approach with user
 - [x] Bootstrap new crate (Task 1) — `8531e28`
-- [ ] Build line buffer and scanner foundations (Tasks 2-3)
+- [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`
 - [ ] Implement empty stream and document boundaries (Tasks 4-5)
 - [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
 - [ ] Implement block collections (Tasks 10-12)
@@ -266,14 +266,16 @@ Create the new crate skeleton in the workspace.
 Port the foundational types from `rlsp-yaml-parser` that
 do not depend on the parser architecture.
 
-- [ ] Port `Pos` struct (byte_offset, char_offset, line,
+**Status:** Completed in commit `63ea25c`.
+
+- [x] Port `Pos` struct (byte_offset, char_offset, line,
   column) and its operations to `pos.rs`
-- [ ] Port `Span` struct to `pos.rs`
-- [ ] Port character predicate functions from
+- [x] Port `Span` struct to `pos.rs`
+- [x] Port character predicate functions from
   `rlsp-yaml-parser/src/chars.rs` to `chars.rs`
-- [ ] Add unit tests for non-trivial predicates
-- [ ] Build and clippy clean
-- [ ] Commit: `feat(parser-temp): port Pos, Span, and character predicates`
+- [x] Add unit tests for non-trivial predicates
+- [x] Build and clippy clean
+- [x] Commit: `feat(parser-temp): port Pos, Span, and character predicates`
 
 **Reference impl consultation:** Local
 `rlsp-yaml-parser/src/pos.rs` and `chars.rs`. These are
