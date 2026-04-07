@@ -226,14 +226,15 @@ user has explicitly approved this scope.
 - [x] Bootstrap new crate (Task 1) — `8531e28`
 - [x] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
 - [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
-- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`, Task 7 `c06c0b2`, Task 8 `ddc3038`
-- [ ] Implement block collections (Tasks 10-12)
-- [ ] Implement flow collections (Tasks 13-14)
-- [ ] Implement anchors, tags, aliases, comments (Tasks 15-17)
-- [ ] Implement directives and multi-document (Task 18)
-- [ ] Port loader and run integration tests (Tasks 19-20)
-- [ ] Run benchmarks, verify O(1) latency (Task 21)
-- [ ] Audit and clean up panic sites (Task 22)
+- [ ] Implement plain, quoted, and literal block scalars (Tasks 6-8) — Task 6 `e624786`, Task 7 `c06c0b2`, Task 8 `ddc3038`
+- [ ] Enable `clippy::panic` and clean up panic sites (Task 9)
+- [ ] Implement folded block scalars (Task 10)
+- [ ] Implement block collections (Tasks 11-13)
+- [ ] Implement flow collections (Tasks 14-15)
+- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18)
+- [ ] Implement directives and multi-document (Task 19)
+- [ ] Port loader and run integration tests (Tasks 20-21)
+- [ ] Run benchmarks, verify O(1) latency (Task 22)
 - [ ] Migrate: replace rlsp-yaml-parser (Task 23)
 
 ## Tasks
@@ -385,7 +386,7 @@ Add `DocumentStart`/`DocumentEnd` events and handle the
   `---\n---\n---\n`)
 - [x] Handle bare documents (no markers — explicit=false)
 - [x] Handle the `directives + ---` document start
-  (directives covered in Task 18, but the parser must not
+  (directives covered in Task 19, but the parser must not
   reject them here)
 - [x] Conformance tests for empty docs and bare doc
   markers must pass; identify which YAML test suite files
@@ -515,7 +516,69 @@ subtle edge cases — chomping, indent detection, blank
 line handling); the local impl has WW2P, M9B4, S98Z and
 other test fixture cases that exercise edge cases.
 
-### Task 9: Folded block scalars
+### Task 9: Enable `clippy::panic` and clean up panic sites
+
+Task 8's review surfaced ~60 `unwrap_or_else(|| panic!("..."))`
+call sites in `rlsp-yaml-parser-temp/src/lexer.rs`. These
+express invariant assertions in a form that bypasses the
+existing `unwrap_used = "deny"` / `expect_used = "deny"`
+clippy lints, making them hard to audit: a reviewer can't
+tell a legitimate invariant ("peek returned Some but
+consume returned None" — a LineBuffer API guarantee) from
+a developer dodging the lint without tracing the call site.
+
+**Approach:** add `#![deny(clippy::panic)]` at the top of
+`rlsp-yaml-parser-temp/src/lib.rs`. This is a crate-level
+Rust attribute that stacks additively with the workspace
+`[lints]` inheritance — the existing lint configuration
+is preserved, and the new lint is scoped to this crate
+only. Other workspace crates (`rlsp-yaml-parser`,
+`rlsp-yaml`, `rlsp-fmt`) are unaffected.
+
+The lint catches every literal `panic!` macro invocation,
+including `unwrap_or_else(|| panic!(...))` since the
+closure body contains `panic!`. The lint becomes the
+audit: `cargo clippy` lists exactly which sites need to
+be fixed, and the list can never grow undetected.
+
+The crate-level attribute covers both `src/` and the
+crate's `tests/` integration tests, so test sites need
+conversion too.
+
+**Execution order:** Inserted between Task 8 and the
+scalar work of Task 10 so the lint is active before
+Tasks 10-21 add more code. This bounds the cleanup scope
+to what Tasks 5-8 introduced (~60 sites) rather than
+letting the pattern spread.
+
+**Conversion rules:**
+- **Invariant assertions** (the majority): `unwrap_or_else(|| panic!("..."))` → `let Some(x) = ... else { unreachable!("...") }`. `unreachable!` is a distinct macro, not caught by `clippy::panic`, and signals "I've proved this can't happen" at the call site.
+- **Real error cases:** convert to a `Result` return. No exceptions.
+- **Test assertions:** `unwrap_or_else(|| panic!("should parse"))` in unit tests → either `unreachable!("should parse")` or `#[expect(clippy::panic, reason = "test assertion")]` on the test function. Prefer the former.
+
+**Acceptance target:** zero `panic!` macro violations in
+`rlsp-yaml-parser-temp` (src and tests) when the
+`#![deny(clippy::panic)]` attribute is active.
+
+- [ ] Add `#![deny(clippy::panic)]` at the top of `rlsp-yaml-parser-temp/src/lib.rs` (below the SPDX header, above the `mod` declarations)
+- [ ] Run `cargo clippy -p rlsp-yaml-parser-temp --all-targets` and collect the full violation list
+- [ ] Convert each violation following the rules above
+- [ ] Verify `cargo clippy -p rlsp-yaml-parser-temp --all-targets` is clean
+- [ ] Verify `cargo test -p rlsp-yaml-parser-temp` still passes (all 392+ tests)
+- [ ] Verify `cargo clippy --workspace --all-targets` is still clean (other crates should be unaffected)
+- [ ] Verify `cargo test --workspace` passes
+- [ ] Verify `cargo fmt --check` is clean
+- [ ] Grep verification: `grep -rn 'unwrap_or_else(|| panic!' rlsp-yaml-parser-temp/` returns zero results
+
+**Reference impl consultation:** Not applicable — this is
+internal refactoring driven by a lint.
+
+**Advisors:** test-engineer (verify no test regressions
+after restructuring); security-engineer (confirm the
+remaining panics — which are all `unreachable!` or tests —
+cannot be triggered by user input).
+
+### Task 10: Folded block scalars
 
 - [ ] Folded block scalar header: `>` with chomp/indent
   modifiers (same as literal)
@@ -535,7 +598,7 @@ other test fixture cases that exercise edge cases.
 
 **Advisors:** test-engineer (folding rules are subtle).
 
-### Task 10: Block sequences
+### Task 11: Block sequences
 
 Implement `- item` block sequences and `SequenceStart`/
 `SequenceEnd` events.
@@ -563,7 +626,7 @@ Implement `- item` block sequences and `SequenceStart`/
 **Advisors:** test-engineer (collections are where
 indent-tracking complexity lives).
 
-### Task 11: Block mappings
+### Task 12: Block mappings
 
 Implement `key: value` block mappings and `MappingStart`/
 `MappingEnd` events.
@@ -592,7 +655,7 @@ Implement `key: value` block mappings and `MappingStart`/
 
 **Advisors:** test-engineer.
 
-### Task 12: Nested block collections
+### Task 13: Nested block collections
 
 - [ ] Block sequences can contain block mappings and vice
   versa
@@ -613,7 +676,7 @@ Implement `key: value` block mappings and `MappingStart`/
 **Advisors:** test-engineer (nesting is where most
 indent-related conformance failures hide).
 
-### Task 13: Flow sequences and mappings
+### Task 14: Flow sequences and mappings
 
 - [ ] Flow sequence: `[a, b, c]`
 - [ ] Flow mapping: `{a: b, c: d}`
@@ -637,7 +700,7 @@ indent-related conformance failures hide).
 
 **Advisors:** test-engineer.
 
-### Task 14: Nested flow and block-flow mixing
+### Task 15: Nested flow and block-flow mixing
 
 - [ ] Flow collections nested inside flow collections
 - [ ] Flow collections nested inside block collections
@@ -655,7 +718,7 @@ indent-related conformance failures hide).
 
 **Advisors:** test-engineer.
 
-### Task 15: Anchors and aliases
+### Task 16: Anchors and aliases
 
 - [ ] Anchor token: `&name` before any node
 - [ ] Alias token: `*name` as a node reference
@@ -675,9 +738,9 @@ indent-related conformance failures hide).
 **Advisors:** test-engineer; security-engineer (alias
 expansion is a known DoS vector — billion laughs attack;
 but expansion happens in the loader, not the parser, so
-this is mostly a reminder for Task 19).
+this is mostly a reminder for Task 20).
 
-### Task 16: Tags
+### Task 17: Tags
 
 - [ ] Verbatim tag: `!<tag:yaml.org,2002:str>`
 - [ ] Shorthand tags: `!!str`, `!handle!suffix`
@@ -698,7 +761,7 @@ this is mostly a reminder for Task 19).
 
 **Advisors:** test-engineer.
 
-### Task 17: Comments
+### Task 18: Comments
 
 - [ ] Tokenize `#` to end of line as a comment
 - [ ] Emit `Comment { text: &'input str }` events at the
@@ -720,7 +783,7 @@ this is mostly a reminder for Task 19).
 **Advisors:** test-engineer (comments are easy to misplace
 in the event stream).
 
-### Task 18: Directives and multi-document streams
+### Task 19: Directives and multi-document streams
 
 - [ ] `%YAML 1.2` directive parsing
 - [ ] `%TAG !handle! prefix` directive parsing
@@ -742,7 +805,7 @@ in the event stream).
 
 **Advisors:** test-engineer.
 
-### Task 19: Port the loader (event → AST)
+### Task 20: Port the loader (event → AST)
 
 The existing loader is already sequential. Port it with
 minimal changes — only what's needed to consume the new
@@ -773,7 +836,7 @@ limits — the loader enforces resource limits to prevent
 DoS attacks like billion laughs; verify these are ported
 correctly).
 
-### Task 20: Run full integration test suite
+### Task 21: Run full integration test suite
 
 Copy all `tests/*.rs` files from `rlsp-yaml-parser` to
 `rlsp-yaml-parser-temp/tests/`, update import paths, and
@@ -807,7 +870,7 @@ the local impl for the production that's failing.
 **Advisors:** test-engineer (this is the broad
 integration test pass).
 
-### Task 21: Run benchmarks and verify O(1) latency
+### Task 22: Run benchmarks and verify O(1) latency
 
 Copy benchmarks from `rlsp-yaml-parser/benches/` to
 `rlsp-yaml-parser-temp/benches/`, update them to call the
@@ -826,55 +889,6 @@ new crate, and run.
 
 **Reference impl consultation:** Not applicable.
 **Advisors:** None.
-
-### Task 22: Enable `clippy::panic` and clean up panic sites
-
-Task 8's review surfaced ~60 `unwrap_or_else(|| panic!("..."))`
-call sites in `rlsp-yaml-parser-temp/src/lexer.rs`. These
-express invariant assertions in a form that bypasses the
-existing `unwrap_used = "deny"` / `expect_used = "deny"`
-clippy lints, making them hard to audit: a reviewer can't
-tell a legitimate invariant ("peek returned Some but
-consume returned None" — a LineBuffer API guarantee) from
-a developer dodging the lint without tracing the call site.
-
-**Approach:** enable `clippy::panic = "deny"` at the
-workspace level. This lint catches every literal `panic!`
-macro invocation, including `unwrap_or_else(|| panic!(...))`
-since the closure body contains `panic!`. The lint becomes
-the audit: `cargo clippy` lists exactly which sites need
-to be fixed, and the list can never grow undetected.
-
-**Execution order:** Originally planned as pre-migration
-cleanup. Executed **out of order** between Task 8 and
-Task 9 per user direction — forcing the lint on now
-prevents Tasks 9-21 from adding more panic sites and
-bounds the cleanup scope.
-
-**Conversion rules:**
-- **Invariant assertions** (the majority): `unwrap_or_else(|| panic!("..."))` → `let Some(x) = ... else { unreachable!("...") }`. `unreachable!` is a distinct macro, not caught by `clippy::panic`, and signals "I've proved this can't happen" at the call site.
-- **Real error cases:** convert to a `Result` return. No exceptions.
-- **Test assertions:** `unwrap_or_else(|| panic!("should parse"))` in unit tests → either `unreachable!("should parse")` or `#[expect(clippy::panic, reason = "test assertion")]` on the test function. Prefer the former.
-
-**Acceptance target:** zero production-code `panic!`
-violations when `clippy::panic = "deny"` is enabled
-workspace-wide.
-
-- [ ] Add `panic = "deny"` to `[workspace.lints.clippy]` in root `Cargo.toml`
-- [ ] Run `cargo clippy --workspace --all-targets` and collect the full violation list
-- [ ] Convert each violation following the rules above
-- [ ] Verify `cargo clippy --workspace --all-targets` is clean
-- [ ] Verify `cargo test --workspace` still passes (all 392+ tests)
-- [ ] Verify `cargo fmt --check` is clean
-- [ ] Verify existing crates (`rlsp-yaml-parser`, `rlsp-yaml`, `rlsp-fmt`) still build and pass tests — the lint is workspace-wide, so they may have their own violations to fix
-
-**Reference impl consultation:** Not applicable — this is
-internal refactoring driven by a lint.
-
-**Advisors:** test-engineer (verify no test regressions
-after restructuring); security-engineer (confirm the
-remaining panics — which are all `unreachable!` or tests —
-cannot be triggered by user input).
 
 ### Task 23: Migration — replace rlsp-yaml-parser
 
@@ -957,11 +971,12 @@ protections survived the rewrite).
 
 - **Security advisor consulted for:** Task 7 (escape
   sequence parsing — `\xHH`/`\uHHHH`/`\UHHHHHHHH` need
-  bounds checking), Task 19 (loader resource limits and
-  DoS protections), Task 22 (audit panic sites before
-  migration), Task 23 (verify limits survived migration).
-  The actual parser is pure and free of trust boundaries —
-  the security concerns are around resource exhaustion
+  bounds checking), Task 9 (audit panic sites after
+  Task 8 surfaced the `unwrap_or_else(|| panic!)` pattern),
+  Task 20 (loader resource limits and DoS protections),
+  Task 23 (verify limits survived migration). The actual
+  parser is pure and free of trust boundaries — the
+  security concerns are around resource exhaustion
   attacks at the loader and escape sequence validation in
   the lexer.
 
@@ -970,23 +985,27 @@ protections survived the rewrite).
   avoids any window where CI sees both crates or a half-
   migrated state.
 
-- **Panic-site cleanup before migration:** Task 8 surfaced
-  ~60 `unwrap_or_else(|| panic!("..."))` sites in the
-  lexer that express invariant assertions in a clippy-
-  lint-bypass form. Added Task 22 (pre-migration) to
-  audit and convert every site to a documented,
-  reviewable form (`let...else { unreachable!() }`,
-  `#[expect(clippy::unwrap_used, reason = "...")]` with
-  `.unwrap()`, or a proper `Result` return depending on
-  the category). Task 22 runs before Task 23 so the
-  migration security audit can confirm no panic leaks
-  into user-input paths.
+- **Panic-site cleanup executed early (Task 9):** Task 8
+  surfaced ~60 `unwrap_or_else(|| panic!("..."))` sites in
+  the lexer that express invariant assertions in a clippy-
+  lint-bypass form. Originally planned as a pre-migration
+  cleanup, this was moved to Task 9 (immediately after
+  Task 8) so the lint is active before Tasks 10-22 add
+  more code — bounding the cleanup scope and preventing
+  regression. The approach is a crate-scoped
+  `#![deny(clippy::panic)]` attribute at the top of
+  `rlsp-yaml-parser-temp/src/lib.rs`, which stacks
+  additively with workspace lint inheritance without
+  affecting other crates. Conversion rules: invariant
+  assertions → `let...else { unreachable!() }`, real
+  errors → `Result` return, test assertions →
+  `unreachable!` or `#[expect(clippy::panic, reason)]`.
 
 - **Inline-after-marker scalar gap:** Task 5's
   `inline_scalar` slot only supports plain scalars.
-  Quoted (Task 7), literal/folded (Task 8/9), and flow
-  (Task 13) scalars after `--- ` currently fall back to
+  Quoted (Task 7), literal/folded (Tasks 8/10), and flow
+  (Task 14) scalars after `--- ` currently fall back to
   the plain scalar path, producing wrong events. Tracked
-  for Task 12 or a dedicated cleanup task; Task 20's
+  for Task 13 or a dedicated cleanup task; Task 21's
   conformance run will flag any regressions. Filed as a
   TODO in `consume_marker_line`.
