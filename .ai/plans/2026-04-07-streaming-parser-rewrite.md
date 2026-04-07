@@ -225,7 +225,7 @@ user has explicitly approved this scope.
 - [x] Confirm scope and approach with user
 - [x] Bootstrap new crate (Task 1) — `8531e28`
 - [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
-- [ ] Implement empty stream and document boundaries (Tasks 4-5)
+- [ ] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`
 - [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
 - [ ] Implement block collections (Tasks 10-12)
 - [ ] Implement flow collections (Tasks 13-14)
@@ -340,21 +340,23 @@ existing pattern to follow).
 Wire the line buffer into a minimal event iterator that
 yields just `StreamStart` and `StreamEnd`.
 
-- [ ] Define `Event` enum in `event.rs`. Variants for this
+**Status:** Completed in commit `6d1d315`.
+
+- [x] Define `Event` enum in `event.rs`. Variants for this
   task: `StreamStart`, `StreamEnd`. Other variants will be
   added in subsequent tasks. Use `Cow<'input, str>` for
   scalar values, `&'input str` for anchors/tags/aliases
   per the API decision in Context.
-- [ ] Define `Span` carrying input bytes
-- [ ] Define `Error` type (using `thiserror`)
-- [ ] Implement `parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span), Error>>`
-- [ ] For empty/whitespace-only input: emit `StreamStart`
+- [x] Define `Span` carrying input bytes
+- [x] Define `Error` type (using `thiserror`)
+- [x] Implement `parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span), Error>>`
+- [x] For empty/whitespace-only input: emit `StreamStart`
   then `StreamEnd`
-- [ ] Update `lib.rs` exports
-- [ ] Add an integration test in `tests/smoke.rs`:
+- [x] Update `lib.rs` exports
+- [x] Add an integration test in `tests/smoke.rs`:
   parses empty string, expects two events
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): emit StreamStart/StreamEnd for empty input`
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): emit StreamStart/StreamEnd for empty input`
 
 **Reference impl consultation:**
 1. Local: `rlsp-yaml-parser/src/event.rs` `Event` enum and
