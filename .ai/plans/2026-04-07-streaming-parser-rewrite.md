@@ -226,7 +226,7 @@ user has explicitly approved this scope.
 - [x] Bootstrap new crate (Task 1) — `8531e28`
 - [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
 - [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
-- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`
+- [ ] Implement scalars: plain, quoted, block (Tasks 6-9) — Task 6 `e624786`, Task 7 `c06c0b2`
 - [ ] Implement block collections (Tasks 10-12)
 - [ ] Implement flow collections (Tasks 13-14)
 - [ ] Implement anchors, tags, aliases, comments (Tasks 15-17)
@@ -450,21 +450,23 @@ plain scalars have many spec edge cases).
 
 ### Task 7: Single-quoted and double-quoted scalars
 
-- [ ] Single-quoted scalar tokenization (escape: `''` →
+**Status:** Completed in commit `c06c0b2`.
+
+- [x] Single-quoted scalar tokenization (escape: `''` →
   `'`, otherwise verbatim)
-- [ ] Double-quoted scalar tokenization with escape
+- [x] Double-quoted scalar tokenization with escape
   sequences (`\n`, `\t`, `\\`, `\"`, `\xHH`, `\uHHHH`,
   `\UHHHHHHHH`, etc.)
-- [ ] Multi-line quoted scalars (line folding rules differ
+- [x] Multi-line quoted scalars (line folding rules differ
   between single and double quotes)
-- [ ] Single-quoted scalars without folding/escapes →
+- [x] Single-quoted scalars without folding/escapes →
   `Cow::Borrowed`. Otherwise `Cow::Owned`.
-- [ ] Double-quoted scalars without escapes/folding →
+- [x] Double-quoted scalars without escapes/folding →
   `Cow::Borrowed`. Otherwise `Cow::Owned`.
-- [ ] Emit `Scalar` events with appropriate `style`
-- [ ] Conformance tests for quoted scalars must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): single- and double-quoted scalars`
+- [x] Emit `Scalar` events with appropriate `style`
+- [x] Conformance tests for quoted scalars must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): single- and double-quoted scalars`
 
 **Reference impl consultation:**
 1. Local: `flow.rs` single-quoted (`c_single_quoted`,
@@ -914,3 +916,12 @@ protections survived the rewrite).
   crate name and deletes the old one in one go. This
   avoids any window where CI sees both crates or a half-
   migrated state.
+
+- **Inline-after-marker scalar gap:** Task 5's
+  `inline_scalar` slot only supports plain scalars.
+  Quoted (Task 7), literal/folded (Task 8/9), and flow
+  (Task 13) scalars after `--- ` currently fall back to
+  the plain scalar path, producing wrong events. Tracked
+  for Task 12 or a dedicated cleanup task; Task 20's
+  conformance run will flag any regressions. Filed as a
+  TODO in `consume_marker_line`.
