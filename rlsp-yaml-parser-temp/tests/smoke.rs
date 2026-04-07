@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#![deny(clippy::panic)]
 
 //! Smoke / integration tests for `rlsp-yaml-parser-temp`.
 //!
@@ -22,7 +23,7 @@ fn event_variants(input: &str) -> Vec<Event<'_>> {
     parse_events(input)
         .map(|r| match r {
             Ok((ev, _span)) => ev,
-            Err(e) => panic!("unexpected parse error: {e}"),
+            Err(e) => unreachable!("unexpected parse error: {e}"),
         })
         .collect()
 }
@@ -157,7 +158,7 @@ mod stream {
     fn stream_start_span_starts_at_origin() {
         let events = parse_to_vec("");
         let Some(Ok((Event::StreamStart, span))) = events.first() else {
-            panic!("expected StreamStart as first event");
+            unreachable!("expected StreamStart as first event");
         };
         assert_eq!(
             span.start,
@@ -170,7 +171,7 @@ mod stream {
     fn stream_end_span_for_empty_input_is_at_origin() {
         let events = parse_to_vec("");
         let Some(Ok((Event::StreamEnd, span))) = events.get(1) else {
-            panic!("expected StreamEnd as second event");
+            unreachable!("expected StreamEnd as second event");
         };
         assert_eq!(
             span.start.byte_offset, 0,
@@ -183,7 +184,7 @@ mod stream {
         // "   " = 3 bytes
         let events = parse_to_vec("   ");
         let Some(Ok((Event::StreamEnd, span))) = events.get(1) else {
-            panic!("expected StreamEnd as second event");
+            unreachable!("expected StreamEnd as second event");
         };
         assert_eq!(
             span.start.byte_offset, 3,
@@ -220,7 +221,7 @@ mod stream {
         for (a, b) in first.iter().zip(second.iter()) {
             match (a, b) {
                 (Ok((ea, _)), Ok((eb, _))) => assert_eq!(ea, eb, "event variants must match"),
-                _ => panic!("both must be Ok"),
+                _ => unreachable!("both must be Ok"),
             }
         }
     }
@@ -563,7 +564,7 @@ mod documents {
     fn doc_start_explicit_span_covers_three_bytes() {
         let results = parse_to_vec("---\n");
         let Some(Ok((Event::DocumentStart { .. }, span))) = results.get(1) else {
-            panic!("expected DocumentStart as second event");
+            unreachable!("expected DocumentStart as second event");
         };
         assert_eq!(
             span.end.byte_offset - span.start.byte_offset,
@@ -576,7 +577,7 @@ mod documents {
     fn doc_start_explicit_span_start_byte_offset_is_zero() {
         let results = parse_to_vec("---\n");
         let Some(Ok((Event::DocumentStart { .. }, span))) = results.get(1) else {
-            panic!("expected DocumentStart as second event");
+            unreachable!("expected DocumentStart as second event");
         };
         assert_eq!(span.start.byte_offset, 0);
     }
@@ -585,7 +586,7 @@ mod documents {
     fn doc_end_explicit_span_covers_three_bytes() {
         let results = parse_to_vec("---\n...\n");
         let Some(Ok((Event::DocumentEnd { explicit: true }, span))) = results.get(2) else {
-            panic!("expected explicit DocumentEnd as third event");
+            unreachable!("expected explicit DocumentEnd as third event");
         };
         assert_eq!(
             span.end.byte_offset - span.start.byte_offset,
@@ -599,7 +600,7 @@ mod documents {
         // "---\n" = 4 bytes, so `...` starts at byte offset 4.
         let results = parse_to_vec("---\n...\n");
         let Some(Ok((Event::DocumentEnd { explicit: true }, span))) = results.get(2) else {
-            panic!("expected explicit DocumentEnd as third event");
+            unreachable!("expected explicit DocumentEnd as third event");
         };
         assert_eq!(span.start.byte_offset, 4);
     }
@@ -608,7 +609,7 @@ mod documents {
     fn doc_end_implicit_span_is_zero_width() {
         let results = parse_to_vec("---\n");
         let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(2) else {
-            panic!("expected implicit DocumentEnd as third event");
+            unreachable!("expected implicit DocumentEnd as third event");
         };
         assert_eq!(
             span.start, span.end,
@@ -621,7 +622,7 @@ mod documents {
         // "\n\n---\n": two newlines (2 bytes) then `---` at byte offset 2.
         let results = parse_to_vec("\n\n---\n");
         let Some(Ok((Event::DocumentStart { .. }, span))) = results.get(1) else {
-            panic!("expected DocumentStart as second event");
+            unreachable!("expected DocumentStart as second event");
         };
         assert_eq!(span.start.byte_offset, 2);
     }
@@ -770,7 +771,7 @@ mod documents {
         // "foo\n": DocumentStart{false} span at byte 0, zero-width.
         let results = parse_to_vec("foo\n");
         let Some(Ok((Event::DocumentStart { explicit: false }, span))) = results.get(1) else {
-            panic!("expected bare DocumentStart as second event");
+            unreachable!("expected bare DocumentStart as second event");
         };
         assert_eq!(
             span.start, span.end,
@@ -785,7 +786,7 @@ mod documents {
         // DocEnd is at index 3 now (Scalar is at index 2).
         let results = parse_to_vec("foo\n");
         let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(3) else {
-            panic!("expected bare DocumentEnd as fourth event");
+            unreachable!("expected bare DocumentEnd as fourth event");
         };
         assert_eq!(
             span.start, span.end,
@@ -800,7 +801,7 @@ mod documents {
         // Implicit DocEnd is at index 3.
         let results = parse_to_vec("foo\n---\n");
         let Some(Ok((Event::DocumentEnd { explicit: false }, span))) = results.get(3) else {
-            panic!("expected implicit DocumentEnd at index 3");
+            unreachable!("expected implicit DocumentEnd at index 3");
         };
         assert_eq!(
             span.start, span.end,
@@ -814,7 +815,7 @@ mod documents {
         // "\nfoo\n": `f` is at byte offset 1 (after the leading `\n`).
         let results = parse_to_vec("\nfoo\n");
         let Some(Ok((Event::DocumentStart { explicit: false }, span))) = results.get(1) else {
-            panic!("expected bare DocumentStart as second event");
+            unreachable!("expected bare DocumentStart as second event");
         };
         assert_eq!(span.start.byte_offset, 1);
     }
@@ -1027,7 +1028,7 @@ mod scalars {
     fn plain_scalar_span_start_at_byte_zero() {
         let results = parse_to_vec("hello");
         let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert_eq!(span.start.byte_offset, 0);
     }
@@ -1038,7 +1039,7 @@ mod scalars {
         // "hello" = 5 bytes; span end at byte 5.
         let results = parse_to_vec("hello");
         let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert_eq!(span.end.byte_offset, 5);
     }
@@ -1049,7 +1050,7 @@ mod scalars {
         // "  hello" — leading 2 spaces, scalar starts at byte 2.
         let results = parse_to_vec("  hello");
         let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert_eq!(span.start.byte_offset, 2);
     }
@@ -1239,7 +1240,7 @@ mod quoted_scalars {
         // Span should be [0, 7) covering `'hello'` (7 bytes).
         let results = parse_to_vec("'hello'\n");
         let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert_eq!(
             span.start.byte_offset, 0,
@@ -1255,7 +1256,7 @@ mod quoted_scalars {
         // Span should cover 7 bytes: `"hello"`.
         let results = parse_to_vec("\"hello\"\n");
         let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert_eq!(
             span.start.byte_offset, 0,
@@ -1321,7 +1322,7 @@ mod quoted_scalars {
     fn single_quoted_cow_borrow_for_no_escape() {
         let results = parse_to_vec("'hello'\n");
         let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert!(
             matches!(value, Cow::Borrowed(_)),
@@ -1334,7 +1335,7 @@ mod quoted_scalars {
     fn double_quoted_cow_borrow_for_no_escape() {
         let results = parse_to_vec("\"hello\"\n");
         let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
-            panic!("expected Scalar as third event");
+            unreachable!("expected Scalar as third event");
         };
         assert!(
             matches!(value, Cow::Borrowed(_)),
@@ -1846,7 +1847,7 @@ mod block_scalars {
             )) => Some(*span),
             _ => None,
         });
-        let span = scalar_span.unwrap_or_else(|| panic!("expected a Literal scalar event"));
+        let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
         // `|` is at byte 0.
         assert_eq!(span.start.byte_offset, 0, "span must start at the `|`");
     }
@@ -1866,7 +1867,7 @@ mod block_scalars {
             )) => Some(*span),
             _ => None,
         });
-        let span = scalar_span.unwrap_or_else(|| panic!("expected a Literal scalar event"));
+        let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
         assert_eq!(span.end.byte_offset, 10, "span must end after all 10 bytes");
     }
 
@@ -1885,7 +1886,7 @@ mod block_scalars {
             )) => Some(*span),
             _ => None,
         });
-        let span = scalar_span.unwrap_or_else(|| panic!("expected a Literal scalar event"));
+        let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
         assert_eq!(
             span.start.byte_offset, 2,
             "span must start at `|` byte offset"

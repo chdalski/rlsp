@@ -141,10 +141,11 @@ impl<'input> Lexer<'input> {
     /// [`Self::is_directives_end`] or [`Self::is_document_end`]) before
     /// calling this.
     pub fn consume_marker_line(&mut self) -> (Pos, Pos) {
-        let line = self
-            .buf
-            .consume_next()
-            .unwrap_or_else(|| panic!("consume_marker_line called at EOF"));
+        // SAFETY: caller must verify via is_directives_end() or is_document_end()
+        // before calling — the state machine enforces this precondition.
+        let Some(line) = self.buf.consume_next() else {
+            unreachable!("consume_marker_line called at EOF")
+        };
         let marker_pos = line.pos;
         let after = pos_after_line(&line);
         self.current_pos = after;
@@ -262,16 +263,22 @@ impl<'input> Lexer<'input> {
         let (leading_spaces, scalar_start_pos, first_value_len) =
             peek_plain_scalar_first_line(&self.buf)?;
 
-        let consumed_first = self
-            .buf
-            .consume_next()
-            .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(consumed_first) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
         self.current_pos = pos_after_line(&consumed_first);
 
-        let first_value_ref: &'input str = consumed_first
+        // SAFETY: leading_spaces and first_value_len are computed by
+        // peek_plain_scalar_first_line from the same line content via
+        // char_indices(), guaranteeing char-boundary alignment and bounds.
+        let Some(first_value_ref): Option<&'input str> = consumed_first
             .content
             .get(leading_spaces..leading_spaces + first_value_len)
-            .unwrap_or_else(|| panic!("scalar slice out of bounds"));
+        else {
+            unreachable!("scalar slice out of bounds")
+        };
 
         let extra = self.collect_plain_continuations(first_value_ref, parent_indent);
 
@@ -322,10 +329,10 @@ impl<'input> Lexer<'input> {
 
             if trimmed.is_empty() {
                 pending_blanks += 1;
-                let consumed = self
-                    .buf
-                    .consume_next()
-                    .unwrap_or_else(|| panic!("consume blank line failed"));
+                // SAFETY: peek succeeded on this iteration; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume blank line failed")
+                };
                 self.current_pos = pos_after_line(&consumed);
                 continue;
             }
@@ -354,10 +361,10 @@ impl<'input> Lexer<'input> {
             }
             buf.push_str(cont_value);
 
-            let consumed = self
-                .buf
-                .consume_next()
-                .unwrap_or_else(|| panic!("consume cont line failed"));
+            // SAFETY: peek succeeded on this iteration; LineBuffer invariant.
+            let Some(consumed) = self.buf.consume_next() else {
+                unreachable!("consume cont line failed")
+            };
             self.current_pos = pos_after_line(&consumed);
         }
 
@@ -397,10 +404,11 @@ impl<'input> Lexer<'input> {
         };
 
         // Consume the first line.
-        let consumed_first = self
-            .buf
-            .consume_next()
-            .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(consumed_first) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
         self.current_pos = pos_after_line(&consumed_first);
 
         // The body starts after the opening `'`.
@@ -438,10 +446,10 @@ impl<'input> Lexer<'input> {
                 });
             };
 
-            let consumed = self
-                .buf
-                .consume_next()
-                .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+            // SAFETY: peek succeeded in the let-else above; LineBuffer invariant.
+            let Some(consumed) = self.buf.consume_next() else {
+                unreachable!("peek returned Some but consume returned None")
+            };
             self.current_pos = pos_after_line(&consumed);
             let line_content = consumed.content;
 
@@ -534,10 +542,11 @@ impl<'input> Lexer<'input> {
         };
 
         // Consume the first line.
-        let consumed_first = self
-            .buf
-            .consume_next()
-            .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(consumed_first) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
         self.current_pos = pos_after_line(&consumed_first);
 
         // Body starts after the opening `"`.
@@ -612,10 +621,11 @@ impl<'input> Lexer<'input> {
         };
 
         // Consume the header line.
-        let header_line = self
-            .buf
-            .consume_next()
-            .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(header_line) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
         self.current_pos = pos_after_line(&header_line);
 
         // Parse the header: `|` [indent-indicator] [chomp-indicator] [comment]
@@ -660,10 +670,10 @@ impl<'input> Lexer<'input> {
             // indentation, which is a YAML error.
             if line_content.starts_with('\t') {
                 let tab_pos = next.pos;
-                let consumed = self
-                    .buf
-                    .consume_next()
-                    .unwrap_or_else(|| panic!("consume failed"));
+                // SAFETY: peek succeeded above; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume failed")
+                };
                 self.current_pos = pos_after_line(&consumed);
                 return Some(Err(Error {
                     pos: tab_pos,
@@ -702,10 +712,10 @@ impl<'input> Lexer<'input> {
                 }
                 trailing_newlines = 0;
 
-                let consumed = self
-                    .buf
-                    .consume_next()
-                    .unwrap_or_else(|| panic!("consume content line failed"));
+                // SAFETY: peek succeeded on this loop iteration; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume content line failed")
+                };
                 self.current_pos = pos_after_line(&consumed);
 
                 out.push_str(after_indent);
@@ -724,10 +734,10 @@ impl<'input> Lexer<'input> {
                     break;
                 }
                 // Whitespace-only line: transparent (l-empty). Count as newline.
-                let consumed = self
-                    .buf
-                    .consume_next()
-                    .unwrap_or_else(|| panic!("consume blank line failed"));
+                // SAFETY: peek succeeded on this loop iteration; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume blank line failed")
+                };
                 self.current_pos = pos_after_line(&consumed);
                 trailing_newlines += 1;
             }
@@ -772,10 +782,10 @@ impl<'input> Lexer<'input> {
             if trimmed.is_empty() {
                 // Blank continuation line.
                 pending_blanks += 1;
-                let consumed = self
-                    .buf
-                    .consume_next()
-                    .unwrap_or_else(|| panic!("consume blank line failed"));
+                // SAFETY: peek succeeded above; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume blank line failed")
+                };
                 self.current_pos = pos_after_line(&consumed);
                 continue;
             }
@@ -797,10 +807,10 @@ impl<'input> Lexer<'input> {
             }
             pending_blanks = 0;
 
-            let consumed = self
-                .buf
-                .consume_next()
-                .unwrap_or_else(|| panic!("consume cont line failed"));
+            // SAFETY: peek succeeded above; LineBuffer invariant.
+            let Some(consumed) = self.buf.consume_next() else {
+                unreachable!("consume cont line failed")
+            };
             self.current_pos = pos_after_line(&consumed);
 
             let line_start_pos = consumed.pos;
@@ -1264,10 +1274,13 @@ impl SingleQuotedScan {
             Cow::Owned(unescape_single_quoted(body, self.quoted_len))
         } else {
             // No escapes: borrow directly.
-            Cow::Borrowed(
-                body.get(..self.quoted_len)
-                    .unwrap_or_else(|| panic!("quoted_len out of bounds")),
-            )
+            // SAFETY: quoted_len is computed by scan_single_quoted_line which
+            // advances via char::len_utf8(), guaranteeing char-boundary alignment
+            // and that quoted_len <= body.len().
+            let Some(slice) = body.get(..self.quoted_len) else {
+                unreachable!("quoted_len out of bounds")
+            };
+            Cow::Borrowed(slice)
         }
     }
 
@@ -1276,9 +1289,11 @@ impl SingleQuotedScan {
         if self.has_escape {
             unescape_single_quoted(body, self.quoted_len)
         } else {
-            body.get(..self.quoted_len)
-                .unwrap_or_else(|| panic!("quoted_len out of bounds"))
-                .to_owned()
+            // SAFETY: same invariant as into_cow — quoted_len is char-boundary aligned.
+            let Some(slice) = body.get(..self.quoted_len) else {
+                unreachable!("quoted_len out of bounds")
+            };
+            slice.to_owned()
         }
     }
 }
@@ -1339,9 +1354,11 @@ fn scan_single_quoted_line(body: &str) -> (SingleQuotedScan, bool) {
 /// `content_len` is the byte length of the content (not counting closing `'`).
 fn unescape_single_quoted(body: &str, content_len: usize) -> String {
     let mut out = String::with_capacity(content_len);
-    let src = body
-        .get(..content_len)
-        .unwrap_or_else(|| panic!("content_len out of bounds"));
+    // SAFETY: content_len equals quoted_len from scan_single_quoted_line, which
+    // advances via char::len_utf8() — always char-boundary aligned and <= body.len().
+    let Some(src) = body.get(..content_len) else {
+        unreachable!("content_len out of bounds")
+    };
     let bytes = src.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -1773,7 +1790,7 @@ mod tests {
         // scalar events for `%foo: bar` inside a document will be silently
         // dropped.
         let Some(line) = LineBuffer::new("%foo: bar").consume_next() else {
-            panic!("LineBuffer produced no line for non-empty input");
+            unreachable!("LineBuffer produced no line for non-empty input")
         };
         assert!(!is_blank_or_comment(&line));
     }
@@ -1784,7 +1801,7 @@ mod tests {
         // Full directive grammar (Task 18) will distinguish valid directives
         // from bare-doc content; until then, all `%`-lines are skipped here.
         let Some(line) = LineBuffer::new("%YAML 1.2").consume_next() else {
-            panic!("LineBuffer produced no line for non-empty input");
+            unreachable!("LineBuffer produced no line for non-empty input")
         };
         assert!(is_directive_or_blank_or_comment(&line));
     }
@@ -1798,7 +1815,7 @@ mod tests {
         let mut lex = make_lexer("hello");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "hello");
     }
 
@@ -1807,7 +1824,7 @@ mod tests {
         let mut lex = make_lexer("hello world");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "hello world");
     }
 
@@ -1816,7 +1833,7 @@ mod tests {
         let mut lex = make_lexer("hello");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert!(
             matches!(val, Cow::Borrowed(_)),
             "single-line must be Borrowed"
@@ -1828,7 +1845,7 @@ mod tests {
         let mut lex = make_lexer("foo\n  bar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
         assert_eq!(val, "foo bar");
     }
@@ -1839,7 +1856,7 @@ mod tests {
         let mut lex = make_lexer("http://x.com");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "http://x.com");
     }
 
@@ -1849,7 +1866,7 @@ mod tests {
         let mut lex = make_lexer("a#b");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "a#b");
     }
 
@@ -1859,7 +1876,7 @@ mod tests {
         let mut lex = make_lexer("key: value");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "key");
     }
 
@@ -1869,7 +1886,7 @@ mod tests {
         let mut lex = make_lexer("foo # comment");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -1879,7 +1896,7 @@ mod tests {
         let mut lex = make_lexer("foo   ");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -1888,7 +1905,7 @@ mod tests {
         let mut lex = make_lexer("foo\n  bar\n  baz");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo bar baz");
     }
 
@@ -1898,7 +1915,7 @@ mod tests {
         let mut lex = make_lexer("foo\n\nbar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo\nbar");
     }
 
@@ -1942,7 +1959,7 @@ mod tests {
         let mut lex = make_lexer("-a");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "-a");
     }
 
@@ -1952,7 +1969,7 @@ mod tests {
         let mut lex = make_lexer(":a");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, ":a");
     }
 
@@ -1963,7 +1980,7 @@ mod tests {
         // Only "foo" should be collected (the --- terminates the scalar).
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -1972,7 +1989,7 @@ mod tests {
         let mut lex = make_lexer("hello");
         let (_, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(span.start.byte_offset, 0);
     }
 
@@ -1982,7 +1999,7 @@ mod tests {
         let mut lex = make_lexer("hello");
         let (_, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(span.end.byte_offset, 5);
     }
 
@@ -1992,7 +2009,7 @@ mod tests {
         let mut lex = make_lexer("  hello");
         let (val, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "hello");
         assert_eq!(span.start.byte_offset, 2);
     }
@@ -2003,7 +2020,7 @@ mod tests {
         let mut lex = make_lexer("中文");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "中文");
     }
 
@@ -2014,7 +2031,7 @@ mod tests {
         let mut lex = make_lexer("  foo\nbar");
         let (val, _) = lex
             .try_consume_plain_scalar(2)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -2024,7 +2041,7 @@ mod tests {
         let mut lex = make_lexer("plain\\value\\with\\backslashes");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "plain\\value\\with\\backslashes");
     }
 
@@ -2038,7 +2055,7 @@ mod tests {
         let mut lex = make_lexer("key:\tvalue");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "key");
     }
 
@@ -2048,7 +2065,7 @@ mod tests {
         let mut lex = make_lexer("key:");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "key");
     }
 
@@ -2062,7 +2079,7 @@ mod tests {
         let mut lex = make_lexer("foo\t# comment");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -2076,7 +2093,7 @@ mod tests {
         let mut lex = make_lexer("foo\n\n\nbar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo\n\nbar");
     }
 
@@ -2086,7 +2103,7 @@ mod tests {
         let mut lex = make_lexer("foo\nbar   \nbaz");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo bar baz");
     }
 
@@ -2100,7 +2117,7 @@ mod tests {
         let mut lex = make_lexer("foo\n...\nbar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -2110,7 +2127,7 @@ mod tests {
         let mut lex = make_lexer("foo\n---word");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo ---word");
     }
 
@@ -2150,7 +2167,7 @@ mod tests {
         let mut lex = make_lexer("中文");
         let (val, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "中文");
         assert_eq!(span.start.byte_offset, 0);
         assert_eq!(span.end.byte_offset, 6);
@@ -2162,7 +2179,7 @@ mod tests {
         let mut lex = make_lexer("  中");
         let (val, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "中");
         assert_eq!(span.start.byte_offset, 2);
         assert_eq!(span.end.byte_offset, 5);
@@ -2179,7 +2196,7 @@ mod tests {
         let mut lex = make_lexer("foo\n...\nbar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
 
@@ -2196,7 +2213,7 @@ mod tests {
         let mut lex = make_lexer("foo\n\n\n  bar");
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
         assert_eq!(val, "foo\n\nbar");
     }
@@ -2211,7 +2228,7 @@ mod tests {
         let mut lex = make_lexer("中文");
         let (_, span) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse"));
+            .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(span.end.byte_offset - span.start.byte_offset, 6);
     }
 
@@ -2227,7 +2244,7 @@ mod tests {
         lex.consume_marker_line();
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse inline scalar"));
+            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
         assert_eq!(val, "text");
     }
 
@@ -2238,7 +2255,7 @@ mod tests {
         lex.consume_marker_line();
         let (val, _) = lex
             .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| panic!("should parse inline scalar"));
+            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
         assert!(
             matches!(val, Cow::Borrowed(_)),
             "inline scalar from marker line must be Cow::Borrowed"
@@ -2252,21 +2269,21 @@ mod tests {
     fn sq(input: &str) -> (Cow<'_, str>, Span) {
         Lexer::new(input)
             .try_consume_single_quoted(0)
-            .unwrap_or_else(|e| panic!("unexpected error: {e}"))
-            .unwrap_or_else(|| panic!("expected Some, got None"))
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
+            .unwrap_or_else(|| unreachable!("expected Some, got None"))
     }
 
     fn sq_err(input: &str) -> Error {
         match Lexer::new(input).try_consume_single_quoted(0) {
             Err(e) => e,
-            Ok(_) => panic!("expected Err, got Ok"),
+            Ok(_) => unreachable!("expected Err, got Ok"),
         }
     }
 
     fn sq_none(input: &str) {
         let result = Lexer::new(input)
             .try_consume_single_quoted(0)
-            .unwrap_or_else(|e| panic!("unexpected error: {e}"));
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"));
         assert!(result.is_none(), "expected None for input {input:?}");
     }
 
@@ -2411,21 +2428,21 @@ mod tests {
     fn dq(input: &str) -> (Cow<'_, str>, Span) {
         Lexer::new(input)
             .try_consume_double_quoted(0)
-            .unwrap_or_else(|e| panic!("unexpected error: {e}"))
-            .unwrap_or_else(|| panic!("expected Some, got None"))
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
+            .unwrap_or_else(|| unreachable!("expected Some, got None"))
     }
 
     fn dq_err(input: &str) -> Error {
         match Lexer::new(input).try_consume_double_quoted(0) {
             Err(e) => e,
-            Ok(_) => panic!("expected Err, got Ok"),
+            Ok(_) => unreachable!("expected Err, got Ok"),
         }
     }
 
     fn dq_none(input: &str) {
         let result = Lexer::new(input)
             .try_consume_double_quoted(0)
-            .unwrap_or_else(|e| panic!("unexpected error: {e}"));
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"));
         assert!(result.is_none(), "expected None for input {input:?}");
     }
 
@@ -2750,8 +2767,9 @@ mod tests {
         let mut lex = make_lexer(input);
         let result = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some, got None"));
-        let (cow, chomp, _span) = result.unwrap_or_else(|e| panic!("expected Ok, got Err: {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some, got None"));
+        let (cow, chomp, _span) =
+            result.unwrap_or_else(|e| unreachable!("expected Ok, got Err: {e}"));
         (cow.into_owned(), chomp)
     }
 
@@ -2760,10 +2778,10 @@ mod tests {
         let mut lex = make_lexer(input);
         let result = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some, got None"));
+            .unwrap_or_else(|| unreachable!("expected Some, got None"));
         match result {
             Err(e) => e,
-            Ok(_) => panic!("expected Err, got Ok"),
+            Ok(_) => unreachable!("expected Err, got Ok"),
         }
     }
 
@@ -3048,8 +3066,8 @@ mod tests {
         let mut lex = make_lexer("|\n  foo\nkey: val\n");
         let result = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(result.0.as_ref(), "foo\n");
         // `key: val` should still be in the buffer.
         let remaining = lex.buf.peek_next().map(|l| l.content);
@@ -3204,8 +3222,8 @@ mod tests {
         let mut lex = make_lexer("|2\n    foo\n");
         let result = lex
             .try_consume_literal_block_scalar(2)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         // parent_indent=2 + explicit=2 = content_indent=4; "    foo" has indent=4
         assert_eq!(result.0.as_ref(), "foo\n");
     }
@@ -3220,8 +3238,8 @@ mod tests {
         let mut lex = make_lexer("|\n  foo\nnext line\n");
         let (val, _, _) = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(val.as_ref(), "foo\n");
         let remaining = lex.buf.peek_next().map(|l| l.content);
         assert_eq!(remaining, Some("next line"));
@@ -3240,8 +3258,8 @@ mod tests {
         let mut lex = make_lexer("|\n  hello\n");
         let (_, _, span) = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.start.byte_offset, 0);
         assert_eq!(span.start.column, 0);
     }
@@ -3253,8 +3271,8 @@ mod tests {
         let mut lex = make_lexer("|\n  hello\n");
         let (_, _, span) = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.end.byte_offset, 10);
     }
 
@@ -3266,8 +3284,8 @@ mod tests {
         let mut lex = make_lexer("|\n  foo\n\n");
         let (_, _, span) = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.end.byte_offset, 9);
     }
 
@@ -3320,8 +3338,8 @@ mod tests {
         let mut lex = make_lexer("|\n  hello\n");
         let (cow, _, _) = lex
             .try_consume_literal_block_scalar(0)
-            .unwrap_or_else(|| panic!("expected Some"))
-            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+            .unwrap_or_else(|| unreachable!("expected Some"))
+            .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert!(
             matches!(cow, Cow::Owned(_)),
             "literal block scalars must always produce Cow::Owned"

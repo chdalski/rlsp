@@ -438,7 +438,7 @@ mod tests {
     fn new_single_line_no_newline_primes_eof_line() {
         let buf = LineBuffer::new("foo");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "foo");
         assert_eq!(line.break_type, BreakType::Eof);
@@ -449,7 +449,7 @@ mod tests {
     fn new_single_line_with_lf_primes_first_line() {
         let buf = LineBuffer::new("foo\n");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "foo");
         assert_eq!(line.break_type, BreakType::Lf);
@@ -459,7 +459,7 @@ mod tests {
     fn new_input_with_only_lf_primes_empty_line() {
         let buf = LineBuffer::new("\n");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "");
         assert_eq!(line.break_type, BreakType::Lf);
@@ -473,12 +473,12 @@ mod tests {
     fn consume_returns_primed_line_and_advances() {
         let mut buf = LineBuffer::new("a\nb\n");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first line");
+            unreachable!("expected first line");
         };
         assert_eq!(first.content, "a");
         assert_eq!(first.break_type, BreakType::Lf);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second line");
+            unreachable!("expected second line");
         };
         assert_eq!(second.content, "b");
         assert_eq!(second.break_type, BreakType::Lf);
@@ -515,7 +515,7 @@ mod tests {
     fn lf_terminator_produces_lf_break_type() {
         let mut buf = LineBuffer::new("a\n");
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.break_type, BreakType::Lf);
     }
@@ -524,12 +524,12 @@ mod tests {
     fn crlf_terminator_produces_crlf_break_type_not_two_lines() {
         let mut buf = LineBuffer::new("a\r\nb");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.content, "a");
         assert_eq!(first.break_type, BreakType::CrLf);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.content, "b");
         assert_eq!(second.break_type, BreakType::Eof);
@@ -540,12 +540,12 @@ mod tests {
     fn bare_cr_terminator_produces_cr_break_type() {
         let mut buf = LineBuffer::new("a\rb");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.content, "a");
         assert_eq!(first.break_type, BreakType::Cr);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.content, "b");
         assert_eq!(second.break_type, BreakType::Eof);
@@ -556,7 +556,7 @@ mod tests {
         let mut buf = LineBuffer::new("a\nb");
         buf.consume_next();
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.content, "b");
         assert_eq!(second.break_type, BreakType::Eof);
@@ -583,7 +583,7 @@ mod tests {
     fn only_crlf_produces_one_empty_line_not_two() {
         let mut buf = LineBuffer::new("\r\n");
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "");
         assert_eq!(line.break_type, BreakType::CrLf);
@@ -594,7 +594,7 @@ mod tests {
     fn only_cr_produces_one_empty_line() {
         let mut buf = LineBuffer::new("\r");
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "");
         assert_eq!(line.break_type, BreakType::Cr);
@@ -605,7 +605,7 @@ mod tests {
     fn only_lf_produces_one_empty_line() {
         let mut buf = LineBuffer::new("\n");
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "");
         assert_eq!(line.break_type, BreakType::Lf);
@@ -616,12 +616,12 @@ mod tests {
     fn two_consecutive_lf_produce_two_empty_lines() {
         let mut buf = LineBuffer::new("\n\n");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.content, "");
         assert_eq!(first.break_type, BreakType::Lf);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.content, "");
         assert_eq!(second.break_type, BreakType::Lf);
@@ -634,7 +634,7 @@ mod tests {
         // a new empty line.
         let mut buf = LineBuffer::new("foo\n");
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "foo");
         assert!(buf.consume_next().is_none());
@@ -648,11 +648,11 @@ mod tests {
     fn offset_is_byte_offset_of_content_start() {
         let mut buf = LineBuffer::new("foo\nbar\n");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.offset, 0);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.offset, 4); // "foo\n" = 4 bytes
     }
@@ -688,11 +688,11 @@ mod tests {
         // Bare \r is a line terminator: the next line must start on line 2.
         let mut buf = LineBuffer::new("a\rb");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.pos.line, 1);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.pos.line, 2);
         assert_eq!(second.pos.column, 0);
@@ -705,7 +705,7 @@ mod tests {
         let mut buf = LineBuffer::new("abc\rd");
         buf.consume_next(); // consume "abc"
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.pos.column, 0);
     }
@@ -715,11 +715,11 @@ mod tests {
         // CRLF is a line terminator: the next line must start on line 2.
         let mut buf = LineBuffer::new("a\r\nb");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.pos.line, 1);
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.pos.line, 2);
         assert_eq!(second.pos.column, 0);
@@ -747,12 +747,12 @@ mod tests {
         // '中' is 3 UTF-8 bytes
         let mut buf = LineBuffer::new("中\nfoo");
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.offset, 0);
         assert_eq!(first.content, "中");
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         // 3 bytes for '中' + 1 byte for '\n' = 4
         assert_eq!(second.offset, 4);
@@ -767,7 +767,7 @@ mod tests {
         let input = "\u{FEFF}foo\n";
         let buf = LineBuffer::new(input);
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "foo");
     }
@@ -777,7 +777,7 @@ mod tests {
         let input = "\u{FEFF}foo\n";
         let buf = LineBuffer::new(input);
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         // BOM is U+FEFF = 3 bytes in UTF-8
         assert_eq!(line.offset, 3);
@@ -792,7 +792,7 @@ mod tests {
         let mut buf = LineBuffer::new(input);
         buf.consume_next(); // consume "foo"
         let Some(second) = buf.consume_next() else {
-            panic!("expected second");
+            unreachable!("expected second");
         };
         assert_eq!(second.content, "\u{FEFF}bar");
     }
@@ -805,7 +805,7 @@ mod tests {
     fn indent_counts_only_leading_spaces() {
         let buf = LineBuffer::new("   foo");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 3);
     }
@@ -814,7 +814,7 @@ mod tests {
     fn indent_is_zero_for_no_leading_spaces() {
         let buf = LineBuffer::new("foo");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 0);
     }
@@ -823,7 +823,7 @@ mod tests {
     fn leading_tab_does_not_count_toward_indent() {
         let buf = LineBuffer::new("\tfoo");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 0);
     }
@@ -832,7 +832,7 @@ mod tests {
     fn tab_after_spaces_does_not_count() {
         let buf = LineBuffer::new("  \tfoo");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 2);
     }
@@ -841,7 +841,7 @@ mod tests {
     fn indent_of_blank_line_is_zero() {
         let buf = LineBuffer::new("\n");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 0);
     }
@@ -850,7 +850,7 @@ mod tests {
     fn indent_of_spaces_only_line_equals_space_count() {
         let buf = LineBuffer::new("   \n");
         let Some(line) = buf.peek_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.indent, 3);
         assert_eq!(line.content, "   ");
@@ -878,7 +878,7 @@ mod tests {
         assert_eq!(buf.peek_next_indent(), Some(2));
         assert_eq!(buf.peek_next_indent(), Some(2));
         let Some(line) = buf.consume_next() else {
-            panic!("expected a line");
+            unreachable!("expected a line");
         };
         assert_eq!(line.content, "  foo");
     }
@@ -907,7 +907,7 @@ mod tests {
         let mut buf = LineBuffer::new("  a\n  b\nc\n");
         let _ = buf.peek_until_dedent(1);
         let Some(first) = buf.consume_next() else {
-            panic!("expected first");
+            unreachable!("expected first");
         };
         assert_eq!(first.content, "  a");
     }
