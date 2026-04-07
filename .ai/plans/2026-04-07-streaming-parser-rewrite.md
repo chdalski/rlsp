@@ -224,7 +224,7 @@ user has explicitly approved this scope.
   feasibility (done in planning)
 - [x] Confirm scope and approach with user
 - [x] Bootstrap new crate (Task 1) — `8531e28`
-- [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`
+- [ ] Build line buffer and scanner foundations (Tasks 2-3) — Task 2 `63ea25c`, Task 3 `562b133`
 - [ ] Implement empty stream and document boundaries (Tasks 4-5)
 - [ ] Implement scalars: plain, quoted, block (Tasks 6-9)
 - [ ] Implement block collections (Tasks 10-12)
@@ -287,26 +287,43 @@ data types and pure functions — no streaming considerations.
 Build the streaming line reader. This is the foundation of
 the streaming architecture.
 
-- [ ] Implement `LineBuffer` struct that wraps an input
+**Status:** Completed in commit `562b133`.
+
+- [x] Implement `LineBuffer` struct that wraps an input
   `&str` and yields lines on demand
-- [ ] Each `Line` carries: byte offset of line start, byte
+- [x] Each `Line` carries: byte offset of line start, byte
   range of content (excluding terminator), the line break
   type (`\n`, `\r\n`, `\r`, EOF), and the indent (count of
   leading spaces)
-- [ ] LineBuffer always has the *next* line buffered if it
+- [x] LineBuffer always has the *next* line buffered if it
   exists, so callers can check the next line's indent
   without consuming it
-- [ ] Provide `peek_next()`, `peek_next_indent()`,
-  `consume_current()`, and `at_eof()` operations
-- [ ] Provide a "scalar mode" or block-scalar peek that
-  expands the buffer locally to scan forward until a line
-  with indent ≤ base — used by block scalar
-  auto-indentation
-- [ ] Unit tests covering: empty input, single line, multi
+- [x] Provide `peek_next()`, `peek_next_indent()`,
+  `consume_next()`, and `at_eof()` operations.
+
+  Note: the implementation uses a **one-line buffer model**
+  rather than a [current, next] two-line model. The buffer
+  holds only the *upcoming* line; the lexer will hold the
+  "current" line in a local variable after `consume_next()`
+  and use `peek_next_indent()` to look at the line after.
+  This deviates from the original plan wording
+  (`consume_current()`) but is simpler and semantically
+  equivalent for the lexer pattern. Lead approved during
+  Task 3 review.
+- [x] Provide a "scalar mode" or block-scalar peek
+  (`peek_until_dedent(base_indent)`) that expands the
+  buffer locally to scan forward until a line with indent
+  ≤ base — used by block scalar auto-indentation. Blank
+  lines are transparent to the scan; trailing blank lines
+  are included in the result and the consumer (Task 8
+  lexer) is responsible for chomping-based trimming.
+- [x] Unit tests covering: empty input, single line, multi
   line, mixed line endings, BOM handling, trailing newline,
-  indent calculation
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): add streaming line buffer with one-line lookahead`
+  indent calculation, and `pos.line`/`pos.column`
+  tracking after each terminator type (regression tests
+  for the bare-CR pos bug found in review)
+- [x] Build, clippy, tests pass (85/85)
+- [x] Commit: `feat(parser-temp): add streaming line buffer with one-line lookahead`
 
 **Reference impl consultation:**
 1. Local: check how `structure.rs` and `block.rs` handle
