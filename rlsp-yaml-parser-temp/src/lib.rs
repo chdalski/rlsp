@@ -10,7 +10,7 @@ mod pos;
 mod scanner;
 
 pub use error::Error;
-pub use event::{Event, ScalarStyle};
+pub use event::{Chomp, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use pos::{Pos, Span};
 
@@ -80,6 +80,20 @@ impl<'input> EventIter<'input> {
     /// - `Ok(None)` — no scalar recognised at this position.
     /// - `Err(e)` — a parse error (e.g. invalid escape sequence).
     fn try_consume_scalar(&mut self) -> Result<Option<(Event<'input>, Span)>, Error> {
+        // Block scalars are tried first — `|` is an indicator that cannot start
+        // a plain scalar, so there is no ambiguity.
+        if let Some(result) = self.lexer.try_consume_literal_block_scalar(0) {
+            let (value, chomp, span) = result?;
+            return Ok(Some((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::Literal(chomp),
+                    anchor: None,
+                    tag: None,
+                },
+                span,
+            )));
+        }
         if let Some((value, span)) = self.lexer.try_consume_single_quoted(0)? {
             return Ok(Some((
                 Event::Scalar {
@@ -235,7 +249,7 @@ impl<'input> Iterator for EventIter<'input> {
                             zero_span(marker_pos),
                         )));
                     }
-                    // Try scalars: single-quoted, double-quoted, plain (in priority order).
+                    // Try scalars: literal block, single-quoted, double-quoted, plain (in priority order).
                     match self.try_consume_scalar() {
                         Ok(Some(event)) => return Some(Ok(event)),
                         Err(e) => return Some(Err(e)),

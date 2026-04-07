@@ -19,6 +19,17 @@
 
 use std::borrow::Cow;
 
+/// Block scalar chomping mode per YAML 1.2 §8.1.1.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chomp {
+    /// `-` — trailing newlines stripped.
+    Strip,
+    /// (default, no indicator) — single trailing newline kept.
+    Clip,
+    /// `+` — all trailing newlines kept.
+    Keep,
+}
+
 /// The style in which a scalar value was written in the source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarStyle {
@@ -28,7 +39,9 @@ pub enum ScalarStyle {
     SingleQuoted,
     /// A `"double-quoted"` scalar (YAML 1.2 §7.3.1).
     DoubleQuoted,
-    // Literal(Chomp) (Task 8), Folded(Chomp) (Task 9) added in their tasks.
+    /// A `|` literal block scalar (YAML 1.2 §8.1.2).
+    Literal(Chomp),
+    // Folded(Chomp) (Task 9) added in its task.
 }
 
 /// A high-level YAML parse event.

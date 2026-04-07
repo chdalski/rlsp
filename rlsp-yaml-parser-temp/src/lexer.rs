@@ -10,7 +10,8 @@ use std::borrow::Cow;
 
 use crate::chars::{decode_escape, is_c_printable};
 use crate::error::Error;
-use crate::lines::{Line, LineBuffer};
+use crate::event::Chomp;
+use crate::lines::{BreakType, Line, LineBuffer};
 use crate::pos::{Pos, Span};
 
 // ---------------------------------------------------------------------------
@@ -574,6 +575,177 @@ impl<'input> Lexer<'input> {
         Ok(Some((value, span)))
     }
 
+    /// Try to tokenize a literal block scalar (`|`) starting at the current line.
+    ///
+    /// Implements YAML 1.2 §8.1.2 `c-l+literal` in block context.  The caller
+    /// supplies `parent_indent` — the indentation level of the enclosing block
+    /// node (`n` in the spec).
+    ///
+    /// Returns:
+    /// - `None` — the current line does not start with `|` (not a literal block scalar).
+    /// - `Some(Ok((value, chomp, span)))` — successfully tokenized.
+    /// - `Some(Err(e))` — started parsing (opening `|` seen) but hit a hard error
+    ///   (e.g. invalid indicator character, tab in indentation).
+    ///
+    /// **Borrow contract:** Always returns `Cow::Owned` — the content is
+    /// assembled from stripped lines and does not exist contiguously in input.
+    ///
+    /// **Span:** Covers from the `|` through the last consumed line terminator.
+    pub fn try_consume_literal_block_scalar(
+        &mut self,
+        parent_indent: usize,
+    ) -> LiteralBlockResult<'input> {
+        // Check the current line starts with `|`.
+        let first_line = self.buf.peek_next()?;
+        let content = first_line.content.trim_start_matches([' ', '\t']);
+        if !content.starts_with('|') {
+            return None;
+        }
+
+        // Record the position of the `|` for the span start.
+        let leading = first_line.content.len() - content.len();
+        let pipe_pos = Pos {
+            byte_offset: first_line.offset + leading,
+            char_offset: first_line.pos.char_offset + leading,
+            line: first_line.pos.line,
+            column: first_line.pos.column + leading,
+        };
+
+        // Consume the header line.
+        let header_line = self
+            .buf
+            .consume_next()
+            .unwrap_or_else(|| panic!("peek returned Some but consume returned None"));
+        self.current_pos = pos_after_line(&header_line);
+
+        // Parse the header: `|` [indent-indicator] [chomp-indicator] [comment]
+        // Indicators can appear in either order: `|+2` or `|2+`.
+        let after_pipe = &content[1..]; // everything after `|`
+        let (chomp, explicit_indent, header_err) = parse_block_header(after_pipe, pipe_pos);
+        if let Some(e) = header_err {
+            return Some(Err(e));
+        }
+
+        // Determine content indent.
+        // If explicit indicator given: content_indent = parent_indent + explicit_indent.
+        // Otherwise: auto-detect by scanning forward to the first non-blank content line.
+        let content_indent: usize = if let Some(explicit) = explicit_indent {
+            parent_indent + explicit
+        } else {
+            // Use peek_until_dedent to scan for the first non-blank line and
+            // read its indent.  base_indent = parent_indent so we stop at
+            // any line with indent <= parent_indent.
+            let lookahead = self.buf.peek_until_dedent(parent_indent);
+            // Find the first non-blank line's indent.
+            lookahead
+                .iter()
+                .find(|l| !l.content.trim_matches([' ', '\t']).is_empty())
+                .map_or(parent_indent + 1, |l| l.indent)
+        };
+
+        // Collect content lines.
+        let mut out = String::new();
+        // Count pending transparent blank lines (not yet pushed, for chomping).
+        // These are lines with indent < content_indent (or truly empty lines).
+        let mut trailing_newlines: usize = 0;
+
+        loop {
+            let Some(next) = self.buf.peek_next() else {
+                break;
+            };
+
+            let line_content = next.content;
+
+            // Tab at the very start of a line means the line uses a tab as
+            // indentation, which is a YAML error.
+            if line_content.starts_with('\t') {
+                let tab_pos = next.pos;
+                let consumed = self
+                    .buf
+                    .consume_next()
+                    .unwrap_or_else(|| panic!("consume failed"));
+                self.current_pos = pos_after_line(&consumed);
+                return Some(Err(Error {
+                    pos: tab_pos,
+                    message: "tab character is not valid indentation in a block scalar".to_owned(),
+                }));
+            }
+
+            // Classify this line:
+            // - If indent >= content_indent: content line (may be spaces-only
+            //   after the indent prefix, but that's still content).
+            // - Otherwise (indent < content_indent): transparent blank — counts
+            //   as a newline but does not terminate if the line is whitespace-only
+            //   (per spec `l-empty(n,c)`). If it has non-whitespace characters,
+            //   it's a dedent terminator.
+            // A line is a content line if:
+            // 1. Its indent >= content_indent, AND
+            // 2. After stripping content_indent leading spaces, at least one
+            //    nb-char (non-break char, including spaces) remains.
+            //
+            // A line is blank (l-empty) if it has indent < content_indent, or
+            // if after stripping content_indent spaces the remaining content is
+            // completely empty. In the blank case we check for non-whitespace
+            // to decide between transparent (blank → newline) vs terminator.
+            let after_indent = if next.indent >= content_indent {
+                line_content.get(content_indent..).unwrap_or("")
+            } else {
+                ""
+            };
+
+            let is_content_line = next.indent >= content_indent && !after_indent.is_empty();
+
+            if is_content_line {
+                // Content line. Flush any pending blank lines first.
+                for _ in 0..trailing_newlines {
+                    out.push('\n');
+                }
+                trailing_newlines = 0;
+
+                let consumed = self
+                    .buf
+                    .consume_next()
+                    .unwrap_or_else(|| panic!("consume content line failed"));
+                self.current_pos = pos_after_line(&consumed);
+
+                out.push_str(after_indent);
+                // Only push a newline if the physical line had one.
+                // A line ending with BreakType::Eof means the input ended
+                // without a trailing newline — no b-as-line-feed is emitted.
+                if consumed.break_type != BreakType::Eof {
+                    out.push('\n');
+                }
+            } else {
+                // Blank line (indent < content_indent, or content after indent
+                // is empty). Check whether it terminates the scalar.
+                let trimmed = line_content.trim_matches([' ', '\t']);
+                if !trimmed.is_empty() {
+                    // Non-whitespace at dedented position: terminates the scalar.
+                    break;
+                }
+                // Whitespace-only line: transparent (l-empty). Count as newline.
+                let consumed = self
+                    .buf
+                    .consume_next()
+                    .unwrap_or_else(|| panic!("consume blank line failed"));
+                self.current_pos = pos_after_line(&consumed);
+                trailing_newlines += 1;
+            }
+        }
+
+        // Apply chomping to the trailing newlines.
+        // At this point `out` ends with `\n` from the last content line (if any),
+        // and `trailing_newlines` counts blank lines following that last content line.
+        let value = apply_chomping(out, trailing_newlines, chomp);
+
+        let span = Span {
+            start: pipe_pos,
+            end: self.current_pos,
+        };
+
+        Some(Ok((Cow::Owned(value), chomp, span)))
+    }
+
     /// Collect continuation lines for a multi-line double-quoted scalar.
     ///
     /// `owned` is the accumulated content so far (from the first line).
@@ -649,6 +821,153 @@ impl<'input> Lexer<'input> {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Literal block scalar helpers
+// ---------------------------------------------------------------------------
+
+/// Return type of [`Lexer::try_consume_literal_block_scalar`].
+///
+/// `None` — not a literal block scalar.
+/// `Some(Ok(...))` — successfully tokenized `(value, chomp, span)`.
+/// `Some(Err(...))` — parse error.
+type LiteralBlockResult<'a> = Option<Result<(Cow<'a, str>, Chomp, Span), Error>>;
+
+/// Parse the block scalar header following the `|` character.
+///
+/// `after_pipe` is the slice starting immediately after `|`.
+/// Returns `(chomp, explicit_indent, error)`.
+///
+/// - `explicit_indent` is `Some(n)` for `|n` or `None` for auto-detect.
+/// - Error is `Some(Error)` for invalid indicator characters.
+fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>, Option<Error>) {
+    let mut chars = after_pipe.chars().peekable();
+
+    // Try to parse indicator characters. They can appear in either order:
+    // indent-then-chomp or chomp-then-indent.
+    let mut chomp: Option<Chomp> = None;
+    let mut explicit_indent: Option<usize> = None;
+    let mut pos = pipe_pos.advance('|');
+
+    // We track how many indicator chars we consumed to detect `|99` (two digits).
+    loop {
+        match chars.peek() {
+            None | Some(' ' | '\t' | '#' | '\n' | '\r') => {
+                // End of indicators: comment, whitespace, or line end.
+                break;
+            }
+            Some(&ch) => {
+                if ch == '+' {
+                    if chomp.is_some() {
+                        return (
+                            Chomp::Clip,
+                            None,
+                            Some(Error {
+                                pos,
+                                message: "duplicate chomp indicator in block scalar header"
+                                    .to_owned(),
+                            }),
+                        );
+                    }
+                    chomp = Some(Chomp::Keep);
+                    chars.next();
+                    pos = pos.advance(ch);
+                } else if ch == '-' {
+                    if chomp.is_some() {
+                        return (
+                            Chomp::Clip,
+                            None,
+                            Some(Error {
+                                pos,
+                                message: "duplicate chomp indicator in block scalar header"
+                                    .to_owned(),
+                            }),
+                        );
+                    }
+                    chomp = Some(Chomp::Strip);
+                    chars.next();
+                    pos = pos.advance(ch);
+                } else if ch.is_ascii_digit() {
+                    if ch == '0' {
+                        return (
+                            Chomp::Clip,
+                            None,
+                            Some(Error {
+                                pos,
+                                message: "indent indicator '0' is not valid in block scalar header"
+                                    .to_owned(),
+                            }),
+                        );
+                    }
+                    if explicit_indent.is_some() {
+                        return (
+                            Chomp::Clip,
+                            None,
+                            Some(Error {
+                                pos,
+                                message: "duplicate indent indicator in block scalar header"
+                                    .to_owned(),
+                            }),
+                        );
+                    }
+                    explicit_indent = Some(ch as usize - '0' as usize);
+                    chars.next();
+                    pos = pos.advance(ch);
+                } else {
+                    // Invalid indicator character.
+                    return (
+                        Chomp::Clip,
+                        None,
+                        Some(Error {
+                            pos,
+                            message: format!("invalid block scalar indicator character '{ch}'"),
+                        }),
+                    );
+                }
+            }
+        }
+    }
+
+    (chomp.unwrap_or(Chomp::Clip), explicit_indent, None)
+}
+
+/// Apply chomping rules to the assembled scalar content.
+///
+/// `content` is the raw assembled content (ends with `\n` from the last
+/// content line, if any content exists).
+/// `trailing_blank_count` is the number of blank lines that followed the last
+/// content line.
+///
+/// Chomping rules (spec §8.1.1.2):
+/// - Strip: remove all trailing newlines (the `\n` from the last content line
+///   and any blank lines).
+/// - Clip: keep exactly one trailing newline (the `\n` from the last content
+///   line).  If content is empty, result is "".
+/// - Keep: keep the `\n` from the last content line plus all blank lines.
+fn apply_chomping(mut content: String, trailing_blank_count: usize, chomp: Chomp) -> String {
+    match chomp {
+        Chomp::Strip => {
+            // Remove the trailing `\n` added after the last content line,
+            // plus any blank lines.
+            if content.ends_with('\n') {
+                content.pop();
+            }
+            // content already has no trailing blanks (they were counted separately).
+        }
+        Chomp::Clip => {
+            // Keep exactly one trailing `\n`.  The content already ends with `\n`
+            // (if non-empty) from the last content line — that's the one to keep.
+            // Blank lines are discarded.
+        }
+        Chomp::Keep => {
+            // Keep the trailing `\n` from the last content line plus all blank lines.
+            for _ in 0..trailing_blank_count {
+                content.push('\n');
+            }
+        }
+    }
+    content
 }
 
 // ---------------------------------------------------------------------------
@@ -2416,6 +2735,596 @@ mod tests {
             e.message.contains("invalid escape"),
             "expected invalid escape error, got: {}",
             e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H — try_consume_literal_block_scalar unit tests (Task 8)
+    // -----------------------------------------------------------------------
+    //
+    // Helpers for literal block scalar tests.
+
+    /// Parse a literal block scalar from `input`, returning Ok((value, chomp)).
+    /// Panics if the result is None or Err.
+    fn lit_ok(input: &str) -> (String, Chomp) {
+        let mut lex = make_lexer(input);
+        let result = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some, got None"));
+        let (cow, chomp, _span) = result.unwrap_or_else(|e| panic!("expected Ok, got Err: {e}"));
+        (cow.into_owned(), chomp)
+    }
+
+    /// Parse a literal block scalar from `input`, expecting an error.
+    fn lit_err(input: &str) -> Error {
+        let mut lex = make_lexer(input);
+        let result = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some, got None"));
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+
+    /// Try a literal block scalar; returns None if not a block scalar.
+    fn lit_none(input: &str) -> bool {
+        let mut lex = make_lexer(input);
+        lex.try_consume_literal_block_scalar(0).is_none()
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-A: Header parsing — happy path
+    // -----------------------------------------------------------------------
+
+    // UT-LB-A1: `|` (no indicators) → Clip, auto-detect indent
+    #[test]
+    fn literal_header_no_indicators_yields_clip() {
+        let (_, chomp) = lit_ok("|\n  hello\n");
+        assert_eq!(chomp, Chomp::Clip);
+    }
+
+    // UT-LB-A2: `|-` → Strip
+    #[test]
+    fn literal_header_minus_yields_strip() {
+        let (_, chomp) = lit_ok("|-\n  hello\n");
+        assert_eq!(chomp, Chomp::Strip);
+    }
+
+    // UT-LB-A3: `|+` → Keep
+    #[test]
+    fn literal_header_plus_yields_keep() {
+        let (_, chomp) = lit_ok("|+\n  hello\n");
+        assert_eq!(chomp, Chomp::Keep);
+    }
+
+    // UT-LB-A4: `|2` → explicit indent 2 (relative to parent=0)
+    #[test]
+    fn literal_header_explicit_indent_2() {
+        let (val, _) = lit_ok("|2\n  hello\n");
+        assert_eq!(val, "hello\n");
+    }
+
+    // UT-LB-A5: `|-2` → Strip + indent 2
+    #[test]
+    fn literal_header_minus_indent_2() {
+        let (val, chomp) = lit_ok("|-2\n  hello\n");
+        assert_eq!(chomp, Chomp::Strip);
+        assert_eq!(val, "hello");
+    }
+
+    // UT-LB-A6: `|2-` → same as |-2 (either order)
+    #[test]
+    fn literal_header_indent_2_then_minus() {
+        let (val, chomp) = lit_ok("|2-\n  hello\n");
+        assert_eq!(chomp, Chomp::Strip);
+        assert_eq!(val, "hello");
+    }
+
+    // UT-LB-A7: `|+2` → Keep + indent 2
+    #[test]
+    fn literal_header_plus_indent_2() {
+        let (val, chomp) = lit_ok("|+2\n  hello\n\n");
+        assert_eq!(chomp, Chomp::Keep);
+        assert_eq!(val, "hello\n\n");
+    }
+
+    // UT-LB-A8: `|2+` → same (either order)
+    #[test]
+    fn literal_header_indent_2_then_plus() {
+        let (val, chomp) = lit_ok("|2+\n  hello\n\n");
+        assert_eq!(chomp, Chomp::Keep);
+        assert_eq!(val, "hello\n\n");
+    }
+
+    // UT-LB-A9: `| # comment` → Clip (comment ignored)
+    #[test]
+    fn literal_header_with_comment_yields_clip() {
+        let (val, chomp) = lit_ok("| # this is a comment\n  hello\n");
+        assert_eq!(chomp, Chomp::Clip);
+        assert_eq!(val, "hello\n");
+    }
+
+    // UT-LB-A10: returns None for non-`|` input
+    #[test]
+    fn literal_block_returns_none_for_non_pipe() {
+        assert!(lit_none("hello\n"));
+    }
+
+    // UT-LB-A11: returns None for empty input
+    #[test]
+    fn literal_block_returns_none_for_empty_input() {
+        assert!(lit_none(""));
+    }
+
+    // UT-LB-A12: `|` at leading whitespace — leading spaces before `|` are allowed
+    #[test]
+    fn literal_block_with_leading_spaces_before_pipe() {
+        let (val, chomp) = lit_ok("  |\n    hello\n");
+        assert_eq!(chomp, Chomp::Clip);
+        assert_eq!(val, "hello\n");
+    }
+
+    // UT-LB-A13: `|  # comment` (spaces then comment) → Clip
+    #[test]
+    fn header_space_then_comment_gives_clip() {
+        let (val, chomp) = lit_ok("|  # comment\n  hello\n");
+        assert_eq!(chomp, Chomp::Clip);
+        assert_eq!(val, "hello\n");
+    }
+
+    // UT-LB-A14: `|9` → explicit indent 9
+    #[test]
+    fn header_explicit_indent_nine() {
+        let (val, chomp) = lit_ok("|9\n         foo\n");
+        assert_eq!(chomp, Chomp::Clip);
+        assert_eq!(val, "foo\n");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-B: Header parsing — errors
+    // -----------------------------------------------------------------------
+
+    // UT-LB-B1: `|!` → error (invalid indicator)
+    #[test]
+    fn literal_header_invalid_indicator_exclamation_is_error() {
+        let e = lit_err("|!\n  hello\n");
+        assert!(
+            e.message.contains("invalid") || e.message.contains("indicator"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B2: `|0` → error (zero is forbidden as indent digit)
+    #[test]
+    fn literal_header_zero_indent_is_error() {
+        let e = lit_err("|0\n  hello\n");
+        assert!(
+            e.message.contains("indent") || e.message.contains('0'),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B3: `|99` → error (duplicate indent digit)
+    #[test]
+    fn literal_header_duplicate_indent_digit_is_error() {
+        let e = lit_err("|99\n  hello\n");
+        assert!(
+            e.message.contains("duplicate") || e.message.contains("indent"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B4: `|++` → error (duplicate chomp indicator)
+    #[test]
+    fn literal_header_duplicate_chomp_indicator_is_error() {
+        let e = lit_err("|++\n  hello\n");
+        assert!(
+            e.message.contains("duplicate") || e.message.contains("chomp"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B5: `|--` → error (duplicate chomp indicator)
+    #[test]
+    fn literal_header_duplicate_strip_indicator_is_error() {
+        let e = lit_err("|--\n  hello\n");
+        assert!(
+            e.message.contains("duplicate") || e.message.contains("chomp"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B6: `|+-` → error (two different chomp indicators)
+    #[test]
+    fn header_two_chomp_indicators_mixed_is_error() {
+        let e = lit_err("|+-\n  hello\n");
+        assert!(
+            e.message.contains("duplicate") || e.message.contains("chomp"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-B7: `|2!` → error (invalid char after digit)
+    #[test]
+    fn header_invalid_char_after_digit_is_error() {
+        let e = lit_err("|2!\n  hello\n");
+        assert!(
+            e.message.contains("invalid") || e.message.contains("indicator"),
+            "unexpected error: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-C: Clip content collection
+    // -----------------------------------------------------------------------
+
+    // UT-LB-C1: single-line content
+    #[test]
+    fn literal_single_line_content() {
+        let (val, _) = lit_ok("|\n  hello\n");
+        assert_eq!(val, "hello\n");
+    }
+
+    // UT-LB-C2: multi-line content
+    #[test]
+    fn literal_multi_line_content() {
+        let (val, _) = lit_ok("|\n  foo\n  bar\n");
+        assert_eq!(val, "foo\nbar\n");
+    }
+
+    // UT-LB-C3: blank line between content lines
+    #[test]
+    fn literal_blank_line_in_content() {
+        let (val, _) = lit_ok("|\n  foo\n\n  bar\n");
+        assert_eq!(val, "foo\n\nbar\n");
+    }
+
+    // UT-LB-C4: leading blank before first content (blank becomes \n per spec)
+    #[test]
+    fn leading_blank_before_first_content_is_included_clip() {
+        // Per YAML 1.2 §8.1.2, blank lines before the first content line
+        // are included as newlines via l-empty.  A completely empty line
+        // has s-indent(0) which satisfies l-empty(n,BLOCK-IN) for any n>0.
+        let (val, _) = lit_ok("|\n\n  foo\n");
+        assert_eq!(val, "\nfoo\n");
+    }
+
+    // UT-LB-C5: empty scalar (header only, no content)
+    #[test]
+    fn literal_empty_scalar_clip_yields_empty_string() {
+        let (val, chomp) = lit_ok("|\n");
+        assert_eq!(chomp, Chomp::Clip);
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-C4b: two interior blank lines preserved
+    #[test]
+    fn two_interior_blank_lines_preserved() {
+        let (val, _) = lit_ok("|\n  foo\n\n\n  bar\n");
+        assert_eq!(val, "foo\n\n\nbar\n");
+    }
+
+    // UT-LB-C5b: empty scalar with trailing blank still yields empty string
+    #[test]
+    fn empty_scalar_with_trailing_blank_still_empty() {
+        let (val, _) = lit_ok("|\n\n");
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-C6: trailing blank line with Clip → single newline kept
+    #[test]
+    fn literal_trailing_blank_with_clip_keeps_single_newline() {
+        let (val, _) = lit_ok("|\n  foo\n\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-C6b: two trailing blanks with Clip → still single newline
+    #[test]
+    fn two_trailing_blanks_dropped_clip() {
+        let (val, _) = lit_ok("|\n  foo\n\n\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-C7: content at higher indent → extra spaces in value
+    #[test]
+    fn literal_content_with_extra_indent_preserves_spaces() {
+        // "|\n   foo\n" with content_indent=3: value is "foo\n"
+        // "|\n  foo\n   bar\n" with content_indent=2: bar has 1 extra space
+        let (val, _) = lit_ok("|\n  foo\n   bar\n");
+        assert_eq!(val, "foo\n bar\n");
+    }
+
+    // UT-LB-C8: content terminated by dedent
+    #[test]
+    fn literal_content_terminated_by_dedent() {
+        let mut lex = make_lexer("|\n  foo\nkey: val\n");
+        let result = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert_eq!(result.0.as_ref(), "foo\n");
+        // `key: val` should still be in the buffer.
+        let remaining = lex.buf.peek_next().map(|l| l.content);
+        assert_eq!(remaining, Some("key: val"));
+    }
+
+    // UT-LB-C9: EOF without trailing newline (no physical newline on last line)
+    #[test]
+    fn literal_eof_without_trailing_newline() {
+        // "|\n  foo" — no final newline; no b-as-line-feed, so value is "foo".
+        let (val, _) = lit_ok("|\n  foo");
+        assert_eq!(val, "foo");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-D: Strip and Keep chomping
+    // -----------------------------------------------------------------------
+
+    // UT-LB-D1: Strip — no trailing newline
+    #[test]
+    fn literal_strip_no_trailing_newline() {
+        let (val, chomp) = lit_ok("|-\n  foo\n");
+        assert_eq!(chomp, Chomp::Strip);
+        assert_eq!(val, "foo");
+    }
+
+    // UT-LB-D2: Strip — trailing blank lines removed
+    #[test]
+    fn literal_strip_with_trailing_blanks_removes_all() {
+        let (val, _) = lit_ok("|-\n  foo\n\n\n");
+        assert_eq!(val, "foo");
+    }
+
+    // UT-LB-D3: Strip — empty scalar
+    #[test]
+    fn literal_strip_empty_scalar_yields_empty_string() {
+        let (val, chomp) = lit_ok("|-\n");
+        assert_eq!(chomp, Chomp::Strip);
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-D4: Keep — all trailing newlines kept
+    #[test]
+    fn literal_keep_all_trailing_newlines() {
+        let (val, chomp) = lit_ok("|+\n  foo\n\n\n");
+        assert_eq!(chomp, Chomp::Keep);
+        assert_eq!(val, "foo\n\n\n");
+    }
+
+    // UT-LB-D5: Keep — single trailing newline
+    #[test]
+    fn literal_keep_single_trailing_newline() {
+        let (val, _) = lit_ok("|+\n  foo\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-D6: Keep — empty scalar
+    #[test]
+    fn literal_keep_empty_scalar_yields_empty_string() {
+        let (val, chomp) = lit_ok("|+\n");
+        assert_eq!(chomp, Chomp::Keep);
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-D7: Clip — single content line, no trailing blank
+    #[test]
+    fn literal_clip_no_trailing_blank_yields_one_newline() {
+        let (val, _) = lit_ok("|\n  foo\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-D8: Clip — multiple trailing blanks → only one newline kept
+    #[test]
+    fn literal_clip_multiple_trailing_blanks_clips_to_one() {
+        let (val, _) = lit_ok("|\n  foo\n\n\n\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-D9: Strip with multi-line content
+    #[test]
+    fn literal_strip_multiline_removes_last_newline() {
+        let (val, _) = lit_ok("|-\n  foo\n  bar\n");
+        assert_eq!(val, "foo\nbar");
+    }
+
+    // UT-LB-D10: Keep with multi-line content and multiple trailing blanks
+    #[test]
+    fn literal_keep_multiline_preserves_all_trailing() {
+        let (val, _) = lit_ok("|+\n  foo\n  bar\n\n");
+        assert_eq!(val, "foo\nbar\n\n");
+    }
+
+    // UT-LB-D11: Keep — only blank lines (no content) → newlines from blanks
+    #[test]
+    fn keep_only_blanks_produces_newlines() {
+        let (val, _) = lit_ok("|+\n\n\n");
+        assert_eq!(val, "\n\n");
+    }
+
+    // UT-LB-D12: Strip — only blank lines → empty string
+    #[test]
+    fn strip_only_blanks_produces_empty_string() {
+        let (val, _) = lit_ok("|-\n\n\n");
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-D13: Clip — only blank lines → empty string
+    #[test]
+    fn clip_only_blanks_produces_empty_string() {
+        let (val, _) = lit_ok("|\n\n\n");
+        assert_eq!(val, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-E: Explicit indent indicator
+    // -----------------------------------------------------------------------
+
+    // UT-LB-E1: explicit indent 2 with parent=0
+    #[test]
+    fn literal_explicit_indent_2_parent_0() {
+        let (val, _) = lit_ok("|2\n  foo\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-E2: explicit indent with more indented line → extra spaces preserved
+    #[test]
+    fn literal_explicit_indent_2_extra_spaces_preserved() {
+        let (val, _) = lit_ok("|2\n   foo\n");
+        assert_eq!(val, " foo\n");
+    }
+
+    // UT-LB-E3: explicit indent 2 with parent=0, content less indented → no content
+    // (foo has 0 spaces < 2: content_indent=0+2=2, but foo only has 0 spaces)
+    // Actually "foo" without leading spaces is indent=0 < 2 — scalar is empty.
+    #[test]
+    fn literal_explicit_indent_content_insufficient_indent_yields_empty() {
+        let (val, _) = lit_ok("|4\n  foo\n");
+        // content_indent=4, foo has indent=2 < 4 → empty scalar
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-E4: explicit indent 1 with parent=0
+    #[test]
+    fn literal_explicit_indent_1() {
+        let (val, _) = lit_ok("|1\n foo\n");
+        assert_eq!(val, "foo\n");
+    }
+
+    // UT-LB-E5: explicit indent 2 relative to parent_indent=2 → content_indent=4
+    #[test]
+    fn explicit_indent_relative_to_parent() {
+        let mut lex = make_lexer("|2\n    foo\n");
+        let result = lex
+            .try_consume_literal_block_scalar(2)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        // parent_indent=2 + explicit=2 = content_indent=4; "    foo" has indent=4
+        assert_eq!(result.0.as_ref(), "foo\n");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-F: Termination/boundary conditions
+    // -----------------------------------------------------------------------
+
+    // UT-LB-F1: block scalar followed by non-blank content at col 0
+    #[test]
+    fn literal_stops_at_dedented_non_blank() {
+        let mut lex = make_lexer("|\n  foo\nnext line\n");
+        let (val, _, _) = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert_eq!(val.as_ref(), "foo\n");
+        let remaining = lex.buf.peek_next().map(|l| l.content);
+        assert_eq!(remaining, Some("next line"));
+    }
+
+    // UT-LB-F2: block scalar at EOF (no lines at all after header)
+    #[test]
+    fn literal_at_eof_after_header_yields_empty() {
+        let (val, _) = lit_ok("|\n");
+        assert_eq!(val, "");
+    }
+
+    // UT-LB-F3: span start is at position of `|`
+    #[test]
+    fn literal_span_start_at_pipe() {
+        let mut lex = make_lexer("|\n  hello\n");
+        let (_, _, span) = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert_eq!(span.start.byte_offset, 0);
+        assert_eq!(span.start.column, 0);
+    }
+
+    // UT-LB-F4: span end after all consumed lines
+    #[test]
+    fn literal_span_end_after_content_lines() {
+        // "|\n  hello\n" = 10 bytes
+        let mut lex = make_lexer("|\n  hello\n");
+        let (_, _, span) = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert_eq!(span.end.byte_offset, 10);
+    }
+
+    // UT-LB-F5: span end covers trailing blanks that are consumed
+    #[test]
+    fn literal_span_end_covers_trailing_blanks() {
+        // "|\n  foo\n\n" = 9 bytes (|=1, \n=1, space=1, space=1, foo=3, \n=1, \n=1)
+        // trailing blank is consumed even under Clip
+        let mut lex = make_lexer("|\n  foo\n\n");
+        let (_, _, span) = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert_eq!(span.end.byte_offset, 9);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-G: Tab handling
+    // -----------------------------------------------------------------------
+
+    // UT-LB-G1: tab as first char of content line → error
+    #[test]
+    fn literal_tab_as_indentation_is_error() {
+        let e = lit_err("|\n\tfoo\n");
+        assert!(
+            e.message.contains("tab"),
+            "expected tab error, got: {}",
+            e.message
+        );
+    }
+
+    // UT-LB-G2: tab after content-indent spaces → preserved in value
+    #[test]
+    fn literal_tab_after_spaces_is_preserved() {
+        // "|\n  \tfoo\n": content_indent=2 (from `  \t`), after stripping 2 spaces: "\tfoo"
+        // The tab is after the indent spaces — it's content.
+        let (val, _) = lit_ok("|\n  \tfoo\n");
+        assert_eq!(val, "\tfoo\n");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-H: UTF-8 and special content
+    // -----------------------------------------------------------------------
+
+    // UT-LB-H1: multi-byte UTF-8 content
+    #[test]
+    fn literal_multibyte_utf8_content() {
+        let (val, _) = lit_ok("|\n  héllo\n");
+        assert_eq!(val, "héllo\n");
+    }
+
+    // UT-LB-H2: content with embedded null byte (valid in Rust strings)
+    #[test]
+    fn literal_content_with_backslash_is_preserved_verbatim() {
+        // Backslashes are not escape sequences in literal block scalars.
+        let (val, _) = lit_ok("|\n  foo\\bar\n");
+        assert_eq!(val, "foo\\bar\n");
+    }
+
+    // UT-LB-H3: result is always Cow::Owned
+    #[test]
+    fn literal_result_is_always_cow_owned() {
+        let mut lex = make_lexer("|\n  hello\n");
+        let (cow, _, _) = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| panic!("expected Some"))
+            .unwrap_or_else(|e| panic!("expected Ok, got {e}"));
+        assert!(
+            matches!(cow, Cow::Owned(_)),
+            "literal block scalars must always produce Cow::Owned"
         );
     }
 }
