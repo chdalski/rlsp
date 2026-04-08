@@ -231,7 +231,7 @@ user has explicitly approved this scope.
 - [x] Implement folded block scalars (Task 10) — `f107749`
 - [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
 - [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
-- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`
+- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
@@ -889,17 +889,19 @@ this is mostly a reminder for Task 20).
 
 ### Task 17: Tags
 
-- [ ] Verbatim tag: `!<tag:yaml.org,2002:str>`
-- [ ] Shorthand tags: `!!str`, `!handle!suffix`
-- [ ] Non-specific tag: `!`
-- [ ] Tag attached to node like anchor
-- [ ] Emit MappingStart/SequenceStart/Scalar events with
+**Status:** Completed in commit `dc01d7f`.
+
+- [x] Verbatim tag: `!<tag:yaml.org,2002:str>`
+- [x] Shorthand tags: `!!str`, `!handle!suffix`
+- [x] Non-specific tag: `!`
+- [x] Tag attached to node like anchor
+- [x] Emit MappingStart/SequenceStart/Scalar events with
   `tag: Some(&'input str)` (or maybe `Cow` if tag handle
   expansion requires it — investigate against the local
   impl)
-- [ ] Conformance tests for tags must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): tags`
+- [x] Conformance tests for tags must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): tags`
 
 **Reference impl consultation:**
 1. Local: `flow.rs` tag productions, `event.rs`
