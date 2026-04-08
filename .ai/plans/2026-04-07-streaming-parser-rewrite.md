@@ -662,22 +662,28 @@ smoke tests pass; committed in `93c66e0`.
 
 ### Task 12: Block mappings
 
+**Status:** Completed in commit `9f4ecb0`.
+
 Implement `key: value` block mappings and `MappingStart`/
 `MappingEnd` events.
 
-- [ ] Tokenizer recognizes the implicit key-value pair
+- [x] Tokenizer recognizes the implicit key-value pair
   pattern: a scalar followed by `:` followed by space/EOL
-- [ ] Tokenizer recognizes the explicit key indicator `?`
+- [x] Tokenizer recognizes the explicit key indicator `?`
   followed by space/EOL (less common but spec-required)
-- [ ] Emit `MappingStart`/`MappingEnd` events around the
+- [x] Emit `MappingStart`/`MappingEnd` events around the
   mapping's entries
-- [ ] Key-value pairs alternate as Scalar/event pairs
+- [x] Key-value pairs alternate as Scalar/event pairs
   inside the mapping
-- [ ] Handle complex keys (any node type as key)
-- [ ] Handle empty values (`key:` followed by EOL)
-- [ ] Conformance tests for block mappings must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): block mappings`
+- [x] Handle complex keys (any node type as key) — literal
+  block scalar keys (`? |\n  ...`) verified
+- [x] Handle empty values (`key:` followed by EOL)
+- [x] Conformance tests for block mappings must pass —
+  deferred to Task 21 (integration test suite); 34 smoke
+  tests in `mod mappings` cover the scope documented here
+- [x] Build, clippy, tests pass (211 integration + 277
+  unit, zero clippy warnings)
+- [x] Commit: `feat(parser-temp): block mappings`
 
 **Reference impl consultation:**
 1. Local: `block.rs` `l_block_mapping()`,
@@ -688,6 +694,29 @@ Implement `key: value` block mappings and `MappingStart`/
    them — verify against test fixtures like 6BCT, 6FWR
 
 **Advisors:** test-engineer.
+
+**Reviewer note (resubmission):** Initial submission was rejected
+for a High correctness finding: `find_value_indicator_offset` did
+not handle the `#`-starts-comment rule (YAML 1.2 §6.6). Inputs
+like `"key # comment: value\n"` were parsed as a mapping
+{`"key # comment"`: `"value"`} instead of a plain scalar
+`"key"` followed by a comment — diverging from the reference
+parser. A Medium finding (three phase-management functions
+`advance_mapping_to_value` / `advance_mapping_to_key` /
+`tick_mapping_phase_after_scalar` with undocumented asymmetric
+sequence-handling semantics) and two Lows (dead `let _ = col;`
+bindings; pre-existing CLAUDE.md drift flagged for future
+cleanup) were in the same rejection. Resubmission fixed all
+four: the byte loop in `find_value_indicator_offset` now tracks
+`prev_was_space` and returns `None` at an unquoted `#` preceded
+by whitespace; `advance_mapping_to_*` both gained doc comments
+stating the call-site invariant and `debug_assert!`s enforcing
+it; the dead `col` bindings became `_`. Two new tests added to
+Group G (`hash_after_space_in_key_terminates_at_comment`,
+`hash_immediately_after_word_is_part_of_plain_scalar`) lock in
+the disambiguation. Verified against an additional 9-case
+probe including tab-prefix, quoted-`#`, and `foo: # comment`
+variants. All 211 smoke tests pass; committed in `9f4ecb0`.
 
 ### Task 13: Nested block collections
 
