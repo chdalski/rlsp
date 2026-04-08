@@ -231,7 +231,7 @@ user has explicitly approved this scope.
 - [x] Implement folded block scalars (Task 10) — `f107749`
 - [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
 - [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
-- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18)
+- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
@@ -865,15 +865,17 @@ All 295 smoke tests pass; committed in `82ad832`.
 
 ### Task 16: Anchors and aliases
 
-- [ ] Anchor token: `&name` before any node
-- [ ] Alias token: `*name` as a node reference
-- [ ] Emit `Alias { name }` for alias nodes
-- [ ] Attach `anchor` field to MappingStart/SequenceStart/
+**Status:** Completed in commit `88210c3`.
+
+- [x] Anchor token: `&name` before any node
+- [x] Alias token: `*name` as a node reference
+- [x] Emit `Alias { name }` for alias nodes
+- [x] Attach `anchor` field to MappingStart/SequenceStart/
   Scalar events that have an anchor
-- [ ] Anchor names borrow from input as `&'input str`
-- [ ] Conformance tests for anchors/aliases must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): anchors and aliases`
+- [x] Anchor names borrow from input as `&'input str`
+- [x] Conformance tests for anchors/aliases must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): anchors and aliases`
 
 **Reference impl consultation:**
 1. Local: `flow.rs` and `block.rs` anchor/alias handling
