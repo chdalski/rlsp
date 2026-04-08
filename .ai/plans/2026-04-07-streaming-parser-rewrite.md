@@ -230,7 +230,7 @@ user has explicitly approved this scope.
 - [x] Enable `clippy::panic` and clean up panic sites (Task 9) — `cb55273`
 - [x] Implement folded block scalars (Task 10) — `f107749`
 - [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
-- [ ] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`
+- [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
 - [ ] Implement anchors, tags, aliases, comments (Tasks 16-18)
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
@@ -845,14 +845,16 @@ All 295 smoke tests pass; committed in `82ad832`.
 
 ### Task 15: Nested flow and block-flow mixing
 
-- [ ] Flow collections nested inside flow collections
-- [ ] Flow collections nested inside block collections
+**Status:** Completed in commit `a87ed9f`.
+
+- [x] Flow collections nested inside flow collections
+- [x] Flow collections nested inside block collections
   (block context contains flow nodes as values)
-- [ ] Block collections cannot appear inside flow context
+- [x] Block collections cannot appear inside flow context
   (per spec)
-- [ ] Conformance tests for mixed/nested flow must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): nested and mixed flow/block`
+- [x] Conformance tests for mixed/nested flow must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): nested and mixed flow/block`
 
 **Reference impl consultation:**
 1. Local: `flow.rs` and `block.rs` — how they call into
