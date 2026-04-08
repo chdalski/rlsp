@@ -228,7 +228,7 @@ user has explicitly approved this scope.
 - [x] Implement empty stream and document boundaries (Tasks 4-5) — Task 4 `6d1d315`, Task 5 `494286e`
 - [x] Implement plain, quoted, and literal block scalars (Tasks 6-8) — Task 6 `e624786`, Task 7 `c06c0b2`, Task 8 `ddc3038`
 - [x] Enable `clippy::panic` and clean up panic sites (Task 9) — `cb55273`
-- [ ] Implement folded block scalars (Task 10)
+- [x] Implement folded block scalars (Task 10) — `f107749`
 - [ ] Implement block collections (Tasks 11-13)
 - [ ] Implement flow collections (Tasks 14-15)
 - [ ] Implement anchors, tags, aliases, comments (Tasks 16-18)
@@ -586,16 +586,18 @@ cannot be triggered by user input).
 
 ### Task 10: Folded block scalars
 
-- [ ] Folded block scalar header: `>` with chomp/indent
+**Status:** Completed in commit `f107749`.
+
+- [x] Folded block scalar header: `>` with chomp/indent
   modifiers (same as literal)
-- [ ] Same auto-detect and collection as literal, but
+- [x] Same auto-detect and collection as literal, but
   apply line folding (single newlines become spaces,
   blank lines become newlines, more-indented lines stay
   literal)
-- [ ] Emit `Scalar { style: Folded(chomp), ... }`
-- [ ] Conformance tests for folded scalars must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): folded block scalars`
+- [x] Emit `Scalar { style: Folded(chomp), ... }`
+- [x] Conformance tests for folded scalars must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): folded block scalars`
 
 **Reference impl consultation:**
 1. Local: `block.rs` `c_l_folded()`, `s_l_block_folded()`,
