@@ -13,7 +13,6 @@
 //!
 //! Future tasks will add:
 //! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 18)
-//! - `Alias { name: Cow<'input, str> }` (Task 15+)
 
 use std::borrow::Cow;
 
@@ -77,6 +76,17 @@ pub enum Event<'input> {
     /// zero-width span at the position immediately after the last byte of
     /// input.
     StreamEnd,
+    /// An alias node (`*name`) that references a previously anchored node.
+    ///
+    /// The associated span covers the entire `*name` token (from `*` through
+    /// the last character of the name).  Resolution of the alias to its
+    /// anchored node is the loader's responsibility (Task 20) — the parser
+    /// emits this event without expansion.
+    Alias {
+        /// The anchor name being referenced (e.g. `"foo"` for `*foo`).
+        /// Borrowed directly from input — no allocation.
+        name: &'input str,
+    },
     /// A document has started.
     ///
     /// `explicit` is `true` when the document was introduced with `---`.

@@ -55,6 +55,20 @@ pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span
 /// overhead stays within a few KB.
 pub const MAX_COLLECTION_DEPTH: usize = 512;
 
+/// Maximum byte length of an anchor name accepted from untrusted input.
+///
+/// Maximum byte length of an anchor or alias name.
+///
+/// The YAML spec places no upper limit on anchor names, but scanning a name
+/// consisting of millions of valid `ns-anchor-char` bytes would exhaust CPU
+/// time without any heap allocation.  This limit caps anchor and alias name
+/// scanning at 1 KiB — generous for all real-world YAML (Kubernetes names are
+/// typically under 64 bytes) while preventing degenerate-input stalls.
+///
+/// The limit is enforced by [`parse_events`] for both `&name` (anchors) and
+/// `*name` (aliases).  Exceeding it returns an [`Error`], not a panic.
+pub const MAX_ANCHOR_NAME_BYTES: usize = 1024;
+
 // ---------------------------------------------------------------------------
 // Iterator implementation
 // ---------------------------------------------------------------------------
@@ -145,6 +159,24 @@ struct EventIter<'input> {
     /// error loops (e.g. depth-limit firing on the same prepended synthetic
     /// line).
     failed: bool,
+    /// A pending anchor name (`&name`) that has been scanned but not yet
+    /// attached to a node event.
+    ///
+    /// Anchors in YAML precede the node they annotate.  After scanning
+    /// `&name`, the parser stores the name here and attaches it to the next
+    /// `Scalar`, `SequenceStart`, or `MappingStart` event.
+    ///
+    /// `pending_anchor_for_collection` distinguishes two cases:
+    /// - `true`: anchor was on its own line (`&name\n- item`) — the anchor
+    ///   annotates the next node regardless of type (collection or scalar).
+    /// - `false`: anchor was inline with key content
+    ///   (`&name key: value`) — the anchor annotates the key scalar, not
+    ///   the enclosing mapping.
+    pending_anchor: Option<&'input str>,
+    /// True when `pending_anchor` was set from a standalone anchor line (no
+    /// inline content after the name).  False when set from an inline anchor
+    /// that precedes a key or scalar on the same line.
+    pending_anchor_for_collection: bool,
 }
 
 impl<'input> EventIter<'input> {
@@ -155,6 +187,8 @@ impl<'input> EventIter<'input> {
             queue: VecDeque::new(),
             coll_stack: Vec::new(),
             failed: false,
+            pending_anchor: None,
+            pending_anchor_for_collection: false,
         }
     }
 
@@ -204,7 +238,17 @@ impl<'input> EventIter<'input> {
                 CollectionEntry::Sequence(_) => Event::SequenceEnd,
                 CollectionEntry::Mapping(_, MappingPhase::Value) => {
                     // Mapping closed while waiting for a value — emit empty value.
-                    self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+                    // Consume any pending anchor so `&anchor\n` at end of doc
+                    // is properly attached to the empty value.
+                    self.queue.push_back((
+                        Event::Scalar {
+                            value: std::borrow::Cow::Borrowed(""),
+                            style: ScalarStyle::Plain,
+                            anchor: self.pending_anchor.take(),
+                            tag: None,
+                        },
+                        zero_span(pos),
+                    ));
                     Event::MappingEnd
                 }
                 CollectionEntry::Mapping(_, MappingPhase::Key) => Event::MappingEnd,
@@ -306,6 +350,8 @@ impl<'input> EventIter<'input> {
     ///
     /// `block_parent_indent` — the indent of the enclosing block context;
     /// block scalars collect content that is more indented than this value.
+    ///
+    /// Consumes `self.pending_anchor` and attaches it to the emitted scalar.
     fn try_consume_scalar(
         &mut self,
         plain_parent_indent: usize,
@@ -320,7 +366,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Literal(chomp),
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 span,
@@ -335,7 +381,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Folded(chomp),
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 span,
@@ -346,7 +392,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::SingleQuoted,
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 span,
@@ -357,7 +403,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::DoubleQuoted,
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 span,
@@ -368,7 +414,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Plain,
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 span,
@@ -735,6 +781,42 @@ fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
     None
 }
 
+/// Scan an anchor name from `content`, returning the name slice.
+///
+/// `content` must begin immediately after the `&` or `*` indicator — the first
+/// character is the first character of the name.  The name continues until
+/// a character that is not `ns-anchor-char` (i.e., whitespace, flow indicator,
+/// or end of content).
+///
+/// Returns `Ok(name)` where `name` is a non-empty borrowed slice of `content`.
+/// Returns `Err` if:
+/// - The name would be empty (first character is not `ns-anchor-char`).
+/// - The name exceeds [`MAX_ANCHOR_NAME_BYTES`] bytes.
+///
+/// The caller is responsible for providing the correct [`Pos`] for error
+/// reporting.
+fn scan_anchor_name(content: &str, indicator_pos: Pos) -> Result<&str, Error> {
+    use crate::chars::is_ns_anchor_char;
+    let end = content
+        .char_indices()
+        .take_while(|&(_, ch)| is_ns_anchor_char(ch))
+        .last()
+        .map_or(0, |(i, ch)| i + ch.len_utf8());
+    if end == 0 {
+        return Err(Error {
+            pos: indicator_pos,
+            message: "anchor name must not be empty".into(),
+        });
+    }
+    if end > MAX_ANCHOR_NAME_BYTES {
+        return Err(Error {
+            pos: indicator_pos,
+            message: format!("anchor name exceeds maximum length of {MAX_ANCHOR_NAME_BYTES} bytes"),
+        });
+    }
+    Ok(&content[..end])
+}
+
 /// Build an empty plain scalar event.
 const fn empty_scalar_event<'input>() -> Event<'input> {
     Event::Scalar {
@@ -801,6 +883,7 @@ impl<'input> EventIter<'input> {
     }
 
     /// Handle one iteration step in the `InDocument` state.
+    #[allow(clippy::too_many_lines)]
     fn step_in_document(&mut self) -> StepResult<'input> {
         self.lexer.skip_empty_lines();
 
@@ -840,6 +923,149 @@ impl<'input> EventIter<'input> {
                 marker_span(marker_pos),
             ));
             return StepResult::Continue;
+        }
+
+        // ---- Alias node: `*name` is a complete node ----
+
+        if let Some(peek) = self.lexer.peek_next_line() {
+            let content: &'input str = peek.content;
+            let line_pos = peek.pos;
+            let line_break_type = peek.break_type;
+            let line_char_offset = line_pos.char_offset;
+            let trimmed = content.trim_start_matches(' ');
+            if let Some(after_star) = trimmed.strip_prefix('*') {
+                let leading = content.len() - trimmed.len();
+                let star_pos = Pos {
+                    byte_offset: line_pos.byte_offset + leading,
+                    char_offset: line_char_offset + leading,
+                    line: line_pos.line,
+                    column: line_pos.column + leading,
+                };
+                match scan_anchor_name(after_star, star_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok(name) => {
+                        let name_char_count = name.chars().count();
+                        // Build alias span: from `*` through end of name.
+                        let alias_end = Pos {
+                            byte_offset: star_pos.byte_offset + 1 + name.len(),
+                            char_offset: star_pos.char_offset + 1 + name_char_count,
+                            line: star_pos.line,
+                            column: star_pos.column + 1 + name_char_count,
+                        };
+                        let alias_span = Span {
+                            start: star_pos,
+                            end: alias_end,
+                        };
+                        // Compute remaining content after the alias name, before
+                        // consuming the line (which would invalidate the borrow).
+                        let after_name = &after_star[name.len()..];
+                        let remaining: &'input str = after_name.trim_start_matches([' ', '\t']);
+                        let spaces = after_name.len() - remaining.len();
+                        let had_remaining = !remaining.is_empty();
+                        let rem_byte_offset = star_pos.byte_offset + 1 + name.len() + spaces;
+                        let rem_char_offset = line_char_offset + leading + 1 + name.len() + spaces;
+                        let rem_col = star_pos.column + 1 + name_char_count + spaces;
+                        self.lexer.consume_line();
+                        if had_remaining {
+                            let rem_pos = Pos {
+                                byte_offset: rem_byte_offset,
+                                char_offset: rem_char_offset,
+                                line: star_pos.line,
+                                column: rem_col,
+                            };
+                            let synthetic = crate::lines::Line {
+                                content: remaining,
+                                offset: rem_byte_offset,
+                                indent: rem_col,
+                                break_type: line_break_type,
+                                pos: rem_pos,
+                            };
+                            self.lexer.prepend_inline_line(synthetic);
+                        }
+                        self.tick_mapping_phase_after_scalar();
+                        return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
+                    }
+                }
+            }
+        }
+
+        // ---- Anchor: `&name` — attach to the next node ----
+
+        if let Some(peek) = self.lexer.peek_next_line() {
+            let content: &'input str = peek.content;
+            let line_pos = peek.pos;
+            let line_break_type = peek.break_type;
+            let trimmed = content.trim_start_matches(' ');
+            if let Some(after_amp) = trimmed.strip_prefix('&') {
+                // We only look for `&` at the start of the trimmed line.
+                // Tags (`!`) before `&` are handled in Task 17.
+                //
+                // IMPORTANT for Task 17: when implementing tag-skip, the skip
+                // logic must consume the *full* tag token (all `ns-anchor-char`
+                // bytes after `!`), not just the `!` character alone.  The `!`
+                // character is itself a valid `ns-anchor-char`, so skipping
+                // only `!` and then re-entering anchor detection would silently
+                // include the tag body in the anchor name.  Example: `!tag &a`
+                // — skip must advance past `tag` before looking for `&a`.
+                let leading = content.len() - trimmed.len();
+                let amp_pos = Pos {
+                    byte_offset: line_pos.byte_offset + leading,
+                    char_offset: line_pos.char_offset + leading,
+                    line: line_pos.line,
+                    column: line_pos.column + leading,
+                };
+                match scan_anchor_name(after_amp, amp_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok(name) => {
+                        // Determine what follows the anchor name on this line,
+                        // before consuming the line (borrow ends here).
+                        let after_name = &after_amp[name.len()..];
+                        let inline: &'input str = after_name.trim_start_matches([' ', '\t']);
+                        let spaces = after_name.len() - inline.len();
+                        let had_inline = !inline.is_empty();
+                        let inline_offset =
+                            line_pos.byte_offset + leading + 1 + name.len() + spaces;
+                        let inline_char_offset =
+                            line_pos.char_offset + leading + 1 + name.len() + spaces;
+                        let inline_col = line_pos.column + leading + 1 + name.len() + spaces;
+                        // Duplicate anchors allowed — overwrite.
+                        self.pending_anchor = Some(name);
+                        self.lexer.consume_line();
+                        if had_inline {
+                            // Inline content after anchor — anchor applies to the
+                            // inline node (scalar or key), not to any enclosing
+                            // collection opened on this same line.
+                            self.pending_anchor_for_collection = false;
+                            let inline_pos = Pos {
+                                byte_offset: inline_offset,
+                                char_offset: inline_char_offset,
+                                line: line_pos.line,
+                                column: inline_col,
+                            };
+                            let synthetic = crate::lines::Line {
+                                content: inline,
+                                offset: inline_offset,
+                                indent: inline_col,
+                                break_type: line_break_type,
+                                pos: inline_pos,
+                            };
+                            self.lexer.prepend_inline_line(synthetic);
+                        } else {
+                            // Standalone anchor line — anchor applies to whatever
+                            // node comes next (collection or scalar).
+                            self.pending_anchor_for_collection = true;
+                        }
+                        // Let the next iteration handle whatever follows.
+                        return StepResult::Continue;
+                    }
+                }
+            }
         }
 
         // ---- Flow collection detection: `[` or `{` starts a flow collection ----
@@ -935,7 +1161,7 @@ impl<'input> EventIter<'input> {
             self.coll_stack.push(CollectionEntry::Sequence(dash_indent));
             self.queue.push_back((
                 Event::SequenceStart {
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                     style: CollectionStyle::Block,
                 },
@@ -952,14 +1178,22 @@ impl<'input> EventIter<'input> {
             let next_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
             if next_indent <= dash_indent {
                 let item_pos = self.lexer.current_pos();
-                self.queue
-                    .push_back((empty_scalar_event(), zero_span(item_pos)));
+                self.queue.push_back((
+                    Event::Scalar {
+                        value: std::borrow::Cow::Borrowed(""),
+                        style: ScalarStyle::Plain,
+                        anchor: self.pending_anchor.take(),
+                        tag: None,
+                    },
+                    zero_span(item_pos),
+                ));
             }
         }
         StepResult::Continue
     }
 
     /// Handle a block-mapping key entry.
+    #[allow(clippy::too_many_lines)]
     fn handle_mapping_entry(&mut self, key_indent: usize, key_pos: Pos) -> StepResult<'input> {
         let cur_pos = self.lexer.current_pos();
         self.close_collections_at_or_above(key_indent.saturating_add(1), cur_pos);
@@ -1011,9 +1245,17 @@ impl<'input> EventIter<'input> {
             }
             self.coll_stack
                 .push(CollectionEntry::Mapping(key_indent, MappingPhase::Key));
+            // Consume pending anchor for the mapping only when the anchor was
+            // on its own line (standalone). Inline anchors (e.g. `&a key: v`)
+            // annotate the key scalar and must not be consumed here.
+            let mapping_anchor = if self.pending_anchor_for_collection {
+                self.pending_anchor.take()
+            } else {
+                None
+            };
             self.queue.push_back((
                 Event::MappingStart {
-                    anchor: None,
+                    anchor: mapping_anchor,
                     tag: None,
                     style: CollectionStyle::Block,
                 },
@@ -1034,7 +1276,15 @@ impl<'input> EventIter<'input> {
             matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value) if *col == key_indent)
         }) {
             let pos = self.lexer.current_pos();
-            self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+            self.queue.push_back((
+                Event::Scalar {
+                    value: std::borrow::Cow::Borrowed(""),
+                    style: ScalarStyle::Plain,
+                    anchor: self.pending_anchor.take(),
+                    tag: None,
+                },
+                zero_span(pos),
+            ));
             self.advance_mapping_to_key();
             return StepResult::Continue;
         }
@@ -1045,7 +1295,15 @@ impl<'input> EventIter<'input> {
             ConsumedMapping::ExplicitKey { had_key_inline } => {
                 if !had_key_inline {
                     let pos = self.lexer.current_pos();
-                    self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+                    self.queue.push_back((
+                        Event::Scalar {
+                            value: std::borrow::Cow::Borrowed(""),
+                            style: ScalarStyle::Plain,
+                            anchor: self.pending_anchor.take(),
+                            tag: None,
+                        },
+                        zero_span(pos),
+                    ));
                     self.advance_mapping_to_value();
                 }
             }
@@ -1057,7 +1315,7 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(key_value),
                         style: ScalarStyle::Plain,
-                        anchor: None,
+                        anchor: self.pending_anchor.take(),
                         tag: None,
                     },
                     key_span,
@@ -1136,7 +1394,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: None,
+                    anchor: self.pending_anchor.take(),
                     tag: None,
                 },
                 zero_span(pos),
@@ -1243,6 +1501,11 @@ impl<'input> EventIter<'input> {
         let mut events: Vec<(Event<'input>, Span)> = Vec::new();
         // Current byte offset within `cur_content`.
         let mut pos_in_line: usize = leading;
+        // Pending anchor for the next node in this flow collection.
+        // Seeded from any block-context anchor that was pending when this flow
+        // collection was entered (e.g. `&seq [a, b]` sets pending_anchor before
+        // the `[` is dispatched to handle_flow_collection).
+        let mut pending_flow_anchor: Option<&'input str> = self.pending_anchor.take();
 
         // Re-sync `cur_content` / `cur_base_pos` from the buffer.
         // Returns false when the buffer is empty (EOF mid-flow).
@@ -1336,7 +1599,7 @@ impl<'input> EventIter<'input> {
                     flow_stack.push(FlowFrame::Sequence { has_value: false });
                     events.push((
                         Event::SequenceStart {
-                            anchor: None,
+                            anchor: pending_flow_anchor.take(),
                             tag: None,
                             style: CollectionStyle::Flow,
                         },
@@ -1349,7 +1612,7 @@ impl<'input> EventIter<'input> {
                     });
                     events.push((
                         Event::MappingStart {
-                            anchor: None,
+                            anchor: pending_flow_anchor.take(),
                             tag: None,
                             style: CollectionStyle::Flow,
                         },
@@ -1601,7 +1864,7 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value,
                         style,
-                        anchor: None,
+                        anchor: pending_flow_anchor.take(),
                         tag: None,
                     },
                     span,
@@ -1690,6 +1953,77 @@ impl<'input> EventIter<'input> {
             }
 
             // ----------------------------------------------------------------
+            // Anchor `&name` in flow context
+            // ----------------------------------------------------------------
+            if ch == '&' {
+                let after_amp = &cur_content[pos_in_line + 1..];
+                let amp_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                match scan_anchor_name(after_amp, amp_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok(name) => {
+                        // Duplicate anchors allowed — overwrite.
+                        pending_flow_anchor = Some(name);
+                        pos_in_line += 1 + name.len();
+                        // Skip any whitespace after the anchor name.
+                        while pos_in_line < cur_content.len() {
+                            match cur_content[pos_in_line..].chars().next() {
+                                Some(c) if c == ' ' || c == '\t' => pos_in_line += 1,
+                                _ => break,
+                            }
+                        }
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // Alias `*name` in flow context
+            // ----------------------------------------------------------------
+            if ch == '*' {
+                let after_star = &cur_content[pos_in_line + 1..];
+                let star_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                match scan_anchor_name(after_star, star_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok(name) => {
+                        let alias_end = Pos {
+                            byte_offset: star_pos.byte_offset + 1 + name.len(),
+                            char_offset: star_pos.char_offset + 1 + name.chars().count(),
+                            line: star_pos.line,
+                            column: star_pos.column + 1 + name.chars().count(),
+                        };
+                        let alias_span = Span {
+                            start: star_pos,
+                            end: alias_end,
+                        };
+                        events.push((Event::Alias { name }, alias_span));
+                        pos_in_line += 1 + name.len();
+                        // Advance mapping phase; mark frame as having a value.
+                        if let Some(frame) = flow_stack.last_mut() {
+                            match frame {
+                                FlowFrame::Sequence { has_value } => {
+                                    *has_value = true;
+                                }
+                                FlowFrame::Mapping { phase, has_value } => {
+                                    *has_value = true;
+                                    *phase = match *phase {
+                                        FlowMappingPhase::Key => FlowMappingPhase::Value,
+                                        FlowMappingPhase::Value => FlowMappingPhase::Key,
+                                    };
+                                }
+                            }
+                        }
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
             // Plain scalar in flow context
             // ----------------------------------------------------------------
             {
@@ -1738,7 +2072,7 @@ impl<'input> EventIter<'input> {
                             Event::Scalar {
                                 value: Cow::Borrowed(scanned),
                                 style: ScalarStyle::Plain,
-                                anchor: None,
+                                anchor: pending_flow_anchor.take(),
                                 tag: None,
                             },
                             scalar_span,
@@ -1764,12 +2098,11 @@ impl<'input> EventIter<'input> {
                     }
                 }
 
-                // Reserved indicators — tasks 16/17/19 will handle anchors,
-                // aliases, tags, and directives. Silently skipping them would
-                // mangle YAML structure (e.g. `[&x]` would emit the anchor
-                // name as a plain scalar instead of an error), so we error
-                // early here.
-                if matches!(ch, '&' | '*' | '!' | '%' | '@' | '`') {
+                // Reserved indicators — tasks 17/19 will handle tags and
+                // directives. `&` and `*` (anchors/aliases) are handled above
+                // in Task 16. Silently skipping remaining reserved indicators
+                // would mangle YAML structure, so we error early here.
+                if matches!(ch, '!' | '%' | '@' | '`') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.failed = true;
                     return StepResult::Yield(Err(Error {
