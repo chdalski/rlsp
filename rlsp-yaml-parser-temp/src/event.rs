@@ -12,7 +12,7 @@
 //! # Planned variants
 //!
 //! Future tasks will add:
-//! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 18)
+//! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 19)
 
 use std::borrow::Cow;
 
@@ -76,6 +76,19 @@ pub enum Event<'input> {
     /// zero-width span at the position immediately after the last byte of
     /// input.
     StreamEnd,
+    /// A YAML comment (YAML 1.2 §6.6).
+    ///
+    /// `text` is the comment body — the content of the line after the `#`
+    /// character, with the `#` itself excluded.  Leading whitespace after `#`
+    /// is preserved (e.g. `# hello` → text `" hello"`; `#nospace` → text
+    /// `"nospace"`).  The associated span covers from the `#` character
+    /// through the last byte of comment text (the newline is not included).
+    ///
+    /// One `Comment` event is emitted per physical line.
+    Comment {
+        /// Comment body (everything after the `#`, excluding the newline).
+        text: &'input str,
+    },
     /// An alias node (`*name`) that references a previously anchored node.
     ///
     /// The associated span covers the entire `*name` token (from `*` through

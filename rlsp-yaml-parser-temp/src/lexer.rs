@@ -32,6 +32,13 @@ pub struct Lexer<'input> {
     /// when the marker line has trailing content; drained by
     /// [`Self::try_consume_plain_scalar`] on the next call.
     inline_scalar: Option<(Cow<'input, str>, Span)>,
+    /// Trailing comment found on the same line as a plain scalar.
+    ///
+    /// Populated by [`Self::try_consume_plain_scalar`] and by the mapping/
+    /// sequence entry consumers when a `# comment` follows the scalar content
+    /// on the same line.  Drained by the state machine after emitting the
+    /// scalar event.
+    pub trailing_comment: Option<(&'input str, Span)>,
 }
 
 impl<'input> Lexer<'input> {
@@ -42,16 +49,16 @@ impl<'input> Lexer<'input> {
             buf: LineBuffer::new(input),
             current_pos: Pos::ORIGIN,
             inline_scalar: None,
+            trailing_comment: None,
         }
     }
 
-    /// Skip blank and comment-only lines, returning the position after the
-    /// last consumed line (i.e. the position at the start of the first
-    /// non-blank/non-comment line, or the end of input if all remaining lines
-    /// are blank/comments).
+    /// Skip blank lines (empty or whitespace-only), stopping at comment lines.
     ///
-    /// A line is blank-or-comment if its content is empty, whitespace-only,
-    /// or begins (after optional leading whitespace) with `#`.
+    /// Returns the position after the last consumed line.
+    ///
+    /// Unlike the previous behaviour, this does **not** consume comment lines —
+    /// they are yielded as `Event::Comment` by the state machine.
     ///
     /// Use this inside a document body (`InDocument`), where `%`-prefixed lines
     /// are regular content, not directives.
@@ -60,7 +67,7 @@ impl<'input> Lexer<'input> {
             let skip = self
                 .buf
                 .peek_next()
-                .is_some_and(|line| is_blank_or_comment(line));
+                .is_some_and(|line| is_blank_not_comment(line));
             if skip {
                 if let Some(line) = self.buf.consume_next() {
                     self.current_pos = pos_after_line(&line);
@@ -71,12 +78,16 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    /// Skip blank, comment-only, and directive (`%`-prefixed) lines, returning
-    /// the position after the last consumed line.
+    /// Skip blank, comment-only, and directive (`%`-prefixed) lines, stopping
+    /// only at lines that are none of the above.
+    ///
+    /// Unlike [`Self::skip_empty_lines`], this variant **does** consume comment
+    /// lines (between documents comments are collected by the caller via
+    /// [`Self::try_consume_comment`] in a separate pass).
     ///
     /// Use this between documents (`BetweenDocs`), where `%YAML` / `%TAG` /
     /// unknown directives are stream-level metadata.  Full directive parsing is
-    /// deferred to Task 18.
+    /// deferred to Task 19.
     pub fn skip_directives_and_blank_lines(&mut self) -> Pos {
         loop {
             let skip = self
@@ -91,6 +102,90 @@ impl<'input> Lexer<'input> {
                 return self.current_pos;
             }
         }
+    }
+
+    /// Try to consume the next line as a comment.
+    ///
+    /// Returns `Some((text, span))` if the next line is a comment (starts with
+    /// `#` after optional leading whitespace), or `None` if the next line is
+    /// blank, a directive, or content.
+    ///
+    /// `text` is the comment body: the slice after the `#`, excluding the
+    /// newline.  Leading whitespace after `#` is preserved.
+    ///
+    /// Returns `Err` when the comment body exceeds `max_comment_len` bytes.
+    pub fn try_consume_comment(
+        &mut self,
+        max_comment_len: usize,
+    ) -> Result<Option<(&'input str, Span)>, crate::error::Error> {
+        let Some(line) = self.buf.peek_next() else {
+            return Ok(None);
+        };
+
+        let trimmed = line.content.trim_start_matches([' ', '\t']);
+        if !trimmed.starts_with('#') {
+            return Ok(None);
+        }
+
+        // The `#` is the first non-whitespace character.
+        // Compute byte offset of `#` within line.content using char_indices —
+        // security: byte-index from char_indices, never character-count arithmetic.
+        let hash_byte_offset = line
+            .content
+            .char_indices()
+            .find(|&(_, ch)| ch == '#')
+            .map_or(0, |(i, _)| i);
+
+        let hash_pos = Pos {
+            byte_offset: line.pos.byte_offset + hash_byte_offset,
+            char_offset: line.pos.char_offset + hash_byte_offset,
+            line: line.pos.line,
+            column: line.pos.column + hash_byte_offset,
+        };
+
+        // Comment text: everything after the `#`.
+        // text_start is always ≤ line.content.len(): hash_byte_offset is from
+        // char_indices() (so < len) and `#` is 1 byte, giving text_start ≤ len.
+        // The slice is always on a char boundary because `#` is ASCII.
+        let text_start = hash_byte_offset + 1; // byte after `#`
+        let text: &'input str = &line.content[text_start..];
+
+        if text.len() > max_comment_len {
+            return Err(crate::error::Error {
+                pos: hash_pos,
+                message: format!(
+                    "comment exceeds maximum allowed length ({max_comment_len} bytes)"
+                ),
+            });
+        }
+
+        // Span: from `#` through end of text (not the newline).
+        let mut span_end = hash_pos.advance('#');
+        for ch in text.chars() {
+            span_end = span_end.advance(ch);
+        }
+        let span = Span {
+            start: hash_pos,
+            end: span_end,
+        };
+
+        // SAFETY: peek succeeded above; LineBuffer invariant.
+        let Some(consumed) = self.buf.consume_next() else {
+            unreachable!("try_consume_comment: peek returned Some but consume returned None")
+        };
+        self.current_pos = pos_after_line(&consumed);
+
+        Ok(Some((text, span)))
+    }
+
+    /// True when the next line is a comment (starts with `#` after optional
+    /// leading whitespace).
+    #[must_use]
+    pub fn is_comment_line(&self) -> bool {
+        self.buf.peek_next().is_some_and(|line| {
+            let trimmed = line.content.trim_start_matches([' ', '\t']);
+            trimmed.starts_with('#')
+        })
     }
 
     /// True if the currently-primed next line is a `---` (directives-end)
@@ -168,26 +263,43 @@ impl<'input> Lexer<'input> {
                 line: marker_pos.line,
                 column: marker_pos.column + prefix_len,
             };
-            // TODO(architecture): scan_plain_line_block only tokenizes plain scalars.
-            // Inline content after `---` that starts with `'` or `"` (Task 7) is
-            // currently emitted as a Plain scalar with the quotes as literal chars.
-            // Same gap exists for `|` and `>` (Tasks 8/9) and flow collections
-            // (Task 13). Fix candidate: restructure to dispatch via the normal
-            // scalar try-chain instead of pre-extracting. Deferred because it
-            // requires re-running the security review for escape handling.
-            let scanned = scan_plain_line_block(inline);
-            if !scanned.is_empty() {
-                let mut inline_end = inline_start;
-                for ch in scanned.chars() {
-                    inline_end = inline_end.advance(ch);
+
+            // If the inline content is a comment (`# ...`), store it as a
+            // trailing comment on the marker line rather than as a scalar.
+            if let Some(comment_text) = inline.strip_prefix('#') {
+                let mut comment_end = inline_start.advance('#');
+                for ch in comment_text.chars() {
+                    comment_end = comment_end.advance(ch);
                 }
-                self.inline_scalar = Some((
-                    Cow::Borrowed(scanned),
+                self.trailing_comment = Some((
+                    comment_text,
                     Span {
                         start: inline_start,
-                        end: inline_end,
+                        end: comment_end,
                     },
                 ));
+            } else {
+                // TODO(architecture): scan_plain_line_block only tokenizes plain scalars.
+                // Inline content after `---` that starts with `'` or `"` (Task 7) is
+                // currently emitted as a Plain scalar with the quotes as literal chars.
+                // Same gap exists for `|` and `>` (Tasks 8/9) and flow collections
+                // (Task 13). Fix candidate: restructure to dispatch via the normal
+                // scalar try-chain instead of pre-extracting. Deferred because it
+                // requires re-running the security review for escape handling.
+                let scanned = scan_plain_line_block(inline);
+                if !scanned.is_empty() {
+                    let mut inline_end = inline_start;
+                    for ch in scanned.chars() {
+                        inline_end = inline_end.advance(ch);
+                    }
+                    self.inline_scalar = Some((
+                        Cow::Borrowed(scanned),
+                        Span {
+                            start: inline_start,
+                            end: inline_end,
+                        },
+                    ));
+                }
             }
         }
 
@@ -297,6 +409,38 @@ impl<'input> Lexer<'input> {
         else {
             unreachable!("scalar slice out of bounds")
         };
+
+        // Detect trailing comment on the same line as the scalar.
+        // `scan_plain_line_block` already stopped at `# ` (whitespace-preceded
+        // `#`), so the content after `leading_spaces + first_value_len` is
+        // either empty, whitespace-only, or `  # comment`.
+        // We use char_indices on the suffix — security: byte offsets only.
+        let after_scalar_start = leading_spaces + first_value_len;
+        if let Some(suffix) = consumed_first.content.get(after_scalar_start..) {
+            if let Some(comment_text) = extract_trailing_comment(suffix) {
+                // Compute the byte offset of `#` within the line.
+                // It is `after_scalar_start + (suffix.len() - comment_text.len() - 1)`
+                // where -1 accounts for the `#` itself.
+                let hash_byte_in_line = after_scalar_start + suffix.len() - comment_text.len() - 1;
+                let hash_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + hash_byte_in_line,
+                    char_offset: consumed_first.pos.char_offset + hash_byte_in_line,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + hash_byte_in_line,
+                };
+                let mut span_end = hash_pos.advance('#');
+                for ch in comment_text.chars() {
+                    span_end = span_end.advance(ch);
+                }
+                self.trailing_comment = Some((
+                    comment_text,
+                    Span {
+                        start: hash_pos,
+                        end: span_end,
+                    },
+                ));
+            }
+        }
 
         let extra = self.collect_plain_continuations(first_value_ref, parent_indent);
 
@@ -1423,10 +1567,46 @@ const fn is_s_white(ch: char) -> bool {
 // Private helpers
 // ---------------------------------------------------------------------------
 
+/// True when `line` is blank (empty or whitespace-only) but NOT a comment.
+///
+/// Used by [`Lexer::skip_empty_lines`] which stops at comment lines so the
+/// state machine can emit `Event::Comment` for them.
+fn is_blank_not_comment(line: &Line<'_>) -> bool {
+    line.content.trim_start_matches([' ', '\t']).is_empty()
+}
+
+/// Extract a trailing comment from the content that follows a scalar value.
+///
+/// `suffix` is the slice of the line after the scalar ends (may be empty,
+/// whitespace-only, or `"  # comment"`).
+///
+/// Returns the comment body (everything after the `#`) if a comment is
+/// present (i.e. `#` is preceded by at least one whitespace), or `None`
+/// if there is no comment in this suffix.
+///
+/// Safety: uses `char_indices` for byte offsets — never character-count
+/// arithmetic — to guarantee char-boundary slicing.
+pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
+    let mut prev_was_ws = true; // position before suffix content = boundary
+    for (i, ch) in suffix.char_indices() {
+        if ch == '#' && prev_was_ws {
+            // `#` preceded by whitespace (or at the very start): comment start.
+            // Return everything after `#`.
+            // SAFETY: i + 1 is a valid char boundary because `#` is ASCII (1 byte).
+            return Some(&suffix[i + 1..]);
+        }
+        prev_was_ws = matches!(ch, ' ' | '\t');
+    }
+    None
+}
+
 /// True when `line` is blank (empty or whitespace-only) or comment-only.
 ///
 /// Does **not** treat `%`-prefixed lines as skippable — inside a document body
 /// a `%`-prefixed line is regular content (e.g. `%complete: 50`).
+///
+/// Used by [`Lexer::has_content`] which must return `false` for both blank
+/// and comment-only lines.
 fn is_blank_or_comment(line: &Line<'_>) -> bool {
     let trimmed = line.content.trim_start_matches([' ', '\t']);
     trimmed.is_empty() || trimmed.starts_with('#')
@@ -1954,10 +2134,13 @@ mod tests {
     }
 
     #[test]
-    fn skip_empty_lines_skips_comment_lines() {
+    fn skip_empty_lines_stops_at_comment_lines() {
+        // skip_empty_lines now stops at comment lines so the state machine can
+        // emit Event::Comment for them.  A comment line is NOT consumed.
         let mut lex = make_lexer("# comment\n---");
         lex.skip_empty_lines();
-        assert!(lex.is_directives_end());
+        assert!(lex.is_comment_line(), "expected to stop at comment line");
+        assert!(!lex.is_directives_end());
     }
 
     #[test]

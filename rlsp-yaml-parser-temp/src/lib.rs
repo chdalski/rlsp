@@ -83,6 +83,18 @@ pub const MAX_ANCHOR_NAME_BYTES: usize = 1024;
 /// Exceeding it returns an [`Error`], not a panic.
 pub const MAX_TAG_LEN: usize = 4096;
 
+/// Maximum byte length of a comment body accepted from untrusted input.
+///
+/// The YAML spec places no upper limit on comment length.  With zero-copy
+/// `&'input str` slices, comment scanning itself allocates nothing, but
+/// character-by-character iteration over a very long comment line still burns
+/// CPU proportional to the line length.  This limit matches `MAX_TAG_LEN` —
+/// comment-only files produce one `Comment` event per line (O(input size),
+/// acceptable) as long as individual lines are bounded.
+///
+/// Exceeding this limit returns an [`Error`], not a panic or truncation.
+pub const MAX_COMMENT_LEN: usize = 4096;
+
 // ---------------------------------------------------------------------------
 // Iterator implementation
 // ---------------------------------------------------------------------------
@@ -655,6 +667,23 @@ impl<'input> EventIter<'input> {
         }
     }
 
+    /// Drain any pending trailing comment from the lexer into the event queue.
+    ///
+    /// Called after emitting a scalar event.  If a trailing comment was
+    /// detected on the scalar's line (e.g. `foo # comment`), it is pushed to
+    /// `self.queue` as `Event::Comment`.
+    ///
+    /// Trailing comments are bounded by the physical line length, which is
+    /// itself bounded by the total input size.  No separate length limit is
+    /// applied here; the security constraint (`MAX_COMMENT_LEN`) applies to
+    /// standalone comment lines (scanned in [`Self::skip_and_collect_comments_in_doc`]
+    /// and [`Self::skip_and_collect_comments_between_docs`]).
+    fn drain_trailing_comment(&mut self) {
+        if let Some((text, span)) = self.lexer.trailing_comment.take() {
+            self.queue.push_back((Event::Comment { text }, span));
+        }
+    }
+
     /// After emitting a value scalar/collection, flip the innermost mapping
     /// back to `Key` phase.
     ///
@@ -1096,9 +1125,72 @@ const fn zero_span(pos: Pos) -> Span {
 }
 
 impl<'input> EventIter<'input> {
+    /// Skip blank lines and directives (`%`-prefixed) while collecting any
+    /// comment lines encountered as `Event::Comment` items pushed to
+    /// `self.queue`.
+    ///
+    /// Used in `BetweenDocs` context, where `%`-prefixed lines are directives.
+    /// Returns `Err` if a comment body exceeds `MAX_COMMENT_LEN`.
+    fn skip_and_collect_comments_between_docs(&mut self) -> Result<(), Error> {
+        loop {
+            // Collect any comment lines first.
+            while self.lexer.is_comment_line() {
+                match self.lexer.try_consume_comment(MAX_COMMENT_LEN) {
+                    Ok(Some((text, span))) => {
+                        self.queue.push_back((Event::Comment { text }, span));
+                    }
+                    Ok(None) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+            // Then skip blank/directive lines (non-comment whitespace lines).
+            self.lexer.skip_directives_and_blank_lines();
+            // If the next line is a comment, loop again to collect it.
+            if !self.lexer.is_comment_line() {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Skip blank lines while collecting any comment lines encountered as
+    /// `Event::Comment` items pushed to `self.queue`.
+    ///
+    /// Used in `InDocument` context.
+    /// Returns `Err` if a comment body exceeds `MAX_COMMENT_LEN`.
+    fn skip_and_collect_comments_in_doc(&mut self) -> Result<(), Error> {
+        loop {
+            // Skip truly blank lines (not comments).
+            self.lexer.skip_empty_lines();
+            // Collect any comment lines.
+            if !self.lexer.is_comment_line() {
+                return Ok(());
+            }
+            while self.lexer.is_comment_line() {
+                match self.lexer.try_consume_comment(MAX_COMMENT_LEN) {
+                    Ok(Some((text, span))) => {
+                        self.queue.push_back((Event::Comment { text }, span));
+                    }
+                    Ok(None) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+            // Loop to skip any blank lines that follow the comments.
+        }
+    }
+
     /// Handle one iteration step in the `BetweenDocs` state.
     fn step_between_docs(&mut self) -> StepResult<'input> {
-        self.lexer.skip_directives_and_blank_lines();
+        match self.skip_and_collect_comments_between_docs() {
+            Ok(()) => {}
+            Err(e) => {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
+        }
+        // If comments were queued, drain them before checking document state.
+        if !self.queue.is_empty() {
+            return StepResult::Continue;
+        }
 
         if self.lexer.at_eof() {
             let end = self.lexer.current_pos();
@@ -1108,10 +1200,12 @@ impl<'input> EventIter<'input> {
         if self.lexer.is_directives_end() {
             let (marker_pos, _) = self.lexer.consume_marker_line();
             self.state = IterState::InDocument;
-            return StepResult::Yield(Ok((
+            self.queue.push_back((
                 Event::DocumentStart { explicit: true },
                 marker_span(marker_pos),
-            )));
+            ));
+            self.drain_trailing_comment();
+            return StepResult::Continue;
         }
         if self.lexer.is_document_end() {
             self.lexer.consume_marker_line();
@@ -1132,7 +1226,17 @@ impl<'input> EventIter<'input> {
     /// Handle one iteration step in the `InDocument` state.
     #[allow(clippy::too_many_lines)]
     fn step_in_document(&mut self) -> StepResult<'input> {
-        self.lexer.skip_empty_lines();
+        match self.skip_and_collect_comments_in_doc() {
+            Ok(()) => {}
+            Err(e) => {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
+        }
+        // If comments were queued, drain them before checking document state.
+        if !self.queue.is_empty() {
+            return StepResult::Continue;
+        }
 
         // ---- Document / stream boundaries ----
 
@@ -1154,6 +1258,7 @@ impl<'input> EventIter<'input> {
                 Event::DocumentEnd { explicit: true },
                 marker_span(marker_pos),
             ));
+            self.drain_trailing_comment();
             return StepResult::Continue;
         }
         if self.lexer.is_directives_end() {
@@ -1169,6 +1274,7 @@ impl<'input> EventIter<'input> {
                 Event::DocumentStart { explicit: true },
                 marker_span(marker_pos),
             ));
+            self.drain_trailing_comment();
             return StepResult::Continue;
         }
 
@@ -1438,6 +1544,8 @@ impl<'input> EventIter<'input> {
         match self.try_consume_scalar(plain_parent_indent, block_parent_indent) {
             Ok(Some(event)) => {
                 self.tick_mapping_phase_after_scalar();
+                // Drain any trailing comment detected on the scalar's line.
+                self.drain_trailing_comment();
                 return StepResult::Yield(Ok(event));
             }
             Err(e) => {
@@ -1878,6 +1986,26 @@ impl<'input> EventIter<'input> {
                 if ch == ' ' || ch == '\t' {
                     pos_in_line += 1;
                 } else if ch == '#' {
+                    // Emit a Comment event for this `# comment` to end of line.
+                    // No MAX_COMMENT_LEN check here — this comment is bounded by the
+                    // physical line length (itself bounded by total input size), the
+                    // same reason drain_trailing_comment does not apply the limit.
+                    let hash_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    // Comment text: everything after `#` (byte at pos_in_line is `#`,
+                    // ASCII 1 byte, so text starts at pos_in_line + 1).
+                    let text_start = pos_in_line + 1;
+                    // SAFETY: text_start <= cur_content.len() because we found
+                    // `#` at pos_in_line which is < cur_content.len().
+                    let comment_text: &'input str = cur_content.get(text_start..).unwrap_or("");
+                    let mut comment_end = hash_pos.advance('#');
+                    for c in comment_text.chars() {
+                        comment_end = comment_end.advance(c);
+                    }
+                    let comment_span = Span {
+                        start: hash_pos,
+                        end: comment_end,
+                    };
+                    events.push((Event::Comment { text: comment_text }, comment_span));
                     pos_in_line = cur_content.len();
                 } else {
                     break;
