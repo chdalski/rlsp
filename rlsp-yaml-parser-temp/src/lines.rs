@@ -7,6 +7,8 @@
 //! peek at the next line's indent without consuming it.  It never scans the
 //! full input up front, giving O(1) first-event latency.
 
+use std::collections::VecDeque;
+
 use crate::pos::Pos;
 
 // ---------------------------------------------------------------------------
@@ -158,9 +160,11 @@ fn scan_line(remaining: &str, pos: Pos, is_first: bool) -> Option<(Line<'_>, &st
 pub struct LineBuffer<'input> {
     /// Remaining unparsed input (past the next line's terminator).
     remaining: &'input str,
-    /// A synthetic line prepended by the caller (e.g. inline sequence content
-    /// extracted from a sequence-entry line).  Drained before `next`.
-    prepend: Option<Line<'input>>,
+    /// Synthetic lines prepended by the caller (e.g. inline content extracted
+    /// from a sequence- or mapping-entry line).  Drained front-first before
+    /// `next`.  A `VecDeque` supports multiple pending prepends when parsing
+    /// implicit mapping entries that need to inject both key and value lines.
+    prepend: VecDeque<Line<'input>>,
     /// The pre-parsed next line, if any.
     next: Option<Line<'input>>,
     /// Position at the start of `remaining`.
@@ -178,7 +182,7 @@ impl<'input> LineBuffer<'input> {
     pub fn new(input: &'input str) -> Self {
         let mut buf = Self {
             remaining: input,
-            prepend: None,
+            prepend: VecDeque::new(),
             next: None,
             remaining_pos: Pos::ORIGIN,
             remaining_is_first: true,
@@ -191,27 +195,23 @@ impl<'input> LineBuffer<'input> {
     /// Prepend a synthetic line that will be returned by the next call to
     /// [`Self::peek_next`] / [`Self::consume_next`], ahead of any real lines.
     ///
-    /// Used to re-present inline content extracted from a sequence-entry line
-    /// (e.g. the `- item` part of `- - item`) as if it were a separate line.
-    /// Only one prepend slot exists; calling this when a prepend is already
-    /// pending is a logic error (the existing prepend would be silently
-    /// dropped).
+    /// Used to re-present inline content extracted from a sequence- or
+    /// mapping-entry line as if it were a separate line.  Multiple prepends
+    /// are supported: each call pushes to the front of the queue, so the last
+    /// prepended line is returned first (LIFO order).  Callers that need FIFO
+    /// order (key before value) should prepend value first, then key.
     pub fn prepend_line(&mut self, line: Line<'input>) {
-        debug_assert!(
-            self.prepend.is_none(),
-            "prepend_line called with pending prepend already set"
-        );
         self.lookahead.clear();
-        self.prepend = Some(line);
+        self.prepend.push_front(line);
     }
 
     /// Look at the next line without consuming it.
     ///
-    /// Returns the prepended synthetic line first (if any), then the normally
-    /// buffered next line.
+    /// Returns the frontmost prepended synthetic line first (if any), then the
+    /// normally buffered next line.
     #[must_use]
     pub fn peek_next(&self) -> Option<&Line<'input>> {
-        self.prepend.as_ref().or(self.next.as_ref())
+        self.prepend.front().or(self.next.as_ref())
     }
 
     /// Convenience: the indent of the next line, without consuming it.
@@ -223,10 +223,10 @@ impl<'input> LineBuffer<'input> {
     /// Advance: return the currently primed next line and prime the following
     /// one from the remaining input.  Returns `None` when no lines remain.
     ///
-    /// Drains the prepended synthetic line first (if any).
+    /// Drains prepended synthetic lines (front-first) before the real buffer.
     pub fn consume_next(&mut self) -> Option<Line<'input>> {
-        // Drain the prepend slot first.
-        if let Some(line) = self.prepend.take() {
+        // Drain prepend queue front-first.
+        if let Some(line) = self.prepend.pop_front() {
             return Some(line);
         }
         // Clear any cached lookahead — it was based on the old position.
@@ -239,8 +239,8 @@ impl<'input> LineBuffer<'input> {
     /// True when no more lines are available (buffer is empty, no prepend, and
     /// input is exhausted).
     #[must_use]
-    pub const fn at_eof(&self) -> bool {
-        self.prepend.is_none() && self.next.is_none()
+    pub fn at_eof(&self) -> bool {
+        self.prepend.is_empty() && self.next.is_none()
     }
 
     /// Scan forward without consuming to collect all lines with

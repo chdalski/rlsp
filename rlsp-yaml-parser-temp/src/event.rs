@@ -13,7 +13,6 @@
 //!
 //! Future tasks will add:
 //! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 18)
-//! - `MappingStart / MappingEnd` (Task 12+)
 //! - `Alias { name: Cow<'input, str> }` (Task 15+)
 
 use std::borrow::Cow;
@@ -32,12 +31,12 @@ pub enum Chomp {
 /// The style (block or flow) of a collection (sequence or mapping).
 ///
 /// Currently only `Block` is produced; `Flow` will be used when flow sequences
-/// (`[a, b]`) and flow mappings (`{a: b}`) are implemented in Tasks 14/12.
+/// (`[a, b]`) and flow mappings (`{a: b}`) are implemented in Task 14.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollectionStyle {
     /// A block-style collection using indentation and `-`/`:` indicators.
     Block,
-    /// A flow-style collection using `[]` or `{}` delimiters (Task 14/12).
+    /// A flow-style collection using `[]` or `{}` delimiters (Task 14).
     Flow,
 }
 
@@ -115,6 +114,24 @@ pub enum Event<'input> {
     ///
     /// Matches the most recent [`Event::SequenceStart`] on the event stack.
     SequenceEnd,
+    /// A block or flow mapping has started.
+    ///
+    /// Followed by alternating key/value node events (scalars or nested
+    /// collections), then a matching [`Event::MappingEnd`].
+    ///
+    /// `anchor` and `tag` are `None` until Tasks 15/16.
+    MappingStart {
+        /// The anchor name, if any (e.g. `&foo`).  Populated in Task 15.
+        anchor: Option<&'input str>,
+        /// The tag, if any (e.g. `!!map`).  Populated in Task 16.
+        tag: Option<&'input str>,
+        /// Whether this is a block (indentation-based) or flow (`{...}`) mapping.
+        style: CollectionStyle,
+    },
+    /// A mapping has ended.
+    ///
+    /// Matches the most recent [`Event::MappingStart`] on the event stack.
+    MappingEnd,
     /// A scalar value.
     ///
     /// `value` borrows from input when no transformation is required (the

@@ -39,16 +39,21 @@ pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span
 }
 
 // ---------------------------------------------------------------------------
-// Depth limit (security: DoS via deeply nested sequences)
+// Depth limit (security: DoS via deeply nested collections)
 // ---------------------------------------------------------------------------
 
-/// Maximum block-sequence nesting depth accepted from untrusted input.
+/// Maximum combined block-collection nesting depth accepted from untrusted
+/// input.
 ///
-/// Inputs that exceed this depth return an [`Error`] rather than consuming
-/// unbounded memory.  512 is generous for all real-world YAML (Kubernetes /
-/// Helm documents are typically under 20 levels deep) and small enough that
-/// the explicit-stack overhead stays within a few KB.
-pub const MAX_SEQUENCE_DEPTH: usize = 512;
+/// This limit covers all open [`Event::SequenceStart`] and
+/// [`Event::MappingStart`] events combined.  Using a unified limit prevents
+/// an attacker from nesting 512 sequences inside 512 mappings (total depth
+/// 1024) by exploiting separate per-type limits.
+///
+/// 512 is generous for all real-world YAML (Kubernetes / Helm documents are
+/// typically under 20 levels deep) and small enough that the explicit-stack
+/// overhead stays within a few KB.
+pub const MAX_COLLECTION_DEPTH: usize = 512;
 
 // ---------------------------------------------------------------------------
 // Iterator implementation
@@ -75,6 +80,34 @@ enum IterState {
     Done,
 }
 
+/// What the state machine expects next for an open mapping entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MappingPhase {
+    /// The next node is a key (first half of a pair).
+    Key,
+    /// The next node is a value (second half of a pair).
+    Value,
+}
+
+/// An entry on the collection stack, tracking open sequences and mappings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollectionEntry {
+    /// An open block sequence.  Holds the column of its `-` indicator.
+    Sequence(usize),
+    /// An open block mapping.  Holds the column of its first key and the
+    /// current phase (expecting key or value).
+    Mapping(usize, MappingPhase),
+}
+
+impl CollectionEntry {
+    /// The indentation column of this collection's indicator/key.
+    const fn indent(self) -> usize {
+        match self {
+            Self::Sequence(col) | Self::Mapping(col, _) => col,
+        }
+    }
+}
+
 /// Lazy iterator that yields events by walking a [`Lexer`].
 struct EventIter<'input> {
     lexer: Lexer<'input>,
@@ -82,19 +115,21 @@ struct EventIter<'input> {
     /// Queued events to emit before resuming normal state dispatch.
     ///
     /// Used when a single parse step must produce multiple consecutive events —
-    /// e.g. `SequenceStart` before the first item, or multiple `SequenceEnd`
-    /// events when a dedent closes several nested sequences at once.
+    /// e.g. `SequenceStart` before the first item, or multiple close events
+    /// when a dedent closes several nested collections at once.
     queue: VecDeque<(Event<'input>, Span)>,
-    /// Stack of block-sequence indent levels currently open.
+    /// Stack of open block collections (sequences and mappings).
     ///
-    /// Each entry is the column of the `-` indicator that opened that sequence.
-    /// When the next line's indent drops below an entry's value, that sequence
-    /// is closed with a `SequenceEnd` event and the entry is popped.
-    seq_stack: Vec<usize>,
+    /// Each entry records whether the open collection is a sequence or a
+    /// mapping, its indentation column, and (for mappings) whether the next
+    /// expected node is a key or a value.  The combined length of this stack
+    /// is bounded by [`MAX_COLLECTION_DEPTH`].
+    coll_stack: Vec<CollectionEntry>,
     /// Set to `true` after an `Err` is yielded.
     ///
-    /// Once set, `next()` immediately returns `None` to prevent infinite error
-    /// loops (e.g. depth-limit firing on the same prepended synthetic line).
+    /// Once set, `next()` immediately returns `None` to prevent infinite
+    /// error loops (e.g. depth-limit firing on the same prepended synthetic
+    /// line).
     failed: bool,
 }
 
@@ -104,45 +139,82 @@ impl<'input> EventIter<'input> {
             lexer: Lexer::new(input),
             state: IterState::BeforeStream,
             queue: VecDeque::new(),
-            seq_stack: Vec::new(),
+            coll_stack: Vec::new(),
             failed: false,
         }
     }
 
-    /// Push `SequenceEnd` events onto the queue for all open sequences whose
-    /// dash-indent is `>= close_threshold`, from innermost to outermost.
-    fn close_sequences_at_or_above(&mut self, close_threshold: usize, pos: Pos) {
-        while let Some(&top) = self.seq_stack.last() {
-            if top >= close_threshold {
-                self.seq_stack.pop();
-                self.queue.push_back((Event::SequenceEnd, zero_span(pos)));
+    /// Current combined collection depth (sequences + mappings).
+    const fn collection_depth(&self) -> usize {
+        self.coll_stack.len()
+    }
+
+    /// Push close events for all collections whose indent is `>= threshold`,
+    /// from innermost to outermost.
+    ///
+    /// After each close, if the new top of the stack is a mapping in Value
+    /// phase, flips it to Key phase — the closed collection was that
+    /// mapping's value.
+    fn close_collections_at_or_above(&mut self, threshold: usize, pos: Pos) {
+        while let Some(&top) = self.coll_stack.last() {
+            if top.indent() >= threshold {
+                self.coll_stack.pop();
+                let ev = match top {
+                    CollectionEntry::Sequence(_) => Event::SequenceEnd,
+                    CollectionEntry::Mapping(_, _) => Event::MappingEnd,
+                };
+                self.queue.push_back((ev, zero_span(pos)));
+                // After closing a collection, the parent mapping (if any)
+                // transitions from Value phase to Key phase.
+                if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
+                    if *phase == MappingPhase::Value {
+                        *phase = MappingPhase::Key;
+                    }
+                }
             } else {
                 break;
             }
         }
     }
 
-    /// Push `SequenceEnd` events for all open sequences (document-end).
-    fn close_all_sequences(&mut self, pos: Pos) {
-        while self.seq_stack.pop().is_some() {
-            self.queue.push_back((Event::SequenceEnd, zero_span(pos)));
+    /// Push close events for all open collections (document-end).
+    ///
+    /// If a mapping is in Value phase when it closes, an empty plain scalar is
+    /// emitted first to satisfy the pending key that had no inline value —
+    /// **unless** the previous closed item was a collection (sequence or
+    /// mapping), which was itself the value.  After each closed collection,
+    /// the parent mapping (if any) is advanced from Value to Key phase.
+    fn close_all_collections(&mut self, pos: Pos) {
+        while let Some(top) = self.coll_stack.pop() {
+            let ev = match top {
+                CollectionEntry::Sequence(_) => Event::SequenceEnd,
+                CollectionEntry::Mapping(_, MappingPhase::Value) => {
+                    // Mapping closed while waiting for a value — emit empty value.
+                    self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+                    Event::MappingEnd
+                }
+                CollectionEntry::Mapping(_, MappingPhase::Key) => Event::MappingEnd,
+            };
+            self.queue.push_back((ev, zero_span(pos)));
+            // After closing any collection, advance the parent mapping (if in
+            // Value phase) to Key phase — the just-closed collection was its value.
+            if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
+                if *phase == MappingPhase::Value {
+                    *phase = MappingPhase::Key;
+                }
+            }
         }
     }
 
-    /// Check whether the next available line is a block-sequence entry indicator
-    /// (`-` followed by space, tab, or end-of-content).
+    /// Check whether the next available line is a block-sequence entry
+    /// indicator (`-` followed by space, tab, or end-of-content).
     ///
     /// Returns `(dash_indent, dash_pos)` where:
-    /// - `dash_indent` is the effective document column of the `-` (from
-    ///   `line.indent`, authoritative for both real and synthetic lines).
-    /// - `dash_pos` is the absolute [`Pos`] of the `-` character — used to
-    ///   attach correct span information to `SequenceStart` events.
+    /// - `dash_indent` is the effective document column of the `-`.
+    /// - `dash_pos` is the absolute [`Pos`] of the `-` character.
     fn peek_sequence_entry(&self) -> Option<(usize, Pos)> {
         let line = self.lexer.peek_next_line()?;
-        // Use line.indent as the authoritative column for the dash.
         let dash_indent = line.indent;
-        // Strip leading spaces from content to reach the first non-space char.
-        // For synthetic lines content already starts at `-` so trim is a no-op.
         let trimmed = line.content.trim_start_matches(' ');
 
         if !trimmed.starts_with('-') {
@@ -155,8 +227,6 @@ impl<'input> EventIter<'input> {
             return None;
         }
 
-        // Compute the Pos of the `-` from `line.pos` (start of physical line)
-        // plus the leading-spaces count.
         let leading_spaces = line.content.len() - trimmed.len();
         let dash_pos = Pos {
             byte_offset: line.pos.byte_offset + leading_spaces,
@@ -167,12 +237,70 @@ impl<'input> EventIter<'input> {
         Some((dash_indent, dash_pos))
     }
 
+    /// Check whether the next available line looks like an implicit mapping
+    /// key: a non-empty line whose plain-scalar content is followed by `: `
+    /// (colon + space) or `:\n` (colon at end-of-line) or `:\t`.
+    ///
+    /// Also recognises the explicit key indicator `? ` at the start of a line.
+    ///
+    /// Returns `(key_indent, key_pos)` on success, where `key_indent` is the
+    /// document column of the first character of the key (or `?` indicator),
+    /// and `key_pos` is its absolute [`Pos`].
+    fn peek_mapping_entry(&self) -> Option<(usize, Pos)> {
+        let line = self.lexer.peek_next_line()?;
+        let key_indent = line.indent;
+
+        let leading_spaces = line.content.len() - line.content.trim_start_matches(' ').len();
+        let trimmed = &line.content[leading_spaces..];
+
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let key_pos = Pos {
+            byte_offset: line.pos.byte_offset + leading_spaces,
+            char_offset: line.pos.char_offset + leading_spaces,
+            line: line.pos.line,
+            column: line.pos.column + leading_spaces,
+        };
+
+        // Explicit key indicator: `? ` or `?` at EOL.
+        if let Some(after_q) = trimmed.strip_prefix('?') {
+            if after_q.is_empty()
+                || after_q.starts_with(' ')
+                || after_q.starts_with('\t')
+                || after_q.starts_with('\n')
+                || after_q.starts_with('\r')
+            {
+                return Some((key_indent, key_pos));
+            }
+        }
+
+        // Implicit key: line contains `: ` or ends with `:`.
+        // We scan the plain-scalar portion of the line for the value indicator.
+        if is_implicit_mapping_line(trimmed) {
+            return Some((key_indent, key_pos));
+        }
+
+        None
+    }
+
     /// Try to consume a scalar from the current lexer position.
+    ///
+    /// `plain_parent_indent` — the indent of the current line; plain scalar
+    /// continuation stops when the next line is less-indented than this.
+    ///
+    /// `block_parent_indent` — the indent of the enclosing block context;
+    /// block scalars collect content that is more indented than this value.
     fn try_consume_scalar(
         &mut self,
-        parent_indent: usize,
+        plain_parent_indent: usize,
+        block_parent_indent: usize,
     ) -> Result<Option<(Event<'input>, Span)>, Error> {
-        if let Some(result) = self.lexer.try_consume_literal_block_scalar(parent_indent) {
+        if let Some(result) = self
+            .lexer
+            .try_consume_literal_block_scalar(block_parent_indent)
+        {
             let (value, chomp, span) = result?;
             return Ok(Some((
                 Event::Scalar {
@@ -184,7 +312,10 @@ impl<'input> EventIter<'input> {
                 span,
             )));
         }
-        if let Some(result) = self.lexer.try_consume_folded_block_scalar(parent_indent) {
+        if let Some(result) = self
+            .lexer
+            .try_consume_folded_block_scalar(block_parent_indent)
+        {
             let (value, chomp, span) = result?;
             return Ok(Some((
                 Event::Scalar {
@@ -196,7 +327,7 @@ impl<'input> EventIter<'input> {
                 span,
             )));
         }
-        if let Some((value, span)) = self.lexer.try_consume_single_quoted(parent_indent)? {
+        if let Some((value, span)) = self.lexer.try_consume_single_quoted(plain_parent_indent)? {
             return Ok(Some((
                 Event::Scalar {
                     value,
@@ -207,7 +338,7 @@ impl<'input> EventIter<'input> {
                 span,
             )));
         }
-        if let Some((value, span)) = self.lexer.try_consume_double_quoted(parent_indent)? {
+        if let Some((value, span)) = self.lexer.try_consume_double_quoted(plain_parent_indent)? {
             return Ok(Some((
                 Event::Scalar {
                     value,
@@ -218,7 +349,7 @@ impl<'input> EventIter<'input> {
                 span,
             )));
         }
-        if let Some((value, span)) = self.lexer.try_consume_plain_scalar(parent_indent) {
+        if let Some((value, span)) = self.lexer.try_consume_plain_scalar(plain_parent_indent) {
             return Ok(Some((
                 Event::Scalar {
                     value,
@@ -232,48 +363,31 @@ impl<'input> EventIter<'input> {
         Ok(None)
     }
 
-    /// Consume the leading `-` indicator from the current line (which must be a
-    /// sequence entry as verified by `peek_sequence_entry`).
+    /// Consume the leading `-` indicator from the current line and (if
+    /// present) prepend a synthetic line for the inline content.
     ///
-    /// If the line has inline content after the dash (`- item`), a synthetic
-    /// `Line` representing that inline content is prepended to the lexer buffer
-    /// so the next iteration sees it as the next line to parse.
-    ///
-    /// Returns `true` if inline content was found and prepended, `false` if
-    /// the item was empty (bare `-` with no following content).
+    /// Returns `true` if inline content was found and prepended.
     fn consume_sequence_dash(&mut self, dash_indent: usize) -> bool {
-        // SAFETY: caller verified via peek_sequence_entry.
+        // SAFETY: caller verified via peek_sequence_entry — the line exists.
         let Some(line) = self.lexer.peek_next_line() else {
-            unreachable!("consume_sequence_dash called at EOF")
+            unreachable!("consume_sequence_dash called without a pending line")
         };
 
         let content = line.content;
-        // Strip leading spaces to reach the `-` indicator.
-        // For real lines this removes `dash_indent` spaces; for synthetic lines
-        // the content already starts at `-` (no leading spaces) so trim is a no-op.
         let after_spaces = content.trim_start_matches(' ');
         debug_assert!(
             after_spaces.starts_with('-'),
             "sequence dash not at expected position"
         );
-        // Content after the `-`.
-        let rest_of_line = &after_spaces[1..]; // slice of input starting after '-'
-
-        // Trim the leading space(s) after the dash to find the inline content.
+        let rest_of_line = &after_spaces[1..];
         let inline = rest_of_line.trim_start_matches([' ', '\t']);
         let had_inline = !inline.is_empty();
 
         if had_inline {
-            // Number of leading spaces we skipped to reach the `-`.
-            // For real indented lines (e.g. `"  - foo"`) this equals `dash_indent`.
-            // For synthetic lines `content` already starts at `-` so this is 0.
             let leading_spaces = content.len() - after_spaces.len();
             let spaces_after_dash = rest_of_line.len() - inline.len();
             let offset_from_dash = 1 + spaces_after_dash;
-            // Total byte distance from `line.pos` (start of physical line) to
-            // the inline content start.
             let total_offset = leading_spaces + offset_from_dash;
-            // The effective document column of the inline content.
             let inline_col = dash_indent + offset_from_dash;
             let inline_pos = Pos {
                 byte_offset: line.pos.byte_offset + total_offset,
@@ -281,9 +395,6 @@ impl<'input> EventIter<'input> {
                 line: line.pos.line,
                 column: line.pos.column + total_offset,
             };
-            // `inline` has no leading spaces (they were trimmed above).
-            // Set `indent` to `inline_col` so that dedent detection and
-            // `peek_sequence_entry` use the correct document column.
             let synthetic = Line {
                 content: inline,
                 offset: inline_pos.byte_offset,
@@ -291,15 +402,332 @@ impl<'input> EventIter<'input> {
                 break_type: line.break_type,
                 pos: inline_pos,
             };
-            // Consume the physical line first, then prepend the synthetic one.
             self.lexer.consume_line();
             self.lexer.prepend_inline_line(synthetic);
         } else {
-            // No inline content — just consume the dash line.
             self.lexer.consume_line();
         }
 
         had_inline
+    }
+
+    /// Consume the current mapping-entry line.
+    ///
+    /// Handles both forms:
+    /// - **Explicit key** (`? key`): consume the `?` indicator line, extract
+    ///   any inline key content and prepend a synthetic line for it.
+    /// - **Implicit key** (`key: value`): split the line at the `: ` / `:\n`
+    ///   boundary.  Return the key as a pre-extracted slice so the caller can
+    ///   emit it as a `Scalar` event directly (bypassing the plain-scalar
+    ///   continuation logic).  Prepend the value portion (if non-empty) as a
+    ///   synthetic line.
+    ///
+    /// Returns a `ConsumedMapping` describing what was found.
+    fn consume_mapping_entry(&mut self, key_indent: usize) -> ConsumedMapping<'input> {
+        // SAFETY: caller verified via peek_mapping_entry — the line exists.
+        let Some(line) = self.lexer.peek_next_line() else {
+            unreachable!("consume_mapping_entry called without a pending line")
+        };
+
+        // Extract all data from the borrowed line before any mutable lexer calls.
+        // `content` is `'input`-lived (borrows the original input string, not
+        // the lexer's internal buffer), so it remains valid after consume_line().
+        let content: &'input str = line.content;
+        let line_pos = line.pos;
+        let line_break_type = line.break_type;
+
+        let leading_spaces = content.len() - content.trim_start_matches(' ').len();
+        let trimmed = &content[leading_spaces..];
+
+        // --- Explicit key: `? ...` ---
+        if let Some(after_q) = trimmed.strip_prefix('?') {
+            let inline = after_q.trim_start_matches([' ', '\t']);
+            let had_key_inline = !inline.is_empty();
+
+            if had_key_inline {
+                // Offset from line start to inline key content.
+                let spaces_after_q = after_q.len() - inline.len();
+                let total_offset = leading_spaces + 1 + spaces_after_q;
+                let inline_col = key_indent + 1 + spaces_after_q;
+                let inline_pos = Pos {
+                    byte_offset: line_pos.byte_offset + total_offset,
+                    char_offset: line_pos.char_offset + total_offset,
+                    line: line_pos.line,
+                    column: line_pos.column + total_offset,
+                };
+                let synthetic = Line {
+                    content: inline,
+                    offset: inline_pos.byte_offset,
+                    indent: inline_col,
+                    break_type: line_break_type,
+                    pos: inline_pos,
+                };
+                self.lexer.consume_line();
+                self.lexer.prepend_inline_line(synthetic);
+            } else {
+                self.lexer.consume_line();
+            }
+            return ConsumedMapping::ExplicitKey { had_key_inline };
+        }
+
+        // --- Implicit key: `key: value` or `key:` ---
+        // Find the `: ` (or `:\t` or `:\n` or `:` at EOL) boundary.
+        // SAFETY: peek_mapping_entry already confirmed this line is a mapping
+        // entry, so find_value_indicator_offset will return Some.
+        let Some(colon_offset) = find_value_indicator_offset(trimmed) else {
+            unreachable!("consume_mapping_entry: implicit key line has no value indicator")
+        };
+
+        let key_content = trimmed[..colon_offset].trim_end_matches([' ', '\t']);
+        let after_colon = &trimmed[colon_offset + 1..]; // skip ':'
+        let value_content = after_colon.trim_start_matches([' ', '\t']);
+
+        // Key span: starts at the first non-space character.
+        let key_start_pos = Pos {
+            byte_offset: line_pos.byte_offset + leading_spaces,
+            char_offset: line_pos.char_offset + leading_spaces,
+            line: line_pos.line,
+            column: line_pos.column + leading_spaces,
+        };
+        let key_end_pos = {
+            let mut p = key_start_pos;
+            for ch in key_content.chars() {
+                p = p.advance(ch);
+            }
+            p
+        };
+        let key_span = Span {
+            start: key_start_pos,
+            end: key_end_pos,
+        };
+
+        // Compute position of value content (after `: ` / `:\t`).
+        let spaces_after_colon = after_colon.len() - value_content.len();
+        let value_offset_in_trimmed = colon_offset + 1 + spaces_after_colon;
+        let value_col = key_indent + value_offset_in_trimmed;
+        let value_pos = Pos {
+            byte_offset: line_pos.byte_offset + leading_spaces + value_offset_in_trimmed,
+            char_offset: line_pos.char_offset + leading_spaces + value_offset_in_trimmed,
+            line: line_pos.line,
+            column: line_pos.column + leading_spaces + value_offset_in_trimmed,
+        };
+
+        // Consume the physical line, then (if there is inline value content)
+        // prepend one synthetic line for the value.  The key is returned
+        // directly in the ConsumedMapping variant — not via a synthetic line —
+        // so that the caller can push a Scalar event without routing through
+        // try_consume_plain_scalar (which would incorrectly treat the value
+        // synthetic line as a plain-scalar continuation).
+        self.lexer.consume_line();
+
+        if !value_content.is_empty() {
+            let value_synthetic = Line {
+                content: value_content,
+                offset: value_pos.byte_offset,
+                indent: value_col,
+                break_type: line_break_type,
+                pos: value_pos,
+            };
+            self.lexer.prepend_inline_line(value_synthetic);
+        }
+
+        ConsumedMapping::ImplicitKey {
+            key_value: key_content,
+            key_span,
+        }
+    }
+
+    /// After emitting a key scalar, flip the innermost mapping to `Value` phase.
+    ///
+    /// **Call-site invariant:** the top of `coll_stack` must be a
+    /// `CollectionEntry::Mapping`.  This function is only called from
+    /// mapping-emission paths (`handle_mapping_entry`, explicit-key handling)
+    /// where the caller has already verified that a mapping is the active
+    /// collection.  Do **not** call this after emitting a scalar that may be a
+    /// sequence item — use `tick_mapping_phase_after_scalar` instead, which
+    /// stops at a Sequence entry and handles the ambiguity correctly.
+    fn advance_mapping_to_value(&mut self) {
+        debug_assert!(
+            matches!(self.coll_stack.last(), Some(CollectionEntry::Mapping(..))),
+            "advance_mapping_to_value called but top of coll_stack is not a Mapping"
+        );
+        for entry in self.coll_stack.iter_mut().rev() {
+            if let CollectionEntry::Mapping(_, phase) = entry {
+                *phase = MappingPhase::Value;
+                return;
+            }
+        }
+    }
+
+    /// After emitting a value scalar/collection, flip the innermost mapping
+    /// back to `Key` phase.
+    ///
+    /// **Call-site invariant:** the top of `coll_stack` must be a
+    /// `CollectionEntry::Mapping`.  This function is only called from
+    /// mapping-emission paths where the caller has already verified that a
+    /// mapping is the active collection.  Do **not** call this after emitting a
+    /// scalar that may be a sequence item — use `tick_mapping_phase_after_scalar`
+    /// instead.
+    fn advance_mapping_to_key(&mut self) {
+        debug_assert!(
+            matches!(self.coll_stack.last(), Some(CollectionEntry::Mapping(..))),
+            "advance_mapping_to_key called but top of coll_stack is not a Mapping"
+        );
+        for entry in self.coll_stack.iter_mut().rev() {
+            if let CollectionEntry::Mapping(_, phase) = entry {
+                *phase = MappingPhase::Key;
+                return;
+            }
+        }
+    }
+}
+
+/// Result of consuming a mapping-entry line.
+enum ConsumedMapping<'input> {
+    /// Explicit key (`? key`).
+    ExplicitKey {
+        /// Whether there was key content on the same line as `?`.
+        had_key_inline: bool,
+    },
+    /// Implicit key (`key: value`).
+    ///
+    /// The key content and span are pre-extracted so the caller can push the
+    /// key `Scalar` event directly without routing it through
+    /// `try_consume_plain_scalar` — which would treat the adjacent value
+    /// synthetic line as a plain-scalar continuation.
+    ImplicitKey {
+        /// The key text slice (borrows input).
+        key_value: &'input str,
+        /// Span covering the key text.
+        key_span: Span,
+    },
+}
+
+/// True when `trimmed` (content after stripping leading spaces) represents
+/// an implicit mapping key: it contains `: `, `:\t`, or ends with `:`.
+fn is_implicit_mapping_line(trimmed: &str) -> bool {
+    find_value_indicator_offset(trimmed).is_some()
+}
+
+/// Return the byte offset of the `:` value indicator within `trimmed`, or
+/// `None` if the line is not a mapping entry.
+///
+/// The `:` must be followed by a space, tab, newline/CR, or end-of-string to
+/// count as a value indicator (YAML 1.2 §7.4).  A `:` immediately followed by
+/// a non-space `ns-char` is part of a plain scalar.
+///
+/// Double-quoted and single-quoted spans are skipped correctly: a `:` inside
+/// quotes is not a value indicator.
+///
+/// Lines that begin with YAML indicator characters that cannot start a plain
+/// scalar (e.g. `%`, `@`, `` ` ``, `,`, `[`, `]`, `{`, `}`, `#`, `&`, `*`,
+/// `!`, `|`, `>`) are rejected immediately — they are not implicit mapping
+/// keys.  Quoted-scalar starts (`"`, `'`) and bare-indicator starts (`?`, `-`,
+/// `:`) are handled specially.
+fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
+    // Reject lines that start with indicator characters that cannot begin a
+    // plain scalar (and are thus not valid implicit mapping keys).
+    if matches!(
+        trimmed.as_bytes().first().copied(),
+        Some(
+            b'%' | b'@'
+                | b'`'
+                | b','
+                | b'['
+                | b']'
+                | b'{'
+                | b'}'
+                | b'#'
+                | b'&'
+                | b'*'
+                | b'!'
+                | b'|'
+                | b'>'
+        )
+    ) {
+        return None;
+    }
+
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    let mut prev_was_space = false; // tracks whether the previous byte was whitespace
+    while let Some(&ch) = bytes.get(i) {
+        // Stop at an unquoted `#` preceded by whitespace (or at position 0):
+        // YAML 1.2 §6.6 — a `#` after whitespace begins a comment; any `:` that
+        // follows is inside the comment and cannot be a value indicator.
+        if ch == b'#' && (i == 0 || prev_was_space) {
+            return None;
+        }
+
+        // Skip double-quoted span (handles `\"` escapes).
+        // After a quoted span, `prev_was_space` is false — a closing `"` is
+        // not whitespace.
+        if ch == b'"' {
+            i += 1; // skip opening `"`
+            while let Some(&inner) = bytes.get(i) {
+                match inner {
+                    b'\\' => i += 2, // skip escape sequence (two bytes)
+                    b'"' => {
+                        i += 1; // skip closing `"`
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            prev_was_space = false;
+            continue;
+        }
+
+        // Skip single-quoted span (handles `''` escape).
+        // After a quoted span, `prev_was_space` is false — a closing `'` is
+        // not whitespace.
+        if ch == b'\'' {
+            i += 1; // skip opening `'`
+            while let Some(&inner) = bytes.get(i) {
+                i += 1;
+                if inner == b'\'' {
+                    // `''` is an escaped single-quote; a lone `'` ends the span.
+                    if bytes.get(i).copied() == Some(b'\'') {
+                        i += 1; // consume the second `'` of the `''` escape
+                    } else {
+                        break; // lone `'` — end of quoted span
+                    }
+                }
+            }
+            prev_was_space = false;
+            continue;
+        }
+
+        if ch == b':' {
+            match bytes.get(i + 1).copied() {
+                None | Some(b' ' | b'\t' | b'\n' | b'\r') => return Some(i),
+                _ => {}
+            }
+        }
+
+        prev_was_space = ch == b' ' || ch == b'\t';
+
+        // Multi-byte char: advance by UTF-8 lead-byte length.
+        i += if ch < 0x80 {
+            1
+        } else if ch & 0xE0 == 0xC0 {
+            2
+        } else if ch & 0xF0 == 0xE0 {
+            3
+        } else {
+            4
+        };
+    }
+    None
+}
+
+/// Build an empty plain scalar event.
+const fn empty_scalar_event<'input>() -> Event<'input> {
+    Event::Scalar {
+        value: std::borrow::Cow::Borrowed(""),
+        style: ScalarStyle::Plain,
+        anchor: None,
+        tag: None,
     }
 }
 
@@ -366,17 +794,16 @@ impl<'input> EventIter<'input> {
 
         if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
             let end = self.lexer.drain_to_end();
-            self.close_all_sequences(end);
+            self.close_all_collections(end);
             self.queue
                 .push_back((Event::DocumentEnd { explicit: false }, zero_span(end)));
             self.queue.push_back((Event::StreamEnd, zero_span(end)));
             self.state = IterState::Done;
             return StepResult::Continue;
         }
-
         if self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
-            self.close_all_sequences(pos);
+            self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line();
             self.state = IterState::BetweenDocs;
             self.queue.push_back((
@@ -385,10 +812,9 @@ impl<'input> EventIter<'input> {
             ));
             return StepResult::Continue;
         }
-
         if self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
-            self.close_all_sequences(pos);
+            self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line();
             self.state = IterState::InDocument;
             self.queue.push_back((
@@ -402,58 +828,21 @@ impl<'input> EventIter<'input> {
             return StepResult::Continue;
         }
 
-        // ---- Block sequence entry detection ----
+        // ---- Block sequence / mapping entry detection ----
 
         if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
-            // Use current_pos (before consuming the line) for close-threshold
-            // position — only needed for SequenceEnd spans on dedent.
-            let cur_pos = self.lexer.current_pos();
-            self.close_sequences_at_or_above(dash_indent.saturating_add(1), cur_pos);
-            if !self.queue.is_empty() {
-                return StepResult::Continue;
-            }
-            let opens_new = self.seq_stack.last().is_none_or(|&top| dash_indent > top);
-            if opens_new {
-                if self.seq_stack.len() >= MAX_SEQUENCE_DEPTH {
-                    self.failed = true;
-                    return StepResult::Yield(Err(Error {
-                        pos: dash_pos,
-                        message: "sequence nesting depth exceeds limit".into(),
-                    }));
-                }
-                self.seq_stack.push(dash_indent);
-                // Use the dash's actual position for the SequenceStart span.
-                self.queue.push_back((
-                    Event::SequenceStart {
-                        anchor: None,
-                        tag: None,
-                        style: CollectionStyle::Block,
-                    },
-                    zero_span(dash_pos),
-                ));
-            }
-            let had_inline = self.consume_sequence_dash(dash_indent);
-            if !had_inline {
-                let item_pos = self.lexer.current_pos();
-                self.queue.push_back((
-                    Event::Scalar {
-                        value: std::borrow::Cow::Borrowed(""),
-                        style: ScalarStyle::Plain,
-                        anchor: None,
-                        tag: None,
-                    },
-                    zero_span(item_pos),
-                ));
-            }
-            return StepResult::Continue;
+            return self.handle_sequence_entry(dash_indent, dash_pos);
+        }
+        if let Some((key_indent, key_pos)) = self.peek_mapping_entry() {
+            return self.handle_mapping_entry(key_indent, key_pos);
         }
 
-        // ---- Dedent: close sequences whose column >= current indent ----
+        // ---- Dedent: close collections more deeply nested than the current line ----
 
         if let Some(line) = self.lexer.peek_next_line() {
             let line_indent = line.indent;
             let close_pos = self.lexer.current_pos();
-            self.close_sequences_at_or_above(line_indent, close_pos);
+            self.close_collections_at_or_above(line_indent.saturating_add(1), close_pos);
             if !self.queue.is_empty() {
                 return StepResult::Continue;
             }
@@ -461,13 +850,21 @@ impl<'input> EventIter<'input> {
 
         // ---- Scalars ----
 
-        // Use the current line's indent as parent_indent for plain scalar
-        // continuation: continuation lines must be at strictly greater indent.
-        // Synthetic inline lines have `indent` == the item's effective column,
-        // so next-entry lines at indent 0 correctly fail the check.
-        let parent_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
-        match self.try_consume_scalar(parent_indent) {
-            Ok(Some(event)) => return StepResult::Yield(Ok(event)),
+        // `plain_parent_indent` — the indent at which the current scalar starts;
+        // used to stop plain-scalar continuation at a lesser-indented line.
+        //
+        // `block_parent_indent` — the indent of the enclosing block context;
+        // block scalars (`|`, `>`) must have content lines more indented than
+        // this value.  For a block scalar embedded as inline content after `? `
+        // or `- `, the enclosing block's indent is the *collection's* indent,
+        // not the column of the inline `|`/`>` token.
+        let plain_parent_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
+        let block_parent_indent = self.coll_stack.last().map_or(0, |e| e.indent());
+        match self.try_consume_scalar(plain_parent_indent, block_parent_indent) {
+            Ok(Some(event)) => {
+                self.tick_mapping_phase_after_scalar();
+                return StepResult::Yield(Ok(event));
+            }
             Err(e) => {
                 self.failed = true;
                 return StepResult::Yield(Err(e));
@@ -476,9 +873,226 @@ impl<'input> EventIter<'input> {
         }
 
         // Fallback: unrecognised content line — consume and loop.
-        // Task 12 will handle block mappings.
         self.lexer.consume_line();
         StepResult::Continue
+    }
+
+    /// Handle a block-sequence dash entry (`-`).
+    fn handle_sequence_entry(&mut self, dash_indent: usize, dash_pos: Pos) -> StepResult<'input> {
+        let cur_pos = self.lexer.current_pos();
+        self.close_collections_at_or_above(dash_indent.saturating_add(1), cur_pos);
+        if !self.queue.is_empty() {
+            return StepResult::Continue;
+        }
+        let opens_new = self
+            .coll_stack
+            .last()
+            .is_none_or(|top| dash_indent > top.indent());
+        if opens_new {
+            if self.collection_depth() >= MAX_COLLECTION_DEPTH {
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos: dash_pos,
+                    message: "collection nesting depth exceeds limit".into(),
+                }));
+            }
+            self.coll_stack.push(CollectionEntry::Sequence(dash_indent));
+            self.queue.push_back((
+                Event::SequenceStart {
+                    anchor: None,
+                    tag: None,
+                    style: CollectionStyle::Block,
+                },
+                zero_span(dash_pos),
+            ));
+        }
+        let had_inline = self.consume_sequence_dash(dash_indent);
+        if !had_inline {
+            let item_pos = self.lexer.current_pos();
+            self.queue
+                .push_back((empty_scalar_event(), zero_span(item_pos)));
+        }
+        StepResult::Continue
+    }
+
+    /// Handle a block-mapping key entry.
+    fn handle_mapping_entry(&mut self, key_indent: usize, key_pos: Pos) -> StepResult<'input> {
+        let cur_pos = self.lexer.current_pos();
+        self.close_collections_at_or_above(key_indent.saturating_add(1), cur_pos);
+        if !self.queue.is_empty() {
+            return StepResult::Continue;
+        }
+
+        let is_in_mapping_at_this_indent = self.coll_stack.last().is_some_and(
+            |top| matches!(top, CollectionEntry::Mapping(col, _) if *col == key_indent),
+        );
+
+        if !is_in_mapping_at_this_indent {
+            if self.collection_depth() >= MAX_COLLECTION_DEPTH {
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos: key_pos,
+                    message: "collection nesting depth exceeds limit".into(),
+                }));
+            }
+            self.coll_stack
+                .push(CollectionEntry::Mapping(key_indent, MappingPhase::Key));
+            self.queue.push_back((
+                Event::MappingStart {
+                    anchor: None,
+                    tag: None,
+                    style: CollectionStyle::Block,
+                },
+                zero_span(key_pos),
+            ));
+            return StepResult::Continue;
+        }
+
+        // Continuing an existing mapping.
+        if self.is_value_indicator_line() {
+            self.consume_explicit_value_line(key_indent);
+            return StepResult::Continue;
+        }
+
+        // If the mapping is in Value phase and the next line is another key
+        // (not a `: value` line), the previous key had no value — emit empty.
+        if self.coll_stack.last().is_some_and(|top| {
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value) if *col == key_indent)
+        }) {
+            let pos = self.lexer.current_pos();
+            self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+            self.advance_mapping_to_key();
+            return StepResult::Continue;
+        }
+
+        // Normal key line: consume and emit key scalar.
+        let consumed = self.consume_mapping_entry(key_indent);
+        match consumed {
+            ConsumedMapping::ExplicitKey { had_key_inline } => {
+                if !had_key_inline {
+                    let pos = self.lexer.current_pos();
+                    self.queue.push_back((empty_scalar_event(), zero_span(pos)));
+                    self.advance_mapping_to_value();
+                }
+            }
+            ConsumedMapping::ImplicitKey {
+                key_value,
+                key_span,
+            } => {
+                self.queue.push_back((
+                    Event::Scalar {
+                        value: std::borrow::Cow::Borrowed(key_value),
+                        style: ScalarStyle::Plain,
+                        anchor: None,
+                        tag: None,
+                    },
+                    key_span,
+                ));
+                self.advance_mapping_to_value();
+            }
+        }
+        StepResult::Continue
+    }
+
+    /// True when the next line is a bare value indicator (`: ` or `:`
+    /// followed by space/EOL), used for the explicit-key form.
+    fn is_value_indicator_line(&self) -> bool {
+        let Some(line) = self.lexer.peek_next_line() else {
+            return false;
+        };
+        let trimmed = line.content.trim_start_matches(' ');
+        if !trimmed.starts_with(':') {
+            return false;
+        }
+        let after_colon = &trimmed[1..];
+        after_colon.is_empty()
+            || after_colon.starts_with(' ')
+            || after_colon.starts_with('\t')
+            || after_colon.starts_with('\n')
+            || after_colon.starts_with('\r')
+    }
+
+    /// Consume a `: value` line (explicit value indicator).
+    ///
+    /// If there is inline content after `: `, prepend a synthetic line for it
+    /// so the next iteration emits it as the value scalar.
+    fn consume_explicit_value_line(&mut self, key_indent: usize) {
+        // SAFETY: caller checked is_value_indicator_line() — the line exists.
+        let Some(line) = self.lexer.peek_next_line() else {
+            unreachable!("consume_explicit_value_line called without a pending line")
+        };
+
+        // Extract all data from the borrowed line before any mutable lexer calls.
+        let content: &'input str = line.content;
+        let line_pos = line.pos;
+        let line_break_type = line.break_type;
+
+        let leading_spaces = content.len() - content.trim_start_matches(' ').len();
+        let trimmed = &content[leading_spaces..];
+
+        // Advance past `:` and any whitespace.
+        let after_colon = &trimmed[1..]; // skip ':'
+        let value_content = after_colon.trim_start_matches([' ', '\t']);
+        let had_value_inline = !value_content.is_empty();
+
+        if had_value_inline {
+            let spaces_after_colon = after_colon.len() - value_content.len();
+            let total_offset = leading_spaces + 1 + spaces_after_colon;
+            let value_col = key_indent + 1 + spaces_after_colon;
+            let value_pos = Pos {
+                byte_offset: line_pos.byte_offset + total_offset,
+                char_offset: line_pos.char_offset + total_offset,
+                line: line_pos.line,
+                column: line_pos.column + total_offset,
+            };
+            let synthetic = Line {
+                content: value_content,
+                offset: value_pos.byte_offset,
+                indent: value_col,
+                break_type: line_break_type,
+                pos: value_pos,
+            };
+            self.lexer.consume_line();
+            self.lexer.prepend_inline_line(synthetic);
+        } else {
+            // Bare `:` with no value content — the value is empty.
+            self.lexer.consume_line();
+            let pos = self.lexer.current_pos();
+            self.queue.push_back((
+                Event::Scalar {
+                    value: std::borrow::Cow::Borrowed(""),
+                    style: ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                zero_span(pos),
+            ));
+            self.advance_mapping_to_key();
+        }
+    }
+
+    /// Tick the key/value phase of the innermost open mapping after emitting a
+    /// scalar event.
+    ///
+    /// - If the mapping was in `Key` phase, it flips to `Value`.
+    /// - If the mapping was in `Value` phase (or there is no open mapping), it
+    ///   flips back to `Key`.
+    fn tick_mapping_phase_after_scalar(&mut self) {
+        // Find the innermost mapping entry on the stack.
+        for entry in self.coll_stack.iter_mut().rev() {
+            if let CollectionEntry::Mapping(_, phase) = entry {
+                *phase = match *phase {
+                    MappingPhase::Key => MappingPhase::Value,
+                    MappingPhase::Value => MappingPhase::Key,
+                };
+                return;
+            }
+            // Sequences between this mapping and the top don't count.
+            if matches!(entry, CollectionEntry::Sequence(_)) {
+                // A scalar here is an item in a sequence, not a mapping value.
+                return;
+            }
+        }
     }
 }
 

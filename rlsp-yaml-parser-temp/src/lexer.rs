@@ -226,7 +226,7 @@ impl<'input> Lexer<'input> {
     /// be pending in [`Self::inline_scalar`].  Check
     /// [`Self::has_inline_scalar`] separately when needed.
     #[must_use]
-    pub const fn at_eof(&self) -> bool {
+    pub fn at_eof(&self) -> bool {
         self.buf.at_eof()
     }
 
