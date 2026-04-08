@@ -608,23 +608,27 @@ cannot be triggered by user input).
 
 ### Task 11: Block sequences
 
+**Status:** Completed in commit `93c66e0`.
+
 Implement `- item` block sequences and `SequenceStart`/
 `SequenceEnd` events.
 
-- [ ] Tokenizer recognizes `-` followed by space/EOL as a
+- [x] Tokenizer recognizes `-` followed by space/EOL as a
   block sequence entry indicator
-- [ ] Track indent levels: a block sequence's items must
+- [x] Track indent levels: a block sequence's items must
   have consistent indent
-- [ ] Emit `SequenceStart`/`SequenceEnd` around the
+- [x] Emit `SequenceStart`/`SequenceEnd` around the
   sequence's items
-- [ ] Each sequence item can be any node (scalar, nested
-  collection)
-- [ ] Empty sequence items (just `-` followed by EOL)
+- [x] Each sequence item can be any node (scalar, nested
+  collection) — scalar and nested-sequence items supported;
+  sequence-containing-mapping deferred to Task 13 per plan
+  scope
+- [x] Empty sequence items (just `-` followed by EOL)
   produce `Scalar { value: "", style: Plain, ... }` (null
   representation per YAML spec)
-- [ ] Conformance tests for block sequences must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): block sequences`
+- [x] Conformance tests for block sequences must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): block sequences`
 
 **Reference impl consultation:**
 1. Local: `block.rs` `l_block_sequence()`,
@@ -633,6 +637,28 @@ Implement `- item` block sequences and `SequenceStart`/
 
 **Advisors:** test-engineer (collections are where
 indent-tracking complexity lives).
+
+**Reviewer note (resubmission):** Initial submission was rejected
+for a High span-correctness finding: `consume_sequence_dash`
+computed synthetic inline-line positions from `line.pos +
+offset_from_dash`, omitting the leading-space count that
+`trim_start_matches(' ')` skipped to reach the dash. Indented
+sequences like `"  - foo\n"` reported the `foo` scalar at byte
+2..5 instead of 4..7. Not caught by the initial Group A-I tests,
+which asserted event order and scalar values but no spans. A
+Medium finding (SequenceStart span also zero-based from
+`current_pos` instead of the dash column) and two Lows (unused
+return value in `consume_sequence_dash`, handoff factual errors)
+were in the same rejection. Resubmission fixed all four:
+`peek_sequence_entry` now returns `(dash_indent, dash_pos)` with
+the dash's absolute position computed from `line.pos +
+leading_spaces`; `consume_sequence_dash` uses `leading_spaces +
+offset_from_dash` for the synthetic line's byte/char/column;
+`SequenceStart` anchors at `dash_pos`; the function signature
+returns `bool`. Group J added 8 span tests locking in correctness
+for zero-indent, indented, nested-indented, inline-nested, and
+multiline cases for both scalar and SequenceStart spans. All 177
+smoke tests pass; committed in `93c66e0`.
 
 ### Task 12: Block mappings
 
