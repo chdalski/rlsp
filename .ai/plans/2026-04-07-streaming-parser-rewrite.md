@@ -231,7 +231,7 @@ user has explicitly approved this scope.
 - [x] Implement folded block scalars (Task 10) — `f107749`
 - [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
 - [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
-- [ ] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`
+- [x] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`, Task 18 `4f1b25c`
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
@@ -912,16 +912,18 @@ this is mostly a reminder for Task 20).
 
 ### Task 18: Comments
 
-- [ ] Tokenize `#` to end of line as a comment
-- [ ] Emit `Comment { text: &'input str }` events at the
+**Status:** Completed in commit `4f1b25c`.
+
+- [x] Tokenize `#` to end of line as a comment
+- [x] Emit `Comment { text: &'input str }` events at the
   positions where comments appear
-- [ ] Comments can appear: between any two events, on
+- [x] Comments can appear: between any two events, on
   blank lines, after node values
-- [ ] Comments inside flow collections
-- [ ] Conformance tests with comments must pass
-- [ ] `tests/loader_spans.rs` cares about comment positions
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): comments`
+- [x] Comments inside flow collections
+- [x] Conformance tests with comments must pass
+- [x] `tests/loader_spans.rs` cares about comment positions
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): comments`
 
 **Reference impl consultation:**
 1. Local: how comments are emitted in `event.rs` and
