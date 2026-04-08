@@ -1520,6 +1520,29 @@ impl<'input> EventIter<'input> {
             }
 
             // ----------------------------------------------------------------
+            // Block sequence entry indicator `-` forbidden in flow context.
+            //
+            // Per YAML 1.2 §7.4, block collections cannot appear inside flow
+            // context.  A `-` followed by space, tab, or end-of-content is
+            // the block-sequence entry indicator; a `-` followed by any other
+            // non-separator character is a valid plain-scalar start (e.g. `-x`
+            // or `-1` are legal plain scalars in flow context).
+            // ----------------------------------------------------------------
+            if ch == '-' {
+                let after = &cur_content[pos_in_line + 1..];
+                let next_c = after.chars().next();
+                if next_c.is_none_or(|c| matches!(c, ' ' | '\t')) {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "block sequence entry '-' is not allowed inside a flow collection"
+                            .into(),
+                    }));
+                }
+            }
+
+            // ----------------------------------------------------------------
             // Quoted scalars — delegate to existing lexer methods.
             //
             // Strategy: consume the current line, prepend a synthetic line
