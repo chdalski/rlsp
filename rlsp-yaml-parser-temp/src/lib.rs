@@ -884,10 +884,23 @@ impl<'input> EventIter<'input> {
         if !self.queue.is_empty() {
             return StepResult::Continue;
         }
-        let opens_new = self
-            .coll_stack
-            .last()
-            .is_none_or(|top| dash_indent > top.indent());
+        // YAML §8.2.1 seq-spaces rule: a block sequence used as a mapping
+        // value in `block-out` context may start at the same column as its
+        // parent key (seq-spaces(n, block-out) = n, not n+1).  We therefore
+        // open a new sequence when:
+        //   - the stack is empty, OR
+        //   - dash_indent is greater than the current top's indent (normal
+        //     case: sequence is nested deeper than its parent), OR
+        //   - the top is a Mapping in Value phase at the same indent (the
+        //     seq-spaces case: the sequence is the value of the current key).
+        let opens_new = match self.coll_stack.last() {
+            None => true,
+            Some(
+                &(CollectionEntry::Sequence(col)
+                | CollectionEntry::Mapping(col, MappingPhase::Key)),
+            ) => dash_indent > col,
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Value)) => dash_indent >= col,
+        };
         if opens_new {
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.failed = true;
@@ -908,9 +921,17 @@ impl<'input> EventIter<'input> {
         }
         let had_inline = self.consume_sequence_dash(dash_indent);
         if !had_inline {
-            let item_pos = self.lexer.current_pos();
-            self.queue
-                .push_back((empty_scalar_event(), zero_span(item_pos)));
+            // Only emit an empty scalar for a bare `-` when there is no
+            // following indented content that could be the item's value.
+            // If the next line is at an indent strictly greater than
+            // `dash_indent`, it belongs to this sequence item — let the
+            // main loop handle it.  Otherwise the item is truly empty.
+            let next_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
+            if next_indent <= dash_indent {
+                let item_pos = self.lexer.current_pos();
+                self.queue
+                    .push_back((empty_scalar_event(), zero_span(item_pos)));
+            }
         }
         StepResult::Continue
     }
@@ -921,6 +942,36 @@ impl<'input> EventIter<'input> {
         self.close_collections_at_or_above(key_indent.saturating_add(1), cur_pos);
         if !self.queue.is_empty() {
             return StepResult::Continue;
+        }
+
+        // YAML §8.2.1 seq-spaces close: a block sequence opened as a mapping
+        // value in `block-out` context may reside at the *same* column as its
+        // parent key (seq-spaces(n, block-out) = n).  When a new mapping key
+        // appears at column `n`, such a same-indent sequence must be closed —
+        // the standard `close_collections_at_or_above(n+1)` above does not
+        // reach it because its indent is exactly `n`, not `>= n+1`.
+        //
+        // Close the sequence only when the collection immediately beneath it
+        // (the next item down the stack) is a Mapping at the same indent in
+        // Value phase — that confirms it was opened by the seq-spaces rule,
+        // not as an independent sequence at column 0.
+        if let Some(&CollectionEntry::Sequence(seq_col)) = self.coll_stack.last() {
+            if seq_col == key_indent {
+                let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
+                    |e| matches!(e, CollectionEntry::Mapping(col, _) if *col == key_indent),
+                );
+                if parent_is_seq_spaces_mapping {
+                    self.coll_stack.pop();
+                    self.queue
+                        .push_back((Event::SequenceEnd, zero_span(cur_pos)));
+                    // Advance parent mapping from Value to Key phase — the
+                    // sequence was its value and is now fully closed.
+                    if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
+                        *phase = MappingPhase::Key;
+                    }
+                    return StepResult::Continue;
+                }
+            }
         }
 
         let is_in_mapping_at_this_indent = self.coll_stack.last().is_some_and(
@@ -1127,6 +1178,69 @@ impl<'input> Iterator for EventIter<'input> {
                 StepResult::Continue => {}
                 StepResult::Yield(result) => return Some(result),
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for private helpers (Gap 2: peek/consume divergence guard)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::{find_value_indicator_offset, is_implicit_mapping_line};
+
+    /// Every line that `is_implicit_mapping_line` accepts must also produce
+    /// `Some` from `find_value_indicator_offset`.  This is the contract
+    /// enforced by the `unreachable!` at the `consume_mapping_entry` call site —
+    /// if the two ever diverge a future change will trigger a runtime panic
+    /// under `#[deny(clippy::panic)]`.
+    ///
+    /// The table covers: trailing colon, colon-space, colon-tab, colon in
+    /// quoted spans (must be accepted by peek but offset still returned),
+    /// multi-byte characters before the colon, and lines that should not
+    /// be accepted.
+    #[test]
+    fn find_value_indicator_agrees_with_is_implicit_mapping_line() {
+        let accepted = [
+            "key:",
+            "key: value",
+            "key:\t",
+            "key:  multiple spaces",
+            "\"quoted key\": val",
+            "'single quoted': val",
+            "key with spaces: val",
+            "k:",
+            "longer-key-with-dashes: v",
+            "unicode_\u{00e9}: v",
+        ];
+        for line in accepted {
+            assert!(
+                is_implicit_mapping_line(line),
+                "expected is_implicit_mapping_line to accept: {line:?}"
+            );
+            assert!(
+                find_value_indicator_offset(line).is_some(),
+                "find_value_indicator_offset must return Some for accepted line: {line:?}"
+            );
+        }
+
+        let rejected = [
+            "plain scalar",
+            "http://example.com",
+            "no colon here",
+            "# comment: not a key",
+            "",
+        ];
+        for line in rejected {
+            assert!(
+                !is_implicit_mapping_line(line),
+                "expected is_implicit_mapping_line to reject: {line:?}"
+            );
+            assert!(
+                find_value_indicator_offset(line).is_none(),
+                "find_value_indicator_offset must return None for rejected line: {line:?}"
+            );
         }
     }
 }
