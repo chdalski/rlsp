@@ -12,8 +12,8 @@
 //! hiding errors.  It is the canonical test helper for all grammar tasks.
 
 use rlsp_yaml_parser_temp::{
-    Chomp, CollectionStyle, Error, Event, MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH, Pos,
-    ScalarStyle, Span, parse_events,
+    Chomp, CollectionStyle, Error, Event, MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH, MAX_TAG_LEN,
+    Pos, ScalarStyle, Span, parse_events,
 };
 
 // ---------------------------------------------------------------------------
@@ -5924,26 +5924,20 @@ mod flow_collections {
     }
 
     #[test]
-    fn tag_indicator_in_flow_sequence_returns_error() {
-        // `[!t x]\n` — `!` is a reserved indicator inside flow context; not yet supported.
-        let result: Vec<_> = parse_events("[!t x]\n").collect();
-        let has_error = result.iter().any(Result::is_err);
+    fn tag_indicator_in_flow_sequence_is_parsed() {
+        // `[!t x]\n` — Task 17 implements tag parsing in flow context.
+        // `!t` is a secondary-handle tag; `x` is the scalar value.
+        let events = evs("[!t x]\n");
         assert!(
-            has_error,
-            "tag indicator `!` inside flow collection must return an error"
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!t"),
+                    ..
+                }
+            )),
+            "tag `!t` inside flow sequence must produce a tagged scalar event"
         );
-        let mut saw_err = false;
-        for item in &result {
-            if saw_err {
-                assert!(
-                    item.is_err(),
-                    "Ok item appeared after Err — iterator must stop after first error"
-                );
-            }
-            if item.is_err() {
-                saw_err = true;
-            }
-        }
     }
 
     #[test]
@@ -7033,35 +7027,20 @@ mod anchors_and_aliases {
     }
 
     #[test]
-    fn tag_before_anchor_entire_line_is_deferred_to_task_17() {
-        // `!tag &anchor value\n` — tag handling is Task 17 (not yet implemented).
-        // The current parser cannot parse `!tag` as a plain scalar (because `!`
-        // is a c-indicator excluded from plain-scalar first chars), so the entire
-        // line is consumed as unrecognised content and no anchor event is emitted.
-        //
-        // This test documents the *current* behavior: the line is silently
-        // consumed, producing no anchor event.  When Task 17 implements tag
-        // parsing, this test should be updated to assert that `&anchor` is
-        // correctly recognised *after* the `!tag` token and produces an anchor.
+    fn tag_before_anchor_on_same_line_both_emitted() {
+        // `!tag &anchor value\n` — Task 17 implements tag parsing.
+        // Both the tag and anchor are emitted on the scalar.
         let events = evs("!tag &anchor value\n");
-        let has_anchor = events.iter().any(|e| {
-            matches!(
+        assert!(
+            events.iter().any(|e| matches!(
                 e,
                 Event::Scalar {
                     anchor: Some("anchor"),
-                    ..
-                } | Event::SequenceStart {
-                    anchor: Some("anchor"),
-                    ..
-                } | Event::MappingStart {
-                    anchor: Some("anchor"),
+                    tag: Some("!tag"),
                     ..
                 }
-            )
-        });
-        assert!(
-            !has_anchor,
-            "tag-before-anchor on same line: anchor must not be parsed until Task 17 (tag support)"
+            )),
+            "tag-before-anchor on same line: both tag and anchor must be emitted on the scalar"
         );
     }
 
@@ -7500,4 +7479,629 @@ mod anchors_and_aliases {
             "plain scalar 'two' with no anchor must be present"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// mod tags — Task 17
+//
+// Covers tag property parsing in block and flow contexts.  Tests are ordered:
+//   A — verbatim tags on scalars
+//   B — primary handle (`!!`) on scalars
+//   C — named handle (`!handle!suffix`)
+//   D — secondary handle (`!suffix`)
+//   E — non-specific tag (`!`)
+//   F — tags on collections (block)
+//   G — tags on collections (flow)
+//   H — tag + anchor combinations
+//   I — error cases
+//   J — span correctness
+//   K — regression: pre-existing silent drop
+//   L — tag on implicit mapping key context
+//   M — standalone tag applies to next node
+// ---------------------------------------------------------------------------
+
+mod tags {
+    use super::*;
+
+    fn evs(input: &str) -> Vec<Event<'_>> {
+        parse_events(input)
+            .map(|r| match r {
+                Ok((ev, _)) => ev,
+                Err(e) => unreachable!("unexpected parse error: {e}"),
+            })
+            .collect()
+    }
+
+    fn has_error(input: &str) -> bool {
+        parse_events(input).any(|r| r.is_err())
+    }
+
+    // -----------------------------------------------------------------------
+    // Group A: Verbatim tags on scalars
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verbatim_tag_on_plain_scalar() {
+        let events = evs("!<tag:yaml.org,2002:str> hello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("tag:yaml.org,2002:str"), value, .. }
+                    if value.as_ref() == "hello"
+            )),
+            "verbatim tag must be stored as URI content (without angle brackets)"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_strips_angle_brackets() {
+        let events = evs("!<my-uri> val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("my-uri"),
+                    ..
+                }
+            )),
+            "verbatim tag must store just 'my-uri', not '!<my-uri>'"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_missing_closing_angle_bracket_returns_error() {
+        assert!(
+            has_error("!<tag:yaml.org,2002:str hello\n"),
+            "verbatim tag missing '>' must return an error"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_empty_uri_returns_error() {
+        assert!(
+            has_error("!<> val\n"),
+            "empty verbatim tag URI must return an error"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_whitespace_in_uri_returns_error() {
+        // Space (0x20) is above the control-character threshold, but a tab
+        // (0x09) is below 0x20 and must be rejected.
+        assert!(
+            has_error("!<foo\tbar> val\n"),
+            "verbatim tag URI containing a tab must return an error"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_control_char_in_uri_returns_error() {
+        // NUL byte inside URI must be rejected.
+        assert!(
+            has_error("!<foo\x00bar> val\n"),
+            "verbatim tag URI containing NUL must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group B: Primary handle (`!!`) on scalars
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn primary_handle_on_plain_scalar() {
+        // `!!str` stored as literal slice `"!!str"` — no expansion.
+        let events = evs("!!str hello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!!str"), value, .. }
+                    if value.as_ref() == "hello"
+            )),
+            "primary handle tag must be stored as '!!str' (no expansion)"
+        );
+    }
+
+    #[test]
+    fn primary_handle_empty_suffix_stored_as_double_bang() {
+        // `!! val` — primary handle with empty suffix; stored as `"!!"`.
+        let events = evs("!! val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!!"),
+                    ..
+                }
+            )),
+            "primary handle with empty suffix must store '!!'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group C: Named handle (`!handle!suffix`)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn named_handle_stored_as_literal_slice() {
+        // `!e!tag val` — stored as `"!e!tag"` (no expansion).
+        let events = evs("!e!tag val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!e!tag"), value, .. }
+                    if value.as_ref() == "val"
+            )),
+            "named handle tag must be stored as literal '!e!tag'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group D: Secondary handle (`!suffix`)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn secondary_handle_on_plain_scalar() {
+        let events = evs("!yaml val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!yaml"), value, .. }
+                    if value.as_ref() == "val"
+            )),
+            "secondary handle tag must be stored as '!yaml'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group E: Non-specific tag (`!`)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn non_specific_tag_on_plain_scalar() {
+        // `! val` — bare `!` followed by space, then content.
+        let events = evs("! val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!"), value, .. }
+                    if value.as_ref() == "val"
+            )),
+            "non-specific tag '!' must be stored as '!'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group F: Tags on collections (block)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_on_block_sequence() {
+        let events = evs("!!seq\n- item\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    tag: Some("!!seq"),
+                    style: CollectionStyle::Block,
+                    ..
+                }
+            )),
+            "block sequence must carry tag '!!seq'"
+        );
+    }
+
+    #[test]
+    fn tag_on_block_mapping() {
+        let events = evs("!!map\nkey: val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::MappingStart {
+                    tag: Some("!!map"),
+                    style: CollectionStyle::Block,
+                    ..
+                }
+            )),
+            "block mapping must carry tag '!!map'"
+        );
+    }
+
+    #[test]
+    fn tag_on_block_literal_scalar() {
+        let events = evs("!!str |\n  hello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!!str"),
+                    style: ScalarStyle::Literal(Chomp::Clip),
+                    value,
+                    ..
+                } if value.as_ref() == "hello\n"
+            )),
+            "literal block scalar must carry tag '!!str'"
+        );
+    }
+
+    #[test]
+    fn tag_on_block_folded_scalar() {
+        let events = evs("!!str >\n  hello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!!str"),
+                    style: ScalarStyle::Folded(Chomp::Clip),
+                    ..
+                }
+            )),
+            "folded block scalar must carry tag '!!str'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group G: Tags on collections (flow)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_on_flow_sequence() {
+        let events = evs("!!seq [a, b]\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    tag: Some("!!seq"),
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            )),
+            "flow sequence must carry tag '!!seq'"
+        );
+    }
+
+    #[test]
+    fn tag_on_flow_mapping() {
+        let events = evs("!!map {a: b}\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::MappingStart {
+                    tag: Some("!!map"),
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            )),
+            "flow mapping must carry tag '!!map'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H: Tag + anchor combinations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_before_anchor_both_emitted_on_scalar() {
+        let events = evs("!str &anchor value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!str"),
+                    anchor: Some("anchor"),
+                    value,
+                    ..
+                } if value.as_ref() == "value"
+            )),
+            "tag before anchor: both must be emitted on the scalar"
+        );
+    }
+
+    #[test]
+    fn anchor_before_tag_both_emitted_on_scalar() {
+        let events = evs("&anchor !str value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!str"),
+                    anchor: Some("anchor"),
+                    value,
+                    ..
+                } if value.as_ref() == "value"
+            )),
+            "anchor before tag: both must be emitted on the scalar"
+        );
+    }
+
+    #[test]
+    fn tag_before_anchor_both_emitted_on_sequence() {
+        let events = evs("!seq &s\n- item\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    tag: Some("!seq"),
+                    anchor: Some("s"),
+                    ..
+                }
+            )),
+            "tag before anchor on sequence: both must be emitted on SequenceStart"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group I: Error cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn duplicate_tag_on_same_node_returns_error() {
+        assert!(
+            has_error("!!str !!int val\n"),
+            "duplicate tags on the same node must return an error"
+        );
+    }
+
+    #[test]
+    fn alias_with_tag_returns_error() {
+        assert!(
+            has_error("&anchor val\n!!str *anchor\n"),
+            "alias node with tag must return an error"
+        );
+    }
+
+    #[test]
+    fn tag_length_at_limit_is_accepted() {
+        // Verbatim tag with URI exactly MAX_TAG_LEN bytes long.
+        let uri = "a".repeat(MAX_TAG_LEN);
+        let input = format!("!<{uri}> val\n");
+        assert!(
+            !has_error(&input),
+            "tag URI at exactly MAX_TAG_LEN bytes must be accepted"
+        );
+    }
+
+    #[test]
+    fn tag_length_exceeding_limit_returns_error() {
+        // Verbatim tag with URI one byte over MAX_TAG_LEN.
+        let uri = "a".repeat(MAX_TAG_LEN + 1);
+        let input = format!("!<{uri}> val\n");
+        assert!(
+            has_error(&input),
+            "tag URI exceeding MAX_TAG_LEN bytes must return an error"
+        );
+    }
+
+    #[test]
+    fn flow_duplicate_tag_on_same_node_returns_error() {
+        // `[!t !t2 val]\n` — two tags on the same flow-sequence element.
+        assert!(
+            has_error("[!t !t2 val]\n"),
+            "two tag indicators on the same flow node must return an error"
+        );
+    }
+
+    #[test]
+    fn flow_alias_with_pending_tag_returns_error() {
+        // `[!t *a, val]\n` — tag precedes alias in flow sequence.
+        // YAML 1.2 §7.1: alias nodes cannot have properties.
+        assert!(
+            has_error("[!t *a, val]\n"),
+            "alias with pending tag in flow context must return an error"
+        );
+    }
+
+    #[test]
+    fn flow_alias_with_pending_tag_alone_returns_error() {
+        // `[!a *name]\n` — tag precedes alias with no following element.
+        assert!(
+            has_error("[!a *name]\n"),
+            "alias with pending tag in flow sequence (sole element) must return an error"
+        );
+    }
+
+    #[test]
+    fn tag_with_invalid_char_stops_at_boundary() {
+        // `!foo<bar val\n` — `<` is not a valid ns-tag-char per §6.8.1.
+        // The tag must stop at `<`, yielding tag `!foo` and value `<bar val`.
+        // (The parser does not error on this; it scans `!foo` as the tag
+        // and treats the rest as the scalar value.)
+        let events = evs("!foo<bar val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!foo"),
+                    ..
+                }
+            )),
+            "tag scan must stop before '<' — tag must be '!foo'"
+        );
+    }
+
+    #[test]
+    fn percent_encoded_tag_suffix_is_accepted() {
+        // `!foo%2Fbar val\n` — `%2F` is a valid percent-encoded sequence.
+        let events = evs("!foo%2Fbar val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some("!foo%2Fbar"),
+                    ..
+                }
+            )),
+            "percent-encoded sequence in tag suffix must be accepted"
+        );
+    }
+
+    #[test]
+    fn bare_percent_in_tag_stops_scan() {
+        // `!foo%zz\nhello\n` — `%zz` is not a valid percent-encoded sequence
+        // (z is not a hex digit).  Tag scan must stop at `%`, yielding standalone
+        // tag `!foo` which applies to the next scalar `hello`.
+        let events = evs("!foo%zz\nhello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!foo"), value, .. }
+                    if value.as_ref() == "hello"
+            )),
+            "bare '%' without two hex digits must stop tag scan — tag must be '!foo'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group J: Span correctness
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tagged_scalar_span_covers_value_not_tag() {
+        // `!!str hello\n` — `!!str ` is 6 bytes; `hello` starts at byte 6.
+        let items = parse_to_vec("!!str hello\n");
+        let scalar_span = items.iter().find_map(|r| match r {
+            Ok((Event::Scalar { tag: Some(_), .. }, span)) => Some(*span),
+            Ok(_) | Err(_) => None,
+        });
+        assert!(scalar_span.is_some(), "tagged scalar event must be present");
+        if let Some(span) = scalar_span {
+            assert_eq!(
+                span.start.byte_offset, 6,
+                "tagged scalar span must start at 'h' of 'hello' (byte 6), not at '!'"
+            );
+            assert_eq!(
+                span.end.byte_offset, 11,
+                "tagged scalar span must end after 'hello' (byte 11)"
+            );
+        }
+    }
+
+    #[test]
+    fn tagged_sequence_span_is_at_dash_indicator() {
+        // `!!seq\n- a\n` — SequenceStart span should point to the `-` on line 2.
+        let items = parse_to_vec("!!seq\n- a\n");
+        let seq_span = items.iter().find_map(|r| match r {
+            Ok((Event::SequenceStart { tag: Some(_), .. }, span)) => Some(*span),
+            Ok(_) | Err(_) => None,
+        });
+        assert!(
+            seq_span.is_some(),
+            "tagged SequenceStart event must be present"
+        );
+        // `!!seq\n` is 6 bytes; `-` is at byte 6.
+        if let Some(span) = seq_span {
+            assert_eq!(
+                span.start.byte_offset, 6,
+                "SequenceStart span must start at '-' indicator (byte 6), not at tag"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Group K: Regression — pre-existing silent drop
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_prefix_line_not_silently_dropped() {
+        // `!str value\n` was previously silently consumed by the fallback
+        // `consume_line` at lib.rs:1124 (the "unrecognised content" path).
+        // This test ensures a Scalar event is produced.
+        let events = evs("!str value\n");
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Scalar { .. })),
+            "!str value must produce a Scalar event, not be silently dropped"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!str"), value, .. }
+                    if value.as_ref() == "value"
+            )),
+            "scalar must have tag '!str' and value 'value'"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_prefix_line_not_silently_dropped() {
+        let events = evs("!<tag:yaml.org,2002:str> value\n");
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Scalar { .. })),
+            "verbatim-tagged value must produce a Scalar event"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group L: Tag on implicit mapping key context
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_on_implicit_mapping_key_scalar() {
+        // `!!str key: val\n` — tag applies to the key scalar.
+        let events = evs("!!str key: val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!!str"), value, .. }
+                    if value.as_ref() == "key"
+            )),
+            "tag on implicit key line must be emitted on the key scalar"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group M: Standalone tag applies to next node
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn standalone_tag_line_applies_to_scalar_below() {
+        let events = evs("!!str\nhello\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some("!!str"), value, .. }
+                    if value.as_ref() == "hello"
+            )),
+            "standalone tag line must be attached to the following scalar"
+        );
+    }
+
+    #[test]
+    fn standalone_tag_line_applies_to_sequence_below() {
+        let events = evs("!!seq\n- a\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    tag: Some("!!seq"),
+                    ..
+                }
+            )),
+            "standalone tag line must be attached to the following sequence"
+        );
+    }
+
+    #[test]
+    fn standalone_tag_line_applies_to_mapping_below() {
+        let events = evs("!!map\nkey: val\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::MappingStart {
+                    tag: Some("!!map"),
+                    ..
+                }
+            )),
+            "standalone tag line must be attached to the following mapping"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Carry-forward note — Medium #2 (flow empty-element-with-tag)
+    //
+    // `[!!]` drops the tag silently; `[!, x]` returns "invalid leading comma".
+    // This mirrors the pre-existing Task 16 behaviour for anchors: `[&a]`
+    // drops the anchor and `[&a, x]` returns the same leading-comma error.
+    // Fixing flow empty-element handling for both anchors and tags requires
+    // deeper changes to the flow loop's has_value / emit logic and is tracked
+    // as a follow-up task (out of Task 17 scope).
+    // -----------------------------------------------------------------------
 }

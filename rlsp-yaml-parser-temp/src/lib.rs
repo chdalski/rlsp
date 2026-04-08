@@ -69,6 +69,20 @@ pub const MAX_COLLECTION_DEPTH: usize = 512;
 /// `*name` (aliases).  Exceeding it returns an [`Error`], not a panic.
 pub const MAX_ANCHOR_NAME_BYTES: usize = 1024;
 
+/// Maximum byte length of a tag accepted from untrusted input.
+///
+/// The YAML spec places no upper limit on tag length, but scanning a tag
+/// consisting of millions of valid bytes would exhaust CPU time without any
+/// heap allocation.  This limit caps tag scanning at 4 KiB — generous for all
+/// real-world YAML (standard tags like `tag:yaml.org,2002:str` are under 30
+/// bytes; custom namespace URIs are rarely over 200 bytes) while preventing
+/// degenerate-input stalls.
+///
+/// The limit applies to the raw scanned portion: the URI content between `<`
+/// and `>` for verbatim tags, or the suffix portion for shorthand tags.
+/// Exceeding it returns an [`Error`], not a panic.
+pub const MAX_TAG_LEN: usize = 4096;
+
 // ---------------------------------------------------------------------------
 // Iterator implementation
 // ---------------------------------------------------------------------------
@@ -177,6 +191,26 @@ struct EventIter<'input> {
     /// inline content after the name).  False when set from an inline anchor
     /// that precedes a key or scalar on the same line.
     pending_anchor_for_collection: bool,
+    /// A pending tag that has been scanned but not yet attached to a node event.
+    ///
+    /// Tags in YAML precede the node they annotate (YAML 1.2 §6.8.1).  After
+    /// scanning `!tag`, `!!tag`, `!<uri>`, or `!`, the parser stores the tag
+    /// here and attaches it to the next `Scalar`, `SequenceStart`, or
+    /// `MappingStart` event.
+    ///
+    /// Storage format (raw borrowed slices — no expansion):
+    /// - `!<URI>`  → stored as `"URI"` (the content between `<` and `>`)
+    /// - `!!suffix` → stored as `"!!suffix"` (literal, no expansion)
+    /// - `!suffix` → stored as `"!suffix"` (literal)
+    /// - `!`       → stored as `"!"`
+    /// - `!handle!suffix` → stored as `"!handle!suffix"` (literal)
+    ///
+    /// `!!` expansion to `tag:yaml.org,2002:` is the loader's responsibility
+    /// (Task 19 will add `%TAG` directive support).
+    pending_tag: Option<&'input str>,
+    /// True when `pending_tag` was set from a standalone tag line (no inline
+    /// content after the tag).  False when set inline.
+    pending_tag_for_collection: bool,
 }
 
 impl<'input> EventIter<'input> {
@@ -189,6 +223,8 @@ impl<'input> EventIter<'input> {
             failed: false,
             pending_anchor: None,
             pending_anchor_for_collection: false,
+            pending_tag: None,
+            pending_tag_for_collection: false,
         }
     }
 
@@ -367,7 +403,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Literal(chomp),
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                 },
                 span,
             )));
@@ -382,7 +418,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Folded(chomp),
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                 },
                 span,
             )));
@@ -393,7 +429,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::SingleQuoted,
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                 },
                 span,
             )));
@@ -404,7 +440,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::DoubleQuoted,
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                 },
                 span,
             )));
@@ -415,7 +451,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Plain,
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                 },
                 span,
             )));
@@ -817,6 +853,217 @@ fn scan_anchor_name(content: &str, indicator_pos: Pos) -> Result<&str, Error> {
     Ok(&content[..end])
 }
 
+/// Scan a tag from `content`, returning the tag slice and its byte length in `content`.
+///
+/// `content` must begin immediately after the `!` indicator.  The function
+/// handles all four YAML 1.2 §6.8.1 tag forms:
+///
+/// - **Verbatim** `!<URI>` → `content` starts with `<`; returns the URI
+///   (between the angle brackets) and its length including the `<` and `>`.
+/// - **Primary shorthand** `!!suffix` → `content` starts with `!`; returns
+///   the full `!!suffix` slice (including the leading `!` that is part of
+///   `content`).
+/// - **Named-handle shorthand** `!handle!suffix` → returns the full slice
+///   `!handle!suffix` (the leading `!` of `handle` is in `content`).
+/// - **Secondary shorthand** `!suffix` → `content` starts with a tag-char;
+///   returns `!suffix` via a slice that includes one byte before `content`
+///   (the caller provides `full_tag_start` for this).
+/// - **Non-specific** `!` alone → `content` is empty or starts with a
+///   separator; returns `"!"` as a one-byte slice of the `!` indicator.
+///
+/// # Parameters
+///
+/// - `content`: the input slice immediately after the `!` indicator character.
+/// - `tag_start`: the input slice starting at the `!` (one byte before `content`).
+/// - `indicator_pos`: the [`Pos`] of the `!` indicator (for error reporting).
+///
+/// # Returns
+///
+/// `Ok((tag_slice, advance_past_exclamation))` where:
+/// - `tag_slice` is the borrowed slice to store in `pending_tag`.
+/// - `advance_past_exclamation` is the number of bytes to advance past the
+///   `!` indicator (i.e. the advance for the entire tag token, not counting
+///   the `!` itself).
+///
+/// Returns `Err` on invalid verbatim tags (unmatched `<`, empty URI, control
+/// character in URI) or when the tag length exceeds [`MAX_TAG_LEN`].
+fn scan_tag<'i>(
+    content: &'i str,
+    tag_start: &'i str,
+    indicator_pos: Pos,
+) -> Result<(&'i str, usize), Error> {
+    // ---- Verbatim tag: `!<URI>` ----
+    if let Some(after_open) = content.strip_prefix('<') {
+        // Find the closing `>`.
+        let close = after_open.find('>').ok_or_else(|| Error {
+            pos: indicator_pos,
+            message: "verbatim tag missing closing '>'".into(),
+        })?;
+        let uri = &after_open[..close];
+        if uri.is_empty() {
+            return Err(Error {
+                pos: indicator_pos,
+                message: "verbatim tag URI must not be empty".into(),
+            });
+        }
+        if uri.len() > MAX_TAG_LEN {
+            return Err(Error {
+                pos: indicator_pos,
+                message: format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            });
+        }
+        // Reject control characters in the URI.
+        for ch in uri.chars() {
+            if ch < '\x20' || ch == '\x7F' {
+                return Err(Error {
+                    pos: indicator_pos,
+                    message: format!("verbatim tag URI contains invalid character {ch:?}"),
+                });
+            }
+        }
+        // advance = 1 (for '<') + uri.len() + 1 (for '>') bytes past the `!`
+        let advance = 1 + uri.len() + 1;
+        return Ok((uri, advance));
+    }
+
+    // ---- Primary handle: `!!suffix` ----
+    if let Some(suffix) = content.strip_prefix('!') {
+        // suffix starts after the second `!`
+        let suffix_bytes = scan_tag_suffix(suffix);
+        // `!!` alone with no suffix is valid (empty suffix shorthand).
+        if suffix_bytes > MAX_TAG_LEN {
+            return Err(Error {
+                pos: indicator_pos,
+                message: format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            });
+        }
+        // tag_slice = `!!suffix` — one byte back for the first `!` (in `tag_start`)
+        // plus `!` in content plus suffix.
+        let tag_slice = &tag_start[..2 + suffix_bytes]; // `!` + `!` + suffix
+        let advance = 1 + suffix_bytes; // past the `!` in content and suffix
+        return Ok((tag_slice, advance));
+    }
+
+    // ---- Non-specific tag: bare `!` (content is empty or starts with non-tag-char) ----
+    // A `%` alone (without two following hex digits) also falls here via scan_tag_suffix.
+    if scan_tag_suffix(content) == 0 {
+        // The tag is just `!` — a one-byte slice from `tag_start`.
+        let tag_slice = &tag_start[..1];
+        return Ok((tag_slice, 0)); // 0 bytes advance past `!` (nothing follows the `!`)
+    }
+
+    // ---- Named handle `!handle!suffix` or secondary handle `!suffix` ----
+    // Scan tag chars until we hit a `!` (named handle delimiter) or non-tag-char.
+    let mut end = 0;
+    let mut found_inner_bang = false;
+    for (i, ch) in content.char_indices() {
+        if ch == '!' {
+            // Named handle: `!handle!suffix` — scan the suffix after the inner `!`.
+            found_inner_bang = true;
+            end = i + 1; // include the `!`
+            // Scan suffix chars (and %HH sequences) after the inner `!`.
+            end += scan_tag_suffix(&content[i + 1..]);
+            break;
+        } else if is_tag_char(ch) {
+            end = i + ch.len_utf8();
+        } else if ch == '%' {
+            // Percent-encoded sequence: %HH.
+            let pct_len = scan_tag_suffix(&content[i..]);
+            if pct_len == 0 {
+                break; // bare `%` without two hex digits — stop
+            }
+            end = i + pct_len;
+        } else {
+            break;
+        }
+    }
+
+    if end == 0 && !found_inner_bang {
+        // No tag chars at all (covered by non-specific check above, but defensive).
+        let tag_slice = &tag_start[..1];
+        return Ok((tag_slice, 0));
+    }
+
+    if end > MAX_TAG_LEN {
+        return Err(Error {
+            pos: indicator_pos,
+            message: format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
+        });
+    }
+
+    // tag_slice = `!` + content[..end] — includes the leading `!` from tag_start.
+    let tag_slice = &tag_start[..=end];
+    Ok((tag_slice, end))
+}
+
+/// Returns true if `ch` is a valid YAML 1.2 `ns-tag-char` (§6.8.1) single character.
+///
+/// This is the *closed* set defined in the spec: `ns-uri-char` minus `!` and
+/// the flow indicators.  `%` is NOT included here — percent-encoded sequences
+/// (`%HH`) are handled separately via [`scan_tag_suffix`].
+const fn is_tag_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(
+            ch,
+            '-' | '_'
+                | '.'
+                | '~'
+                | '*'
+                | '\''
+                | '('
+                | ')'
+                | '#'
+                | ';'
+                | '/'
+                | '?'
+                | ':'
+                | '@'
+                | '&'
+                | '='
+                | '+'
+                | '$'
+        )
+}
+
+/// Returns the byte length of the valid tag suffix starting at `s`.
+///
+/// A tag suffix is a sequence of `ns-tag-char` characters and percent-encoded
+/// `%HH` sequences (YAML 1.2 §6.8.1).  Scanning stops at the first character
+/// that does not satisfy either condition.
+fn scan_tag_suffix(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        // Percent-encoded sequence: `%` followed by exactly two hex digits.
+        if bytes.get(pos) == Some(&b'%') {
+            let h1 = bytes
+                .get(pos + 1)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            let h2 = bytes
+                .get(pos + 2)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            if h1 && h2 {
+                pos += 3;
+                continue;
+            }
+            break;
+        }
+        // Safe to decode the next char: all is_tag_char matches are ASCII,
+        // so multi-byte UTF-8 chars will fail is_tag_char and stop the scan.
+        let Some(ch) = s[pos..].chars().next() else {
+            break;
+        };
+        if is_tag_char(ch) {
+            pos += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    pos
+}
+
 /// Build an empty plain scalar event.
 const fn empty_scalar_event<'input>() -> Event<'input> {
     Event::Scalar {
@@ -941,6 +1188,14 @@ impl<'input> EventIter<'input> {
                     line: line_pos.line,
                     column: line_pos.column + leading,
                 };
+                // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
+                if self.pending_tag.is_some() {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: star_pos,
+                        message: "alias node cannot have a tag property".into(),
+                    }));
+                }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
                         self.failed = true;
@@ -987,6 +1242,77 @@ impl<'input> EventIter<'input> {
                         }
                         self.tick_mapping_phase_after_scalar();
                         return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
+                    }
+                }
+            }
+        }
+
+        // ---- Tag: `!tag`, `!!tag`, `!<uri>`, or `!` — attach to next node ----
+
+        if let Some(peek) = self.lexer.peek_next_line() {
+            let content: &'input str = peek.content;
+            let line_pos = peek.pos;
+            let line_break_type = peek.break_type;
+            let trimmed = content.trim_start_matches(' ');
+            if trimmed.starts_with('!') {
+                let leading = content.len() - trimmed.len();
+                let bang_pos = Pos {
+                    byte_offset: line_pos.byte_offset + leading,
+                    char_offset: line_pos.char_offset + leading,
+                    line: line_pos.line,
+                    column: line_pos.column + leading,
+                };
+                // `tag_start` starts at the `!`; `after_bang` is everything after it.
+                let tag_start: &'input str = &content[leading..];
+                let after_bang: &'input str = &content[leading + 1..];
+                match scan_tag(after_bang, tag_start, bang_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok((tag_slice, advance_past_bang)) => {
+                        // Total bytes consumed for the tag token: 1 (`!`) + advance.
+                        let tag_token_bytes = 1 + advance_past_bang;
+                        let after_tag = &trimmed[tag_token_bytes..];
+                        let inline: &'input str = after_tag.trim_start_matches([' ', '\t']);
+                        let spaces = after_tag.len() - inline.len();
+                        let had_inline = !inline.is_empty();
+                        let inline_offset =
+                            line_pos.byte_offset + leading + tag_token_bytes + spaces;
+                        let inline_char_offset =
+                            line_pos.char_offset + leading + tag_token_bytes + spaces;
+                        let inline_col = line_pos.column + leading + tag_token_bytes + spaces;
+                        // Duplicate tags on the same node are an error.
+                        if self.pending_tag.is_some() {
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: bang_pos,
+                                message: "a node may not have more than one tag".into(),
+                            }));
+                        }
+                        self.pending_tag = Some(tag_slice);
+                        self.lexer.consume_line();
+                        if had_inline {
+                            self.pending_tag_for_collection = false;
+                            let inline_pos = Pos {
+                                byte_offset: inline_offset,
+                                char_offset: inline_char_offset,
+                                line: line_pos.line,
+                                column: inline_col,
+                            };
+                            let synthetic = crate::lines::Line {
+                                content: inline,
+                                offset: inline_offset,
+                                indent: inline_col,
+                                break_type: line_break_type,
+                                pos: inline_pos,
+                            };
+                            self.lexer.prepend_inline_line(synthetic);
+                        } else {
+                            // Standalone tag line — applies to whatever node comes next.
+                            self.pending_tag_for_collection = true;
+                        }
+                        return StepResult::Continue;
                     }
                 }
             }
@@ -1162,7 +1488,7 @@ impl<'input> EventIter<'input> {
             self.queue.push_back((
                 Event::SequenceStart {
                     anchor: self.pending_anchor.take(),
-                    tag: None,
+                    tag: self.pending_tag.take(),
                     style: CollectionStyle::Block,
                 },
                 zero_span(dash_pos),
@@ -1253,10 +1579,15 @@ impl<'input> EventIter<'input> {
             } else {
                 None
             };
+            let mapping_tag = if self.pending_tag_for_collection {
+                self.pending_tag.take()
+            } else {
+                None
+            };
             self.queue.push_back((
                 Event::MappingStart {
                     anchor: mapping_anchor,
-                    tag: None,
+                    tag: mapping_tag,
                     style: CollectionStyle::Block,
                 },
                 zero_span(key_pos),
@@ -1300,7 +1631,7 @@ impl<'input> EventIter<'input> {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
                             anchor: self.pending_anchor.take(),
-                            tag: None,
+                            tag: self.pending_tag.take(),
                         },
                         zero_span(pos),
                     ));
@@ -1316,7 +1647,7 @@ impl<'input> EventIter<'input> {
                         value: std::borrow::Cow::Borrowed(key_value),
                         style: ScalarStyle::Plain,
                         anchor: self.pending_anchor.take(),
-                        tag: None,
+                        tag: self.pending_tag.take(),
                     },
                     key_span,
                 ));
@@ -1506,6 +1837,11 @@ impl<'input> EventIter<'input> {
         // collection was entered (e.g. `&seq [a, b]` sets pending_anchor before
         // the `[` is dispatched to handle_flow_collection).
         let mut pending_flow_anchor: Option<&'input str> = self.pending_anchor.take();
+        // Pending tag for the next node in this flow collection.
+        // Seeded from any block-context tag that was pending when this flow
+        // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before
+        // the `[` is dispatched to handle_flow_collection).
+        let mut pending_flow_tag: Option<&'input str> = self.pending_tag.take();
 
         // Re-sync `cur_content` / `cur_base_pos` from the buffer.
         // Returns false when the buffer is empty (EOF mid-flow).
@@ -1600,7 +1936,7 @@ impl<'input> EventIter<'input> {
                     events.push((
                         Event::SequenceStart {
                             anchor: pending_flow_anchor.take(),
-                            tag: None,
+                            tag: pending_flow_tag.take(),
                             style: CollectionStyle::Flow,
                         },
                         open_span,
@@ -1613,7 +1949,7 @@ impl<'input> EventIter<'input> {
                     events.push((
                         Event::MappingStart {
                             anchor: pending_flow_anchor.take(),
-                            tag: None,
+                            tag: pending_flow_tag.take(),
                             style: CollectionStyle::Flow,
                         },
                         open_span,
@@ -1865,7 +2201,7 @@ impl<'input> EventIter<'input> {
                         value,
                         style,
                         anchor: pending_flow_anchor.take(),
-                        tag: None,
+                        tag: pending_flow_tag.take(),
                     },
                     span,
                 ));
@@ -1953,6 +2289,45 @@ impl<'input> EventIter<'input> {
             }
 
             // ----------------------------------------------------------------
+            // Tag `!tag`, `!!tag`, `!<uri>`, or `!` in flow context
+            // ----------------------------------------------------------------
+            if ch == '!' {
+                let bang_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                let after_bang = &cur_content[pos_in_line + 1..];
+                let tag_start = &cur_content[pos_in_line..];
+                match scan_tag(after_bang, tag_start, bang_pos) {
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                    Ok((tag_slice, advance_past_bang)) => {
+                        // Total bytes: 1 (`!`) + advance_past_bang.
+                        // `!<URI>`: advance_past_bang = 1 + uri.len() + 1
+                        // `!!suffix`: advance_past_bang = 1 + suffix.len()
+                        // `!suffix`: advance_past_bang = suffix.len()
+                        // `!` alone: advance_past_bang = 0
+                        if pending_flow_tag.is_some() {
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: bang_pos,
+                                message: "a node may not have more than one tag".into(),
+                            }));
+                        }
+                        pending_flow_tag = Some(tag_slice);
+                        pos_in_line += 1 + advance_past_bang;
+                        // Skip any whitespace after the tag.
+                        while pos_in_line < cur_content.len() {
+                            match cur_content[pos_in_line..].chars().next() {
+                                Some(c) if c == ' ' || c == '\t' => pos_in_line += 1,
+                                _ => break,
+                            }
+                        }
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
             // Anchor `&name` in flow context
             // ----------------------------------------------------------------
             if ch == '&' {
@@ -1985,6 +2360,14 @@ impl<'input> EventIter<'input> {
             if ch == '*' {
                 let after_star = &cur_content[pos_in_line + 1..];
                 let star_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
+                if pending_flow_tag.is_some() {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: star_pos,
+                        message: "alias node cannot have a tag property".into(),
+                    }));
+                }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
                         self.failed = true;
@@ -2073,7 +2456,7 @@ impl<'input> EventIter<'input> {
                                 value: Cow::Borrowed(scanned),
                                 style: ScalarStyle::Plain,
                                 anchor: pending_flow_anchor.take(),
-                                tag: None,
+                                tag: pending_flow_tag.take(),
                             },
                             scalar_span,
                         ));
@@ -2098,11 +2481,11 @@ impl<'input> EventIter<'input> {
                     }
                 }
 
-                // Reserved indicators — tasks 17/19 will handle tags and
-                // directives. `&` and `*` (anchors/aliases) are handled above
-                // in Task 16. Silently skipping remaining reserved indicators
-                // would mangle YAML structure, so we error early here.
-                if matches!(ch, '!' | '%' | '@' | '`') {
+                // Reserved indicators — task 19 will handle directives.
+                // `!` (tags), `&`/`*` (anchors/aliases) are handled above.
+                // Silently skipping remaining reserved indicators would mangle
+                // YAML structure, so we error early here.
+                if matches!(ch, '%' | '@' | '`') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.failed = true;
                     return StepResult::Yield(Err(Error {
