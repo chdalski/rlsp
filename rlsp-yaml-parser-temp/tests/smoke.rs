@@ -2022,3 +2022,513 @@ mod block_scalars {
         assert_eq!(scalar, Some("ab\n\ncd\nef\n"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// mod folded_scalars — folded block scalar integration tests (Task 10)
+// ---------------------------------------------------------------------------
+
+mod folded_scalars {
+    use super::*;
+
+    // Helper: make a folded Scalar event for easy comparison.
+    fn folded(value: &str, chomp: Chomp) -> Event<'_> {
+        Event::Scalar {
+            value: value.into(),
+            style: ScalarStyle::Folded(chomp),
+            anchor: None,
+            tag: None,
+        }
+    }
+
+    // IT-FB-1 (spike) — simple two-line folded scalar, single break becomes space.
+    // Validates `>` dispatch, `Folded(Clip)` style, and basic folding.
+    #[test]
+    fn spike_two_line_folded_break_becomes_space() {
+        // ">\n  foo\n  bar\n" → scalar "foo bar\n" (Clip)
+        let events = event_variants(">\n  foo\n  bar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo bar\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Core folding rules
+    // -----------------------------------------------------------------------
+
+    // IT-FB-2 — single non-blank line is not folded (no preceding content to join).
+    #[test]
+    fn single_line_not_folded() {
+        let events = event_variants(">\n  hello\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("hello\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-3 — three equally-indented non-blank lines, all breaks folded to spaces.
+    #[test]
+    fn three_lines_all_breaks_become_spaces() {
+        let events = event_variants(">\n  a\n  b\n  c\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("a b c\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-4 — one blank line between non-blank lines produces one newline.
+    // Per §8.1.3: N blank lines → N newlines (first break discarded, blanks' breaks kept).
+    #[test]
+    fn one_blank_line_produces_one_newline() {
+        let events = event_variants(">\n  foo\n\n  bar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo\nbar\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-5 — two blank lines between non-blank lines produce two newlines.
+    #[test]
+    fn two_blank_lines_produce_two_newlines() {
+        let events = event_variants(">\n  foo\n\n\n  bar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo\n\nbar\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-6 — more-indented line: break before is preserved as `\n`, relative indent kept.
+    // content_indent=2; "indented" line has indent 4 (more-indented by 2 spaces).
+    // Break before → `\n`; content after stripping content_indent=2 spaces: "  indented".
+    #[test]
+    fn more_indented_break_before_preserved_relative_indent_kept() {
+        // ">\n  normal\n    indented\n"
+        // → "normal\n  indented\n"
+        let events = event_variants(">\n  normal\n    indented\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("normal\n  indented\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-7 — breaks surrounding a more-indented region are both preserved as `\n`.
+    // YAML 1.2 §8.1.3: "folding does not apply to line breaks *surrounding* text
+    // lines that contain leading white space." Both the break BEFORE and the break
+    // AFTER a more-indented line are preserved (neither is folded to a space).
+    // content_indent=2; `b` at indent 4 (more-indented).
+    // Break before `b` → `\n`; relative content of `b` → "  b"; break after `b` → `\n`.
+    #[test]
+    fn breaks_surrounding_more_indented_region_both_preserved() {
+        // ">\n  a\n    b\n  c\n"
+        // → "a\n  b\nc\n"
+        let events = event_variants(">\n  a\n    b\n  c\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("a\n  b\nc\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-8 — all content lines at same (deeper) indent → auto-detect, normal folding.
+    // Auto-detect gives content_indent=4; both lines at indent 4 (equally indented).
+    #[test]
+    fn all_deep_lines_equally_indented_normal_folding() {
+        let events = event_variants(">\n    deep\n    also deep\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("deep also deep\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Chomping
+    // -----------------------------------------------------------------------
+
+    // IT-FB-9 — Strip (`>-`): trailing newlines removed.
+    #[test]
+    fn strip_chomp_removes_trailing_newlines() {
+        let events = event_variants(">-\n  foo\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo", Chomp::Strip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-10 — Keep (`>+`): trailing blank lines preserved.
+    #[test]
+    fn keep_chomp_preserves_trailing_blank_lines() {
+        let events = event_variants(">+\n  foo\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo\n\n", Chomp::Keep),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-11 — Clip (`>`): single trailing newline kept, extra blanks dropped.
+    #[test]
+    fn clip_chomp_keeps_one_trailing_newline() {
+        let events = event_variants(">\n  foo\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Explicit indent indicator
+    // -----------------------------------------------------------------------
+
+    // IT-FB-12 — explicit indent indicator `>2`.
+    #[test]
+    fn explicit_indent_indicator() {
+        let events = event_variants(">2\n  foo\n  bar\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo bar\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-13 — explicit indent with strip, chomp-then-indent order: `>-2`.
+    #[test]
+    fn explicit_indent_with_strip_chomp_then_indent_order() {
+        let events = event_variants(">-2\n  foo\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo", Chomp::Strip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-14 — explicit indent with keep, chomp-then-indent order: `>+2`.
+    #[test]
+    fn explicit_indent_with_keep_chomp_then_indent_order() {
+        let events = event_variants(">+2\n  foo\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo\n\n", Chomp::Keep),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-15 — explicit indent with strip, indent-then-chomp order: `>2-`.
+    // `parse_block_header` accepts either order.
+    #[test]
+    fn explicit_indent_with_strip_indent_then_chomp_order() {
+        let events = event_variants(">2-\n  foo\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("foo", Chomp::Strip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Edge cases
+    // -----------------------------------------------------------------------
+
+    // IT-FB-16 — empty folded scalar (header only, no content).
+    #[test]
+    fn empty_folded_scalar_yields_empty_string() {
+        let events = event_variants(">\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-17 — all-blank content (blank lines only, no non-blank lines).
+    #[test]
+    fn all_blank_content_yields_empty_string_with_clip() {
+        let events = event_variants(">\n\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-18 — single-line with trailing blanks (Keep).
+    #[test]
+    fn keep_chomp_with_multiple_trailing_blanks() {
+        let events = event_variants(">+\n  only\n\n\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("only\n\n\n", Chomp::Keep),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // IT-FB-19 — terminated by dedent.
+    #[test]
+    fn folded_terminated_by_dedent() {
+        let events = parse_to_vec(">\n  foo\n  bar\nkey\n");
+        let scalar_value = events.iter().find_map(|r| match r {
+            Ok((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::Folded(_),
+                    ..
+                },
+                _,
+            )) => Some(value.as_ref()),
+            _ => None,
+        });
+        assert_eq!(scalar_value, Some("foo bar\n"));
+    }
+
+    // IT-FB-20 — leading blank before first content line.
+    // blank line before first content → leading newline (l-empty).
+    #[test]
+    fn leading_blank_before_first_content() {
+        let events = event_variants(">\n\n  foo\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: false },
+                folded("\nfoo\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Span correctness
+    // -----------------------------------------------------------------------
+
+    // IT-FB-21 — span starts at `>`.
+    #[test]
+    fn span_starts_at_gt() {
+        let results = parse_to_vec(">\n  hello\n");
+        let span = results
+            .iter()
+            .find_map(|r| match r {
+                Ok((
+                    Event::Scalar {
+                        style: ScalarStyle::Folded(_),
+                        ..
+                    },
+                    span,
+                )) => Some(*span),
+                _ => None,
+            })
+            .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
+        assert_eq!(span.start.byte_offset, 0, "span must start at the `>`");
+    }
+
+    // IT-FB-22 — span starts at `>` when preceded by whitespace.
+    #[test]
+    fn span_start_accounts_for_leading_whitespace() {
+        // "  >\n    hello\n": `>` is at byte offset 2.
+        let results = parse_to_vec("  >\n    hello\n");
+        let span = results
+            .iter()
+            .find_map(|r| match r {
+                Ok((
+                    Event::Scalar {
+                        style: ScalarStyle::Folded(_),
+                        ..
+                    },
+                    span,
+                )) => Some(*span),
+                _ => None,
+            })
+            .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
+        assert_eq!(
+            span.start.byte_offset, 2,
+            "span must start at `>` byte offset"
+        );
+    }
+
+    // IT-FB-23 — span ends after all consumed lines.
+    #[test]
+    fn span_end_after_all_consumed_lines() {
+        // ">\n  hello\n" = 10 bytes total.
+        let results = parse_to_vec(">\n  hello\n");
+        let span = results
+            .iter()
+            .find_map(|r| match r {
+                Ok((
+                    Event::Scalar {
+                        style: ScalarStyle::Folded(_),
+                        ..
+                    },
+                    span,
+                )) => Some(*span),
+                _ => None,
+            })
+            .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
+        assert_eq!(span.end.byte_offset, 10, "span must end after all 10 bytes");
+    }
+
+    // -----------------------------------------------------------------------
+    // Error paths
+    // -----------------------------------------------------------------------
+
+    // IT-FB-24 — invalid indicator character produces an error.
+    #[test]
+    fn invalid_indicator_character_produces_error() {
+        let results = parse_to_vec(">!\n  hello\n");
+        let has_err = results.iter().any(Result::is_err);
+        assert!(has_err, "expected a parse error for invalid indicator `!`");
+    }
+
+    // IT-FB-25 — indent indicator `0` is invalid.
+    #[test]
+    fn indent_indicator_zero_is_invalid() {
+        let results = parse_to_vec(">0\n  hello\n");
+        let has_err = results.iter().any(Result::is_err);
+        assert!(has_err, "expected a parse error for indent indicator `0`");
+    }
+
+    // IT-FB-26 — duplicate chomp indicator is invalid.
+    #[test]
+    fn duplicate_chomp_indicator_is_invalid() {
+        let results = parse_to_vec(">++\n  hello\n");
+        let has_err = results.iter().any(Result::is_err);
+        assert!(has_err, "expected a parse error for duplicate chomp `++`");
+    }
+
+    // -----------------------------------------------------------------------
+    // Explicit document integration
+    // -----------------------------------------------------------------------
+
+    // IT-FB-27 — folded scalar in explicit document.
+    #[test]
+    fn folded_scalar_in_explicit_document() {
+        let events = event_variants("---\n>\n  hello world\n...\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart { explicit: true },
+                folded("hello world\n", Chomp::Clip),
+                Event::DocumentEnd { explicit: true },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Style emission
+    // -----------------------------------------------------------------------
+
+    // IT-FB-28 — `ScalarStyle::Folded(Chomp::Clip)` emitted through `parse_events`.
+    // Explicit style discriminant check — ensures scanner wires to `Folded` not `Literal`.
+    #[test]
+    fn folded_scalar_style_is_folded_not_literal() {
+        let results = parse_to_vec(">\n  text\n");
+        let style = results.iter().find_map(|r| match r {
+            Ok((Event::Scalar { style, .. }, _)) => Some(*style),
+            _ => None,
+        });
+        assert_eq!(
+            style,
+            Some(ScalarStyle::Folded(Chomp::Clip)),
+            "scalar style must be Folded(Clip), not Literal or Plain"
+        );
+    }
+}

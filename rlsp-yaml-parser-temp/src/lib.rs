@@ -81,14 +81,26 @@ impl<'input> EventIter<'input> {
     /// - `Ok(None)` — no scalar recognised at this position.
     /// - `Err(e)` — a parse error (e.g. invalid escape sequence).
     fn try_consume_scalar(&mut self) -> Result<Option<(Event<'input>, Span)>, Error> {
-        // Block scalars are tried first — `|` is an indicator that cannot start
-        // a plain scalar, so there is no ambiguity.
+        // Block scalars are tried first — `|` and `>` are indicators that cannot
+        // start a plain scalar, so there is no ambiguity.
         if let Some(result) = self.lexer.try_consume_literal_block_scalar(0) {
             let (value, chomp, span) = result?;
             return Ok(Some((
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Literal(chomp),
+                    anchor: None,
+                    tag: None,
+                },
+                span,
+            )));
+        }
+        if let Some(result) = self.lexer.try_consume_folded_block_scalar(0) {
+            let (value, chomp, span) = result?;
+            return Ok(Some((
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::Folded(chomp),
                     anchor: None,
                     tag: None,
                 },

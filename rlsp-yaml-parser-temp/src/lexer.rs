@@ -756,6 +756,175 @@ impl<'input> Lexer<'input> {
         Some(Ok((Cow::Owned(value), chomp, span)))
     }
 
+    /// Try to tokenize a folded block scalar (`>`) starting at the current line.
+    ///
+    /// Implements YAML 1.2 §8.1.3 `c-l+folded` in block context.  The caller
+    /// supplies `parent_indent` — the indentation level of the enclosing block
+    /// node (`n` in the spec).
+    ///
+    /// **Borrow contract:** Always returns `Cow::Owned` — folding assembles a
+    /// transformed string that does not exist contiguously in the input.
+    ///
+    /// **Security:** Collection is O(n) in input size; no amplification.
+    /// `peek_until_dedent` may scan O(n) ahead — pre-existing constraint shared
+    /// with literal scalars.
+    pub fn try_consume_folded_block_scalar(
+        &mut self,
+        parent_indent: usize,
+    ) -> LiteralBlockResult<'input> {
+        let first_line = self.buf.peek_next()?;
+        let content = first_line.content.trim_start_matches([' ', '\t']);
+        if !content.starts_with('>') {
+            return None;
+        }
+
+        let leading = first_line.content.len() - content.len();
+        let gt_pos = Pos {
+            byte_offset: first_line.offset + leading,
+            char_offset: first_line.pos.char_offset + leading,
+            line: first_line.pos.line,
+            column: first_line.pos.column + leading,
+        };
+
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(header_line) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
+        self.current_pos = pos_after_line(&header_line);
+
+        // Parse the header — reuse `parse_block_header`; works identically for `>` and `|`.
+        let after_gt = &content[1..];
+        let (chomp, explicit_indent, header_err) = parse_block_header(after_gt, gt_pos);
+        if let Some(e) = header_err {
+            return Some(Err(e));
+        }
+
+        let content_indent: usize = if let Some(explicit) = explicit_indent {
+            parent_indent + explicit
+        } else {
+            let lookahead = self.buf.peek_until_dedent(parent_indent);
+            lookahead
+                .iter()
+                .find(|l| !l.content.trim_matches([' ', '\t']).is_empty())
+                .map_or(parent_indent + 1, |l| l.indent)
+        };
+
+        let (content_result, trailing_newlines) = self.collect_folded_lines(content_indent);
+        let folded = match content_result {
+            Ok(s) => s,
+            Err(e) => return Some(Err(e)),
+        };
+        let value = apply_chomping(folded, trailing_newlines, chomp);
+        let span = Span {
+            start: gt_pos,
+            end: self.current_pos,
+        };
+        Some(Ok((Cow::Owned(value), chomp, span)))
+    }
+
+    /// Collect and fold content lines for a folded block scalar.
+    ///
+    /// Returns `(content, trailing_blank_count)`.
+    ///
+    /// The physical line break after each content line is deferred — it becomes
+    /// the inter-line separator (space, `\n`, or N newlines) when the next line
+    /// is classified, per YAML 1.2 §8.1.3 folding rules:
+    ///
+    /// - Single break, both lines equally indented → space.
+    /// - Single break surrounding a more-indented line → `\n` (preserved).
+    /// - N blank lines between non-blank lines → N `\n`s.
+    fn collect_folded_lines(&mut self, content_indent: usize) -> (Result<String, Error>, usize) {
+        let mut out = String::new();
+        let mut trailing_newlines: usize = 0;
+        let mut last_had_break = false;
+        let mut prev_more_indented = false;
+        let mut has_content = false;
+
+        loop {
+            let Some(next) = self.buf.peek_next() else {
+                break;
+            };
+
+            let line_content = next.content;
+
+            if line_content.starts_with('\t') {
+                let tab_pos = next.pos;
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                return (
+                    Err(Error {
+                        pos: tab_pos,
+                        message: "tab character is not valid indentation in a block scalar"
+                            .to_owned(),
+                    }),
+                    0,
+                );
+            }
+
+            let after_indent = if next.indent >= content_indent {
+                line_content.get(content_indent..).unwrap_or("")
+            } else {
+                ""
+            };
+            let is_content_line = next.indent >= content_indent && !after_indent.is_empty();
+
+            if is_content_line {
+                let is_more_indented = next.indent > content_indent;
+                if has_content {
+                    if trailing_newlines > 0 {
+                        // N blank lines → N newlines (first break discarded).
+                        for _ in 0..trailing_newlines {
+                            out.push('\n');
+                        }
+                    } else if prev_more_indented || is_more_indented {
+                        // Break surrounding a more-indented line is preserved.
+                        out.push('\n');
+                    } else {
+                        // Single break between equally-indented lines → space.
+                        out.push(' ');
+                    }
+                } else {
+                    // Leading blank lines before first content line.
+                    for _ in 0..trailing_newlines {
+                        out.push('\n');
+                    }
+                }
+                trailing_newlines = 0;
+
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume content line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                out.push_str(after_indent);
+                // Defer the physical break — decided as separator by the next line.
+                last_had_break = consumed.break_type != BreakType::Eof;
+                prev_more_indented = is_more_indented;
+                has_content = true;
+            } else {
+                let trimmed = line_content.trim_matches([' ', '\t']);
+                if !trimmed.is_empty() {
+                    break; // Dedented non-whitespace terminates the scalar.
+                }
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume blank line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                trailing_newlines += 1;
+            }
+        }
+
+        // Append the final content line's physical break so `apply_chomping`
+        // sees the canonical `\n`-terminated content.
+        if has_content && last_had_break {
+            out.push('\n');
+        }
+
+        (Ok(out), trailing_newlines)
+    }
+
     /// Collect continuation lines for a multi-line double-quoted scalar.
     ///
     /// `owned` is the accumulated content so far (from the first line).

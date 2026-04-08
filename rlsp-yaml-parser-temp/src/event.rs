@@ -41,7 +41,16 @@ pub enum ScalarStyle {
     DoubleQuoted,
     /// A `|` literal block scalar (YAML 1.2 §8.1.2).
     Literal(Chomp),
-    // Folded(Chomp) (Task 9) added in its task.
+    /// A `>` folded block scalar (YAML 1.2 §8.1.3).
+    ///
+    /// Line folding is applied to the collected content: a single line break
+    /// between two equally-indented non-blank lines becomes a space; N blank
+    /// lines between non-blank lines produce N newlines; more-indented lines
+    /// preserve their relative leading whitespace and the line break before
+    /// them is kept as `\n` rather than folded to a space.  Callers must not
+    /// treat the value as whitespace-safe — more-indented lines can inject
+    /// arbitrary leading spaces into the parsed value.
+    Folded(Chomp),
 }
 
 /// A high-level YAML parse event.
