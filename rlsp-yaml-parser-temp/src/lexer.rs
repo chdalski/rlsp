@@ -1314,6 +1314,65 @@ fn scan_plain_line_block(content: &str) -> &str {
     &content[..committed_end]
 }
 
+/// Scan a plain scalar from `content` (flow context, after leading whitespace
+/// has been stripped).
+///
+/// Flow plain scalars (YAML 1.2 §7.3.3) cannot contain flow indicators
+/// (`,`, `[`, `]`, `{`, `}`) or a `:` that is followed by a space, tab, or
+/// flow indicator.  This function returns the longest prefix of `content` that
+/// is a valid flow plain scalar, trimmed of trailing whitespace.
+///
+/// This is `pub(crate)` so the flow parser in `lib.rs` can call it without
+/// routing through the Lexer struct — the input slice is already available at
+/// the call site.  Callers must not pass flow-context content to
+/// [`scan_plain_line_block`] — the block scanner does not stop at flow
+/// indicators.
+pub fn scan_plain_line_flow(content: &str) -> &str {
+    let mut chars = content.char_indices().peekable();
+    let mut committed_end: usize = 0;
+    let mut prev_was_ws = false;
+
+    while let Some((i, ch)) = chars.next() {
+        if matches!(ch, '\n' | '\r') {
+            break;
+        }
+
+        // Flow indicators always terminate a plain scalar.
+        if matches!(ch, ',' | '[' | ']' | '{' | '}') {
+            break;
+        }
+
+        if is_s_white(ch) {
+            prev_was_ws = true;
+            continue;
+        }
+
+        // `#` preceded by whitespace (or at position 0) starts a comment.
+        if ch == '#' && (i == 0 || prev_was_ws) {
+            break;
+        }
+
+        // `:` in flow context: terminates when followed by a space, tab,
+        // flow indicator, or end-of-content.  (YAML 1.2 §7.3.3)
+        if ch == ':' {
+            let next = chars.peek().map(|(_, c)| *c);
+            match next {
+                None | Some(' ' | '\t' | ',' | '[' | ']' | '{' | '}') => break,
+                _ => {}
+            }
+        }
+
+        if !ns_plain_safe_block(ch) {
+            break;
+        }
+
+        committed_end = i + ch.len_utf8();
+        prev_was_ws = false;
+    }
+
+    &content[..committed_end]
+}
+
 // ---------------------------------------------------------------------------
 // Character class predicates (YAML 1.2 §5)
 // ---------------------------------------------------------------------------
@@ -3531,5 +3590,93 @@ mod tests {
             matches!(cow, Cow::Owned(_)),
             "literal block scalars must always produce Cow::Owned"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group SPF: scan_plain_line_flow (Task 14)
+    // -----------------------------------------------------------------------
+
+    // SPF-1: plain word terminates at `]`
+    #[test]
+    fn flow_plain_terminates_at_close_bracket() {
+        assert_eq!(scan_plain_line_flow("abc]rest"), "abc");
+    }
+
+    // SPF-2: plain word terminates at `}`
+    #[test]
+    fn flow_plain_terminates_at_close_brace() {
+        assert_eq!(scan_plain_line_flow("abc}rest"), "abc");
+    }
+
+    // SPF-3: plain word terminates at `,`
+    #[test]
+    fn flow_plain_terminates_at_comma() {
+        assert_eq!(scan_plain_line_flow("abc,rest"), "abc");
+    }
+
+    // SPF-4: plain word terminates at `[`
+    #[test]
+    fn flow_plain_terminates_at_open_bracket() {
+        assert_eq!(scan_plain_line_flow("abc[rest"), "abc");
+    }
+
+    // SPF-5: plain word terminates at `{`
+    #[test]
+    fn flow_plain_terminates_at_open_brace() {
+        assert_eq!(scan_plain_line_flow("abc{rest"), "abc");
+    }
+
+    // SPF-6: plain word is returned in full when no terminator
+    #[test]
+    fn flow_plain_returns_full_when_no_terminator() {
+        assert_eq!(scan_plain_line_flow("hello"), "hello");
+    }
+
+    // SPF-7: empty input returns empty
+    #[test]
+    fn flow_plain_empty_input_returns_empty() {
+        assert_eq!(scan_plain_line_flow(""), "");
+    }
+
+    // SPF-8: `#` preceded by whitespace starts a comment (terminates scalar)
+    #[test]
+    fn flow_plain_hash_after_space_starts_comment() {
+        assert_eq!(scan_plain_line_flow("abc # comment"), "abc");
+    }
+
+    // SPF-9: `#` not preceded by whitespace is part of the scalar
+    #[test]
+    fn flow_plain_hash_without_preceding_space_is_content() {
+        assert_eq!(scan_plain_line_flow("abc#def"), "abc#def");
+    }
+
+    // SPF-10: `:` followed by space terminates plain scalar
+    #[test]
+    fn flow_plain_colon_space_terminates() {
+        assert_eq!(scan_plain_line_flow("key: rest"), "key");
+    }
+
+    // SPF-11: `:` followed by flow indicator terminates plain scalar
+    #[test]
+    fn flow_plain_colon_flow_indicator_terminates() {
+        assert_eq!(scan_plain_line_flow("key:}rest"), "key");
+    }
+
+    // SPF-12: `:` at EOL terminates plain scalar (None next)
+    #[test]
+    fn flow_plain_colon_at_eol_terminates() {
+        assert_eq!(scan_plain_line_flow("key:"), "key");
+    }
+
+    // SPF-13: `:` in the middle not followed by separator is part of scalar
+    #[test]
+    fn flow_plain_colon_followed_by_alnum_is_content() {
+        assert_eq!(scan_plain_line_flow("a:b"), "a:b");
+    }
+
+    // SPF-14: trailing whitespace is not included in the result
+    #[test]
+    fn flow_plain_trailing_whitespace_excluded() {
+        assert_eq!(scan_plain_line_flow("abc   "), "abc");
     }
 }

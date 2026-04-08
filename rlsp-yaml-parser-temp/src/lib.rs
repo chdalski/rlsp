@@ -89,7 +89,12 @@ enum MappingPhase {
     Value,
 }
 
-/// An entry on the collection stack, tracking open sequences and mappings.
+/// An entry on the collection stack, tracking open block sequences and mappings.
+///
+/// Flow collections are fully parsed by [`EventIter::handle_flow_collection`]
+/// before returning; they never leave an entry on this stack.  The combined
+/// depth limit (block + flow) is enforced inside `handle_flow_collection` by
+/// summing `coll_stack.len()` with the local flow-frame count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CollectionEntry {
     /// An open block sequence.  Holds the column of its `-` indicator.
@@ -97,6 +102,15 @@ enum CollectionEntry {
     /// An open block mapping.  Holds the column of its first key and the
     /// current phase (expecting key or value).
     Mapping(usize, MappingPhase),
+}
+
+/// Whether the next expected token in a flow mapping is a key or value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlowMappingPhase {
+    /// Expecting the next key (or the closing `}`).
+    Key,
+    /// Expecting the value after a key has been consumed.
+    Value,
 }
 
 impl CollectionEntry {
@@ -828,6 +842,15 @@ impl<'input> EventIter<'input> {
             return StepResult::Continue;
         }
 
+        // ---- Flow collection detection: `[` or `{` starts a flow collection ----
+
+        if let Some(line) = self.lexer.peek_next_line() {
+            let trimmed = line.content.trim_start_matches(' ');
+            if trimmed.starts_with('[') || trimmed.starts_with('{') {
+                return self.handle_flow_collection();
+            }
+        }
+
         // ---- Block sequence / mapping entry detection ----
 
         if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
@@ -1120,6 +1143,640 @@ impl<'input> EventIter<'input> {
             ));
             self.advance_mapping_to_key();
         }
+    }
+
+    /// Handle a flow collection (`[...]` or `{...}`) starting on the current line.
+    ///
+    /// This method reads the complete flow collection — potentially spanning
+    /// multiple physical lines — and pushes all events (SequenceStart/End,
+    /// MappingStart/End, Scalar) to `self.queue`.  It returns when the
+    /// outermost closing delimiter (`]` or `}`) is consumed.
+    ///
+    /// ## Security invariants
+    ///
+    /// - **No recursion:** the parser uses an explicit `Vec<FlowFrame>` stack
+    ///   rather than recursive function calls, preventing stack overflow on
+    ///   deeply nested input.
+    /// - **Unified depth limit:** each new nested collection checks against
+    ///   `MAX_COLLECTION_DEPTH` using the same `coll_stack.len()` counter as
+    ///   block collections, so flow and block nesting depths are additive.
+    /// - **Incremental parsing:** content is processed line-by-line; no
+    ///   `String` buffer holds the entire flow body.
+    /// - **Unterminated collection:** reaching EOF without the matching closing
+    ///   delimiter returns `Err`.
+    #[allow(clippy::too_many_lines)]
+    fn handle_flow_collection(&mut self) -> StepResult<'input> {
+        use crate::lexer::scan_plain_line_flow;
+        use std::borrow::Cow;
+
+        // -----------------------------------------------------------------------
+        // Local types for the explicit flow-parser stack.
+        // -----------------------------------------------------------------------
+
+        /// One frame on the explicit flow-parser stack.
+        #[derive(Clone, Copy)]
+        enum FlowFrame {
+            /// An open `[...]` sequence.
+            ///
+            /// `has_value` is `false` immediately after opening and immediately
+            /// after each comma; it becomes `true` when a scalar or nested
+            /// collection is emitted.  A comma arriving when `has_value` is
+            /// `false` is a leading comma error.
+            Sequence { has_value: bool },
+            /// An open `{...}` mapping.
+            ///
+            /// `has_value` tracks the same invariant as in `Sequence` but for
+            /// the mapping as a whole (not per key/value pair).
+            Mapping {
+                phase: FlowMappingPhase,
+                has_value: bool,
+            },
+        }
+
+        // Design note — phase-advance pattern
+        //
+        // Four sites below repeat the same `if let Some(frame) = flow_stack.last_mut()
+        // { match frame { Sequence { has_value } => ... Mapping { phase, has_value } =>
+        // ... } }` shape.  Extracting a helper function would require moving `FlowFrame`
+        // and `FlowMappingPhase` to module scope — adding module-level types whose sole
+        // purpose is to enable this refactor adds more complexity than the duplication
+        // costs.  Each site is 6–8 lines and clearly labelled by its comment; the
+        // repetition is intentional and stable.
+
+        // -----------------------------------------------------------------------
+        // Buffer-management invariant
+        // -----------------------------------------------------------------------
+        //
+        // The line buffer always holds the current line un-consumed.  We peek to
+        // read content and only consume the line when we need to advance past it
+        // (end-of-line or quoted-scalar delegation).
+        //
+        // `cur_content` / `cur_base_pos` always mirror what `peek_next_line()`
+        // returns.  After any call that changes the buffer (consume_line /
+        // prepend_inline_line), we immediately re-sync via peek.
+        //
+        // Helper: advance `pos` over `content[..byte_len]`, one char at a time.
+
+        let abs_pos = |base: Pos, content: &str, i: usize| -> Pos {
+            let mut p = base;
+            for ch in content[..i].chars() {
+                p = p.advance(ch);
+            }
+            p
+        };
+
+        // -----------------------------------------------------------------------
+        // Initialise: read the current line, locate the opening delimiter.
+        // -----------------------------------------------------------------------
+
+        // SAFETY: caller verified via peek in step_in_document.
+        let Some(first_line) = self.lexer.peek_next_line() else {
+            unreachable!("handle_flow_collection called without a pending line")
+        };
+
+        let leading = first_line.content.len() - first_line.content.trim_start_matches(' ').len();
+
+        // Stack for tracking open flow collections (nested via explicit iteration,
+        // not recursion — security requirement).
+        let mut flow_stack: Vec<FlowFrame> = Vec::new();
+        // All events assembled during this call (pushed to self.queue at end).
+        let mut events: Vec<(Event<'input>, Span)> = Vec::new();
+        // Current byte offset within `cur_content`.
+        let mut pos_in_line: usize = leading;
+
+        // Re-sync `cur_content` / `cur_base_pos` from the buffer.
+        // Returns false when the buffer is empty (EOF mid-flow).
+        // INVARIANT: called every time after consuming or prepending a line.
+        macro_rules! resync {
+            () => {{
+                match self.lexer.peek_next_line() {
+                    Some(l) => {
+                        // Safe: we re-assign these immediately without holding
+                        // a borrow on `self.lexer` at the same time.
+                        (l.content, l.pos)
+                    }
+                    None => {
+                        // EOF
+                        ("", self.lexer.current_pos())
+                    }
+                }
+            }};
+        }
+
+        let (mut cur_content, mut cur_base_pos) = resync!();
+
+        // -----------------------------------------------------------------------
+        // Main parse loop — iterates over characters in the current (and
+        // subsequent) lines until the outermost closing delimiter is found.
+        // -----------------------------------------------------------------------
+
+        'outer: loop {
+            // Skip leading spaces/tabs and comments.
+            while pos_in_line < cur_content.len() {
+                let Some(ch) = cur_content[pos_in_line..].chars().next() else {
+                    break;
+                };
+                if ch == ' ' || ch == '\t' {
+                    pos_in_line += 1;
+                } else if ch == '#' {
+                    pos_in_line = cur_content.len();
+                } else {
+                    break;
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // End of line — consume and advance.
+            // ----------------------------------------------------------------
+            if pos_in_line >= cur_content.len() {
+                self.lexer.consume_line();
+
+                if flow_stack.is_empty() {
+                    // Outermost collection closed; done.
+                    break 'outer;
+                }
+
+                (cur_content, cur_base_pos) = resync!();
+                if cur_content.is_empty() && self.lexer.at_eof() {
+                    let err_pos = self.lexer.current_pos();
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "unterminated flow collection: unexpected end of input".into(),
+                    }));
+                }
+                pos_in_line = 0;
+                continue 'outer;
+            }
+
+            let Some(ch) = cur_content[pos_in_line..].chars().next() else {
+                continue 'outer;
+            };
+
+            // ----------------------------------------------------------------
+            // Opening delimiters `[` and `{`
+            // ----------------------------------------------------------------
+            if ch == '[' || ch == '{' {
+                // Check unified depth limit (flow + block combined).
+                let total_depth = self.coll_stack.len() + flow_stack.len();
+                if total_depth >= MAX_COLLECTION_DEPTH {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "collection nesting depth exceeds limit".into(),
+                    }));
+                }
+
+                let open_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                let open_span = zero_span(open_pos);
+                pos_in_line += 1;
+
+                if ch == '[' {
+                    flow_stack.push(FlowFrame::Sequence { has_value: false });
+                    events.push((
+                        Event::SequenceStart {
+                            anchor: None,
+                            tag: None,
+                            style: CollectionStyle::Flow,
+                        },
+                        open_span,
+                    ));
+                } else {
+                    flow_stack.push(FlowFrame::Mapping {
+                        phase: FlowMappingPhase::Key,
+                        has_value: false,
+                    });
+                    events.push((
+                        Event::MappingStart {
+                            anchor: None,
+                            tag: None,
+                            style: CollectionStyle::Flow,
+                        },
+                        open_span,
+                    ));
+                }
+                continue 'outer;
+            }
+
+            // ----------------------------------------------------------------
+            // Closing delimiters `]` and `}`
+            // ----------------------------------------------------------------
+            if ch == ']' || ch == '}' {
+                let close_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                let close_span = zero_span(close_pos);
+                pos_in_line += 1;
+
+                let Some(top) = flow_stack.pop() else {
+                    // Closing delimiter with empty stack — mismatched.
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: close_pos,
+                        message: format!("unexpected '{ch}' in flow context"),
+                    }));
+                };
+
+                match (ch, top) {
+                    (']', FlowFrame::Sequence { .. }) => {
+                        events.push((Event::SequenceEnd, close_span));
+                    }
+                    ('}', FlowFrame::Mapping { phase, .. }) => {
+                        // If mapping is in Value phase (key emitted, no value yet),
+                        // emit empty value before closing.
+                        if phase == FlowMappingPhase::Value {
+                            events.push((empty_scalar_event(), close_span));
+                        }
+                        events.push((Event::MappingEnd, close_span));
+                    }
+                    (']', FlowFrame::Mapping { .. }) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(Error {
+                            pos: close_pos,
+                            message: "expected '}' to close flow mapping, found ']'".into(),
+                        }));
+                    }
+                    ('}', FlowFrame::Sequence { .. }) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(Error {
+                            pos: close_pos,
+                            message: "expected ']' to close flow sequence, found '}'".into(),
+                        }));
+                    }
+                    _ => unreachable!("all (ch, top) combinations covered above"),
+                }
+
+                // After a nested collection closes inside a parent frame,
+                // mark the parent as having a value (the nested collection was it),
+                // and if it's a mapping in Value phase, advance to Key phase.
+                if let Some(parent) = flow_stack.last_mut() {
+                    match parent {
+                        FlowFrame::Sequence { has_value } => {
+                            *has_value = true;
+                        }
+                        FlowFrame::Mapping { phase, has_value } => {
+                            *has_value = true;
+                            if *phase == FlowMappingPhase::Value {
+                                *phase = FlowMappingPhase::Key;
+                            }
+                        }
+                    }
+                }
+
+                if flow_stack.is_empty() {
+                    // Outermost collection closed.
+                    // Consume the current line; prepend any non-empty tail so the
+                    // block state machine can process content after the `]`/`}`.
+                    let tail_content = &cur_content[pos_in_line..];
+                    self.lexer.consume_line();
+                    if !tail_content.trim_start_matches([' ', '\t']).is_empty() {
+                        let tail_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                        let synthetic = crate::lines::Line {
+                            content: tail_content,
+                            offset: tail_pos.byte_offset,
+                            indent: tail_pos.column,
+                            break_type: crate::lines::BreakType::Eof,
+                            pos: tail_pos,
+                        };
+                        self.lexer.prepend_inline_line(synthetic);
+                    }
+                    break 'outer;
+                }
+                continue 'outer;
+            }
+
+            // ----------------------------------------------------------------
+            // Comma separator
+            // ----------------------------------------------------------------
+            if ch == ',' {
+                // Leading-comma check: if the current frame has not yet produced
+                // any value since it was opened (or since the last comma), this
+                // comma is invalid — e.g. `[,]` or `{,}`.
+                let leading = match flow_stack.last() {
+                    Some(
+                        FlowFrame::Sequence { has_value } | FlowFrame::Mapping { has_value, .. },
+                    ) => !has_value,
+                    None => false,
+                };
+                if leading {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "invalid leading comma in flow collection".into(),
+                    }));
+                }
+
+                pos_in_line += 1;
+
+                // Skip whitespace after comma.
+                while pos_in_line < cur_content.len() {
+                    match cur_content[pos_in_line..].chars().next() {
+                        Some(c) if c == ' ' || c == '\t' => pos_in_line += 1,
+                        _ => break,
+                    }
+                }
+
+                // Double-comma check: next char must not be another comma.
+                if cur_content[pos_in_line..].starts_with(',') {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "invalid empty entry: consecutive commas in flow collection"
+                            .into(),
+                    }));
+                }
+
+                // Reset has_value and (for mappings) go back to Key phase.
+                if let Some(frame) = flow_stack.last_mut() {
+                    match frame {
+                        FlowFrame::Sequence { has_value } => {
+                            *has_value = false;
+                        }
+                        FlowFrame::Mapping { phase, has_value } => {
+                            *has_value = false;
+                            if *phase == FlowMappingPhase::Value {
+                                *phase = FlowMappingPhase::Key;
+                            }
+                        }
+                    }
+                }
+
+                continue 'outer;
+            }
+
+            // ----------------------------------------------------------------
+            // Block scalar indicators forbidden in flow context
+            // ----------------------------------------------------------------
+            if ch == '|' || ch == '>' {
+                let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: format!(
+                        "block scalar indicator '{ch}' is not allowed inside a flow collection"
+                    ),
+                }));
+            }
+
+            // ----------------------------------------------------------------
+            // Quoted scalars — delegate to existing lexer methods.
+            //
+            // Strategy: consume the current line, prepend a synthetic line
+            // starting exactly at the quote character, call the method, then
+            // re-sync `cur_content` / `cur_base_pos` from the buffer.
+            // ----------------------------------------------------------------
+            if ch == '\'' || ch == '"' {
+                // `remaining` borrows from `cur_content` which borrows from `'input`.
+                // We capture it before touching the lexer buffer.
+                let remaining: &'input str = &cur_content[pos_in_line..];
+                let cur_abs_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+
+                // Consume the current line from the buffer and replace it with
+                // a synthetic line that starts at the quote character.  The
+                // quoted-scalar method will consume this synthetic line entirely,
+                // including any content after the closing quote — so we must
+                // reconstruct the tail from `remaining` and `span` below.
+                self.lexer.consume_line();
+                let synthetic = crate::lines::Line {
+                    content: remaining,
+                    offset: cur_abs_pos.byte_offset,
+                    indent: cur_abs_pos.column,
+                    break_type: crate::lines::BreakType::Eof,
+                    pos: cur_abs_pos,
+                };
+                self.lexer.prepend_inline_line(synthetic);
+
+                // Call the appropriate quoted-scalar method.
+                let result = if ch == '\'' {
+                    self.lexer.try_consume_single_quoted(0)
+                } else {
+                    self.lexer.try_consume_double_quoted(0)
+                };
+
+                let (value, span) = match result {
+                    Ok(Some(vs)) => vs,
+                    Ok(None) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(Error {
+                            pos: cur_abs_pos,
+                            message: "expected quoted scalar".into(),
+                        }));
+                    }
+                    Err(e) => {
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                };
+
+                let style = if ch == '\'' {
+                    ScalarStyle::SingleQuoted
+                } else {
+                    ScalarStyle::DoubleQuoted
+                };
+                events.push((
+                    Event::Scalar {
+                        value,
+                        style,
+                        anchor: None,
+                        tag: None,
+                    },
+                    span,
+                ));
+
+                // The quoted-scalar method consumed its synthetic line entirely.
+                // Any content after the closing quote is in `remaining` starting
+                // at byte offset `span.end.byte_offset - cur_abs_pos.byte_offset`.
+                // Prepend a synthetic line for that tail so the flow parser
+                // continues processing `,`, `]`, `}`, etc. after the scalar.
+                let consumed_bytes = span.end.byte_offset - cur_abs_pos.byte_offset;
+                let tail_in_remaining = &remaining[consumed_bytes..];
+                if !tail_in_remaining.is_empty() {
+                    let tail_syn = crate::lines::Line {
+                        content: tail_in_remaining,
+                        offset: span.end.byte_offset,
+                        indent: span.end.column,
+                        break_type: crate::lines::BreakType::Eof,
+                        pos: span.end,
+                    };
+                    self.lexer.prepend_inline_line(tail_syn);
+                }
+
+                // Re-sync from the buffer.
+                (cur_content, cur_base_pos) = resync!();
+                pos_in_line = 0;
+
+                if cur_content.is_empty() && self.lexer.at_eof() && !flow_stack.is_empty() {
+                    let err_pos = self.lexer.current_pos();
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "unterminated flow collection: unexpected end of input".into(),
+                    }));
+                }
+
+                // Advance mapping phase for the emitted scalar; mark frame as having a value.
+                if let Some(frame) = flow_stack.last_mut() {
+                    match frame {
+                        FlowFrame::Sequence { has_value } => {
+                            *has_value = true;
+                        }
+                        FlowFrame::Mapping { phase, has_value } => {
+                            *has_value = true;
+                            *phase = match *phase {
+                                FlowMappingPhase::Key => FlowMappingPhase::Value,
+                                FlowMappingPhase::Value => FlowMappingPhase::Key,
+                            };
+                        }
+                    }
+                }
+
+                continue 'outer;
+            }
+
+            // ----------------------------------------------------------------
+            // Explicit key indicator `?` in flow mappings
+            // ----------------------------------------------------------------
+            if ch == '?' {
+                let next_ch = cur_content[pos_in_line + 1..].chars().next();
+                if next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | '\n' | '\r')) {
+                    // `?` followed by whitespace/EOL: explicit key indicator.
+                    pos_in_line += 1;
+                    continue 'outer;
+                }
+                // `?` not followed by whitespace — treat as plain scalar start.
+            }
+
+            // ----------------------------------------------------------------
+            // `:` value separator in flow mappings
+            // ----------------------------------------------------------------
+            if ch == ':' {
+                let next_ch = cur_content[pos_in_line + 1..].chars().next();
+                let is_value_sep =
+                    next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | ',' | ']' | '}' | '\n' | '\r'));
+                if is_value_sep {
+                    if let Some(FlowFrame::Mapping { phase, .. }) = flow_stack.last_mut() {
+                        if *phase == FlowMappingPhase::Key {
+                            *phase = FlowMappingPhase::Value;
+                        }
+                    }
+                    pos_in_line += 1;
+                    continue 'outer;
+                }
+                // `:` not followed by separator — treat as plain scalar char.
+            }
+
+            // ----------------------------------------------------------------
+            // Plain scalar in flow context
+            // ----------------------------------------------------------------
+            {
+                // Indicator characters that cannot start a plain scalar in flow.
+                let is_plain_first = if matches!(
+                    ch,
+                    ',' | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '#'
+                        | '&'
+                        | '*'
+                        | '!'
+                        | '|'
+                        | '>'
+                        | '\''
+                        | '"'
+                        | '%'
+                        | '@'
+                        | '`'
+                ) {
+                    false
+                } else if matches!(ch, '?' | ':' | '-') {
+                    // These start a plain scalar only if followed by a safe char.
+                    let after = &cur_content[pos_in_line + ch.len_utf8()..];
+                    let next_c = after.chars().next();
+                    next_c.is_some_and(|nc| !matches!(nc, ' ' | '\t' | ',' | '[' | ']' | '{' | '}'))
+                } else {
+                    true
+                };
+
+                if is_plain_first {
+                    let slice = &cur_content[pos_in_line..];
+                    let scanned = scan_plain_line_flow(slice);
+                    if !scanned.is_empty() {
+                        let scalar_start = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                        let scalar_end =
+                            abs_pos(cur_base_pos, cur_content, pos_in_line + scanned.len());
+                        let scalar_span = Span {
+                            start: scalar_start,
+                            end: scalar_end,
+                        };
+
+                        events.push((
+                            Event::Scalar {
+                                value: Cow::Borrowed(scanned),
+                                style: ScalarStyle::Plain,
+                                anchor: None,
+                                tag: None,
+                            },
+                            scalar_span,
+                        ));
+                        pos_in_line += scanned.len();
+
+                        // Advance mapping phase; mark frame as having a value.
+                        if let Some(frame) = flow_stack.last_mut() {
+                            match frame {
+                                FlowFrame::Sequence { has_value } => {
+                                    *has_value = true;
+                                }
+                                FlowFrame::Mapping { phase, has_value } => {
+                                    *has_value = true;
+                                    *phase = match *phase {
+                                        FlowMappingPhase::Key => FlowMappingPhase::Value,
+                                        FlowMappingPhase::Value => FlowMappingPhase::Key,
+                                    };
+                                }
+                            }
+                        }
+                        continue 'outer;
+                    }
+                }
+
+                // Reserved indicators — tasks 16/17/19 will handle anchors,
+                // aliases, tags, and directives. Silently skipping them would
+                // mangle YAML structure (e.g. `[&x]` would emit the anchor
+                // name as a plain scalar instead of an error), so we error
+                // early here.
+                if matches!(ch, '&' | '*' | '!' | '%' | '@' | '`') {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: format!(
+                            "indicator '{ch}' inside flow collection is not yet supported"
+                        ),
+                    }));
+                }
+
+                // Any other character that is not a plain-scalar start and is
+                // not an indicator handled above (e.g. C0 control characters,
+                // DEL, C1 controls, surrogates) is invalid here. Error rather
+                // than panicking — this is user-supplied input.
+                let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: format!("invalid character {ch:?} inside flow collection"),
+                }));
+            }
+        }
+
+        // Tick the parent block mapping phase (if any) after completing a flow
+        // collection that was a key or value in a block mapping.
+        self.tick_mapping_phase_after_scalar();
+
+        // Push all accumulated events to the queue.
+        self.queue.extend(events);
+        StepResult::Continue
     }
 
     /// Tick the key/value phase of the innermost open mapping after emitting a
