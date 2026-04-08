@@ -720,15 +720,21 @@ variants. All 211 smoke tests pass; committed in `9f4ecb0`.
 
 ### Task 13: Nested block collections
 
-- [ ] Block sequences can contain block mappings and vice
+**Status:** Completed in commit `09b5b10`.
+
+- [x] Block sequences can contain block mappings and vice
   versa
-- [ ] Indent rules across nesting boundaries
-- [ ] Compact in-line forms (e.g., `- key: value` where
+- [x] Indent rules across nesting boundaries
+- [x] Compact in-line forms (e.g., `- key: value` where
   the mapping starts on the sequence entry line)
-- [ ] Conformance tests for nested block collections must
-  pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): nested block collections`
+- [x] Conformance tests for nested block collections must
+  pass — 37 smoke tests in `mod nested_collections` cover
+  the scope; yaml-test-suite conformance is wired to
+  `rlsp-yaml-parser` (not parser-temp) and is deferred to
+  Task 21
+- [x] Build, clippy, tests pass (248 smoke + 278 unit,
+  zero clippy warnings)
+- [x] Commit: `feat(parser-temp): nested block collections`
 
 **Reference impl consultation:**
 1. Local: `block.rs` `s_l_block_indented()`,
@@ -738,6 +744,38 @@ variants. All 211 smoke tests pass; committed in `9f4ecb0`.
 
 **Advisors:** test-engineer (nesting is where most
 indent-related conformance failures hide).
+
+**Reviewer note (resubmission):** Task 13 was planned as an
+audit-and-strengthen exercise — Task 12's unified `coll_stack`
+pre-delivered most nesting combinations as a natural consequence of
+its design. The initial submission added 34 `nested_collections`
+smoke tests (Groups A–H) covering every cross-type combination from
+the test-engineer spec plus three targeted parser fixes for the
+YAML §8.2.1 seq-spaces rule: `handle_sequence_entry` opens a new
+sequence when the top of the stack is `Mapping(col, Value)` and
+`dash_indent >= col` (not just `> col`); `handle_mapping_entry`
+closes a same-indent sequence whose immediate parent is a mapping
+at that column before processing the new key, transitioning the
+parent mapping back to `Key` phase; and a bare `-` followed by a
+next line at a deeper indent defers empty-scalar emission so the
+indented content becomes the item's block value. A Gap 2
+table-driven unit test enforces the
+`is_implicit_mapping_line` ↔ `find_value_indicator_offset`
+contract at the `consume_mapping_entry` `unreachable!` site. The
+initial submission was rejected for a High test-coverage gap: the
+lead's review directive required span regression-guards on three
+cases "at least" (`- key: value`, `- - key: value`, `key:\n  - item`),
+and 4 of the 12 mandated span assertions were present. The
+resubmission added three span tests (`sequence_start_span_in_compact_seq_map`,
+`seq_of_seq_of_map_spans`, `mapping_and_scalar_spans_with_seq_value`)
+locking in the outer `SequenceStart` at `(0,0,1)` for
+`- key: value`, all five positions for `- - key: val` (outer
+`SeqStart (0,0,1)`, inner `SeqStart (2,2,1)`, `MappingStart (4,4)`,
+key `(4,4)`, val `(9,9)`), and the outer `MappingStart (0,0,1)` +
+item scalar `(9,4,2)` for `key:\n  - item`. The parser was
+empirically correct on all these cases at first submission — the
+gap was a regression-guard gap, not a correctness bug. All 248
+smoke tests pass; committed in `09b5b10`.
 
 ### Task 14: Flow sequences and mappings
 
