@@ -194,6 +194,24 @@ impl<'input> Lexer<'input> {
         (marker_pos, after)
     }
 
+    /// Peek at the next line without consuming it.
+    ///
+    /// Returns the prepended synthetic line first (if any), then the normally
+    /// buffered next line.  The returned reference is valid until the next
+    /// call to any method that consumes or modifies the buffer.
+    #[must_use]
+    pub fn peek_next_line(&self) -> Option<&Line<'input>> {
+        self.buf.peek_next()
+    }
+
+    /// Prepend a synthetic line to the front of the buffer.
+    ///
+    /// Used to re-present inline content extracted from a sequence-entry line
+    /// (e.g. `- item` from `- - item\n`) as if it were a separate next line.
+    pub fn prepend_inline_line(&mut self, line: Line<'input>) {
+        self.buf.prepend_line(line);
+    }
+
     /// Consume the currently-primed line (any content) and advance position.
     pub fn consume_line(&mut self) {
         if let Some(line) = self.buf.consume_next() {

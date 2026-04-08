@@ -158,6 +158,9 @@ fn scan_line(remaining: &str, pos: Pos, is_first: bool) -> Option<(Line<'_>, &st
 pub struct LineBuffer<'input> {
     /// Remaining unparsed input (past the next line's terminator).
     remaining: &'input str,
+    /// A synthetic line prepended by the caller (e.g. inline sequence content
+    /// extracted from a sequence-entry line).  Drained before `next`.
+    prepend: Option<Line<'input>>,
     /// The pre-parsed next line, if any.
     next: Option<Line<'input>>,
     /// Position at the start of `remaining`.
@@ -175,6 +178,7 @@ impl<'input> LineBuffer<'input> {
     pub fn new(input: &'input str) -> Self {
         let mut buf = Self {
             remaining: input,
+            prepend: None,
             next: None,
             remaining_pos: Pos::ORIGIN,
             remaining_is_first: true,
@@ -184,21 +188,47 @@ impl<'input> LineBuffer<'input> {
         buf
     }
 
+    /// Prepend a synthetic line that will be returned by the next call to
+    /// [`Self::peek_next`] / [`Self::consume_next`], ahead of any real lines.
+    ///
+    /// Used to re-present inline content extracted from a sequence-entry line
+    /// (e.g. the `- item` part of `- - item`) as if it were a separate line.
+    /// Only one prepend slot exists; calling this when a prepend is already
+    /// pending is a logic error (the existing prepend would be silently
+    /// dropped).
+    pub fn prepend_line(&mut self, line: Line<'input>) {
+        debug_assert!(
+            self.prepend.is_none(),
+            "prepend_line called with pending prepend already set"
+        );
+        self.lookahead.clear();
+        self.prepend = Some(line);
+    }
+
     /// Look at the next line without consuming it.
+    ///
+    /// Returns the prepended synthetic line first (if any), then the normally
+    /// buffered next line.
     #[must_use]
-    pub const fn peek_next(&self) -> Option<&Line<'input>> {
-        self.next.as_ref()
+    pub fn peek_next(&self) -> Option<&Line<'input>> {
+        self.prepend.as_ref().or(self.next.as_ref())
     }
 
     /// Convenience: the indent of the next line, without consuming it.
     #[must_use]
     pub fn peek_next_indent(&self) -> Option<usize> {
-        self.next.as_ref().map(|l| l.indent)
+        self.peek_next().map(|l| l.indent)
     }
 
     /// Advance: return the currently primed next line and prime the following
     /// one from the remaining input.  Returns `None` when no lines remain.
+    ///
+    /// Drains the prepended synthetic line first (if any).
     pub fn consume_next(&mut self) -> Option<Line<'input>> {
+        // Drain the prepend slot first.
+        if let Some(line) = self.prepend.take() {
+            return Some(line);
+        }
         // Clear any cached lookahead — it was based on the old position.
         self.lookahead.clear();
         let line = self.next.take()?;
@@ -206,11 +236,11 @@ impl<'input> LineBuffer<'input> {
         Some(line)
     }
 
-    /// True when no more lines are available (buffer is empty and input is
-    /// exhausted).
+    /// True when no more lines are available (buffer is empty, no prepend, and
+    /// input is exhausted).
     #[must_use]
     pub const fn at_eof(&self) -> bool {
-        self.next.is_none()
+        self.prepend.is_none() && self.next.is_none()
     }
 
     /// Scan forward without consuming to collect all lines with
