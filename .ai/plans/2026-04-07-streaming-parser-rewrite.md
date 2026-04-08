@@ -229,8 +229,8 @@ user has explicitly approved this scope.
 - [x] Implement plain, quoted, and literal block scalars (Tasks 6-8) — Task 6 `e624786`, Task 7 `c06c0b2`, Task 8 `ddc3038`
 - [x] Enable `clippy::panic` and clean up panic sites (Task 9) — `cb55273`
 - [x] Implement folded block scalars (Task 10) — `f107749`
-- [ ] Implement block collections (Tasks 11-13)
-- [ ] Implement flow collections (Tasks 14-15)
+- [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
+- [ ] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`
 - [ ] Implement anchors, tags, aliases, comments (Tasks 16-18)
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
@@ -779,18 +779,25 @@ smoke tests pass; committed in `09b5b10`.
 
 ### Task 14: Flow sequences and mappings
 
-- [ ] Flow sequence: `[a, b, c]`
-- [ ] Flow mapping: `{a: b, c: d}`
-- [ ] Empty flow collections
-- [ ] Multi-line flow collections
-- [ ] Trailing commas (allowed)
-- [ ] Flow scalars inside flow collections (plain scalars
+**Status:** Completed in commit `82ad832`.
+
+- [x] Flow sequence: `[a, b, c]`
+- [x] Flow mapping: `{a: b, c: d}`
+- [x] Empty flow collections
+- [x] Multi-line flow collections
+- [x] Trailing commas (allowed)
+- [x] Flow scalars inside flow collections (plain scalars
   have stricter rules in flow context)
-- [ ] Emit Sequence/Mapping events with nested events for
+- [x] Emit Sequence/Mapping events with nested events for
   items
-- [ ] Conformance tests for flow collections must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): flow sequences and mappings`
+- [x] Conformance tests for flow collections must pass —
+  46 smoke tests in `mod flow_collections` cover the
+  scope; yaml-test-suite conformance is wired to
+  `rlsp-yaml-parser` (not parser-temp) and is deferred
+  to Task 21
+- [x] Build, clippy, tests pass (295 smoke + 292 unit,
+  zero clippy warnings)
+- [x] Commit: `feat(parser-temp): flow sequences and mappings`
 
 **Reference impl consultation:**
 1. Local: `flow.rs` — the entire file is flow productions.
@@ -800,6 +807,41 @@ smoke tests pass; committed in `09b5b10`.
 2. HsYAML and libfyaml flow handling
 
 **Advisors:** test-engineer.
+
+**Reviewer note (re-resubmission):** Task 14 went through three review
+rounds. Round 1 rejected for a High silent-scope-deferral finding: the
+plain-scalar fallback silently skipped the reserved c-indicators (`&`,
+`*`, `!`, `%`, `@`, backtick) inside flow collections, so `[&x]` parsed
+as `SequenceStart, Scalar("x"), SequenceEnd` instead of erroring — a
+data-loss bug on valid YAML. Also flagged two Mediums (no multi-line
+flow span regression-guard; `handle_flow_collection` is 579 lines with
+4× duplicated phase-advance blocks). Round 2 rejected for a new High
+introduced by the round-1 fix: the replacement code used
+`unreachable!("unhandled flow-context character")` as its fallback, but
+the `is_plain_first` gate and the downstream `ns_plain_safe_block`
+check in `scan_plain_line_flow` are not the same predicate — any
+non-`ns-char` character (C0 controls, DEL, C1 controls, surrogates,
+`\uFFFE`/`\uFFFF`) would reach the unreachable and panic the parser.
+Proven via an ad-hoc test of `"[\x01]\n"`. Round 3 replaced the
+unreachable with an explicit `Err` and added a regression test
+(`control_character_in_flow_collection_returns_error`). The round-1
+Medium on span regression-guard was addressed by
+`scalar_on_continuation_line_has_correct_span` (Group P), which pins
+down byte_offset=9, line=3, column=2 for scalar `b` in the multi-line
+input `"[\n  a,\n  b\n]\n"` — confirming the `peek_next_line()` natural
+Pos path is span-correct across line boundaries. The round-1 Medium on
+function size was accepted as a documented trade-off: `FlowFrame` and
+`FlowMappingPhase` are local to `handle_flow_collection` and extracting
+helper functions would require promoting them to module scope, adding
+more surface area than the 4× 6-8 line duplication costs. The flow
+parser emits `CollectionStyle::Flow` (not the default `Block`) through
+all open/close paths; the unified depth limit is
+`coll_stack.len() + flow_stack.len() >= MAX_COLLECTION_DEPTH` with no
+separate flow-depth constant, verified by `flow_depth_limit_is_enforced`
+and `mixed_block_and_flow_depth_limit_is_enforced`. Block context is
+untouched — `scan_plain_line_block` received 0 deletions and all
+Task 11/12/13 sequences/mappings/nested_collections tests still pass.
+All 295 smoke tests pass; committed in `82ad832`.
 
 ### Task 15: Nested flow and block-flow mixing
 
