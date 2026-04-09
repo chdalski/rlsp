@@ -4897,32 +4897,23 @@ mod nested_collections {
 
     #[test]
     fn multi_level_dedent_closes_nested_collections() {
+        // Updated in Task 21: reference parser rejects this input per YAML 1.2
+        // §8.2.1 (block sequence structure); conformance fix makes streaming parser match.
         // `- key:\n    - inner\nother: val\n`
-        // After `inner`, dedent back to col 0 closes: inner seq, outer seq (via the mapping value).
-        // `other: val` at col 0 should parse as a new mapping.
-        let events = event_variants("- key:\n    - inner\nother: val\n");
-        let has_inner = events
-            .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "inner"));
-        let has_other = events
-            .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "other"));
-        let has_val = events
-            .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "val"));
-        assert!(has_inner, "scalar 'inner' must be emitted");
-        assert!(has_other, "scalar 'other' must be emitted");
-        assert!(has_val, "scalar 'val' must be emitted");
-        // inner must appear before other
-        let inner_pos = events
-            .iter()
-            .position(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "inner"))
-            .unwrap_or_else(|| unreachable!("inner scalar must exist"));
-        let other_pos = events
-            .iter()
-            .position(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "other"))
-            .unwrap_or_else(|| unreachable!("other scalar must exist"));
-        assert!(inner_pos < other_pos, "inner before other");
+        // After `inner`, dedent back to col 0 closes: inner seq, mapping, outer seq.
+        // `other: val` at col 0 is an error — the document's root sequence already
+        // ended and a bare mapping key cannot follow at the same indent level
+        // (YAML 1.2 spec; confirmed by rlsp-yaml-parser reference impl).
+        let results = parse_to_vec("- key:\n    - inner\nother: val\n");
+        let has_inner = results.iter().any(
+            |r| matches!(r, Ok((Event::Scalar { value, .. }, _)) if value.as_ref() == "inner"),
+        );
+        assert!(has_inner, "scalar 'inner' must be emitted before the error");
+        let has_error = results.iter().any(Result::is_err);
+        assert!(
+            has_error,
+            "parse error expected after 'other: val' at root sequence indent"
+        );
     }
 
     #[test]
@@ -5266,33 +5257,34 @@ mod nested_collections {
 
     #[test]
     fn mapping_in_value_phase_emits_empty_scalar_on_close() {
-        // A mapping key with no value followed by a dedent must emit an
-        // empty plain scalar before MappingEnd (value-phase close).
-        // `key:\nother: v\n` — "key" has no inline value; the next key
-        // "other" at the same indent continues the mapping. But if we
-        // put "key:\n" and then dedent immediately, the mapping closes
-        // while in Value phase.
-        // `key:\nv\n` — the standalone scalar `v` is not a mapping key,
-        // so the mapping closes first.
-        //
-        // Use: `outer:\n  key:\nbaz\n`
-        // outer mapping: key="outer", value=mapping(key="key", value=empty)
-        // At "baz": indent 0 closes inner mapping (Value phase → empty scalar)
-        // then closes outer mapping.
-        let events = event_variants("outer:\n  key:\nbaz\n");
-        // Must have at least one empty-string scalar (the missing value).
-        let has_empty_scalar = events
+        // Updated in Task 21: reference parser rejects this input per YAML 1.2
+        // §8.2 (block mapping structure); conformance fix makes streaming parser match.
+        // `outer:\n  key:\nbaz\n` — "outer" maps to an inner mapping, "key" has
+        // no value.  After closing both mappings, "baz" at indent 0 is outside
+        // the document root and is an error per YAML 1.2 (confirmed by
+        // rlsp-yaml-parser reference impl: closes both mappings, then Err on
+        // "baz").  The key scalars "outer" and "key" must be emitted.
+        let results = parse_to_vec("outer:\n  key:\nbaz\n");
+        let scalars: Vec<_> = results
             .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref().is_empty()));
+            .filter_map(|r| match r {
+                Ok((Event::Scalar { value, .. }, _)) => Some(value.as_ref()),
+                _ => None,
+            })
+            .collect();
         assert!(
-            has_empty_scalar,
-            "a key with no value must produce an empty scalar before MappingEnd"
+            scalars.contains(&"outer"),
+            "scalar 'outer' must be emitted; got {scalars:?}"
         );
-        // "baz" must also appear.
-        let has_baz = events
-            .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "baz"));
-        assert!(has_baz, "scalar 'baz' must be emitted after the close");
+        assert!(
+            scalars.contains(&"key"),
+            "scalar 'key' must be emitted; got {scalars:?}"
+        );
+        let has_error = results.iter().any(Result::is_err);
+        assert!(
+            has_error,
+            "parse error expected: 'baz' at col 0 is outside the document root"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -8375,17 +8367,16 @@ mod tags {
 
     #[test]
     fn bare_percent_in_tag_stops_scan() {
+        // Updated in Task 21: reference parser rejects this input per YAML 1.2
+        // §6.8.1 (tag properties); conformance fix makes streaming parser match.
         // `!foo%zz\nhello\n` — `%zz` is not a valid percent-encoded sequence
-        // (z is not a hex digit).  Tag scan must stop at `%`, yielding standalone
-        // tag `!foo` which applies to the next scalar `hello`.
-        let events = evs("!foo%zz\nhello\n");
+        // (z is not a hex digit).  The tag scanner stops at `%`, yielding `!foo`
+        // with `%zz` remaining inline (no space between tag and `%zz`).  Per YAML
+        // 1.2 this is an invalid tag property (confirmed by rlsp-yaml-parser reference
+        // impl which errors on this input).
         assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::Scalar { tag: Some(t), value, .. }
-                    if t.as_ref() == "!foo" && value.as_ref() == "hello"
-            )),
-            "bare '%' without two hex digits must stop tag scan — tag must be '!foo'"
+            has_error("!foo%zz\nhello\n"),
+            "tag followed immediately by bare '%' is a parse error"
         );
     }
 

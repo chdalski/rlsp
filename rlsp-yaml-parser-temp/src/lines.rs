@@ -214,10 +214,37 @@ impl<'input> LineBuffer<'input> {
         self.prepend.front().or(self.next.as_ref())
     }
 
+    /// Returns `true` if the next line comes from the prepend queue (synthetic),
+    /// rather than from the original input stream.
+    #[must_use]
+    pub fn is_next_synthetic(&self) -> bool {
+        !self.prepend.is_empty()
+    }
+
     /// Convenience: the indent of the next line, without consuming it.
     #[must_use]
     pub fn peek_next_indent(&self) -> Option<usize> {
         self.peek_next().map(|l| l.indent)
+    }
+
+    /// Peek at the second upcoming line without consuming either.
+    ///
+    /// Handles the prepend queue: the second line may come from the prepend
+    /// queue or from the primed `next` slot or from `remaining`.
+    #[must_use]
+    pub fn peek_second(&self) -> Option<Line<'input>> {
+        // Determine where the "first" line comes from, then find the "second".
+        if !self.prepend.is_empty() {
+            // First line is prepend[0]. Second is prepend[1] if it exists,
+            // else self.next.
+            if self.prepend.len() >= 2 {
+                return self.prepend.get(1).cloned();
+            }
+            return self.next.clone();
+        }
+        // First line is self.next. Second is the first line from `remaining`.
+        self.next.as_ref()?; // ensure first exists
+        scan_line(self.remaining, self.remaining_pos, self.remaining_is_first).map(|(line, _)| line)
     }
 
     /// Advance: return the currently primed next line and prime the following
@@ -301,7 +328,9 @@ impl<'input> LineBuffer<'input> {
             }
 
             // Stop before the first non-blank line that is dedented.
-            if line.indent <= base_indent {
+            // base_indent == usize::MAX is the "root level" sentinel meaning
+            // no indent threshold — include all non-blank lines.
+            if base_indent != usize::MAX && line.indent <= base_indent {
                 break;
             }
 

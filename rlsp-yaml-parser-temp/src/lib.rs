@@ -10,7 +10,6 @@ mod lines;
 pub mod loader;
 pub mod node;
 mod pos;
-mod scanner;
 
 pub use error::Error;
 pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
@@ -278,11 +277,20 @@ enum MappingPhase {
 /// summing `coll_stack.len()` with the local flow-frame count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CollectionEntry {
-    /// An open block sequence.  Holds the column of its `-` indicator.
-    Sequence(usize),
-    /// An open block mapping.  Holds the column of its first key and the
-    /// current phase (expecting key or value).
-    Mapping(usize, MappingPhase),
+    /// An open block sequence.  Holds the column of its `-` indicator and
+    /// whether at least one complete item has been delivered.  `has_had_item`
+    /// is `false` for a freshly opened sequence and becomes `true` once a
+    /// complete item (scalar or sub-collection) has been emitted.  Used by
+    /// `handle_sequence_entry` to detect a `-` at the wrong indentation level.
+    Sequence(usize, bool),
+    /// An open block mapping.  Holds the column of its first key, the
+    /// current phase (expecting key or value), and whether the mapping has
+    /// had at least one key advanced to the value phase (`has_had_value`).
+    /// `has_had_value` is `false` for a freshly opened mapping and becomes
+    /// `true` the first time `advance_mapping_to_value` is called on it.
+    /// The wrong-indentation check in `handle_mapping_entry` uses this flag
+    /// to avoid false positives on explicit-key content nodes (e.g. V9D5).
+    Mapping(usize, MappingPhase, bool),
 }
 
 /// Whether the next expected token in a flow mapping is a key or value.
@@ -298,12 +306,13 @@ impl CollectionEntry {
     /// The indentation column of this collection's indicator/key.
     const fn indent(self) -> usize {
         match self {
-            Self::Sequence(col) | Self::Mapping(col, _) => col,
+            Self::Sequence(col, _) | Self::Mapping(col, _, _) => col,
         }
     }
 }
 
 /// Lazy iterator that yields events by walking a [`Lexer`].
+#[allow(clippy::struct_excessive_bools)]
 struct EventIter<'input> {
     lexer: Lexer<'input>,
     state: IterState,
@@ -366,6 +375,28 @@ struct EventIter<'input> {
     /// Accumulated from `%YAML` and `%TAG` directives seen in `BetweenDocs`
     /// state.  Reset at document boundaries.
     directive_scope: DirectiveScope,
+    /// Set to `true` once the root node of the current document has been
+    /// fully emitted (a scalar at the top level, or a collection after its
+    /// closing event empties `coll_stack`).
+    ///
+    /// Used to detect invalid extra content after the document root, such as
+    /// `foo:\n  bar\ninvalid` where `invalid` appears after the root mapping
+    /// closes.  Reset to `false` at each document boundary.
+    root_node_emitted: bool,
+    /// Set to `true` after consuming a `? ` explicit key indicator whose key
+    /// content will appear on the NEXT line (i.e., `had_key_inline = false`).
+    /// Cleared when the key content is processed.
+    ///
+    /// Used to allow a block sequence indicator on a line following `? ` to be
+    /// treated as the explicit key's content rather than triggering the
+    /// "invalid block sequence entry" guard.
+    explicit_key_pending: bool,
+    /// When a tag or anchor appears inline on a physical line (e.g. `!!str &a key:`),
+    /// the key content is prepended as a synthetic line with the key's column as its
+    /// indent.  This field records the indent of the ORIGINAL physical line so that
+    /// `handle_mapping_entry` can open the mapping at the correct (original) indent
+    /// rather than the synthetic line's offset.
+    property_origin_indent: Option<usize>,
 }
 
 impl<'input> EventIter<'input> {
@@ -381,6 +412,9 @@ impl<'input> EventIter<'input> {
             pending_tag: None,
             pending_tag_for_collection: false,
             directive_scope: DirectiveScope::default(),
+            root_node_emitted: false,
+            explicit_key_pending: false,
+            property_origin_indent: None,
         }
     }
 
@@ -400,16 +434,23 @@ impl<'input> EventIter<'input> {
             if top.indent() >= threshold {
                 self.coll_stack.pop();
                 let ev = match top {
-                    CollectionEntry::Sequence(_) => Event::SequenceEnd,
-                    CollectionEntry::Mapping(_, _) => Event::MappingEnd,
+                    CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
+                    CollectionEntry::Mapping(_, _, _) => Event::MappingEnd,
                 };
                 self.queue.push_back((ev, zero_span(pos)));
                 // After closing a collection, the parent mapping (if any)
-                // transitions from Value phase to Key phase.
-                if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
-                    if *phase == MappingPhase::Value {
-                        *phase = MappingPhase::Key;
+                // transitions from Value phase to Key phase.  The parent
+                // sequence (if any) marks its current item as completed.
+                match self.coll_stack.last_mut() {
+                    Some(CollectionEntry::Mapping(_, phase, _)) => {
+                        if *phase == MappingPhase::Value {
+                            *phase = MappingPhase::Key;
+                        }
                     }
+                    Some(CollectionEntry::Sequence(_, has_had_item)) => {
+                        *has_had_item = true;
+                    }
+                    None => {}
                 }
             } else {
                 break;
@@ -427,8 +468,8 @@ impl<'input> EventIter<'input> {
     fn close_all_collections(&mut self, pos: Pos) {
         while let Some(top) = self.coll_stack.pop() {
             let ev = match top {
-                CollectionEntry::Sequence(_) => Event::SequenceEnd,
-                CollectionEntry::Mapping(_, MappingPhase::Value) => {
+                CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
+                CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
                     // Mapping closed while waiting for a value — emit empty value.
                     // Consume any pending anchor so `&anchor\n` at end of doc
                     // is properly attached to the empty value.
@@ -443,12 +484,12 @@ impl<'input> EventIter<'input> {
                     ));
                     Event::MappingEnd
                 }
-                CollectionEntry::Mapping(_, MappingPhase::Key) => Event::MappingEnd,
+                CollectionEntry::Mapping(_, MappingPhase::Key, _) => Event::MappingEnd,
             };
             self.queue.push_back((ev, zero_span(pos)));
             // After closing any collection, advance the parent mapping (if in
             // Value phase) to Key phase — the just-closed collection was its value.
-            if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
+            if let Some(CollectionEntry::Mapping(_, phase, _)) = self.coll_stack.last_mut() {
                 if *phase == MappingPhase::Value {
                     *phase = MappingPhase::Key;
                 }
@@ -590,7 +631,44 @@ impl<'input> EventIter<'input> {
                 span,
             )));
         }
-        if let Some((value, span)) = self.lexer.try_consume_double_quoted(plain_parent_indent)? {
+        // Pass Some(parent_indent) when inside a block collection so
+        // collect_double_quoted_continuations can validate continuation-line
+        // indentation (YAML 1.2 §7.3.1).  At document root (coll_stack empty)
+        // there is no enclosing block, so no indent constraint: pass None.
+        let dq_block_indent = if self.coll_stack.is_empty() {
+            None
+        } else {
+            Some(plain_parent_indent)
+        };
+        if let Some((value, span)) = self.lexer.try_consume_double_quoted(dq_block_indent)? {
+            // In block context, after a double-quoted scalar closes, the only
+            // valid trailing content is optional whitespace followed by an
+            // optional comment (with mandatory preceding whitespace before `#`).
+            // Non-comment, non-whitespace content is an error.
+            if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
+                let first_non_ws = tail.trim_start_matches([' ', '\t']);
+                if !first_non_ws.is_empty() {
+                    let ws_len = tail.len() - first_non_ws.len();
+                    if first_non_ws.starts_with('#') && ws_len == 0 {
+                        // `#` immediately after closing quote — not a comment.
+                        self.failed = true;
+                        return Err(Error {
+                            pos: tail_pos,
+                            message: "comment requires at least one space before '#'".into(),
+                        });
+                    } else if !first_non_ws.starts_with('#') {
+                        // Non-comment content after quoted scalar.
+                        self.failed = true;
+                        return Err(Error {
+                            pos: tail_pos,
+                            message: "unexpected content after quoted scalar".into(),
+                        });
+                    }
+                    // Valid comment: discard (the comment event is not emitted
+                    // in block context here; it will be picked up by drain_trailing_comment
+                    // in the normal flow).
+                }
+            }
             return Ok(Some((
                 Event::Scalar {
                     value,
@@ -602,6 +680,11 @@ impl<'input> EventIter<'input> {
             )));
         }
         if let Some((value, span)) = self.lexer.try_consume_plain_scalar(plain_parent_indent) {
+            // Check for invalid content in the suffix (e.g. NUL or mid-stream
+            // BOM that stopped the scanner but is not valid at this position).
+            if let Some(e) = self.lexer.plain_scalar_suffix_error.take() {
+                return Err(e);
+            }
             return Ok(Some((
                 Event::Scalar {
                     value,
@@ -675,6 +758,7 @@ impl<'input> EventIter<'input> {
     ///   synthetic line.
     ///
     /// Returns a `ConsumedMapping` describing what was found.
+    #[allow(clippy::too_many_lines)]
     fn consume_mapping_entry(&mut self, key_indent: usize) -> ConsumedMapping<'input> {
         // SAFETY: caller verified via peek_mapping_entry — the line exists.
         let Some(line) = self.lexer.peek_next_line() else {
@@ -691,35 +775,51 @@ impl<'input> EventIter<'input> {
         let leading_spaces = content.len() - content.trim_start_matches(' ').len();
         let trimmed = &content[leading_spaces..];
 
-        // --- Explicit key: `? ...` ---
+        // --- Explicit key: `? ` or `?` at EOL ---
+        //
+        // The explicit key indicator is `?` followed by whitespace or end of
+        // line (YAML 1.2 §8.2.2).  A `?` followed by a non-whitespace character
+        // (e.g. `?foo: val`) is NOT an explicit key — `?foo` is an implicit key
+        // that starts with `?`, just like `?foo: val` being a mapping entry where
+        // the key is the plain scalar `?foo`.  This check must mirror the
+        // condition in peek_mapping_entry to keep consume and peek consistent.
         if let Some(after_q) = trimmed.strip_prefix('?') {
-            let inline = after_q.trim_start_matches([' ', '\t']);
-            let had_key_inline = !inline.is_empty();
+            let is_explicit_key = after_q.is_empty()
+                || after_q.starts_with(' ')
+                || after_q.starts_with('\t')
+                || after_q.starts_with('\n')
+                || after_q.starts_with('\r');
+            if is_explicit_key {
+                let inline = after_q.trim_start_matches([' ', '\t']);
+                // A trailing comment (`# ...`) is not key content — treat as
+                // if nothing followed the `?` indicator.
+                let had_key_inline = !inline.is_empty() && !inline.starts_with('#');
 
-            if had_key_inline {
-                // Offset from line start to inline key content.
-                let spaces_after_q = after_q.len() - inline.len();
-                let total_offset = leading_spaces + 1 + spaces_after_q;
-                let inline_col = key_indent + 1 + spaces_after_q;
-                let inline_pos = Pos {
-                    byte_offset: line_pos.byte_offset + total_offset,
-                    char_offset: line_pos.char_offset + total_offset,
-                    line: line_pos.line,
-                    column: line_pos.column + total_offset,
-                };
-                let synthetic = Line {
-                    content: inline,
-                    offset: inline_pos.byte_offset,
-                    indent: inline_col,
-                    break_type: line_break_type,
-                    pos: inline_pos,
-                };
-                self.lexer.consume_line();
-                self.lexer.prepend_inline_line(synthetic);
-            } else {
-                self.lexer.consume_line();
+                if had_key_inline {
+                    // Offset from line start to inline key content.
+                    let spaces_after_q = after_q.len() - inline.len();
+                    let total_offset = leading_spaces + 1 + spaces_after_q;
+                    let inline_col = key_indent + 1 + spaces_after_q;
+                    let inline_pos = Pos {
+                        byte_offset: line_pos.byte_offset + total_offset,
+                        char_offset: line_pos.char_offset + total_offset,
+                        line: line_pos.line,
+                        column: line_pos.column + total_offset,
+                    };
+                    let synthetic = Line {
+                        content: inline,
+                        offset: inline_pos.byte_offset,
+                        indent: inline_col,
+                        break_type: line_break_type,
+                        pos: inline_pos,
+                    };
+                    self.lexer.consume_line();
+                    self.lexer.prepend_inline_line(synthetic);
+                } else {
+                    self.lexer.consume_line();
+                }
+                return ConsumedMapping::ExplicitKey { had_key_inline };
             }
-            return ConsumedMapping::ExplicitKey { had_key_inline };
         }
 
         // --- Implicit key: `key: value` or `key:` ---
@@ -773,6 +873,30 @@ impl<'input> EventIter<'input> {
         self.lexer.consume_line();
 
         if !value_content.is_empty() {
+            // Detect illegal inline implicit mapping: if the inline value itself
+            // contains a value indicator (`:` followed by space/EOL), this is an
+            // attempt to start a block mapping inline (e.g. `a: b: c: d` or
+            // `a: 'b': c`).  Block mappings cannot appear inline — their entries
+            // must start on new lines.  Return an error before prepending the value.
+            if find_value_indicator_offset(value_content).is_some() {
+                return ConsumedMapping::InlineImplicitMappingError { pos: value_pos };
+            }
+
+            // Detect illegal inline block sequence: `key: - item` is invalid
+            // because a block sequence indicator (`-`) cannot appear as an
+            // inline value of a block mapping entry — the sequence must start
+            // on a new line.  Only `- `, `-\t`, or bare `-` (at EOL) qualify
+            // as sequence indicators.
+            {
+                let after_dash = value_content.strip_prefix('-');
+                let is_seq_indicator = after_dash.is_some_and(|rest| {
+                    rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
+                });
+                if is_seq_indicator {
+                    return ConsumedMapping::InlineImplicitMappingError { pos: value_pos };
+                }
+            }
+
             let value_synthetic = Line {
                 content: value_content,
                 offset: value_pos.byte_offset,
@@ -803,9 +927,12 @@ impl<'input> EventIter<'input> {
             matches!(self.coll_stack.last(), Some(CollectionEntry::Mapping(..))),
             "advance_mapping_to_value called but top of coll_stack is not a Mapping"
         );
+        // The explicit key's content has been processed; clear the pending flag.
+        self.explicit_key_pending = false;
         for entry in self.coll_stack.iter_mut().rev() {
-            if let CollectionEntry::Mapping(_, phase) = entry {
+            if let CollectionEntry::Mapping(_, phase, has_had_value) = entry {
                 *phase = MappingPhase::Value;
+                *has_had_value = true;
                 return;
             }
         }
@@ -843,10 +970,28 @@ impl<'input> EventIter<'input> {
             "advance_mapping_to_key called but top of coll_stack is not a Mapping"
         );
         for entry in self.coll_stack.iter_mut().rev() {
-            if let CollectionEntry::Mapping(_, phase) = entry {
+            if let CollectionEntry::Mapping(_, phase, _) = entry {
                 *phase = MappingPhase::Key;
                 return;
             }
+        }
+    }
+
+    /// Returns the minimum column at which a standalone block-node property
+    /// (anchor or tag on its own line) is valid in the current context.
+    ///
+    /// - Mapping in Value phase at indent `n`: the value node must be at col > n.
+    /// - Sequence at indent `n`: item content must be at col > n.
+    /// - Mapping in Key phase at indent `n`: a key at col `n` is valid.
+    /// - Root (empty stack): any column is valid.
+    fn min_standalone_property_indent(&self) -> usize {
+        match self.coll_stack.last() {
+            Some(
+                CollectionEntry::Mapping(n, MappingPhase::Value, _)
+                | CollectionEntry::Sequence(n, _),
+            ) => n + 1,
+            Some(CollectionEntry::Mapping(n, MappingPhase::Key, _)) => *n,
+            None => 0,
         }
     }
 }
@@ -870,12 +1015,60 @@ enum ConsumedMapping<'input> {
         /// Span covering the key text.
         key_span: Span,
     },
+    /// The inline value of an implicit key itself contained a value indicator,
+    /// making it an illegal inline block mapping (e.g. `a: b: c` or `a: 'b': c`).
+    /// The error position points to the start of the inline value content.
+    InlineImplicitMappingError { pos: Pos },
 }
 
 /// True when `trimmed` (content after stripping leading spaces) represents
 /// an implicit mapping key: it contains `: `, `:\t`, or ends with `:`.
 fn is_implicit_mapping_line(trimmed: &str) -> bool {
     find_value_indicator_offset(trimmed).is_some()
+}
+
+/// Returns `true` when `s` is a block structure indicator that cannot appear
+/// at tab-based indentation: a block sequence entry (`-` followed by
+/// whitespace or EOL), an explicit key marker (`?` followed by whitespace or
+/// EOL), or an implicit mapping key (contains a `:` value indicator).
+///
+/// Used to detect tab-as-block-indentation violations (YAML 1.2 §6.1).
+fn is_tab_indented_block_indicator(s: &str) -> bool {
+    s.strip_prefix(['-', '?']).map_or_else(
+        || is_implicit_mapping_line(s),
+        |after| after.is_empty() || after.starts_with([' ', '\t']),
+    )
+}
+
+/// Like `find_value_indicator_offset`, but skips any leading anchor (`&name`)
+/// and/or tag (`!tag`) tokens before checking for a mapping key indicator.
+///
+/// This handles cases like `&anchor key: value` or `!!str &a key: value`
+/// where the actual key content starts after the properties.
+fn inline_contains_mapping_key(inline: &str) -> bool {
+    if find_value_indicator_offset(inline).is_some() {
+        return true;
+    }
+    // Skip leading anchor/tag tokens and retry
+    let mut s = inline;
+    loop {
+        let trimmed = s.trim_start_matches([' ', '\t']);
+        if let Some(after_amp) = trimmed.strip_prefix('&') {
+            // skip anchor name (non-space chars)
+            let name_end = after_amp.find([' ', '\t']).unwrap_or(after_amp.len());
+            s = &after_amp[name_end..];
+        } else if trimmed.starts_with('!') {
+            // skip tag token (non-space chars)
+            let tag_end = trimmed.find([' ', '\t']).unwrap_or(trimmed.len());
+            s = &trimmed[tag_end..];
+        } else {
+            break;
+        }
+        if find_value_indicator_offset(s.trim_start_matches([' ', '\t'])).is_some() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Return the byte offset of the `:` value indicator within `trimmed`, or
@@ -896,10 +1089,14 @@ fn is_implicit_mapping_line(trimmed: &str) -> bool {
 fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
     // Reject lines that start with indicator characters that cannot begin a
     // plain scalar (and are thus not valid implicit mapping keys).
+    // Also reject lines starting with `\t`: YAML 1.2 §6.1 forbids tabs as
+    // indentation, so a line beginning with a tab cannot be a mapping entry.
     if matches!(
         trimmed.as_bytes().first().copied(),
         Some(
-            b'%' | b'@'
+            b'\t'
+                | b'%'
+                | b'@'
                 | b'`'
                 | b','
                 | b'['
@@ -929,9 +1126,13 @@ fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
         }
 
         // Skip double-quoted span (handles `\"` escapes).
+        // Only treat `"` as a quoted-span delimiter when it appears at the
+        // very start of the key (i == 0) — in YAML, `"key": value` has a
+        // double-quoted key, but `a"b": value` has a literal `"` inside a
+        // plain scalar key, which must not be mistaken for a quoted span.
         // After a quoted span, `prev_was_space` is false — a closing `"` is
         // not whitespace.
-        if ch == b'"' {
+        if ch == b'"' && i == 0 {
             i += 1; // skip opening `"`
             while let Some(&inner) = bytes.get(i) {
                 match inner {
@@ -948,9 +1149,10 @@ fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
         }
 
         // Skip single-quoted span (handles `''` escape).
+        // Same rule: only treat `'` as a quoted-span delimiter at position 0.
         // After a quoted span, `prev_was_space` is false — a closing `'` is
         // not whitespace.
-        if ch == b'\'' {
+        if ch == b'\'' && i == 0 {
             i += 1; // skip opening `'`
             while let Some(&inner) = bytes.get(i) {
                 i += 1;
@@ -1540,13 +1742,28 @@ impl<'input> EventIter<'input> {
         }
 
         if self.lexer.at_eof() {
+            // Per YAML 1.2 §9.2, directives require a `---` marker.
+            // A directive followed by EOF (no `---`) is a spec violation.
+            if self.directive_scope.directive_count > 0 {
+                let pos = self.lexer.current_pos();
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos,
+                    message: "directives must be followed by a '---' document-start marker".into(),
+                }));
+            }
             let end = self.lexer.current_pos();
             self.state = IterState::Done;
             return StepResult::Yield(Ok((Event::StreamEnd, zero_span(end))));
         }
         if self.lexer.is_directives_end() {
-            let (marker_pos, _) = self.lexer.consume_marker_line();
+            let (marker_pos, _) = self.lexer.consume_marker_line(false);
+            if let Some(e) = self.lexer.marker_inline_error.take() {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
             self.state = IterState::InDocument;
+            self.root_node_emitted = false;
             // Take the accumulated directives — scope stays active for document body tag resolution.
             let version = self.directive_scope.version;
             let tag_directives = self.directive_scope.tag_directives();
@@ -1572,7 +1789,11 @@ impl<'input> EventIter<'input> {
                     message: "directives must be followed by a '---' document-start marker".into(),
                 }));
             }
-            self.lexer.consume_marker_line();
+            self.lexer.consume_marker_line(true);
+            if let Some(e) = self.lexer.marker_inline_error.take() {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
             return StepResult::Continue; // orphan `...`, no event
         }
         // Per YAML 1.2 §9.2, directives require a `---` marker.  If the next
@@ -1592,6 +1813,7 @@ impl<'input> EventIter<'input> {
         );
         let content_pos = self.lexer.current_pos();
         self.state = IterState::InDocument;
+        self.root_node_emitted = false;
         // Take the accumulated directives — scope stays active for document body tag resolution.
         let version = self.directive_scope.version;
         let tag_directives = self.directive_scope.tag_directives();
@@ -1620,6 +1842,32 @@ impl<'input> EventIter<'input> {
             return StepResult::Continue;
         }
 
+        // ---- Tab indentation check ----
+        //
+        // YAML 1.2 §6.1: tabs cannot be used for indentation in block context.
+        // Only lines whose VERY FIRST character is `\t` (no leading spaces) are
+        // using a tab as the indentation character and must be rejected.
+        //
+        // Exceptions: `\t[`, `\t{`, `\t]`, `\t}` are allowed because flow
+        // collection delimiters can follow tabs (YAML test suite 6CA3, Q5MG).
+        // Lines like `  \tx` have SPACES as indentation; the tab is content.
+        if let Some(line) = self.lexer.peek_next_line() {
+            if line.content.starts_with('\t') {
+                // First char is a tab — check what the first non-tab character
+                // is.  Flow collection delimiters are allowed after leading tabs.
+                let first_non_tab = line.content.trim_start_matches('\t').chars().next();
+                if !matches!(first_non_tab, Some('[' | '{' | ']' | '}')) {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
+                    }));
+                }
+            }
+        }
+
         // ---- Document / stream boundaries ----
 
         if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
@@ -1634,7 +1882,11 @@ impl<'input> EventIter<'input> {
         if self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
-            let (marker_pos, _) = self.lexer.consume_marker_line();
+            let (marker_pos, _) = self.lexer.consume_marker_line(true);
+            if let Some(e) = self.lexer.marker_inline_error.take() {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
             // Reset directive scope at the document boundary so directives from
             // this document do not leak into the next one.
             self.directive_scope = DirectiveScope::default();
@@ -1649,13 +1901,31 @@ impl<'input> EventIter<'input> {
         if self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
-            let (marker_pos, _) = self.lexer.consume_marker_line();
+            let (marker_pos, _) = self.lexer.consume_marker_line(false);
+            if let Some(e) = self.lexer.marker_inline_error.take() {
+                self.failed = true;
+                return StepResult::Yield(Err(e));
+            }
             // A bare `---` inside a document implicitly ends the current document
             // and starts a new one without a preamble.  Reset the directive scope
             // here since consume_preamble_between_docs will not be called for this
             // transition.
             self.directive_scope = DirectiveScope::default();
+            // Validate any inline tag on this `---` line against the new
+            // document's (empty) directive scope.  Tags defined in the previous
+            // document do not carry over (YAML §9.2), so an undefined handle
+            // must fail immediately.
+            if let Some((tag_val, tag_pos)) = self.lexer.peek_inline_scalar() {
+                if tag_val.starts_with('!') {
+                    if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
+                        self.lexer.drain_inline_scalar();
+                        self.failed = true;
+                        return StepResult::Yield(Err(e));
+                    }
+                }
+            }
             self.state = IterState::InDocument;
+            self.root_node_emitted = false;
             self.queue.push_back((
                 Event::DocumentEnd { explicit: false },
                 zero_span(marker_pos),
@@ -1670,6 +1940,60 @@ impl<'input> EventIter<'input> {
             ));
             self.drain_trailing_comment();
             return StepResult::Continue;
+        }
+
+        // ---- Directive lines (`%YAML`/`%TAG`) inside document body ----
+        //
+        // YAML 1.2 §9.2: directives can only appear in the preamble (before
+        // `---`).  A `%YAML` or `%TAG` line inside a document body, followed
+        // by `---`, indicates the author forgot to close the previous document
+        // with `...` before writing the next document's preamble.
+        //
+        // We only fire the error when:
+        //   1. The current line starts with `%YAML ` or `%TAG ` (a genuine
+        //      YAML directive keyword, not arbitrary content like `%!PS-Adobe`).
+        //   2. The following line is a `---` document-start marker.
+        //
+        // This avoids false positives when `%` appears as content in plain
+        // scalars (XLQ9) or inside block scalar bodies (M7A3, W4TN).
+        if let Some(line) = self.lexer.peek_next_line() {
+            let is_yaml_directive =
+                line.content.starts_with("%YAML ") || line.content.starts_with("%TAG ");
+            if is_yaml_directive {
+                let next_is_doc_start = self.lexer.peek_second_line().is_some_and(|l| {
+                    l.content == "---"
+                        || l.content.starts_with("--- ")
+                        || l.content.starts_with("---\t")
+                });
+                if next_is_doc_start {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message:
+                            "directive '%' is only valid before the document-start marker '---'"
+                                .into(),
+                    }));
+                }
+            }
+        }
+
+        // ---- Root-node guard ----
+        //
+        // A YAML document contains exactly one root node.  Once the root has
+        // been fully emitted (`root_node_emitted = true`) and the collection
+        // stack is empty, any further non-comment, non-blank content is invalid.
+        if self.root_node_emitted && self.coll_stack.is_empty() && !self.lexer.has_inline_scalar() {
+            if let Some(line) = self.lexer.peek_next_line() {
+                let err_pos = line.pos;
+                self.failed = true;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: "unexpected content after document root node".into(),
+                }));
+            }
         }
 
         // ---- Alias node: `*name` is a complete node ----
@@ -1694,6 +2018,17 @@ impl<'input> EventIter<'input> {
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
                         message: "alias node cannot have a tag property".into(),
+                    }));
+                }
+                // An anchor is only a property of the alias if it's item-level
+                // (pending_anchor_for_collection=false).  A collection-level anchor
+                // (pending_anchor_for_collection=true) belongs to the surrounding
+                // collection, not the alias node.
+                if self.pending_anchor.is_some() && !self.pending_anchor_for_collection {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: star_pos,
+                        message: "alias node cannot have an anchor property".into(),
                     }));
                 }
                 match scan_anchor_name(after_star, star_pos) {
@@ -1752,6 +2087,7 @@ impl<'input> EventIter<'input> {
         if let Some(peek) = self.lexer.peek_next_line() {
             let content: &'input str = peek.content;
             let line_pos = peek.pos;
+            let line_indent = peek.indent;
             let line_break_type = peek.break_type;
             let trimmed = content.trim_start_matches(' ');
             if trimmed.starts_with('!') {
@@ -1777,18 +2113,55 @@ impl<'input> EventIter<'input> {
                         let inline: &'input str = after_tag.trim_start_matches([' ', '\t']);
                         let spaces = after_tag.len() - inline.len();
                         let had_inline = !inline.is_empty();
+                        // YAML 1.2 §6.8.1: a tag property must be separated from
+                        // the following node content by `s-separate` when the first
+                        // character after the tag could be confused with a tag
+                        // continuation or creates structural ambiguity:
+                        // - `!` starts another tag property
+                        // - flow indicators (`,`, `[`, `]`, `{`, `}`) cause
+                        //   structural confusion (e.g. `!!str,`)
+                        // - `%` may be a valid percent-encoded continuation that
+                        //   should have been part of the tag, or an invalid
+                        //   percent-sequence that makes the input unparseable
+                        // When the tag scanner stopped at a plain non-tag char like
+                        // `<`, the tag ended naturally and the content is the value
+                        // (e.g. `!foo<bar val` → tag=`!foo`, scalar=`<bar val`).
+                        if had_inline && spaces == 0 {
+                            let first = inline.chars().next().unwrap_or('\0');
+                            if first == '!'
+                                || first == '%'
+                                || matches!(first, ',' | '[' | ']' | '{' | '}')
+                            {
+                                self.failed = true;
+                                return StepResult::Yield(Err(Error {
+                                    pos: bang_pos,
+                                    message:
+                                        "tag must be separated from node content by whitespace"
+                                            .into(),
+                                }));
+                            }
+                        }
                         let inline_offset =
                             line_pos.byte_offset + leading + tag_token_bytes + spaces;
                         let inline_char_offset =
                             line_pos.char_offset + leading + tag_token_bytes + spaces;
                         let inline_col = line_pos.column + leading + tag_token_bytes + spaces;
                         // Duplicate tags on the same node are an error.
+                        // Exception: if the existing tag is collection-level
+                        // (pending_tag_for_collection=true) and the new tag has
+                        // inline content that is (or contains) a mapping key line,
+                        // they apply to different nodes (collection vs. key scalar).
                         if self.pending_tag.is_some() {
-                            self.failed = true;
-                            return StepResult::Yield(Err(Error {
-                                pos: bang_pos,
-                                message: "a node may not have more than one tag".into(),
-                            }));
+                            let is_different_node = self.pending_tag_for_collection
+                                && had_inline
+                                && inline_contains_mapping_key(inline);
+                            if !is_different_node {
+                                self.failed = true;
+                                return StepResult::Yield(Err(Error {
+                                    pos: bang_pos,
+                                    message: "a node may not have more than one tag".into(),
+                                }));
+                            }
                         }
                         // Resolve tag handle against directive scope at scan time.
                         let resolved_tag =
@@ -1803,6 +2176,18 @@ impl<'input> EventIter<'input> {
                         self.lexer.consume_line();
                         if had_inline {
                             self.pending_tag_for_collection = false;
+                            // Record the original physical line's indent so that
+                            // handle_mapping_entry can open the mapping at the correct
+                            // indent when the key is on a synthetic (offset) line.
+                            // Only set when the inline content is (or leads to) a
+                            // mapping key — if it's a plain value, there is no
+                            // handle_mapping_entry call to consume this, and leaving
+                            // it set would corrupt the next unrelated mapping entry.
+                            if self.property_origin_indent.is_none()
+                                && inline_contains_mapping_key(inline)
+                            {
+                                self.property_origin_indent = Some(line_indent);
+                            }
                             let inline_pos = Pos {
                                 byte_offset: inline_offset,
                                 char_offset: inline_char_offset,
@@ -1819,6 +2204,18 @@ impl<'input> EventIter<'input> {
                             self.lexer.prepend_inline_line(synthetic);
                         } else {
                             // Standalone tag line — applies to whatever node comes next.
+                            // Validate: the tag must be indented enough for this context.
+                            let min = self.min_standalone_property_indent();
+                            if line_indent < min {
+                                self.pending_tag = None;
+                                self.failed = true;
+                                return StepResult::Yield(Err(Error {
+                                    pos: bang_pos,
+                                    message:
+                                        "node property is not indented enough for this context"
+                                            .into(),
+                                }));
+                            }
                             self.pending_tag_for_collection = true;
                         }
                         return StepResult::Continue;
@@ -1832,6 +2229,7 @@ impl<'input> EventIter<'input> {
         if let Some(peek) = self.lexer.peek_next_line() {
             let content: &'input str = peek.content;
             let line_pos = peek.pos;
+            let line_indent = peek.indent;
             let line_break_type = peek.break_type;
             let trimmed = content.trim_start_matches(' ');
             if let Some(after_amp) = trimmed.strip_prefix('&') {
@@ -1869,14 +2267,90 @@ impl<'input> EventIter<'input> {
                         let inline_char_offset =
                             line_pos.char_offset + leading + 1 + name.len() + spaces;
                         let inline_col = line_pos.column + leading + 1 + name.len() + spaces;
-                        // Duplicate anchors allowed — overwrite.
+                        // Duplicate anchors on the same node are an error.
+                        //
+                        // Case 1: existing anchor is item-level (pending_anchor_for_collection=false)
+                        // and no collection tag is pending — both this and the existing anchor
+                        // are for the same item-level node.
+                        //
+                        // Case 2: existing anchor is collection-level (pending_anchor_for_collection=true)
+                        // and the new anchor has inline content that is NOT a collection opener
+                        // ([, {) or property (!, &) — both anchors apply to the same scalar node.
+                        let amp_pos2 = amp_pos;
+                        let is_duplicate = if self.pending_anchor.is_some()
+                            && !self.pending_anchor_for_collection
+                            && !self.pending_tag_for_collection
+                        {
+                            true
+                        } else if self.pending_anchor.is_some()
+                            && self.pending_anchor_for_collection
+                            && had_inline
+                            && !self.pending_tag_for_collection
+                        {
+                            // The existing anchor is collection-level, but the new anchor
+                            // has inline content.  If that content is a mapping key line
+                            // (contains `: ` etc.), the new anchor is for the key and the
+                            // existing anchor is for the mapping — different nodes, no error.
+                            // If the inline is a plain scalar (no key indicator), both
+                            // anchors apply to the same scalar node — error.
+                            let first_ch = inline.chars().next();
+                            // If inline starts with a collection/property opener, treat as
+                            // different node — no error.
+                            let starts_with_opener =
+                                matches!(first_ch, Some('[' | '{' | '!' | '&' | '*' | '|' | '>'));
+                            // If inline contains a mapping key indicator (`: `), the new
+                            // anchor is for a key — different node from the collection.
+                            let is_mapping_key = find_value_indicator_offset(inline).is_some();
+                            !starts_with_opener && !is_mapping_key
+                        } else {
+                            false
+                        };
+                        if is_duplicate {
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: amp_pos2,
+                                message: "a node may not have more than one anchor".into(),
+                            }));
+                        }
                         self.pending_anchor = Some(name);
                         self.lexer.consume_line();
                         if had_inline {
+                            // Detect illegal inline block sequence: `&anchor - item`
+                            // is invalid — a block sequence indicator cannot appear
+                            // inline after an anchor property in block context.
+                            let is_seq = inline.strip_prefix('-').is_some_and(|rest| {
+                                rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
+                            });
+                            if is_seq {
+                                self.pending_anchor = None;
+                                self.failed = true;
+                                let seq_pos = Pos {
+                                    byte_offset: inline_offset,
+                                    char_offset: inline_char_offset,
+                                    line: line_pos.line,
+                                    column: inline_col,
+                                };
+                                return StepResult::Yield(Err(Error {
+                                    pos: seq_pos,
+                                    message:
+                                        "block sequence indicator cannot appear inline after a node property"
+                                            .into(),
+                                }));
+                            }
                             // Inline content after anchor — anchor applies to the
                             // inline node (scalar or key), not to any enclosing
                             // collection opened on this same line.
                             self.pending_anchor_for_collection = false;
+                            // Record the original physical line's indent so that
+                            // handle_mapping_entry can open the mapping at the correct
+                            // indent when the key is on a synthetic (offset) line.
+                            // Only set when the inline content leads to a mapping key;
+                            // value-context anchors must not corrupt the next entry.
+                            if self.property_origin_indent.is_none()
+                                && inline_contains_mapping_key(inline)
+                            {
+                                self.property_origin_indent = Some(line_indent);
+                            }
                             let inline_pos = Pos {
                                 byte_offset: inline_offset,
                                 char_offset: inline_char_offset,
@@ -1894,6 +2368,19 @@ impl<'input> EventIter<'input> {
                         } else {
                             // Standalone anchor line — anchor applies to whatever
                             // node comes next (collection or scalar).
+                            // Validate: the anchor must be indented enough for this context.
+                            let min = self.min_standalone_property_indent();
+                            if line_indent < min {
+                                self.pending_anchor = None;
+                                self.failed = true;
+                                let err_pos = amp_pos;
+                                return StepResult::Yield(Err(Error {
+                                    pos: err_pos,
+                                    message:
+                                        "node property is not indented enough for this context"
+                                            .into(),
+                                }));
+                            }
                             self.pending_anchor_for_collection = true;
                         }
                         // Let the next iteration handle whatever follows.
@@ -1904,11 +2391,22 @@ impl<'input> EventIter<'input> {
         }
 
         // ---- Flow collection detection: `[` or `{` starts a flow collection ----
+        // Stray closing flow indicators (`]`, `}`) in block context are errors.
 
         if let Some(line) = self.lexer.peek_next_line() {
             let trimmed = line.content.trim_start_matches(' ');
             if trimmed.starts_with('[') || trimmed.starts_with('{') {
                 return self.handle_flow_collection();
+            }
+            if trimmed.starts_with(']') || trimmed.starts_with('}') {
+                let err_pos = line.pos;
+                let ch = trimmed.chars().next().unwrap_or(']');
+                self.failed = true;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: format!("unexpected '{ch}' outside flow collection"),
+                }));
             }
         }
 
@@ -1926,29 +2424,130 @@ impl<'input> EventIter<'input> {
         if let Some(line) = self.lexer.peek_next_line() {
             let line_indent = line.indent;
             let close_pos = self.lexer.current_pos();
+            // Record the minimum indent across all open collections before
+            // closing. A root collection has indent 0. If the minimum indent
+            // before closure was 0 and the stack empties, the root node is
+            // complete. When a tag-inline mapping opens at a column > 0 (a
+            // pre-existing indent-tracking limitation), closing it must not
+            // prematurely mark the root as emitted.
+            let min_indent_before = self.coll_stack.iter().map(|e| e.indent()).min();
             self.close_collections_at_or_above(line_indent.saturating_add(1), close_pos);
+            // If closing collections emptied the stack, the root node is
+            // complete — but only if the outermost collection was at indent 0
+            // (a true root collection, not a spuriously-indented inline tag).
+            if self.coll_stack.is_empty() && !self.queue.is_empty() && min_indent_before == Some(0)
+            {
+                self.root_node_emitted = true;
+            }
             if !self.queue.is_empty() {
                 return StepResult::Continue;
             }
         }
 
+        // ---- Block structure validity checks ----
+        //
+        // After closing deeper collections and before consuming a scalar,
+        // validate that the current line's indentation is consistent with
+        // the innermost open block collection.
+        //
+        // For block sequences: the only valid content at the sequence's own
+        // indent level is `- ` (handled by peek_sequence_entry above).
+        // Any other content at that indent level is invalid YAML.
+        //
+        // For block mappings in Key phase: the only valid content at the
+        // mapping's indent level is a mapping entry (handled by
+        // peek_mapping_entry above). A plain scalar without `: ` is not
+        // a valid implicit mapping key.
+        if let Some(line) = self.lexer.peek_next_line() {
+            let line_indent = line.indent;
+            match self.coll_stack.last() {
+                Some(&CollectionEntry::Sequence(seq_indent, _)) if line_indent == seq_indent => {
+                    // Content at the sequence indent level that is NOT `- ` is
+                    // invalid. peek_sequence_entry already returned None, so this
+                    // line is not a sequence entry.
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "invalid content at block sequence indent level: expected '- '"
+                            .into(),
+                    }));
+                }
+                Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, _))
+                    if line_indent == map_indent =>
+                {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message:
+                            "invalid content at block mapping indent level: expected mapping key"
+                                .into(),
+                    }));
+                }
+                // Content more deeply indented than the mapping key level is only
+                // valid as an explicit-key continuation (explicit_key_pending=true)
+                // or as the very first key (has_had_value=false — the first key may
+                // be at any indent >= map_indent).  After at least one key-value pair
+                // has been processed (has_had_value=true) with no explicit-key pending,
+                // deeper content that is not a valid mapping key is an error.
+                Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, true))
+                    if line_indent > map_indent
+                        && !self.explicit_key_pending
+                        && !self.lexer.is_next_line_synthetic() =>
+                {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "unexpected indented content after mapping value".into(),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
         // ---- Scalars ----
 
-        // `plain_parent_indent` — the indent at which the current scalar starts;
-        // used to stop plain-scalar continuation at a lesser-indented line.
-        //
         // `block_parent_indent` — the indent of the enclosing block context;
         // block scalars (`|`, `>`) must have content lines more indented than
         // this value.  For a block scalar embedded as inline content after `? `
         // or `- `, the enclosing block's indent is the *collection's* indent,
         // not the column of the inline `|`/`>` token.
-        let plain_parent_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
-        let block_parent_indent = self.coll_stack.last().map_or(0, |e| e.indent());
+        //
+        // `plain_parent_indent` — the enclosing block's indent level.
+        // Plain scalar continuation lines must be indented strictly more than
+        // `plain_parent_indent` (YAML 1.2), with a special exception for
+        // tab-indented lines when `plain_parent_indent == 0` (the tab provides
+        // the s-separate-in-line separator required by s-flow-folded(0)).
+        // Use usize::MAX as a sentinel for "root level" — the root node has no
+        // parent collection, so block scalar body lines may start at column 0
+        // (equivalent to a parent indent of -1 in the YAML spec).
+        let block_parent_indent = self.coll_stack.last().map_or(usize::MAX, |e| e.indent());
+        let plain_parent_indent = self.coll_stack.last().map_or(0, |e| e.indent());
+        // Capture whether an inline scalar (from `--- text`) was pending before
+        // the scalar dispatch call.  If it was, the emitted plain scalar came
+        // from the `---` marker line and is NOT necessarily the complete root
+        // node — the lexer emits `--- >` / `--- |` / `--- "text` inline content
+        // as a plain scalar, but the actual node body follows on subsequent
+        // lines.  Marking root_node_emitted in those cases would incorrectly
+        // reject the body lines as "content after root node".
+        let had_inline_scalar = self.lexer.has_inline_scalar();
         match self.try_consume_scalar(plain_parent_indent, block_parent_indent) {
             Ok(Some(event)) => {
                 self.tick_mapping_phase_after_scalar();
                 // Drain any trailing comment detected on the scalar's line.
                 self.drain_trailing_comment();
+                // A scalar emitted at the document root (no open collection)
+                // is the complete root node — unless it came from inline
+                // content after `---` (had_inline_scalar), in which case the
+                // body on subsequent lines is part of the same node.
+                if self.coll_stack.is_empty() && !had_inline_scalar {
+                    self.root_node_emitted = true;
+                }
                 return StepResult::Yield(Ok(event));
             }
             Err(e) => {
@@ -1958,12 +2557,32 @@ impl<'input> EventIter<'input> {
             Ok(None) => {}
         }
 
+        // Check for invalid characters at the start of an unrecognised line.
+        // A line that starts with a character that is neither whitespace nor a
+        // valid YAML ns-char (e.g. NUL U+0000 or mid-stream BOM U+FEFF) is a
+        // parse error.
+        if let Some(line) = self.lexer.peek_next_line() {
+            let first_ch = line.content.chars().next();
+            if let Some(ch) = first_ch {
+                if ch != ' ' && ch != '\t' && !crate::lexer::is_ns_char(ch) {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: format!("invalid character U+{:04X} in document", ch as u32),
+                    }));
+                }
+            }
+        }
+
         // Fallback: unrecognised content line — consume and loop.
         self.lexer.consume_line();
         StepResult::Continue
     }
 
     /// Handle a block-sequence dash entry (`-`).
+    #[allow(clippy::too_many_lines)]
     fn handle_sequence_entry(&mut self, dash_indent: usize, dash_pos: Pos) -> StepResult<'input> {
         let cur_pos = self.lexer.current_pos();
         self.close_collections_at_or_above(dash_indent.saturating_add(1), cur_pos);
@@ -1982,12 +2601,43 @@ impl<'input> EventIter<'input> {
         let opens_new = match self.coll_stack.last() {
             None => true,
             Some(
-                &(CollectionEntry::Sequence(col)
-                | CollectionEntry::Mapping(col, MappingPhase::Key)),
+                &(CollectionEntry::Sequence(col, _)
+                | CollectionEntry::Mapping(col, MappingPhase::Key, _)),
             ) => dash_indent > col,
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Value)) => dash_indent >= col,
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Value, _)) => dash_indent >= col,
         };
         if opens_new {
+            // A block sequence cannot be an implicit mapping key — only flow nodes
+            // may appear as implicit keys.  If the parent is a mapping in Key phase
+            // and we are about to open a new sequence, this is a block sequence
+            // where a mapping key is expected: an error.
+            // Exception: when explicit_key_pending is set, the sequence IS the
+            // content of an explicit key (`? \n- seq_key`), which is valid.
+            if matches!(
+                self.coll_stack.last(),
+                Some(&CollectionEntry::Mapping(_, MappingPhase::Key, true))
+            ) && !self.explicit_key_pending
+            {
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos: dash_pos,
+                    message: "block sequence cannot appear as an implicit mapping key".into(),
+                }));
+            }
+            // A block sequence item at a wrong indent level is invalid.  When the
+            // parent is a sequence that has already completed at least one item
+            // (`has_had_item = true`) and the new dash is NOT at the parent
+            // sequence's column (not a new sibling item), this is a wrong-indent
+            // sequence entry.
+            if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last() {
+                if dash_indent != parent_col {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: dash_pos,
+                        message: "block sequence entry at wrong indentation level".into(),
+                    }));
+                }
+            }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.failed = true;
                 return StepResult::Yield(Err(Error {
@@ -1995,7 +2645,16 @@ impl<'input> EventIter<'input> {
                     message: "collection nesting depth exceeds limit".into(),
                 }));
             }
-            self.coll_stack.push(CollectionEntry::Sequence(dash_indent));
+            // Sequence opening consumes any pending explicit-key context.
+            self.explicit_key_pending = false;
+            // Mark the parent sequence (if any) as having started an item.
+            if let Some(CollectionEntry::Sequence(_, current_item_started)) =
+                self.coll_stack.last_mut()
+            {
+                *current_item_started = true;
+            }
+            self.coll_stack
+                .push(CollectionEntry::Sequence(dash_indent, false));
             self.queue.push_back((
                 Event::SequenceStart {
                     anchor: self.pending_anchor.take(),
@@ -2004,6 +2663,59 @@ impl<'input> EventIter<'input> {
                 },
                 zero_span(dash_pos),
             ));
+        }
+        // When continuing an existing sequence (opens_new = false), reset
+        // `current_item_started` so that the new item can receive content.
+        if !opens_new {
+            if let Some(CollectionEntry::Sequence(_, current_item_started)) =
+                self.coll_stack.last_mut()
+            {
+                *current_item_started = false;
+            }
+        }
+        // When continuing an existing sequence (opens_new = false) and there is
+        // a pending tag/anchor from the previous item's content (e.g. `- !!str`
+        // whose inline extraction left a standalone tag line), that tag/anchor
+        // applies to an empty scalar for the previous item.  Emit it now before
+        // processing the current `-`.
+        if !opens_new
+            && (self.pending_tag_for_collection || self.pending_anchor_for_collection)
+            && (self.pending_tag.is_some() || self.pending_anchor.is_some())
+        {
+            let item_pos = self.lexer.current_pos();
+            self.queue.push_back((
+                Event::Scalar {
+                    value: std::borrow::Cow::Borrowed(""),
+                    style: ScalarStyle::Plain,
+                    anchor: self.pending_anchor.take(),
+                    tag: self.pending_tag.take(),
+                },
+                zero_span(item_pos),
+            ));
+            self.pending_tag_for_collection = false;
+            self.pending_anchor_for_collection = false;
+        }
+        // Check for tab-indented block structure before consuming the dash.
+        // In YAML, tabs cannot be used for block-level indentation.  When the
+        // separator between the dash and the inline content is (or contains) a
+        // tab, and the inline content is a block structure indicator, the tab
+        // is acting as indentation for a block node — which is invalid
+        // (YAML 1.2 §6.1).
+        if let Some(line) = self.lexer.peek_next_line() {
+            let after_spaces = line.content.trim_start_matches(' ');
+            if let Some(rest) = after_spaces.strip_prefix('-') {
+                let inline = rest.trim_start_matches([' ', '\t']);
+                let separator = &rest[..rest.len() - inline.len()];
+                if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
+                    let err_pos = line.pos;
+                    self.failed = true;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "tab character is not valid block indentation".into(),
+                    }));
+                }
+            }
         }
         let had_inline = self.consume_sequence_dash(dash_indent);
         if !had_inline {
@@ -2049,10 +2761,10 @@ impl<'input> EventIter<'input> {
         // (the next item down the stack) is a Mapping at the same indent in
         // Value phase — that confirms it was opened by the seq-spaces rule,
         // not as an independent sequence at column 0.
-        if let Some(&CollectionEntry::Sequence(seq_col)) = self.coll_stack.last() {
+        if let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last() {
             if seq_col == key_indent {
                 let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
-                    |e| matches!(e, CollectionEntry::Mapping(col, _) if *col == key_indent),
+                    |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == key_indent),
                 );
                 if parent_is_seq_spaces_mapping {
                     self.coll_stack.pop();
@@ -2060,7 +2772,8 @@ impl<'input> EventIter<'input> {
                         .push_back((Event::SequenceEnd, zero_span(cur_pos)));
                     // Advance parent mapping from Value to Key phase — the
                     // sequence was its value and is now fully closed.
-                    if let Some(CollectionEntry::Mapping(_, phase)) = self.coll_stack.last_mut() {
+                    if let Some(CollectionEntry::Mapping(_, phase, _)) = self.coll_stack.last_mut()
+                    {
                         *phase = MappingPhase::Key;
                     }
                     return StepResult::Continue;
@@ -2069,10 +2782,52 @@ impl<'input> EventIter<'input> {
         }
 
         let is_in_mapping_at_this_indent = self.coll_stack.last().is_some_and(
-            |top| matches!(top, CollectionEntry::Mapping(col, _) if *col == key_indent),
+            |top| matches!(top, CollectionEntry::Mapping(col, _, _) if *col == key_indent),
         );
 
         if !is_in_mapping_at_this_indent {
+            // A mapping entry at `key_indent` cannot be opened when:
+            //
+            // 1. The top of the stack is a block sequence at the same indent —
+            //    this would nest a mapping inside the sequence without a `- `
+            //    prefix (BD7L pattern).
+            //
+            // 2. The top of the stack is a block mapping in Key phase at a
+            //    lesser indent that has already had at least one entry — this
+            //    would open a nested mapping when no current key exists for it
+            //    to be the value of (EW3V, DMG6, N4JP, U44R patterns: wrong
+            //    indentation).  The `has_had_value` flag suppresses this check
+            //    for fresh mappings whose first key node is nested deeper than
+            //    the mapping indicator (e.g. V9D5 explicit-key content).
+            //    Also skip when a value-indicator line (`: value`) is next
+            //    because it is the value portion of an alias/anchor mapping key
+            //    split across tokens (e.g. `*alias : scalar` in 26DV), or when
+            //    a pending tag or anchor is present (tags prepend synthetic
+            //    inlines at their column — 74H7).
+            match self.coll_stack.last() {
+                Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == key_indent => {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: key_pos,
+                        message:
+                            "invalid mapping entry at block sequence indent level: expected '- '"
+                                .into(),
+                    }));
+                }
+                Some(&CollectionEntry::Mapping(map_col, MappingPhase::Key, true))
+                    if map_col < key_indent
+                        && self.pending_tag.is_none()
+                        && self.pending_anchor.is_none()
+                        && !self.is_value_indicator_line() =>
+                {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: key_pos,
+                        message: "wrong indentation: mapping key is more indented than the enclosing mapping".into(),
+                    }));
+                }
+                _ => {}
+            }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.failed = true;
                 return StepResult::Yield(Err(Error {
@@ -2080,8 +2835,22 @@ impl<'input> EventIter<'input> {
                     message: "collection nesting depth exceeds limit".into(),
                 }));
             }
-            self.coll_stack
-                .push(CollectionEntry::Mapping(key_indent, MappingPhase::Key));
+            // Mark the parent sequence (if any) as having started an item.
+            if let Some(CollectionEntry::Sequence(_, current_item_started)) =
+                self.coll_stack.last_mut()
+            {
+                *current_item_started = true;
+            }
+            // When a tag or anchor appeared inline on the physical line before
+            // the key content, the synthetic key line has a larger indent than
+            // the actual entry start.  Use the original physical line's indent
+            // to open the mapping at the correct indentation level.
+            let effective_mapping_indent = self.property_origin_indent.take().unwrap_or(key_indent);
+            self.coll_stack.push(CollectionEntry::Mapping(
+                effective_mapping_indent,
+                MappingPhase::Key,
+                false,
+            ));
             // Consume pending anchor for the mapping only when the anchor was
             // on its own line (standalone). Inline anchors (e.g. `&a key: v`)
             // annotate the key scalar and must not be consumed here.
@@ -2108,6 +2877,55 @@ impl<'input> EventIter<'input> {
 
         // Continuing an existing mapping.
         if self.is_value_indicator_line() {
+            // If there is a pending tag/anchor that is not designated for the
+            // mapping collection itself (i.e. it came from an inline `!!tag`
+            // or `&anchor` before the `:` value indicator), it applies to the
+            // empty implicit key scalar.  Emit that key scalar first so the
+            // pending properties are not lost and the mapping phase advances
+            // correctly before the value indicator is consumed.
+            let in_key_phase = self.coll_stack.last().is_some_and(|top| {
+                matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == key_indent)
+            });
+            if in_key_phase
+                && !self.pending_tag_for_collection
+                && !self.pending_anchor_for_collection
+                && (self.pending_tag.is_some() || self.pending_anchor.is_some())
+            {
+                let pos = self.lexer.current_pos();
+                self.queue.push_back((
+                    Event::Scalar {
+                        value: std::borrow::Cow::Borrowed(""),
+                        style: ScalarStyle::Plain,
+                        anchor: self.pending_anchor.take(),
+                        tag: self.pending_tag.take(),
+                    },
+                    zero_span(pos),
+                ));
+                self.advance_mapping_to_value();
+                return StepResult::Continue;
+            }
+            // Check for tab-indented block structure after explicit value marker.
+            // `: TAB -`, `: TAB ?`, or `: TAB key:` are invalid because the tab
+            // makes the following block-structure-forming content block-indented
+            // via a tab, which is forbidden (YAML 1.2 §6.1).
+            if let Some(line) = self.lexer.peek_next_line() {
+                let after_spaces = line.content.trim_start_matches(' ');
+                if let Some(after_colon) = after_spaces.strip_prefix(':') {
+                    if !after_colon.is_empty() {
+                        let value = after_colon.trim_start_matches([' ', '\t']);
+                        let separator = &after_colon[..after_colon.len() - value.len()];
+                        if separator.contains('\t') && is_tab_indented_block_indicator(value) {
+                            let err_pos = line.pos;
+                            self.failed = true;
+                            self.lexer.consume_line();
+                            return StepResult::Yield(Err(Error {
+                                pos: err_pos,
+                                message: "tab character is not valid block indentation".into(),
+                            }));
+                        }
+                    }
+                }
+            }
             self.consume_explicit_value_line(key_indent);
             return StepResult::Continue;
         }
@@ -2115,7 +2933,7 @@ impl<'input> EventIter<'input> {
         // If the mapping is in Value phase and the next line is another key
         // (not a `: value` line), the previous key had no value — emit empty.
         if self.coll_stack.last().is_some_and(|top| {
-            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value) if *col == key_indent)
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == key_indent)
         }) {
             let pos = self.lexer.current_pos();
             self.queue.push_back((
@@ -2131,11 +2949,37 @@ impl<'input> EventIter<'input> {
             return StepResult::Continue;
         }
 
+        // Check for tab-indented block structure after explicit key marker.
+        // `? TAB -`, `? TAB ?`, or `? TAB key:` are invalid because the tab
+        // makes the following block-structure-forming content block-indented
+        // via a tab, which is forbidden (YAML 1.2 §6.1).
+        if let Some(line) = self.lexer.peek_next_line() {
+            let after_spaces = line.content.trim_start_matches(' ');
+            if let Some(after_q) = after_spaces.strip_prefix('?') {
+                if !after_q.is_empty() {
+                    let inline = after_q.trim_start_matches([' ', '\t']);
+                    let separator = &after_q[..after_q.len() - inline.len()];
+                    if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
+                        let err_pos = line.pos;
+                        self.failed = true;
+                        self.lexer.consume_line();
+                        return StepResult::Yield(Err(Error {
+                            pos: err_pos,
+                            message: "tab character is not valid block indentation".into(),
+                        }));
+                    }
+                }
+            }
+        }
         // Normal key line: consume and emit key scalar.
         let consumed = self.consume_mapping_entry(key_indent);
         match consumed {
             ConsumedMapping::ExplicitKey { had_key_inline } => {
-                if !had_key_inline {
+                if had_key_inline {
+                    // The key content will appear inline (already prepended).
+                    // No explicit-key-pending needed since the key content is
+                    // already in the buffer.
+                } else {
                     let pos = self.lexer.current_pos();
                     self.queue.push_back((
                         Event::Scalar {
@@ -2147,6 +2991,10 @@ impl<'input> EventIter<'input> {
                         zero_span(pos),
                     ));
                     self.advance_mapping_to_value();
+                    // The key content is on the NEXT line — mark that an explicit
+                    // key is pending so block sequence entries are allowed
+                    // (e.g. `?\n- seq_key`).
+                    self.explicit_key_pending = true;
                 }
             }
             ConsumedMapping::ImplicitKey {
@@ -2163,6 +3011,18 @@ impl<'input> EventIter<'input> {
                     key_span,
                 ));
                 self.advance_mapping_to_value();
+            }
+            ConsumedMapping::InlineImplicitMappingError { pos } => {
+                // The inline value is a block node (mapping or sequence indicator)
+                // which cannot appear inline as a mapping value — block nodes must
+                // start on a new line.
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos,
+                    message:
+                        "block node cannot appear as inline value; use a new line or a flow node"
+                            .into(),
+                }));
             }
         }
         StepResult::Continue
@@ -2207,7 +3067,8 @@ impl<'input> EventIter<'input> {
         // Advance past `:` and any whitespace.
         let after_colon = &trimmed[1..]; // skip ':'
         let value_content = after_colon.trim_start_matches([' ', '\t']);
-        let had_value_inline = !value_content.is_empty();
+        // A comment-only value (e.g. `: # lala`) is not a real inline value.
+        let had_value_inline = !value_content.is_empty() && !value_content.starts_with('#');
 
         if had_value_inline {
             let spaces_after_colon = after_colon.len() - value_content.len();
@@ -2229,19 +3090,13 @@ impl<'input> EventIter<'input> {
             self.lexer.consume_line();
             self.lexer.prepend_inline_line(synthetic);
         } else {
-            // Bare `:` with no value content — the value is empty.
+            // `:` with no real value content (either bare or comment-only).
+            // Consume the indicator line and advance to Value phase — the next
+            // line may be a block node (the actual value), or if the next line
+            // is another key at the same indent, the main loop emits an empty
+            // scalar at that point (see the Value-phase empty-scalar guard).
             self.lexer.consume_line();
-            let pos = self.lexer.current_pos();
-            self.queue.push_back((
-                Event::Scalar {
-                    value: std::borrow::Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take(),
-                    tag: None,
-                },
-                zero_span(pos),
-            ));
-            self.advance_mapping_to_key();
+            self.advance_mapping_to_value();
         }
     }
 
@@ -2282,14 +3137,35 @@ impl<'input> EventIter<'input> {
             /// after each comma; it becomes `true` when a scalar or nested
             /// collection is emitted.  A comma arriving when `has_value` is
             /// `false` is a leading comma error.
-            Sequence { has_value: bool },
+            ///
+            /// `after_colon` is `true` when we have just consumed a `:` value
+            /// separator in a single-pair implicit mapping context.  In this
+            /// state a new scalar or collection is the value of the single-pair
+            /// mapping — not a new entry — so the missing-comma check must not
+            /// fire.
+            ///
+            /// `last_was_plain` is `true` when the most recent emitted item was
+            /// a plain scalar.  Plain scalars may span multiple lines in flow
+            /// context, so the missing-comma check must not fire after a plain
+            /// scalar (the next line's content may be a continuation).
+            Sequence {
+                has_value: bool,
+                after_colon: bool,
+                last_was_plain: bool,
+            },
             /// An open `{...}` mapping.
             ///
             /// `has_value` tracks the same invariant as in `Sequence` but for
             /// the mapping as a whole (not per key/value pair).
+            ///
+            /// `last_was_plain` mirrors the same concept as in `Sequence`: when
+            /// the most recent emitted item was a plain scalar, the next line
+            /// may be a multi-line continuation, so indicator-start validation
+            /// must be deferred until we know whether it is a continuation.
             Mapping {
                 phase: FlowMappingPhase,
                 has_value: bool,
+                last_was_plain: bool,
             },
         }
 
@@ -2335,6 +3211,17 @@ impl<'input> EventIter<'input> {
         };
 
         let leading = first_line.content.len() - first_line.content.trim_start_matches(' ').len();
+        // The physical line number where the outermost flow collection opened.
+        // Used to detect multi-line flow keys (C2SP).
+        let start_line = first_line.pos.line;
+        // The physical line number of the most recent emitted value (scalar or
+        // inner-collection close).  Used to detect multi-line implicit keys (DK4H):
+        // a `:` value separator on a different line than the preceding key is invalid.
+        let mut last_token_line = first_line.pos.line;
+        // Set when a `?` explicit-key indicator is consumed inside a flow sequence.
+        // Suppresses the DK4H single-line check for the corresponding `:` separator —
+        // explicit keys in flow sequences may span multiple lines (YAML 1.2 §7.4.2).
+        let mut explicit_key_in_seq = false;
 
         // Stack for tracking open flow collections (nested via explicit iteration,
         // not recursion — security requirement).
@@ -2375,20 +3262,77 @@ impl<'input> EventIter<'input> {
 
         let (mut cur_content, mut cur_base_pos) = resync!();
 
+        // The minimum indent for continuation lines in this flow collection.
+        // When the flow collection is inside an enclosing block collection,
+        // continuation lines must be indented more than the enclosing block's
+        // indent level (YAML 1.2: flow context lines must not regress to or
+        // below the enclosing block indent level).
+        // At document root (coll_stack empty), there is no enclosing block, so
+        // no constraint — represented as None.
+        let flow_min_indent: Option<usize> = self.coll_stack.last().map(|e| e.indent());
+
         // -----------------------------------------------------------------------
         // Main parse loop — iterates over characters in the current (and
         // subsequent) lines until the outermost closing delimiter is found.
         // -----------------------------------------------------------------------
 
         'outer: loop {
+            // Document markers (`---` and `...`) are only valid at the document
+            // level — they are illegal inside flow collections (YAML 1.2 §8.1).
+            // A document marker must appear at the very beginning of a line
+            // (column 0) and be followed by whitespace or end-of-line.
+            if pos_in_line == 0
+                && (cur_content.starts_with("---") || cur_content.starts_with("..."))
+            {
+                let rest = &cur_content[3..];
+                if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, 0);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "document marker is not allowed inside a flow collection".into(),
+                    }));
+                }
+            }
+
+            // Tabs as indentation on a new line in flow context are invalid
+            // (YAML 1.2 §6.2 — indentation uses spaces only).  A tab at the
+            // start of a continuation line (before the first non-whitespace
+            // character) is a tab used as indentation.  Blank lines (tab only,
+            // no content) are exempt — they are treated as empty separator lines.
+            if pos_in_line == 0 {
+                let has_tab_indent =
+                    cur_content.starts_with('\t') && !cur_content.trim().is_empty();
+                if has_tab_indent {
+                    let err_pos = abs_pos(cur_base_pos, cur_content, 0);
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: err_pos,
+                        message: "tab character is not allowed as indentation in flow context"
+                            .into(),
+                    }));
+                }
+            }
+
             // Skip leading spaces/tabs and comments.
+            // `#` is a comment start only when preceded by whitespace (or at
+            // start of line, i.e. pos_in_line == 0 with all prior chars being
+            // whitespace).  A `#` immediately after a token (e.g. `,#`) is not
+            // a comment — it is an error character that will be caught below.
+            let prev_was_ws_at_loop_entry = pos_in_line == 0
+                || cur_content[..pos_in_line]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c == ' ' || c == '\t');
+            let mut prev_was_ws = prev_was_ws_at_loop_entry;
             while pos_in_line < cur_content.len() {
                 let Some(ch) = cur_content[pos_in_line..].chars().next() else {
                     break;
                 };
                 if ch == ' ' || ch == '\t' {
+                    prev_was_ws = true;
                     pos_in_line += 1;
-                } else if ch == '#' {
+                } else if ch == '#' && prev_was_ws {
                     // Emit a Comment event for this `# comment` to end of line.
                     // No MAX_COMMENT_LEN check here — this comment is bounded by the
                     // physical line length (itself bounded by total input size), the
@@ -2435,6 +3379,28 @@ impl<'input> EventIter<'input> {
                         message: "unterminated flow collection: unexpected end of input".into(),
                     }));
                 }
+
+                // Flow continuation lines must be indented more than the
+                // enclosing block context (YAML 1.2: flow lines must not
+                // regress to the block indent level).  Blank/whitespace-only
+                // lines are exempt — they act as line separators.
+                // At document root (no enclosing block), there is no
+                // indentation constraint.
+                if let Some(min_indent) = flow_min_indent {
+                    if let Some(next_line) = self.lexer.peek_next_line() {
+                        let trimmed = next_line.content.trim();
+                        if !trimmed.is_empty() && next_line.indent <= min_indent {
+                            let err_pos = next_line.pos;
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: err_pos,
+                                message: "flow collection continuation line is not indented enough"
+                                    .into(),
+                            }));
+                        }
+                    }
+                }
+
                 pos_in_line = 0;
                 continue 'outer;
             }
@@ -2463,7 +3429,11 @@ impl<'input> EventIter<'input> {
                 pos_in_line += 1;
 
                 if ch == '[' {
-                    flow_stack.push(FlowFrame::Sequence { has_value: false });
+                    flow_stack.push(FlowFrame::Sequence {
+                        has_value: false,
+                        after_colon: false,
+                        last_was_plain: false,
+                    });
                     events.push((
                         Event::SequenceStart {
                             anchor: pending_flow_anchor.take(),
@@ -2476,6 +3446,7 @@ impl<'input> EventIter<'input> {
                     flow_stack.push(FlowFrame::Mapping {
                         phase: FlowMappingPhase::Key,
                         has_value: false,
+                        last_was_plain: false,
                     });
                     events.push((
                         Event::MappingStart {
@@ -2539,12 +3510,26 @@ impl<'input> EventIter<'input> {
                 // mark the parent as having a value (the nested collection was it),
                 // and if it's a mapping in Value phase, advance to Key phase.
                 if let Some(parent) = flow_stack.last_mut() {
+                    // Update the last-token-line tracker so the multi-line implicit
+                    // key check (DK4H) knows where the key (inner collection) ended.
+                    last_token_line = cur_base_pos.line;
                     match parent {
-                        FlowFrame::Sequence { has_value } => {
+                        FlowFrame::Sequence {
+                            has_value,
+                            after_colon,
+                            last_was_plain,
+                        } => {
                             *has_value = true;
+                            *after_colon = false;
+                            *last_was_plain = false;
                         }
-                        FlowFrame::Mapping { phase, has_value } => {
+                        FlowFrame::Mapping {
+                            phase,
+                            has_value,
+                            last_was_plain,
+                        } => {
                             *has_value = true;
+                            *last_was_plain = false;
                             if *phase == FlowMappingPhase::Value {
                                 *phase = FlowMappingPhase::Key;
                             }
@@ -2557,8 +3542,48 @@ impl<'input> EventIter<'input> {
                     // Consume the current line; prepend any non-empty tail so the
                     // block state machine can process content after the `]`/`}`.
                     let tail_content = &cur_content[pos_in_line..];
+                    let tail_trimmed = tail_content.trim_start_matches([' ', '\t']);
+                    // `#` is a comment only when preceded by whitespace.  If the
+                    // closing bracket is immediately followed by `#` (no space),
+                    // that is not a valid comment — it is a syntax error.
+                    if tail_trimmed.starts_with('#') {
+                        let prev_was_ws = pos_in_line == 0
+                            || cur_content[..pos_in_line]
+                                .chars()
+                                .next_back()
+                                .is_some_and(|c| c == ' ' || c == '\t');
+                        if !prev_was_ws {
+                            let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: err_pos,
+                                message: "comment requires at least one space before '#'".into(),
+                            }));
+                        }
+                    }
+                    // A flow collection used as an implicit mapping key must
+                    // fit on a single line (YAML 1.2 §7.4.2).  If the tail
+                    // begins with `:` (making this collection a mapping key) and
+                    // the closing delimiter is on a different line than the
+                    // opening delimiter, reject as a multi-line flow key.
+                    if tail_trimmed.starts_with(':') && cur_base_pos.line != start_line {
+                        let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                        self.failed = true;
+                        return StepResult::Yield(Err(Error {
+                            pos: err_pos,
+                            message: "multi-line flow collection cannot be used as an implicit mapping key".into(),
+                        }));
+                    }
+                    // If the block collection stack is empty AND the tail does not
+                    // start with `:` (which would indicate this flow collection is a
+                    // mapping key), the flow collection is the document root node.
+                    // Mark it so subsequent content on the NEXT LINE triggers the
+                    // root-node guard in `step_in_document`.
+                    if self.coll_stack.is_empty() && !tail_trimmed.starts_with(':') {
+                        self.root_node_emitted = true;
+                    }
                     self.lexer.consume_line();
-                    if !tail_content.trim_start_matches([' ', '\t']).is_empty() {
+                    if !tail_trimmed.is_empty() {
                         let tail_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                         let synthetic = crate::lines::Line {
                             content: tail_content,
@@ -2583,7 +3608,8 @@ impl<'input> EventIter<'input> {
                 // comma is invalid — e.g. `[,]` or `{,}`.
                 let leading = match flow_stack.last() {
                     Some(
-                        FlowFrame::Sequence { has_value } | FlowFrame::Mapping { has_value, .. },
+                        FlowFrame::Sequence { has_value, .. }
+                        | FlowFrame::Mapping { has_value, .. },
                     ) => !has_value,
                     None => false,
                 };
@@ -2617,20 +3643,78 @@ impl<'input> EventIter<'input> {
                     }));
                 }
 
+                // If a tag or anchor is pending but no scalar was emitted yet,
+                // the comma terminates an implicit empty-scalar node.  Emit it
+                // so the pending properties are attached to the correct node
+                // rather than carried forward to the next entry.
+                if pending_flow_tag.is_some() || pending_flow_anchor.is_some() {
+                    let empty_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    events.push((
+                        Event::Scalar {
+                            value: Cow::Borrowed(""),
+                            style: ScalarStyle::Plain,
+                            anchor: pending_flow_anchor.take(),
+                            tag: pending_flow_tag.take(),
+                        },
+                        zero_span(empty_pos),
+                    ));
+                    // Advance phase: this scalar acts as a value (or key).
+                    if let Some(frame) = flow_stack.last_mut() {
+                        match frame {
+                            FlowFrame::Sequence {
+                                has_value,
+                                after_colon,
+                                last_was_plain,
+                            } => {
+                                *has_value = true;
+                                *after_colon = false;
+                                *last_was_plain = false;
+                            }
+                            FlowFrame::Mapping {
+                                phase,
+                                has_value,
+                                last_was_plain,
+                            } => {
+                                *has_value = true;
+                                *last_was_plain = false;
+                                *phase = match *phase {
+                                    FlowMappingPhase::Key => FlowMappingPhase::Value,
+                                    FlowMappingPhase::Value => FlowMappingPhase::Key,
+                                };
+                            }
+                        }
+                    }
+                }
+
                 // Reset has_value and (for mappings) go back to Key phase.
                 if let Some(frame) = flow_stack.last_mut() {
                     match frame {
-                        FlowFrame::Sequence { has_value } => {
+                        FlowFrame::Sequence {
+                            has_value,
+                            after_colon,
+                            last_was_plain,
+                        } => {
                             *has_value = false;
+                            *after_colon = false;
+                            *last_was_plain = false;
                         }
-                        FlowFrame::Mapping { phase, has_value } => {
+                        FlowFrame::Mapping {
+                            phase,
+                            has_value,
+                            last_was_plain,
+                        } => {
                             *has_value = false;
+                            *last_was_plain = false;
                             if *phase == FlowMappingPhase::Value {
                                 *phase = FlowMappingPhase::Key;
                             }
                         }
                     }
                 }
+                // Reset last_token_line after a comma — the next key can start
+                // on the same line as the comma (or any subsequent line) without
+                // triggering the multi-line implicit key error.
+                last_token_line = cur_base_pos.line;
 
                 continue 'outer;
             }
@@ -2704,7 +3788,9 @@ impl<'input> EventIter<'input> {
                 let result = if ch == '\'' {
                     self.lexer.try_consume_single_quoted(0)
                 } else {
-                    self.lexer.try_consume_double_quoted(0)
+                    // Flow context: no block-indentation constraint on
+                    // continuation lines of double-quoted scalars.
+                    self.lexer.try_consume_double_quoted(None)
                 };
 
                 let (value, span) = match result {
@@ -2737,27 +3823,47 @@ impl<'input> EventIter<'input> {
                     span,
                 ));
 
-                // The quoted-scalar method consumed its synthetic line entirely.
-                // Any content after the closing quote is in `remaining` starting
-                // at byte offset `span.end.byte_offset - cur_abs_pos.byte_offset`.
-                // Prepend a synthetic line for that tail so the flow parser
-                // continues processing `,`, `]`, `}`, etc. after the scalar.
-                let consumed_bytes = span.end.byte_offset - cur_abs_pos.byte_offset;
-                let tail_in_remaining = &remaining[consumed_bytes..];
-                if !tail_in_remaining.is_empty() {
-                    let tail_syn = crate::lines::Line {
-                        content: tail_in_remaining,
-                        offset: span.end.byte_offset,
-                        indent: span.end.column,
-                        break_type: crate::lines::BreakType::Eof,
-                        pos: span.end,
-                    };
-                    self.lexer.prepend_inline_line(tail_syn);
+                // Reconstruct the tail after the closing quote so the flow
+                // parser can continue with `,`, `]`, `}`, etc.
+                //
+                // For single-line scalars, the tail is in `remaining` at byte
+                // offset `span.end.byte_offset - cur_abs_pos.byte_offset`.
+                //
+                // For multiline scalars, the lexer's continuation loop consumed
+                // additional input lines; the tail on the closing-quote line is
+                // stored in `self.lexer.pending_multiline_tail`.  Drain it here.
+                if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
+                    if !tail.is_empty() {
+                        let tail_syn = crate::lines::Line {
+                            content: tail,
+                            offset: tail_pos.byte_offset,
+                            indent: tail_pos.column,
+                            break_type: crate::lines::BreakType::Eof,
+                            pos: tail_pos,
+                        };
+                        self.lexer.prepend_inline_line(tail_syn);
+                    }
+                } else {
+                    // Single-line scalar: derive tail from `remaining`.
+                    let consumed_bytes = span.end.byte_offset - cur_abs_pos.byte_offset;
+                    let tail_in_remaining = remaining.get(consumed_bytes..).unwrap_or("");
+                    if !tail_in_remaining.is_empty() {
+                        let tail_syn = crate::lines::Line {
+                            content: tail_in_remaining,
+                            offset: span.end.byte_offset,
+                            indent: span.end.column,
+                            break_type: crate::lines::BreakType::Eof,
+                            pos: span.end,
+                        };
+                        self.lexer.prepend_inline_line(tail_syn);
+                    }
                 }
 
                 // Re-sync from the buffer.
                 (cur_content, cur_base_pos) = resync!();
                 pos_in_line = 0;
+                // Track where this quoted scalar (potential key) ended.
+                last_token_line = cur_base_pos.line;
 
                 if cur_content.is_empty() && self.lexer.at_eof() && !flow_stack.is_empty() {
                     let err_pos = self.lexer.current_pos();
@@ -2771,11 +3877,22 @@ impl<'input> EventIter<'input> {
                 // Advance mapping phase for the emitted scalar; mark frame as having a value.
                 if let Some(frame) = flow_stack.last_mut() {
                     match frame {
-                        FlowFrame::Sequence { has_value } => {
+                        FlowFrame::Sequence {
+                            has_value,
+                            after_colon,
+                            last_was_plain,
+                        } => {
                             *has_value = true;
+                            *after_colon = false;
+                            *last_was_plain = false;
                         }
-                        FlowFrame::Mapping { phase, has_value } => {
+                        FlowFrame::Mapping {
+                            phase,
+                            has_value,
+                            last_was_plain,
+                        } => {
                             *has_value = true;
+                            *last_was_plain = false;
                             *phase = match *phase {
                                 FlowMappingPhase::Key => FlowMappingPhase::Value,
                                 FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -2788,12 +3905,17 @@ impl<'input> EventIter<'input> {
             }
 
             // ----------------------------------------------------------------
-            // Explicit key indicator `?` in flow mappings
+            // Explicit key indicator `?` in flow mappings and sequences
             // ----------------------------------------------------------------
             if ch == '?' {
                 let next_ch = cur_content[pos_in_line + 1..].chars().next();
                 if next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | '\n' | '\r')) {
                     // `?` followed by whitespace/EOL: explicit key indicator.
+                    // In a flow sequence, remember this so the DK4H single-line
+                    // check is suppressed for the corresponding `:` separator.
+                    if matches!(flow_stack.last(), Some(FlowFrame::Sequence { .. })) {
+                        explicit_key_in_seq = true;
+                    }
                     pos_in_line += 1;
                     continue 'outer;
                 }
@@ -2805,12 +3927,85 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             if ch == ':' {
                 let next_ch = cur_content[pos_in_line + 1..].chars().next();
-                let is_value_sep =
+                // `:` is a value separator when followed by whitespace/delimiter
+                // (standard case) OR when in a flow sequence with a synthetic
+                // current line (adjacent `:` from JSON-like key — YAML 1.2
+                // §7.4.2).  A synthetic line means the `:` is on the same
+                // physical line as the preceding quoted scalar / collection.
+                let is_standard_sep =
                     next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | ',' | ']' | '}' | '\n' | '\r'));
+                let is_adjacent_json_sep = !is_standard_sep
+                    && matches!(
+                        flow_stack.last(),
+                        Some(FlowFrame::Sequence {
+                            has_value: true,
+                            ..
+                        })
+                    )
+                    && self.lexer.is_next_line_synthetic();
+                let is_value_sep = is_standard_sep || is_adjacent_json_sep;
                 if is_value_sep {
-                    if let Some(FlowFrame::Mapping { phase, .. }) = flow_stack.last_mut() {
-                        if *phase == FlowMappingPhase::Key {
-                            *phase = FlowMappingPhase::Value;
+                    // Multi-line implicit single-pair mapping key check (YAML 1.2 §7.4.1):
+                    // inside a flow sequence `[...]`, a single-pair mapping entry's key must
+                    // be on the same line as the `:` separator.  (Flow mappings `{...}` allow
+                    // multi-line implicit keys — see YAML 1.2 §7.4.2.)
+                    // Exception: when a `?` explicit-key indicator was seen in this sequence
+                    // (`explicit_key_in_seq`), the key may span multiple lines.
+                    let in_sequence = matches!(flow_stack.last(), Some(FlowFrame::Sequence { .. }));
+                    if in_sequence && cur_base_pos.line != last_token_line && !explicit_key_in_seq {
+                        let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                        self.failed = true;
+                        return StepResult::Yield(Err(Error {
+                            pos: colon_pos,
+                            message: "implicit flow mapping key must be on a single line".into(),
+                        }));
+                    }
+                    explicit_key_in_seq = false;
+                    if let Some(frame) = flow_stack.last_mut() {
+                        match frame {
+                            FlowFrame::Mapping {
+                                phase,
+                                has_value,
+                                last_was_plain,
+                            } => {
+                                *last_was_plain = false;
+                                if *phase == FlowMappingPhase::Key {
+                                    // If a tag or anchor is pending but no key scalar was
+                                    // emitted yet, the `:` terminates an implicit empty key.
+                                    // Emit the empty key scalar now so the pending properties
+                                    // are attached to the key, not carried to the value.
+                                    if pending_flow_tag.is_some() || pending_flow_anchor.is_some() {
+                                        let key_pos =
+                                            abs_pos(cur_base_pos, cur_content, pos_in_line);
+                                        events.push((
+                                            Event::Scalar {
+                                                value: Cow::Borrowed(""),
+                                                style: ScalarStyle::Plain,
+                                                anchor: pending_flow_anchor.take(),
+                                                tag: pending_flow_tag.take(),
+                                            },
+                                            zero_span(key_pos),
+                                        ));
+                                        *has_value = true;
+                                    }
+                                    *phase = FlowMappingPhase::Value;
+                                }
+                            }
+                            FlowFrame::Sequence {
+                                after_colon,
+                                last_was_plain,
+                                ..
+                            } => {
+                                // `:` as value separator in a sequence means we are
+                                // entering the value part of a single-pair implicit
+                                // mapping.  Mark `after_colon` so the next scalar or
+                                // collection is not rejected for missing a comma.
+                                *after_colon = true;
+                                // Reset last_was_plain so the value scalar on the next
+                                // line is not appended to the key via multi-line
+                                // plain-scalar continuation logic.
+                                *last_was_plain = false;
+                            }
                         }
                     }
                     pos_in_line += 1;
@@ -2879,7 +4074,15 @@ impl<'input> EventIter<'input> {
                         return StepResult::Yield(Err(e));
                     }
                     Ok(name) => {
-                        // Duplicate anchors allowed — overwrite.
+                        // Two anchors on the same flow node are an error.
+                        if pending_flow_anchor.is_some() {
+                            let amp_pos2 = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: amp_pos2,
+                                message: "a node may not have more than one anchor".into(),
+                            }));
+                        }
                         pending_flow_anchor = Some(name);
                         pos_in_line += 1 + name.len();
                         // Skip any whitespace after the anchor name.
@@ -2908,6 +4111,13 @@ impl<'input> EventIter<'input> {
                         message: "alias node cannot have a tag property".into(),
                     }));
                 }
+                if pending_flow_anchor.is_some() {
+                    self.failed = true;
+                    return StepResult::Yield(Err(Error {
+                        pos: star_pos,
+                        message: "alias node cannot have an anchor property".into(),
+                    }));
+                }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
                         self.failed = true;
@@ -2929,15 +4139,128 @@ impl<'input> EventIter<'input> {
                         // Advance mapping phase; mark frame as having a value.
                         if let Some(frame) = flow_stack.last_mut() {
                             match frame {
-                                FlowFrame::Sequence { has_value } => {
+                                FlowFrame::Sequence {
+                                    has_value,
+                                    after_colon,
+                                    last_was_plain,
+                                } => {
                                     *has_value = true;
+                                    *after_colon = false;
+                                    *last_was_plain = false;
                                 }
-                                FlowFrame::Mapping { phase, has_value } => {
+                                FlowFrame::Mapping {
+                                    phase,
+                                    has_value,
+                                    last_was_plain,
+                                } => {
                                     *has_value = true;
+                                    *last_was_plain = false;
                                     *phase = match *phase {
                                         FlowMappingPhase::Key => FlowMappingPhase::Value,
                                         FlowMappingPhase::Value => FlowMappingPhase::Key,
                                     };
+                                }
+                            }
+                        }
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // Multi-line plain scalar continuation in flow context
+            //
+            // A plain scalar may span multiple lines (YAML §7.3.3).  When the
+            // previous emitted token was a plain scalar (`last_was_plain`) and
+            // the current character is a valid `ns-plain-char` (i.e. it can
+            // appear within a plain scalar body, even if it cannot *start* one),
+            // extend the in-progress scalar rather than treating the character
+            // as the start of a new token.
+            //
+            // `ns-plain-char` in flow context: any `ns-char` that is not `:` or
+            // `#`, plus `:` followed by ns-plain-safe, plus `#` not preceded by
+            // whitespace.  At the start of a continuation line all leading
+            // whitespace has been consumed, so `#` at position 0 here would be
+            // `#` after whitespace — a comment start, not a continuation char.
+            // ----------------------------------------------------------------
+            {
+                // For flow MAPPINGS: a plain scalar may continue a key only when
+                // the phase is currently Value — meaning the previous scalar was
+                // a KEY (Key→Value phase advance was done when emitting it).  A
+                // VALUE scalar (phase Value→Key) must NOT continue: the next line
+                // is a new key that requires a preceding comma.
+                // For flow SEQUENCES: `last_was_plain` alone is enough (single-pair
+                // implicit mapping keys can span lines, and regular sequence items
+                // can also continue, though commas terminate them).
+                let frame_last_was_plain = matches!(
+                    flow_stack.last(),
+                    Some(
+                        FlowFrame::Mapping {
+                            last_was_plain: true,
+                            phase: FlowMappingPhase::Value,
+                            ..
+                        } | FlowFrame::Sequence {
+                            last_was_plain: true,
+                            ..
+                        }
+                    )
+                );
+                // `ns-plain-char` check: ch must not be a flow terminator, `:` (alone),
+                // or `#` (comment start after whitespace, which is the only `#` we can
+                // see here since whitespace was consumed).
+                let is_ns_plain_char_continuation = frame_last_was_plain
+                    && !matches!(ch, ',' | '[' | ']' | '{' | '}' | '#')
+                    && (ch != ':' || {
+                        let after = &cur_content[pos_in_line + 1..];
+                        let next_c = after.chars().next();
+                        // `:` is a valid continuation char only when NOT followed by
+                        // a separator (space, tab, flow indicator, or end-of-line).
+                        next_c.is_some_and(|nc| {
+                            !matches!(nc, ' ' | '\t' | ',' | '[' | ']' | '{' | '}')
+                        })
+                    });
+
+                if is_ns_plain_char_continuation {
+                    let slice = &cur_content[pos_in_line..];
+                    let scanned = scan_plain_line_flow(slice);
+                    if !scanned.is_empty() {
+                        // Extend the most-recently-emitted scalar event with a
+                        // line-fold (space) and the continuation content.
+                        if let Some((
+                            Event::Scalar {
+                                value,
+                                style: ScalarStyle::Plain,
+                                ..
+                            },
+                            _,
+                        )) = events.last_mut()
+                        {
+                            let extended = format!("{value} {scanned}");
+                            *value = Cow::Owned(extended);
+                        }
+                        pos_in_line += scanned.len();
+                        // Update last_token_line to this line so the DK4H
+                        // multi-line implicit-key check remains anchored to the
+                        // last real token (the continuation content).
+                        last_token_line = cur_base_pos.line;
+                        // The continuation may itself end at EOL, leaving the scalar
+                        // still incomplete.  Keep `last_was_plain` true and, for
+                        // mappings, revert the phase back to Key so that the `: `
+                        // separator is still recognised.
+                        if let Some(frame) = flow_stack.last_mut() {
+                            match frame {
+                                FlowFrame::Mapping {
+                                    phase,
+                                    last_was_plain,
+                                    ..
+                                } => {
+                                    // Undo the premature Key→Value advance: the key is not
+                                    // yet complete until `: ` is seen.
+                                    *phase = FlowMappingPhase::Key;
+                                    *last_was_plain = true;
+                                }
+                                FlowFrame::Sequence { last_was_plain, .. } => {
+                                    *last_was_plain = true;
                                 }
                             }
                         }
@@ -2980,6 +4303,36 @@ impl<'input> EventIter<'input> {
                 };
 
                 if is_plain_first {
+                    // Missing-comma check: in a flow collection with has_value=true,
+                    // a new plain scalar is starting without a preceding comma —
+                    // YAML 1.2 §7.4 requires commas between entries.
+                    match flow_stack.last() {
+                        Some(FlowFrame::Mapping {
+                            phase: FlowMappingPhase::Key,
+                            has_value: true,
+                            ..
+                        }) => {
+                            let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: err_pos,
+                                message: "missing comma between flow mapping entries".into(),
+                            }));
+                        }
+                        Some(FlowFrame::Sequence {
+                            has_value: true,
+                            after_colon: false,
+                            last_was_plain: false,
+                        }) => {
+                            let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                            self.failed = true;
+                            return StepResult::Yield(Err(Error {
+                                pos: err_pos,
+                                message: "missing comma between flow sequence entries".into(),
+                            }));
+                        }
+                        _ => {}
+                    }
                     let slice = &cur_content[pos_in_line..];
                     let scanned = scan_plain_line_flow(slice);
                     if !scanned.is_empty() {
@@ -3001,15 +4354,29 @@ impl<'input> EventIter<'input> {
                             scalar_span,
                         ));
                         pos_in_line += scanned.len();
+                        // Track where this scalar (potential key) ended for the
+                        // multi-line implicit key check (DK4H).
+                        last_token_line = cur_base_pos.line;
 
                         // Advance mapping phase; mark frame as having a value.
                         if let Some(frame) = flow_stack.last_mut() {
                             match frame {
-                                FlowFrame::Sequence { has_value } => {
+                                FlowFrame::Sequence {
+                                    has_value,
+                                    after_colon,
+                                    last_was_plain,
+                                } => {
                                     *has_value = true;
+                                    *after_colon = false;
+                                    *last_was_plain = true; // plain scalars may continue
                                 }
-                                FlowFrame::Mapping { phase, has_value } => {
+                                FlowFrame::Mapping {
+                                    phase,
+                                    has_value,
+                                    last_was_plain,
+                                } => {
                                     *has_value = true;
+                                    *last_was_plain = true; // plain scalars may continue on next line
                                     *phase = match *phase {
                                         FlowMappingPhase::Key => FlowMappingPhase::Value,
                                         FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -3065,18 +4432,25 @@ impl<'input> EventIter<'input> {
     /// - If the mapping was in `Value` phase (or there is no open mapping), it
     ///   flips back to `Key`.
     fn tick_mapping_phase_after_scalar(&mut self) {
+        // A scalar was consumed — clear any pending explicit-key context.
+        self.explicit_key_pending = false;
         // Find the innermost mapping entry on the stack.
         for entry in self.coll_stack.iter_mut().rev() {
-            if let CollectionEntry::Mapping(_, phase) = entry {
+            if let CollectionEntry::Mapping(_, phase, has_had_value) = entry {
                 *phase = match *phase {
-                    MappingPhase::Key => MappingPhase::Value,
+                    MappingPhase::Key => {
+                        *has_had_value = true;
+                        MappingPhase::Value
+                    }
                     MappingPhase::Value => MappingPhase::Key,
                 };
                 return;
             }
             // Sequences between this mapping and the top don't count.
-            if matches!(entry, CollectionEntry::Sequence(_)) {
+            if let CollectionEntry::Sequence(_, has_had_item) = entry {
                 // A scalar here is an item in a sequence, not a mapping value.
+                // Mark the sequence as having a completed item.
+                *has_had_item = true;
                 return;
             }
         }

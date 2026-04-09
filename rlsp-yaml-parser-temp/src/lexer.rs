@@ -39,6 +39,32 @@ pub struct Lexer<'input> {
     /// on the same line.  Drained by the state machine after emitting the
     /// scalar event.
     pub trailing_comment: Option<(&'input str, Span)>,
+    /// Content that follows the closing quote of a multiline double- or
+    /// single-quoted scalar (on the same line as the closing quote).
+    ///
+    /// Set by [`Self::try_consume_double_quoted`] and
+    /// [`Self::try_consume_single_quoted`] when the scalar spans multiple
+    /// lines.  Drained by the flow parser after calling those methods, which
+    /// prepends the tail as a synthetic line so the flow parser can continue
+    /// processing `,`, `]`, `}`, etc. that follow the closing quote.
+    pub pending_multiline_tail: Option<(&'input str, Pos)>,
+    /// Error detected in the suffix of a plain scalar (content after the
+    /// scalar value that is neither whitespace nor a valid trailing comment).
+    ///
+    /// Set by [`Self::try_consume_plain_scalar`] when an invalid suffix is
+    /// found (e.g. a NUL byte or mid-stream BOM).  Drained by the caller
+    /// after the scalar event is emitted, so the error is reported after the
+    /// scalar rather than instead of it.
+    pub plain_scalar_suffix_error: Option<Error>,
+    /// Error produced by [`Self::consume_marker_line`] when the marker line
+    /// carries inline content that cannot be parsed (e.g. `--- !tag` where
+    /// `!` starts a tag indicator that cannot start a plain scalar, or
+    /// `--- key: value` where `: ` occurs after the plain-scanned prefix,
+    /// or any inline on a `...` marker which never permits inline content).
+    ///
+    /// Drained by the callers in `lib.rs` immediately after calling
+    /// `consume_marker_line`.
+    pub marker_inline_error: Option<Error>,
 }
 
 impl<'input> Lexer<'input> {
@@ -50,6 +76,9 @@ impl<'input> Lexer<'input> {
             current_pos: Pos::ORIGIN,
             inline_scalar: None,
             trailing_comment: None,
+            pending_multiline_tail: None,
+            plain_scalar_suffix_error: None,
+            marker_inline_error: None,
         }
     }
 
@@ -258,7 +287,15 @@ impl<'input> Lexer<'input> {
     /// The caller must ensure the current line is a marker (via
     /// [`Self::is_directives_end`] or [`Self::is_document_end`]) before
     /// calling this.
-    pub fn consume_marker_line(&mut self) -> (Pos, Pos) {
+    /// Consume the currently-primed marker line (`---` or `...`).
+    ///
+    /// `reject_all_inline` — when `true` (used for `...` markers), any
+    /// non-comment inline content after the marker is flagged as an error in
+    /// [`Self::marker_inline_error`].  When `false` (used for `---` markers),
+    /// a valid plain scalar may appear inline; invalid inline content (an
+    /// indicator character that cannot start a plain scalar, or residual
+    /// content after the scanned scalar) is still flagged.
+    pub fn consume_marker_line(&mut self, reject_all_inline: bool) -> (Pos, Pos) {
         // SAFETY: caller must verify via is_directives_end() or is_document_end()
         // before calling — the state machine enforces this precondition.
         let Some(line) = self.buf.consume_next() else {
@@ -301,7 +338,32 @@ impl<'input> Lexer<'input> {
                         end: comment_end,
                     },
                 ));
+            } else if reject_all_inline {
+                // `...` markers must not have non-comment inline content.
+                self.marker_inline_error = Some(Error {
+                    pos: inline_start,
+                    message: "invalid content after document-end marker '...'".into(),
+                });
             } else {
+                // Detect block scalar indicators (`|` / `>`) in inline position.
+                // `scan_plain_line_block` below would mis-scan `|0` or `|10` as
+                // plain scalars; instead validate the block header eagerly so that
+                // invalid indicators (indent 0, double-digit, duplicate markers)
+                // produce the correct parse error.
+                if let Some(after_pipe) = inline
+                    .strip_prefix('|')
+                    .or_else(|| inline.strip_prefix('>'))
+                {
+                    let (_, _, header_err) = parse_block_header(after_pipe, inline_start);
+                    if let Some(e) = header_err {
+                        self.marker_inline_error = Some(e);
+                        return (marker_pos, after);
+                    }
+                    // Valid block scalar header — fall through to the plain-scalar path
+                    // so it is stashed as inline_scalar for the event emitter.
+                    // (The body on subsequent lines is handled by the normal scalar
+                    // dispatch path after DocumentStart is emitted.)
+                }
                 // TODO(architecture): scan_plain_line_block only tokenizes plain scalars.
                 // Inline content after `---` that starts with `'` or `"` (Task 7) is
                 // currently emitted as a Plain scalar with the quotes as literal chars.
@@ -310,18 +372,36 @@ impl<'input> Lexer<'input> {
                 // scalar try-chain instead of pre-extracting. Deferred because it
                 // requires re-running the security review for escape handling.
                 let scanned = scan_plain_line_block(inline);
-                if !scanned.is_empty() {
-                    let mut inline_end = inline_start;
-                    for ch in scanned.chars() {
-                        inline_end = inline_end.advance(ch);
+                if scanned.is_empty() {
+                    // First character cannot start a plain scalar (e.g. `&`, `!`,
+                    // `*`, `%`, `{`, `[`) — invalid inline content after `---`.
+                    self.marker_inline_error = Some(Error {
+                        pos: inline_start,
+                        message: "invalid content after document-start marker '---'".into(),
+                    });
+                } else {
+                    // Check for residual content after the plain scalar (e.g.
+                    // `--- key: value` where `: value` is left over).  Any
+                    // non-whitespace residual that is not a comment is invalid.
+                    let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
+                    if !residual.is_empty() && !residual.starts_with('#') {
+                        self.marker_inline_error = Some(Error {
+                            pos: inline_start,
+                            message: "invalid content after document-start marker '---'".into(),
+                        });
+                    } else {
+                        let mut inline_end = inline_start;
+                        for ch in scanned.chars() {
+                            inline_end = inline_end.advance(ch);
+                        }
+                        self.inline_scalar = Some((
+                            Cow::Borrowed(scanned),
+                            Span {
+                                start: inline_start,
+                                end: inline_end,
+                            },
+                        ));
                     }
-                    self.inline_scalar = Some((
-                        Cow::Borrowed(scanned),
-                        Span {
-                            start: inline_start,
-                            end: inline_end,
-                        },
-                    ));
                 }
             }
         }
@@ -337,6 +417,14 @@ impl<'input> Lexer<'input> {
     #[must_use]
     pub fn peek_next_line(&self) -> Option<&Line<'input>> {
         self.buf.peek_next()
+    }
+
+    /// Peek at the second upcoming line without consuming either.
+    ///
+    /// Returns `None` if fewer than two lines remain.
+    #[must_use]
+    pub fn peek_second_line(&self) -> Option<Line<'input>> {
+        self.buf.peek_second()
     }
 
     /// Prepend a synthetic line to the front of the buffer.
@@ -370,6 +458,28 @@ impl<'input> Lexer<'input> {
     #[must_use]
     pub const fn has_inline_scalar(&self) -> bool {
         self.inline_scalar.is_some()
+    }
+
+    /// Return a reference to the pending inline scalar (value, start position)
+    /// without consuming it, or `None` if there is no pending inline scalar.
+    #[must_use]
+    pub fn peek_inline_scalar(&self) -> Option<(&str, Pos)> {
+        self.inline_scalar
+            .as_ref()
+            .map(|(v, span)| (v.as_ref(), span.start))
+    }
+
+    /// Discard the pending inline scalar without emitting it.
+    pub fn drain_inline_scalar(&mut self) {
+        self.inline_scalar = None;
+    }
+
+    /// True when the next line in the buffer is a synthetic line prepended by
+    /// the parser (e.g. inline key content from `? key` or `- item`), rather
+    /// than a raw line from the original input stream.
+    #[must_use]
+    pub fn is_next_line_synthetic(&self) -> bool {
+        self.buf.is_next_synthetic()
     }
 
     /// Position after the last consumed line.
@@ -455,17 +565,58 @@ impl<'input> Lexer<'input> {
                 for ch in comment_text.chars() {
                     span_end = span_end.advance(ch);
                 }
-                self.trailing_comment = Some((
-                    comment_text,
-                    Span {
-                        start: hash_pos,
-                        end: span_end,
-                    },
-                ));
+                // Validate comment text: YAML 1.2 §8.1.1 — comment lines must
+                // not contain NUL (U+0000) since it is not a c-printable char.
+                if let Some((bad_i, bad_ch)) = comment_text.char_indices().find(|(_, c)| *c == '\0')
+                {
+                    let bad_pos = Pos {
+                        byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                        char_offset: hash_pos.char_offset + 1 + bad_i,
+                        line: hash_pos.line,
+                        column: hash_pos.column + 1 + bad_i,
+                    };
+                    self.plain_scalar_suffix_error = Some(Error {
+                        pos: bad_pos,
+                        message: format!("invalid character U+{:04X} in comment", bad_ch as u32),
+                    });
+                } else {
+                    self.trailing_comment = Some((
+                        comment_text,
+                        Span {
+                            start: hash_pos,
+                            end: span_end,
+                        },
+                    ));
+                }
+            } else if let Some((bad_i, bad_ch)) = suffix
+                .char_indices()
+                .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
+            {
+                // Suffix contains a character that stopped plain-scalar
+                // scanning (NUL U+0000 or mid-stream BOM U+FEFF) and is not
+                // valid at this position.  Other non-whitespace characters
+                // (e.g. `: value`) may be valid YAML content that the mapping
+                // detector missed and are not flagged here.
+                let bad_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
+                    char_offset: consumed_first.pos.char_offset + after_scalar_start + bad_i,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + after_scalar_start + bad_i,
+                };
+                self.plain_scalar_suffix_error = Some(Error {
+                    pos: bad_pos,
+                    message: format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
+                });
             }
         }
 
-        let extra = self.collect_plain_continuations(first_value_ref, parent_indent);
+        // A trailing comment on the first line terminates the plain scalar —
+        // continuation lines after a comment are not part of the scalar.
+        let extra = if self.trailing_comment.is_some() || self.plain_scalar_suffix_error.is_some() {
+            None
+        } else {
+            self.collect_plain_continuations(first_value_ref, parent_indent, consumed_first.indent)
+        };
 
         let span_end = self.current_pos;
         Some(extra.map_or_else(
@@ -502,6 +653,7 @@ impl<'input> Lexer<'input> {
         &mut self,
         first_value_ref: &str,
         parent_indent: usize,
+        scalar_indent: usize,
     ) -> Option<String> {
         let mut pending_blanks: usize = 0;
         let mut result: Option<String> = None;
@@ -526,7 +678,19 @@ impl<'input> Lexer<'input> {
                 break;
             }
 
-            if next.indent < parent_indent {
+            // A continuation line is valid when it is strictly more indented
+            // than the enclosing block (`indent > parent_indent`).
+            //
+            // Special case: when `parent_indent == 0` AND the scalar itself
+            // started at column 0 (`scalar_indent == 0`), a continuation at
+            // column 0 is also valid — `s-flow-folded(0)` allows any indentation ≥ 0
+            // for scalars in the n=0 document-root context.
+            // (YAML 1.2 spec example 7.12 / tests HS5T.)
+            // A tab at the start of a continuation also satisfies `s-separate-in-line`
+            // even when parent_indent=0 and scalar_indent>0.
+            let n0_exception = parent_indent == 0 && scalar_indent == 0;
+            let tab_exception = parent_indent == 0 && next.content.starts_with('\t');
+            if next.indent <= parent_indent && !n0_exception && !tab_exception {
                 break;
             }
 
@@ -534,6 +698,19 @@ impl<'input> Lexer<'input> {
             if cont_value.is_empty() {
                 break;
             }
+
+            // If the plain scan stops short (not at end of content) and the
+            // remaining content starts with `: ` (value indicator), this line
+            // is an implicit mapping entry — the plain scalar terminates here.
+            let after_cont = trimmed[cont_value.len()..].trim_start_matches([' ', '\t']);
+            if after_cont.starts_with(": ") || after_cont == ":" {
+                break;
+            }
+
+            // If the remainder after the scanned value is a comment (`# …`),
+            // this line has a trailing comment that terminates the plain scalar.
+            // Include the current line's content but do NOT continue after this.
+            let has_trailing_comment = after_cont.starts_with('#');
 
             let buf = result.get_or_insert_with(|| String::from(first_value_ref));
             if pending_blanks > 0 {
@@ -551,6 +728,10 @@ impl<'input> Lexer<'input> {
                 unreachable!("consume cont line failed")
             };
             self.current_pos = pos_after_line(&consumed);
+
+            if has_trailing_comment {
+                break;
+            }
         }
 
         result
@@ -623,7 +804,7 @@ impl<'input> Lexer<'input> {
         let mut owned = value.as_owned_string(body_start);
 
         loop {
-            let Some(_next) = self.buf.peek_next() else {
+            let Some(next) = self.buf.peek_next() else {
                 // EOF without closing quote.
                 return Err(Error {
                     pos: self.current_pos,
@@ -631,10 +812,21 @@ impl<'input> Lexer<'input> {
                 });
             };
 
+            // Document markers at column 0 terminate the document even inside
+            // quoted scalars (YAML spec §6.5 / test suite RXY3).
+            if is_doc_marker_line(next.content) {
+                return Err(Error {
+                    pos: next.pos,
+                    message: "document marker '...' or '---' is not allowed inside a quoted scalar"
+                        .to_owned(),
+                });
+            }
+
             // SAFETY: peek succeeded in the let-else above; LineBuffer invariant.
             let Some(consumed) = self.buf.consume_next() else {
                 unreachable!("peek returned Some but consume returned None")
             };
+            let line_start_pos = consumed.pos;
             self.current_pos = pos_after_line(&consumed);
             let line_content = consumed.content;
 
@@ -666,6 +858,20 @@ impl<'input> Lexer<'input> {
                     owned.push_str(&unescape_single_quoted(trimmed, cont_value.quoted_len));
                 } else {
                     owned.push_str(&trimmed[..cont_value.quoted_len]);
+                }
+                // Compute position right after the closing `'` by advancing from
+                // the line start over leading whitespace + content + closing `'`.
+                let leading_len = line_content.len() - trimmed.len();
+                let mut close_pos = line_start_pos;
+                for ch in line_content[..leading_len + cont_value.quoted_len].chars() {
+                    close_pos = close_pos.advance(ch);
+                }
+                close_pos = close_pos.advance('\''); // past closing `'`
+                // If there is content after the closing `'`, store it so the
+                // flow parser can continue parsing `,`, `]`, `}`, etc.
+                let tail = trimmed.get(cont_value.quoted_len + 1..).unwrap_or("");
+                if !tail.is_empty() {
+                    self.pending_multiline_tail = Some((tail, close_pos));
                 }
                 let end_pos = self.current_pos;
                 return Ok(Some((
@@ -708,7 +914,7 @@ impl<'input> Lexer<'input> {
     /// Multi-line or any escape → `Cow::Owned`.
     pub fn try_consume_double_quoted(
         &mut self,
-        _parent_indent: usize,
+        block_context_indent: Option<usize>,
     ) -> Result<Option<(Cow<'input, str>, Span)>, Error> {
         let Some(first_line) = self.buf.peek_next() else {
             return Ok(None);
@@ -742,20 +948,32 @@ impl<'input> Lexer<'input> {
             DoubleQuotedLine::Closed {
                 value,
                 close_pos: end_pos,
-            } => (
-                value.into_cow(body_start),
-                Span {
-                    start: open_pos,
-                    end: end_pos,
-                },
-            ),
+                tail,
+            } => {
+                // Store any non-empty tail so the caller can validate or process it.
+                if !tail.is_empty() {
+                    self.pending_multiline_tail = Some((tail, end_pos));
+                }
+                (
+                    value.into_cow(body_start),
+                    Span {
+                        start: open_pos,
+                        end: end_pos,
+                    },
+                )
+            }
             DoubleQuotedLine::Incomplete {
                 value,
                 line_continuation,
             } => {
                 // Multi-line: accumulate.
                 let mut owned = value.into_string();
-                self.collect_double_quoted_continuations(&mut owned, line_continuation, open_pos)?;
+                self.collect_double_quoted_continuations(
+                    &mut owned,
+                    line_continuation,
+                    open_pos,
+                    block_context_indent,
+                )?;
                 let end_pos = self.current_pos;
                 (
                     Cow::Owned(owned),
@@ -785,6 +1003,7 @@ impl<'input> Lexer<'input> {
     /// assembled from stripped lines and does not exist contiguously in input.
     ///
     /// **Span:** Covers from the `|` through the last consumed line terminator.
+    #[allow(clippy::too_many_lines)]
     pub fn try_consume_literal_block_scalar(
         &mut self,
         parent_indent: usize,
@@ -824,25 +1043,54 @@ impl<'input> Lexer<'input> {
         // Determine content indent.
         // If explicit indicator given: content_indent = parent_indent + explicit_indent.
         // Otherwise: auto-detect by scanning forward to the first non-blank content line.
-        let content_indent: usize = if let Some(explicit) = explicit_indent {
-            parent_indent + explicit
+        // `content_indent_known` is true when content_indent is derived from an actual
+        // non-blank line (or an explicit indicator); false when it falls back to the
+        // default (parent_indent + 1) because no content lines exist.  The spec rule
+        // "leading empty lines must not exceed the first non-empty line's indent" only
+        // applies when there IS a first non-empty line (content_indent_known = true).
+        // `effective_min` is `parent_indent + 1` when parent_indent is a real
+        // value, or `1` when parent_indent == usize::MAX (root-level sentinel,
+        // meaning the scalar has no enclosing collection and body lines may
+        // start at column 0 per YAML spec §8.1: body indent > -1).
+        let effective_min = if parent_indent == usize::MAX {
+            1_usize
         } else {
-            // Use peek_until_dedent to scan for the first non-blank line and
-            // read its indent.  base_indent = parent_indent so we stop at
-            // any line with indent <= parent_indent.
-            let lookahead = self.buf.peek_until_dedent(parent_indent);
-            // Find the first non-blank line's indent.
-            lookahead
-                .iter()
-                .find(|l| !l.content.trim_matches([' ', '\t']).is_empty())
-                .map_or(parent_indent + 1, |l| l.indent)
+            parent_indent + 1
         };
+
+        let (content_indent, content_indent_known): (usize, bool) =
+            if let Some(explicit) = explicit_indent {
+                // Explicit indent indicator: content_indent = parent_indent + indicator.
+                // For root level (usize::MAX), treat parent as 0 for arithmetic.
+                let base = if parent_indent == usize::MAX {
+                    0
+                } else {
+                    parent_indent
+                };
+                (base + explicit, true)
+            } else {
+                // Use peek_until_dedent to scan for the first non-blank line and
+                // read its indent.  base_indent = parent_indent so we stop at
+                // any line with indent <= parent_indent (usize::MAX means no limit).
+                let lookahead = self.buf.peek_until_dedent(parent_indent);
+                // Find the first non-blank line's indent.
+                lookahead
+                    .iter()
+                    .find(|l| !l.content.trim_matches([' ', '\t']).is_empty())
+                    .map_or((effective_min, false), |l| (l.indent, true))
+            };
 
         // Collect content lines.
         let mut out = String::new();
         // Count pending transparent blank lines (not yet pushed, for chomping).
         // These are lines with indent < content_indent (or truly empty lines).
         let mut trailing_newlines: usize = 0;
+        // Track whether we've seen the first line with actual non-whitespace
+        // characters.  Per YAML 1.2 §8.1.1.1: "It is an error for any of the
+        // leading empty lines to contain more spaces than the first non-empty
+        // line."  A spaces-only line with indent > content_indent is therefore
+        // an error if it precedes any real content.
+        let mut before_first_real_content = true;
 
         loop {
             let Some(next) = self.buf.peek_next() else {
@@ -891,6 +1139,32 @@ impl<'input> Lexer<'input> {
             let is_content_line = next.indent >= content_indent && !after_indent.is_empty();
 
             if is_content_line {
+                // Leading all-whitespace lines with indent > content_indent are
+                // errors (spec §8.1.1.1: leading empty lines must not exceed the
+                // first non-empty line's indentation).  Only applies when
+                // content_indent was derived from an actual non-blank line or an
+                // explicit indicator (content_indent_known = true).
+                let has_real_content = !after_indent.trim_end_matches([' ', '\t']).is_empty();
+                if content_indent_known
+                    && before_first_real_content
+                    && !has_real_content
+                    && next.indent > content_indent
+                {
+                    let blank_pos = next.pos;
+                    let Some(consumed) = self.buf.consume_next() else {
+                        unreachable!("consume over-indented blank failed")
+                    };
+                    self.current_pos = pos_after_line(&consumed);
+                    return Some(Err(Error {
+                        pos: blank_pos,
+                        message: "block scalar blank line has more indentation than the content"
+                            .to_owned(),
+                    }));
+                }
+                if has_real_content {
+                    before_first_real_content = false;
+                }
+
                 // Content line. Flush any pending blank lines first.
                 for _ in 0..trailing_newlines {
                     out.push('\n');
@@ -985,14 +1259,24 @@ impl<'input> Lexer<'input> {
             return Some(Err(e));
         }
 
+        let effective_min = if parent_indent == usize::MAX {
+            1_usize
+        } else {
+            parent_indent + 1
+        };
         let content_indent: usize = if let Some(explicit) = explicit_indent {
-            parent_indent + explicit
+            let base = if parent_indent == usize::MAX {
+                0
+            } else {
+                parent_indent
+            };
+            base + explicit
         } else {
             let lookahead = self.buf.peek_until_dedent(parent_indent);
             lookahead
                 .iter()
                 .find(|l| !l.content.trim_matches([' ', '\t']).is_empty())
-                .map_or(parent_indent + 1, |l| l.indent)
+                .map_or(effective_min, |l| l.indent)
         };
 
         let (content_result, trailing_newlines) = self.collect_folded_lines(content_indent);
@@ -1054,7 +1338,9 @@ impl<'input> Lexer<'input> {
             } else {
                 ""
             };
-            let is_content_line = next.indent >= content_indent && !after_indent.is_empty();
+            // A content line must have a non-whitespace character after the indent.
+            let is_content_line = next.indent >= content_indent
+                && !after_indent.trim_end_matches([' ', '\t']).is_empty();
 
             if is_content_line {
                 let is_more_indented = next.indent > content_indent;
@@ -1093,6 +1379,25 @@ impl<'input> Lexer<'input> {
                 if !trimmed.is_empty() {
                     break; // Dedented non-whitespace terminates the scalar.
                 }
+                // Whitespace-only blank line: validate l-empty indentation constraint.
+                // Per YAML 1.2 §8.1.1 rule 175, a blank line must have at most
+                // content_indent leading spaces.  More spaces is a parse error.
+                if next.indent > content_indent {
+                    let blank_pos = next.pos;
+                    let Some(consumed) = self.buf.consume_next() else {
+                        unreachable!("consume over-indented blank failed")
+                    };
+                    self.current_pos = pos_after_line(&consumed);
+                    return (
+                        Err(Error {
+                            pos: blank_pos,
+                            message:
+                                "block scalar blank line has more indentation than the content"
+                                    .to_owned(),
+                        }),
+                        0,
+                    );
+                }
                 let Some(consumed) = self.buf.consume_next() else {
                     unreachable!("consume blank line failed")
                 };
@@ -1120,6 +1425,7 @@ impl<'input> Lexer<'input> {
         owned: &mut String,
         mut line_continuation: bool,
         open_pos: Pos,
+        block_context_indent: Option<usize>,
     ) -> Result<(), Error> {
         let mut pending_blanks: usize = 0;
 
@@ -1131,7 +1437,32 @@ impl<'input> Lexer<'input> {
                 });
             };
 
+            // Document markers at column 0 terminate the document even inside
+            // quoted scalars (YAML spec §6.5 / test suite 5TRB).
+            if is_doc_marker_line(next.content) {
+                return Err(Error {
+                    pos: next.pos,
+                    message: "document marker '...' or '---' is not allowed inside a quoted scalar"
+                        .to_owned(),
+                });
+            }
+
             let trimmed = next.content.trim_start_matches([' ', '\t']);
+
+            // In block context, continuation lines of a double-quoted scalar
+            // must be indented more than the enclosing block (YAML 1.2 §7.3.1).
+            // A non-blank continuation line at indent <= n is invalid.
+            // At document root (no enclosing block), there is no constraint.
+            if let Some(n) = block_context_indent {
+                if !trimmed.is_empty() && next.indent <= n {
+                    return Err(Error {
+                        pos: next.pos,
+                        message: format!(
+                            "double-quoted scalar continuation line must be indented more than {n}"
+                        ),
+                    });
+                }
+            }
 
             if trimmed.is_empty() {
                 // Blank continuation line.
@@ -1169,8 +1500,18 @@ impl<'input> Lexer<'input> {
 
             let line_start_pos = consumed.pos;
             match scan_double_quoted_line(trimmed, line_start_pos)? {
-                DoubleQuotedLine::Closed { value, .. } => {
+                DoubleQuotedLine::Closed {
+                    value,
+                    close_pos,
+                    tail,
+                } => {
                     value.push_into(owned);
+                    // Store the tail (content after closing `"` on the closing
+                    // line) so the flow parser can prepend it as a synthetic
+                    // line to continue processing `,`, `]`, `}`, etc.
+                    if !tail.is_empty() {
+                        self.pending_multiline_tail = Some((tail, close_pos));
+                    }
                     return Ok(());
                 }
                 DoubleQuotedLine::Incomplete {
@@ -1205,23 +1546,37 @@ type LiteralBlockResult<'a> = Option<Result<(Cow<'a, str>, Chomp, Span), Error>>
 ///
 /// - `explicit_indent` is `Some(n)` for `|n` or `None` for auto-detect.
 /// - Error is `Some(Error)` for invalid indicator characters.
+#[allow(clippy::too_many_lines)]
 fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>, Option<Error>) {
-    let mut chars = after_pipe.chars().peekable();
-
     // Try to parse indicator characters. They can appear in either order:
     // indent-then-chomp or chomp-then-indent.
     let mut chomp: Option<Chomp> = None;
     let mut explicit_indent: Option<usize> = None;
     let mut pos = pipe_pos.advance('|');
+    let mut byte_offset: usize = 0;
 
     // We track how many indicator chars we consumed to detect `|99` (two digits).
     loop {
-        match chars.peek() {
-            None | Some(' ' | '\t' | '#' | '\n' | '\r') => {
-                // End of indicators: comment, whitespace, or line end.
+        let remaining = &after_pipe[byte_offset..];
+        match remaining.chars().next() {
+            None | Some(' ' | '\t' | '\n' | '\r') => {
+                // End of indicators: whitespace or line end.
                 break;
             }
-            Some(&ch) => {
+            Some('#') => {
+                // `#` immediately after indicator (no whitespace) is an error.
+                return (
+                    Chomp::Clip,
+                    None,
+                    Some(Error {
+                        pos,
+                        message:
+                            "comment after block scalar indicator requires at least one space before '#'"
+                                .to_owned(),
+                    }),
+                );
+            }
+            Some(ch) => {
                 if ch == '+' {
                     if chomp.is_some() {
                         return (
@@ -1235,7 +1590,7 @@ fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>,
                         );
                     }
                     chomp = Some(Chomp::Keep);
-                    chars.next();
+                    byte_offset += ch.len_utf8();
                     pos = pos.advance(ch);
                 } else if ch == '-' {
                     if chomp.is_some() {
@@ -1250,7 +1605,7 @@ fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>,
                         );
                     }
                     chomp = Some(Chomp::Strip);
-                    chars.next();
+                    byte_offset += ch.len_utf8();
                     pos = pos.advance(ch);
                 } else if ch.is_ascii_digit() {
                     if ch == '0' {
@@ -1276,7 +1631,7 @@ fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>,
                         );
                     }
                     explicit_indent = Some(ch as usize - '0' as usize);
-                    chars.next();
+                    byte_offset += ch.len_utf8();
                     pos = pos.advance(ch);
                 } else {
                     // Invalid indicator character.
@@ -1291,6 +1646,22 @@ fn parse_block_header(after_pipe: &str, pipe_pos: Pos) -> (Chomp, Option<usize>,
                 }
             }
         }
+    }
+
+    // After indicators, only optional whitespace followed by optional comment
+    // (or end of line) is allowed.  Non-whitespace, non-comment content is invalid.
+    let remaining = &after_pipe[byte_offset..];
+    let after_ws = remaining.trim_start_matches([' ', '\t']);
+    if !after_ws.is_empty() && !after_ws.starts_with('#') {
+        // Non-comment, non-whitespace content after indicators.
+        return (
+            Chomp::Clip,
+            None,
+            Some(Error {
+                pos,
+                message: "invalid content after block scalar indicator".to_owned(),
+            }),
+        );
     }
 
     (chomp.unwrap_or(Chomp::Clip), explicit_indent, None)
@@ -1570,7 +1941,7 @@ const fn is_c_indicator(ch: char) -> bool {
 }
 
 /// `ns-char` — printable non-whitespace non-BOM character.
-const fn is_ns_char(ch: char) -> bool {
+pub const fn is_ns_char(ch: char) -> bool {
     !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
         && matches!(ch,
             '\x21'..='\x7E'
@@ -1680,6 +2051,14 @@ fn is_marker(content: &str, ch: u8) -> bool {
     }
     // The 4th byte, if present, must be space or tab.
     matches!(bytes.get(3), None | Some(&b' ' | &b'\t'))
+}
+
+/// Return `true` if `content` is a document-start (`---`) or document-end
+/// (`...`) marker at column 0.
+///
+/// Used to detect forbidden markers inside multi-line quoted scalars.
+fn is_doc_marker_line(content: &str) -> bool {
+    is_marker(content, b'-') || is_marker(content, b'.')
 }
 
 /// Compute the `Pos` immediately after the terminator of `line`.
@@ -1829,6 +2208,8 @@ enum DoubleQuotedLine<'a> {
     Closed {
         value: DoubleQuotedValue<'a>,
         close_pos: Pos,
+        /// Content that follows the closing `"` on the same line (may be empty).
+        tail: &'a str,
     },
     /// End of line without closing `"`.
     Incomplete {
@@ -1977,7 +2358,13 @@ fn scan_double_quoted_line(body: &str, start_pos: Pos) -> Result<DoubleQuotedLin
                     || DoubleQuotedValue::Borrowed(body.get(..i).unwrap_or("")),
                     DoubleQuotedValue::Owned,
                 );
-                return Ok(DoubleQuotedLine::Closed { value, close_pos });
+                // `tail` is whatever follows the closing `"` on this line.
+                let tail = body.get(i + 1..).unwrap_or("");
+                return Ok(DoubleQuotedLine::Closed {
+                    value,
+                    close_pos,
+                    tail,
+                });
             }
             '\\' => {
                 // Escape sequence.
@@ -2183,7 +2570,7 @@ mod tests {
     #[test]
     fn consume_marker_line_returns_marker_pos_and_after_pos() {
         let mut lex = make_lexer("---\n");
-        let (marker_pos, after_pos) = lex.consume_marker_line();
+        let (marker_pos, after_pos) = lex.consume_marker_line(false);
         assert_eq!(marker_pos.byte_offset, 0);
         assert_eq!(after_pos.byte_offset, 4);
     }
@@ -2191,7 +2578,7 @@ mod tests {
     #[test]
     fn consume_marker_line_advances_lexer_past_line() {
         let mut lex = make_lexer("---\nnext");
-        lex.consume_marker_line();
+        lex.consume_marker_line(false);
         assert!(lex.buf.peek_next().is_some_and(|l| l.content == "next"));
     }
 
@@ -2689,7 +3076,7 @@ mod tests {
         // `--- text` — after consuming the marker line, try_consume_plain_scalar
         // returns the inline content "text".
         let mut lex = make_lexer("--- text");
-        lex.consume_marker_line();
+        lex.consume_marker_line(false);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse inline scalar"));
@@ -2700,7 +3087,7 @@ mod tests {
     fn plain_scalar_inline_after_marker_is_cow_borrowed() {
         // Inline content from `---` line is a zero-copy borrowed slice.
         let mut lex = make_lexer("--- text");
-        lex.consume_marker_line();
+        lex.consume_marker_line(false);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse inline scalar"));
@@ -2875,13 +3262,13 @@ mod tests {
 
     fn dq(input: &str) -> (Cow<'_, str>, Span) {
         Lexer::new(input)
-            .try_consume_double_quoted(0)
+            .try_consume_double_quoted(None)
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
             .unwrap_or_else(|| unreachable!("expected Some, got None"))
     }
 
     fn dq_err(input: &str) -> Error {
-        match Lexer::new(input).try_consume_double_quoted(0) {
+        match Lexer::new(input).try_consume_double_quoted(None) {
             Err(e) => e,
             Ok(_) => unreachable!("expected Err, got Ok"),
         }
@@ -2889,7 +3276,7 @@ mod tests {
 
     fn dq_none(input: &str) {
         let result = Lexer::new(input)
-            .try_consume_double_quoted(0)
+            .try_consume_double_quoted(None)
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"));
         assert!(result.is_none(), "expected None for input {input:?}");
     }
