@@ -1035,6 +1035,7 @@ dependencies = [
 name = "rlsp-yaml-parser-temp"
 version = "0.0.0"
 dependencies = [
+ "criterion 0.5.1",
  "rstest",
  "thiserror",
 ]

@@ -13,6 +13,19 @@ thiserror = "2"
 
 [dev-dependencies]
 rstest = "0.26"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
 
 [lints]
 workspace = true
