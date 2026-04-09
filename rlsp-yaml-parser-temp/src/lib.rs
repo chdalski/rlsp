@@ -6,13 +6,16 @@ mod error;
 mod event;
 mod lexer;
 mod lines;
-mod loader;
+pub mod loader;
+pub mod node;
 mod pos;
 mod scanner;
 
 pub use error::Error;
 pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
+pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
+pub use node::{Document, Node};
 pub use pos::{Pos, Span};
 
 use std::collections::{HashMap, VecDeque};
