@@ -9,10 +9,6 @@
 //! contributed to it.  For zero-width synthetic events (e.g. `StreamStart`
 //! at the very beginning of input), the span has equal `start` and `end`.
 //!
-//! # Planned variants
-//!
-//! Future tasks will add:
-//! - `DocumentStart { explicit: bool, version: Option<(u8, u8)>, tags: Vec<...> }` (Task 19)
 
 use std::borrow::Cow;
 
@@ -104,12 +100,18 @@ pub enum Event<'input> {
     ///
     /// `explicit` is `true` when the document was introduced with `---`.
     /// `false` for bare documents (no marker).
-    ///
-    /// Note: `version` and `tags` (from `%YAML` / `%TAG` directives) are
-    /// deferred to Task 18.
     DocumentStart {
         /// Whether the document was introduced with `---`.
         explicit: bool,
+        /// Version from the `%YAML` directive preceding this document, if any.
+        ///
+        /// `Some((1, 2))` for `%YAML 1.2`, `None` when no `%YAML` directive was present.
+        version: Option<(u8, u8)>,
+        /// Tag handle/prefix pairs from `%TAG` directives preceding this document.
+        ///
+        /// Each entry is `(handle, prefix)` — e.g. `("!foo!", "tag:example.com,2026:")`.
+        /// Empty when no `%TAG` directives were present.
+        tag_directives: Vec<(String, String)>,
     },
     /// A document has ended.
     ///
@@ -123,13 +125,14 @@ pub enum Event<'input> {
     ///
     /// Followed by zero or more node events (scalars or nested collections),
     /// then a matching [`Event::SequenceEnd`].
-    ///
-    /// `anchor` and `tag` are `None` until Tasks 15/16.
     SequenceStart {
-        /// The anchor name, if any (e.g. `&foo`).  Populated in Task 15.
+        /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
-        /// The tag, if any (e.g. `!!seq`).  Populated in Task 16.
-        tag: Option<&'input str>,
+        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:seq"` for `!!seq`).
+        ///
+        /// Verbatim tags (`!<URI>`) borrow from input.  Shorthand tags resolved
+        /// via `%TAG` directives or the built-in `!!` default produce owned strings.
+        tag: Option<Cow<'input, str>>,
         /// Whether this is a block (`-` indicator) or flow (`[...]`) sequence.
         style: CollectionStyle,
     },
@@ -141,13 +144,13 @@ pub enum Event<'input> {
     ///
     /// Followed by alternating key/value node events (scalars or nested
     /// collections), then a matching [`Event::MappingEnd`].
-    ///
-    /// `anchor` and `tag` are `None` until Tasks 15/16.
     MappingStart {
-        /// The anchor name, if any (e.g. `&foo`).  Populated in Task 15.
+        /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
-        /// The tag, if any (e.g. `!!map`).  Populated in Task 16.
-        tag: Option<&'input str>,
+        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:map"` for `!!map`).
+        ///
+        /// See [`SequenceStart::tag`] for resolution semantics.
+        tag: Option<Cow<'input, str>>,
         /// Whether this is a block (indentation-based) or flow (`{...}`) mapping.
         style: CollectionStyle,
     },
@@ -160,17 +163,16 @@ pub enum Event<'input> {
     /// `value` borrows from input when no transformation is required (the
     /// vast majority of plain scalars).  It owns when line folding produces
     /// a string that doesn't exist contiguously in the input.
-    ///
-    /// `anchor` and `tag` are `None` until Tasks 15/16 implement anchor and
-    /// tag tokenization respectively.
     Scalar {
         /// The scalar's decoded value.
         value: Cow<'input, str>,
         /// The style in which the scalar appeared in the source.
         style: ScalarStyle,
-        /// The anchor name, if any (e.g. `&foo`).  Populated in Task 15.
+        /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
-        /// The tag, if any (e.g. `!!str`).  Populated in Task 16.
-        tag: Option<&'input str>,
+        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:str"` for `!!str`).
+        ///
+        /// See [`SequenceStart::tag`] for resolution semantics.
+        tag: Option<Cow<'input, str>>,
     },
 }

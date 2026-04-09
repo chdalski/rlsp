@@ -78,22 +78,17 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    /// Skip blank, comment-only, and directive (`%`-prefixed) lines, stopping
-    /// only at lines that are none of the above.
+    /// Skip blank lines between documents, stopping at directive (`%`), comment
+    /// (`#`), content, or marker lines.
     ///
-    /// Unlike [`Self::skip_empty_lines`], this variant **does** consume comment
-    /// lines (between documents comments are collected by the caller via
-    /// [`Self::try_consume_comment`] in a separate pass).
-    ///
-    /// Use this between documents (`BetweenDocs`), where `%YAML` / `%TAG` /
-    /// unknown directives are stream-level metadata.  Full directive parsing is
-    /// deferred to Task 19.
-    pub fn skip_directives_and_blank_lines(&mut self) -> Pos {
+    /// Use this between documents (`BetweenDocs`) after directive and comment
+    /// lines have already been consumed by the caller.
+    pub fn skip_blank_lines_between_docs(&mut self) -> Pos {
         loop {
             let skip = self
                 .buf
                 .peek_next()
-                .is_some_and(|line| is_directive_or_blank_or_comment(line));
+                .is_some_and(|line| is_blank_not_comment(line));
             if skip {
                 if let Some(line) = self.buf.consume_next() {
                     self.current_pos = pos_after_line(&line);
@@ -102,6 +97,34 @@ impl<'input> Lexer<'input> {
                 return self.current_pos;
             }
         }
+    }
+
+    /// True when the next line is a directive (`%`-prefixed).
+    #[must_use]
+    pub fn is_directive_line(&self) -> bool {
+        self.buf
+            .peek_next()
+            .is_some_and(|line| line.content.starts_with('%'))
+    }
+
+    /// Try to consume the next line as a directive.
+    ///
+    /// Returns `Some((directive_content, start_pos))` when the next line starts
+    /// with `%`, where `directive_content` is the full line content (including
+    /// the `%`).  Returns `None` when the next line is not a directive.
+    pub fn try_consume_directive_line(&mut self) -> Option<(&'input str, Pos)> {
+        let line = self.buf.peek_next()?;
+        if !line.content.starts_with('%') {
+            return None;
+        }
+        let start_pos = line.pos;
+        let content: &'input str = line.content;
+        // SAFETY: peek succeeded above; LineBuffer invariant.
+        let Some(consumed) = self.buf.consume_next() else {
+            unreachable!("try_consume_directive_line: peek returned Some but consume returned None")
+        };
+        self.current_pos = pos_after_line(&consumed);
+        Some((content, start_pos))
     }
 
     /// Try to consume the next line as a comment.
@@ -1619,12 +1642,8 @@ fn is_blank_or_comment(line: &Line<'_>) -> bool {
 /// to use in the between-documents context; inside a document body `%`-prefixed
 /// lines are content and must be handled by [`is_blank_or_comment`] instead.
 ///
-/// TODO(Task 18): This predicate currently skips ALL `%`-prefixed lines in
-/// `BetweenDocs`.  Task 18 will add full directive grammar parsing per YAML §6.8,
-/// which will distinguish valid directives (`%YAML`, `%TAG`, etc.) from
-/// malformed `%`-prefixed lines that should error or be treated as bare-doc
-/// content.  Until then, any `%`-prefixed line in `BetweenDocs` is silently
-/// treated as a directive.
+/// Used only in tests to verify the `BetweenDocs` predicate.
+#[cfg(test)]
 fn is_directive_or_blank_or_comment(line: &Line<'_>) -> bool {
     if is_blank_or_comment(line) {
         return true;

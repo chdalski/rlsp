@@ -15,7 +15,7 @@ pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use pos::{Pos, Span};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use lexer::Lexer;
 
@@ -94,6 +94,143 @@ pub const MAX_TAG_LEN: usize = 4096;
 ///
 /// Exceeding this limit returns an [`Error`], not a panic or truncation.
 pub const MAX_COMMENT_LEN: usize = 4096;
+
+/// Maximum number of directives (`%YAML` + `%TAG` combined) per document.
+///
+/// Without this cap, an attacker could supply thousands of distinct `%TAG`
+/// directives, each allocating a `HashMap` entry, to exhaust heap memory.
+/// 64 is generous for all real-world YAML (the typical document has 0–2
+/// directives) while bounding per-document directive overhead.
+///
+/// Exceeding this limit returns an [`Error`], not a panic.
+pub const MAX_DIRECTIVES_PER_DOC: usize = 64;
+
+/// Maximum byte length of a `%TAG` handle (e.g. `!foo!`) accepted from
+/// untrusted input.
+///
+/// Tag handles are short by design; a 256-byte cap is generous while
+/// preventing `DoS` via scanning very long handle strings.
+///
+/// Exceeding this limit returns an [`Error`], not a panic.
+pub const MAX_TAG_HANDLE_BYTES: usize = 256;
+
+/// Maximum byte length of the fully-resolved tag string after prefix expansion.
+///
+/// When a shorthand tag `!foo!bar` is resolved against its `%TAG` prefix, the
+/// result is `prefix + suffix`.  This cap prevents the resolved string from
+/// exceeding a safe bound even when the prefix and suffix are both at their
+/// individual limits.  Reuses [`MAX_TAG_LEN`] so the bound is consistent with
+/// verbatim tag limits.
+///
+/// The check is performed before allocation; exceeding this limit returns an
+/// [`Error`], not a panic.
+pub const MAX_RESOLVED_TAG_LEN: usize = MAX_TAG_LEN;
+
+// ---------------------------------------------------------------------------
+// Directive scope
+// ---------------------------------------------------------------------------
+
+/// Per-document directive state accumulated from `%YAML` and `%TAG` directives.
+///
+/// Cleared at the start of each new document (on `---` in `BetweenDocs`, on
+/// `...`, or at EOF).  The default handles (`!!` and `!`) are **not** stored
+/// here — they are resolved directly in [`DirectiveScope::resolve_tag`].
+#[derive(Debug, Default)]
+struct DirectiveScope {
+    /// Version from `%YAML`, if any.
+    version: Option<(u8, u8)>,
+    /// Custom tag handles declared via `%TAG` directives.
+    ///
+    /// Key: handle (e.g. `"!foo!"`).  Value: prefix (e.g. `"tag:example.com:"`).
+    tag_handles: HashMap<String, String>,
+    /// Total directive count (YAML + TAG combined) for the `DoS` limit check.
+    directive_count: usize,
+}
+
+impl DirectiveScope {
+    /// Resolve a raw tag slice (as stored in `pending_tag`) to its final form.
+    ///
+    /// Resolution rules:
+    /// - Verbatim tag (no leading `!`, i.e. already a bare URI from `!<URI>` scanning) → returned as-is.
+    /// - `!!suffix` → look up `"!!"` in custom handles; fall back to default `tag:yaml.org,2002:`.
+    /// - `!suffix` (no inner `!`) → returned as-is (local tag, no expansion).
+    /// - `!handle!suffix` → look up `"!handle!"` in custom handles; error if not found.
+    /// - `!` (bare) → returned as-is.
+    ///
+    /// Returns `Ok(Cow::Borrowed(raw))` when no allocation is needed, or
+    /// `Ok(Cow::Owned(resolved))` after prefix expansion.  Returns `Err` when
+    /// a named handle has no registered prefix.
+    fn resolve_tag<'a>(
+        &self,
+        raw: &'a str,
+        indicator_pos: Pos,
+    ) -> Result<std::borrow::Cow<'a, str>, Error> {
+        use std::borrow::Cow;
+
+        // Verbatim tags arrive as bare URIs (scan_tag strips the `!<` / `>` wrappers).
+        // They do not start with `!`, so no resolution is needed.
+        if !raw.starts_with('!') {
+            return Ok(Cow::Borrowed(raw));
+        }
+
+        let after_first_bang = &raw[1..];
+
+        // `!!suffix` — primary handle.
+        if let Some(suffix) = after_first_bang.strip_prefix('!') {
+            let prefix = self
+                .tag_handles
+                .get("!!")
+                .map_or("tag:yaml.org,2002:", String::as_str);
+            let resolved = format!("{prefix}{suffix}");
+            if resolved.len() > MAX_RESOLVED_TAG_LEN {
+                return Err(Error {
+                    pos: indicator_pos,
+                    message: format!(
+                        "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
+                    ),
+                });
+            }
+            return Ok(Cow::Owned(resolved));
+        }
+
+        // `!handle!suffix` — named handle.
+        if let Some(inner_bang) = after_first_bang.find('!') {
+            let handle = &raw[..inner_bang + 2]; // `!handle!`
+            let suffix = &after_first_bang[inner_bang + 1..];
+            if let Some(prefix) = self.tag_handles.get(handle) {
+                let resolved = format!("{prefix}{suffix}");
+                if resolved.len() > MAX_RESOLVED_TAG_LEN {
+                    return Err(Error {
+                        pos: indicator_pos,
+                        message: format!(
+                            "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
+                        ),
+                    });
+                }
+                return Ok(Cow::Owned(resolved));
+            }
+            return Err(Error {
+                pos: indicator_pos,
+                message: format!("undefined tag handle: {handle}"),
+            });
+        }
+
+        // `!suffix` (local tag) or bare `!` — no expansion.
+        Ok(Cow::Borrowed(raw))
+    }
+
+    /// Collect the tag handle/prefix pairs for inclusion in `DocumentStart`.
+    fn tag_directives(&self) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = self
+            .tag_handles
+            .iter()
+            .map(|(h, p)| (h.clone(), p.clone()))
+            .collect();
+        // Sort for deterministic ordering in tests and events.
+        pairs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        pairs
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Iterator implementation
@@ -210,19 +347,21 @@ struct EventIter<'input> {
     /// here and attaches it to the next `Scalar`, `SequenceStart`, or
     /// `MappingStart` event.
     ///
-    /// Storage format (raw borrowed slices — no expansion):
-    /// - `!<URI>`  → stored as `"URI"` (the content between `<` and `>`)
-    /// - `!!suffix` → stored as `"!!suffix"` (literal, no expansion)
-    /// - `!suffix` → stored as `"!suffix"` (literal)
-    /// - `!`       → stored as `"!"`
-    /// - `!handle!suffix` → stored as `"!handle!suffix"` (literal)
-    ///
-    /// `!!` expansion to `tag:yaml.org,2002:` is the loader's responsibility
-    /// (Task 19 will add `%TAG` directive support).
-    pending_tag: Option<&'input str>,
+    /// Tags are resolved against the current directive scope at scan time:
+    /// - `!<URI>`  → stored as `Cow::Borrowed("URI")` (verbatim, no change)
+    /// - `!!suffix` → resolved via `!!` handle (default: `tag:yaml.org,2002:suffix`)
+    /// - `!suffix` → stored as `Cow::Borrowed("!suffix")` (local tag, no expansion)
+    /// - `!`       → stored as `Cow::Borrowed("!")`
+    /// - `!handle!suffix` → resolved via `%TAG !handle! prefix` directive
+    pending_tag: Option<std::borrow::Cow<'input, str>>,
     /// True when `pending_tag` was set from a standalone tag line (no inline
     /// content after the tag).  False when set inline.
     pending_tag_for_collection: bool,
+    /// Directive scope for the current document.
+    ///
+    /// Accumulated from `%YAML` and `%TAG` directives seen in `BetweenDocs`
+    /// state.  Reset at document boundaries.
+    directive_scope: DirectiveScope,
 }
 
 impl<'input> EventIter<'input> {
@@ -237,6 +376,7 @@ impl<'input> EventIter<'input> {
             pending_anchor_for_collection: false,
             pending_tag: None,
             pending_tag_for_collection: false,
+            directive_scope: DirectiveScope::default(),
         }
     }
 
@@ -1124,16 +1264,52 @@ const fn zero_span(pos: Pos) -> Span {
     }
 }
 
+/// Returns `true` if `handle` is a syntactically valid YAML tag handle.
+///
+/// Valid forms per YAML 1.2 §6.8.1 productions [89]–[92]:
+/// - `!`   — primary tag handle
+/// - `!!`  — secondary tag handle
+/// - `!<word-chars>!` — named tag handle, where word chars are `[a-zA-Z0-9_-]`
+fn is_valid_tag_handle(handle: &str) -> bool {
+    match handle {
+        "!" | "!!" => true,
+        _ => {
+            // Named handle: starts and ends with `!`, interior non-empty word chars.
+            let inner = handle.strip_prefix('!').and_then(|s| s.strip_suffix('!'));
+            match inner {
+                Some(word) if !word.is_empty() => word
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                _ => false,
+            }
+        }
+    }
+}
+
 impl<'input> EventIter<'input> {
-    /// Skip blank lines and directives (`%`-prefixed) while collecting any
-    /// comment lines encountered as `Event::Comment` items pushed to
-    /// `self.queue`.
+    /// Consume blank lines, comment lines, and directive lines in `BetweenDocs`
+    /// context.
     ///
-    /// Used in `BetweenDocs` context, where `%`-prefixed lines are directives.
-    /// Returns `Err` if a comment body exceeds `MAX_COMMENT_LEN`.
-    fn skip_and_collect_comments_between_docs(&mut self) -> Result<(), Error> {
+    /// - Blank lines: silently consumed.
+    /// - Comment lines: emitted as `Event::Comment` items into `self.queue`.
+    /// - Directive lines (`%`-prefixed): parsed and accumulated into
+    ///   `self.directive_scope`.
+    ///
+    /// Returns `Err` on malformed directives, exceeded limits, or comment
+    /// bodies exceeding `MAX_COMMENT_LEN`.  Stops at the first non-blank,
+    /// non-comment, non-directive line (i.e. `---`, `...`, or content).
+    ///
+    /// The caller is responsible for resetting `self.directive_scope` before
+    /// entering the `BetweenDocs` state (at each document boundary transition).
+    /// This function does NOT reset it — `step_between_docs` re-enters it on
+    /// every comment yield, so resetting here would clobber directives parsed
+    /// on earlier re-entries for the same document.
+    fn consume_preamble_between_docs(&mut self) -> Result<(), Error> {
         loop {
-            // Collect any comment lines first.
+            // Skip blank lines first.
+            self.lexer.skip_blank_lines_between_docs();
+
+            // Collect comment lines.
             while self.lexer.is_comment_line() {
                 match self.lexer.try_consume_comment(MAX_COMMENT_LEN) {
                     Ok(Some((text, span))) => {
@@ -1142,14 +1318,181 @@ impl<'input> EventIter<'input> {
                     Ok(None) => break,
                     Err(e) => return Err(e),
                 }
+                self.lexer.skip_blank_lines_between_docs();
             }
-            // Then skip blank/directive lines (non-comment whitespace lines).
-            self.lexer.skip_directives_and_blank_lines();
-            // If the next line is a comment, loop again to collect it.
-            if !self.lexer.is_comment_line() {
+
+            // Parse directive lines.
+            while self.lexer.is_directive_line() {
+                let Some((content, dir_pos)) = self.lexer.try_consume_directive_line() else {
+                    break;
+                };
+                self.parse_directive(content, dir_pos)?;
+                self.lexer.skip_blank_lines_between_docs();
+            }
+
+            // After parsing directives, there may be more blank lines or comments.
+            if !self.lexer.is_comment_line() && !self.lexer.is_directive_line() {
                 return Ok(());
             }
         }
+    }
+
+    /// Parse a single directive line and update `self.directive_scope`.
+    ///
+    /// `content` is the full line content starting with `%` (e.g. `"%YAML 1.2"`).
+    /// `dir_pos` is the position of the `%` character.
+    fn parse_directive(&mut self, content: &'input str, dir_pos: Pos) -> Result<(), Error> {
+        // Enforce per-document directive count limit.
+        if self.directive_scope.directive_count >= MAX_DIRECTIVES_PER_DOC {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!(
+                    "directive count exceeds maximum of {MAX_DIRECTIVES_PER_DOC} per document"
+                ),
+            });
+        }
+
+        // `content` starts with `%`; the rest is `NAME[ params...]`.
+        let after_percent = &content[1..];
+
+        // Determine directive name (up to first whitespace).
+        let name_end = after_percent
+            .find([' ', '\t'])
+            .unwrap_or(after_percent.len());
+        let name = &after_percent[..name_end];
+        let rest = after_percent[name_end..].trim_start_matches([' ', '\t']);
+
+        match name {
+            "YAML" => self.parse_yaml_directive(rest, dir_pos),
+            "TAG" => self.parse_tag_directive(rest, dir_pos),
+            _ => {
+                // Reserved directive — silently ignore per YAML 1.2 spec.
+                self.directive_scope.directive_count += 1;
+                Ok(())
+            }
+        }
+    }
+
+    /// Parse `%YAML major.minor` and store in directive scope.
+    fn parse_yaml_directive(&mut self, params: &str, dir_pos: Pos) -> Result<(), Error> {
+        if self.directive_scope.version.is_some() {
+            return Err(Error {
+                pos: dir_pos,
+                message: "duplicate %YAML directive in the same document".into(),
+            });
+        }
+
+        // Parse `major.minor`.
+        let dot = params.find('.').ok_or_else(|| Error {
+            pos: dir_pos,
+            message: format!("malformed %YAML directive: expected 'major.minor', got {params:?}"),
+        })?;
+        let major_str = &params[..dot];
+        let after_dot = &params[dot + 1..];
+        // Minor version ends at first whitespace or end of string.
+        let minor_end = after_dot.find([' ', '\t']).unwrap_or(after_dot.len());
+        let minor_str = &after_dot[..minor_end];
+        // Anything after the minor version must be empty or a comment (# ...).
+        let trailing = after_dot[minor_end..].trim_start_matches([' ', '\t']);
+        if !trailing.is_empty() && !trailing.starts_with('#') {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!(
+                    "malformed %YAML directive: unexpected trailing content {trailing:?}"
+                ),
+            });
+        }
+
+        let major = major_str.parse::<u8>().map_err(|_| Error {
+            pos: dir_pos,
+            message: format!("malformed %YAML major version: {major_str:?}"),
+        })?;
+        let minor = minor_str.parse::<u8>().map_err(|_| Error {
+            pos: dir_pos,
+            message: format!("malformed %YAML minor version: {minor_str:?}"),
+        })?;
+
+        // Only major version 1 is accepted; 2+ is a hard error.
+        if major != 1 {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!("unsupported YAML version {major}.{minor}: only 1.x is supported"),
+            });
+        }
+
+        self.directive_scope.version = Some((major, minor));
+        self.directive_scope.directive_count += 1;
+        Ok(())
+    }
+
+    /// Parse `%TAG !handle! prefix` and store in directive scope.
+    fn parse_tag_directive(&mut self, params: &'input str, dir_pos: Pos) -> Result<(), Error> {
+        // Split on whitespace to get handle and prefix.
+        let handle_end = params.find([' ', '\t']).ok_or_else(|| Error {
+            pos: dir_pos,
+            message: format!("malformed %TAG directive: expected 'handle prefix', got {params:?}"),
+        })?;
+        let handle = &params[..handle_end];
+        let prefix = params[handle_end..].trim_start_matches([' ', '\t']);
+
+        if prefix.is_empty() {
+            return Err(Error {
+                pos: dir_pos,
+                message: "malformed %TAG directive: missing prefix".into(),
+            });
+        }
+
+        // Validate handle shape: must be `!`, `!!`, or `!<word-chars>!`
+        // where word chars are ASCII alphanumeric, `-`, or `_`
+        // (YAML 1.2 §6.8.1 productions [89]–[92]).
+        if !is_valid_tag_handle(handle) {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!("malformed %TAG handle: {handle:?} is not a valid tag handle"),
+            });
+        }
+
+        // Validate handle length.
+        if handle.len() > MAX_TAG_HANDLE_BYTES {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!(
+                    "tag handle exceeds maximum length of {MAX_TAG_HANDLE_BYTES} bytes"
+                ),
+            });
+        }
+
+        // Validate prefix length.
+        if prefix.len() > MAX_TAG_LEN {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!("tag prefix exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            });
+        }
+
+        // Reject control characters in prefix.
+        for ch in prefix.chars() {
+            if (ch as u32) < 0x20 || ch == '\x7F' {
+                return Err(Error {
+                    pos: dir_pos,
+                    message: format!("tag prefix contains invalid control character {ch:?}"),
+                });
+            }
+        }
+
+        // Duplicate handle check.
+        if self.directive_scope.tag_handles.contains_key(handle) {
+            return Err(Error {
+                pos: dir_pos,
+                message: format!("duplicate %TAG directive for handle {handle:?}"),
+            });
+        }
+
+        self.directive_scope
+            .tag_handles
+            .insert(handle.to_owned(), prefix.to_owned());
+        self.directive_scope.directive_count += 1;
+        Ok(())
     }
 
     /// Skip blank lines while collecting any comment lines encountered as
@@ -1180,7 +1523,7 @@ impl<'input> EventIter<'input> {
 
     /// Handle one iteration step in the `BetweenDocs` state.
     fn step_between_docs(&mut self) -> StepResult<'input> {
-        match self.skip_and_collect_comments_between_docs() {
+        match self.consume_preamble_between_docs() {
             Ok(()) => {}
             Err(e) => {
                 self.failed = true;
@@ -1200,25 +1543,60 @@ impl<'input> EventIter<'input> {
         if self.lexer.is_directives_end() {
             let (marker_pos, _) = self.lexer.consume_marker_line();
             self.state = IterState::InDocument;
+            // Take the accumulated directives — scope stays active for document body tag resolution.
+            let version = self.directive_scope.version;
+            let tag_directives = self.directive_scope.tag_directives();
             self.queue.push_back((
-                Event::DocumentStart { explicit: true },
+                Event::DocumentStart {
+                    explicit: true,
+                    version,
+                    tag_directives,
+                },
                 marker_span(marker_pos),
             ));
             self.drain_trailing_comment();
             return StepResult::Continue;
         }
         if self.lexer.is_document_end() {
+            // Orphan `...` — if directives were parsed without a `---` marker,
+            // that is a spec violation (YAML 1.2 §9.2: directives require `---`).
+            if self.directive_scope.directive_count > 0 {
+                let pos = self.lexer.current_pos();
+                self.failed = true;
+                return StepResult::Yield(Err(Error {
+                    pos,
+                    message: "directives must be followed by a '---' document-start marker".into(),
+                }));
+            }
             self.lexer.consume_marker_line();
             return StepResult::Continue; // orphan `...`, no event
         }
+        // Per YAML 1.2 §9.2, directives require a `---` marker.  If the next
+        // line is not `---` and we have already parsed directives, that is a
+        // spec violation — reject before emitting an implicit DocumentStart.
+        if self.directive_scope.directive_count > 0 {
+            let pos = self.lexer.current_pos();
+            self.failed = true;
+            return StepResult::Yield(Err(Error {
+                pos,
+                message: "directives must be followed by a '---' document-start marker".into(),
+            }));
+        }
         debug_assert!(
             self.lexer.has_content(),
-            "expected content after skipping blank/comment/directive lines"
+            "expected content after consuming blank/comment/directive lines"
         );
         let content_pos = self.lexer.current_pos();
         self.state = IterState::InDocument;
+        // Take the accumulated directives — scope stays active for document body tag resolution.
+        let version = self.directive_scope.version;
+        let tag_directives = self.directive_scope.tag_directives();
         StepResult::Yield(Ok((
-            Event::DocumentStart { explicit: false },
+            Event::DocumentStart {
+                explicit: false,
+                version,
+                tag_directives,
+            },
             zero_span(content_pos),
         )))
     }
@@ -1253,6 +1631,9 @@ impl<'input> EventIter<'input> {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line();
+            // Reset directive scope at the document boundary so directives from
+            // this document do not leak into the next one.
+            self.directive_scope = DirectiveScope::default();
             self.state = IterState::BetweenDocs;
             self.queue.push_back((
                 Event::DocumentEnd { explicit: true },
@@ -1265,13 +1646,22 @@ impl<'input> EventIter<'input> {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line();
+            // A bare `---` inside a document implicitly ends the current document
+            // and starts a new one without a preamble.  Reset the directive scope
+            // here since consume_preamble_between_docs will not be called for this
+            // transition.
+            self.directive_scope = DirectiveScope::default();
             self.state = IterState::InDocument;
             self.queue.push_back((
                 Event::DocumentEnd { explicit: false },
                 zero_span(marker_pos),
             ));
             self.queue.push_back((
-                Event::DocumentStart { explicit: true },
+                Event::DocumentStart {
+                    explicit: true,
+                    version: None,
+                    tag_directives: Vec::new(),
+                },
                 marker_span(marker_pos),
             ));
             self.drain_trailing_comment();
@@ -1396,7 +1786,16 @@ impl<'input> EventIter<'input> {
                                 message: "a node may not have more than one tag".into(),
                             }));
                         }
-                        self.pending_tag = Some(tag_slice);
+                        // Resolve tag handle against directive scope at scan time.
+                        let resolved_tag =
+                            match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    self.failed = true;
+                                    return StepResult::Yield(Err(e));
+                                }
+                            };
+                        self.pending_tag = Some(resolved_tag);
                         self.lexer.consume_line();
                         if had_inline {
                             self.pending_tag_for_collection = false;
@@ -1949,7 +2348,7 @@ impl<'input> EventIter<'input> {
         // Seeded from any block-context tag that was pending when this flow
         // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before
         // the `[` is dispatched to handle_flow_collection).
-        let mut pending_flow_tag: Option<&'input str> = self.pending_tag.take();
+        let mut pending_flow_tag: Option<std::borrow::Cow<'input, str>> = self.pending_tag.take();
 
         // Re-sync `cur_content` / `cur_base_pos` from the buffer.
         // Returns false when the buffer is empty (EOF mid-flow).
@@ -2441,7 +2840,16 @@ impl<'input> EventIter<'input> {
                                 message: "a node may not have more than one tag".into(),
                             }));
                         }
-                        pending_flow_tag = Some(tag_slice);
+                        // Resolve tag handle against directive scope at scan time.
+                        let resolved_flow_tag =
+                            match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    self.failed = true;
+                                    return StepResult::Yield(Err(e));
+                                }
+                            };
+                        pending_flow_tag = Some(resolved_flow_tag);
                         pos_in_line += 1 + advance_past_bang;
                         // Skip any whitespace after the tag.
                         while pos_in_line < cur_content.len() {
