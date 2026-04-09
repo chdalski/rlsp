@@ -2,6 +2,7 @@
 #![deny(clippy::panic)]
 
 mod chars;
+pub mod encoding;
 mod error;
 mod event;
 mod lexer;

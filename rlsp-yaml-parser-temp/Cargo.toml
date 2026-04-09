@@ -11,5 +11,8 @@ description = "Streaming YAML 1.2 parser (work in progress, will replace rlsp-ya
 [dependencies]
 thiserror = "2"
 
+[dev-dependencies]
+rstest = "0.26"
+
 [lints]
 workspace = true
