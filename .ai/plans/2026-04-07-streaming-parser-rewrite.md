@@ -1030,20 +1030,23 @@ integration test pass).
 
 ### Task 22: Run benchmarks and verify O(1) latency
 
+**Status:** Completed in commit `2ca0ba4`.
+
 Copy benchmarks from `rlsp-yaml-parser/benches/` to
 `rlsp-yaml-parser-temp/benches/`, update them to call the
 new crate, and run.
 
-- [ ] Copy `benches/throughput.rs`, `benches/latency.rs`,
+- [x] Copy `benches/throughput.rs`, `benches/latency.rs`,
   `benches/memory.rs`, `benches/fixtures.rs`
-- [ ] Update to call `rlsp_yaml_parser_temp::parse_events`
-- [ ] Run all benchmarks
-- [ ] Verify acceptance: huge_1MB first-event latency
+- [x] Update to call `rlsp_yaml_parser_temp::parse_events`
+- [x] Run all benchmarks
+- [x] Verify acceptance: huge_1MB first-event latency
   < 1 ms (target: O(1), currently 3.498 s in old parser)
-- [ ] Document results in
+  — measured: 46.89 ns (reviewer independent: 51.98 ns)
+- [x] Document results in
   `rlsp-yaml-parser-temp/docs/benchmarks.md`
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `docs(parser-temp): benchmark results for streaming parser`
+- [x] Build, clippy, tests pass
+- [x] Commit `2ca0ba4`: `docs(parser-temp): benchmark results for streaming parser`
 
 **Reference impl consultation:** Not applicable.
 **Advisors:** None.
