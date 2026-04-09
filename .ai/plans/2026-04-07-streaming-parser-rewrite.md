@@ -936,18 +936,20 @@ in the event stream).
 
 ### Task 19: Directives and multi-document streams
 
-- [ ] `%YAML 1.2` directive parsing
-- [ ] `%TAG !handle! prefix` directive parsing
-- [ ] Directive scope per document (resets on `...` or
+**Status:** Completed in commit `e8d0973`.
+
+- [x] `%YAML 1.2` directive parsing
+- [x] `%TAG !handle! prefix` directive parsing
+- [x] Directive scope per document (resets on `...` or
   end of stream)
-- [ ] Tag handle resolution against directive prefixes
-- [ ] Multi-document streams with directives between
+- [x] Tag handle resolution against directive prefixes
+- [x] Multi-document streams with directives between
   documents
-- [ ] DocumentStart events carry the directive info
+- [x] DocumentStart events carry the directive info
   (version, tag pairs)
-- [ ] Conformance tests for directives must pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): directives and tag handles`
+- [x] Conformance tests for directives must pass
+- [x] Build, clippy, tests pass
+- [x] Commit: `feat(parser-temp): directives and tag handles`
 
 **Reference impl consultation:**
 1. Local: `structure.rs` `l_directive()`, `event.rs`
