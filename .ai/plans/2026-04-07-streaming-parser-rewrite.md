@@ -960,23 +960,25 @@ in the event stream).
 
 ### Task 20: Port the loader (event → AST)
 
+**Status:** Completed in commit `7927c24`.
+
 The existing loader is already sequential. Port it with
 minimal changes — only what's needed to consume the new
 crate's `Event` type.
 
-- [ ] Port `node.rs` (Node types, Document) — these are
+- [x] Port `node.rs` (Node types, Document) — these are
   data types, port verbatim
-- [ ] Port `loader.rs` `LoadState`, `LoaderBuilder`,
+- [x] Port `loader.rs` `LoadState`, `LoaderBuilder`,
   `load()` function
-- [ ] Adapt the loader to consume `Iterator<Item = Result<(Event<'_>, Span), Error>>` instead of materializing all events
-- [ ] Cow scalar values need to be converted to owned
+- [x] Adapt the loader to consume `Iterator<Item = Result<(Event<'_>, Span), Error>>` instead of materializing all events
+- [x] Cow scalar values need to be converted to owned
   strings inside Node (or kept as Cow if we want to
   preserve the borrow further — investigate the right call
   with the local impl)
-- [ ] `tests/loader_spans.rs` integration tests pass (3 tests)
-- [ ] `tests/round_trip.rs` integration tests pass
-- [ ] Build, clippy, tests pass
-- [ ] Commit: `feat(parser-temp): port loader and Node types`
+- [x] `tests/loader_spans.rs` integration tests pass (13 tests)
+- [x] `tests/round_trip.rs` — AST-level assertions in `tests/loader.rs` Group H (emitter not yet available in temp crate)
+- [x] Build, clippy, tests pass
+- [x] Commit `7927c24`: `feat(parser-temp): port loader and Node types`
 
 **Reference impl consultation:**
 1. Local: `loader.rs` and `node.rs` — verbatim port for
