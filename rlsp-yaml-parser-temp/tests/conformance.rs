@@ -257,3 +257,149 @@ fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Custom: anchor/tag before mapping key — indent tracking bugfix
+//
+// When an anchor or tag appears inline before a mapping key, the parser
+// prepends the key content as a synthetic line at the property's column.
+// The mapping must be opened at the PHYSICAL line's indent (the property's
+// column), not the synthetic line's offset column.
+// ---------------------------------------------------------------------------
+
+// Test 1: anchor before mapping key at root level
+// `&anchor key: value` — anchor annotates the mapping, not the key scalar.
+// Expected: Mapping{anchor:"anchor", entries:[(key→"key", val→"value")]}
+#[test]
+fn anchor_before_mapping_key_root_level() {
+    use rlsp_yaml_parser_temp::loader::load;
+    use rlsp_yaml_parser_temp::node::Node;
+
+    let docs = load("&anchor key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &docs[0].root
+    else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("anchor")),
+        "anchor should be on mapping, got: {anchor:?}"
+    );
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+// Test 2: anchor before mapping key at indented level
+// `outer:\n  &anchor inner_key: inner_value`
+// Expected: root Mapping with "outer" → Mapping{anchor:"anchor", entries:[(inner_key→inner_value)]}
+#[test]
+fn anchor_before_mapping_key_indented() {
+    use rlsp_yaml_parser_temp::loader::load;
+    use rlsp_yaml_parser_temp::node::Node;
+
+    let docs = load("outer:\n  &anchor inner_key: inner_value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping root");
+    };
+    assert_eq!(entries.len(), 1, "root should have 1 entry");
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "outer"),
+        "key: {k:?}"
+    );
+    let Node::Mapping {
+        entries: inner_entries,
+        anchor,
+        ..
+    } = v
+    else {
+        panic!("expected inner Mapping, got: {v:?}");
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("anchor")),
+        "anchor should be on inner mapping, got: {anchor:?}"
+    );
+    assert_eq!(inner_entries.len(), 1, "inner mapping should have 1 entry");
+    let (ik, iv) = &inner_entries[0];
+    assert!(
+        matches!(ik, Node::Scalar { value, .. } if value == "inner_key"),
+        "inner key: {ik:?}"
+    );
+    assert!(
+        matches!(iv, Node::Scalar { value, .. } if value == "inner_value"),
+        "inner val: {iv:?}"
+    );
+}
+
+// Test 3: tag before mapping key at root level
+// `!!str key: value` — tag annotates the mapping.
+// Expected: Mapping{tag: resolved "!!str" tag, entries:[(key→"key", val→"value")]}
+#[test]
+fn tag_before_mapping_key_root_level() {
+    use rlsp_yaml_parser_temp::loader::load;
+    use rlsp_yaml_parser_temp::node::Node;
+
+    let docs = load("!!str key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping { entries, tag, .. } = &docs[0].root else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+// Test 4: anchor + tag together before mapping key
+// `&a !!str key: value` — both annotate the mapping.
+// Expected: Mapping{anchor:"a", tag: resolved tag, entries:[(key→"key", val→"value")]}
+#[test]
+fn anchor_and_tag_before_mapping_key() {
+    use rlsp_yaml_parser_temp::loader::load;
+    use rlsp_yaml_parser_temp::node::Node;
+
+    let docs = load("&a !!str key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping {
+        entries,
+        anchor,
+        tag,
+        ..
+    } = &docs[0].root
+    else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("a")),
+        "anchor should be on mapping, got: {anchor:?}"
+    );
+    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}

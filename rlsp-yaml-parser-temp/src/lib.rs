@@ -2745,7 +2745,15 @@ impl<'input> EventIter<'input> {
     #[allow(clippy::too_many_lines)]
     fn handle_mapping_entry(&mut self, key_indent: usize, key_pos: Pos) -> StepResult<'input> {
         let cur_pos = self.lexer.current_pos();
-        self.close_collections_at_or_above(key_indent.saturating_add(1), cur_pos);
+
+        // When an anchor or tag appeared inline on the physical line before
+        // the key content (e.g. `&anchor key: value`), the key is prepended
+        // as a synthetic line at the property's column (e.g. column 8).
+        // All indent-relative decisions below must use the PHYSICAL line's
+        // indent (column 0 in that example), not the synthetic line's column.
+        let effective_key_indent = self.property_origin_indent.unwrap_or(key_indent);
+
+        self.close_collections_at_or_above(effective_key_indent.saturating_add(1), cur_pos);
         if !self.queue.is_empty() {
             return StepResult::Continue;
         }
@@ -2762,9 +2770,9 @@ impl<'input> EventIter<'input> {
         // Value phase — that confirms it was opened by the seq-spaces rule,
         // not as an independent sequence at column 0.
         if let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last() {
-            if seq_col == key_indent {
+            if seq_col == effective_key_indent {
                 let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
-                    |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == key_indent),
+                    |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == effective_key_indent),
                 );
                 if parent_is_seq_spaces_mapping {
                     self.coll_stack.pop();
@@ -2782,11 +2790,11 @@ impl<'input> EventIter<'input> {
         }
 
         let is_in_mapping_at_this_indent = self.coll_stack.last().is_some_and(
-            |top| matches!(top, CollectionEntry::Mapping(col, _, _) if *col == key_indent),
+            |top| matches!(top, CollectionEntry::Mapping(col, _, _) if *col == effective_key_indent),
         );
 
         if !is_in_mapping_at_this_indent {
-            // A mapping entry at `key_indent` cannot be opened when:
+            // A mapping entry at `effective_key_indent` cannot be opened when:
             //
             // 1. The top of the stack is a block sequence at the same indent —
             //    this would nest a mapping inside the sequence without a `- `
@@ -2805,7 +2813,7 @@ impl<'input> EventIter<'input> {
             //    a pending tag or anchor is present (tags prepend synthetic
             //    inlines at their column — 74H7).
             match self.coll_stack.last() {
-                Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == key_indent => {
+                Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == effective_key_indent => {
                     self.failed = true;
                     return StepResult::Yield(Err(Error {
                         pos: key_pos,
@@ -2815,7 +2823,7 @@ impl<'input> EventIter<'input> {
                     }));
                 }
                 Some(&CollectionEntry::Mapping(map_col, MappingPhase::Key, true))
-                    if map_col < key_indent
+                    if map_col < effective_key_indent
                         && self.pending_tag.is_none()
                         && self.pending_anchor.is_none()
                         && !self.is_value_indicator_line() =>
@@ -2841,25 +2849,35 @@ impl<'input> EventIter<'input> {
             {
                 *current_item_started = true;
             }
-            // When a tag or anchor appeared inline on the physical line before
-            // the key content, the synthetic key line has a larger indent than
-            // the actual entry start.  Use the original physical line's indent
-            // to open the mapping at the correct indentation level.
-            let effective_mapping_indent = self.property_origin_indent.take().unwrap_or(key_indent);
+            // Note: property_origin_indent is NOT consumed here.  It remains set
+            // so the next call (which processes the synthetic key line at the
+            // synthetic column) can again compute effective_key_indent = origin
+            // indent and recognize the already-open mapping.  It will be cleared
+            // in the "continuing existing mapping" branch below.
+            let had_property_origin = self.property_origin_indent.is_some();
             self.coll_stack.push(CollectionEntry::Mapping(
-                effective_mapping_indent,
+                effective_key_indent,
                 MappingPhase::Key,
                 false,
             ));
-            // Consume pending anchor for the mapping only when the anchor was
-            // on its own line (standalone). Inline anchors (e.g. `&a key: v`)
-            // annotate the key scalar and must not be consumed here.
-            let mapping_anchor = if self.pending_anchor_for_collection {
+            // Consume pending anchor/tag for the mapping.  There are two cases:
+            //
+            // 1. Standalone property (e.g. `&a\nkey: v`) — `pending_*_for_collection`
+            //    is true; the property was always intended for the collection.
+            //
+            // 2. Inline property before a mapping key (e.g. `&a key: v`) —
+            //    `pending_*_for_collection` is false because when the anchor was
+            //    consumed the parser didn't yet know whether the inline content
+            //    would be a scalar or a mapping key.  Now that we know it IS a
+            //    mapping key (we are opening a new mapping), the property belongs
+            //    to the mapping, not to the key scalar.  `had_property_origin`
+            //    is true exactly in this case.
+            let mapping_anchor = if self.pending_anchor_for_collection || had_property_origin {
                 self.pending_anchor.take()
             } else {
                 None
             };
-            let mapping_tag = if self.pending_tag_for_collection {
+            let mapping_tag = if self.pending_tag_for_collection || had_property_origin {
                 self.pending_tag.take()
             } else {
                 None
@@ -2884,7 +2902,7 @@ impl<'input> EventIter<'input> {
             // pending properties are not lost and the mapping phase advances
             // correctly before the value indicator is consumed.
             let in_key_phase = self.coll_stack.last().is_some_and(|top| {
-                matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == key_indent)
+                matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == effective_key_indent)
             });
             if in_key_phase
                 && !self.pending_tag_for_collection
@@ -2933,7 +2951,7 @@ impl<'input> EventIter<'input> {
         // If the mapping is in Value phase and the next line is another key
         // (not a `: value` line), the previous key had no value — emit empty.
         if self.coll_stack.last().is_some_and(|top| {
-            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == key_indent)
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == effective_key_indent)
         }) {
             let pos = self.lexer.current_pos();
             self.queue.push_back((
@@ -2972,6 +2990,10 @@ impl<'input> EventIter<'input> {
             }
         }
         // Normal key line: consume and emit key scalar.
+        // property_origin_indent has served its purpose (selecting effective
+        // indent for the mapping-open and for subsequent continues).  Clear it
+        // so it does not affect unrelated subsequent entries.
+        self.property_origin_indent = None;
         let consumed = self.consume_mapping_entry(key_indent);
         match consumed {
             ConsumedMapping::ExplicitKey { had_key_inline } => {

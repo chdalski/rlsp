@@ -257,3 +257,132 @@ fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Custom: anchor/tag before mapping key — indent tracking regression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn anchor_before_mapping_key_root_level() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("&anchor key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &docs[0].root
+    else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("anchor")),
+        "anchor should be on mapping, got: {anchor:?}"
+    );
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+#[test]
+fn anchor_before_mapping_key_indented() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("outer:\n  &anchor inner_key: inner_value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping root");
+    };
+    assert_eq!(entries.len(), 1, "root should have 1 entry");
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "outer"),
+        "key: {k:?}"
+    );
+    let Node::Mapping {
+        entries: inner_entries,
+        anchor,
+        ..
+    } = v
+    else {
+        panic!("expected inner Mapping, got: {v:?}");
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("anchor")),
+        "anchor should be on inner mapping, got: {anchor:?}"
+    );
+    assert_eq!(inner_entries.len(), 1, "inner mapping should have 1 entry");
+    let (ik, iv) = &inner_entries[0];
+    assert!(
+        matches!(ik, Node::Scalar { value, .. } if value == "inner_key"),
+        "inner key: {ik:?}"
+    );
+    assert!(
+        matches!(iv, Node::Scalar { value, .. } if value == "inner_value"),
+        "inner val: {iv:?}"
+    );
+}
+
+#[test]
+fn tag_before_mapping_key_root_level() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("!!str key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping { entries, tag, .. } = &docs[0].root else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+#[test]
+fn anchor_and_tag_before_mapping_key() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("&a !!str key: value\n").expect("load failed");
+    assert_eq!(docs.len(), 1, "expected 1 document");
+    let Node::Mapping {
+        entries,
+        anchor,
+        tag,
+        ..
+    } = &docs[0].root
+    else {
+        panic!("expected Mapping root, got: {:?}", docs[0].root);
+    };
+    assert!(
+        matches!(anchor.as_deref(), Some("a")),
+        "anchor should be on mapping, got: {anchor:?}"
+    );
+    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
