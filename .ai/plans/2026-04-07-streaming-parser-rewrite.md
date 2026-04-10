@@ -237,7 +237,7 @@ user has explicitly approved this scope.
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
-- [ ] Migrate: replace rlsp-yaml-parser (Task 23)
+- [x] Migrate: replace rlsp-yaml-parser (Task 23) — Phase A bugfixes `620720f`, Phase B `cc5c9a5`
 
 ## Tasks
 
@@ -1089,27 +1089,27 @@ atomic rename only after everything passes.
 - [ ] `cargo test --workspace` passes (both parsers in the
   workspace simultaneously)
 
-**Phase B — Atomic rename (only after Phase A is green)**
+**Phase B — Atomic rename (only after Phase A is green)** — `cc5c9a5`
 
-- [ ] Delete `rlsp-yaml-parser/` directory entirely
-- [ ] Rename `rlsp-yaml-parser-temp/` to `rlsp-yaml-parser/`
-- [ ] In the new `rlsp-yaml-parser/Cargo.toml`, change
+- [x] Delete `rlsp-yaml-parser/` directory entirely
+- [x] Rename `rlsp-yaml-parser-temp/` to `rlsp-yaml-parser/`
+- [x] In the new `rlsp-yaml-parser/Cargo.toml`, change
   `name = "rlsp-yaml-parser-temp"` to
   `name = "rlsp-yaml-parser"`
-- [ ] Update workspace `members` in root `Cargo.toml`:
+- [x] Update workspace `members` in root `Cargo.toml`:
   remove `rlsp-yaml-parser-temp`, keep `rlsp-yaml-parser`
-- [ ] Revert `rlsp-yaml/Cargo.toml` dependency back to
+- [x] Revert `rlsp-yaml/Cargo.toml` dependency back to
   `rlsp-yaml-parser` (path = `../rlsp-yaml-parser`)
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace --all-targets` passes
-- [ ] `cargo bench -p rlsp-yaml-parser` runs
-- [ ] Grep workspace for `rlsp-yaml-parser-temp` — zero
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace --all-targets` passes
+- [x] `cargo bench -p rlsp-yaml-parser` runs
+- [x] Grep workspace for `rlsp-yaml-parser-temp` — zero
   references remaining
-- [ ] Update CLAUDE.md Components table — remove the
+- [x] Update CLAUDE.md Components table — remove the
   `rlsp-yaml-parser-temp` row
-- [ ] Update `rlsp-yaml-parser/docs/benchmarks.md` to
+- [x] Update `rlsp-yaml-parser/docs/benchmarks.md` to
   reflect the migration (remove "temp" references)
-- [ ] Commit: `feat(parser): replace PEG parser with
+- [x] Commit: `feat(parser): replace PEG parser with
   streaming implementation`
 
 **Reference impl consultation:** Not applicable.
