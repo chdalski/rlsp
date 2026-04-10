@@ -234,9 +234,9 @@ user has explicitly approved this scope.
 - [x] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`, Task 18 `4f1b25c`
 - [x] Bugfix: anchor/tag before mapping key indent — `55c3846`, corrected placement `266081a`
 - [x] Bugfix: quoted key decoding + trailing comment attachment — `620720f`
-- [ ] Implement directives and multi-document (Task 19)
-- [ ] Port loader and run integration tests (Tasks 20-21)
-- [ ] Run benchmarks, verify O(1) latency (Task 22)
+- [x] Implement directives and multi-document (Task 19) — `e8d0973`
+- [x] Port loader and run integration tests (Tasks 20-21) — `7927c24`, `5f6c7ad`
+- [x] Run benchmarks, verify O(1) latency (Task 22) — `2ca0ba4`
 - [x] Migrate: replace rlsp-yaml-parser (Task 23) — Phase A bugfixes `620720f`, Phase B `cc5c9a5`
 
 ## Tasks
@@ -1062,11 +1062,11 @@ atomic rename only after everything passes.
 
 **Phase A — Integration validation (old parser stays)**
 
-- [ ] Change `rlsp-yaml/Cargo.toml` dependency from
+- [x] Change `rlsp-yaml/Cargo.toml` dependency from
   `rlsp-yaml-parser` to `rlsp-yaml-parser-temp` (path =
   `../rlsp-yaml-parser-temp`). Keep the old crate in the
   workspace — it stays as a working reference.
-- [ ] Update `rlsp-yaml/src/*.rs` for the new public API:
+- [x] Update `rlsp-yaml/src/*.rs` for the new public API:
   - `Event` → `Event<'input>` (lifetime parameter)
   - Scalar values: `String` → `Cow<'input, str>`
   - Anchors: `Option<String>` → `Option<&'input str>`
@@ -1076,9 +1076,9 @@ atomic rename only after everything passes.
   - New `Event::Comment` and `Event::Alias` variants in
     exhaustive matches (already existed in old parser but
     type signatures changed)
-- [ ] `cargo test -p rlsp-yaml` passes — exercises the
+- [x] `cargo test -p rlsp-yaml` passes — exercises the
   parser through the real language server code paths
-- [ ] `cargo clippy -p rlsp-yaml --all-targets` passes
+- [x] `cargo clippy -p rlsp-yaml --all-targets` passes
 - [x] Fix any integration bugs discovered — these are bugs
   in `rlsp-yaml-parser-temp` that the conformance suite
   did not cover (e.g. the anchor-on-mapping-key indent
@@ -1086,7 +1086,7 @@ atomic rename only after everything passes.
   test-engineer sign-off.
   - [x] Bug 1: Quoted block mapping keys not decoded — `620720f`
   - [x] Bug 2: Trailing comments not attached to AST nodes — `620720f`
-- [ ] `cargo test --workspace` passes (both parsers in the
+- [x] `cargo test --workspace` passes (both parsers in the
   workspace simultaneously)
 
 **Phase B — Atomic rename (only after Phase A is green)** — `cc5c9a5`
