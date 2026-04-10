@@ -56,26 +56,50 @@ character count is needed):
 need the same audit — not yet categorized. Some are safe (e.g.,
 `marker_pos.char_offset + 3` where `---` is always ASCII), others
 use `.len()` on strings that could contain multi-byte chars (e.g.,
-`name.len()` for anchor names, `tag_token_bytes` for tags).
+`name.len()` for anchor names in alias/anchor position arithmetic).
 
-### lib.rs sites requiring audit
+### Audit findings (lib.rs)
 
-From grep results, these `char_offset` constructions in `lib.rs`
-need classification (safe/unsafe):
+Complete classification of all `char_offset`/`column` construction
+sites in `lib.rs`. Tag characters (`is_tag_char`) are ASCII-only so
+`tag_token_bytes` == char count. Leading spaces come from
+`trim_start_matches(' ')` so always ASCII. Only anchor names (via
+`is_ns_anchor_char`) allow multi-byte characters.
 
-- Lines 524, 553: `+ leading_spaces` (from byte-level trim)
-- Lines 729, 805, 3169: `+ total_offset`
-- Lines 840, 2078, 2164, 2316: `+ leading` (from byte-level trim)
-- Line 862: `+ leading_spaces + value_offset_in_trimmed`
-- Line 1525: `+ 3` (for `---`/`...` markers — safe, ASCII)
-- Lines 2111, 4219: `+ name_char_count` / `+ name.chars().count()`
-  (safe — explicitly char-counted)
-- Line 2126: `+ leading + 1 + name.len() + spaces` (UNSAFE —
-  `name.len()` is bytes, anchor names can be multi-byte)
-- Line 2214: `+ leading + tag_token_bytes + spaces` (UNSAFE —
-  `tag_token_bytes` is bytes, tags can contain multi-byte)
-- Line 2335: `+ leading + 1 + name.len() + spaces` (UNSAFE —
-  same as 2126)
+| Site | Location | Value added | Classification |
+|------|----------|-------------|----------------|
+| 1 | lib.rs:524,526 | `+ leading_spaces` — spaces-only trim | **SAFE** |
+| 2 | lib.rs:553,555 | `+ leading_spaces` — spaces-only trim | **SAFE** |
+| 3 | lib.rs:729,731 | `+ total_offset` = leading_spaces + 1 + spaces_after_dash (all ASCII) | **SAFE** |
+| 4 | lib.rs:805,807 | `+ total_offset` = leading_spaces + 1 + spaces_after_q (all ASCII) | **SAFE** |
+| 5 | lib.rs:840,842 | `+ leading_spaces` — spaces-only trim | **SAFE** |
+| 6 | lib.rs:862,864 | `+ leading_spaces + value_offset_in_trimmed`; `value_offset_in_trimmed = colon_offset + 1 + spaces` where `colon_offset` is a byte offset into trimmed content which can contain multi-byte chars in the mapping key | **UNSAFE** |
+| 7 | lib.rs:1525,1527 | `+ 3` constant — `---`/`...` are always ASCII | **SAFE** |
+| 8 | lib.rs:2078,2080 | `+ leading` — spaces-only trim | **SAFE** |
+| 9 | lib.rs:2111,2113 | `+ 1 + name_char_count` — `name_char_count = name.chars().count()` | **SAFE** |
+| 10 | lib.rs:2126,2132 | `rem_char_offset = line_char_offset + leading + 1 + name.len() + spaces`; `name.len()` is bytes, anchor names can be multi-byte | **UNSAFE** |
+| 11 | lib.rs:2164,2166 | `+ leading` — spaces-only trim | **SAFE** |
+| 12 | lib.rs:2214,2215 | `+ leading + tag_token_bytes + spaces` — tag chars are ASCII-only | **SAFE** |
+| 13 | lib.rs:2260,2262 | `+ inline_char_offset` / `+ inline_col` derived from safe tag arithmetic | **SAFE** |
+| 14 | lib.rs:2316,2318 | `+ leading` — spaces-only trim | **SAFE** |
+| 15 | lib.rs:2335,2336 | `inline_char_offset = line_pos.char_offset + leading + 1 + name.len() + spaces`; `name.len()` is bytes, anchor names can be multi-byte | **UNSAFE** |
+| 16 | lib.rs:2396,2398 | `+ inline_char_offset` / `+ inline_col` derived from unsafe site 15 | **UNSAFE** (cascading) |
+| 17 | lib.rs:2423,2425 | `+ inline_char_offset` / `+ inline_col` derived from unsafe site 15 | **UNSAFE** (cascading) |
+| 18 | lib.rs:3169,3171 | `+ total_offset` = leading_spaces + 1 + spaces_after_colon (all ASCII) | **SAFE** |
+| 19 | lib.rs:4219,4221 | `+ 1 + name.chars().count()` — explicit char count | **SAFE** |
+
+**lib.rs unsafe sites summary (5 root sites, 2 cascading):**
+
+- **Site 6** (lib.rs:862,864) — `colon_offset` byte offset into trimmed
+  mapping-key content; plain scalars used as keys can contain multi-byte
+  UTF-8
+- **Site 10** (lib.rs:2126,2132) — alias `rem_char_offset` uses
+  `name.len()` (bytes) for anchor name length; anchor names allow
+  multi-byte via `is_ns_anchor_char`
+- **Site 15** (lib.rs:2335,2336) — anchor `inline_char_offset`/`inline_col`
+  uses `name.len()` (bytes); same issue as site 10
+- **Sites 16–17** (lib.rs:2396,2398 and 2423,2425) — cascade from site
+  15; `inline_char_offset`/`inline_col` used in `Pos` construction
 
 ### Related: LSP UTF-16 conversion
 
@@ -173,7 +197,7 @@ Per user direction:
 
 ## Steps
 
-- [ ] Audit all position arithmetic in lib.rs (Task 1)
+- [x] Audit all position arithmetic in lib.rs (Task 1)
 - [ ] Write Unicode position tests as TDD safety net (Task 2)
 - [ ] Fix byte/char conflation bugs (Task 3)
 - [ ] Implement lazy Pos optimization (Task 4)
@@ -187,16 +211,16 @@ Complete the position arithmetic audit for `lib.rs`. The lexer.rs
 audit is done (11 unsafe sites documented above). lib.rs has ~25+
 `char_offset`/`column` construction sites that need classification.
 
-- [ ] Read every `char_offset:` and `column:` construction in
+- [x] Read every `char_offset:` and `column:` construction in
   lib.rs
-- [ ] For each, determine: is the value being added a byte count
+- [x] For each, determine: is the value being added a byte count
   or a char count? Could the source string contain multi-byte
   UTF-8?
-- [ ] Classify each as SAFE (guaranteed ASCII arithmetic) or
+- [x] Classify each as SAFE (guaranteed ASCII arithmetic) or
   UNSAFE (byte length used where char count needed)
-- [ ] Update this plan with the definitive list of all unsafe
+- [x] Update this plan with the definitive list of all unsafe
   sites across both files
-- [ ] Commit: `docs(parser): audit lib.rs position arithmetic
+- [x] Commit: `docs(parser): audit lib.rs position arithmetic
   for Unicode correctness`
 
 **Reference impl consultation:** Not applicable (audit only).
