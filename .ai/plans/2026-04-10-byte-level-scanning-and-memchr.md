@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-10
 
 ## Goal
@@ -156,7 +156,7 @@ with scalar fallback. Zero unsafe in the public API.
 
 ## Steps
 
-- [ ] Split lexer.rs into submodules (Task 1)
+- [x] Split lexer.rs into submodules (Task 1) — c1ff3ce
 - [ ] Add memchr dependency and byte-level plain scalar scanning (Task 2)
 - [ ] Byte-level scanning for quoted scalars (Task 3)
 - [ ] Byte-level scanning for block scalars and comment (Task 4)
@@ -168,31 +168,31 @@ with scalar fallback. Zero unsafe in the public API.
 
 Pure refactoring — no behavior change, no new dependencies.
 
-- [ ] Create `rlsp-yaml-parser/src/lexer/` directory
-- [ ] Move plain scalar functions to `lexer/plain.rs`:
+- [x] Create `rlsp-yaml-parser/src/lexer/` directory
+- [x] Move plain scalar functions to `lexer/plain.rs`:
   `scan_plain_line_block`, `scan_plain_line_flow`,
   `peek_plain_scalar_first_line`, `try_consume_plain_scalar`,
   `collect_plain_continuations`, `extract_trailing_comment`,
   and related helper types
-- [ ] Move quoted scalar functions to `lexer/quoted.rs`:
+- [x] Move quoted scalar functions to `lexer/quoted.rs`:
   `try_consume_single_quoted`, `try_consume_double_quoted`,
   `scan_single_quoted_line`, `scan_double_quoted_line`,
   `collect_double_quoted_continuations`, and related types
   (`SingleQuotedScan`, `DoubleQuotedLine`, etc.)
-- [ ] Move block scalar functions to `lexer/block.rs`:
+- [x] Move block scalar functions to `lexer/block.rs`:
   `try_consume_literal_block_scalar`,
   `try_consume_folded_block_scalar`, `collect_folded_lines`
-- [ ] Move comment scanning to `lexer/comment.rs`:
+- [x] Move comment scanning to `lexer/comment.rs`:
   `try_consume_comment`
-- [ ] Keep in `lexer.rs`: `Lexer` struct, `new()`,
+- [x] Keep in `lexer.rs`: `Lexer` struct, `new()`,
   `peek_next_line()`, `consume_marker_line()`,
   `consume_line()`, `try_consume_directive_line()`, shared
   types, module declarations, and re-exports
-- [ ] Adjust visibility: functions called by `Lexer` methods
+- [x] Adjust visibility: functions called by `Lexer` methods
   in `lexer.rs` need `pub(super)` or `pub(crate)`
-- [ ] All tests pass unchanged
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `refactor(parser): split lexer into submodules`
+- [x] All tests pass unchanged
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `refactor(parser): split lexer into submodules` — c1ff3ce
 
 **Reference impl consultation:** Not applicable (refactoring).
 **Advisors:** None (pure code movement).
