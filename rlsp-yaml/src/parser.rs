@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser_temp::loader::LoaderBuilder;
-use rlsp_yaml_parser_temp::node::Document;
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::loader::LoaderBuilder;
+use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 /// Maximum mapping/sequence nesting depth accepted by the parser.
@@ -29,16 +29,16 @@ pub fn parse_yaml(text: &str) -> ParseResult {
         },
         Err(err) => {
             let (pos, message) = match &err {
-                rlsp_yaml_parser_temp::loader::LoadError::Parse { pos, message } => {
+                rlsp_yaml_parser::loader::LoadError::Parse { pos, message } => {
                     (*pos, message.clone())
                 }
-                rlsp_yaml_parser_temp::loader::LoadError::NestingDepthLimitExceeded { .. }
-                | rlsp_yaml_parser_temp::loader::LoadError::AnchorCountLimitExceeded { .. }
-                | rlsp_yaml_parser_temp::loader::LoadError::AliasExpansionLimitExceeded { .. }
-                | rlsp_yaml_parser_temp::loader::LoadError::CircularAlias { .. }
-                | rlsp_yaml_parser_temp::loader::LoadError::UndefinedAlias { .. }
-                | rlsp_yaml_parser_temp::loader::LoadError::UnexpectedEndOfStream => {
-                    (rlsp_yaml_parser_temp::Pos::ORIGIN, err.to_string())
+                rlsp_yaml_parser::loader::LoadError::NestingDepthLimitExceeded { .. }
+                | rlsp_yaml_parser::loader::LoadError::AnchorCountLimitExceeded { .. }
+                | rlsp_yaml_parser::loader::LoadError::AliasExpansionLimitExceeded { .. }
+                | rlsp_yaml_parser::loader::LoadError::CircularAlias { .. }
+                | rlsp_yaml_parser::loader::LoadError::UndefinedAlias { .. }
+                | rlsp_yaml_parser::loader::LoadError::UnexpectedEndOfStream => {
+                    (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())
                 }
             };
             #[allow(clippy::cast_possible_truncation)]
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn should_include_span_in_parsed_scalar() {
-        use rlsp_yaml_parser_temp::node::Node;
+        use rlsp_yaml_parser::node::Node;
 
         let result = parse_yaml("hello\n");
 
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn parse_yaml_returns_documents_with_string_value_type() {
-        use rlsp_yaml_parser_temp::node::Node;
+        use rlsp_yaml_parser::node::Node;
 
         let result = parse_yaml("key: value\n");
 
@@ -352,12 +352,15 @@ mod tests {
             !result.diagnostics.is_empty(),
             "expected diagnostic for deep nesting"
         );
-        assert!(result.documents.is_empty(), "expected no documents on error");
+        assert!(
+            result.documents.is_empty(),
+            "expected no documents on error"
+        );
     }
 
     #[test]
     fn parse_yaml_undefined_alias_in_lossless_mode_produces_alias_node() {
-        use rlsp_yaml_parser_temp::node::Node;
+        use rlsp_yaml_parser::node::Node;
 
         // In lossless mode (the default), *undefined aliases are NOT errors;
         // they are preserved as Node::Alias leaves.

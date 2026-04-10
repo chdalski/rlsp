@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_fmt::{Doc, FormatOptions, concat, format as fmt_format, hard_line, indent, join, text};
-use rlsp_yaml_parser_temp::node::{Document, Node};
-use rlsp_yaml_parser_temp::{Chomp, ScalarStyle, Span};
+use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::{Chomp, ScalarStyle, Span};
 
 use crate::server::YamlVersion;
 
@@ -280,7 +280,7 @@ impl Default for YamlFormatOptions {
 pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // The parser preserves scalar styles (plain, quoted, block) and tags natively.
     // No special configuration needed — every scalar carries its original style.
-    let documents: Vec<Document<Span>> = match rlsp_yaml_parser_temp::load(text_input) {
+    let documents: Vec<Document<Span>> = match rlsp_yaml_parser::load(text_input) {
         Ok(docs) => docs,
         Err(_) => return text_input.to_string(),
     };

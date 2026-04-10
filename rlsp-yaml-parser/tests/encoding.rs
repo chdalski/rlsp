@@ -12,8 +12,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use rlsp_yaml_parser::encoding::{EncodingError, decode};
-use rlsp_yaml_parser::event::Event;
-use rlsp_yaml_parser::parse_events;
+use rlsp_yaml_parser::{Event, parse_events};
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -29,7 +28,7 @@ fn scalar_values(input: &str) -> Vec<String> {
     parse_events(input)
         .filter_map(Result::ok)
         .filter_map(|(event, _span)| match event {
-            Event::Scalar { value, .. } => Some(value),
+            Event::Scalar { value, .. } => Some(value.into_owned()),
             Event::StreamStart
             | Event::StreamEnd
             | Event::DocumentStart { .. }

@@ -259,9 +259,21 @@ fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
-// Custom: anchor/tag before mapping key — indent tracking regression tests
+// Custom: anchor/tag before mapping key — indent tracking bugfix
+//
+// When an anchor or tag appears inline before a mapping key, the parser
+// prepends the key content as a synthetic line at the property's column.
+// The mapping must be opened at the PHYSICAL line's indent (the property's
+// column), not the synthetic line's offset column.
+//
+// Per YAML test suite 9KAX: inline property (same line as key) annotates
+// the KEY SCALAR, not the mapping.  Standalone property (own line) annotates
+// the collection node that follows.
 // ---------------------------------------------------------------------------
 
+// Test 1: anchor before mapping key at root level.
+// `&anchor key: value` — anchor is inline before the key → annotates key scalar.
+// Expected: Mapping{no anchor, entries:[(Scalar{anchor:"anchor",value:"key"} → "value")]}
 #[test]
 fn anchor_before_mapping_key_root_level() {
     use rlsp_yaml_parser::loader::load;
@@ -276,14 +288,14 @@ fn anchor_before_mapping_key_root_level() {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
     assert!(
-        matches!(anchor.as_deref(), Some("anchor")),
-        "anchor should be on mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, anchor: Some(a), .. } if value == "key" && a == "anchor"),
+        "key scalar must carry anchor 'anchor', got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -291,6 +303,9 @@ fn anchor_before_mapping_key_root_level() {
     );
 }
 
+// Test 2: anchor before mapping key at indented level.
+// `outer:\n  &anchor inner_key: inner_value`
+// Expected: root Mapping → "outer" → Mapping{no anchor, entries:[(Scalar{anchor:"anchor",value:"inner_key"} → "inner_value")]}
 #[test]
 fn anchor_before_mapping_key_indented() {
     use rlsp_yaml_parser::loader::load;
@@ -316,14 +331,14 @@ fn anchor_before_mapping_key_indented() {
         panic!("expected inner Mapping, got: {v:?}");
     };
     assert!(
-        matches!(anchor.as_deref(), Some("anchor")),
-        "anchor should be on inner mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "inner mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
     assert_eq!(inner_entries.len(), 1, "inner mapping should have 1 entry");
     let (ik, iv) = &inner_entries[0];
     assert!(
-        matches!(ik, Node::Scalar { value, .. } if value == "inner_key"),
-        "inner key: {ik:?}"
+        matches!(ik, Node::Scalar { value, anchor: Some(a), .. } if value == "inner_key" && a == "anchor"),
+        "inner key scalar must carry anchor 'anchor', got: {ik:?}"
     );
     assert!(
         matches!(iv, Node::Scalar { value, .. } if value == "inner_value"),
@@ -331,6 +346,9 @@ fn anchor_before_mapping_key_indented() {
     );
 }
 
+// Test 3: tag before mapping key at root level.
+// `!!str key: value` — tag is inline before the key → annotates key scalar.
+// Expected: Mapping{no tag, entries:[(Scalar{tag:Some("str"),value:"key"} → "value")]}
 #[test]
 fn tag_before_mapping_key_root_level() {
     use rlsp_yaml_parser::loader::load;
@@ -341,12 +359,15 @@ fn tag_before_mapping_key_root_level() {
     let Node::Mapping { entries, tag, .. } = &docs[0].root else {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
-    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert!(
+        tag.is_none(),
+        "mapping must have no tag (tag is on key scalar), got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, tag: Some(t), .. } if value == "key" && t.contains("str")),
+        "key scalar must carry the tag, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -354,6 +375,9 @@ fn tag_before_mapping_key_root_level() {
     );
 }
 
+// Test 4: anchor + tag together before mapping key.
+// `&a !!str key: value` — both inline before the key → annotate key scalar.
+// Expected: Mapping{no anchor, no tag, entries:[(Scalar{anchor:"a",tag:Some,value:"key"} → "value")]}
 #[test]
 fn anchor_and_tag_before_mapping_key() {
     use rlsp_yaml_parser::loader::load;
@@ -371,15 +395,19 @@ fn anchor_and_tag_before_mapping_key() {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
     assert!(
-        matches!(anchor.as_deref(), Some("a")),
-        "anchor should be on mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
-    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert!(
+        tag.is_none(),
+        "mapping must have no tag (tag is on key scalar), got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, anchor: Some(a), tag: Some(t), .. }
+            if value == "key" && a == "a" && t.contains("str")),
+        "key scalar must carry anchor 'a' and tag, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -392,9 +420,50 @@ fn anchor_and_tag_before_mapping_key() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn double_quoted_implicit_key_decoded() {
-    use rlsp_yaml_parser::loader::load;
-    use rlsp_yaml_parser::node::Node;
+fn quoted_key_parse_events_style_double() {
+    use rlsp_yaml_parser::{ScalarStyle, parse_events};
+
+    let events: Vec<_> = parse_events("\"key\": value\n").collect();
+    let key_event = events.iter().find_map(|r| {
+        let (ev, _) = r.as_ref().expect("event error");
+        if let rlsp_yaml_parser::Event::Scalar { value, style, .. } = ev {
+            if value == "key" {
+                return Some(*style);
+            }
+        }
+        None
+    });
+    assert_eq!(
+        key_event,
+        Some(ScalarStyle::DoubleQuoted),
+        "key scalar must have DoubleQuoted style at event layer"
+    );
+}
+
+#[test]
+fn quoted_key_parse_events_style_single() {
+    use rlsp_yaml_parser::{ScalarStyle, parse_events};
+
+    let events: Vec<_> = parse_events("'key': value\n").collect();
+    let key_event = events.iter().find_map(|r| {
+        let (ev, _) = r.as_ref().expect("event error");
+        if let rlsp_yaml_parser::Event::Scalar { value, style, .. } = ev {
+            if value == "key" {
+                return Some(*style);
+            }
+        }
+        None
+    });
+    assert_eq!(
+        key_event,
+        Some(ScalarStyle::SingleQuoted),
+        "key scalar must have SingleQuoted style at event layer"
+    );
+}
+
+#[test]
+fn quoted_key_double_quoted_simple() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
 
     let docs = load("\"key\": value\n").expect("load failed");
     assert_eq!(docs.len(), 1);
@@ -404,8 +473,9 @@ fn double_quoted_implicit_key_decoded() {
     assert_eq!(entries.len(), 1);
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key must be decoded (no quotes), got: {k:?}"
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "key" && *style == ScalarStyle::DoubleQuoted),
+        "key must be decoded with DoubleQuoted style, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -414,9 +484,8 @@ fn double_quoted_implicit_key_decoded() {
 }
 
 #[test]
-fn single_quoted_implicit_key_decoded() {
-    use rlsp_yaml_parser::loader::load;
-    use rlsp_yaml_parser::node::Node;
+fn quoted_key_single_quoted_simple() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
 
     let docs = load("'key': value\n").expect("load failed");
     assert_eq!(docs.len(), 1);
@@ -426,12 +495,144 @@ fn single_quoted_implicit_key_decoded() {
     assert_eq!(entries.len(), 1);
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key must be decoded (no quotes), got: {k:?}"
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "key" && *style == ScalarStyle::SingleQuoted),
+        "key must be decoded with SingleQuoted style, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
         "val: {v:?}"
+    );
+}
+
+#[test]
+fn quoted_key_double_quoted_with_escape_sequence() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    // \t in double-quoted YAML is a literal tab character
+    let docs = load("\"ke\\ty\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "ke\ty" && *style == ScalarStyle::DoubleQuoted),
+        "key escape must be decoded and style DoubleQuoted, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_single_quoted_with_escaped_quote() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    // In single-quoted scalars, '' is the escape for a literal '
+    let docs = load("'it''s': value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "it's" && *style == ScalarStyle::SingleQuoted),
+        "single-quoted key escape must be decoded and style SingleQuoted, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_with_spaces_inside() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    let docs = load("\"hello world\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "hello world" && *style == ScalarStyle::DoubleQuoted),
+        "spaces inside quoted key must be preserved, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_double_quoted_empty() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    let docs = load("\"\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value.is_empty() && *style == ScalarStyle::DoubleQuoted),
+        "empty quoted key must decode to empty string with DoubleQuoted style, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_in_nested_mapping() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    let docs = load("outer:\n  \"inner key\": inner value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "outer"),
+        "outer key: {k:?}"
+    );
+    let Node::Mapping { entries: inner, .. } = v else {
+        panic!("expected nested Mapping, got: {v:?}");
+    };
+    assert_eq!(inner.len(), 1);
+    let (ik, _) = &inner[0];
+    assert!(
+        matches!(ik, Node::Scalar { value, style, .. }
+            if value == "inner key" && *style == ScalarStyle::DoubleQuoted),
+        "nested quoted key must be decoded, got: {ik:?}"
+    );
+}
+
+#[test]
+fn quoted_key_multiple_entries_mixed() {
+    use rlsp_yaml_parser::{ScalarStyle, loader::load, node::Node};
+
+    let docs = load("plain_key: 1\n\"quoted_key\": 2\n'another': 3\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 3);
+    let (k0, _) = &entries[0];
+    assert!(
+        matches!(k0, Node::Scalar { value, style, .. }
+            if value == "plain_key" && *style == ScalarStyle::Plain),
+        "entry 0 key: {k0:?}"
+    );
+    let (k1, _) = &entries[1];
+    assert!(
+        matches!(k1, Node::Scalar { value, style, .. }
+            if value == "quoted_key" && *style == ScalarStyle::DoubleQuoted),
+        "entry 1 key: {k1:?}"
+    );
+    let (k2, _) = &entries[2];
+    assert!(
+        matches!(k2, Node::Scalar { value, style, .. }
+            if value == "another" && *style == ScalarStyle::SingleQuoted),
+        "entry 2 key: {k2:?}"
     );
 }
 
@@ -441,8 +642,7 @@ fn single_quoted_implicit_key_decoded() {
 
 #[test]
 fn trailing_comment_on_mapping_value_attached() {
-    use rlsp_yaml_parser::loader::load;
-    use rlsp_yaml_parser::node::Node;
+    use rlsp_yaml_parser::{loader::load, node::Node};
 
     let docs = load("key: value  # trailing\n").expect("load failed");
     assert_eq!(docs.len(), 1);
@@ -460,8 +660,7 @@ fn trailing_comment_on_mapping_value_attached() {
 
 #[test]
 fn trailing_comment_on_sequence_item_attached() {
-    use rlsp_yaml_parser::loader::load;
-    use rlsp_yaml_parser::node::Node;
+    use rlsp_yaml_parser::{loader::load, node::Node};
 
     let docs = load("- item  # note\n").expect("load failed");
     assert_eq!(docs.len(), 1);
@@ -479,8 +678,7 @@ fn trailing_comment_on_sequence_item_attached() {
 
 #[test]
 fn leading_comment_attached_to_second_mapping_key() {
-    use rlsp_yaml_parser::loader::load;
-    use rlsp_yaml_parser::node::Node;
+    use rlsp_yaml_parser::{loader::load, node::Node};
 
     let docs = load("a: 1\n# before b\nb: 2\n").expect("load failed");
     assert_eq!(docs.len(), 1);

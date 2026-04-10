@@ -1402,9 +1402,9 @@ pub fn extract_yaml_version(text: &str) -> Option<String> {
 /// the root node is not a mapping, or either key is absent / non-string.
 #[must_use]
 pub fn detect_kubernetes_resource(
-    docs: &[rlsp_yaml_parser_temp::node::Document<rlsp_yaml_parser_temp::Span>],
+    docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
 ) -> Option<(String, String)> {
-    use rlsp_yaml_parser_temp::node::Node;
+    use rlsp_yaml_parser::node::Node;
 
     let root = &docs.first()?.root;
     let Node::Mapping { entries, .. } = root else {
@@ -2855,10 +2855,8 @@ mod tests {
     // detect_kubernetes_resource + kubernetes_schema_url
     // ══════════════════════════════════════════════════════════════════════════
 
-    fn parse_docs(
-        text: &str,
-    ) -> Vec<rlsp_yaml_parser_temp::node::Document<rlsp_yaml_parser_temp::Span>> {
-        rlsp_yaml_parser_temp::load(text).unwrap_or_default()
+    fn parse_docs(text: &str) -> Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>> {
+        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     // Test K8s-1: core API (v1 Pod) — detection and URL

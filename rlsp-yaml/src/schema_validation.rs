@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use regex::RegexBuilder;
-use rlsp_yaml_parser_temp::node::{Document, Node};
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::scalar_helpers;
@@ -644,7 +644,7 @@ fn validate_scalar_constraints(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    use rlsp_yaml_parser_temp::ScalarStyle;
+    use rlsp_yaml_parser::ScalarStyle;
     if let Node::Scalar { value, style, .. } = node {
         let is_plain = matches!(style, ScalarStyle::Plain);
 
@@ -930,7 +930,7 @@ fn validate_content_schema(
         .unwrap_or(raw);
 
     // Parse the content as YAML.
-    let Ok(docs) = rlsp_yaml_parser_temp::load(content_text) else {
+    let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
         let range = node_range(path, key_index);
         diagnostics.push(make_diagnostic(
             range,
@@ -1584,12 +1584,12 @@ fn validate_mapping(
             // Create a temporary scalar node for the key string.
             let key_node = Node::Scalar {
                 value: key_str.clone(),
-                style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                style: rlsp_yaml_parser::ScalarStyle::Plain,
                 anchor: None,
                 tag: None,
-                loc: rlsp_yaml_parser_temp::Span {
-                    start: rlsp_yaml_parser_temp::Pos::ORIGIN,
-                    end: rlsp_yaml_parser_temp::Pos::ORIGIN,
+                loc: rlsp_yaml_parser::Span {
+                    start: rlsp_yaml_parser::Pos::ORIGIN,
+                    end: rlsp_yaml_parser::Pos::ORIGIN,
                 },
                 leading_comments: Vec::new(),
                 trailing_comment: None,
@@ -1641,9 +1641,9 @@ fn validate_dependencies(
                     entries: entries.to_vec(),
                     anchor: None,
                     tag: None,
-                    loc: rlsp_yaml_parser_temp::Span {
-                        start: rlsp_yaml_parser_temp::Pos::ORIGIN,
-                        end: rlsp_yaml_parser_temp::Pos::ORIGIN,
+                    loc: rlsp_yaml_parser::Span {
+                        start: rlsp_yaml_parser::Pos::ORIGIN,
+                        end: rlsp_yaml_parser::Pos::ORIGIN,
                     },
                     leading_comments: Vec::new(),
                     trailing_comment: None,
@@ -1829,7 +1829,7 @@ fn validate_composition(
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn yaml_type_name(node: &Node<Span>) -> &'static str {
-    use rlsp_yaml_parser_temp::ScalarStyle;
+    use rlsp_yaml_parser::ScalarStyle;
     match node {
         Node::Scalar { value, style, .. } => {
             // Only plain (unquoted) scalars undergo type inference.
@@ -1886,7 +1886,7 @@ fn display_schema_type(schema_type: &SchemaType) -> String {
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn yaml_to_json(node: &Node<Span>) -> Option<serde_json::Value> {
-    use rlsp_yaml_parser_temp::ScalarStyle;
+    use rlsp_yaml_parser::ScalarStyle;
     match node {
         Node::Scalar { value, style, .. } => {
             // Quoted/block scalars are always strings — skip type inference.
@@ -2014,7 +2014,7 @@ mod tests {
     use serde_json::json;
 
     fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser_temp::load(text).unwrap_or_default()
+        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     fn string_schema() -> JsonSchema {

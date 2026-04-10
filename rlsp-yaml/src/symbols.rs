@@ -2,8 +2,8 @@
 
 use std::fmt::Write;
 
-use rlsp_yaml_parser_temp::node::{Document, Node};
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::scalar_helpers;
@@ -375,7 +375,7 @@ mod tests {
     use tower_lsp::lsp_types::SymbolKind;
 
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
-        rlsp_yaml_parser_temp::load(text).ok()
+        rlsp_yaml_parser::load(text).ok()
     }
 
     fn find_symbol<'a>(symbols: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {

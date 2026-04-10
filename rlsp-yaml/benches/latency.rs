@@ -8,8 +8,8 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::document_store::DocumentStore;
 use rlsp_yaml::semantic_tokens::semantic_tokens;
-use rlsp_yaml_parser_temp::node::Document;
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ fn bench_completion(c: &mut Criterion) {
     let schema = fixtures::generate_schema(50, 3);
     let text = fixtures::generate_nested_yaml(20, 3);
     // Completion now uses rlsp-yaml-parser types.
-    let docs: Vec<Document<Span>> = rlsp_yaml_parser_temp::load(&text).unwrap_or_default();
+    let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
 
     // Cursor positions at known nesting depths.
     // Each depth level occupies 3 lines: 2 leaf props + 1 nested key.

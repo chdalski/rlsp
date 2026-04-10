@@ -273,7 +273,7 @@ impl Backend {
         uri: &Url,
         schema_url: &str,
         diagnostics: &mut Vec<Diagnostic>,
-        documents: &[rlsp_yaml_parser_temp::node::Document<rlsp_yaml_parser_temp::Span>],
+        documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
         text: &str,
     ) {
         let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();

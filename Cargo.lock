@@ -1023,16 +1023,6 @@ dependencies = [
 
 [[package]]
 name = "rlsp-yaml-parser"
-version = "0.2.0"
-dependencies = [
- "criterion 0.5.1",
- "rstest",
- "smallvec",
- "thiserror",
-]
-
-[[package]]
-name = "rlsp-yaml-parser-temp"
 version = "0.0.0"
 dependencies = [
  "criterion 0.5.1",

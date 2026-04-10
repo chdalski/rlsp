@@ -19,6 +19,33 @@ impl Pos {
         line: 1,
         column: 0,
     };
+
+    /// Advance the position by one character.
+    ///
+    /// If `ch` is a line feed (`\n`) the line counter is incremented and the
+    /// column is reset to 0.  For all other characters the column advances by
+    /// one.  `byte_offset` advances by `ch.len_utf8()` and `char_offset`
+    /// always advances by 1.
+    #[must_use]
+    pub const fn advance(self, ch: char) -> Self {
+        let byte_offset = self.byte_offset + ch.len_utf8();
+        let char_offset = self.char_offset + 1;
+        if ch == '\n' {
+            Self {
+                byte_offset,
+                char_offset,
+                line: self.line + 1,
+                column: 0,
+            }
+        } else {
+            Self {
+                byte_offset,
+                char_offset,
+                line: self.line,
+                column: self.column + 1,
+            }
+        }
+    }
 }
 
 /// A half-open span `[start, end)` within the input stream.
@@ -29,14 +56,12 @@ pub struct Span {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
     #[test]
-    fn pos_default_is_origin() {
+    fn pos_origin_is_start_of_document() {
         let pos = Pos::ORIGIN;
-
         assert_eq!(pos.byte_offset, 0);
         assert_eq!(pos.char_offset, 0);
         assert_eq!(pos.line, 1);
@@ -51,7 +76,6 @@ mod tests {
             line: 3,
             column: 4,
         };
-
         assert_eq!(pos.byte_offset, 10);
         assert_eq!(pos.char_offset, 8);
         assert_eq!(pos.line, 3);
@@ -59,50 +83,9 @@ mod tests {
     }
 
     #[test]
-    fn span_start_and_end_are_accessible() {
-        let start = Pos {
-            byte_offset: 0,
-            char_offset: 0,
-            line: 1,
-            column: 0,
-        };
-        let end = Pos {
-            byte_offset: 5,
-            char_offset: 5,
-            line: 1,
-            column: 5,
-        };
-        let span = Span { start, end };
-
-        assert_eq!(span.start, start);
-        assert_eq!(span.end, end);
-    }
-
-    #[test]
-    fn span_single_character_has_equal_offsets_except_end_byte() {
-        let start = Pos {
-            byte_offset: 0,
-            char_offset: 0,
-            line: 1,
-            column: 0,
-        };
-        let end = Pos {
-            byte_offset: 1,
-            char_offset: 1,
-            line: 1,
-            column: 1,
-        };
-        let span = Span { start, end };
-
-        assert_eq!(span.start.byte_offset, 0);
-        assert_eq!(span.end.byte_offset, 1);
-    }
-
-    #[test]
     fn pos_is_copy() {
         let pos = Pos::ORIGIN;
         let pos2 = pos;
-        // Both bindings are usable — Pos is Copy
         let _ = pos.byte_offset;
         let _ = pos2.byte_offset;
     }
@@ -116,5 +99,45 @@ mod tests {
         let span2 = span;
         let _ = span.start;
         let _ = span2.start;
+    }
+
+    #[test]
+    fn advance_ascii_increments_byte_and_char_and_column() {
+        let pos = Pos::ORIGIN.advance('a');
+        assert_eq!(pos.byte_offset, 1);
+        assert_eq!(pos.char_offset, 1);
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.column, 1);
+    }
+
+    #[test]
+    fn advance_newline_increments_line_and_resets_column() {
+        let pos = Pos::ORIGIN.advance('a').advance('\n');
+        assert_eq!(pos.byte_offset, 2);
+        assert_eq!(pos.char_offset, 2);
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.column, 0);
+    }
+
+    #[test]
+    fn advance_multibyte_char_increments_byte_offset_by_utf8_len() {
+        // '中' is 3 bytes in UTF-8
+        let pos = Pos::ORIGIN.advance('中');
+        assert_eq!(pos.byte_offset, 3);
+        assert_eq!(pos.char_offset, 1);
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.column, 1);
+    }
+
+    #[test]
+    fn advance_multiple_lines() {
+        let pos = Pos::ORIGIN
+            .advance('a')
+            .advance('\n')
+            .advance('b')
+            .advance('\n')
+            .advance('c');
+        assert_eq!(pos.line, 3);
+        assert_eq!(pos.column, 1);
     }
 }

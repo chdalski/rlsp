@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #![deny(clippy::panic)]
 
-//! Smoke / integration tests for `rlsp-yaml-parser-temp`.
+//! Smoke / integration tests for `rlsp-yaml-parser`.
 //!
 //! Tests are grouped by grammar area using nested modules.  Each task adds
 //! a new `mod` block here as it introduces new event variants.
@@ -11,7 +11,7 @@
 //! [`parse_to_vec`] collects the full event stream into a `Vec` without
 //! hiding errors.  It is the canonical test helper for all grammar tasks.
 
-use rlsp_yaml_parser_temp::{
+use rlsp_yaml_parser::{
     Chomp, CollectionStyle, Error, Event, MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH,
     MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN, Pos, ScalarStyle,
     Span, parse_events,
@@ -617,7 +617,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "value".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -649,7 +649,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "---".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -748,7 +748,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -773,7 +773,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo bar".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -798,7 +798,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -823,7 +823,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -849,7 +849,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -879,7 +879,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "foo".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },
@@ -891,7 +891,7 @@ mod documents {
                 },
                 Event::Scalar {
                     value: "bar".into(),
-                    style: rlsp_yaml_parser_temp::ScalarStyle::Plain,
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
                     anchor: None,
                     tag: None,
                 },

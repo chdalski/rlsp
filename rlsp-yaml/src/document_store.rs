@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use rlsp_yaml_parser_temp::node::Document;
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::Url;
 
 use crate::parser;
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn should_update_parsed_documents_on_change() {
-        use rlsp_yaml_parser_temp::node::Node;
+        use rlsp_yaml_parser::node::Node;
 
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn should_update_document_span_root_on_change() {
-        use rlsp_yaml_parser_temp::node::Node;
+        use rlsp_yaml_parser::node::Node;
 
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");

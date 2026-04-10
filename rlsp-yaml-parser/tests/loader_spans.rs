@@ -3,10 +3,13 @@
 // Integration tests verifying that container nodes (Mapping, Sequence) carry
 // full spans — `loc.start` from the opening token, `loc.end` from the closing
 // token. These tests exercise the public `load()` API.
+//
+// Ported from rlsp-yaml-parser/tests/loader_spans.rs with import paths updated.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(clippy::panic)]
 
-use rlsp_yaml_parser::load;
+use rlsp_yaml_parser::loader::load;
 use rlsp_yaml_parser::node::Node;
 
 // ---------------------------------------------------------------------------
@@ -156,7 +159,6 @@ fn empty_sequence_span_is_non_zero() {
 /// Test 12 — sequence-of-mappings outer span covers all items.
 #[test]
 fn sequence_of_mappings_outer_span_covers_all_items() {
-    // This input parses correctly even though the emitter can't round-trip it.
     let docs = load("- name: Alice\n  age: 30\n- name: Bob\n  age: 25\n").unwrap();
     let Node::Sequence { loc, .. } = &docs[0].root else {
         panic!("expected Sequence");

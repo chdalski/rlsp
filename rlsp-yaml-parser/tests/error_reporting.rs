@@ -12,10 +12,9 @@
     clippy::missing_const_for_fn
 )]
 
-use rlsp_yaml_parser::event::{Error, Event};
 use rlsp_yaml_parser::loader::LoadError;
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{load, parse_events};
+use rlsp_yaml_parser::{Error, Event, load, parse_events};
 
 // ---------------------------------------------------------------------------
 // Helpers

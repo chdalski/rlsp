@@ -12,8 +12,8 @@ use rlsp_yaml::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
     validate_unused_anchors,
 };
-use rlsp_yaml_parser_temp::node::Document;
-use rlsp_yaml_parser_temp::Span;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ use tower_lsp::lsp_types::{Position, Url};
 fn bench_validators_individual(c: &mut Criterion) {
     let text = fixtures::large();
     // Validators now use rlsp-yaml-parser types.
-    let docs: Vec<Document<Span>> = rlsp_yaml_parser_temp::load(&text).unwrap_or_default();
+    let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
     let allowed_tags = std::collections::HashSet::new();
 
     let mut group = c.benchmark_group("validators_individual");
@@ -65,7 +65,7 @@ fn bench_hover_and_references(c: &mut Criterion) {
     let schema = fixtures::generate_schema(20, 2);
     let text = fixtures::generate_anchor_yaml(100);
     // Hover now uses rlsp-yaml-parser types.
-    let docs: Vec<Document<Span>> = rlsp_yaml_parser_temp::load(&text).unwrap_or_default();
+    let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
 
     let uri: Url = "file:///bench/anchors.yaml"
         .parse()
@@ -96,7 +96,7 @@ fn bench_hover_and_references(c: &mut Criterion) {
 fn bench_selection_ranges(c: &mut Criterion) {
     let text = fixtures::generate_nested_yaml(20, 3);
     let docs: Vec<Document<Span>> =
-        rlsp_yaml_parser_temp::load(&text).expect("fixture YAML parses without error");
+        rlsp_yaml_parser::load(&text).expect("fixture YAML parses without error");
 
     // Cursor positions at known nesting depths (depth * 3 lines, depth * 2 cols).
     let positions_by_depth: &[(&str, &[Position])] = &[

@@ -7,24 +7,24 @@
     clippy::too_many_lines
 )]
 
-//! Integration tests for the rlsp-yaml-parser-temp loader.
+//! Integration tests for the rlsp-yaml-parser loader.
 //!
 //! Exercises `load()` and `LoaderBuilder` through the public API.
 
-use rlsp_yaml_parser_temp::loader::{LoadError, LoaderBuilder, load};
-use rlsp_yaml_parser_temp::node::Node;
+use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
+use rlsp_yaml_parser::node::Node;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn load_one(input: &str) -> Node<rlsp_yaml_parser_temp::Span> {
+fn load_one(input: &str) -> Node<rlsp_yaml_parser::Span> {
     let docs = load(input).expect("load failed");
     assert_eq!(docs.len(), 1, "expected 1 document, got {}", docs.len());
     docs.into_iter().next().unwrap().root
 }
 
-fn load_resolved_one(input: &str) -> Node<rlsp_yaml_parser_temp::Span> {
+fn load_resolved_one(input: &str) -> Node<rlsp_yaml_parser::Span> {
     let docs = LoaderBuilder::new()
         .resolved()
         .build()
@@ -34,7 +34,7 @@ fn load_resolved_one(input: &str) -> Node<rlsp_yaml_parser_temp::Span> {
     docs.into_iter().next().unwrap().root
 }
 
-fn scalar_value(node: &Node<rlsp_yaml_parser_temp::Span>) -> &str {
+fn scalar_value(node: &Node<rlsp_yaml_parser::Span>) -> &str {
     match node {
         Node::Scalar { value, .. } => value.as_str(),
         Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {

@@ -34,8 +34,7 @@ pnpm run format    # check formatting (prettier)
 | `rlsp-fmt/` | Generic Wadler-Lindig pretty-printing engine |
 | `rlsp-yaml/` | YAML language server |
 | `rlsp-yaml/integrations/vscode/` | VS Code extension for rlsp-yaml |
-| `rlsp-yaml-parser/` | Spec-faithful YAML 1.2 parser |
-| `rlsp-yaml-parser-temp/` | Streaming YAML 1.2 parser (in development; will replace `rlsp-yaml-parser/` in plan task 22) |
+| `rlsp-yaml-parser/` | Spec-faithful streaming YAML 1.2 parser |
 
 ## Conventions
 
