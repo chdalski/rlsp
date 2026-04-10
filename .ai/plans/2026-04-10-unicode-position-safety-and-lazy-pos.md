@@ -198,7 +198,7 @@ Per user direction:
 ## Steps
 
 - [x] Audit all position arithmetic in lib.rs (Task 1)
-- [ ] Write Unicode position tests as TDD safety net (Task 2)
+- [x] Write Unicode position tests as TDD safety net (Task 2)
 - [ ] Fix byte/char conflation bugs (Task 3)
 - [ ] Implement lazy Pos optimization (Task 4)
 - [ ] Benchmark and verify improvement (Task 5)
@@ -233,33 +233,32 @@ produced from YAML input containing multi-byte UTF-8 characters.
 These tests serve as the TDD safety net — they will expose the
 byte/char conflation bugs before any fixes are applied.
 
-- [ ] Create `tests/unicode_positions.rs`
-- [ ] Test plain scalars: multi-byte chars in value, verify
+- [x] Create `tests/unicode_positions.rs`
+- [x] Test plain scalars: multi-byte chars in value, verify
   event Span start/end have correct byte_offset, char_offset,
   line, column
-- [ ] Test plain scalars: multi-byte chars in leading content
+- [x] Test plain scalars: multi-byte chars in leading content
   (before the scalar on the same line), verify Span positions
-- [ ] Test single-quoted scalars with multi-byte leading content
-- [ ] Test double-quoted scalars with multi-byte leading content
-- [ ] Test block scalars (literal and folded) with multi-byte
+- [x] Test single-quoted scalars with multi-byte leading content
+- [x] Test double-quoted scalars with multi-byte leading content
+- [x] Test block scalars (literal and folded) with multi-byte
   content on the indicator line
-- [ ] Test comments with multi-byte content before `#`
-- [ ] Test anchor names containing multi-byte chars (`&名前`)
-- [ ] Test tag names containing multi-byte chars
-- [ ] Test alias references with multi-byte names (`*名前`)
-- [ ] Test document markers with inline multi-byte content
+- [x] Test comments with multi-byte content before `#`
+- [x] Test anchor names containing multi-byte chars (`&名前`)
+- [x] Test tag names containing multi-byte chars
+- [x] Test alias references with multi-byte names (`*名前`)
+- [x] Test document markers with inline multi-byte content
   (`--- 中文`)
-- [ ] Test mapping keys that are multi-byte (`日本語: value`)
-- [ ] Test mixed: multi-byte key with trailing comment
-- [ ] Verify that `byte_offset` is always correct (it uses
+- [x] Test mapping keys that are multi-byte (`日本語: value`)
+- [x] Test mixed: multi-byte key with trailing comment
+- [x] Verify that `byte_offset` is always correct (it uses
   `.len()` which is bytes — should be right)
-- [ ] Verify that `char_offset` and `column` match expected
+- [x] Verify that `char_offset` and `column` match expected
   character counts
-- [ ] Mark tests that fail as `#[should_panic]` or document
+- [x] Mark tests that fail as `#[should_panic]` or document
   expected failures — these become the bug fix acceptance gate
   for Task 3
-- [ ] Build, clippy, commit:
-  `test(parser): add Unicode position tests for multi-byte UTF-8`
+- [x] Build, clippy, commit: `7031829`
 
 **Reference impl consultation:** Not applicable (test-only).
 **Advisors:** test-engineer — new test file establishing position
