@@ -188,11 +188,12 @@ impl<'input> Lexer<'input> {
             .find(|&(_, ch)| ch == '#')
             .map_or(0, |(i, _)| i);
 
+        let hash_char_offset = line.content[..hash_byte_offset].chars().count();
         let hash_pos = Pos {
             byte_offset: line.pos.byte_offset + hash_byte_offset,
-            char_offset: line.pos.char_offset + hash_byte_offset,
+            char_offset: line.pos.char_offset + hash_char_offset,
             line: line.pos.line,
-            column: line.pos.column + hash_byte_offset,
+            column: line.pos.column + hash_char_offset,
         };
 
         // Comment text: everything after the `#`.
@@ -316,12 +317,13 @@ impl<'input> Lexer<'input> {
             // Compute the start position of the inline content.
             // marker_pos is at column 0 of the line; inline content starts at
             // byte_offset = marker_pos.byte_offset + (content.len() - inline.len()).
-            let prefix_len = line.content.len() - inline.len();
+            let prefix_bytes = line.content.len() - inline.len();
+            let prefix_chars = line.content[..prefix_bytes].chars().count();
             let inline_start = Pos {
-                byte_offset: marker_pos.byte_offset + prefix_len,
-                char_offset: marker_pos.char_offset + prefix_len,
+                byte_offset: marker_pos.byte_offset + prefix_bytes,
+                char_offset: marker_pos.char_offset + prefix_chars,
                 line: marker_pos.line,
-                column: marker_pos.column + prefix_len,
+                column: marker_pos.column + prefix_chars,
             };
 
             // If the inline content is a comment (`# ...`), store it as a
@@ -515,6 +517,7 @@ impl<'input> Lexer<'input> {
     /// If [`Self::inline_scalar`] is set (populated by a preceding
     /// [`Self::consume_marker_line`] call for a `--- text` line), it is
     /// drained and returned immediately without consuming any new lines.
+    #[allow(clippy::too_many_lines)]
     pub fn try_consume_plain_scalar(
         &mut self,
         parent_indent: usize,
@@ -555,11 +558,12 @@ impl<'input> Lexer<'input> {
                 // It is `after_scalar_start + (suffix.len() - comment_text.len() - 1)`
                 // where -1 accounts for the `#` itself.
                 let hash_byte_in_line = after_scalar_start + suffix.len() - comment_text.len() - 1;
+                let hash_char_in_line = consumed_first.content[..hash_byte_in_line].chars().count();
                 let hash_pos = Pos {
                     byte_offset: consumed_first.pos.byte_offset + hash_byte_in_line,
-                    char_offset: consumed_first.pos.char_offset + hash_byte_in_line,
+                    char_offset: consumed_first.pos.char_offset + hash_char_in_line,
                     line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + hash_byte_in_line,
+                    column: consumed_first.pos.column + hash_char_in_line,
                 };
                 let mut span_end = hash_pos.advance('#');
                 for ch in comment_text.chars() {
@@ -569,11 +573,12 @@ impl<'input> Lexer<'input> {
                 // not contain NUL (U+0000) since it is not a c-printable char.
                 if let Some((bad_i, bad_ch)) = comment_text.char_indices().find(|(_, c)| *c == '\0')
                 {
+                    let bad_char_i = comment_text[..bad_i].chars().count();
                     let bad_pos = Pos {
                         byte_offset: hash_pos.byte_offset + 1 + bad_i,
-                        char_offset: hash_pos.char_offset + 1 + bad_i,
+                        char_offset: hash_pos.char_offset + 1 + bad_char_i,
                         line: hash_pos.line,
-                        column: hash_pos.column + 1 + bad_i,
+                        column: hash_pos.column + 1 + bad_char_i,
                     };
                     self.plain_scalar_suffix_error = Some(Error {
                         pos: bad_pos,
@@ -597,11 +602,14 @@ impl<'input> Lexer<'input> {
                 // valid at this position.  Other non-whitespace characters
                 // (e.g. `: value`) may be valid YAML content that the mapping
                 // detector missed and are not flagged here.
+                let bad_char_offset = consumed_first.content[..after_scalar_start + bad_i]
+                    .chars()
+                    .count();
                 let bad_pos = Pos {
                     byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
-                    char_offset: consumed_first.pos.char_offset + after_scalar_start + bad_i,
+                    char_offset: consumed_first.pos.char_offset + bad_char_offset,
                     line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + after_scalar_start + bad_i,
+                    column: consumed_first.pos.column + bad_char_offset,
                 };
                 self.plain_scalar_suffix_error = Some(Error {
                     pos: bad_pos,
@@ -761,12 +769,13 @@ impl<'input> Lexer<'input> {
             return Ok(None);
         }
 
-        let leading = first_line.content.len() - content.len();
+        let leading_bytes = first_line.content.len() - content.len();
+        let leading_chars = first_line.content[..leading_bytes].chars().count();
         let open_pos = Pos {
-            byte_offset: first_line.offset + leading,
-            char_offset: first_line.pos.char_offset + leading,
+            byte_offset: first_line.offset + leading_bytes,
+            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
-            column: first_line.pos.column + leading,
+            column: first_line.pos.column + leading_chars,
         };
 
         // Consume the first line.
@@ -778,7 +787,7 @@ impl<'input> Lexer<'input> {
         self.current_pos = pos_after_line(&consumed_first);
 
         // The body starts after the opening `'`.
-        let body_start = &consumed_first.content[leading + 1..];
+        let body_start = &consumed_first.content[leading_bytes + 1..];
 
         // Scan within this line for the closing `'`, handling `''` escapes.
         let (value, closed) = scan_single_quoted_line(body_start);
@@ -924,12 +933,13 @@ impl<'input> Lexer<'input> {
             return Ok(None);
         }
 
-        let leading = first_line.content.len() - content.len();
+        let leading_bytes = first_line.content.len() - content.len();
+        let leading_chars = first_line.content[..leading_bytes].chars().count();
         let open_pos = Pos {
-            byte_offset: first_line.offset + leading,
-            char_offset: first_line.pos.char_offset + leading,
+            byte_offset: first_line.offset + leading_bytes,
+            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
-            column: first_line.pos.column + leading,
+            column: first_line.pos.column + leading_chars,
         };
 
         // Consume the first line.
@@ -941,7 +951,7 @@ impl<'input> Lexer<'input> {
         self.current_pos = pos_after_line(&consumed_first);
 
         // Body starts after the opening `"`.
-        let body_start = &consumed_first.content[leading + 1..];
+        let body_start = &consumed_first.content[leading_bytes + 1..];
 
         // Try to scan on a single line (fast path / borrow path).
         let (value, span) = match scan_double_quoted_line(body_start, open_pos.advance('"'))? {
@@ -1016,12 +1026,13 @@ impl<'input> Lexer<'input> {
         }
 
         // Record the position of the `|` for the span start.
-        let leading = first_line.content.len() - content.len();
+        let leading_bytes = first_line.content.len() - content.len();
+        let leading_chars = first_line.content[..leading_bytes].chars().count();
         let pipe_pos = Pos {
-            byte_offset: first_line.offset + leading,
-            char_offset: first_line.pos.char_offset + leading,
+            byte_offset: first_line.offset + leading_bytes,
+            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
-            column: first_line.pos.column + leading,
+            column: first_line.pos.column + leading_chars,
         };
 
         // Consume the header line.
@@ -1237,12 +1248,13 @@ impl<'input> Lexer<'input> {
             return None;
         }
 
-        let leading = first_line.content.len() - content.len();
+        let leading_bytes = first_line.content.len() - content.len();
+        let leading_chars = first_line.content[..leading_bytes].chars().count();
         let gt_pos = Pos {
-            byte_offset: first_line.offset + leading,
-            char_offset: first_line.pos.char_offset + leading,
+            byte_offset: first_line.offset + leading_bytes,
+            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
-            column: first_line.pos.column + leading,
+            column: first_line.pos.column + leading_chars,
         };
 
         // SAFETY: LineBuffer guarantees consume returns Some when peek returned
@@ -1736,15 +1748,16 @@ fn peek_plain_scalar_first_line(buf: &LineBuffer<'_>) -> Option<(usize, Pos, usi
         return None;
     }
 
-    let leading_spaces = first.content.len() - content_trimmed.len();
+    let leading_bytes = first.content.len() - content_trimmed.len();
+    let leading_chars = first.content[..leading_bytes].chars().count();
     let scalar_start_pos = Pos {
-        byte_offset: first.offset + leading_spaces,
-        char_offset: first.pos.char_offset + leading_spaces,
+        byte_offset: first.offset + leading_bytes,
+        char_offset: first.pos.char_offset + leading_chars,
         line: first.pos.line,
-        column: first.pos.column + leading_spaces,
+        column: first.pos.column + leading_chars,
     };
 
-    Some((leading_spaces, scalar_start_pos, first_value.len()))
+    Some((leading_bytes, scalar_start_pos, first_value.len()))
 }
 
 // ---------------------------------------------------------------------------

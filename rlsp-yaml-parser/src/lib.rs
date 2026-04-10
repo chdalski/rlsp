@@ -855,13 +855,18 @@ impl<'input> EventIter<'input> {
 
         // Compute position of value content (after `: ` / `:\t`).
         let spaces_after_colon = after_colon.len() - value_content.len();
-        let value_offset_in_trimmed = colon_offset + 1 + spaces_after_colon;
-        let value_col = key_indent + value_offset_in_trimmed;
+        let value_byte_offset_in_trimmed = colon_offset + 1 + spaces_after_colon;
+        // `colon_offset` is a byte offset into `trimmed`; key text can contain
+        // multi-byte UTF-8.  Convert the prefix bytes to char count for
+        // char_offset and column.
+        let key_chars = trimmed[..colon_offset].chars().count();
+        let value_char_offset_in_trimmed = key_chars + 1 + spaces_after_colon;
+        let value_col = key_indent + value_char_offset_in_trimmed;
         let value_pos = Pos {
-            byte_offset: line_pos.byte_offset + leading_spaces + value_offset_in_trimmed,
-            char_offset: line_pos.char_offset + leading_spaces + value_offset_in_trimmed,
+            byte_offset: line_pos.byte_offset + leading_spaces + value_byte_offset_in_trimmed,
+            char_offset: line_pos.char_offset + leading_spaces + value_char_offset_in_trimmed,
             line: line_pos.line,
-            column: line_pos.column + leading_spaces + value_offset_in_trimmed,
+            column: line_pos.column + leading_spaces + value_char_offset_in_trimmed,
         };
 
         // Detect whether the key is a quoted scalar.  `key_content` already
@@ -2123,7 +2128,8 @@ impl<'input> EventIter<'input> {
                         let spaces = after_name.len() - remaining.len();
                         let had_remaining = !remaining.is_empty();
                         let rem_byte_offset = star_pos.byte_offset + 1 + name.len() + spaces;
-                        let rem_char_offset = line_char_offset + leading + 1 + name.len() + spaces;
+                        let rem_char_offset =
+                            line_char_offset + leading + 1 + name_char_count + spaces;
                         let rem_col = star_pos.column + 1 + name_char_count + spaces;
                         self.lexer.consume_line();
                         if had_remaining {
@@ -2329,11 +2335,12 @@ impl<'input> EventIter<'input> {
                         let inline: &'input str = after_name.trim_start_matches([' ', '\t']);
                         let spaces = after_name.len() - inline.len();
                         let had_inline = !inline.is_empty();
+                        let name_char_count = name.chars().count();
                         let inline_offset =
                             line_pos.byte_offset + leading + 1 + name.len() + spaces;
                         let inline_char_offset =
-                            line_pos.char_offset + leading + 1 + name.len() + spaces;
-                        let inline_col = line_pos.column + leading + 1 + name.len() + spaces;
+                            line_pos.char_offset + leading + 1 + name_char_count + spaces;
+                        let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;
                         // Duplicate anchors on the same node are an error.
                         //
                         // Case 1: existing anchor is item-level (pending_anchor_for_collection=false)
