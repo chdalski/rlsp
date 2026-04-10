@@ -201,7 +201,7 @@ Per user direction:
 - [x] Write Unicode position tests as TDD safety net (Task 2)
 - [x] Fix byte/char conflation bugs (Task 3)
 - [x] Implement lazy Pos optimization (Task 4)
-- [ ] Benchmark and verify improvement (Task 5)
+- [x] Benchmark and verify improvement (Task 5)
 
 ## Tasks
 
@@ -374,20 +374,19 @@ reviewer.
 Run benchmarks to measure the throughput improvement from lazy Pos
 and verify no performance regressions.
 
-- [ ] Run `cargo bench` (full benchmark suite)
-- [ ] Compare throughput (MB/s) for all fixture sizes against
+- [x] Run `cargo bench` (full benchmark suite)
+- [x] Compare throughput (MB/s) for all fixture sizes against
   the baseline in `docs/benchmarks.md`
-- [ ] Compare first-event latency (should be unchanged or
+- [x] Compare first-event latency (should be unchanged or
   improved)
-- [ ] Compare allocation counts (should be unchanged — this
+- [x] Compare allocation counts (should be unchanged — this
   optimization reduces CPU work, not allocations)
-- [ ] Report: target, measured result, whether target met
+- [x] Report: target, measured result, whether target met
   (target: 15-25% throughput improvement on large_100KB and
   huge_1MB fixtures)
-- [ ] Update `docs/benchmarks.md` with new results if the
+- [x] Update `docs/benchmarks.md` with new results if the
   improvement is significant
-- [ ] Commit: `docs(parser): benchmark results for lazy Pos
-  optimization`
+- [x] Commit: `f2a8f9b`
 
 **Reference impl consultation:** Not applicable.
 **Advisors:** None (measurement only).
