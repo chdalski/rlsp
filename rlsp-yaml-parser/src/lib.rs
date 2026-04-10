@@ -521,7 +521,6 @@ impl<'input> EventIter<'input> {
         let leading_spaces = line.content.len() - trimmed.len();
         let dash_pos = Pos {
             byte_offset: line.pos.byte_offset + leading_spaces,
-            char_offset: line.pos.char_offset + leading_spaces,
             line: line.pos.line,
             column: line.pos.column + leading_spaces,
         };
@@ -550,7 +549,6 @@ impl<'input> EventIter<'input> {
 
         let key_pos = Pos {
             byte_offset: line.pos.byte_offset + leading_spaces,
-            char_offset: line.pos.char_offset + leading_spaces,
             line: line.pos.line,
             column: line.pos.column + leading_spaces,
         };
@@ -726,7 +724,6 @@ impl<'input> EventIter<'input> {
             let inline_col = dash_indent + offset_from_dash;
             let inline_pos = Pos {
                 byte_offset: line.pos.byte_offset + total_offset,
-                char_offset: line.pos.char_offset + total_offset,
                 line: line.pos.line,
                 column: line.pos.column + total_offset,
             };
@@ -802,7 +799,6 @@ impl<'input> EventIter<'input> {
                     let inline_col = key_indent + 1 + spaces_after_q;
                     let inline_pos = Pos {
                         byte_offset: line_pos.byte_offset + total_offset,
-                        char_offset: line_pos.char_offset + total_offset,
                         line: line_pos.line,
                         column: line_pos.column + total_offset,
                     };
@@ -837,7 +833,6 @@ impl<'input> EventIter<'input> {
         // Key span: starts at the first non-space character.
         let key_start_pos = Pos {
             byte_offset: line_pos.byte_offset + leading_spaces,
-            char_offset: line_pos.char_offset + leading_spaces,
             line: line_pos.line,
             column: line_pos.column + leading_spaces,
         };
@@ -857,16 +852,14 @@ impl<'input> EventIter<'input> {
         let spaces_after_colon = after_colon.len() - value_content.len();
         let value_byte_offset_in_trimmed = colon_offset + 1 + spaces_after_colon;
         // `colon_offset` is a byte offset into `trimmed`; key text can contain
-        // multi-byte UTF-8.  Convert the prefix bytes to char count for
-        // char_offset and column.
+        // multi-byte UTF-8.  Convert the prefix bytes to char count for column.
         let key_chars = trimmed[..colon_offset].chars().count();
-        let value_char_offset_in_trimmed = key_chars + 1 + spaces_after_colon;
-        let value_col = key_indent + value_char_offset_in_trimmed;
+        let value_col_in_trimmed = key_chars + 1 + spaces_after_colon;
+        let value_col = key_indent + value_col_in_trimmed;
         let value_pos = Pos {
             byte_offset: line_pos.byte_offset + leading_spaces + value_byte_offset_in_trimmed,
-            char_offset: line_pos.char_offset + leading_spaces + value_char_offset_in_trimmed,
             line: line_pos.line,
-            column: line_pos.column + leading_spaces + value_char_offset_in_trimmed,
+            column: line_pos.column + leading_spaces + value_col_in_trimmed,
         };
 
         // Detect whether the key is a quoted scalar.  `key_content` already
@@ -1527,7 +1520,6 @@ const fn marker_span(marker_pos: Pos) -> Span {
         start: marker_pos,
         end: Pos {
             byte_offset: marker_pos.byte_offset + 3,
-            char_offset: marker_pos.char_offset + 3,
             line: marker_pos.line,
             column: marker_pos.column + 3,
         },
@@ -2074,13 +2066,11 @@ impl<'input> EventIter<'input> {
             let content: &'input str = peek.content;
             let line_pos = peek.pos;
             let line_break_type = peek.break_type;
-            let line_char_offset = line_pos.char_offset;
             let trimmed = content.trim_start_matches(' ');
             if let Some(after_star) = trimmed.strip_prefix('*') {
                 let leading = content.len() - trimmed.len();
                 let star_pos = Pos {
                     byte_offset: line_pos.byte_offset + leading,
-                    char_offset: line_char_offset + leading,
                     line: line_pos.line,
                     column: line_pos.column + leading,
                 };
@@ -2113,7 +2103,6 @@ impl<'input> EventIter<'input> {
                         // Build alias span: from `*` through end of name.
                         let alias_end = Pos {
                             byte_offset: star_pos.byte_offset + 1 + name.len(),
-                            char_offset: star_pos.char_offset + 1 + name_char_count,
                             line: star_pos.line,
                             column: star_pos.column + 1 + name_char_count,
                         };
@@ -2128,14 +2117,11 @@ impl<'input> EventIter<'input> {
                         let spaces = after_name.len() - remaining.len();
                         let had_remaining = !remaining.is_empty();
                         let rem_byte_offset = star_pos.byte_offset + 1 + name.len() + spaces;
-                        let rem_char_offset =
-                            line_char_offset + leading + 1 + name_char_count + spaces;
                         let rem_col = star_pos.column + 1 + name_char_count + spaces;
                         self.lexer.consume_line();
                         if had_remaining {
                             let rem_pos = Pos {
                                 byte_offset: rem_byte_offset,
-                                char_offset: rem_char_offset,
                                 line: star_pos.line,
                                 column: rem_col,
                             };
@@ -2167,7 +2153,6 @@ impl<'input> EventIter<'input> {
                 let leading = content.len() - trimmed.len();
                 let bang_pos = Pos {
                     byte_offset: line_pos.byte_offset + leading,
-                    char_offset: line_pos.char_offset + leading,
                     line: line_pos.line,
                     column: line_pos.column + leading,
                 };
@@ -2216,8 +2201,6 @@ impl<'input> EventIter<'input> {
                         }
                         let inline_offset =
                             line_pos.byte_offset + leading + tag_token_bytes + spaces;
-                        let inline_char_offset =
-                            line_pos.char_offset + leading + tag_token_bytes + spaces;
                         let inline_col = line_pos.column + leading + tag_token_bytes + spaces;
                         // Duplicate tags on the same node are an error.
                         // Exception: if the existing tag is collection-level
@@ -2263,7 +2246,6 @@ impl<'input> EventIter<'input> {
                             }
                             let inline_pos = Pos {
                                 byte_offset: inline_offset,
-                                char_offset: inline_char_offset,
                                 line: line_pos.line,
                                 column: inline_col,
                             };
@@ -2319,7 +2301,6 @@ impl<'input> EventIter<'input> {
                 let leading = content.len() - trimmed.len();
                 let amp_pos = Pos {
                     byte_offset: line_pos.byte_offset + leading,
-                    char_offset: line_pos.char_offset + leading,
                     line: line_pos.line,
                     column: line_pos.column + leading,
                 };
@@ -2338,8 +2319,6 @@ impl<'input> EventIter<'input> {
                         let name_char_count = name.chars().count();
                         let inline_offset =
                             line_pos.byte_offset + leading + 1 + name.len() + spaces;
-                        let inline_char_offset =
-                            line_pos.char_offset + leading + 1 + name_char_count + spaces;
                         let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;
                         // Duplicate anchors on the same node are an error.
                         //
@@ -2400,7 +2379,6 @@ impl<'input> EventIter<'input> {
                                 self.failed = true;
                                 let seq_pos = Pos {
                                     byte_offset: inline_offset,
-                                    char_offset: inline_char_offset,
                                     line: line_pos.line,
                                     column: inline_col,
                                 };
@@ -2427,7 +2405,6 @@ impl<'input> EventIter<'input> {
                             }
                             let inline_pos = Pos {
                                 byte_offset: inline_offset,
-                                char_offset: inline_char_offset,
                                 line: line_pos.line,
                                 column: inline_col,
                             };
@@ -3173,7 +3150,6 @@ impl<'input> EventIter<'input> {
             let value_col = key_indent + 1 + spaces_after_colon;
             let value_pos = Pos {
                 byte_offset: line_pos.byte_offset + total_offset,
-                char_offset: line_pos.char_offset + total_offset,
                 line: line_pos.line,
                 column: line_pos.column + total_offset,
             };
@@ -4223,7 +4199,6 @@ impl<'input> EventIter<'input> {
                     Ok(name) => {
                         let alias_end = Pos {
                             byte_offset: star_pos.byte_offset + 1 + name.len(),
-                            char_offset: star_pos.char_offset + 1 + name.chars().count(),
                             line: star_pos.line,
                             column: star_pos.column + 1 + name.chars().count(),
                         };

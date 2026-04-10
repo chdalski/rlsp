@@ -29,6 +29,16 @@ pub enum BreakType {
 }
 
 impl BreakType {
+    /// Byte length of this line terminator (0 for Eof).
+    #[must_use]
+    pub const fn byte_len(self) -> usize {
+        match self {
+            Self::Lf | Self::Cr => 1,
+            Self::CrLf => 2,
+            Self::Eof => 0,
+        }
+    }
+
     /// Advance `pos` past this line break.
     ///
     /// Each break type requires distinct logic because `Pos::advance(char)`
@@ -40,12 +50,10 @@ impl BreakType {
             Self::Lf => pos.advance('\n'),
             Self::CrLf => {
                 pos.byte_offset += '\r'.len_utf8();
-                pos.char_offset += 1;
                 pos.advance('\n')
             }
             Self::Cr => {
                 pos.byte_offset += '\r'.len_utf8();
-                pos.char_offset += 1;
                 pos.line += 1;
                 pos.column = 0;
                 pos
@@ -111,7 +119,6 @@ fn scan_line(remaining: &str, pos: Pos, is_first: bool) -> Option<(Line<'_>, &st
             &remaining[bom_len..],
             Pos {
                 byte_offset: pos.byte_offset + bom_len,
-                char_offset: pos.char_offset + 1,
                 ..pos
             },
         )
@@ -311,7 +318,7 @@ impl<'input> LineBuffer<'input> {
                     match scan_line(cursor_remaining, cursor_pos, cursor_is_first) {
                         None => break,
                         Some((l, rest)) => {
-                            cursor_pos = advance_pos_past_line(&l);
+                            cursor_pos = pos_after_line(&l);
                             cursor_remaining = rest;
                             cursor_is_first = false;
                             l
@@ -352,7 +359,7 @@ impl<'input> LineBuffer<'input> {
             }
             Some((line, rest)) => {
                 // Advance `remaining_pos` past the line we just parsed.
-                let new_pos = advance_pos_past_line(&line);
+                let new_pos = pos_after_line(&line);
                 self.remaining_pos = new_pos;
                 self.remaining = rest;
                 self.remaining_is_first = false;
@@ -362,28 +369,16 @@ impl<'input> LineBuffer<'input> {
     }
 }
 
-/// Compute the `Pos` after the terminator of `line`.
+/// Compute the `Pos` at the start of the line after `line` (O(1)).
 ///
-/// Walks the content characters then advances past the terminator.
-///
-/// Each break type requires distinct `Pos` update logic because
-/// `Pos::advance(char)` operates on individual characters and cannot
-/// distinguish a bare `\r` (which ends a line) from a `\r` that is part of
-/// a `\r\n` pair.  This function knows the `BreakType` and updates
-/// `line`/`column` accordingly:
-///
-/// - `Lf`: delegate to `Pos::advance('\n')` — it already bumps `line`.
-/// - `CrLf`: bump `byte_offset`/`char_offset` for the `\r`, then delegate
-///   to `Pos::advance('\n')` for the `\n` (which bumps `line`).
-/// - `Cr`: bump `byte_offset`/`char_offset` and increment `line`/reset
-///   `column` directly — `Pos::advance('\r')` would not bump `line`.
-/// - `Eof`: no bytes to advance.
-fn advance_pos_past_line(line: &Line<'_>) -> Pos {
-    let mut pos = line.pos;
-    for ch in line.content.chars() {
-        pos = pos.advance(ch);
+/// The next line starts at `byte_offset = line.offset + content.len() + terminator.len()`,
+/// `line` incremented by one, and `column` reset to 0.  No character walk needed.
+const fn pos_after_line(line: &Line<'_>) -> Pos {
+    Pos {
+        byte_offset: line.offset + line.content.len() + line.break_type.byte_len(),
+        line: line.pos.line + 1,
+        column: 0,
     }
-    line.break_type.advance(pos)
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +398,6 @@ mod tests {
         let pos = Pos::ORIGIN;
         let after = BreakType::Lf.advance(pos);
         assert_eq!(after.byte_offset, 1);
-        assert_eq!(after.char_offset, 1);
         assert_eq!(after.line, 2);
         assert_eq!(after.column, 0);
     }
@@ -414,7 +408,6 @@ mod tests {
         let after = BreakType::CrLf.advance(pos);
         // \r = 1 byte, \n = 1 byte → 2 bytes total
         assert_eq!(after.byte_offset, 2);
-        assert_eq!(after.char_offset, 2);
         assert_eq!(after.line, 2);
         assert_eq!(after.column, 0);
     }
@@ -430,7 +423,6 @@ mod tests {
     fn break_type_advance_cr_resets_column() {
         let pos = Pos {
             byte_offset: 3,
-            char_offset: 3,
             line: 1,
             column: 3,
         };
@@ -444,13 +436,11 @@ mod tests {
     fn break_type_advance_lf_at_non_origin_pos() {
         let pos = Pos {
             byte_offset: 5,
-            char_offset: 5,
             line: 2,
             column: 3,
         };
         let after = BreakType::Lf.advance(pos);
         assert_eq!(after.byte_offset, 6);
-        assert_eq!(after.char_offset, 6);
         assert_eq!(after.line, 3);
         assert_eq!(after.column, 0);
     }
@@ -459,13 +449,11 @@ mod tests {
     fn break_type_advance_crlf_at_non_origin_pos() {
         let pos = Pos {
             byte_offset: 5,
-            char_offset: 5,
             line: 2,
             column: 3,
         };
         let after = BreakType::CrLf.advance(pos);
         assert_eq!(after.byte_offset, 7); // \r (1) + \n (1) = +2
-        assert_eq!(after.char_offset, 7);
         assert_eq!(after.line, 3);
         assert_eq!(after.column, 0);
     }
@@ -474,7 +462,6 @@ mod tests {
     fn break_type_advance_eof_is_noop() {
         let pos = Pos {
             byte_offset: 5,
-            char_offset: 4,
             line: 3,
             column: 2,
         };

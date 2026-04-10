@@ -188,12 +188,11 @@ impl<'input> Lexer<'input> {
             .find(|&(_, ch)| ch == '#')
             .map_or(0, |(i, _)| i);
 
-        let hash_char_offset = line.content[..hash_byte_offset].chars().count();
+        let hash_col = crate::pos::column_at(line.content, hash_byte_offset);
         let hash_pos = Pos {
             byte_offset: line.pos.byte_offset + hash_byte_offset,
-            char_offset: line.pos.char_offset + hash_char_offset,
             line: line.pos.line,
-            column: line.pos.column + hash_char_offset,
+            column: line.pos.column + hash_col,
         };
 
         // Comment text: everything after the `#`.
@@ -318,10 +317,9 @@ impl<'input> Lexer<'input> {
             // marker_pos is at column 0 of the line; inline content starts at
             // byte_offset = marker_pos.byte_offset + (content.len() - inline.len()).
             let prefix_bytes = line.content.len() - inline.len();
-            let prefix_chars = line.content[..prefix_bytes].chars().count();
+            let prefix_chars = crate::pos::column_at(line.content, prefix_bytes);
             let inline_start = Pos {
                 byte_offset: marker_pos.byte_offset + prefix_bytes,
-                char_offset: marker_pos.char_offset + prefix_chars,
                 line: marker_pos.line,
                 column: marker_pos.column + prefix_chars,
             };
@@ -558,12 +556,12 @@ impl<'input> Lexer<'input> {
                 // It is `after_scalar_start + (suffix.len() - comment_text.len() - 1)`
                 // where -1 accounts for the `#` itself.
                 let hash_byte_in_line = after_scalar_start + suffix.len() - comment_text.len() - 1;
-                let hash_char_in_line = consumed_first.content[..hash_byte_in_line].chars().count();
+                let hash_col_in_line =
+                    crate::pos::column_at(consumed_first.content, hash_byte_in_line);
                 let hash_pos = Pos {
                     byte_offset: consumed_first.pos.byte_offset + hash_byte_in_line,
-                    char_offset: consumed_first.pos.char_offset + hash_char_in_line,
                     line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + hash_char_in_line,
+                    column: consumed_first.pos.column + hash_col_in_line,
                 };
                 let mut span_end = hash_pos.advance('#');
                 for ch in comment_text.chars() {
@@ -576,7 +574,6 @@ impl<'input> Lexer<'input> {
                     let bad_char_i = comment_text[..bad_i].chars().count();
                     let bad_pos = Pos {
                         byte_offset: hash_pos.byte_offset + 1 + bad_i,
-                        char_offset: hash_pos.char_offset + 1 + bad_char_i,
                         line: hash_pos.line,
                         column: hash_pos.column + 1 + bad_char_i,
                     };
@@ -602,14 +599,12 @@ impl<'input> Lexer<'input> {
                 // valid at this position.  Other non-whitespace characters
                 // (e.g. `: value`) may be valid YAML content that the mapping
                 // detector missed and are not flagged here.
-                let bad_char_offset = consumed_first.content[..after_scalar_start + bad_i]
-                    .chars()
-                    .count();
+                let bad_col_offset =
+                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
                 let bad_pos = Pos {
                     byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
-                    char_offset: consumed_first.pos.char_offset + bad_char_offset,
                     line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + bad_char_offset,
+                    column: consumed_first.pos.column + bad_col_offset,
                 };
                 self.plain_scalar_suffix_error = Some(Error {
                     pos: bad_pos,
@@ -770,10 +765,9 @@ impl<'input> Lexer<'input> {
         }
 
         let leading_bytes = first_line.content.len() - content.len();
-        let leading_chars = first_line.content[..leading_bytes].chars().count();
+        let leading_chars = crate::pos::column_at(first_line.content, leading_bytes);
         let open_pos = Pos {
             byte_offset: first_line.offset + leading_bytes,
-            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
             column: first_line.pos.column + leading_chars,
         };
@@ -934,10 +928,9 @@ impl<'input> Lexer<'input> {
         }
 
         let leading_bytes = first_line.content.len() - content.len();
-        let leading_chars = first_line.content[..leading_bytes].chars().count();
+        let leading_chars = crate::pos::column_at(first_line.content, leading_bytes);
         let open_pos = Pos {
             byte_offset: first_line.offset + leading_bytes,
-            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
             column: first_line.pos.column + leading_chars,
         };
@@ -1027,10 +1020,9 @@ impl<'input> Lexer<'input> {
 
         // Record the position of the `|` for the span start.
         let leading_bytes = first_line.content.len() - content.len();
-        let leading_chars = first_line.content[..leading_bytes].chars().count();
+        let leading_chars = crate::pos::column_at(first_line.content, leading_bytes);
         let pipe_pos = Pos {
             byte_offset: first_line.offset + leading_bytes,
-            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
             column: first_line.pos.column + leading_chars,
         };
@@ -1249,10 +1241,9 @@ impl<'input> Lexer<'input> {
         }
 
         let leading_bytes = first_line.content.len() - content.len();
-        let leading_chars = first_line.content[..leading_bytes].chars().count();
+        let leading_chars = crate::pos::column_at(first_line.content, leading_bytes);
         let gt_pos = Pos {
             byte_offset: first_line.offset + leading_bytes,
-            char_offset: first_line.pos.char_offset + leading_chars,
             line: first_line.pos.line,
             column: first_line.pos.column + leading_chars,
         };
@@ -1749,10 +1740,9 @@ fn peek_plain_scalar_first_line(buf: &LineBuffer<'_>) -> Option<(usize, Pos, usi
     }
 
     let leading_bytes = first.content.len() - content_trimmed.len();
-    let leading_chars = first.content[..leading_bytes].chars().count();
+    let leading_chars = crate::pos::column_at(first.content, leading_bytes);
     let scalar_start_pos = Pos {
         byte_offset: first.offset + leading_bytes,
-        char_offset: first.pos.char_offset + leading_chars,
         line: first.pos.line,
         column: first.pos.column + leading_chars,
     };
