@@ -11,8 +11,8 @@ use rlsp_yaml::schema_validation::validate_schema;
 use rlsp_yaml::validators::{
     validate_duplicate_keys, validate_flow_style, validate_key_ordering, validate_unused_anchors,
 };
-use rlsp_yaml_parser::node::Document;
-use rlsp_yaml_parser::pos::Span;
+use rlsp_yaml_parser_temp::node::Document;
+use rlsp_yaml_parser_temp::Span;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tier 1 — hot-path benchmarks
@@ -69,7 +69,7 @@ fn bench_schema_validation(c: &mut Criterion) {
     let parsed: Vec<(&str, String, Vec<_>)> = sizes
         .iter()
         .map(|(name, text)| {
-            let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(text).unwrap_or_default();
+            let docs: Vec<Document<Span>> = rlsp_yaml_parser_temp::load(text).unwrap_or_default();
             (*name, text.clone(), docs)
         })
         .collect();

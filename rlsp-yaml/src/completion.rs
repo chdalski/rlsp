@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use rlsp_yaml_parser::node::Document;
-use rlsp_yaml_parser::pos::Span;
+use rlsp_yaml_parser_temp::node::Document;
+use rlsp_yaml_parser_temp::Span;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, InsertTextFormat,
     MarkupContent, MarkupKind, Position,
@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
-        rlsp_yaml_parser::load(text).ok()
+        rlsp_yaml_parser_temp::load(text).ok()
     }
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {

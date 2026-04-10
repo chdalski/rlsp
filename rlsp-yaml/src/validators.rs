@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::pos::Span;
+use rlsp_yaml_parser_temp::node::{Document, Node};
+use rlsp_yaml_parser_temp::Span;
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
 };
@@ -1100,7 +1100,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_alphabetically_ordered_keys() {
         let text = "apple: 1\nbanana: 2\ncherry: 3\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1109,7 +1109,7 @@ mod tests {
     #[test]
     fn should_detect_out_of_order_keys() {
         let text = "banana: 2\napple: 1\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -1122,7 +1122,7 @@ mod tests {
     #[test]
     fn should_return_correct_range_for_out_of_order_key() {
         let text = "banana: 2\napple: 1\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1);
@@ -1132,7 +1132,7 @@ mod tests {
     #[test]
     fn should_detect_multiple_out_of_order_keys() {
         let text = "charlie: 3\nalpha: 1\nbravo: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 2);
@@ -1143,7 +1143,7 @@ mod tests {
     #[test]
     fn should_check_ordering_within_nested_mappings() {
         let text = "outer:\n  zebra: 1\n  alpha: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "alpha is out of order within outer");
@@ -1152,7 +1152,7 @@ mod tests {
     #[test]
     fn should_check_ordering_at_each_level_independently() {
         let text = "b_parent:\n  a_child: 1\na_parent:\n  key: val\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert_eq!(result.len(), 1, "a_parent is out of order at top level");
@@ -1163,7 +1163,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_empty_document_ordering() {
         let text = "";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_single_key() {
         let text = "only: value\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1182,7 +1182,7 @@ mod tests {
     fn should_handle_numeric_string_keys() {
         // Implementation choice: lexicographic comparison ("10" < "2" lexicographically)
         let text = "2: two\n10: ten\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // "10" comes after "2" but should come before (lexicographically "1" < "2")
@@ -1192,7 +1192,7 @@ mod tests {
     #[test]
     fn should_ignore_sequence_items_for_ordering() {
         let text = "items:\n  - zebra\n  - alpha\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         assert!(result.is_empty());
@@ -1201,7 +1201,7 @@ mod tests {
     #[test]
     fn should_handle_multi_document_key_ordering() {
         let text = "z: 1\n---\na: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // First doc has single key, second doc has single key
@@ -1212,7 +1212,7 @@ mod tests {
     fn should_be_case_sensitive() {
         // Implementation choice: case-sensitive comparison ("Apple" != "apple", "Apple" < "apple")
         let text = "Apple: 1\napple: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         let result = validate_key_ordering(text, &docs);
 
         // "Apple" < "apple" lexicographically (uppercase comes before lowercase in ASCII)
@@ -1222,7 +1222,7 @@ mod tests {
     // ---- Custom Tags Validator: helpers ----
 
     fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap()
+        rlsp_yaml_parser_temp::load(text).unwrap()
     }
 
     fn allowed(tags: &[&str]) -> HashSet<String> {
@@ -1308,7 +1308,7 @@ mod tests {
     }
 
     fn parse_duplicate(text: &str) -> Vec<super::Diagnostic> {
-        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let docs = rlsp_yaml_parser_temp::load(text).unwrap();
         validate_duplicate_keys(&docs)
     }
 

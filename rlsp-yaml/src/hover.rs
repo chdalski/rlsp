@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::pos::Span;
+use rlsp_yaml_parser_temp::node::{Document, Node};
+use rlsp_yaml_parser_temp::Span;
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::schema::JsonSchema;
@@ -629,7 +629,7 @@ mod tests {
     }
 
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
-        rlsp_yaml_parser::load(text).ok()
+        rlsp_yaml_parser_temp::load(text).ok()
     }
 
     fn schema_with_description(description: &str) -> JsonSchema {
