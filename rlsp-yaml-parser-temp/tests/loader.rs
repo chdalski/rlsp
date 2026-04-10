@@ -549,3 +549,368 @@ fn it_rt_12_large_mapping_count() {
     assert_eq!(scalar_value(&entries[999].0), "key999");
     assert_eq!(scalar_value(&entries[999].1), "val999");
 }
+
+// ---------------------------------------------------------------------------
+// IT-I: Inline anchor/tag before mapping key — property placement (9KAX)
+//
+// Per YAML test suite 9KAX: an inline property (anchor or tag on the same
+// line as the key) annotates the KEY SCALAR.  A standalone property (own
+// line) annotates the collection node that follows.
+// ---------------------------------------------------------------------------
+
+// IT-I-1: Inline anchor at root level annotates key scalar, not mapping.
+#[test]
+fn inline_anchor_before_key_annotates_key_scalar_root() {
+    let node = load_one("&anchor key: value\n");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &node
+    else {
+        panic!("expected Mapping root, got: {node:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "mapping must have no anchor; got: {anchor:?}"
+    );
+    assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
+    let (k, v) = &entries[0];
+    let Node::Scalar {
+        value: kv,
+        anchor: ka,
+        ..
+    } = k
+    else {
+        panic!("key must be Scalar; got: {k:?}");
+    };
+    assert_eq!(kv.as_str(), "key");
+    assert_eq!(
+        ka.as_deref(),
+        Some("anchor"),
+        "anchor must be on key scalar; got: {ka:?}"
+    );
+    assert_eq!(scalar_value(v), "value");
+}
+
+// IT-I-2: Inline anchor at indented level annotates key scalar, not inner mapping.
+#[test]
+fn inline_anchor_before_key_annotates_key_scalar_indented() {
+    let node = load_one("outer:\n  &anchor inner_key: inner_value\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root");
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    let Node::Mapping {
+        entries: inner,
+        anchor,
+        ..
+    } = v
+    else {
+        panic!("expected inner Mapping; got: {v:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "inner mapping must have no anchor; got: {anchor:?}"
+    );
+    assert_eq!(
+        inner.len(),
+        1,
+        "expected 1 inner entry; got: {}",
+        inner.len()
+    );
+    let (ik, iv) = &inner[0];
+    let Node::Scalar {
+        value: ikv,
+        anchor: ika,
+        ..
+    } = ik
+    else {
+        panic!("inner key must be Scalar; got: {ik:?}");
+    };
+    assert_eq!(ikv.as_str(), "inner_key");
+    assert_eq!(
+        ika.as_deref(),
+        Some("anchor"),
+        "anchor must be on inner key scalar; got: {ika:?}"
+    );
+    assert_eq!(scalar_value(iv), "inner_value");
+}
+
+// IT-I-3: Inline tag before key annotates key scalar, not mapping.
+#[test]
+fn inline_tag_before_key_annotates_key_scalar() {
+    let node = load_one("!!str key: value\n");
+    let Node::Mapping { entries, tag, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert!(tag.is_none(), "mapping must have no tag; got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
+    let (k, v) = &entries[0];
+    let Node::Scalar {
+        value: kv, tag: kt, ..
+    } = k
+    else {
+        panic!("key must be Scalar; got: {k:?}");
+    };
+    assert_eq!(kv.as_str(), "key");
+    assert!(
+        kt.as_deref().is_some_and(|t| t.contains("str")),
+        "tag must be on key scalar; got: {kt:?}"
+    );
+    assert_eq!(scalar_value(v), "value");
+}
+
+// IT-I-4: Inline anchor + tag together before key — both annotate key scalar.
+#[test]
+fn inline_anchor_and_tag_before_key_annotate_key_scalar() {
+    let node = load_one("&a !!str key: value\n");
+    let Node::Mapping {
+        entries,
+        anchor,
+        tag,
+        ..
+    } = &node
+    else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "mapping must have no anchor; got: {anchor:?}"
+    );
+    assert!(tag.is_none(), "mapping must have no tag; got: {tag:?}");
+    assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
+    let (k, v) = &entries[0];
+    let Node::Scalar {
+        value: kv,
+        anchor: ka,
+        tag: kt,
+        ..
+    } = k
+    else {
+        panic!("key must be Scalar; got: {k:?}");
+    };
+    assert_eq!(kv.as_str(), "key");
+    assert_eq!(
+        ka.as_deref(),
+        Some("a"),
+        "anchor must be on key scalar; got: {ka:?}"
+    );
+    assert!(
+        kt.as_deref().is_some_and(|t| t.contains("str")),
+        "tag must be on key scalar; got: {kt:?}"
+    );
+    assert_eq!(scalar_value(v), "value");
+}
+
+// IT-I-5: Standalone anchor (own line) annotates the mapping, not a key scalar.
+#[test]
+fn standalone_anchor_before_mapping_annotates_mapping() {
+    let node = load_one("&anchor\nkey: value\n");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &node
+    else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        anchor.as_deref(),
+        Some("anchor"),
+        "anchor must be on mapping; got: {anchor:?}"
+    );
+    assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
+    let (k, _) = &entries[0];
+    let Node::Scalar {
+        value: kv,
+        anchor: ka,
+        ..
+    } = k
+    else {
+        panic!("key must be Scalar; got: {k:?}");
+    };
+    assert_eq!(kv.as_str(), "key");
+    assert!(ka.is_none(), "key scalar must have no anchor; got: {ka:?}");
+}
+
+// IT-I-6: Multi-entry mapping — inline anchor on one key, other keys unaffected.
+#[test]
+fn inline_anchor_on_one_key_in_multi_entry_mapping() {
+    let node = load_one("a: 1\n&anchor b: 2\nc: 3\n");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &node
+    else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "mapping must have no anchor; got: {anchor:?}"
+    );
+    assert_eq!(
+        entries.len(),
+        3,
+        "expected 3 entries; got: {}",
+        entries.len()
+    );
+    // First key: no anchor
+    let (k0, _) = &entries[0];
+    let Node::Scalar { anchor: a0, .. } = k0 else {
+        panic!("expected Scalar key 0");
+    };
+    assert!(a0.is_none(), "key 'a' must have no anchor; got: {a0:?}");
+    // Second key: carries the anchor
+    let (k1, v1) = &entries[1];
+    let Node::Scalar {
+        value: kv1,
+        anchor: a1,
+        ..
+    } = k1
+    else {
+        panic!("expected Scalar key 1");
+    };
+    assert_eq!(kv1.as_str(), "b");
+    assert_eq!(
+        a1.as_deref(),
+        Some("anchor"),
+        "anchor must be on key 'b'; got: {a1:?}"
+    );
+    assert_eq!(scalar_value(v1), "2");
+    // Third key: no anchor
+    let (k2, _) = &entries[2];
+    let Node::Scalar { anchor: a2, .. } = k2 else {
+        panic!("expected Scalar key 2");
+    };
+    assert!(a2.is_none(), "key 'c' must have no anchor; got: {a2:?}");
+}
+
+// IT-I-7: Inline anchor before indented key — no phantom nesting.
+// `&anchor key: value` must produce exactly 1 top-level mapping entry.
+#[test]
+fn inline_anchor_produces_no_phantom_nesting() {
+    let node = load_one("&anchor key: value\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root");
+    };
+    assert_eq!(
+        entries.len(),
+        1,
+        "must have exactly 1 entry (no phantom nested mapping); got: {}",
+        entries.len()
+    );
+    // The value must be a plain scalar, not a nested mapping.
+    let (_, v) = &entries[0];
+    assert!(
+        matches!(v, Node::Scalar { .. }),
+        "value must be a plain scalar, not a nested mapping; got: {v:?}"
+    );
+}
+
+// IT-I-7: Anchor on inline key scalar is usable as an alias (resolved mode).
+// `&anchor key: value\nref: *anchor\n` — *anchor resolves to the key scalar "key".
+#[test]
+fn anchor_before_mapping_key_is_usable_as_alias() {
+    let node = load_resolved_one("&anchor key: value\nref: *anchor\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 entries; got: {}",
+        entries.len()
+    );
+    // Entry 0: key="key", value="value"
+    let (k0, v0) = &entries[0];
+    assert_eq!(scalar_value(k0), "key", "entry 0 key must be 'key'");
+    assert_eq!(scalar_value(v0), "value", "entry 0 value must be 'value'");
+    // Entry 1: key="ref", value is the resolved alias (the anchored key scalar "key")
+    let (k1, v1) = &entries[1];
+    assert_eq!(scalar_value(k1), "ref", "entry 1 key must be 'ref'");
+    assert_eq!(
+        scalar_value(v1),
+        "key",
+        "alias *anchor must resolve to the anchored key scalar value 'key'; got: {v1:?}"
+    );
+}
+
+// IT-I-8: Multiple anchored keys in the same mapping — all 3 entries present, no phantom nesting.
+#[test]
+fn multiple_anchored_keys_in_same_mapping() {
+    let node = load_one("&a one: 1\n&b two: 2\n&c three: 3\n");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &node
+    else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "mapping must have no anchor; got: {anchor:?}"
+    );
+    assert_eq!(
+        entries.len(),
+        3,
+        "expected 3 entries; got: {}",
+        entries.len()
+    );
+    let expected = [("one", "a"), ("two", "b"), ("three", "c")];
+    for (i, (exp_val, exp_anchor)) in expected.iter().enumerate() {
+        let (k, _) = &entries[i];
+        let Node::Scalar {
+            value: kv,
+            anchor: ka,
+            ..
+        } = k
+        else {
+            panic!("entry {i} key must be Scalar; got: {k:?}");
+        };
+        assert_eq!(kv.as_str(), *exp_val, "entry {i} key value");
+        assert_eq!(
+            ka.as_deref(),
+            Some(*exp_anchor),
+            "entry {i} key anchor must be '{exp_anchor}'; got: {ka:?}"
+        );
+    }
+}
+
+// Control case: Inline anchor before value-side scalar — not before key.
+// `key: &anchor value` — anchor annotates the value scalar (not the key, not the mapping).
+#[test]
+fn inline_anchor_before_value_scalar_annotates_value() {
+    let node = load_one("key: &anchor value\n");
+    let Node::Mapping {
+        entries, anchor, ..
+    } = &node
+    else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert!(
+        anchor.is_none(),
+        "mapping must have no anchor; got: {anchor:?}"
+    );
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    let Node::Scalar {
+        value: kv,
+        anchor: ka,
+        ..
+    } = k
+    else {
+        panic!("key must be Scalar; got: {k:?}");
+    };
+    assert_eq!(kv.as_str(), "key");
+    assert!(ka.is_none(), "key scalar must have no anchor; got: {ka:?}");
+    let Node::Scalar {
+        value: vv,
+        anchor: va,
+        ..
+    } = v
+    else {
+        panic!("value must be Scalar; got: {v:?}");
+    };
+    assert_eq!(vv.as_str(), "value");
+    assert_eq!(
+        va.as_deref(),
+        Some("anchor"),
+        "anchor must be on value scalar; got: {va:?}"
+    );
+}

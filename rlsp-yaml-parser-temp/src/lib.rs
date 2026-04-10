@@ -2854,30 +2854,26 @@ impl<'input> EventIter<'input> {
             // synthetic column) can again compute effective_key_indent = origin
             // indent and recognize the already-open mapping.  It will be cleared
             // in the "continuing existing mapping" branch below.
-            let had_property_origin = self.property_origin_indent.is_some();
             self.coll_stack.push(CollectionEntry::Mapping(
                 effective_key_indent,
                 MappingPhase::Key,
                 false,
             ));
-            // Consume pending anchor/tag for the mapping.  There are two cases:
+            // Consume pending anchor/tag for the mapping only for standalone
+            // properties (e.g. `&a\nkey: v`) where `pending_*_for_collection`
+            // is true.
             //
-            // 1. Standalone property (e.g. `&a\nkey: v`) — `pending_*_for_collection`
-            //    is true; the property was always intended for the collection.
-            //
-            // 2. Inline property before a mapping key (e.g. `&a key: v`) —
-            //    `pending_*_for_collection` is false because when the anchor was
-            //    consumed the parser didn't yet know whether the inline content
-            //    would be a scalar or a mapping key.  Now that we know it IS a
-            //    mapping key (we are opening a new mapping), the property belongs
-            //    to the mapping, not to the key scalar.  `had_property_origin`
-            //    is true exactly in this case.
-            let mapping_anchor = if self.pending_anchor_for_collection || had_property_origin {
+            // Inline properties (e.g. `&a key: v`) leave `pending_*_for_collection`
+            // false — they annotate the key scalar, not the mapping (YAML test
+            // suite 9KAX: inline property → key scalar).  The pending anchor/tag
+            // is left on `self.pending_anchor`/`self.pending_tag` and will be
+            // consumed by `consume_mapping_entry` when it emits the key scalar.
+            let mapping_anchor = if self.pending_anchor_for_collection {
                 self.pending_anchor.take()
             } else {
                 None
             };
-            let mapping_tag = if self.pending_tag_for_collection || had_property_origin {
+            let mapping_tag = if self.pending_tag_for_collection {
                 self.pending_tag.take()
             } else {
                 None

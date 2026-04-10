@@ -7048,27 +7048,22 @@ mod anchors_and_aliases {
 
     #[test]
     fn anchor_on_mapping_key_scalar() {
-        // `&k key: val\n` — anchor annotates the implicit block mapping node,
-        // not the key scalar inside it (YAML 1.2 spec: properties annotate the
-        // complete node that follows).
+        // `&k key: val\n` — anchor is inline before the key, so it annotates
+        // the key scalar (YAML test suite 9KAX: inline property → key scalar).
         let events = evs("&k key: val\n");
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                Event::MappingStart {
-                    anchor: Some("k"),
-                    ..
-                }
+                Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
             )),
-            "anchor `&k` must be attached to the mapping node"
+            "anchor `&k` must be attached to key scalar"
         );
-        // Key scalar carries no anchor.
+        // MappingStart carries no anchor.
         assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
-            )),
-            "key scalar must have no anchor"
+            events
+                .iter()
+                .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
+            "MappingStart must have no anchor"
         );
     }
 
@@ -7211,29 +7206,28 @@ mod anchors_and_aliases {
 
     #[test]
     fn inline_anchor_on_key_does_not_annotate_mapping_start() {
-        // `&k key: val\n` — `&k` annotates the implicit block mapping that
-        // `key: val` forms (YAML 1.2 spec: properties annotate the complete
-        // node following them).
+        // `&k key: val\n` — `&k` is inline before the key, so it annotates the
+        // key scalar, NOT the MappingStart (YAML test suite 9KAX).
         let events = evs("&k key: val\n");
-        // The MappingStart carries the anchor.
+        // MappingStart has no anchor.
         assert!(
             events.iter().any(|e| matches!(
                 e,
                 Event::MappingStart {
-                    anchor: Some("k"),
+                    anchor: None,
                     style: CollectionStyle::Block,
                     ..
                 }
             )),
-            "anchor `&k` must annotate the MappingStart"
+            "MappingStart must have no anchor when anchor is inline before key"
         );
-        // The key scalar has no anchor.
+        // The key scalar carries the anchor.
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
+                Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
             )),
-            "key scalar must have no anchor"
+            "anchor `&k` must be on key scalar"
         );
     }
 
@@ -8480,24 +8474,24 @@ mod tags {
 
     #[test]
     fn tag_on_implicit_mapping_key_scalar() {
-        // `!!str key: val\n` — tag annotates the implicit block mapping node
-        // (YAML 1.2 spec: properties annotate the complete node following them).
+        // `!!str key: val\n` — tag is inline before the key, so it annotates
+        // the key scalar, NOT the MappingStart (YAML test suite 9KAX).
         let events = evs("!!str key: val\n");
+        // Key scalar carries the tag.
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                Event::MappingStart { tag: Some(t), .. }
-                    if t.as_ref() == "tag:yaml.org,2002:str"
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref().contains("str") && value.as_ref() == "key"
             )),
-            "tag on implicit key line must be on the MappingStart"
+            "tag must be on key scalar, not on MappingStart"
         );
-        // Key scalar has no tag.
+        // MappingStart has no tag.
         assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::Scalar { tag: None, value, .. } if value.as_ref() == "key"
-            )),
-            "key scalar must have no tag"
+            events
+                .iter()
+                .any(|e| matches!(e, Event::MappingStart { tag: None, .. })),
+            "MappingStart must have no tag when tag is inline before key"
         );
     }
 

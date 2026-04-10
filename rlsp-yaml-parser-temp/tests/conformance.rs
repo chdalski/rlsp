@@ -265,11 +265,15 @@ fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
 // prepends the key content as a synthetic line at the property's column.
 // The mapping must be opened at the PHYSICAL line's indent (the property's
 // column), not the synthetic line's offset column.
+//
+// Per YAML test suite 9KAX: inline property (same line as key) annotates
+// the KEY SCALAR, not the mapping.  Standalone property (own line) annotates
+// the collection node that follows.
 // ---------------------------------------------------------------------------
 
-// Test 1: anchor before mapping key at root level
-// `&anchor key: value` — anchor annotates the mapping, not the key scalar.
-// Expected: Mapping{anchor:"anchor", entries:[(key→"key", val→"value")]}
+// Test 1: anchor before mapping key at root level.
+// `&anchor key: value` — anchor is inline before the key → annotates key scalar.
+// Expected: Mapping{no anchor, entries:[(Scalar{anchor:"anchor",value:"key"} → "value")]}
 #[test]
 fn anchor_before_mapping_key_root_level() {
     use rlsp_yaml_parser_temp::loader::load;
@@ -284,14 +288,14 @@ fn anchor_before_mapping_key_root_level() {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
     assert!(
-        matches!(anchor.as_deref(), Some("anchor")),
-        "anchor should be on mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, anchor: Some(a), .. } if value == "key" && a == "anchor"),
+        "key scalar must carry anchor 'anchor', got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -299,9 +303,9 @@ fn anchor_before_mapping_key_root_level() {
     );
 }
 
-// Test 2: anchor before mapping key at indented level
+// Test 2: anchor before mapping key at indented level.
 // `outer:\n  &anchor inner_key: inner_value`
-// Expected: root Mapping with "outer" → Mapping{anchor:"anchor", entries:[(inner_key→inner_value)]}
+// Expected: root Mapping → "outer" → Mapping{no anchor, entries:[(Scalar{anchor:"anchor",value:"inner_key"} → "inner_value")]}
 #[test]
 fn anchor_before_mapping_key_indented() {
     use rlsp_yaml_parser_temp::loader::load;
@@ -327,14 +331,14 @@ fn anchor_before_mapping_key_indented() {
         panic!("expected inner Mapping, got: {v:?}");
     };
     assert!(
-        matches!(anchor.as_deref(), Some("anchor")),
-        "anchor should be on inner mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "inner mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
     assert_eq!(inner_entries.len(), 1, "inner mapping should have 1 entry");
     let (ik, iv) = &inner_entries[0];
     assert!(
-        matches!(ik, Node::Scalar { value, .. } if value == "inner_key"),
-        "inner key: {ik:?}"
+        matches!(ik, Node::Scalar { value, anchor: Some(a), .. } if value == "inner_key" && a == "anchor"),
+        "inner key scalar must carry anchor 'anchor', got: {ik:?}"
     );
     assert!(
         matches!(iv, Node::Scalar { value, .. } if value == "inner_value"),
@@ -342,9 +346,9 @@ fn anchor_before_mapping_key_indented() {
     );
 }
 
-// Test 3: tag before mapping key at root level
-// `!!str key: value` — tag annotates the mapping.
-// Expected: Mapping{tag: resolved "!!str" tag, entries:[(key→"key", val→"value")]}
+// Test 3: tag before mapping key at root level.
+// `!!str key: value` — tag is inline before the key → annotates key scalar.
+// Expected: Mapping{no tag, entries:[(Scalar{tag:Some("str"),value:"key"} → "value")]}
 #[test]
 fn tag_before_mapping_key_root_level() {
     use rlsp_yaml_parser_temp::loader::load;
@@ -355,12 +359,15 @@ fn tag_before_mapping_key_root_level() {
     let Node::Mapping { entries, tag, .. } = &docs[0].root else {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
-    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert!(
+        tag.is_none(),
+        "mapping must have no tag (tag is on key scalar), got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, tag: Some(t), .. } if value == "key" && t.contains("str")),
+        "key scalar must carry the tag, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
@@ -368,9 +375,9 @@ fn tag_before_mapping_key_root_level() {
     );
 }
 
-// Test 4: anchor + tag together before mapping key
-// `&a !!str key: value` — both annotate the mapping.
-// Expected: Mapping{anchor:"a", tag: resolved tag, entries:[(key→"key", val→"value")]}
+// Test 4: anchor + tag together before mapping key.
+// `&a !!str key: value` — both inline before the key → annotate key scalar.
+// Expected: Mapping{no anchor, no tag, entries:[(Scalar{anchor:"a",tag:Some,value:"key"} → "value")]}
 #[test]
 fn anchor_and_tag_before_mapping_key() {
     use rlsp_yaml_parser_temp::loader::load;
@@ -388,15 +395,19 @@ fn anchor_and_tag_before_mapping_key() {
         panic!("expected Mapping root, got: {:?}", docs[0].root);
     };
     assert!(
-        matches!(anchor.as_deref(), Some("a")),
-        "anchor should be on mapping, got: {anchor:?}"
+        anchor.is_none(),
+        "mapping must have no anchor (anchor is on key scalar), got: {anchor:?}"
     );
-    assert!(tag.is_some(), "tag should be on mapping, got: {tag:?}");
+    assert!(
+        tag.is_none(),
+        "mapping must have no tag (tag is on key scalar), got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry, got: {}", entries.len());
     let (k, v) = &entries[0];
     assert!(
-        matches!(k, Node::Scalar { value, .. } if value == "key"),
-        "key: {k:?}"
+        matches!(k, Node::Scalar { value, anchor: Some(a), tag: Some(t), .. }
+            if value == "key" && a == "a" && t.contains("str")),
+        "key scalar must carry anchor 'a' and tag, got: {k:?}"
     );
     assert!(
         matches!(v, Node::Scalar { value, .. } if value == "value"),
