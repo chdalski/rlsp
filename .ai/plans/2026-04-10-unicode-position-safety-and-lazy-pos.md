@@ -200,7 +200,7 @@ Per user direction:
 - [x] Audit all position arithmetic in lib.rs (Task 1)
 - [x] Write Unicode position tests as TDD safety net (Task 2)
 - [x] Fix byte/char conflation bugs (Task 3)
-- [ ] Implement lazy Pos optimization (Task 4)
+- [x] Implement lazy Pos optimization (Task 4)
 - [ ] Benchmark and verify improvement (Task 5)
 
 ## Tasks
@@ -308,7 +308,7 @@ With all position tests passing (Tasks 2-3), optimize `Pos`
 tracking to eliminate the per-character walk in
 `advance_pos_past_line()`.
 
-- [ ] Drop `char_offset` from `Pos` struct — change `Pos` to:
+- [x] Drop `char_offset` from `Pos` struct — change `Pos` to:
   ```rust
   pub struct Pos {
       pub byte_offset: usize,
@@ -319,11 +319,11 @@ tracking to eliminate the per-character walk in
   Rationale: neither libfyaml nor libyaml tracks cumulative
   Unicode scalar count. The LSP protocol needs UTF-16 code units,
   not char_offset. No consumer uses char_offset in its native form.
-- [ ] Update all `Pos` construction sites in lib.rs and lexer.rs
+- [x] Update all `Pos` construction sites in lib.rs and lexer.rs
   to remove `char_offset` field
-- [ ] Update all tests that assert on `char_offset` — remove
+- [x] Update all tests that assert on `char_offset` — remove
   those assertions
-- [ ] Replace `advance_pos_past_line()` with a lightweight
+- [x] Replace `advance_pos_past_line()` with a lightweight
   function that only computes `byte_offset` and `line` (both
   available without character walking):
   ```rust
@@ -337,7 +337,7 @@ tracking to eliminate the per-character walk in
       }
   }
   ```
-- [ ] For `column` computation at mid-line positions, use an
+- [x] For `column` computation at mid-line positions, use an
   ASCII fast path:
   ```rust
   fn column_at(line_content: &str, byte_offset_in_line: usize) -> usize {
@@ -349,15 +349,14 @@ tracking to eliminate the per-character walk in
       }
   }
   ```
-- [ ] Update Span emission points to compute column lazily
+- [x] Update Span emission points to compute column lazily
   using `column_at()` instead of maintaining it incrementally
-- [ ] All Unicode position tests pass (char_offset assertions
+- [x] All Unicode position tests pass (char_offset assertions
   removed, column assertions still verified)
-- [ ] All 351 conformance tests pass
-- [ ] All existing integration tests pass
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `perf(parser): lazy Pos tracking — drop char_offset,
-  eliminate per-character walk`
+- [x] All 351 conformance tests pass
+- [x] All existing integration tests pass
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `ea47bb9`
 
 **Reference impl consultation:**
 1. libfyaml: `fy_mark` struct (3 fields: input_pos, line, column)
