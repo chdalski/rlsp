@@ -1,0 +1,533 @@
+// SPDX-License-Identifier: MIT
+
+use std::borrow::Cow;
+
+use crate::error::Error;
+use crate::lines::LineBuffer;
+use crate::pos::{Pos, Span};
+
+use super::{Lexer, is_blank_or_comment, is_marker, pos_after_line};
+
+impl<'input> Lexer<'input> {
+    /// Try to tokenize a plain scalar starting at the current line.
+    ///
+    /// Implements YAML 1.2 §7.3.3 `ns-plain` in block context.  The caller
+    /// supplies `parent_indent` — the indentation level of the enclosing
+    /// block node (`n` in the spec); continuation lines must have
+    /// `indent >= parent_indent`.
+    ///
+    /// Returns `(value, span)` on success or `None` if the current line cannot
+    /// start a plain scalar (EOF, blank/comment, or forbidden first character).
+    ///
+    /// **Borrow contract:** Single-line → `Cow::Borrowed` (zero allocation).
+    /// Multi-line → `Cow::Owned` (one allocation for the folded value).
+    ///
+    /// If [`Self::inline_scalar`] is set (populated by a preceding
+    /// [`Self::consume_marker_line`] call for a `--- text` line), it is
+    /// drained and returned immediately without consuming any new lines.
+    #[allow(clippy::too_many_lines)]
+    pub fn try_consume_plain_scalar(
+        &mut self,
+        parent_indent: usize,
+    ) -> Option<(Cow<'input, str>, Span)> {
+        // Drain any inline scalar stashed by consume_marker_line (e.g. `--- text`).
+        if let Some(inline) = self.inline_scalar.take() {
+            return Some(inline);
+        }
+        let (leading_spaces, scalar_start_pos, first_value_len) =
+            peek_plain_scalar_first_line(&self.buf)?;
+
+        // SAFETY: LineBuffer guarantees consume returns Some when peek returned
+        // Some on the same instance (single-threaded, no interleaving).
+        let Some(consumed_first) = self.buf.consume_next() else {
+            unreachable!("peek returned Some but consume returned None")
+        };
+        self.current_pos = pos_after_line(&consumed_first);
+
+        // SAFETY: leading_spaces and first_value_len are computed by
+        // peek_plain_scalar_first_line from the same line content via
+        // char_indices(), guaranteeing char-boundary alignment and bounds.
+        let Some(first_value_ref): Option<&'input str> = consumed_first
+            .content
+            .get(leading_spaces..leading_spaces + first_value_len)
+        else {
+            unreachable!("scalar slice out of bounds")
+        };
+
+        // Detect trailing comment on the same line as the scalar.
+        // `scan_plain_line_block` already stopped at `# ` (whitespace-preceded
+        // `#`), so the content after `leading_spaces + first_value_len` is
+        // either empty, whitespace-only, or `  # comment`.
+        // We use char_indices on the suffix — security: byte offsets only.
+        let after_scalar_start = leading_spaces + first_value_len;
+        if let Some(suffix) = consumed_first.content.get(after_scalar_start..) {
+            if let Some(comment_text) = extract_trailing_comment(suffix) {
+                // Compute the byte offset of `#` within the line.
+                // It is `after_scalar_start + (suffix.len() - comment_text.len() - 1)`
+                // where -1 accounts for the `#` itself.
+                let hash_byte_in_line = after_scalar_start + suffix.len() - comment_text.len() - 1;
+                let hash_col_in_line =
+                    crate::pos::column_at(consumed_first.content, hash_byte_in_line);
+                let hash_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + hash_byte_in_line,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + hash_col_in_line,
+                };
+                let mut span_end = hash_pos.advance('#');
+                for ch in comment_text.chars() {
+                    span_end = span_end.advance(ch);
+                }
+                // Validate comment text: YAML 1.2 §8.1.1 — comment lines must
+                // not contain NUL (U+0000) since it is not a c-printable char.
+                if let Some((bad_i, bad_ch)) = comment_text.char_indices().find(|(_, c)| *c == '\0')
+                {
+                    let bad_char_i = comment_text[..bad_i].chars().count();
+                    let bad_pos = Pos {
+                        byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                        line: hash_pos.line,
+                        column: hash_pos.column + 1 + bad_char_i,
+                    };
+                    self.plain_scalar_suffix_error = Some(Error {
+                        pos: bad_pos,
+                        message: format!("invalid character U+{:04X} in comment", bad_ch as u32),
+                    });
+                } else {
+                    self.trailing_comment = Some((
+                        comment_text,
+                        Span {
+                            start: hash_pos,
+                            end: span_end,
+                        },
+                    ));
+                }
+            } else if let Some((bad_i, bad_ch)) = suffix
+                .char_indices()
+                .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
+            {
+                // Suffix contains a character that stopped plain-scalar
+                // scanning (NUL U+0000 or mid-stream BOM U+FEFF) and is not
+                // valid at this position.  Other non-whitespace characters
+                // (e.g. `: value`) may be valid YAML content that the mapping
+                // detector missed and are not flagged here.
+                let bad_col_offset =
+                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
+                let bad_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + bad_col_offset,
+                };
+                self.plain_scalar_suffix_error = Some(Error {
+                    pos: bad_pos,
+                    message: format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
+                });
+            }
+        }
+
+        // A trailing comment on the first line terminates the plain scalar —
+        // continuation lines after a comment are not part of the scalar.
+        let extra = if self.trailing_comment.is_some() || self.plain_scalar_suffix_error.is_some() {
+            None
+        } else {
+            self.collect_plain_continuations(first_value_ref, parent_indent, consumed_first.indent)
+        };
+
+        let span_end = self.current_pos;
+        Some(extra.map_or_else(
+            || {
+                let mut end_pos = scalar_start_pos;
+                for ch in first_value_ref.chars() {
+                    end_pos = end_pos.advance(ch);
+                }
+                (
+                    Cow::Borrowed(first_value_ref),
+                    Span {
+                        start: scalar_start_pos,
+                        end: end_pos,
+                    },
+                )
+            },
+            |owned| {
+                (
+                    Cow::Owned(owned),
+                    Span {
+                        start: scalar_start_pos,
+                        end: span_end,
+                    },
+                )
+            },
+        ))
+    }
+
+    /// Collect continuation lines after the first line of a plain scalar.
+    ///
+    /// Returns `Some(String)` if any continuation lines were found (multi-line),
+    /// or `None` if the scalar ends after the first line (single-line).
+    fn collect_plain_continuations(
+        &mut self,
+        first_value_ref: &str,
+        parent_indent: usize,
+        scalar_indent: usize,
+    ) -> Option<String> {
+        let mut pending_blanks: usize = 0;
+        let mut result: Option<String> = None;
+
+        loop {
+            let Some(next) = self.buf.peek_next() else {
+                break;
+            };
+            let trimmed = next.content.trim_start_matches([' ', '\t']);
+
+            if trimmed.is_empty() {
+                pending_blanks += 1;
+                // SAFETY: peek succeeded on this iteration; LineBuffer invariant.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume blank line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                continue;
+            }
+
+            if is_marker(next.content, b'-') || is_marker(next.content, b'.') {
+                break;
+            }
+
+            // A continuation line is valid when it is strictly more indented
+            // than the enclosing block (`indent > parent_indent`).
+            //
+            // Special case: when `parent_indent == 0` AND the scalar itself
+            // started at column 0 (`scalar_indent == 0`), a continuation at
+            // column 0 is also valid — `s-flow-folded(0)` allows any indentation ≥ 0
+            // for scalars in the n=0 document-root context.
+            // (YAML 1.2 spec example 7.12 / tests HS5T.)
+            // A tab at the start of a continuation also satisfies `s-separate-in-line`
+            // even when parent_indent=0 and scalar_indent>0.
+            let n0_exception = parent_indent == 0 && scalar_indent == 0;
+            let tab_exception = parent_indent == 0 && next.content.starts_with('\t');
+            if next.indent <= parent_indent && !n0_exception && !tab_exception {
+                break;
+            }
+
+            let cont_value = scan_plain_line_block(trimmed);
+            if cont_value.is_empty() {
+                break;
+            }
+
+            // If the plain scan stops short (not at end of content) and the
+            // remaining content starts with `: ` (value indicator), this line
+            // is an implicit mapping entry — the plain scalar terminates here.
+            let after_cont = trimmed[cont_value.len()..].trim_start_matches([' ', '\t']);
+            if after_cont.starts_with(": ") || after_cont == ":" {
+                break;
+            }
+
+            // If the remainder after the scanned value is a comment (`# …`),
+            // this line has a trailing comment that terminates the plain scalar.
+            // Include the current line's content but do NOT continue after this.
+            let has_trailing_comment = after_cont.starts_with('#');
+
+            let buf = result.get_or_insert_with(|| String::from(first_value_ref));
+            if pending_blanks > 0 {
+                for _ in 0..pending_blanks {
+                    buf.push('\n');
+                }
+                pending_blanks = 0;
+            } else {
+                buf.push(' ');
+            }
+            buf.push_str(cont_value);
+
+            // SAFETY: peek succeeded on this iteration; LineBuffer invariant.
+            let Some(consumed) = self.buf.consume_next() else {
+                unreachable!("consume cont line failed")
+            };
+            self.current_pos = pos_after_line(&consumed);
+
+            if has_trailing_comment {
+                break;
+            }
+        }
+
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Plain scalar first-line inspection
+// ---------------------------------------------------------------------------
+
+/// Peek at the next line in `buf` and determine whether it can start a plain
+/// scalar in block context.
+///
+/// Returns `(leading_spaces, scalar_start_pos, first_value_len)` on success, or
+/// `None` if the line cannot start a plain scalar.
+pub(super) fn peek_plain_scalar_first_line(buf: &LineBuffer<'_>) -> Option<(usize, Pos, usize)> {
+    let first = buf.peek_next()?;
+
+    if is_blank_or_comment(first) {
+        return None;
+    }
+
+    let content_trimmed = first.content.trim_start_matches([' ', '\t']);
+    if content_trimmed.is_empty() {
+        return None;
+    }
+
+    let first_char = content_trimmed.chars().next()?;
+    if !ns_plain_first_block(first_char, content_trimmed) {
+        return None;
+    }
+
+    let first_value = scan_plain_line_block(content_trimmed);
+    if first_value.is_empty() {
+        return None;
+    }
+
+    let leading_bytes = first.content.len() - content_trimmed.len();
+    let leading_chars = crate::pos::column_at(first.content, leading_bytes);
+    let scalar_start_pos = Pos {
+        byte_offset: first.offset + leading_bytes,
+        line: first.pos.line,
+        column: first.pos.column + leading_chars,
+    };
+
+    Some((leading_bytes, scalar_start_pos, first_value.len()))
+}
+
+// ---------------------------------------------------------------------------
+// Plain scalar character predicates (YAML 1.2 §7.3.3)
+// ---------------------------------------------------------------------------
+
+/// `ns-plain-first(c)` for block context: the first character of a plain scalar.
+///
+/// A character can start a plain scalar if:
+/// - It is a non-indicator `ns-char`, OR
+/// - It is `?`, `:`, or `-` AND the next character is a safe plain char.
+///
+/// YAML 1.2 spec [126]: `ns-plain-first(c) ::= (ns-char – c-indicator) |
+///   ((? | : | -) Followed by ns-plain-safe(c))`
+fn ns_plain_first_block(ch: char, rest: &str) -> bool {
+    if is_c_indicator(ch) {
+        // Special case: `?`, `:`, `-` are allowed if followed by a safe char.
+        if matches!(ch, '?' | ':' | '-') {
+            // Look at the character after `ch`.
+            let after = &rest[ch.len_utf8()..];
+            if let Some(next) = after.chars().next() {
+                return ns_plain_safe_block(next);
+            }
+        }
+        // Other indicators or indicator not followed by safe char.
+        return false;
+    }
+    // Non-indicator ns-char.
+    is_ns_char(ch)
+}
+
+/// `ns-plain-safe(c)` for block context: any `ns-char`.
+///
+/// In flow context this would additionally exclude flow indicators (Task 13).
+const fn ns_plain_safe_block(ch: char) -> bool {
+    is_ns_char(ch)
+}
+
+/// `ns-plain-char(c)` for block context: characters allowed in the body of a plain scalar.
+///
+/// Rules (YAML 1.2 [130]):
+/// - Any `ns-plain-safe(c)` that is not `:` or `#`.
+/// - `#` when the preceding character was not whitespace (i.e., `#` here means
+///   a `:` or `#` character encountered in the middle of a run, which cannot
+///   be whitespace-preceded since we only arrive here after consuming a
+///   non-whitespace run).
+/// - `:` when followed by an `ns-plain-safe(c)` character.
+fn ns_plain_char_block(prev_was_ws: bool, ch: char, next: Option<char>) -> bool {
+    if ch == '#' {
+        // `#` is allowed only when NOT preceded by whitespace.
+        return !prev_was_ws;
+    }
+    if ch == ':' {
+        // `:` is allowed only when followed by a safe plain char.
+        return next.is_some_and(ns_plain_safe_block);
+    }
+    ns_plain_safe_block(ch)
+}
+
+/// Scan a plain scalar from `content` (block context, after leading whitespace
+/// has been stripped).
+///
+/// Returns the trimmed value slice (trailing whitespace stripped, comment
+/// stripped if preceded by whitespace).
+///
+/// This implements `nb-ns-plain-in-line(c)` applied to the full line content
+/// starting at the first non-space character position.
+pub(super) fn scan_plain_line_block(content: &str) -> &str {
+    // We track: the end of the last committed non-whitespace run.
+    // Whitespace is tentatively included but stripped if the line ends with it
+    // or if `#` follows whitespace.
+    let mut chars = content.char_indices().peekable();
+    // Last committed byte offset (exclusive): the scalar ends here.
+    let mut committed_end: usize = 0;
+    // Whether the previous character was whitespace.
+    let mut prev_was_ws = false;
+
+    while let Some((i, ch)) = chars.next() {
+        // Check for break characters (should never appear in line content, but
+        // guard anyway).
+        if matches!(ch, '\n' | '\r') {
+            break;
+        }
+
+        if is_s_white(ch) {
+            // Whitespace is tentative — don't advance committed_end yet.
+            prev_was_ws = true;
+            continue;
+        }
+
+        // Non-whitespace character: check if it terminates the scalar.
+        let next_ch = chars.peek().map(|(_, c)| *c);
+
+        if !ns_plain_char_block(prev_was_ws, ch, next_ch) {
+            // This character cannot be part of the plain scalar.
+            // The scalar ends at committed_end (before any pending whitespace).
+            break;
+        }
+
+        // Character is valid — commit through this character.
+        committed_end = i + ch.len_utf8();
+        prev_was_ws = false;
+    }
+
+    &content[..committed_end]
+}
+
+/// Scan a plain scalar from `content` (flow context, after leading whitespace
+/// has been stripped).
+///
+/// Flow plain scalars (YAML 1.2 §7.3.3) cannot contain flow indicators
+/// (`,`, `[`, `]`, `{`, `}`) or a `:` that is followed by a space, tab, or
+/// flow indicator.  This function returns the longest prefix of `content` that
+/// is a valid flow plain scalar, trimmed of trailing whitespace.
+///
+/// This is `pub(crate)` so the flow parser in `lib.rs` can call it without
+/// routing through the Lexer struct — the input slice is already available at
+/// the call site.  Callers must not pass flow-context content to
+/// [`scan_plain_line_block`] — the block scanner does not stop at flow
+/// indicators.
+pub fn scan_plain_line_flow(content: &str) -> &str {
+    let mut chars = content.char_indices().peekable();
+    let mut committed_end: usize = 0;
+    let mut prev_was_ws = false;
+
+    while let Some((i, ch)) = chars.next() {
+        if matches!(ch, '\n' | '\r') {
+            break;
+        }
+
+        // Flow indicators always terminate a plain scalar.
+        if matches!(ch, ',' | '[' | ']' | '{' | '}') {
+            break;
+        }
+
+        if is_s_white(ch) {
+            prev_was_ws = true;
+            continue;
+        }
+
+        // `#` preceded by whitespace (or at position 0) starts a comment.
+        if ch == '#' && (i == 0 || prev_was_ws) {
+            break;
+        }
+
+        // `:` in flow context: terminates when followed by a space, tab,
+        // flow indicator, or end-of-content.  (YAML 1.2 §7.3.3)
+        if ch == ':' {
+            let next = chars.peek().map(|(_, c)| *c);
+            match next {
+                None | Some(' ' | '\t' | ',' | '[' | ']' | '{' | '}') => break,
+                _ => {}
+            }
+        }
+
+        if !ns_plain_safe_block(ch) {
+            break;
+        }
+
+        committed_end = i + ch.len_utf8();
+        prev_was_ws = false;
+    }
+
+    &content[..committed_end]
+}
+
+// ---------------------------------------------------------------------------
+// Character class predicates (YAML 1.2 §5)
+// ---------------------------------------------------------------------------
+
+/// `c-indicator` — all 21 YAML indicator characters.
+const fn is_c_indicator(ch: char) -> bool {
+    matches!(
+        ch,
+        '-' | '?'
+            | ':'
+            | ','
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '#'
+            | '&'
+            | '*'
+            | '!'
+            | '|'
+            | '>'
+            | '\''
+            | '"'
+            | '%'
+            | '@'
+            | '`'
+    )
+}
+
+/// `ns-char` — printable non-whitespace non-BOM character.
+pub const fn is_ns_char(ch: char) -> bool {
+    !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
+        && matches!(ch,
+            '\x21'..='\x7E'
+            | '\u{85}'
+            | '\u{A0}'..='\u{D7FF}'
+            | '\u{E000}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{10FFFF}'
+        )
+}
+
+/// `s-white` — space or tab.
+const fn is_s_white(ch: char) -> bool {
+    matches!(ch, ' ' | '\t')
+}
+
+// ---------------------------------------------------------------------------
+// Trailing comment extraction
+// ---------------------------------------------------------------------------
+
+/// Extract a trailing comment from the content that follows a scalar value.
+///
+/// `suffix` is the slice of the line after the scalar ends (may be empty,
+/// whitespace-only, or `"  # comment"`).
+///
+/// Returns the comment body (everything after the `#`) if a comment is
+/// present (i.e. `#` is preceded by at least one whitespace), or `None`
+/// if there is no comment in this suffix.
+///
+/// Safety: uses `char_indices` for byte offsets — never character-count
+/// arithmetic — to guarantee char-boundary slicing.
+pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
+    let mut prev_was_ws = true; // position before suffix content = boundary
+    for (i, ch) in suffix.char_indices() {
+        if ch == '#' && prev_was_ws {
+            // `#` preceded by whitespace (or at the very start): comment start.
+            // Return everything after `#`.
+            // SAFETY: i + 1 is a valid char boundary because `#` is ASCII (1 byte).
+            return Some(&suffix[i + 1..]);
+        }
+        prev_was_ws = matches!(ch, ' ' | '\t');
+    }
+    None
+}
