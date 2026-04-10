@@ -1054,11 +1054,40 @@ new crate, and run.
 
 ### Task 23: Migration — replace rlsp-yaml-parser
 
-Final task. Atomic migration in one commit (or one PR)
-so CI never sees a broken state.
+Final task. Two-phase migration: first point `rlsp-yaml`
+at the temp crate to surface integration bugs while the
+old parser is still intact as a reference, then do the
+atomic rename only after everything passes.
 
-- [ ] Verify all integration tests still pass on temp crate
-- [ ] Verify benchmarks still meet acceptance criteria
+**Phase A — Integration validation (old parser stays)**
+
+- [ ] Change `rlsp-yaml/Cargo.toml` dependency from
+  `rlsp-yaml-parser` to `rlsp-yaml-parser-temp` (path =
+  `../rlsp-yaml-parser-temp`). Keep the old crate in the
+  workspace — it stays as a working reference.
+- [ ] Update `rlsp-yaml/src/*.rs` for the new public API:
+  - `Event` → `Event<'input>` (lifetime parameter)
+  - Scalar values: `String` → `Cow<'input, str>`
+  - Anchors: `Option<String>` → `Option<&'input str>`
+  - Tags: `Option<String>` → `Option<Cow<'input, str>>`
+  - `DocumentStart.tags` → `DocumentStart.tag_directives`
+  - New `style: CollectionStyle` on SequenceStart/MappingStart
+  - New `Event::Comment` and `Event::Alias` variants in
+    exhaustive matches (already existed in old parser but
+    type signatures changed)
+- [ ] `cargo test -p rlsp-yaml` passes — exercises the
+  parser through the real language server code paths
+- [ ] `cargo clippy -p rlsp-yaml --all-targets` passes
+- [ ] Fix any integration bugs discovered — these are bugs
+  in `rlsp-yaml-parser-temp` that the conformance suite
+  did not cover (e.g. the anchor-on-mapping-key indent
+  bug). Each fix goes through the normal pipeline with
+  test-engineer sign-off.
+- [ ] `cargo test --workspace` passes (both parsers in the
+  workspace simultaneously)
+
+**Phase B — Atomic rename (only after Phase A is green)**
+
 - [ ] Delete `rlsp-yaml-parser/` directory entirely
 - [ ] Rename `rlsp-yaml-parser-temp/` to `rlsp-yaml-parser/`
 - [ ] In the new `rlsp-yaml-parser/Cargo.toml`, change
@@ -1066,17 +1095,19 @@ so CI never sees a broken state.
   `name = "rlsp-yaml-parser"`
 - [ ] Update workspace `members` in root `Cargo.toml`:
   remove `rlsp-yaml-parser-temp`, keep `rlsp-yaml-parser`
-- [ ] Update `rlsp-yaml/Cargo.toml` if it pinned to the
-  old version (it depends on `rlsp-yaml-parser`)
-- [ ] Update `rlsp-yaml/src/*.rs` for the new public API
-  (Cow scalar values, &str anchors/tags). Most callers
-  will need minor adjustments.
+- [ ] Revert `rlsp-yaml/Cargo.toml` dependency back to
+  `rlsp-yaml-parser` (path = `../rlsp-yaml-parser`)
 - [ ] `cargo test --workspace` passes
 - [ ] `cargo clippy --workspace --all-targets` passes
-- [ ] `cargo bench --workspace` runs
-- [ ] Commit: `feat(parser): replace PEG parser with streaming implementation`
+- [ ] `cargo bench -p rlsp-yaml-parser` runs
+- [ ] Grep workspace for `rlsp-yaml-parser-temp` — zero
+  references remaining
+- [ ] Update CLAUDE.md Components table — remove the
+  `rlsp-yaml-parser-temp` row
 - [ ] Update `rlsp-yaml-parser/docs/benchmarks.md` to
-  reflect the migration
+  reflect the migration (remove "temp" references)
+- [ ] Commit: `feat(parser): replace PEG parser with
+  streaming implementation`
 
 **Reference impl consultation:** Not applicable.
 **Advisors:** test-engineer (verify migration completeness);
