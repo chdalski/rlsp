@@ -232,7 +232,7 @@ user has explicitly approved this scope.
 - [x] Implement block collections (Tasks 11-13) — Task 11 `93c66e0`, Task 12 `9f4ecb0`, Task 13 `09b5b10`
 - [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
 - [x] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`, Task 18 `4f1b25c`
-- [x] Bugfix: anchor/tag before mapping key indent — `55c3846`
+- [x] Bugfix: anchor/tag before mapping key indent — `55c3846`, corrected placement `266081a`
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
