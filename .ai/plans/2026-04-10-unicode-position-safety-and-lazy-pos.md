@@ -199,7 +199,7 @@ Per user direction:
 
 - [x] Audit all position arithmetic in lib.rs (Task 1)
 - [x] Write Unicode position tests as TDD safety net (Task 2)
-- [ ] Fix byte/char conflation bugs (Task 3)
+- [x] Fix byte/char conflation bugs (Task 3)
 - [ ] Implement lazy Pos optimization (Task 4)
 - [ ] Benchmark and verify improvement (Task 5)
 
@@ -272,9 +272,9 @@ Fix all unsafe position arithmetic sites identified in the audit
 replace `.len()` byte arithmetic with proper character counting
 when computing `char_offset` or `column`.
 
-- [ ] Fix all 11 lexer.rs sites (documented in Context above)
-- [ ] Fix all unsafe lib.rs sites (identified in Task 1)
-- [ ] For each fix, apply the pattern:
+- [x] Fix all 11 lexer.rs sites (documented in Context above)
+- [x] Fix all unsafe lib.rs sites (identified in Task 1)
+- [x] For each fix, apply the pattern:
   ```rust
   // Before (UNSAFE):
   let leading = line.content.len() - content.len();
@@ -287,12 +287,11 @@ when computing `char_offset` or `column`.
   char_offset: base.char_offset + leading_chars,
   column: base.column + leading_chars,
   ```
-- [ ] All Unicode position tests from Task 2 pass
-- [ ] All 351 conformance tests pass
-- [ ] All existing integration tests pass
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `fix(parser): correct byte/char conflation in
-  position arithmetic`
+- [x] All Unicode position tests from Task 2 pass
+- [x] All 351 conformance tests pass
+- [x] All existing integration tests pass
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `a96460d`
 
 **Reference impl consultation:**
 1. Local: check `pos.rs` `Pos::advance()` for the correct
