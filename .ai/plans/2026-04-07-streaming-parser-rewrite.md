@@ -233,6 +233,7 @@ user has explicitly approved this scope.
 - [x] Implement flow collections (Tasks 14-15) — Task 14 `82ad832`, Task 15 `a87ed9f`
 - [x] Implement anchors, tags, aliases, comments (Tasks 16-18) — Task 16 `88210c3`, Task 17 `dc01d7f`, Task 18 `4f1b25c`
 - [x] Bugfix: anchor/tag before mapping key indent — `55c3846`, corrected placement `266081a`
+- [x] Bugfix: quoted key decoding + trailing comment attachment — `620720f`
 - [ ] Implement directives and multi-document (Task 19)
 - [ ] Port loader and run integration tests (Tasks 20-21)
 - [ ] Run benchmarks, verify O(1) latency (Task 22)
@@ -1078,11 +1079,13 @@ atomic rename only after everything passes.
 - [ ] `cargo test -p rlsp-yaml` passes — exercises the
   parser through the real language server code paths
 - [ ] `cargo clippy -p rlsp-yaml --all-targets` passes
-- [ ] Fix any integration bugs discovered — these are bugs
+- [x] Fix any integration bugs discovered — these are bugs
   in `rlsp-yaml-parser-temp` that the conformance suite
   did not cover (e.g. the anchor-on-mapping-key indent
   bug). Each fix goes through the normal pipeline with
   test-engineer sign-off.
+  - [x] Bug 1: Quoted block mapping keys not decoded — `620720f`
+  - [x] Bug 2: Trailing comments not attached to AST nodes — `620720f`
 - [ ] `cargo test --workspace` passes (both parsers in the
   workspace simultaneously)
 
