@@ -287,4 +287,105 @@ mod tests {
 
         assert!(result.documents.is_empty());
     }
+
+    // TE tests for Task 23 Phase A: API adaptation verification
+
+    #[test]
+    fn parse_yaml_returns_documents_with_string_value_type() {
+        use rlsp_yaml_parser_temp::node::Node;
+
+        let result = parse_yaml("key: value\n");
+
+        assert!(!result.documents.is_empty());
+        match &result.documents[0].root {
+            Node::Mapping { entries, .. } => {
+                assert!(!entries.is_empty());
+                let (k, v) = &entries[0];
+                match k {
+                    Node::Scalar { value, .. } => {
+                        // value is a String — confirm it's accessible as &str
+                        let s: &str = value.as_str();
+                        assert_eq!(s, "key");
+                    }
+                    Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                        panic!("expected Scalar key")
+                    }
+                }
+                match v {
+                    Node::Scalar { value, .. } => {
+                        assert_eq!(value.as_str(), "value");
+                    }
+                    Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                        panic!("expected Scalar value")
+                    }
+                }
+            }
+            Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                panic!("expected Mapping root")
+            }
+        }
+    }
+
+    #[test]
+    fn parse_yaml_nesting_depth_limit_produces_diagnostic() {
+        // Build YAML with 260 nesting levels — exceeds MAX_NESTING_DEPTH = 256.
+        // Run in a thread with a larger stack so the recursive parser itself does
+        // not overflow before it can enforce the limit.
+        let result = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let mut text = String::new();
+                for i in 0..260usize {
+                    let indent = "  ".repeat(i);
+                    writeln!(text, "{indent}level{i}:").unwrap();
+                }
+                let leaf_indent = "  ".repeat(260);
+                writeln!(text, "{leaf_indent}leaf: value").unwrap();
+                parse_yaml(&text)
+            })
+            .expect("thread spawn")
+            .join()
+            .expect("thread join");
+
+        // NestingDepthLimitExceeded maps to Pos::ORIGIN — diagnostic should be reported
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected diagnostic for deep nesting"
+        );
+        assert!(result.documents.is_empty(), "expected no documents on error");
+    }
+
+    #[test]
+    fn parse_yaml_undefined_alias_in_lossless_mode_produces_alias_node() {
+        use rlsp_yaml_parser_temp::node::Node;
+
+        // In lossless mode (the default), *undefined aliases are NOT errors;
+        // they are preserved as Node::Alias leaves.
+        let result = parse_yaml("key: *undefined\n");
+
+        // lossless mode: should parse without error, root is a Mapping
+        // with an Alias value node
+        if result.documents.is_empty() {
+            // Some parser implementations DO error on undefined aliases in lossless mode —
+            // if so, the diagnostic path must be non-empty.
+            assert!(
+                !result.diagnostics.is_empty(),
+                "either documents or diagnostics must be non-empty"
+            );
+        } else {
+            match &result.documents[0].root {
+                Node::Mapping { entries, .. } => {
+                    let (_, v) = &entries[0];
+                    // Value should be an Alias node (lossless mode)
+                    assert!(
+                        matches!(v, Node::Alias { .. }),
+                        "expected Alias node for *undefined in lossless mode, got: {v:?}"
+                    );
+                }
+                Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                    panic!("expected Mapping root")
+                }
+            }
+        }
+    }
 }

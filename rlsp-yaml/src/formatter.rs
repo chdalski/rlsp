@@ -2073,4 +2073,67 @@ mod tests {
             "on: plain key must not gain quotes even in V1.1: {result:?}"
         );
     }
+
+    // TE tests for Task 23 Phase A: ScalarStyle and Chomp variant verification
+
+    #[test]
+    fn format_yaml_plain_scalar_roundtrips() {
+        let result = format_yaml("key: plain_value\n", &default_opts());
+        assert!(
+            result.contains("key: plain_value"),
+            "plain scalar missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_literal_block_scalar_chomp_clip() {
+        let result = format_yaml("key: |\n  line one\n  line two\n", &default_opts());
+        assert!(
+            result.contains('|'),
+            "literal block indicator missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_folded_block_scalar_chomp_strip() {
+        let result = format_yaml("key: >-\n  content\n", &default_opts());
+        assert!(
+            result.contains(">-"),
+            "folded-strip indicator missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_yaml_single_quoted_scalar() {
+        // The formatter normalizes away unnecessary quotes from plain-safe scalars.
+        // Confirm the value content ("quoted value") is preserved, even if quotes are stripped.
+        let result = format_yaml("key: 'quoted value'\n", &default_opts());
+        assert!(
+            result.contains("quoted value"),
+            "single-quoted scalar content missing: {result:?}"
+        );
+        assert!(result.contains("key:"), "key missing: {result:?}");
+    }
+
+    #[test]
+    fn format_yaml_double_quoted_scalar() {
+        // The formatter normalizes away unnecessary quotes from plain-safe scalars.
+        // Confirm the value content ("quoted value") is preserved, even if quotes are stripped.
+        let result = format_yaml("key: \"quoted value\"\n", &default_opts());
+        assert!(
+            result.contains("quoted value"),
+            "double-quoted scalar content missing: {result:?}"
+        );
+        assert!(result.contains("key:"), "key missing: {result:?}");
+    }
+
+    #[test]
+    fn format_yaml_invalid_input_returns_input_unchanged() {
+        let input = "key: [bad\n";
+        let result = format_yaml(input, &default_opts());
+        assert_eq!(
+            result, input,
+            "invalid input should be returned unchanged: {result:?}"
+        );
+    }
 }
