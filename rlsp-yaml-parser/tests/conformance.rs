@@ -386,3 +386,112 @@ fn anchor_and_tag_before_mapping_key() {
         "val: {v:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Bug regression: double/single-quoted implicit block mapping keys must be decoded
+// ---------------------------------------------------------------------------
+
+#[test]
+fn double_quoted_implicit_key_decoded() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("\"key\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key must be decoded (no quotes), got: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+#[test]
+fn single_quoted_implicit_key_decoded() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("'key': value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "key"),
+        "key must be decoded (no quotes), got: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bug regression: trailing comments must be attached to AST nodes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trailing_comment_on_mapping_value_attached() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("key: value  # trailing\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    assert_eq!(
+        v.trailing_comment(),
+        Some("# trailing"),
+        "trailing comment must be attached to value node, got: {v:?}"
+    );
+}
+
+#[test]
+fn trailing_comment_on_sequence_item_attached() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("- item  # note\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence, got: {:?}", docs[0].root);
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].trailing_comment(),
+        Some("# note"),
+        "trailing comment must be attached to sequence item, got: {:?}",
+        items[0]
+    );
+}
+
+#[test]
+fn leading_comment_attached_to_second_mapping_key() {
+    use rlsp_yaml_parser::loader::load;
+    use rlsp_yaml_parser::node::Node;
+
+    let docs = load("a: 1\n# before b\nb: 2\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 2);
+    let (key_b, _) = &entries[1];
+    assert_eq!(
+        key_b.leading_comments(),
+        &["# before b"],
+        "leading comment must be attached to second key, got: {key_b:?}"
+    );
+}

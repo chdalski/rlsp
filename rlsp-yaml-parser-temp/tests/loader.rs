@@ -914,3 +914,157 @@ fn inline_anchor_before_value_scalar_annotates_value() {
         "anchor must be on value scalar; got: {va:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Group J — Trailing comment attachment
+// ---------------------------------------------------------------------------
+
+#[test]
+fn it_j1_trailing_comment_on_mapping_value_is_attached() {
+    let node = load_one("key: value  # my comment\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    let tc = v
+        .trailing_comment()
+        .expect("trailing comment must be attached to value node");
+    assert!(
+        tc.contains("my comment"),
+        "trailing comment must contain 'my comment'; got: {tc:?}"
+    );
+}
+
+#[test]
+fn it_j2_trailing_comment_text_includes_hash() {
+    let node = load_one("key: value  # my comment\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    let (_, v) = &entries[0];
+    let tc = v
+        .trailing_comment()
+        .expect("trailing comment must be attached");
+    assert!(
+        tc.starts_with('#'),
+        "trailing comment must start with '#'; got: {tc:?}"
+    );
+}
+
+#[test]
+fn it_j3_trailing_comment_on_sequence_item_is_attached() {
+    let node = load_one("- item  # seq comment\n");
+    let Node::Sequence { items, .. } = &node else {
+        panic!("expected Sequence root; got: {node:?}");
+    };
+    assert_eq!(items.len(), 1);
+    let tc = items[0]
+        .trailing_comment()
+        .expect("trailing comment must be attached to sequence item");
+    assert!(
+        tc.contains("seq comment"),
+        "trailing comment must contain 'seq comment'; got: {tc:?}"
+    );
+}
+
+#[test]
+fn it_j4_no_trailing_comment_when_comment_on_next_line() {
+    let node = load_one("key: value\n# next line comment\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    assert_eq!(
+        v.trailing_comment(),
+        None,
+        "next-line comment must NOT be captured as trailing; got: {:?}",
+        v.trailing_comment()
+    );
+}
+
+#[test]
+fn it_j5_leading_comment_still_works_after_fix() {
+    // A comment between two mapping entries must be captured as a leading
+    // comment on the second key.  This exercises consume_leading_comments —
+    // the function whose broken span.end.line > span.start.line condition was
+    // removed by the Bug 2 fix.
+    let node = load_one("a: 1\n# header\nb: 2\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 2);
+    let (k, _) = &entries[1];
+    let lc = k.leading_comments();
+    assert!(
+        !lc.is_empty(),
+        "leading comment must be attached to second mapping key; got empty"
+    );
+    assert!(
+        lc.iter().any(|c| c.contains("header")),
+        "leading comments must contain 'header'; got: {lc:?}"
+    );
+}
+
+#[test]
+fn it_j6_multiple_trailing_comments_separate_entries() {
+    let node = load_one("a: 1  # first\nb: 2  # second\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 2);
+    let (_, v0) = &entries[0];
+    let tc0 = v0
+        .trailing_comment()
+        .expect("entry 0 value must have trailing comment");
+    assert!(
+        tc0.contains("first"),
+        "entry 0 trailing comment must contain 'first'; got: {tc0:?}"
+    );
+    let (_, v1) = &entries[1];
+    let tc1 = v1
+        .trailing_comment()
+        .expect("entry 1 value must have trailing comment");
+    assert!(
+        tc1.contains("second"),
+        "entry 1 trailing comment must contain 'second'; got: {tc1:?}"
+    );
+}
+
+#[test]
+fn it_j7_trailing_comment_with_special_chars() {
+    let node = load_one("key: value  # comment: with: colons\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    let tc = v
+        .trailing_comment()
+        .expect("trailing comment must be attached");
+    assert!(
+        tc.contains("comment: with: colons"),
+        "trailing comment must contain colons verbatim; got: {tc:?}"
+    );
+}
+
+#[test]
+fn it_j8_no_trailing_comment_on_collection_node() {
+    let node = load_one("map:\n  a: 1\n  b: 2\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (_, v) = &entries[0];
+    assert!(
+        matches!(
+            v,
+            Node::Mapping {
+                trailing_comment: None,
+                ..
+            }
+        ),
+        "multi-line mapping value must have no trailing comment; got: {v:?}"
+    );
+}

@@ -84,10 +84,33 @@ struct ContentEntry {
 /// - Any unmatched leading comments (e.g. at end of file) are appended at the end.
 ///
 /// Always runs (even with no comments) so blank line reattachment is never skipped.
+/// Returns the index of the last line in `original` that is actual YAML
+/// content — neither blank nor a standalone comment outside `line_to_comment`.
+fn last_content_line_idx(
+    original: &str,
+    line_to_comment: &std::collections::HashMap<usize, &Comment>,
+) -> Option<usize> {
+    original
+        .lines()
+        .enumerate()
+        .filter(|(idx, line)| {
+            !line.trim().is_empty()
+                && (!line.trim_start().starts_with('#') || line_to_comment.contains_key(idx))
+        })
+        .map(|(idx, _)| idx)
+        .last()
+}
+
 fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> String {
     // Build a quick lookup: line index -> comment.
     let line_to_comment: std::collections::HashMap<usize, &Comment> =
         comments.iter().map(|c| (c.line, c)).collect();
+
+    // Standalone `#` lines after this index are EOF-trailing comments not
+    // embedded in the AST; collect them to append verbatim.  Lines before or
+    // at this index that start with `#` are inter-node comments already
+    // emitted by the AST formatter — skip them or they will be duplicated.
+    let last_content_idx = last_content_line_idx(original, &line_to_comment);
 
     let mut entries: Vec<ContentEntry> = Vec::new();
     let mut pending_leading: Vec<String> = Vec::new();
@@ -105,6 +128,17 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
             pending_leading.push(comment.text.clone());
         } else if line.trim().is_empty() {
             pending_blanks += 1;
+        } else if line.trim_start().starts_with('#')
+            && last_content_idx.is_some_and(|last| idx > last)
+        {
+            // A standalone comment line after all content — not in line_to_comment
+            // and not handled by the AST formatter.  Collect as an EOF-trailing
+            // comment to be appended verbatim after the formatted body.
+            if pending_blanks > 0 {
+                pending_leading.push(String::new());
+            }
+            pending_blanks = 0;
+            pending_leading.push(line.trim().to_string());
         } else {
             entries.push(ContentEntry {
                 signature: content_signature(line),
@@ -1005,10 +1039,6 @@ mod tests {
     }
 
     // Test C10: Hash inside quoted string is NOT extracted as a comment.
-    // Known limitation: rlsp-yaml-parser strips spaces around `#` in
-    // double-quoted strings, so "value # not a comment" becomes
-    // "value#notacomment". The hash is not extracted as a comment, which
-    // is the primary invariant — the content just loses internal spacing.
     #[test]
     fn hash_inside_quoted_string_not_extracted() {
         let input = "key: \"value # not a comment\"\n";
@@ -1022,10 +1052,9 @@ mod tests {
                 );
             }
         }
-        // The value content should appear in some form (spaces may be stripped
-        // by the parser — known limitation).
+        // The value content (decoded from the double-quoted scalar) must be present.
         assert!(
-            result.contains("value") && result.contains("notacomment"),
+            result.contains("value") && result.contains("not a comment"),
             "quoted string content should be present: {result:?}"
         );
     }

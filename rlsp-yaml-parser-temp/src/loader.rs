@@ -408,7 +408,8 @@ impl<'opt> LoadState<'opt> {
                     let mut value = self.parse_node(stream)?;
 
                     // Trailing comment on the value — peek for inline comment.
-                    if let Some(trail) = peek_trailing_comment(stream)? {
+                    let value_end_line = node_end_line(&value);
+                    if let Some(trail) = peek_trailing_comment(stream, value_end_line)? {
                         attach_trailing_comment(&mut value, trail);
                     }
 
@@ -476,7 +477,8 @@ impl<'opt> LoadState<'opt> {
                     attach_leading_comments(&mut item, leading);
 
                     // Trailing comment on the item — peek for inline comment.
-                    if let Some(trail) = peek_trailing_comment(stream)? {
+                    let item_end_line = node_end_line(&item);
+                    if let Some(trail) = peek_trailing_comment(stream, item_end_line)? {
                         attach_trailing_comment(&mut item, trail);
                     }
 
@@ -700,33 +702,57 @@ fn consume_leading_doc_comments(
 
 /// Consume leading block-level Comment events before a collection item or
 /// mapping key.  Returns the captured comment texts.
+///
+/// A "leading" comment is any `Comment` event that appears before the next
+/// non-comment structural event.  By the time this function is called,
+/// `peek_trailing_comment` has already consumed any trailing comment that was
+/// on the same line as the preceding value — so every remaining `Comment` here
+/// is on its own line and belongs to the upcoming key/item as a leading comment.
 fn consume_leading_comments(stream: &mut EventStream<'_>) -> Result<Vec<String>> {
     let mut leading = Vec::new();
-    while matches!(
-        stream.peek(),
-        Some(Ok((Event::Comment { .. }, span))) if span.end.line > span.start.line
-    ) {
-        if let Some((Event::Comment { text }, span)) = next_from(stream)? {
-            if span.end.line > span.start.line {
-                leading.push(format!("#{text}"));
-            }
+    while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
+        if let Some((Event::Comment { text }, _)) = next_from(stream)? {
+            leading.push(format!("#{text}"));
         }
     }
     Ok(leading)
 }
 
-/// If the next event is a trailing Comment (zero-width span: start == end),
+/// If the next event is a trailing Comment on the same line as `preceding_end_line`,
 /// consume it and return the text.  Otherwise return `None`.
-fn peek_trailing_comment(stream: &mut EventStream<'_>) -> Result<Option<String>> {
+///
+/// libfyaml (`fy_attach_comments_if_any` in `fy-parse.c`) uses the same
+/// criterion: a comment is "trailing" when its line equals the preceding
+/// token's end line (`fym.line == fyt->handle.end_mark.line`).  The new
+/// parser emits trailing comments with real spans (not zero-width), so the
+/// old `span.start == span.end` sentinel from the original parser does not
+/// apply here.
+fn peek_trailing_comment(
+    stream: &mut EventStream<'_>,
+    preceding_end_line: usize,
+) -> Result<Option<String>> {
     if matches!(
         stream.peek(),
-        Some(Ok((Event::Comment { .. }, span))) if span.start == span.end
+        Some(Ok((Event::Comment { .. }, span))) if span.start.line == preceding_end_line
     ) {
         if let Some((Event::Comment { text }, _)) = next_from(stream)? {
             return Ok(Some(format!("#{text}")));
         }
     }
     Ok(None)
+}
+
+/// Return the line number of a node's span end position.
+///
+/// Used to determine whether the next `Comment` event is trailing (same line)
+/// or leading (different line).
+const fn node_end_line(node: &Node<Span>) -> usize {
+    match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => loc.end.line,
+    }
 }
 
 // ---------------------------------------------------------------------------

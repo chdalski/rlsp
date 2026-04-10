@@ -864,13 +864,75 @@ impl<'input> EventIter<'input> {
             column: line_pos.column + leading_spaces + value_offset_in_trimmed,
         };
 
-        // Consume the physical line, then (if there is inline value content)
+        // Detect whether the key is a quoted scalar.  `key_content` already
+        // has its outer whitespace stripped; if it starts with `'` or `"` the
+        // key is quoted and must be decoded rather than emitted as Plain.
+        let key_is_quoted = matches!(key_content.as_bytes().first(), Some(b'"' | b'\''));
+
+        // Consume the physical line, then (if inline value content exists)
         // prepend one synthetic line for the value.  The key is returned
         // directly in the ConsumedMapping variant — not via a synthetic line —
         // so that the caller can push a Scalar event without routing through
         // try_consume_plain_scalar (which would incorrectly treat the value
         // synthetic line as a plain-scalar continuation).
         self.lexer.consume_line();
+
+        // If the key is quoted, decode it now using the lexer's existing
+        // quoted-scalar methods.  We prepend a synthetic line containing only
+        // the key text (including the surrounding quote characters) so the
+        // method can parse it normally, then discard the synthetic line.
+        //
+        // libfyaml (fy-parse.c, fy_attach_comments_if_any / token scanner):
+        // all scalar tokens — quoted or plain — flow through the same token
+        // queue; the *scanner* decodes the scalar at the token level before
+        // the parser ever sees it.  We replicate that by decoding quoted keys
+        // here, at the point where we know the key is quoted.
+        let (decoded_key, key_style) = if key_is_quoted {
+            let key_synthetic = Line {
+                content: key_content,
+                offset: key_start_pos.byte_offset,
+                indent: leading_spaces,
+                break_type: line_break_type,
+                pos: key_start_pos,
+            };
+            self.lexer.prepend_inline_line(key_synthetic);
+
+            if key_content.starts_with('\'') {
+                match self.lexer.try_consume_single_quoted(0) {
+                    Ok(Some((value, _))) => (value, ScalarStyle::SingleQuoted),
+                    Ok(None) => {
+                        return ConsumedMapping::QuotedKeyError {
+                            pos: key_start_pos,
+                            message: "single-quoted key could not be parsed".into(),
+                        };
+                    }
+                    Err(e) => {
+                        return ConsumedMapping::QuotedKeyError {
+                            pos: e.pos,
+                            message: e.message,
+                        };
+                    }
+                }
+            } else {
+                match self.lexer.try_consume_double_quoted(None) {
+                    Ok(Some((value, _))) => (value, ScalarStyle::DoubleQuoted),
+                    Ok(None) => {
+                        return ConsumedMapping::QuotedKeyError {
+                            pos: key_start_pos,
+                            message: "double-quoted key could not be parsed".into(),
+                        };
+                    }
+                    Err(e) => {
+                        return ConsumedMapping::QuotedKeyError {
+                            pos: e.pos,
+                            message: e.message,
+                        };
+                    }
+                }
+            }
+        } else {
+            (std::borrow::Cow::Borrowed(key_content), ScalarStyle::Plain)
+        };
 
         if !value_content.is_empty() {
             // Detect illegal inline implicit mapping: if the inline value itself
@@ -908,7 +970,8 @@ impl<'input> EventIter<'input> {
         }
 
         ConsumedMapping::ImplicitKey {
-            key_value: key_content,
+            key_value: decoded_key,
+            key_style,
             key_span,
         }
     }
@@ -1010,15 +1073,19 @@ enum ConsumedMapping<'input> {
     /// `try_consume_plain_scalar` — which would treat the adjacent value
     /// synthetic line as a plain-scalar continuation.
     ImplicitKey {
-        /// The key text slice (borrows input).
-        key_value: &'input str,
-        /// Span covering the key text.
+        /// The decoded key value (may be owned if escapes were resolved).
+        key_value: std::borrow::Cow<'input, str>,
+        /// The scalar style of the key (`Plain`, `SingleQuoted`, or `DoubleQuoted`).
+        key_style: ScalarStyle,
+        /// Span covering the key text (including quotes if quoted).
         key_span: Span,
     },
     /// The inline value of an implicit key itself contained a value indicator,
     /// making it an illegal inline block mapping (e.g. `a: b: c` or `a: 'b': c`).
     /// The error position points to the start of the inline value content.
     InlineImplicitMappingError { pos: Pos },
+    /// A quoted implicit key could not be decoded (e.g. bad escape sequence).
+    QuotedKeyError { pos: Pos, message: String },
 }
 
 /// True when `trimmed` (content after stripping leading spaces) represents
@@ -3017,18 +3084,23 @@ impl<'input> EventIter<'input> {
             }
             ConsumedMapping::ImplicitKey {
                 key_value,
+                key_style,
                 key_span,
             } => {
                 self.queue.push_back((
                     Event::Scalar {
-                        value: std::borrow::Cow::Borrowed(key_value),
-                        style: ScalarStyle::Plain,
+                        value: key_value,
+                        style: key_style,
                         anchor: self.pending_anchor.take(),
                         tag: self.pending_tag.take(),
                     },
                     key_span,
                 ));
                 self.advance_mapping_to_value();
+            }
+            ConsumedMapping::QuotedKeyError { pos, message } => {
+                self.failed = true;
+                return StepResult::Yield(Err(Error { pos, message }));
             }
             ConsumedMapping::InlineImplicitMappingError { pos } => {
                 // The inline value is a block node (mapping or sequence indicator)
