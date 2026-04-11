@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [ ] #6 — loader.rs helper extraction (Tasks 7-9)
+- [~] #6 — loader.rs helper extraction (Tasks 7-9) — Task 7 done (2ac29d0), Tasks 8-9 pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -178,17 +178,17 @@ Migrate all test groups for `try_consume_literal_block_scalar` (Task 8) from `sr
   - **test-engineer input gate:** consult before implementing — task introduces a new test file for a previously-untested module (triggers the risk-assessment rule on both "new test file establishes testing pattern" and "modified code has no existing test coverage")
   - **test-engineer output gate:** get sign-off on the completed test list before submitting to reviewer
 
-### Task 7: extract loader/stream.rs (#6)
+### Task 7: extract loader/stream.rs (#6) — 2ac29d0
 
 Move the four stream-helper functions from `src/loader.rs` into a new `src/loader/stream.rs` submodule. None of these functions touch `LoadState` — they take `EventStream` references. Pure move.
 
 **Files:** `src/loader.rs`, `src/loader/stream.rs` (new)
 
-- [ ] Create `src/loader/stream.rs`
-- [ ] Move `next_from` (`loader.rs:666`), `consume_leading_doc_comments` (`loader.rs:689`), `consume_leading_comments` (`loader.rs:711`), `peek_trailing_comment` (`loader.rs:730`)
-- [ ] Add `mod stream;` declaration in `loader.rs`; update internal call sites to use `stream::fn_name` or bring into scope with `use`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move
+- [x] Create `src/loader/stream.rs`
+- [x] Move `next_from` (`loader.rs:666`), `consume_leading_doc_comments` (`loader.rs:689`), `consume_leading_comments` (`loader.rs:711`), `peek_trailing_comment` (`loader.rs:730`)
+- [x] Add `mod stream;` declaration in `loader.rs`; update internal call sites to use `stream::fn_name` or bring into scope with `use`
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure move
 
 ### Task 8: extract loader/reloc.rs (#6)
 
