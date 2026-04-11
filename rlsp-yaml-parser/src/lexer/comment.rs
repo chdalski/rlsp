@@ -5,7 +5,8 @@ use memchr::memchr;
 use crate::error::Error;
 use crate::pos::{Pos, Span};
 
-use super::{Lexer, pos_after_line};
+use super::Lexer;
+use crate::lines::pos_after_line;
 
 impl<'input> Lexer<'input> {
     /// Try to consume the next line as a comment.

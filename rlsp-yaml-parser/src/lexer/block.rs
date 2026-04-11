@@ -7,7 +7,8 @@ use crate::event::Chomp;
 use crate::lines::BreakType;
 use crate::pos::{Pos, Span};
 
-use super::{Lexer, pos_after_line};
+use super::Lexer;
+use crate::lines::pos_after_line;
 
 /// Return type of [`Lexer::try_consume_literal_block_scalar`].
 ///

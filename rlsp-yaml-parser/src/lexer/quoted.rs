@@ -8,7 +8,8 @@ use crate::chars::{decode_escape, is_c_printable};
 use crate::error::Error;
 use crate::pos::{Pos, Span};
 
-use super::{Lexer, is_doc_marker_line, pos_after_line};
+use super::{Lexer, is_doc_marker_line};
+use crate::lines::pos_after_line;
 
 impl<'input> Lexer<'input> {
     /// Try to tokenize a single-quoted scalar starting at the current line.

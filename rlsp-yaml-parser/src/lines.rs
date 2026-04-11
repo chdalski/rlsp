@@ -369,15 +369,25 @@ impl<'input> LineBuffer<'input> {
     }
 }
 
-/// Compute the `Pos` at the start of the line after `line` (O(1)).
+/// Compute the `Pos` immediately after the terminator of `line`.
 ///
-/// The next line starts at `byte_offset = line.offset + content.len() + terminator.len()`,
-/// `line` incremented by one, and `column` reset to 0.  No character walk needed.
-const fn pos_after_line(line: &Line<'_>) -> Pos {
-    Pos {
-        byte_offset: line.offset + line.content.len() + line.break_type.byte_len(),
-        line: line.pos.line + 1,
-        column: 0,
+/// O(1) for `Lf`/`Cr`/`CrLf` — the next line is at `line+1, column=0`.
+/// O(content) for `Eof` — the final line has no terminator, so position stays
+/// on the same line; column advances by the char count of the content via the
+/// ASCII fast path in [`crate::pos::column_at`].
+pub fn pos_after_line(line: &Line<'_>) -> Pos {
+    let byte_offset = line.offset + line.content.len() + line.break_type.byte_len();
+    match line.break_type {
+        BreakType::Eof => Pos {
+            byte_offset,
+            line: line.pos.line,
+            column: line.pos.column + crate::pos::column_at(line.content, line.content.len()),
+        },
+        BreakType::Lf | BreakType::Cr | BreakType::CrLf => Pos {
+            byte_offset,
+            line: line.pos.line + 1,
+            column: 0,
+        },
     }
 }
 
@@ -1013,5 +1023,237 @@ mod tests {
         assert_eq!(lines.first().map(|l| l.content), Some("  a"));
         assert_eq!(lines.get(1).map(|l| l.content), Some(""));
         assert_eq!(lines.get(2).map(|l| l.content), Some("  b"));
+    }
+
+    // -----------------------------------------------------------------------
+    // pos_after_line
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pos_after_line_lf_ascii() {
+        let line = Line {
+            content: "hello",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::Lf,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 6);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_lf_empty_content() {
+        let line = Line {
+            content: "",
+            offset: 10,
+            indent: 0,
+            break_type: BreakType::Lf,
+            pos: Pos {
+                byte_offset: 10,
+                line: 3,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 11);
+        assert_eq!(result.line, 4);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_lf_multibyte() {
+        let line = Line {
+            content: "日本",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::Lf,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 7); // 6 bytes + 1 for \n
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_cr_ascii() {
+        let line = Line {
+            content: "abc",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::Cr,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 4);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_cr_empty_content() {
+        let line = Line {
+            content: "",
+            offset: 5,
+            indent: 0,
+            break_type: BreakType::Cr,
+            pos: Pos {
+                byte_offset: 5,
+                line: 2,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 6);
+        assert_eq!(result.line, 3);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_crlf_ascii() {
+        let line = Line {
+            content: "key: val",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::CrLf,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 10);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_crlf_empty_content() {
+        let line = Line {
+            content: "",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::CrLf,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 2);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_eof_empty_content() {
+        let line = Line {
+            content: "",
+            offset: 20,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: 20,
+                line: 5,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 20);
+        assert_eq!(result.line, 5);
+        assert_eq!(result.column, 0);
+    }
+
+    #[test]
+    fn pos_after_line_eof_ascii() {
+        let line = Line {
+            content: "last",
+            offset: 10,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: 10,
+                line: 3,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 14);
+        assert_eq!(result.line, 3);
+        assert_eq!(result.column, 4);
+    }
+
+    #[test]
+    fn pos_after_line_eof_ascii_nonzero_start_column() {
+        let line = Line {
+            content: "end",
+            offset: 7,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: 7,
+                line: 2,
+                column: 5,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 10);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.column, 8);
+    }
+
+    #[test]
+    fn pos_after_line_eof_multibyte() {
+        let line = Line {
+            content: "日本語",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 9);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 3);
+    }
+
+    #[test]
+    fn pos_after_line_eof_mixed_content() {
+        let line = Line {
+            content: "ab日",
+            offset: 0,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+        };
+        let result = pos_after_line(&line);
+        assert_eq!(result.byte_offset, 5);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 3);
     }
 }

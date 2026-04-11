@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use crate::error::Error;
-use crate::lines::{Line, LineBuffer};
+use crate::lines::{Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
 
 mod block;
@@ -495,15 +495,6 @@ pub fn is_marker(content: &str, ch: u8) -> bool {
 /// Used to detect forbidden markers inside multi-line quoted scalars.
 pub fn is_doc_marker_line(content: &str) -> bool {
     is_marker(content, b'-') || is_marker(content, b'.')
-}
-
-/// Compute the `Pos` immediately after the terminator of `line`.
-pub fn pos_after_line(line: &Line<'_>) -> Pos {
-    let mut pos = line.pos;
-    for ch in line.content.chars() {
-        pos = pos.advance(ch);
-    }
-    line.break_type.advance(pos)
 }
 
 // ---------------------------------------------------------------------------

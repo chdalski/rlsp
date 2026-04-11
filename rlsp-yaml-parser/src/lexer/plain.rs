@@ -7,8 +7,9 @@ use crate::error::Error;
 use crate::lines::LineBuffer;
 use crate::pos::{Pos, Span};
 
-use super::{Lexer, is_blank_or_comment, is_marker, pos_after_line};
+use super::{Lexer, is_blank_or_comment, is_marker};
 use crate::chars::{is_c_indicator, is_ns_char};
+use crate::lines::pos_after_line;
 
 impl<'input> Lexer<'input> {
     /// Try to tokenize a plain scalar starting at the current line.
