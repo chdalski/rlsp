@@ -86,7 +86,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
-- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Tasks 12-14 pending
+- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Tasks 13-14 pending
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
@@ -288,17 +288,17 @@ Move the `DirectiveScope` struct (`src/lib.rs:142`) and its impl block (`lib.rs:
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none
 
-### Task 12: extract state-machine enums into state.rs (#4a-iii)
+### Task 12: extract state-machine enums into state.rs (#4a-iii) — 7b04cd0
 
 Move the state-machine type definitions from `src/lib.rs:242-401` into a new `src/state.rs` module: `StepResult`, `IterState`, `MappingPhase`, `CollectionEntry` + `impl CollectionEntry`, `FlowMappingPhase`, and the `ConsumedMapping` enum at `lib.rs:1061-1088`.
 
 **Files:** `src/lib.rs`, `src/state.rs` (new)
 
-- [ ] Create `src/state.rs`
-- [ ] Move `StepResult`, `IterState`, `MappingPhase`, `CollectionEntry`, `impl CollectionEntry`, `FlowMappingPhase`, `ConsumedMapping`
-- [ ] Add `mod state;` declaration in `lib.rs`; update all internal references (there will be many — the `impl EventIter` blocks match these enums frequently)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move but wide touch surface; careful with imports
+- [x] Create `src/state.rs`
+- [x] Move `StepResult`, `IterState`, `MappingPhase`, `CollectionEntry`, `impl CollectionEntry`, `FlowMappingPhase`, `ConsumedMapping`
+- [x] Add `mod state;` declaration in `lib.rs`; update all internal references (there will be many — the `impl EventIter` blocks match these enums frequently)
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure move but wide touch surface; careful with imports
 
 ### Task 13: extract tag and anchor scanning into properties.rs (#4a-iv)
 
