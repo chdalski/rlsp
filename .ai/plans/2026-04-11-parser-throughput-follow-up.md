@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-11
 
 # rlsp-yaml-parser throughput follow-up
@@ -318,8 +318,8 @@ branch, matching today's behaviour.
 
 ## Steps
 
-- [ ] Task 1 — deduplicate `pos_after_line` with an Eof-safe
-      fast path
+- [x] Task 1 — deduplicate `pos_after_line` with an Eof-safe
+      fast path — `32a2809`
 - [ ] Task 2 — eliminate end-of-span char walks via
       `pos::advance_within_line`
 - [ ] Task 3 — collapse the scalar try-chain into a
@@ -358,34 +358,34 @@ pub fn pos_after_line(line: &Line<'_>) -> Pos {
 }
 ```
 
-- [ ] Promote `pos_after_line` in `src/lines.rs` from
+- [x] Promote `pos_after_line` in `src/lines.rs` from
   `const fn` private helper to `pub(crate) fn` with the
   Eof-aware implementation above.
-- [ ] Delete the O(n) `pos_after_line` and its `pub` export
+- [x] Delete the O(n) `pos_after_line` and its `pub` export
   from `src/lexer.rs`.
-- [ ] Update imports in `src/lexer.rs`,
+- [x] Update imports in `src/lexer.rs`,
   `src/lexer/block.rs`, `src/lexer/comment.rs`,
   `src/lexer/plain.rs`, `src/lexer/quoted.rs` to use
   `crate::lines::pos_after_line`.
-- [ ] Verify the internal `LineBuffer::prime` and
+- [x] Verify the internal `LineBuffer::prime` and
   `peek_until_dedent` call sites in `src/lines.rs` still
   use the promoted helper (they should — one helper, one
   definition).
-- [ ] Add unit tests in `src/lines.rs` pinning
+- [x] Add unit tests in `src/lines.rs` pinning
   `pos_after_line` output for each `BreakType` variant
   (Lf, Cr, CrLf, Eof) across ASCII-only, multi-byte, and
   empty-content lines. These are regression guards for
   the Eof branch — the only case whose behaviour
   materially differs from the previous lexer helper.
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml-parser` (including the
   conformance suite) all green.
-- [ ] `cargo bench -p rlsp-yaml-parser --bench throughput`;
+- [x] `cargo bench -p rlsp-yaml-parser --bench throughput`;
   compare medians against the baseline in
   `docs/benchmarks.md`; confirm no fixture regresses.
-- [ ] Update `docs/benchmarks.md` with the new numbers.
-- [ ] Commit: `perf(parser): unify pos_after_line with
-  Eof-safe O(1) fast path`.
+- [x] Update `docs/benchmarks.md` with the new numbers.
+- [x] Commit: `perf(parser): unify pos_after_line with
+  Eof-safe O(1) fast path` — `32a2809`.
 
 **Reference impl consultation:**
 1. `src/lines.rs:376` — the pre-existing const fn that
