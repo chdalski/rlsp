@@ -89,6 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -451,6 +452,94 @@ Move the block-mapping handlers into `src/event_iter/block/mapping.rs`. This is 
 - [x] `cargo fmt`, `cargo clippy --all-targets` — zero warnings; `cargo test -p rlsp-yaml-parser` — 455 unit + 529 smoke + 21 unicode + 3 doc tests + supporting suites green; `cargo test --test conformance` — 368/368
 - [x] **Advisors:** none consulted — pure move, no logic changes, no new code paths, no behaviour change
 
+### Task 23b: relocate `src/properties.rs` → `src/event_iter/properties.rs` (#4c)
+
+Pure relocation of the `properties` module into the `event_iter/` subtree. The four functions (`scan_anchor_name`, `scan_tag`, `scan_tag_suffix`, `is_valid_tag_handle`) were extracted from `lib.rs` in Task 13 before `event_iter/` existed as a directory, so the module sits at crate root despite every caller living in `event_iter/`. Audit confirms: only `event_iter/step.rs`, `event_iter/flow.rs`, `event_iter/directives.rs` import from `crate::properties`.
+
+**Files:** `src/properties.rs` → `src/event_iter/properties.rs` (move), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/step.rs`, `src/event_iter/flow.rs`, `src/event_iter/directives.rs`
+
+- [ ] `git mv src/properties.rs src/event_iter/properties.rs`
+- [ ] Remove `mod properties;` from `src/lib.rs`
+- [ ] Add `pub(crate) mod properties;` to `src/event_iter.rs`
+- [ ] Update `use crate::properties::...` → `use super::properties::...` in `event_iter/step.rs`, `event_iter/flow.rs`, `event_iter/directives.rs`
+- [ ] Narrow the four functions' visibility to `pub(in crate::event_iter) fn` — they have no callers outside `event_iter/`, so the tightening is safe at this point
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 expected
+- [ ] **Advisors:** none — pure relocation, low risk, low uncertainty
+
+### Task 23c: add unit tests for `event_iter/properties.rs` (#4c — follow-up)
+
+Create `#[cfg(test)] mod tests` in `src/event_iter/properties.rs` with unit-level coverage for the four functions. Follows the Task 6/7b/8b/9b precedent — the module currently has no direct unit tests; coverage is only via `tests/smoke.rs` integration tests (including Task 27's 16 `verbatim_tag_uri_*` cases). `scan_tag` is a trust boundary (verbatim-tag URI parsing against untrusted input), so test-engineer may route to security-engineer at the input gate.
+
+**Files:** `src/event_iter/properties.rs`
+
+- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
+- [ ] Coverage for `scan_anchor_name`: valid anchor names; empty anchor indicator; anchors longer than `MAX_ANCHOR_NAME_BYTES`; anchor terminators (space, tab, flow indicators, line break)
+- [ ] Coverage for `scan_tag`: shorthand `!foo`, `!!foo`, verbatim `!<uri>`; percent-encoded sequences; rejection cases aligned with Task 27's §6.8.1 tightening (spaces, non-URI chars, bare `%`, control chars); length limit; embedded close-delimiter behaviour
+- [ ] Coverage for `scan_tag_suffix`: scan length calculation for valid tag-char sequences
+- [ ] Coverage for `is_valid_tag_handle`: `!`, `!named!`, `!!`; invalid forms (missing trailing `!`, non-word-char content)
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [ ] **Advisors required:**
+  - **test-engineer input gate:** consult before implementing — new test file for previously-untested module (matches "new test file establishes testing pattern" and "modified code has no existing test coverage" triggers from risk-assessment rule). TE may route to security-engineer at this gate given `scan_tag` is a trust boundary
+  - **test-engineer output gate:** explicit sign-off on completed test list before submitting to reviewer
+- [ ] **Submission:** developer's handoff must cite both TE gates (and SE gates if invoked); reviewer rejects if any citation is missing
+
+### Task 23d: relocate `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (#4c)
+
+Pure relocation. `DirectiveScope` was extracted from `lib.rs` in Task 11 before `event_iter/` existed. Audit confirms only `event_iter/base.rs` and `event_iter/step.rs` import `crate::directive_scope::DirectiveScope`.
+
+**Files:** `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (move), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/base.rs`, `src/event_iter/step.rs`
+
+- [ ] `git mv src/directive_scope.rs src/event_iter/directive_scope.rs`
+- [ ] Remove `mod directive_scope;` from `src/lib.rs`
+- [ ] Add `pub(crate) mod directive_scope;` to `src/event_iter.rs`
+- [ ] Update `use crate::directive_scope::DirectiveScope` → `use super::directive_scope::DirectiveScope` (or `use crate::event_iter::directive_scope::DirectiveScope` in base.rs and step.rs, whichever is idiomatic for the submodule depth)
+- [ ] Narrow the `DirectiveScope` type + methods to `pub(in crate::event_iter)` where possible — check that the struct is not exposed across the crate root (it is not referenced outside event_iter after this move)
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
+- [ ] **Advisors:** none — pure relocation
+
+### Task 23e: add unit tests for `event_iter/directive_scope.rs` (#4c — follow-up)
+
+Create `#[cfg(test)] mod tests` in `src/event_iter/directive_scope.rs`. The module currently has no unit tests — same coverage gap as properties.rs. Follows the Task 6/7b/8b/9b/23c precedent.
+
+**Files:** `src/event_iter/directive_scope.rs`
+
+- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
+- [ ] Coverage for `resolve_tag`: primary handle `!`, named handles `!foo!`, secondary handle `!!`, verbatim tags, unknown handles, empty suffix, oversized resolved tag against `MAX_RESOLVED_TAG_LEN`
+- [ ] Coverage for `tag_directives`: returns the directive map; interaction with `%TAG` handle registration (if the struct exposes a registration method — confirm against current API)
+- [ ] Coverage for scope lifecycle: fresh scope has no handles; registering a handle and resolving against it; scope reset between documents
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [ ] **Advisors required:** test-engineer input + output gates — new test file for previously-untested module; follows 23c precedent
+
+### Task 23f: relocate `src/state.rs` → `src/event_iter/state.rs` (#4c)
+
+Pure relocation. The state-machine types (`StepResult`, `IterState`, `MappingPhase`, `CollectionEntry`, `FlowMappingPhase`, `ConsumedMapping`, `PendingAnchor`, `PendingTag`) were extracted in Task 12 before `event_iter/` existed. Audit confirms consumers are all event_iter submodules: `base.rs`, `directives.rs`, `flow.rs`, `step.rs`, `block/sequence.rs`, `block/mapping.rs`. **The existing `#[cfg(test)] mod tests` block at `state.rs:158` migrates alongside the code.**
+
+**Files:** `src/state.rs` → `src/event_iter/state.rs` (move), `src/lib.rs`, `src/event_iter.rs`, all `event_iter/*.rs` that import `crate::state::...`
+
+- [ ] `git mv src/state.rs src/event_iter/state.rs`
+- [ ] Remove `mod state;` from `src/lib.rs`
+- [ ] Add `pub(crate) mod state;` to `src/event_iter.rs`
+- [ ] Update `use crate::state::...` → `use super::state::...` (or equivalent) in all six event_iter consumers
+- [ ] Narrow types to `pub(in crate::event_iter)` where the surface is not referenced outside event_iter (most — if not all — should qualify)
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
+- [ ] **Advisors:** none — pure relocation; existing tests migrate unchanged
+
+### Task 23g: relocate and rename `src/mapping.rs` → `src/event_iter/line_mapping.rs` (#4c)
+
+Pure relocation combined with a rename. The line-level mapping-key helpers (`is_implicit_mapping_line`, `is_tab_indented_block_indicator`, `inline_contains_mapping_key`, `find_value_indicator_offset`) were extracted in Task 14 before `event_iter/` existed. Audit confirms only event_iter submodules import `crate::mapping`: `step.rs`, `block/sequence.rs`, `block/mapping.rs`. **The existing `#[cfg(test)] mod tests` block at `mapping.rs:174` migrates alongside.**
+
+**Rename rationale:** the plan's original decision *"Two `mapping.rs` files coexist — renaming rejected as cosmetic churn"* was made before the single-consumer audit. The new context (module is exclusive to `event_iter/`) reverses that decision: placing the module under `event_iter/` while named `mapping.rs` would create `event_iter/mapping.rs` + `event_iter/block/mapping.rs` side-by-side, which is worse than the current split, not better. Renaming to `line_mapping.rs` disambiguates explicitly — the module contains *line-level* mapping-key detection, whereas `block/mapping.rs` contains the *block-mapping state machine*. See superseding Decisions entry.
+
+**Files:** `src/mapping.rs` → `src/event_iter/line_mapping.rs` (move + rename), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/step.rs`, `src/event_iter/block/sequence.rs`, `src/event_iter/block/mapping.rs`
+
+- [ ] `git mv src/mapping.rs src/event_iter/line_mapping.rs`
+- [ ] Remove `mod mapping;` from `src/lib.rs`
+- [ ] Add `pub(crate) mod line_mapping;` to `src/event_iter.rs`
+- [ ] Update `use crate::mapping::...` → `use super::line_mapping::...` (or equivalent absolute path) in the three event_iter consumers
+- [ ] Narrow functions to `pub(in crate::event_iter)` where possible
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
+- [ ] **Advisors:** none — pure relocation + rename; existing tests migrate unchanged
+
 ### Task 24: clean docs/benchmarks.md to current-state-only snapshot (#8)
 
 Remove all historical content from `rlsp-yaml-parser/docs/benchmarks.md`: PEG-parser comparisons (acceptance proof for completed Task 22 of `2026-04-07-streaming-parser-rewrite.md`), Lazy Pos before/after tables (acceptance proof for completed `2026-04-10-unicode-position-safety-and-lazy-pos.md`), byte-level scanning before/after tables (acceptance proof for completed `2026-04-10-byte-level-scanning-and-memchr.md`), and the "Latest update" framing that treats the doc as a diff-over-time artifact. Result: a snapshot of current rlsp-yaml-parser vs libfyaml performance with environment, methodology, fixtures, current measurements, and forward-looking analysis of current behaviour.
@@ -555,7 +644,9 @@ Close the spec-conformance gap in `scan_tag` (`lib.rs:1355-1363` — will move d
 - **chars.rs cleanup split into two tasks (C1 and C2).** C1 is a pure refactor (delete unused, de-duplicate, remove allow); C2 is a behaviour change that closes a spec gap. Bundling them would conflate refactoring with a trust-boundary change. C2 is deferred to end-of-plan so advisor consultation happens when the rest of the codebase is stable.
 - **`flow.rs` stays as one 1,310-line file.** The in-code design note at `lib.rs:3245-3253` explicitly rejects helper-extraction refactors for `handle_flow_collection`. Overriding that note is out of scope for this plan.
 - **`block` submodule uses nested folder structure.** `event_iter/block.rs` + `event_iter/block/sequence.rs` + `event_iter/block/mapping.rs` rather than `event_iter/block_sequence.rs` + `event_iter/block_mapping.rs`. The path hierarchy disambiguates the two `mapping.rs` files (`src/mapping.rs` at crate root for line-scanning helpers, `src/event_iter/block/mapping.rs` for block-mapping state-machine methods).
-- **Two `mapping.rs` files coexist** — Rust paths disambiguate them and the hierarchy makes the distinction obvious. Renaming either was considered and rejected as cosmetic churn.
+- **Two `mapping.rs` files coexist** — Rust paths disambiguate them and the hierarchy makes the distinction obvious. Renaming either was considered and rejected as cosmetic churn. **Superseded 2026-04-11 by the Task 23g decision below.**
+- **Task 23g — `src/mapping.rs` renamed to `line_mapping.rs` and relocated to `event_iter/` (supersedes the two-mapping-rs decision above).** After Task 23 completed, an audit of crate-root modules for "used only by event_iter" affiliation identified four candidates (properties, directive_scope, state, mapping). For `mapping.rs` specifically, simply moving it under `event_iter/` would produce `event_iter/mapping.rs` + `event_iter/block/mapping.rs` side-by-side — worse than the current crate-root/submodule split, not better. Renaming to `line_mapping.rs` disambiguates by what the module actually contains: line-level mapping-key detection vs. block-mapping state machine. The original "cosmetic churn" concern no longer applies because the single-consumer context makes the relocation valuable in its own right and the rename is a logical corollary of the move, not a standalone cosmetic change.
+- **Tasks 23b/23c/23d/23e/23f/23g added mid-plan (2026-04-11).** After Task 23 completed, the user asked whether `src/properties.rs` should be part of `event_iter/` (since it's only referenced from there) and whether it had unit tests. Audit of all crate-root support modules revealed four "used only by event_iter" candidates: `properties.rs`, `directive_scope.rs`, `state.rs`, `mapping.rs`. The first two have no direct unit tests (same gap as `lexer/comment.rs` before Task 6, and `stream.rs`/`reloc.rs`/`comments.rs` before Tasks 7b/8b/9b); the latter two already have unit tests migrated in their originating tasks. Following the Task 6/7b/8b/9b precedent, each of the four gets a relocation task, and the two with coverage gaps get a follow-up test-creation task with test-engineer input + output gates. Plan grew from 30 → 36 tasks. Execution ordering: after Task 23 (event_iter/ split complete), before Task 24 (benchmarks cleanup): 23b → 23c → 23d → 23e → 23f → 23g → 24.
 - **loader.rs keeps `LoadState` intact.** The internal cohort of `LoadState` methods (`parse_node`, `register_anchor`, `resolve_alias`, `expand_node`) are tightly coupled; splitting them into sibling files would require `pub(super)` on every method and add file-hop friction without improving clarity. Only the three self-contained helper sections are extracted.
 - **EventIter Fix 4 (fold `root_node_emitted` into `IterState::InDocument`) declined.** After Fixes 1-3, the struct has 2 booleans (below clippy threshold); no warning to silence. Folding `root_node_emitted` into the state variant would require helper methods or `matches!` contamination at every read/write site. The philosophical win doesn't justify the practical noise, and it contradicts the project's demonstrated preference for "bool-with-a-comment" over "new-type-for-invariant" (`flow.rs` design note).
 - **Clippy allow is removed in Task 17.** Once `EventIter` drops to 2 booleans, `#[allow(clippy::struct_excessive_bools)]` at `lib.rs:315` becomes a no-op and is deleted. The removal is bundled with Task 17 rather than its own task because it is a mechanical consequence of the bool-count drop.
