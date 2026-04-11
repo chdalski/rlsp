@@ -14,7 +14,7 @@ thiserror = "2"
 
 [dev-dependencies]
 rstest = "0.26"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "throughput"
