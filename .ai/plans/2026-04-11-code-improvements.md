@@ -84,7 +84,7 @@ All three layers are preserved in their respective plan files and commit message
 
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
-- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 pending
+- [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
@@ -161,20 +161,20 @@ Migrate all test groups for `try_consume_literal_block_scalar` (Task 8) from `sr
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure test move + new test module scaffolding
 
-### Task 6: add unit tests for lexer/comment.rs (#3d — new)
+### Task 6: add unit tests for lexer/comment.rs (#3d — new) — 082c565
 
 `lexer/comment.rs` is a single-method file (`Lexer::try_consume_comment`) with no unit-test coverage. This task adds a `#[cfg(test)] mod tests` module with unit tests covering the method's documented contract. This is NOT a test migration — these are new tests for previously-untested code.
 
 **Files:** `src/lexer/comment.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` in `lexer/comment.rs`
-- [ ] Happy-path coverage: simple `# hello` comment → text + span; indented comment with leading spaces/tabs; empty comment body (`#` alone); comment with leading whitespace after `#` preserved per doc; multi-byte UTF-8 in comment body
-- [ ] `None` cases: empty input; blank line; content line like `key: value`; directive line `%YAML 1.2`
-- [ ] Span correctness: `hash_pos` byte offset, line, column accurate including after leading whitespace; span end is after the last content char, not after newline
-- [ ] Error path: body exceeds `max_comment_len` → `Err` with `hash_pos`
-- [ ] State effect: successful consume advances `current_pos` past the line (verify via subsequent `peek_next()`)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors required:**
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` in `lexer/comment.rs`
+- [x] Happy-path coverage: simple `# hello` comment → text + span; indented comment with leading spaces/tabs; empty comment body (`#` alone); comment with leading whitespace after `#` preserved per doc; multi-byte UTF-8 in comment body
+- [x] `None` cases: empty input; blank line; content line like `key: value`; directive line `%YAML 1.2`
+- [x] Span correctness: `hash_pos` byte offset, line, column accurate including after leading whitespace; span end is after the last content char, not after newline
+- [x] Error path: body exceeds `max_comment_len` → `Err` with `hash_pos`
+- [x] State effect: successful consume advances `current_pos` past the line (verify via subsequent `peek_next()`)
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors required:**
   - **test-engineer input gate:** consult before implementing — task introduces a new test file for a previously-untested module (triggers the risk-assessment rule on both "new test file establishes testing pattern" and "modified code has no existing test coverage")
   - **test-engineer output gate:** get sign-off on the completed test list before submitting to reviewer
 
