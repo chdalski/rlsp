@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4)
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -485,19 +485,19 @@ Create `#[cfg(test)] mod tests` in `src/event_iter/properties.rs` with unit-leve
   - **security-engineer output gate:** sign-off granted — satisfied
 - [x] **Submission:** all four advisor gates cited in handoff; reviewer verified completeness. One review round-trip: reviewer rejected first submission for two Medium findings (missing embedded close-delimiter test + stale loop comment at properties.rs:89-97; duplicate test `scan_tag_verbatim_rejects_percent_one_digit_at_buffer_end`); developer resolved both on resubmission
 
-### Task 23d: relocate `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (#4c)
+### Task 23d: relocate `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (#4c) — 01a4f3d
 
 Pure relocation. `DirectiveScope` was extracted from `lib.rs` in Task 11 before `event_iter/` existed. Audit confirms only `event_iter/base.rs` and `event_iter/step.rs` import `crate::directive_scope::DirectiveScope`.
 
 **Files:** `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (move), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/base.rs`, `src/event_iter/step.rs`
 
-- [ ] `git mv src/directive_scope.rs src/event_iter/directive_scope.rs`
-- [ ] Remove `mod directive_scope;` from `src/lib.rs`
-- [ ] Add `pub(crate) mod directive_scope;` to `src/event_iter.rs`
-- [ ] Update `use crate::directive_scope::DirectiveScope` → `use super::directive_scope::DirectiveScope` (or `use crate::event_iter::directive_scope::DirectiveScope` in base.rs and step.rs, whichever is idiomatic for the submodule depth)
-- [ ] Narrow the `DirectiveScope` type + methods to `pub(in crate::event_iter)` where possible — check that the struct is not exposed across the crate root (it is not referenced outside event_iter after this move)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors:** none — pure relocation
+- [x] `git mv src/directive_scope.rs src/event_iter/directive_scope.rs`
+- [x] Remove `mod directive_scope;` from `src/lib.rs`
+- [x] Add `pub(crate) mod directive_scope;` to `src/event_iter.rs` — used plain `mod directive_scope;` plus `pub use directive_scope::DirectiveScope;` (clippy rejects `pub(super)` inside the already-crate-private `event_iter` module as redundant; matches the Task 23b precedent for `mod properties;`)
+- [x] Update `use crate::directive_scope::DirectiveScope` → `use super::directive_scope::DirectiveScope` in `event_iter/base.rs` and `event_iter/step.rs`; `lib.rs` updated to `use event_iter::DirectiveScope`
+- [x] Narrow the `DirectiveScope` type + methods to `pub(in crate::event_iter)` where possible — fields (`version`, `tag_handles`, `directive_count`) and methods (`resolve_tag`, `tag_directives`) narrowed to `pub(in crate::event_iter)`. The struct itself remains `pub` because `EventIter` in `lib.rs:103` still declares a `directive_scope: DirectiveScope` field; the plan's original assumption that "the struct is not referenced outside event_iter after this move" was inaccurate. The `pub use` in the private `event_iter` module keeps the type reachable at `event_iter::DirectiveScope` without exposing it beyond the crate.
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — all green; 368/368 conformance, zero clippy warnings
+- [x] **Advisors:** none — pure relocation
 
 ### Task 23e: add unit tests for `event_iter/directive_scope.rs` (#4c — follow-up)
 
