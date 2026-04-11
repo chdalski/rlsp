@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::event::{Event, ScalarStyle};
 use crate::pos::{Pos, Span};
+use std::borrow::Cow;
 
 /// Outcome of one state-machine step inside [`crate::EventIter::next`].
 pub enum StepResult<'input> {
@@ -101,6 +102,30 @@ impl<'input> PendingAnchor<'input> {
     }
 }
 
+/// Disposition of a pending tag before it's attached to a node event.
+///
+/// Parallel to [`PendingAnchor`] but for tags. Tags in YAML precede the
+/// node they annotate. The disposition determines which node the tag
+/// annotates:
+///
+/// - `Standalone`: tag was on its own line (`!!seq\n- item`) — annotates
+///   the next node regardless of type (collection or scalar).
+/// - `Inline`: tag was inline with key content (`!!str key: value`) —
+///   annotates the key scalar, not the enclosing mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingTag<'input> {
+    Standalone(Cow<'input, str>),
+    Inline(Cow<'input, str>),
+}
+
+impl<'input> PendingTag<'input> {
+    pub fn into_cow(self) -> Cow<'input, str> {
+        match self {
+            Self::Standalone(c) | Self::Inline(c) => c,
+        }
+    }
+}
+
 /// Result of consuming a mapping-entry line.
 pub enum ConsumedMapping<'input> {
     /// Explicit key (`? key`).
@@ -132,7 +157,8 @@ pub enum ConsumedMapping<'input> {
 
 #[cfg(test)]
 mod tests {
-    use super::PendingAnchor;
+    use super::{PendingAnchor, PendingTag};
+    use std::borrow::Cow;
 
     // A-1: Standalone variant carries the anchor name.
     #[test]
@@ -157,5 +183,21 @@ mod tests {
         assert!(a.is_none());
         assert!(!matches!(a, Some(PendingAnchor::Standalone(_))));
         assert!(!matches!(a, Some(PendingAnchor::Inline(_))));
+    }
+
+    // T-1: Standalone variant carries the tag string.
+    #[test]
+    fn pending_tag_standalone_carries_value() {
+        let tag = PendingTag::Standalone(Cow::Borrowed("tag:yaml.org,2002:str"));
+        assert!(matches!(&tag, PendingTag::Standalone(c) if c.as_ref() == "tag:yaml.org,2002:str"));
+        assert_eq!(tag.into_cow().as_ref(), "tag:yaml.org,2002:str");
+    }
+
+    // T-2: Inline variant carries the tag string.
+    #[test]
+    fn pending_tag_inline_carries_value() {
+        let tag = PendingTag::Inline(Cow::Borrowed("!mytag"));
+        assert!(matches!(&tag, PendingTag::Inline(c) if c.as_ref() == "!mytag"));
+        assert_eq!(tag.into_cow().as_ref(), "!mytag");
     }
 }

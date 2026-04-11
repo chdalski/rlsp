@@ -32,7 +32,7 @@ use std::collections::VecDeque;
 use directive_scope::DirectiveScope;
 use state::{
     CollectionEntry, ConsumedMapping, FlowMappingPhase, IterState, MappingPhase, PendingAnchor,
-    StepResult,
+    PendingTag, StepResult,
 };
 
 use lexer::Lexer;
@@ -102,10 +102,11 @@ struct EventIter<'input> {
     /// - `!suffix` → stored as `Cow::Borrowed("!suffix")` (local tag, no expansion)
     /// - `!`       → stored as `Cow::Borrowed("!")`
     /// - `!handle!suffix` → resolved via `%TAG !handle! prefix` directive
-    pending_tag: Option<std::borrow::Cow<'input, str>>,
-    /// True when `pending_tag` was set from a standalone tag line (no inline
-    /// content after the tag).  False when set inline.
-    pending_tag_for_collection: bool,
+    ///
+    /// The [`PendingTag`] variant encodes both the resolved tag string and
+    /// whether it was standalone (applies to the next node of any type) or
+    /// inline (applies to the key scalar, not the enclosing mapping).
+    pending_tag: Option<PendingTag<'input>>,
     /// Directive scope for the current document.
     ///
     /// Accumulated from `%YAML` and `%TAG` directives seen in `BetweenDocs`
@@ -145,7 +146,6 @@ impl<'input> EventIter<'input> {
             failed: false,
             pending_anchor: None,
             pending_tag: None,
-            pending_tag_for_collection: false,
             directive_scope: DirectiveScope::default(),
             root_node_emitted: false,
             explicit_key_pending: false,
@@ -333,7 +333,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Literal(chomp),
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 span,
             )));
@@ -348,7 +348,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Folded(chomp),
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 span,
             )));
@@ -359,7 +359,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::SingleQuoted,
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 span,
             )));
@@ -407,7 +407,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::DoubleQuoted,
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 span,
             )));
@@ -423,7 +423,7 @@ impl<'input> EventIter<'input> {
                     value,
                     style: ScalarStyle::Plain,
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 span,
             )));
@@ -1475,13 +1475,14 @@ impl<'input> EventIter<'input> {
                         let inline_col = line_pos.column + leading + tag_token_bytes + spaces;
                         // Duplicate tags on the same node are an error.
                         // Exception: if the existing tag is collection-level
-                        // (pending_tag_for_collection=true) and the new tag has
-                        // inline content that is (or contains) a mapping key line,
-                        // they apply to different nodes (collection vs. key scalar).
+                        // (Standalone variant) and the new tag has inline content
+                        // that is (or contains) a mapping key line, they apply to
+                        // different nodes (collection vs. key scalar).
                         if self.pending_tag.is_some() {
-                            let is_different_node = self.pending_tag_for_collection
-                                && had_inline
-                                && inline_contains_mapping_key(inline);
+                            let is_different_node =
+                                matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
+                                    && had_inline
+                                    && inline_contains_mapping_key(inline);
                             if !is_different_node {
                                 self.failed = true;
                                 return StepResult::Yield(Err(Error {
@@ -1499,10 +1500,9 @@ impl<'input> EventIter<'input> {
                                     return StepResult::Yield(Err(e));
                                 }
                             };
-                        self.pending_tag = Some(resolved_tag);
                         self.lexer.consume_line();
                         if had_inline {
-                            self.pending_tag_for_collection = false;
+                            self.pending_tag = Some(PendingTag::Inline(resolved_tag));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
@@ -1533,7 +1533,6 @@ impl<'input> EventIter<'input> {
                             // Validate: the tag must be indented enough for this context.
                             let min = self.min_standalone_property_indent();
                             if line_indent < min {
-                                self.pending_tag = None;
                                 self.failed = true;
                                 return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
@@ -1542,7 +1541,7 @@ impl<'input> EventIter<'input> {
                                             .into(),
                                 }));
                             }
-                            self.pending_tag_for_collection = true;
+                            self.pending_tag = Some(PendingTag::Standalone(resolved_tag));
                         }
                         return StepResult::Continue;
                     }
@@ -1602,16 +1601,18 @@ impl<'input> EventIter<'input> {
                         // opener ([, {) or property (!, &) — both anchors apply to the
                         // same scalar node.
                         let amp_pos2 = amp_pos;
+                        let has_standalone_tag =
+                            matches!(self.pending_tag, Some(PendingTag::Standalone(_)));
                         let is_duplicate =
                             if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
-                                && !self.pending_tag_for_collection
+                                && !has_standalone_tag
                             {
                                 true
                             } else if matches!(
                                 self.pending_anchor,
                                 Some(PendingAnchor::Standalone(_))
                             ) && had_inline
-                                && !self.pending_tag_for_collection
+                                && !has_standalone_tag
                             {
                                 // The existing anchor is collection-level, but the new anchor
                                 // has inline content.  If that content is a mapping key line
@@ -1981,7 +1982,7 @@ impl<'input> EventIter<'input> {
             self.queue.push_back((
                 Event::SequenceStart {
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                     style: CollectionStyle::Block,
                 },
                 zero_span(dash_pos),
@@ -2002,7 +2003,7 @@ impl<'input> EventIter<'input> {
         // applies to an empty scalar for the previous item.  Emit it now before
         // processing the current `-`.
         if !opens_new
-            && (self.pending_tag_for_collection
+            && (matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
                 || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))))
             && (self.pending_tag.is_some() || self.pending_anchor.is_some())
         {
@@ -2012,11 +2013,10 @@ impl<'input> EventIter<'input> {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
                     anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take(),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 zero_span(item_pos),
             ));
-            self.pending_tag_for_collection = false;
         }
         // Check for tab-indented block structure before consuming the dash.
         // In YAML, tabs cannot be used for block-level indentation.  When the
@@ -2197,8 +2197,8 @@ impl<'input> EventIter<'input> {
                 } else {
                     None
                 };
-            let mapping_tag = if self.pending_tag_for_collection {
-                self.pending_tag.take()
+            let mapping_tag = if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
+                self.pending_tag.take().map(PendingTag::into_cow)
             } else {
                 None
             };
@@ -2225,7 +2225,7 @@ impl<'input> EventIter<'input> {
                 matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == effective_key_indent)
             });
             if in_key_phase
-                && !self.pending_tag_for_collection
+                && !matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
                 && !matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_)))
                 && (self.pending_tag.is_some() || self.pending_anchor.is_some())
             {
@@ -2235,7 +2235,7 @@ impl<'input> EventIter<'input> {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
                         anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                        tag: self.pending_tag.take(),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
                     },
                     zero_span(pos),
                 ));
@@ -2328,7 +2328,7 @@ impl<'input> EventIter<'input> {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
                             anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                            tag: self.pending_tag.take(),
+                            tag: self.pending_tag.take().map(PendingTag::into_cow),
                         },
                         zero_span(pos),
                     ));
@@ -2349,7 +2349,7 @@ impl<'input> EventIter<'input> {
                         value: key_value,
                         style: key_style,
                         anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                        tag: self.pending_tag.take(),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
                     },
                     key_span,
                 ));
@@ -2586,7 +2586,8 @@ impl<'input> EventIter<'input> {
         // Seeded from any block-context tag that was pending when this flow
         // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before
         // the `[` is dispatched to handle_flow_collection).
-        let mut pending_flow_tag: Option<std::borrow::Cow<'input, str>> = self.pending_tag.take();
+        let mut pending_flow_tag: Option<std::borrow::Cow<'input, str>> =
+            self.pending_tag.take().map(PendingTag::into_cow);
 
         // Re-sync `cur_content` / `cur_base_pos` from the buffer.
         // Returns false when the buffer is empty (EOF mid-flow).

@@ -8760,6 +8760,187 @@ mod tags {
     // deeper changes to the flow loop's has_value / emit logic and is tracked
     // as a follow-up task (out of Task 17 scope).
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Group J: PendingTag enum consolidation (Task 16)
+    // -----------------------------------------------------------------------
+
+    // T-3: Standalone tag on block sequence — SequenceStart carries the tag; scalar has none.
+    #[test]
+    fn standalone_tag_on_block_sequence_propagates_to_sequence_start() {
+        let events = evs("!!seq\n- a\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:seq"
+            )),
+            "SequenceStart must carry tag:yaml.org,2002:seq"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: None, value, .. } if value.as_ref() == "a"
+            )),
+            "sequence item scalar must have no tag"
+        );
+    }
+
+    // T-4: Inline tag on mapping key — MappingStart has no tag; key scalar carries the tag.
+    #[test]
+    fn inline_tag_on_mapping_key_annotates_key_scalar_not_mapping() {
+        let events = evs("!!str key: value\n");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::MappingStart { tag: None, .. })),
+            "MappingStart must have no tag when !!str is inline before key"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "key"
+            )),
+            "key scalar must carry tag:yaml.org,2002:str"
+        );
+    }
+
+    // T-5: Standalone tag on block mapping — MappingStart carries the tag; key scalar has none.
+    #[test]
+    fn standalone_tag_on_block_mapping_propagates_to_mapping_start() {
+        let events = evs("!!map\nkey: value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::MappingStart { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:map"
+            )),
+            "MappingStart must carry tag:yaml.org,2002:map"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: None, value, .. } if value.as_ref() == "key"
+            )),
+            "key scalar must have no tag"
+        );
+    }
+
+    // T-6: Verbatim tag passes through unchanged.
+    #[test]
+    fn verbatim_tag_passes_through_unchanged() {
+        let events = evs("!<tag:example.com/foo> value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "tag:example.com/foo" && value.as_ref() == "value"
+            )),
+            "verbatim tag must be preserved as-is on the scalar"
+        );
+    }
+
+    // T-7: Local tag preserved as-is.
+    #[test]
+    fn local_tag_preserved_as_is() {
+        let events = evs("!local value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "!local" && value.as_ref() == "value"
+            )),
+            "local tag !local must be preserved unchanged"
+        );
+    }
+
+    // T-8: Tag resolved via %TAG directive — Cow::Owned flows through enum variant correctly.
+    #[test]
+    fn tag_resolved_via_pct_tag_directive_cow_owned() {
+        let input = "%TAG !custom! tag:example.com/\n---\n!custom!foo value\n";
+        let events = evs(input);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "tag:example.com/foo" && value.as_ref() == "value"
+            )),
+            "resolved tag tag:example.com/foo must flow through PendingTag::Inline correctly"
+        );
+    }
+
+    // T-9: Tag cleared after use — second sequence item has no tag.
+    #[test]
+    fn tag_cleared_after_use_second_item_has_none() {
+        let events = evs("- !!str first\n- second\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "first"
+            )),
+            "first item must carry tag:yaml.org,2002:str"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: None, value, .. } if value.as_ref() == "second"
+            )),
+            "second item must have no tag"
+        );
+    }
+
+    // T-10: Tag on flow sequence — SequenceStart carries the tag with Flow style.
+    #[test]
+    fn tag_on_flow_sequence_propagates_to_sequence_start() {
+        let events = evs("!!seq [a, b]\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    tag: Some(t),
+                    style: CollectionStyle::Flow,
+                    ..
+                } if t.as_ref() == "tag:yaml.org,2002:seq"
+            )),
+            "SequenceStart for flow sequence must carry tag:yaml.org,2002:seq"
+        );
+    }
+
+    // T-11: Tag + anchor both on standalone collection — both propagate through distinct enums.
+    #[test]
+    fn tag_and_anchor_both_standalone_both_propagate_to_sequence_start() {
+        let input = "&myseq\n!!seq\n- a\n";
+        let events = evs(input);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    anchor: Some("myseq"),
+                    tag: Some(t),
+                    ..
+                } if t.as_ref() == "tag:yaml.org,2002:seq"
+            )),
+            "SequenceStart must carry both anchor myseq and tag:yaml.org,2002:seq"
+        );
+    }
+
+    // T-12: Inline tag + inline anchor on same scalar — both attached to the scalar.
+    #[test]
+    fn inline_tag_and_anchor_on_same_scalar_both_attached() {
+        let events = evs("!!str &a value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar {
+                    tag: Some(t),
+                    anchor: Some("a"),
+                    value,
+                    ..
+                } if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "value"
+            )),
+            "scalar must carry both tag:yaml.org,2002:str and anchor a"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
