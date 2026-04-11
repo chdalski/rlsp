@@ -17,7 +17,8 @@ mod comment;
 mod plain;
 mod quoted;
 
-pub use plain::{is_ns_char, scan_plain_line_flow};
+pub use crate::chars::is_ns_char;
+pub use plain::scan_plain_line_flow;
 
 use block::parse_block_header;
 use plain::scan_plain_line_block;

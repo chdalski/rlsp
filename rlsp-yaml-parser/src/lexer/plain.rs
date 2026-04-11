@@ -8,6 +8,7 @@ use crate::lines::LineBuffer;
 use crate::pos::{Pos, Span};
 
 use super::{Lexer, is_blank_or_comment, is_marker, pos_after_line};
+use crate::chars::{is_c_indicator, is_ns_char};
 
 impl<'input> Lexer<'input> {
     /// Try to tokenize a plain scalar starting at the current line.
@@ -520,47 +521,6 @@ pub fn scan_plain_line_flow(content: &str) -> &str {
     }
 
     &content[..committed_end]
-}
-
-// ---------------------------------------------------------------------------
-// Character class predicates (YAML 1.2 §5)
-// ---------------------------------------------------------------------------
-
-/// `c-indicator` — all 21 YAML indicator characters.
-const fn is_c_indicator(ch: char) -> bool {
-    matches!(
-        ch,
-        '-' | '?'
-            | ':'
-            | ','
-            | '['
-            | ']'
-            | '{'
-            | '}'
-            | '#'
-            | '&'
-            | '*'
-            | '!'
-            | '|'
-            | '>'
-            | '\''
-            | '"'
-            | '%'
-            | '@'
-            | '`'
-    )
-}
-
-/// `ns-char` — printable non-whitespace non-BOM character.
-pub const fn is_ns_char(ch: char) -> bool {
-    !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
-        && matches!(ch,
-            '\x21'..='\x7E'
-            | '\u{85}'
-            | '\u{A0}'..='\u{D7FF}'
-            | '\u{E000}'..='\u{FFFD}'
-            | '\u{10000}'..='\u{10FFFF}'
-        )
 }
 
 // ---------------------------------------------------------------------------

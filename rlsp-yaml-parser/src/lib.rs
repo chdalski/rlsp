@@ -1404,7 +1404,7 @@ fn scan_tag<'i>(
             // Scan suffix chars (and %HH sequences) after the inner `!`.
             end += scan_tag_suffix(&content[i + 1..]);
             break;
-        } else if is_tag_char(ch) {
+        } else if crate::chars::is_ns_tag_char_single(ch) {
             end = i + ch.len_utf8();
         } else if ch == '%' {
             // Percent-encoded sequence: %HH.
@@ -1436,35 +1436,6 @@ fn scan_tag<'i>(
     Ok((tag_slice, end))
 }
 
-/// Returns true if `ch` is a valid YAML 1.2 `ns-tag-char` (§6.8.1) single character.
-///
-/// This is the *closed* set defined in the spec: `ns-uri-char` minus `!` and
-/// the flow indicators.  `%` is NOT included here — percent-encoded sequences
-/// (`%HH`) are handled separately via [`scan_tag_suffix`].
-const fn is_tag_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric()
-        || matches!(
-            ch,
-            '-' | '_'
-                | '.'
-                | '~'
-                | '*'
-                | '\''
-                | '('
-                | ')'
-                | '#'
-                | ';'
-                | '/'
-                | '?'
-                | ':'
-                | '@'
-                | '&'
-                | '='
-                | '+'
-                | '$'
-        )
-}
-
 /// Returns the byte length of the valid tag suffix starting at `s`.
 ///
 /// A tag suffix is a sequence of `ns-tag-char` characters and percent-encoded
@@ -1490,12 +1461,12 @@ fn scan_tag_suffix(s: &str) -> usize {
             }
             break;
         }
-        // Safe to decode the next char: all is_tag_char matches are ASCII,
-        // so multi-byte UTF-8 chars will fail is_tag_char and stop the scan.
+        // Safe to decode the next char: all is_ns_tag_char_single matches are ASCII,
+        // so multi-byte UTF-8 chars will fail is_ns_tag_char_single and stop the scan.
         let Some(ch) = s[pos..].chars().next() else {
             break;
         };
-        if is_tag_char(ch) {
+        if crate::chars::is_ns_tag_char_single(ch) {
             pos += ch.len_utf8();
         } else {
             break;

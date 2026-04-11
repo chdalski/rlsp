@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Functions defined here will be used by scanner/lexer in later tasks.
-#![allow(dead_code)]
 
-//! YAML 1.2 §5 character productions [1]–[62] and selected character
-//! predicates from §6–§8.
+//! YAML 1.2 §5 character productions used by the parser.
 //!
 //! Each function is named after the spec production and cross-referenced by
 //! its production number in a `// [N]` comment.  All functions are pure
@@ -26,16 +23,6 @@ pub const fn is_c_printable(ch: char) -> bool {
         | '\u{E000}'..='\u{FFFD}' // BMP private / specials (excluding FFFE/FFFF)
         | '\u{10000}'..='\u{10FFFF}' // supplementary planes
     )
-}
-
-/// [2] nb-json — non-break JSON-compatible characters.
-pub const fn is_nb_json(ch: char) -> bool {
-    ch == '\t' || ch >= '\x20'
-}
-
-/// [3] c-byte-order-mark — the Unicode BOM character (U+FEFF).
-pub const fn is_c_byte_order_mark(ch: char) -> bool {
-    ch == '\u{FEFF}'
 }
 
 // ---------------------------------------------------------------------------
@@ -73,59 +60,8 @@ pub const fn is_c_flow_indicator(ch: char) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// §5.4 – Line break characters [24]–[27]
+// §5.5 – Non-space characters [34]
 // ---------------------------------------------------------------------------
-
-/// [24] b-line-feed
-pub const fn is_b_line_feed(ch: char) -> bool {
-    ch == '\n'
-}
-
-/// [25] b-carriage-return
-pub const fn is_b_carriage_return(ch: char) -> bool {
-    ch == '\r'
-}
-
-/// [26] b-char — line feed or carriage return.
-pub const fn is_b_char(ch: char) -> bool {
-    matches!(ch, '\n' | '\r')
-}
-
-/// [27] nb-char — printable character that is not a line break or BOM.
-///
-/// c-printable minus b-char minus c-byte-order-mark (U+FEFF).
-/// Note: U+FEFF lies within the \u{E000}–\u{FFFD} BMP range, so it must be
-/// excluded explicitly.
-pub const fn is_nb_char(ch: char) -> bool {
-    ch != '\u{FEFF}'
-        && matches!(ch,
-            '\t'
-            | '\x20'..='\x7E'
-            | '\u{85}'
-            | '\u{A0}'..='\u{D7FF}'
-            | '\u{E000}'..='\u{FFFD}'
-            | '\u{10000}'..='\u{10FFFF}'
-        )
-}
-
-// ---------------------------------------------------------------------------
-// §5.5 – White space characters [31]–[34]
-// ---------------------------------------------------------------------------
-
-/// [31] s-space
-pub const fn is_s_space(ch: char) -> bool {
-    ch == ' '
-}
-
-/// [32] s-tab
-pub const fn is_s_tab(ch: char) -> bool {
-    ch == '\t'
-}
-
-/// [33] s-white — space or tab.
-pub const fn is_s_white(ch: char) -> bool {
-    matches!(ch, ' ' | '\t')
-}
 
 /// [34] ns-char — non-break, non-white printable character.
 pub const fn is_ns_char(ch: char) -> bool {
@@ -140,31 +76,12 @@ pub const fn is_ns_char(ch: char) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// §5.6 – Miscellaneous character classes [35]–[40]
+// §5.6 – Miscellaneous character classes [39]–[40], [102]
 // ---------------------------------------------------------------------------
-
-/// [35] ns-dec-digit — ASCII decimal digit.
-pub const fn is_ns_dec_digit(ch: char) -> bool {
-    ch.is_ascii_digit()
-}
-
-/// [36] ns-hex-digit — ASCII hexadecimal digit (case-insensitive).
-pub const fn is_ns_hex_digit(ch: char) -> bool {
-    ch.is_ascii_hexdigit()
-}
-
-/// [37] ns-ascii-letter — ASCII letter.
-pub const fn is_ns_ascii_letter(ch: char) -> bool {
-    ch.is_ascii_alphabetic()
-}
-
-/// [38] ns-word-char — decimal digit, ASCII letter, or hyphen.
-pub const fn is_ns_word_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '-'
-}
 
 /// [39] ns-uri-char (single-char form) — characters allowed in a URI
 /// that are not percent-sign.
+#[allow(dead_code)]
 ///
 /// Note: the percent-encoded form (`%HH`) is a two-character sequence and
 /// must be handled at the scanner level.  This predicate covers all
@@ -343,23 +260,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // nb_json [2]
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn nb_json_accepts_tab_and_printable_ascii() {
-        assert!(is_nb_json('\t'));
-        assert!(is_nb_json('A'));
-    }
-
-    #[test]
-    fn nb_json_rejects_null_and_c0_below_0x20_except_tab() {
-        assert!(!is_nb_json('\x00'));
-        assert!(!is_nb_json('\x01'));
-        assert!(!is_nb_json('\x1F'));
-    }
-
-    // -----------------------------------------------------------------------
     // c_indicator [22] — indicator/flow-indicator distinctions are critical
     // -----------------------------------------------------------------------
 
@@ -396,24 +296,6 @@ mod tests {
         ] {
             assert!(!is_c_flow_indicator(ch), "should reject {ch:?}");
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // nb_char [27] — BOM exclusion is a subtle edge case
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn nb_char_accepts_printable_non_break_non_bom() {
-        assert!(is_nb_char('A'));
-        assert!(is_nb_char(' '));
-        assert!(is_nb_char('\u{00E9}')); // é
-    }
-
-    #[test]
-    fn nb_char_rejects_lf_cr_and_bom() {
-        assert!(!is_nb_char('\n'));
-        assert!(!is_nb_char('\r'));
-        assert!(!is_nb_char('\u{FEFF}'));
     }
 
     // -----------------------------------------------------------------------
