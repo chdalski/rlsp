@@ -91,7 +91,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
 - [x] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a), Task 23g done (9a48d38)
 - [x] #8 — docs/benchmarks.md historical cleanup (Task 24) — 73c3371
-- [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26) — Task 25 done (cdd1a18)
+- [x] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26) — Task 25 done (cdd1a18), Task 26 done (0bf9706)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
 
 ## Tasks
@@ -608,17 +608,17 @@ Create `rlsp-yaml-parser/README.md` using the old README at commit `560230d` as 
 - [x] Update `.ai/memory/project_followup_plans.md` — the stale "Write rlsp-yaml-parser/README.md — DONE" entry has already been cleaned; verify no follow-up action needed, or add a note referencing this plan if historical continuity would help future agents — verified no action needed
 - [x] **Advisors:** none — docs only. Reviewer verified Quick Start examples against current API signatures (`parse_events` at `lib.rs:47`, `load` at `loader.rs:249`, `LoaderBuilder::{new, resolved, max_nesting_depth, build, load}` at `loader.rs:147-197`) and confirmed security-limit defaults against `loader.rs:122-127`.
 
-### Task 26: retrofit AI Note across rlsp-yaml, rlsp-fmt, root README + add missing crates to root Crates table (#7b)
+### Task 26: retrofit AI Note across rlsp-yaml, rlsp-fmt, root README + add missing crates to root Crates table (#7b) — 0bf9706
 
 Add the Short AI Note section to `rlsp-yaml/README.md` and `rlsp-fmt/README.md`. Replace the existing one-liner AI Note in `/workspace/README.md` with the Short variant so all four READMEs share identical wording. Update the root README's Crates table to include `rlsp-yaml-parser` and `rlsp-fmt` (currently only lists `rlsp-yaml`).
 
 **Files:** `README.md`, `rlsp-yaml/README.md`, `rlsp-fmt/README.md`
 
-- [ ] Add Short AI Note section to `rlsp-yaml/README.md` (currently has none — append before License or after License, matching convention)
-- [ ] Add Short AI Note section to `rlsp-fmt/README.md` (currently has none)
-- [ ] Replace the existing AI Note in `/workspace/README.md` — old text is one sentence; replace with the Short variant
-- [ ] Update the Crates table in `/workspace/README.md` to include rows for `rlsp-yaml-parser` (link to `rlsp-yaml-parser/README.md`, description: "Spec-faithful streaming YAML 1.2 parser") and `rlsp-fmt` (link to `rlsp-fmt/README.md`, description: "Generic Wadler-Lindig pretty-printing engine")
-- [ ] **Advisors:** none — docs only
+- [x] Add Short AI Note section to `rlsp-yaml/README.md` (currently has none — append before License or after License, matching convention)
+- [x] Add Short AI Note section to `rlsp-fmt/README.md` (currently has none)
+- [x] Replace the existing AI Note in `/workspace/README.md` — old text is one sentence; replace with the Short variant
+- [x] Update the Crates table in `/workspace/README.md` to include rows for `rlsp-yaml-parser` (link to `rlsp-yaml-parser/README.md`, description: "Spec-faithful streaming YAML 1.2 parser") and `rlsp-fmt` (link to `rlsp-fmt/README.md`, description: "Generic Wadler-Lindig pretty-printing engine")
+- [x] **Advisors:** none — docs only
 
 ### Task 27: tighten verbatim-tag URI validation using is_ns_uri_char_single (#1-C2) — ad790db
 
