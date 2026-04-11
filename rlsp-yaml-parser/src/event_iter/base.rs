@@ -111,115 +111,150 @@ impl<'input> EventIter<'input> {
     /// block scalars collect content that is more indented than this value.
     ///
     /// Consumes `self.pending_anchor` and attaches it to the emitted scalar.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn try_consume_scalar(
         &mut self,
         plain_parent_indent: usize,
         block_parent_indent: usize,
     ) -> Result<Option<(Event<'input>, Span)>, Error> {
-        if let Some(result) = self
-            .lexer
-            .try_consume_literal_block_scalar(block_parent_indent)
-        {
-            let (value, chomp, span) = result?;
-            return Ok(Some((
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::Literal(chomp),
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
-                },
-                span,
-            )));
-        }
-        if let Some(result) = self
-            .lexer
-            .try_consume_folded_block_scalar(block_parent_indent)
-        {
-            let (value, chomp, span) = result?;
-            return Ok(Some((
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::Folded(chomp),
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
-                },
-                span,
-            )));
-        }
-        if let Some((value, span)) = self.lexer.try_consume_single_quoted(plain_parent_indent)? {
-            return Ok(Some((
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::SingleQuoted,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
-                },
-                span,
-            )));
-        }
-        // Pass Some(parent_indent) when inside a block collection so
-        // collect_double_quoted_continuations can validate continuation-line
-        // indentation (YAML 1.2 §7.3.1).  At document root (coll_stack empty)
-        // there is no enclosing block, so no indent constraint: pass None.
-        let dq_block_indent = if self.coll_stack.is_empty() {
-            None
+        // A pending inline scalar (from `--- text`) does not live on the
+        // currently-primed line — check before peeking to avoid reading the
+        // wrong line.
+        let first_byte = if self.lexer.has_inline_scalar() {
+            None // force plain branch to drain the inline scalar
         } else {
-            Some(plain_parent_indent)
+            self.lexer.peek_next_line().and_then(|line| {
+                let trimmed = line.content.trim_start_matches([' ', '\t']);
+                trimmed.as_bytes().first().copied()
+            })
         };
-        if let Some((value, span)) = self.lexer.try_consume_double_quoted(dq_block_indent)? {
-            // In block context, after a double-quoted scalar closes, the only
-            // valid trailing content is optional whitespace followed by an
-            // optional comment (with mandatory preceding whitespace before `#`).
-            // Non-comment, non-whitespace content is an error.
-            if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
-                let first_non_ws = tail.trim_start_matches([' ', '\t']);
-                if !first_non_ws.is_empty() {
-                    let ws_len = tail.len() - first_non_ws.len();
-                    if first_non_ws.starts_with('#') && ws_len == 0 {
-                        // `#` immediately after closing quote — not a comment.
-                        return Err(Error {
-                            pos: tail_pos,
-                            message: "comment requires at least one space before '#'".into(),
-                        });
-                    } else if !first_non_ws.starts_with('#') {
-                        // Non-comment content after quoted scalar.
-                        return Err(Error {
-                            pos: tail_pos,
-                            message: "unexpected content after quoted scalar".into(),
-                        });
+
+        match first_byte {
+            Some(b'|') => {
+                let Some(result) = self
+                    .lexer
+                    .try_consume_literal_block_scalar(block_parent_indent)
+                else {
+                    return Ok(None);
+                };
+                let (value, chomp, span) = result?;
+                Ok(Some((
+                    Event::Scalar {
+                        value,
+                        style: ScalarStyle::Literal(chomp),
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    span,
+                )))
+            }
+            Some(b'>') => {
+                let Some(result) = self
+                    .lexer
+                    .try_consume_folded_block_scalar(block_parent_indent)
+                else {
+                    return Ok(None);
+                };
+                let (value, chomp, span) = result?;
+                Ok(Some((
+                    Event::Scalar {
+                        value,
+                        style: ScalarStyle::Folded(chomp),
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    span,
+                )))
+            }
+            Some(b'\'') => {
+                let Some((value, span)) =
+                    self.lexer.try_consume_single_quoted(plain_parent_indent)?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some((
+                    Event::Scalar {
+                        value,
+                        style: ScalarStyle::SingleQuoted,
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    span,
+                )))
+            }
+            Some(b'"') => {
+                // Pass Some(parent_indent) when inside a block collection so
+                // collect_double_quoted_continuations can validate continuation-line
+                // indentation (YAML 1.2 §7.3.1).  At document root (coll_stack empty)
+                // there is no enclosing block, so no indent constraint: pass None.
+                let dq_block_indent = if self.coll_stack.is_empty() {
+                    None
+                } else {
+                    Some(plain_parent_indent)
+                };
+                let Some((value, span)) = self.lexer.try_consume_double_quoted(dq_block_indent)?
+                else {
+                    return Ok(None);
+                };
+                // In block context, after a double-quoted scalar closes, the only
+                // valid trailing content is optional whitespace followed by an
+                // optional comment (with mandatory preceding whitespace before `#`).
+                // Non-comment, non-whitespace content is an error.
+                if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
+                    let first_non_ws = tail.trim_start_matches([' ', '\t']);
+                    if !first_non_ws.is_empty() {
+                        let ws_len = tail.len() - first_non_ws.len();
+                        if first_non_ws.starts_with('#') && ws_len == 0 {
+                            // `#` immediately after closing quote — not a comment.
+                            return Err(Error {
+                                pos: tail_pos,
+                                message: "comment requires at least one space before '#'".into(),
+                            });
+                        } else if !first_non_ws.starts_with('#') {
+                            // Non-comment content after quoted scalar.
+                            return Err(Error {
+                                pos: tail_pos,
+                                message: "unexpected content after quoted scalar".into(),
+                            });
+                        }
+                        // Valid comment: discard (the comment event is not emitted
+                        // in block context here; it will be picked up by drain_trailing_comment
+                        // in the normal flow).
                     }
-                    // Valid comment: discard (the comment event is not emitted
-                    // in block context here; it will be picked up by drain_trailing_comment
-                    // in the normal flow).
                 }
+                Ok(Some((
+                    Event::Scalar {
+                        value,
+                        style: ScalarStyle::DoubleQuoted,
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    span,
+                )))
             }
-            return Ok(Some((
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::DoubleQuoted,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
-                },
-                span,
-            )));
-        }
-        if let Some((value, span)) = self.lexer.try_consume_plain_scalar(plain_parent_indent) {
-            // Check for invalid content in the suffix (e.g. NUL or mid-stream
-            // BOM that stopped the scanner but is not valid at this position).
-            if let Some(e) = self.lexer.plain_scalar_suffix_error.take() {
-                return Err(e);
+            // EOF, blank line, or any byte that is not a block/quoted indicator
+            // — attempt plain scalar (also drains inline_scalar when set).
+            _ => {
+                let Some((value, span)) = self.lexer.try_consume_plain_scalar(plain_parent_indent)
+                else {
+                    return Ok(None);
+                };
+                // Check for invalid content in the suffix (e.g. NUL or mid-stream
+                // BOM that stopped the scanner but is not valid at this position).
+                if let Some(e) = self.lexer.plain_scalar_suffix_error.take() {
+                    return Err(e);
+                }
+                Ok(Some((
+                    Event::Scalar {
+                        value,
+                        style: ScalarStyle::Plain,
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    span,
+                )))
             }
-            return Ok(Some((
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
-                },
-                span,
-            )));
         }
-        Ok(None)
     }
 
     /// Drain any pending trailing comment from the lexer into the event queue.
@@ -283,6 +318,161 @@ impl<'input> Iterator for EventIter<'input> {
                 StepResult::Continue => {}
                 StepResult::Yield(result) => return Some(result),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::wildcard_enum_match_arm,
+    clippy::indexing_slicing
+)]
+mod tests {
+    use super::*;
+    use crate::EventIter;
+
+    fn scalar_style(input: &'static str) -> Option<ScalarStyle> {
+        let mut iter = EventIter::new(input);
+        // Skip StreamStart, DocumentStart
+        loop {
+            match iter.next()? {
+                Ok((Event::Scalar { style, .. }, _)) => return Some(style),
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Group A — First-byte dispatch (core pin)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dispatch_pipe_literal_block() {
+        assert!(matches!(
+            scalar_style("|\n  a\n"),
+            Some(ScalarStyle::Literal(_))
+        ));
+    }
+
+    #[test]
+    fn dispatch_gt_folded_block() {
+        assert!(matches!(
+            scalar_style(">\n  a\n"),
+            Some(ScalarStyle::Folded(_))
+        ));
+    }
+
+    #[test]
+    fn dispatch_single_quote() {
+        assert!(matches!(
+            scalar_style("'a'\n"),
+            Some(ScalarStyle::SingleQuoted)
+        ));
+    }
+
+    #[test]
+    fn dispatch_double_quote() {
+        assert!(matches!(
+            scalar_style("\"a\"\n"),
+            Some(ScalarStyle::DoubleQuoted)
+        ));
+    }
+
+    #[test]
+    fn dispatch_plain_word() {
+        assert!(matches!(scalar_style("a\n"), Some(ScalarStyle::Plain)));
+    }
+
+    #[test]
+    fn dispatch_at_eof_returns_none() {
+        let mut iter = EventIter::new("");
+        // At bare EOF, try_consume_scalar must not error and must return None.
+        let result = iter.try_consume_scalar(0, usize::MAX);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn dispatch_blank_line_returns_none() {
+        let mut iter = EventIter::new("\n");
+        iter.state = IterState::InDocument;
+        let result = iter.try_consume_scalar(0, usize::MAX);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Group B — Inline scalar short-circuit (has_inline_scalar path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn inline_scalar_short_circuits_to_plain_before_peek() {
+        use std::borrow::Cow;
+        let mut iter = EventIter::new("");
+        let span = crate::zero_span(crate::pos::Pos::ORIGIN);
+        iter.lexer
+            .set_inline_scalar_for_test(Cow::Borrowed("text"), span);
+        let result = iter.try_consume_scalar(0, usize::MAX);
+        if let Ok(Some((Event::Scalar { style, value, .. }, _))) = result {
+            assert!(
+                matches!(style, ScalarStyle::Plain),
+                "expected plain scalar via inline_scalar short-circuit"
+            );
+            assert_eq!(value, "text");
+        } else {
+            unreachable!("expected Ok(Some(plain scalar)) from inline_scalar short-circuit")
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Group C — Leading-whitespace handling (trim before dispatch)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn leading_spaces_before_pipe_dispatches_literal() {
+        assert!(matches!(
+            scalar_style("  |\n    a\n"),
+            Some(ScalarStyle::Literal(_))
+        ));
+    }
+
+    #[test]
+    fn leading_spaces_before_gt_dispatches_folded() {
+        assert!(matches!(
+            scalar_style("  >\n    a\n"),
+            Some(ScalarStyle::Folded(_))
+        ));
+    }
+
+    #[test]
+    fn leading_tab_before_word_is_rejected_by_yaml_spec() {
+        // YAML 1.2 §6.1 forbids tabs as indentation.  The parser returns an
+        // error before reaching the scalar dispatcher — confirmed behaviour.
+        let events: Vec<_> = EventIter::new("\ta\n").collect();
+        assert!(
+            events.iter().any(Result::is_err),
+            "tab-indented input must produce a parse error per YAML 1.2 §6.1"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group D — Malformed indicator falls through to Ok(None), not retry
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn malformed_literal_indicator_no_retry_as_plain() {
+        // `|` with no body at parent_indent=0; the literal scanner may return
+        // None or Err. Either way the result must NOT be a Plain scalar — the
+        // dispatcher must not retry.
+        let mut iter = EventIter::new("|\n");
+        iter.state = IterState::InDocument;
+        let result = iter.try_consume_scalar(0, usize::MAX);
+        if let Ok(Some((Event::Scalar { style, .. }, _))) = result {
+            assert!(
+                !matches!(style, ScalarStyle::Plain),
+                "dispatcher must not fall back to plain after dispatching to literal"
+            );
         }
     }
 }

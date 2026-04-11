@@ -10869,3 +10869,179 @@ mod directives {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// mod scalar_dispatch — first-byte dispatcher integration tests (Task 3)
+// ---------------------------------------------------------------------------
+
+mod scalar_dispatch {
+    use super::*;
+
+    fn first_scalar(input: &str) -> Option<Event<'_>> {
+        parse_events(input)
+            .filter_map(Result::ok)
+            .map(|(ev, _)| ev)
+            .find(|ev| matches!(ev, Event::Scalar { .. }))
+    }
+
+    fn has_parse_error(input: &str) -> bool {
+        parse_events(input).any(|r| r.is_err())
+    }
+
+    // -----------------------------------------------------------------------
+    // Group E — Five dispatch styles end-to-end
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn it_literal_block_scalar_round_trip() {
+        let ev = first_scalar("|\n  hello\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::Literal(_), ref value, .. }) if value == "hello\n"),
+            "expected literal scalar 'hello\\n', got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_folded_block_scalar_round_trip() {
+        let ev = first_scalar(">\n  hello\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::Folded(_), ref value, .. }) if value == "hello\n"),
+            "expected folded scalar 'hello\\n', got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_single_quoted_scalar_round_trip() {
+        let ev = first_scalar("'hello'\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::SingleQuoted, ref value, .. }) if value == "hello"),
+            "expected single-quoted scalar 'hello', got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_double_quoted_scalar_round_trip() {
+        let ev = first_scalar("\"hello\"\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::DoubleQuoted, ref value, .. }) if value == "hello"),
+            "expected double-quoted scalar 'hello', got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_plain_scalar_round_trip() {
+        let ev = first_scalar("hello\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::Plain, ref value, .. }) if value == "hello"),
+            "expected plain scalar 'hello', got {ev:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group F — Inline scalar path (the `--- text` short-circuit)
+    // -----------------------------------------------------------------------
+
+    // IT-S14 already covers basic `--- text\n`; this group adds edge cases.
+
+    #[test]
+    fn it_inline_scalar_with_leading_whitespace_in_value() {
+        // Two spaces between `---` and `value` — leading ws after `---` is
+        // separator; scalar content is `value with spaces`.
+        let ev = first_scalar("---  value with spaces\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::Plain, ref value, .. }) if value == "value with spaces"),
+            "expected plain scalar 'value with spaces', got {ev:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group G — Unusual whitespace before block indicators
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn it_tab_before_pipe_behavior_preserved() {
+        // `\t|` — a tab-prefixed line. The tab is stripped as whitespace and `|`
+        // is seen as the first byte, routing to the literal block scanner.
+        // Both the old chain and the new dispatcher behave identically here.
+        // Confirm the result is NOT a plain scalar (the dispatch happened to literal).
+        let events: Vec<_> = parse_events("\t|\n").collect();
+        let scalar_ev = events
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .find(|(ev, _)| matches!(ev, Event::Scalar { .. }));
+        if let Some((Event::Scalar { style, .. }, _)) = scalar_ev {
+            assert!(
+                !matches!(style, ScalarStyle::Plain),
+                "tab-then-pipe should not dispatch to plain"
+            );
+        }
+        // If no scalar (parse error or no document), that's also acceptable —
+        // what matters is we don't silently emit a plain scalar.
+    }
+
+    #[test]
+    fn it_pipe_with_chomping_indicator_still_dispatches_literal() {
+        let ev = first_scalar("|-\n  a\n");
+        assert!(
+            matches!(
+                ev,
+                Some(Event::Scalar {
+                    style: ScalarStyle::Literal(_),
+                    ..
+                })
+            ),
+            "expected literal scalar, got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_gt_with_indent_indicator_still_dispatches_folded() {
+        let ev = first_scalar(">2\n  a\n");
+        assert!(
+            matches!(
+                ev,
+                Some(Event::Scalar {
+                    style: ScalarStyle::Folded(_),
+                    ..
+                })
+            ),
+            "expected folded scalar, got {ev:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H — Double-quoted trailing-tail validation preserved
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn it_double_quoted_comment_after_closing_quote_accepted() {
+        // `"hello" # comment` — valid trailing comment.
+        assert!(
+            !has_parse_error("\"hello\" # comment\n"),
+            "valid trailing comment after double-quoted scalar must be accepted"
+        );
+        let ev = first_scalar("\"hello\" # comment\n");
+        assert!(
+            matches!(ev, Some(Event::Scalar { style: ScalarStyle::DoubleQuoted, ref value, .. }) if value == "hello"),
+            "expected double-quoted scalar 'hello', got {ev:?}"
+        );
+    }
+
+    #[test]
+    fn it_double_quoted_no_space_before_hash_is_error() {
+        // `"hello"#comment` — `#` immediately after closing quote, no space.
+        assert!(
+            has_parse_error("\"hello\"#comment\n"),
+            "# immediately after closing quote must be a parse error"
+        );
+    }
+
+    #[test]
+    fn it_double_quoted_non_comment_trailing_content_is_error() {
+        // `"hello" extra` — non-whitespace, non-comment after closing quote.
+        assert!(
+            has_parse_error("\"hello\" extra\n"),
+            "non-comment content after closing double-quote must be a parse error"
+        );
+    }
+}

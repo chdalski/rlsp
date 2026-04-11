@@ -404,6 +404,13 @@ impl<'input> Lexer<'input> {
         self.inline_scalar = None;
     }
 
+    /// Inject an inline scalar for testing — simulates the state left by
+    /// `consume_marker_line` after parsing `--- text`.
+    #[cfg(test)]
+    pub fn set_inline_scalar_for_test(&mut self, value: Cow<'input, str>, span: crate::pos::Span) {
+        self.inline_scalar = Some((value, span));
+    }
+
     /// True when the next line in the buffer is a synthetic line prepended by
     /// the parser (e.g. inline key content from `? key` or `- item`), rather
     /// than a raw line from the original input stream.
