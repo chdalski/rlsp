@@ -90,7 +90,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
 - [x] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a), Task 23g done (9a48d38)
-- [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
+- [x] #8 — docs/benchmarks.md historical cleanup (Task 24) — 73c3371
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
 
@@ -542,26 +542,26 @@ Pure relocation combined with a rename. The line-level mapping-key helpers (`is_
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 553 unit + 529 smoke + 368/368 conformance + 21 unicode + 3 doc tests, zero clippy warnings
 - [x] **Advisors:** none — pure relocation + rename; existing tests migrate unchanged
 
-### Task 24: clean docs/benchmarks.md to current-state-only snapshot (#8)
+### Task 24: clean docs/benchmarks.md to current-state-only snapshot (#8) — 73c3371
 
 Remove all historical content from `rlsp-yaml-parser/docs/benchmarks.md`: PEG-parser comparisons (acceptance proof for completed Task 22 of `2026-04-07-streaming-parser-rewrite.md`), Lazy Pos before/after tables (acceptance proof for completed `2026-04-10-unicode-position-safety-and-lazy-pos.md`), byte-level scanning before/after tables (acceptance proof for completed `2026-04-10-byte-level-scanning-and-memchr.md`), and the "Latest update" framing that treats the doc as a diff-over-time artifact. Result: a snapshot of current rlsp-yaml-parser vs libfyaml performance with environment, methodology, fixtures, current measurements, and forward-looking analysis of current behaviour.
 
 **Files:** `rlsp-yaml-parser/docs/benchmarks.md`
 
-- [ ] Rewrite intro paragraph to remove "previous PEG-based parser" framing (line 3) — keep comparison to libfyaml
-- [ ] Remove "Latest update" note (line 18)
-- [ ] Trim header at line 61 — "Streaming parser" qualifier is meaningless without contrast
-- [ ] Delete entire "Side-by-side comparison" subsection (lines 71-84) and its table
-- [ ] Delete quoted comparison note at lines 120-121
-- [ ] Rewrite analysis paragraphs at lines 225-237 — describe streaming latency on its own merits, not vs. PEG
-- [ ] Rewrite heading at line 233 to drop the "137× faster than old parser" framing
-- [ ] Trim phrases at lines 241-242, 253 that contrast with old parser
-- [ ] Delete entire "Lazy Pos optimization results" subsection (lines 263-298)
-- [ ] Delete entire "Byte-level scanning optimization results" subsection (lines 300-343)
-- [ ] Delete entire "## Comparison: old parser vs streaming parser" final section (lines 345-354)
-- [ ] Result: ~227 lines (from 354), covering environment, methodology, fixtures, current rlsp vs libfyaml numbers, current-behaviour analysis
-- [ ] `cargo fmt` (markdown unaffected but consistency), no other verification needed
-- [ ] **Advisors:** none — docs-only cleanup
+- [x] Rewrite intro paragraph to remove "previous PEG-based parser" framing (line 3) — keep comparison to libfyaml
+- [x] Remove "Latest update" note (line 18)
+- [x] Trim header at line 61 — "Streaming parser" qualifier is meaningless without contrast
+- [x] Delete entire "Side-by-side comparison" subsection (lines 71-84) and its table
+- [x] Delete quoted comparison note at lines 120-121
+- [x] Rewrite analysis paragraphs at lines 225-237 — describe streaming latency on its own merits, not vs. PEG
+- [x] Rewrite heading at line 233 to drop the "137× faster than old parser" framing
+- [x] Trim phrases at lines 241-242, 253 that contrast with old parser
+- [x] Delete entire "Lazy Pos optimization results" subsection (lines 263-298)
+- [x] Delete entire "Byte-level scanning optimization results" subsection (lines 300-343)
+- [x] Delete entire "## Comparison: old parser vs streaming parser" final section (lines 345-354)
+- [x] Result: 243 lines (from 354) — close to the ~227 estimate; covers environment, methodology, fixtures, current rlsp vs libfyaml numbers, current-behaviour analysis
+- [x] `cargo fmt` (markdown unaffected but consistency), no other verification needed
+- [x] **Advisors:** none — docs-only cleanup
 
 ### Task 25: write rlsp-yaml-parser/README.md (#7a)
 
