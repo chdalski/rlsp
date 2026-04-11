@@ -2,7 +2,6 @@
 #![deny(clippy::panic)]
 
 mod chars;
-mod directive_scope;
 pub mod encoding;
 mod error;
 mod event;
@@ -29,7 +28,7 @@ pub use limits::{
 };
 use std::collections::VecDeque;
 
-use directive_scope::DirectiveScope;
+use event_iter::DirectiveScope;
 use state::{CollectionEntry, IterState, PendingAnchor, PendingTag};
 
 use lexer::Lexer;

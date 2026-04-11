@@ -15,13 +15,13 @@ use crate::pos::Pos;
 #[derive(Debug, Default)]
 pub struct DirectiveScope {
     /// Version from `%YAML`, if any.
-    pub version: Option<(u8, u8)>,
+    pub(in crate::event_iter) version: Option<(u8, u8)>,
     /// Custom tag handles declared via `%TAG` directives.
     ///
     /// Key: handle (e.g. `"!foo!"`).  Value: prefix (e.g. `"tag:example.com:"`).
-    pub tag_handles: HashMap<String, String>,
+    pub(in crate::event_iter) tag_handles: HashMap<String, String>,
     /// Total directive count (YAML + TAG combined) for the `DoS` limit check.
-    pub directive_count: usize,
+    pub(in crate::event_iter) directive_count: usize,
 }
 
 impl DirectiveScope {
@@ -37,7 +37,11 @@ impl DirectiveScope {
     /// Returns `Ok(Cow::Borrowed(raw))` when no allocation is needed, or
     /// `Ok(Cow::Owned(resolved))` after prefix expansion.  Returns `Err` when
     /// a named handle has no registered prefix.
-    pub fn resolve_tag<'a>(&self, raw: &'a str, indicator_pos: Pos) -> Result<Cow<'a, str>, Error> {
+    pub(in crate::event_iter) fn resolve_tag<'a>(
+        &self,
+        raw: &'a str,
+        indicator_pos: Pos,
+    ) -> Result<Cow<'a, str>, Error> {
         // Verbatim tags arrive as bare URIs (scan_tag strips the `!<` / `>` wrappers).
         // They do not start with `!`, so no resolution is needed.
         if !raw.starts_with('!') {
@@ -91,7 +95,7 @@ impl DirectiveScope {
     }
 
     /// Collect the tag handle/prefix pairs for inclusion in `DocumentStart`.
-    pub fn tag_directives(&self) -> Vec<(String, String)> {
+    pub(in crate::event_iter) fn tag_directives(&self) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = self
             .tag_handles
             .iter()

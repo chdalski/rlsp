@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::directive_scope::DirectiveScope;
+use super::directive_scope::DirectiveScope;
 use crate::error::Error;
 use crate::event::{Event, ScalarStyle};
 use crate::lexer::Lexer;
