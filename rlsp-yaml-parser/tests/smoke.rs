@@ -8237,6 +8237,146 @@ mod tags {
     }
 
     // -----------------------------------------------------------------------
+    // Group A2: Verbatim tag URI validation — YAML 1.2 §6.8.1 production [38]
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verbatim_tag_uri_alphanumeric_accepted() {
+        assert!(
+            !has_error("!<abc123> v\n"),
+            "alphanumeric-only URI must be accepted"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_allowed_punctuation_accepted() {
+        // All single-char ns-uri-char punctuation except `%` (handled separately).
+        assert!(
+            !has_error("!<a-_.~*'()[]#;/?:@&=+$,b> v\n"),
+            "URI with all allowed punctuation must be accepted"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_exclamation_accepted() {
+        // `!` is in ns-uri-char (YAML 1.2 §6.8.1), unlike ns-tag-char.
+        assert!(
+            !has_error("!<tag:foo!bar> v\n"),
+            "'!' is a valid ns-uri-char and must be accepted"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_percent_encoded_space_accepted() {
+        assert!(
+            !has_error("!<%20> v\n"),
+            "%20 (percent-encoded space) must be accepted"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_percent_encoded_slash_accepted() {
+        assert!(
+            !has_error("!<path%2Fto> v\n"),
+            "%2F (percent-encoded slash) must be accepted"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_percent_uppercase_hex_accepted() {
+        assert!(!has_error("!<%2F> v\n"), "uppercase %2F must be accepted");
+        assert!(!has_error("!<%2f> v\n"), "lowercase %2f must be accepted");
+    }
+
+    #[test]
+    fn verbatim_tag_uri_space_rejected() {
+        assert!(
+            has_error("!<foo bar> v\n"),
+            "space in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_curly_brace_rejected() {
+        assert!(
+            has_error("!<foo{bar}> v\n"),
+            "curly brace in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_non_ascii_rejected() {
+        // Non-ASCII characters are not valid ns-uri-char single-char values.
+        assert!(
+            has_error("!<\u{4E2D}\u{6587}> v\n"),
+            "non-ASCII characters in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_bare_percent_rejected() {
+        assert!(
+            has_error("!<%GG> v\n"),
+            "bare %% without two hex digits must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_percent_with_one_hex_digit_rejected() {
+        assert!(
+            has_error("!<%2> v\n"),
+            "%% with only one hex digit must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_del_char_rejected() {
+        assert!(
+            has_error("!<foo\x7Fbar> v\n"),
+            "DEL (0x7F) in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_vertical_bar_rejected() {
+        assert!(
+            has_error("!<foo|bar> v\n"),
+            "vertical bar in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_backslash_rejected() {
+        // `\` is not in ns-uri-char.
+        assert!(
+            has_error("!<foo\\bar> v\n"),
+            "backslash in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_less_than_rejected() {
+        assert!(
+            has_error("!<foo<bar> v\n"),
+            "less-than sign in verbatim tag URI must be rejected"
+        );
+    }
+
+    #[test]
+    fn verbatim_tag_uri_embedded_close_delimiter_terminates_uri() {
+        // First `>` closes the verbatim tag; `bar>` becomes part of the scalar value.
+        let events = evs("!<foo>bar>\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { tag: Some(t), value, .. }
+                    if t.as_ref() == "foo" && value.as_ref() == "bar>"
+            )),
+            "first '>' must close the verbatim tag URI; remainder is scalar content"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // Group B: Primary handle (`!!`) on scalars
     // -----------------------------------------------------------------------
 

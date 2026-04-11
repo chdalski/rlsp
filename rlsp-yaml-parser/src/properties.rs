@@ -75,6 +75,7 @@ pub fn scan_anchor_name(content: &str, indicator_pos: Pos) -> Result<&str, Error
 ///
 /// Returns `Err` on invalid verbatim tags (unmatched `<`, empty URI, control
 /// character in URI) or when the tag length exceeds [`MAX_TAG_LEN`].
+#[allow(clippy::too_many_lines)]
 pub fn scan_tag<'i>(
     content: &'i str,
     tag_start: &'i str,
@@ -82,12 +83,64 @@ pub fn scan_tag<'i>(
 ) -> Result<(&'i str, usize), Error> {
     // ---- Verbatim tag: `!<URI>` ----
     if let Some(after_open) = content.strip_prefix('<') {
-        // Find the closing `>`.
-        let close = after_open.find('>').ok_or_else(|| Error {
-            pos: indicator_pos,
-            message: "verbatim tag missing closing '>'".into(),
-        })?;
-        let uri = &after_open[..close];
+        // Scan the URI body character-by-character, validating each character
+        // against YAML 1.2 §6.8.1 production [38] (ns-uri-char).  Stop at the
+        // first `>` (closing delimiter) or reject immediately on any invalid
+        // character.  This order ensures that an embedded `>` inside the URI —
+        // e.g. `!<foo>bar>` — is caught as an invalid character rather than
+        // silently truncating the URI at the first `>`.
+        //
+        // Valid characters: ns-uri-char single-char form, OR a `%HH` sequence.
+        // Invalid: spaces, non-ASCII, `{`, `}`, `>`, `^`, `\`, `` ` ``, bare `%`.
+        use crate::chars::is_ns_uri_char_single;
+        let bytes = after_open.as_bytes();
+        let mut byte_offset = 0usize;
+        loop {
+            let Some(&b) = bytes.get(byte_offset) else {
+                return Err(Error {
+                    pos: indicator_pos,
+                    message: "verbatim tag missing closing '>'".into(),
+                });
+            };
+            if b == b'>' {
+                break; // found the closing delimiter
+            }
+            if b == b'%' {
+                // Percent-encoded sequence: must be followed by exactly two
+                // ASCII hex digits.
+                let h1 = bytes
+                    .get(byte_offset + 1)
+                    .copied()
+                    .is_some_and(|b| b.is_ascii_hexdigit());
+                let h2 = bytes
+                    .get(byte_offset + 2)
+                    .copied()
+                    .is_some_and(|b| b.is_ascii_hexdigit());
+                if h1 && h2 {
+                    byte_offset += 3;
+                    continue;
+                }
+                return Err(Error {
+                    pos: indicator_pos,
+                    message: format!(
+                        "verbatim tag URI contains invalid percent-encoding at byte offset {byte_offset}"
+                    ),
+                });
+            }
+            // Decode the next char; all valid ns-uri-char singles are ASCII,
+            // so a non-ASCII leading byte will fail the predicate and be rejected.
+            let ch = after_open[byte_offset..].chars().next().unwrap_or('\0');
+            if !is_ns_uri_char_single(ch) {
+                return Err(Error {
+                    pos: indicator_pos,
+                    message: format!(
+                        "verbatim tag URI contains character not allowed by YAML 1.2 §6.8.1 at byte offset {byte_offset}"
+                    ),
+                });
+            }
+            byte_offset += ch.len_utf8();
+        }
+        let uri = &after_open[..byte_offset];
         if uri.is_empty() {
             return Err(Error {
                 pos: indicator_pos,
@@ -99,15 +152,6 @@ pub fn scan_tag<'i>(
                 pos: indicator_pos,
                 message: format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
             });
-        }
-        // Reject control characters in the URI.
-        for ch in uri.chars() {
-            if ch < '\x20' || ch == '\x7F' {
-                return Err(Error {
-                    pos: indicator_pos,
-                    message: format!("verbatim tag URI contains invalid character {ch:?}"),
-                });
-            }
         }
         // advance = 1 (for '<') + uri.len() + 1 (for '>') bytes past the `!`
         let advance = 1 + uri.len() + 1;

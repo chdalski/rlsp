@@ -81,7 +81,6 @@ pub const fn is_ns_char(ch: char) -> bool {
 
 /// [39] ns-uri-char (single-char form) — characters allowed in a URI
 /// that are not percent-sign.
-#[allow(dead_code)]
 ///
 /// Note: the percent-encoded form (`%HH`) is a two-character sequence and
 /// must be handled at the scanner level.  This predicate covers all
