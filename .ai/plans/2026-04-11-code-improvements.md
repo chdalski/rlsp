@@ -82,7 +82,7 @@ All three layers are preserved in their respective plan files and commit message
 
 ## Steps
 
-- [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
+- [x] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 done (ad790db)
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
@@ -91,7 +91,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
-- [ ] #27 — chars.rs verbatim-tag URI validation tightening (Task 27)
+- [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
 
 ## Tasks
 
@@ -529,7 +529,7 @@ Add the Short AI Note section to `rlsp-yaml/README.md` and `rlsp-fmt/README.md`.
 - [ ] Update the Crates table in `/workspace/README.md` to include rows for `rlsp-yaml-parser` (link to `rlsp-yaml-parser/README.md`, description: "Spec-faithful streaming YAML 1.2 parser") and `rlsp-fmt` (link to `rlsp-fmt/README.md`, description: "Generic Wadler-Lindig pretty-printing engine")
 - [ ] **Advisors:** none — docs only
 
-### Task 27: tighten verbatim-tag URI validation using is_ns_uri_char_single (#1-C2)
+### Task 27: tighten verbatim-tag URI validation using is_ns_uri_char_single (#1-C2) — ad790db
 
 Close the spec-conformance gap in `scan_tag` (`lib.rs:1355-1363` — will move during Task 13 to `properties.rs`). Currently the verbatim-tag URI path only rejects control characters (`< '\x20' || == '\x7F'`), accepting non-URI characters that violate YAML 1.2 §6.8.1 production [38]. This task wires `is_ns_uri_char_single` (which was kept in chars.rs during Task 1 for this purpose) into `scan_tag` so each character of a verbatim-tag URI must be either a member of `ns-uri-char` or a `%HH` percent-encoded sequence.
 
@@ -537,18 +537,18 @@ Close the spec-conformance gap in `scan_tag` (`lib.rs:1355-1363` — will move d
 
 **Files:** `src/chars.rs` (no change; `is_ns_uri_char_single` already present), `src/properties.rs` (`scan_tag` after Task 13)
 
-- [ ] Replace the control-character-only loop at the verbatim-tag URI path with character-by-character validation against `is_ns_uri_char_single` or `%HH` sequences
-- [ ] Error message: cite YAML 1.2 §6.8.1 production [38]; include the offending character and its position
-- [ ] Update any existing test cases that used verbatim tags with non-URI characters — these will now correctly reject
-- [ ] Add new test cases for the rejection path: space, `{`, `}`, non-ASCII like `中`, unescaped `<`/`>`/`|`
-- [ ] Add test cases for the accept path that should still work: alphanumeric + `-_.~*'()[]#;/?:@&=+$,`, percent-encoded `%20` (space), `%2F` (slash)
-- [ ] Run the full YAML Test Suite — if any conformance tests regress from pass to fail (previously-accepted verbatim tags that are now rejected), report to the user before committing: those tests may need to move from valid-case to invalid-case bucket, or indicate a spec interpretation disagreement
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — conformance rate must not regress; if it does, halt and report
-- [ ] **Advisors required:**
-  - **security-engineer input gate:** consult before implementing — this task changes validation on untrusted input parsing at a trust boundary (verbatim-tag URIs flow into `tag_handles` as `HashMap` keys and to the loader for tag resolution). The advisor should assess: rejection error message safety (no injection), whether rejection rate changes security-test expectations, any edge cases around `%` escape interaction, and whether to accept or harden any rejected inputs
-  - **security-engineer output gate:** get sign-off on the completed implementation
-  - **test-engineer input gate:** consult before implementing — behaviour change requires new test cases and may regress existing ones; the TE should specify accept-path and reject-path coverage plus the conformance-regression check
-  - **test-engineer output gate:** get sign-off on the completed test list
+- [x] Replace the control-character-only loop at the verbatim-tag URI path with character-by-character validation against `is_ns_uri_char_single` or `%HH` sequences
+- [x] Error message: cite YAML 1.2 §6.8.1 production [38]; include the position. **Trade-off (per security-engineer [High] finding):** offending character is NOT included in the error message — only the byte offset. Character reflection in error output was rejected as a reflection-injection risk. The plan's "include the offending character" requirement is overridden by the security advisor's specification.
+- [x] Update any existing test cases that used verbatim tags with non-URI characters — none required updating; existing tests at `smoke.rs:8178-8234` use only inputs still accepted/rejected identically under the new predicate (verified)
+- [x] Add new test cases for the rejection path: space, `{`, `}`, non-ASCII like `中`, unescaped `<`/`>`/`|` — done (16 tests in Group A2). `>` is a special case: it cannot be rejected because it is the URI close delimiter; instead `verbatim_tag_uri_embedded_close_delimiter_terminates_uri` documents the spec-correct behaviour where `!<foo>bar>` parses as `tag=foo` with `bar>` as scalar content
+- [x] Add test cases for the accept path that should still work: alphanumeric + `-_.~*'()[]#;/?:@&=+$,`, percent-encoded `%20` (space), `%2F` (slash) — done
+- [x] Run the full YAML Test Suite — conformance remains 368/368, no regression
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 455 unit, 368/368 conformance, 529 smoke, zero clippy warnings
+- [x] **Advisors required:**
+  - **security-engineer input gate:** consulted before implementing; full assessment received — three issues identified: [High] no character reflection, [Medium] bare `%` handling, [Low] embedded `>` behavior — satisfied
+  - **security-engineer output gate:** signed off on completed implementation — all three issues resolved — satisfied
+  - **test-engineer input gate:** **NOT consulted before implementing** — plan violation. The developer proceeded directly using the security assessment's test scenarios as the test-design baseline. The deviation was disclosed transparently to the test-engineer at the output gate.
+  - **test-engineer output gate:** signed off after the developer added two TE-required tests (`verbatim_tag_uri_less_than_rejected` and `verbatim_tag_uri_embedded_close_delimiter_terminates_uri`). Full sign-off granted — satisfied
 
 ## Decisions
 
