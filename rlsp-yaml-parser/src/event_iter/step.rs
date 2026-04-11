@@ -5,12 +5,12 @@
 //! Contains `step_in_document`, the main dispatcher called by `Iterator::next`
 //! when the parser is in `IterState::InDocument`.
 
+use super::properties::{scan_anchor_name, scan_tag};
 use crate::directive_scope::DirectiveScope;
 use crate::error::Error;
 use crate::event::Event;
 use crate::mapping::{find_value_indicator_offset, inline_contains_mapping_key};
 use crate::pos::{Pos, Span};
-use crate::properties::{scan_anchor_name, scan_tag};
 use crate::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };

@@ -4,11 +4,11 @@
 //! Methods on `EventIter` that handle %YAML, %TAG, and the
 //! transition between documents in a stream.
 
+use super::properties::is_valid_tag_handle;
 use crate::error::Error;
 use crate::event::Event;
 use crate::limits::{MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN};
 use crate::pos::Pos;
-use crate::properties::is_valid_tag_handle;
 use crate::state::{IterState, StepResult};
 use crate::{EventIter, marker_span, zero_span};
 

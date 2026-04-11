@@ -14,7 +14,6 @@ pub mod loader;
 mod mapping;
 pub mod node;
 mod pos;
-mod properties;
 mod state;
 
 pub use error::Error;

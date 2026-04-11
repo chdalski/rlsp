@@ -19,7 +19,10 @@ use crate::pos::Pos;
 ///
 /// The caller is responsible for providing the correct [`Pos`] for error
 /// reporting.
-pub fn scan_anchor_name(content: &str, indicator_pos: Pos) -> Result<&str, Error> {
+pub(in crate::event_iter) fn scan_anchor_name(
+    content: &str,
+    indicator_pos: Pos,
+) -> Result<&str, Error> {
     use crate::chars::is_ns_anchor_char;
     let end = content
         .char_indices()
@@ -76,7 +79,7 @@ pub fn scan_anchor_name(content: &str, indicator_pos: Pos) -> Result<&str, Error
 /// Returns `Err` on invalid verbatim tags (unmatched `<`, empty URI, control
 /// character in URI) or when the tag length exceeds [`MAX_TAG_LEN`].
 #[allow(clippy::too_many_lines)]
-pub fn scan_tag<'i>(
+pub(in crate::event_iter) fn scan_tag<'i>(
     content: &'i str,
     tag_start: &'i str,
     indicator_pos: Pos,
@@ -233,7 +236,7 @@ pub fn scan_tag<'i>(
 /// A tag suffix is a sequence of `ns-tag-char` characters and percent-encoded
 /// `%HH` sequences (YAML 1.2 §6.8.1).  Scanning stops at the first character
 /// that does not satisfy either condition.
-pub fn scan_tag_suffix(s: &str) -> usize {
+pub(in crate::event_iter) fn scan_tag_suffix(s: &str) -> usize {
     let bytes = s.as_bytes();
     let mut pos = 0;
     while pos < bytes.len() {
@@ -273,7 +276,7 @@ pub fn scan_tag_suffix(s: &str) -> usize {
 /// - `!`   — primary tag handle
 /// - `!!`  — secondary tag handle
 /// - `!<word-chars>!` — named tag handle, where word chars are `[a-zA-Z0-9_-]`
-pub fn is_valid_tag_handle(handle: &str) -> bool {
+pub(in crate::event_iter) fn is_valid_tag_handle(handle: &str) -> bool {
     match handle {
         "!" | "!!" => true,
         _ => {

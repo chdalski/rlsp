@@ -8,11 +8,11 @@
 //! preserved verbatim through any future edits. See the design note in
 //! the function body for the rationale.
 
+use super::properties::{scan_anchor_name, scan_tag};
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::pos::{Pos, Span};
-use crate::properties::{scan_anchor_name, scan_tag};
 use crate::state::{FlowMappingPhase, IterState, PendingAnchor, PendingTag, StepResult};
 use crate::{EventIter, empty_scalar_event, zero_span};
 

@@ -4,4 +4,5 @@ mod base;
 mod block;
 mod directives;
 mod flow;
+mod properties;
 mod step;
