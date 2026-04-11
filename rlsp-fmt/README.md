@@ -67,3 +67,13 @@ cargo test -p rlsp-fmt
 ## License
 
 [MIT](../LICENSE) — Christoph Dalski
+
+## AI Note
+
+Every line of source in this crate was authored, reviewed, and committed by AI agents
+working through a multi-agent pipeline (planning, implementation, independent review,
+and test/security advisors for high-risk tasks). The human role is designing the
+architecture, rules, and review process; agents execute them. Conformance against the
+YAML Test Suite is a measured acceptance criterion — not an aspiration — and any change
+touching parser behaviour or untrusted input passes through formal test and security
+advisor review before being merged.

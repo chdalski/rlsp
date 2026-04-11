@@ -9,6 +9,8 @@ Small, fast language server implementations written in Rust with minimal memory 
 | Crate | Description |
 |-------|-------------|
 | [rlsp-yaml](rlsp-yaml/README.md) | YAML language server |
+| [rlsp-yaml-parser](rlsp-yaml-parser/README.md) | Spec-faithful streaming YAML 1.2 parser |
+| [rlsp-fmt](rlsp-fmt/README.md) | Generic Wadler-Lindig pretty-printing engine |
 
 ## VS Code Extension
 
@@ -20,7 +22,13 @@ This project accepts bug reports and feature requests via [GitHub Issues](https:
 
 ## AI Note
 
-The source is entirely AI-written — I designed the architecture and rules, the agents wrote the code.
+Every line of source in this crate was authored, reviewed, and committed by AI agents
+working through a multi-agent pipeline (planning, implementation, independent review,
+and test/security advisors for high-risk tasks). The human role is designing the
+architecture, rules, and review process; agents execute them. Conformance against the
+YAML Test Suite is a measured acceptance criterion — not an aspiration — and any change
+touching parser behaviour or untrusted input passes through formal test and security
+advisor review before being merged.
 
 ## License
 
