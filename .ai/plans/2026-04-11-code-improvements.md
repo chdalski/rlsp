@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828)
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -466,22 +466,24 @@ Pure relocation of the `properties` module into the `event_iter/` subtree. The f
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 confirmed
 - [x] **Advisors:** none — pure relocation, low risk, low uncertainty
 
-### Task 23c: add unit tests for `event_iter/properties.rs` (#4c — follow-up)
+### Task 23c: add unit tests for `event_iter/properties.rs` (#4c — follow-up) — 94721e4
 
 Create `#[cfg(test)] mod tests` in `src/event_iter/properties.rs` with unit-level coverage for the four functions. Follows the Task 6/7b/8b/9b precedent — the module currently has no direct unit tests; coverage is only via `tests/smoke.rs` integration tests (including Task 27's 16 `verbatim_tag_uri_*` cases). `scan_tag` is a trust boundary (verbatim-tag URI parsing against untrusted input), so test-engineer may route to security-engineer at the input gate.
 
 **Files:** `src/event_iter/properties.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
-- [ ] Coverage for `scan_anchor_name`: valid anchor names; empty anchor indicator; anchors longer than `MAX_ANCHOR_NAME_BYTES`; anchor terminators (space, tab, flow indicators, line break)
-- [ ] Coverage for `scan_tag`: shorthand `!foo`, `!!foo`, verbatim `!<uri>`; percent-encoded sequences; rejection cases aligned with Task 27's §6.8.1 tightening (spaces, non-URI chars, bare `%`, control chars); length limit; embedded close-delimiter behaviour
-- [ ] Coverage for `scan_tag_suffix`: scan length calculation for valid tag-char sequences
-- [ ] Coverage for `is_valid_tag_handle`: `!`, `!named!`, `!!`; invalid forms (missing trailing `!`, non-word-char content)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors required:**
-  - **test-engineer input gate:** consult before implementing — new test file for previously-untested module (matches "new test file establishes testing pattern" and "modified code has no existing test coverage" triggers from risk-assessment rule). TE may route to security-engineer at this gate given `scan_tag` is a trust boundary
-  - **test-engineer output gate:** explicit sign-off on completed test list before submitting to reviewer
-- [ ] **Submission:** developer's handoff must cite both TE gates (and SE gates if invoked); reviewer rejects if any citation is missing
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
+- [x] Coverage for `scan_anchor_name`: valid anchor names; empty anchor indicator; anchors longer than `MAX_ANCHOR_NAME_BYTES`; anchor terminators (space, tab, flow indicators, line break)
+- [x] Coverage for `scan_tag`: shorthand `!foo`, `!!foo`, verbatim `!<uri>`; percent-encoded sequences; rejection cases aligned with Task 27's §6.8.1 tightening (spaces, non-URI chars, bare `%`, control chars); length limit; embedded close-delimiter behaviour
+- [x] Coverage for `scan_tag_suffix`: scan length calculation for valid tag-char sequences
+- [x] Coverage for `is_valid_tag_handle`: `!`, `!named!`, `!!`; invalid forms (missing trailing `!`, non-word-char content)
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — 530 unit (+75), 368/368 conformance, zero clippy warnings
+- [x] **Advisors required:**
+  - **test-engineer input gate:** 56-test spec + SE referral — satisfied
+  - **test-engineer output gate:** sign-off granted on 75 tests (56 spec + 19 additive security strengthening) — satisfied
+  - **security-engineer input gate:** 30-scenario adversarial spec — satisfied
+  - **security-engineer output gate:** sign-off granted — satisfied
+- [x] **Submission:** all four advisor gates cited in handoff; reviewer verified completeness. One review round-trip: reviewer rejected first submission for two Medium findings (missing embedded close-delimiter test + stale loop comment at properties.rs:89-97; duplicate test `scan_tag_verbatim_rejects_percent_one_digit_at_buffer_end`); developer resolved both on resubmission
 
 ### Task 23d: relocate `src/directive_scope.rs` → `src/event_iter/directive_scope.rs` (#4c)
 
