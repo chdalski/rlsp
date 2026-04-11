@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), test tasks 7b/8b/9b pending
+- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), test tasks 8b/9b pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -214,23 +214,23 @@ Move the comment-attachment helpers from `src/loader.rs` into a new `src/loader/
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none
 
-### Task 7b: add unit tests for loader/stream.rs (#6 — follow-up)
+### Task 7b: add unit tests for loader/stream.rs (#6 — follow-up) — 617519a
 
 Create `#[cfg(test)] mod tests` in `src/loader/stream.rs` with unit-level coverage for the four functions extracted in Task 7 (`next_from`, `consume_leading_doc_comments`, `consume_leading_comments`, `peek_trailing_comment`). Mirrors the Task 6 precedent (first unit tests for `lexer/comment.rs`). Added mid-plan after the user observed that Task 7 extracted functions whose direct unit-test coverage was nil — they were only exercised indirectly through `tests/loader.rs` and `tests/smoke.rs`.
 
 **Files:** `src/loader/stream.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/stream.rs`
-- [ ] Coverage for `next_from`: forwards `Some(Ok(event, span))`, propagates `Some(Err(e))` as `LoadError::Parse`, returns `Ok(None)` on `None`
-- [ ] Coverage for `consume_leading_doc_comments`: accumulates comment-text events into the caller's Vec until a non-comment event is peeked (without consuming the non-comment); empty case (first event is non-comment)
-- [ ] Coverage for `consume_leading_comments`: same accumulation pattern for in-doc context
-- [ ] Coverage for `peek_trailing_comment`: respects the `value_end_line` cutoff — returns `Some(text)` when the next comment is on the same line as `value_end_line`, returns `None` when the comment is on a later line, returns `None` when the next event is not a comment
-- [ ] Test helper: build a mock `EventStream` from a `Vec<Result<(Event, Span), Error>>` or parse a small YAML string to get a real stream — the TE will recommend the pattern at the input gate
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green, existing tests unaffected
-- [ ] **Advisors required:**
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/stream.rs`
+- [x] Coverage for `next_from`: forwards `Some(Ok(event, span))`, propagates `Some(Err(e))` as `LoadError::Parse`, returns `Ok(None)` on `None`
+- [x] Coverage for `consume_leading_doc_comments`: accumulates comment-text events into the caller's Vec until a non-comment event is peeked (without consuming the non-comment); empty case (first event is non-comment)
+- [x] Coverage for `consume_leading_comments`: same accumulation pattern for in-doc context
+- [x] Coverage for `peek_trailing_comment`: respects the `value_end_line` cutoff — returns `Some(text)` when the next comment is on the same line as `value_end_line`, returns `None` when the comment is on a later line, returns `None` when the next event is not a comment
+- [x] Test helper: build a mock `EventStream` from a `Vec<Result<(Event, Span), Error>>` or parse a small YAML string to get a real stream — the TE will recommend the pattern at the input gate
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green, existing tests unaffected
+- [x] **Advisors required:**
   - **test-engineer input gate:** consult before implementing — this is a new test file for a previously-untested module, triggering both "new test file establishes testing pattern" and "modified code has no existing test coverage" in the risk-assessment rule
   - **test-engineer output gate:** get explicit sign-off on the completed test list before submitting to reviewer
-- [ ] **Submission:** developer's handoff message to reviewer must cite both advisor gates explicitly; reviewer rejects if either citation is missing (per Task 6 precedent)
+- [x] **Submission:** developer's handoff message to reviewer must cite both advisor gates explicitly; reviewer rejects if either citation is missing (per Task 6 precedent)
 
 ### Task 8b: add unit tests for loader/reloc.rs (#6 — follow-up)
 
