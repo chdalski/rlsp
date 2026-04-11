@@ -1,7 +1,6 @@
 # rlsp-yaml-parser Benchmark Results
 
-Comparison of `rlsp-yaml-parser` (streaming parser) against the previous PEG-based parser
-and `libfyaml` (high-performance C YAML library).
+Comparison of `rlsp-yaml-parser` against `libfyaml` (high-performance C YAML library).
 
 ## Environment
 
@@ -13,8 +12,6 @@ and `libfyaml` (high-performance C YAML library).
 | Platform | Linux (container) |
 
 > **Note:** These results are from a containerized environment. Container scheduling and shared CPU resources introduce noise compared to bare-metal measurements. Use these numbers for relative comparisons — not as absolute performance claims.
-
-> **Latest update:** Results updated after byte-level scanning + memchr optimization (commits `c6c56ba`, `815d7c5`, `cf772a9`): replaced `char_indices()` inner loops with byte-level ASCII fast paths and `memchr`-based delimiter search. See [Analysis](#byte-level-scanning-optimization-results) for comparison.
 
 ## Methodology
 
@@ -56,9 +53,9 @@ Allocation bytes and count are measured using a `CountingAllocator` that wraps t
 
 ### Latency — time to first event
 
-The primary acceptance criterion for this parser rewrite is O(1) first-event latency.
+The primary acceptance criterion for this parser is O(1) first-event latency.
 
-#### Streaming parser (rlsp-yaml-parser) — Criterion output
+#### Criterion output
 
 ```
 latency/rlsp/first_event/tiny_100B    time: [47.444 ns 47.488 ns 47.536 ns]
@@ -68,20 +65,20 @@ latency/rlsp/first_event/huge_1MB     time: [47.377 ns 47.412 ns 47.448 ns]
 latency_real/rlsp/first_event         time: [39.945 ns 39.993 ns 40.044 ns]
 ```
 
-#### Side-by-side comparison: old parser vs streaming parser vs libfyaml
+#### rlsp vs libfyaml — first-event latency
 
-| Fixture | old rlsp (PEG) | rlsp (streaming) | libfyaml | improvement |
-|---------|---------------:|----------------------:|---------:|------------:|
-| tiny_100B | 178.10 µs | **47.49 ns** | 945.7 ns | 3,750× faster |
-| medium_10KB | 18.337 ms | **46.56 ns** | 921.7 ns | 393,800× faster |
-| large_100KB | 172.29 ms | **47.38 ns** | 936.0 ns | 3,634,000× faster |
-| huge_1MB | 1.654 s | **47.41 ns** | 952.4 ns | 34,880,000× faster |
-| kubernetes_3KB | 4.438 ms | **39.99 ns** | 947.5 ns | 111,000× faster |
+| Fixture | rlsp (streaming) | libfyaml |
+|---------|----------------------:|---------:|
+| tiny_100B | **47.49 ns** | 945.7 ns |
+| medium_10KB | **46.56 ns** | 921.7 ns |
+| large_100KB | **47.38 ns** | 936.0 ns |
+| huge_1MB | **47.41 ns** | 952.4 ns |
+| kubernetes_3KB | **39.99 ns** | 947.5 ns |
 
 > **Acceptance criterion: `huge_1MB` first-event latency < 1 ms.**
 > **Measured result: 47.41 ns. Target MET. (21,088× under the 1 ms threshold.)**
 
-The streaming parser yields its first event in ~47 ns regardless of document size — true O(1) first-event latency. The old PEG parser scanned and tokenized the entire input before yielding, producing 1.654 s for a 1 MB document. libfyaml's lazy parsing achieves ~950 ns constant first-event latency; the streaming parser is ~20× faster still.
+The streaming parser yields its first event in ~47 ns regardless of document size — true O(1) first-event latency. libfyaml's lazy parsing achieves ~950 ns constant first-event latency; the streaming parser is ~20× faster still.
 
 ### Throughput — full event drain
 
@@ -117,17 +114,11 @@ Raw timings (median):
 | large_100KB | 2.560 ms | 1.164 ms | 897.6 µs |
 | huge_1MB | 30.43 ms | 11.222 ms | 8.480 ms |
 
-> **Comparison to old parser:** The old PEG parser processed the huge_1MB fixture at ~636 KiB/s
-> (1.536 s for `parse_events`). The streaming parser processes it at 85.0 MiB/s (11.2 ms) —
-> a **137× throughput improvement** for full-document parsing.
-
 ### Throughput by YAML style (~100 KB each)
 
 > **Note on noise:** The Criterion tables below are from an unpinned bench run and include
 > container scheduling noise — `block_heavy` in particular shows a wide CI spread (67.3 MiB/s
-> measured here vs 85.3 MiB/s in the controlled run). For the definitive CPU-pinned measurements
-> used to assess the byte-scanning optimization, see
-> [Byte-level scanning optimization results](#byte-level-scanning-optimization-results).
+> measured here vs 85.3 MiB/s in the controlled run).
 
 #### Criterion output
 
@@ -224,131 +215,29 @@ memory/real_world/load             time: [57.686 µs 57.745 µs 57.809 µs]
 
 The streaming parser yields its first event in ~47 ns regardless of document size. This is the
 primary design goal: the LSP server can begin producing diagnostics before a large document
-is fully parsed. The old PEG parser buffered the entire input before yielding any event, producing
-1.654 s for a 1 MB document.
+is fully parsed.
 
-The improvement is 34 million× for the `huge_1MB` fixture and proportionally larger for smaller
-documents (because first-event setup cost dominates at small sizes).
+The huge_1MB fixture first-event latency is 47.41 ns — 21,088× under the 1 ms acceptance
+criterion. libfyaml achieves ~950 ns first-event latency; the streaming parser is ~20× faster.
 
-### Throughput: streaming parser is 137× faster than old parser for full document
-
-The old PEG parser processed the huge_1MB fixture at ~636 KiB/s for `parse_events` (1.536 s).
-The streaming parser processes it at 85.0 MiB/s (11.2 ms). This 137× improvement comes from
-eliminating the O(n²) `validate_tokens` scan that the old parser performed before yielding events.
-
-### Throughput gap vs libfyaml: 1.2–1.8× at scale
+### Throughput vs libfyaml: 1.2–1.8× gap at scale
 
 For the event-drain comparison (apples to apples), the streaming parser is 1.2–1.8× slower than
-libfyaml at 100 KB–1 MB documents. This is a significant improvement from the old parser's
-65–185× gap. The remaining gap reflects libfyaml's C implementation and years of optimization
-versus a Rust implementation that preserves full byte-range spans and comments.
+libfyaml at 100 KB–1 MB documents. The gap reflects libfyaml's C implementation and years of
+optimization versus a Rust implementation that preserves full byte-range spans and comments.
 
 For small documents (tiny_100B), rlsp is actually 2.1× **faster** than libfyaml — libfyaml's
-FFI setup overhead exceeds the parsing cost at that size. For flow_heavy documents, rlsp is now
+FFI setup overhead exceeds the parsing cost at that size. For flow_heavy documents, rlsp is
 1.2× faster as well.
 
 ### Real-world latency: streaming architecture benefits the LSP use case
 
 For the Kubernetes Deployment manifest (the most representative LSP fixture), first-event latency
-is 40 ns (streaming) vs ~4.4 ms (old parser) — a 111,000× improvement. Full-document parse time
-improved from ~4.5 ms to 36.1 µs — a 124× improvement. This is now competitive with libfyaml's
-27.0 µs full-drain time.
+is 40 ns. Full-document parse time is 36.1 µs — competitive with libfyaml's 27.0 µs full-drain
+time.
 
 ### Trade-off: correctness and span fidelity vs raw speed
 
 libfyaml is a production C library optimized for speed. rlsp-yaml-parser is a spec-faithful
 Rust implementation that preserves lossless byte-range spans and comments — information that
 libfyaml discards. The throughput gap is the cost of that fidelity.
-
-### Lazy Pos optimization results
-
-Commit `ea47bb9` dropped `char_offset` from the `Pos` struct (following libfyaml/libyaml precedent —
-neither tracks cumulative Unicode scalar count) and eliminated `advance_pos_past_line()`, which
-previously walked every character of every consumed line to update `char_offset`. Column is now
-computed lazily at span emission time using an ASCII fast path (`str::is_ascii()` is SIMD-accelerated;
-for >99% of real YAML lines, the character walk is skipped entirely).
-
-**Before vs after (rlsp/events, median throughput):**
-
-| Fixture | Before | After | Change |
-|---------|-------:|------:|-------:|
-| tiny_100B | 62.4 MiB/s | 66.8 MiB/s | +7% |
-| medium_10KB | 77.9 MiB/s | 81.4 MiB/s | +4.5% |
-| large_100KB | 82.7 MiB/s | 80.7 MiB/s | −2.4% (high noise, CI: 73–87 MiB/s) |
-| huge_1MB | 85.7 MiB/s | 90.4 MiB/s | +5.5% |
-
-**Style benchmarks (larger gains visible here):**
-
-| Style | Before | After | Change |
-|-------|-------:|------:|-------:|
-| block_heavy | 75.2 MiB/s | 75.4 MiB/s | flat |
-| block_sequence | 102.5 MiB/s | 115.9 MiB/s | +13% |
-| flow_heavy | 80.5 MiB/s | 93.0 MiB/s | +16% |
-| scalar_heavy | 143.8 MiB/s | 167.3 MiB/s | +16% |
-| mixed | 82.8 MiB/s | 85.4 MiB/s | +3% |
-
-The `huge_1MB` fixture improvement (+5.5%) is below the 15-25% target. This is expected: the
-synthetic fixture is mixed style (mappings, sequences, scalars), and the ASCII fast path benefit
-is highest for scalar-heavy input (167.3 vs 143.8 MiB/s, +16%). Allocation counts are unchanged
-— this optimization reduces CPU work, not allocations.
-
-First-event latency improved from ~47 ns to ~42 ns (−10%), consistent with reduced per-event
-overhead from eliminating `char_offset` field maintenance. (Note: first-event latency has
-reverted to ~47 ns in the current measurements — this is container scheduling noise; the
-optimization itself is a CPU reduction, not a first-event-latency change.)
-
-### Byte-level scanning optimization results
-
-Commits `c6c56ba`, `815d7c5`, `cf772a9` replaced `char_indices()` inner loops in all scanner
-functions with byte-level ASCII fast paths and `memchr`-based delimiter search. The optimization
-targets CPU reduction in scalar parsing hot paths; it does not change allocation behavior.
-
-**Measurement methodology:** The numbers below are the authoritative comparison for the
-byte-scanning optimization. They are CPU-pinned (`taskset -c 0`, 300–500 samples) to eliminate
-container scheduling noise; the main Criterion tables earlier in this document are a raw unpinned
-run retained for historical context and trend comparison with earlier optimizations. The baseline
-is commit `ab064b3` (lexer split complete, byte-scanning not yet applied); the "after" is the
-current HEAD with all byte-scanning applied.
-
-**Style benchmarks (rlsp/events, CPU-pinned, before = Task 1 / after = byte-scan):**
-
-| Style | Before | After | Change |
-|-------|-------:|------:|-------:|
-| block_heavy | 76.5 MiB/s | 85.3 MiB/s | +11.5% |
-| block_sequence | 109.3 MiB/s | 121.9 MiB/s | +11.5% |
-| flow_heavy | 95.5 MiB/s | 97.4 MiB/s | +2.0% |
-| scalar_heavy | 163.2 MiB/s | 167.7 MiB/s | +2.7% |
-| mixed | 88.2 MiB/s | 90.7 MiB/s | +2.8% |
-
-**Real-world (kubernetes_3KB):**
-
-| Metric | Before | After | Change |
-|--------|-------:|------:|-------:|
-| rlsp/load | 59.8 MiB/s | 65.0 MiB/s | +8.7% |
-| rlsp/events | 93.3 MiB/s | 98.3 MiB/s | +5.4% |
-
-**Assessment:** Byte-level scanning + memchr delivers **2.7–11.5% throughput improvement** on
-synthetic fixtures, and **+5–9% on real-world content**. The 2× plan target was speculative; the
-measured ceiling is ~12% because scanner inner loops share the hot path with event dispatch,
-state machine transitions, and line-buffer infrastructure — eliminating the UTF-8 decode cost
-removes one component but not the dominant cost. The improvement is real and consistent, and
-the user has explicitly accepted these results in place of the 2× target.
-
-Fixtures with sparse terminators (`block_heavy`, `block_sequence`) gain the most — memchr skips
-long stretches between `:` and `#` hits. Fixtures with dense terminators or short content windows
-(`scalar_heavy`, `flow_heavy`) gain less because the memchr setup overhead reduces the SIMD
-benefit on short windows.
-
-Allocation counts are unchanged — the optimization reduces CPU work only, consistent with the
-design intent.
-
-## Comparison: old parser vs streaming parser
-
-| Metric | rlsp-yaml-parser (PEG) | rlsp-yaml-parser (streaming) | improvement |
-|--------|----------------------:|----------------------------------:|------------:|
-| huge_1MB first-event | 1.654 s | 47.41 ns | 34,880,000× |
-| huge_1MB full parse | 1.536 s | 11.22 ms | 137× |
-| large_100KB first-event | 172.29 ms | 47.38 ns | 3,634,000× |
-| kubernetes_3KB first-event | 4.438 ms | 39.99 ns | 111,000× |
-| kubernetes_3KB full parse | 4.475 ms | 36.1 µs | 124× |
-| huge_1MB throughput (events) | 636 KiB/s | 85.0 MiB/s | 137× |
