@@ -84,7 +84,7 @@ All three layers are preserved in their respective plan files and commit message
 
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
-- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Tasks 4-6 pending
+- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Tasks 5-6 pending
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
@@ -136,18 +136,18 @@ Migrate all test groups that exercise `try_consume_plain_scalar`, `scan_plain_li
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — same test count as before, just relocated
 - [x] **Advisors:** none — pure test move, existing tests unchanged
 
-### Task 4: migrate quoted-scalar tests from lexer.rs to lexer/quoted.rs (#3b)
+### Task 4: migrate quoted-scalar tests from lexer.rs to lexer/quoted.rs (#3b) — cd8937c
 
 Migrate all test groups for `try_consume_single_quoted` and `try_consume_double_quoted` into `lexer/quoted.rs`'s existing `mod tests` at line 756. Pure test move.
 
 **Files:** `src/lexer.rs`, `src/lexer/quoted.rs`
 
-- [ ] Move Group H (`try_consume_single_quoted`, Task 7) from `src/lexer.rs:1184` through subgroups H-A (happy path), H-B (Cow allocation), H-C (multi-line folding), H-D (error cases)
-- [ ] Move Group I (`try_consume_double_quoted`, Task 7) from `src/lexer.rs:1343` through subgroups I-E (happy path), I-F (hex/unicode escapes), I-G (line continuation and folding), I-H (Cow allocation), I-I (security controls I-22 through I-25)
-- [ ] Append to `lexer/quoted.rs:756 mod tests` — verify `use super::*;` covers dependencies
-- [ ] Same helper-visibility check as Task 3
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure test move
+- [x] Move Group H (`try_consume_single_quoted`, Task 7) from `src/lexer.rs:1184` through subgroups H-A (happy path), H-B (Cow allocation), H-C (multi-line folding), H-D (error cases)
+- [x] Move Group I (`try_consume_double_quoted`, Task 7) from `src/lexer.rs:1343` through subgroups I-E (happy path), I-F (hex/unicode escapes), I-G (line continuation and folding), I-H (Cow allocation), I-I (security controls I-22 through I-25)
+- [x] Append to `lexer/quoted.rs:756 mod tests` — verify `use super::*;` covers dependencies
+- [x] Same helper-visibility check as Task 3
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure test move
 
 ### Task 5: migrate block-scalar tests and create test module in lexer/block.rs (#3c)
 
