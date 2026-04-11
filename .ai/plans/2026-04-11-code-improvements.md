@@ -82,7 +82,7 @@ All three layers are preserved in their respective plan files and commit message
 
 ## Steps
 
-- [ ] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27)
+- [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [ ] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2)
 - [ ] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6)
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
@@ -95,20 +95,20 @@ All three layers are preserved in their respective plan files and commit message
 
 ## Tasks
 
-### Task 1: chars.rs dead-code removal and de-duplication (#1-C1)
+### Task 1: chars.rs dead-code removal and de-duplication (#1-C1) — 17abda2
 
 Delete 13 unused YAML 1.2 character predicates from `src/chars.rs`, consolidate three that are duplicated across files back into a single chars.rs home, and remove the crate-level `#![allow(dead_code)]` attribute. `is_ns_uri_char_single` is kept (Task 27 wires it into `scan_tag`). Pure refactor, no behaviour change.
 
 **Files:** `src/chars.rs`, `src/lexer/plain.rs`, `src/lib.rs`
 
-- [ ] Delete from `src/chars.rs`: `is_nb_json`, `is_c_byte_order_mark`, `is_b_line_feed`, `is_b_carriage_return`, `is_b_char`, `is_nb_char`, `is_s_space`, `is_s_tab`, `is_s_white`, `is_ns_dec_digit`, `is_ns_hex_digit`, `is_ns_ascii_letter`, `is_ns_word_char` (13 predicates)
-- [ ] Delete the `#[cfg(test)]` tests for each removed predicate
-- [ ] Remove the local copy of `is_c_indicator` from `src/lexer/plain.rs:530-552`; import `crate::chars::is_c_indicator` instead
-- [ ] Remove the local copy of `is_ns_char` from `src/lexer/plain.rs:555-564`; export `chars::is_ns_char` as `pub use plain::is_ns_char` at `lexer.rs:20` remains intact — update to re-export from `chars` instead, OR have `plain.rs` re-export its imported version
-- [ ] Remove the local copy of `is_tag_char` from `src/lib.rs:1444-1466`; update `scan_tag_suffix` and `scan_tag` call sites to call `crate::chars::is_ns_tag_char_single` instead
-- [ ] Remove `// Functions defined here will be used by scanner/lexer in later tasks.` comment and `#![allow(dead_code)]` attribute from top of `src/chars.rs`
-- [ ] `cargo fmt`, `cargo clippy --all-targets` zero warnings, `cargo test` all green
-- [ ] **Advisors:** none — pure deletion/inlining, low risk, low uncertainty
+- [x] Delete from `src/chars.rs`: `is_nb_json`, `is_c_byte_order_mark`, `is_b_line_feed`, `is_b_carriage_return`, `is_b_char`, `is_nb_char`, `is_s_space`, `is_s_tab`, `is_s_white`, `is_ns_dec_digit`, `is_ns_hex_digit`, `is_ns_ascii_letter`, `is_ns_word_char` (13 predicates)
+- [x] Delete the `#[cfg(test)]` tests for each removed predicate
+- [x] Remove the local copy of `is_c_indicator` from `src/lexer/plain.rs:530-552`; import `crate::chars::is_c_indicator` instead
+- [x] Remove the local copy of `is_ns_char` from `src/lexer/plain.rs:555-564`; export `chars::is_ns_char` as `pub use plain::is_ns_char` at `lexer.rs:20` remains intact — update to re-export from `chars` instead, OR have `plain.rs` re-export its imported version
+- [x] Remove the local copy of `is_tag_char` from `src/lib.rs:1444-1466`; update `scan_tag_suffix` and `scan_tag` call sites to call `crate::chars::is_ns_tag_char_single` instead
+- [x] Remove `// Functions defined here will be used by scanner/lexer in later tasks.` comment and `#![allow(dead_code)]` attribute from top of `src/chars.rs`
+- [x] `cargo fmt`, `cargo clippy --all-targets` zero warnings, `cargo test` all green
+- [x] **Advisors:** none — pure deletion/inlining, low risk, low uncertainty
 
 ### Task 2: move `is_directive_or_blank_or_comment` into lexer.rs test module (#2)
 
