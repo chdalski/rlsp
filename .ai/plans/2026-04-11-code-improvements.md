@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10)
+- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -423,19 +423,19 @@ Move the main `step_in_document` dispatcher (~740 lines) into `src/event_iter/st
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure move
 
-### Task 22: create event_iter/block.rs + event_iter/block/sequence.rs (#4b-v)
+### Task 22: create event_iter/block.rs + event_iter/block/sequence.rs (#4b-v) — a7657ab
 
 Create the `event_iter/block/` sub-submodule hierarchy and populate it with block-sequence handling. `event_iter/block.rs` is the module file that declares `mod sequence; mod mapping;` (the mapping submodule arrives in Task 23). Task 22 creates the scaffolding plus the sequence handlers.
 
 **Files:** `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/block.rs` (new), `src/event_iter/block/sequence.rs` (new)
 
-- [ ] Create `src/event_iter/block.rs` containing `pub(in crate::event_iter) mod sequence;` (the mapping submodule is added in Task 23)
-- [ ] Add `pub(crate) mod block;` to `src/event_iter.rs`
-- [ ] Create `src/event_iter/block/sequence.rs`
-- [ ] Move from `impl EventIter`: `handle_sequence_entry` (`lib.rs:2637`), `consume_sequence_dash` (`lib.rs:703`), `peek_sequence_entry` (`lib.rs:506`)
-- [ ] Convert to `pub(in crate::event_iter) fn`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move + scaffolding
+- [x] Create `src/event_iter/block.rs` containing `pub(in crate::event_iter) mod sequence;` (the mapping submodule is added in Task 23)
+- [x] Add `pub(crate) mod block;` to `src/event_iter.rs` — declared as `mod block;` (crate-private by default, equivalent to `pub(crate)` because `event_iter` itself is crate-private; matches the Task 18 precedent for `mod base;`)
+- [x] Create `src/event_iter/block/sequence.rs`
+- [x] Move from `impl EventIter`: `handle_sequence_entry` (`lib.rs:2637`), `consume_sequence_dash` (`lib.rs:703`), `peek_sequence_entry` (`lib.rs:506`)
+- [x] Convert to `pub(in crate::event_iter) fn` — used `pub(crate)` as transient (Task 18-21 precedent; lib.rs still has `impl EventIter` callers in the block-mapping handlers slated for Task 23, which require crate-wide visibility. A follow-up tightening pass after Task 23 will narrow visibility to `pub(in crate::event_iter)`)
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — 1313 unit, 455 parser, 529 smoke, 368/368 conformance, zero warnings
+- [x] **Advisors:** none — pure move + scaffolding
 
 ### Task 23: create event_iter/block/mapping.rs (#4b-vi)
 
