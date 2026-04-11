@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4)
+- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [ ] #27 — chars.rs verbatim-tag URI validation tightening (Task 27)
@@ -410,18 +410,18 @@ Move `handle_flow_collection` (~1,310 lines) into `src/event_iter/flow.rs` as a 
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — flow-collection tests are sensitive; verify full pass
 - [x] **Advisors:** none (pure move). The reviewer should spot-check that the byte-for-byte function moved unchanged — no accidental edits inside the 1,310-line body.
 
-### Task 21: create event_iter/step.rs (#4b-iv)
+### Task 21: create event_iter/step.rs (#4b-iv) — d1f0e10
 
 Move the main `step_in_document` dispatcher (~740 lines) into `src/event_iter/step.rs`. This is the document-mode entry point that `Iterator::next` delegates to when `state == InDocument`.
 
 **Files:** `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/step.rs` (new)
 
-- [ ] Create `src/event_iter/step.rs`
-- [ ] Add `pub(crate) mod step;` to `src/event_iter.rs`
-- [ ] Move `step_in_document` (`lib.rs:1896-2636`)
-- [ ] Convert to `pub(in crate::event_iter) fn`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move
+- [x] Create `src/event_iter/step.rs`
+- [x] Add `pub(crate) mod step;` to `src/event_iter.rs`
+- [x] Move `step_in_document` (`lib.rs:1896-2636`)
+- [x] Convert to `pub(in crate::event_iter) fn`
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure move
 
 ### Task 22: create event_iter/block.rs + event_iter/block/sequence.rs (#4b-v)
 
