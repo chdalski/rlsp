@@ -86,7 +86,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
-- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Tasks 13-14 pending
+- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 pending
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
@@ -300,17 +300,17 @@ Move the state-machine type definitions from `src/lib.rs:242-401` into a new `sr
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure move but wide touch surface; careful with imports
 
-### Task 13: extract tag and anchor scanning into properties.rs (#4a-iv)
+### Task 13: extract tag and anchor scanning into properties.rs (#4a-iv) — b171ce1
 
 Move node-property scanning functions from `src/lib.rs` into a new `src/properties.rs` module. YAML 1.2 §6.9 calls these "node properties" (anchors + tags), which gives the module its name.
 
 **Files:** `src/lib.rs`, `src/properties.rs` (new)
 
-- [ ] Create `src/properties.rs`
-- [ ] Move `scan_anchor_name` (`lib.rs:1274`), `scan_tag` (`lib.rs:1330`), `scan_tag_suffix` (`lib.rs:1473`), `is_valid_tag_handle` (`lib.rs:1543`). `is_ns_tag_char_single` from chars.rs is now the single source — no need to move.
-- [ ] Add `mod properties;` declaration in `lib.rs`; update call sites in `impl EventIter` blocks
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move (Task 1 already normalised the tag-char predicate)
+- [x] Create `src/properties.rs`
+- [x] Move `scan_anchor_name` (`lib.rs:1274`), `scan_tag` (`lib.rs:1330`), `scan_tag_suffix` (`lib.rs:1473`), `is_valid_tag_handle` (`lib.rs:1543`). `is_ns_tag_char_single` from chars.rs is now the single source — no need to move.
+- [x] Add `mod properties;` declaration in `lib.rs`; update call sites in `impl EventIter` blocks
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure move (Task 1 already normalised the tag-char predicate)
 
 ### Task 14: extract mapping-key line helpers into mapping.rs (#4a-v)
 
