@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use memchr::memchr2;
+use memchr::{memchr, memchr2};
 use std::borrow::Cow;
 
 use crate::error::Error;
@@ -80,8 +80,7 @@ impl<'input> Lexer<'input> {
                 }
                 // Validate comment text: YAML 1.2 §8.1.1 — comment lines must
                 // not contain NUL (U+0000) since it is not a c-printable char.
-                if let Some((bad_i, bad_ch)) = comment_text.char_indices().find(|(_, c)| *c == '\0')
-                {
+                if let Some(bad_i) = memchr(b'\0', comment_text.as_bytes()) {
                     let bad_char_i = comment_text[..bad_i].chars().count();
                     let bad_pos = Pos {
                         byte_offset: hash_pos.byte_offset + 1 + bad_i,
@@ -90,7 +89,7 @@ impl<'input> Lexer<'input> {
                     };
                     self.plain_scalar_suffix_error = Some(Error {
                         pos: bad_pos,
-                        message: format!("invalid character U+{:04X} in comment", bad_ch as u32),
+                        message: "invalid character U+0000 in comment".to_owned(),
                     });
                 } else {
                     self.trailing_comment = Some((
@@ -576,19 +575,19 @@ pub const fn is_ns_char(ch: char) -> bool {
 /// Returns the comment body (everything after the `#`) if a comment is
 /// present (i.e. `#` is preceded by at least one whitespace), or `None`
 /// if there is no comment in this suffix.
-///
-/// Safety: uses `char_indices` for byte offsets — never character-count
-/// arithmetic — to guarantee char-boundary slicing.
 pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
-    let mut prev_was_ws = true; // position before suffix content = boundary
-    for (i, ch) in suffix.char_indices() {
-        if ch == '#' && prev_was_ws {
-            // `#` preceded by whitespace (or at the very start): comment start.
-            // Return everything after `#`.
+    let bytes = suffix.as_bytes();
+    let mut search_from = 0;
+    while let Some(rel) = memchr(b'#', bytes.get(search_from..).unwrap_or_default()) {
+        let i = search_from + rel;
+        // `#` must be preceded by whitespace (or be at position 0, which was
+        // preceded by the scalar end — treated as a boundary).
+        let preceded_by_ws = i == 0 || matches!(bytes.get(i - 1), Some(b' ' | b'\t'));
+        if preceded_by_ws {
             // SAFETY: i + 1 is a valid char boundary because `#` is ASCII (1 byte).
             return Some(&suffix[i + 1..]);
         }
-        prev_was_ws = matches!(ch, ' ' | '\t');
+        search_from = i + 1;
     }
     None
 }

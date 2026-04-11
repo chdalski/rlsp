@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use memchr::memchr;
+
 use crate::error::Error;
 use crate::pos::{Pos, Span};
 
@@ -30,13 +32,8 @@ impl<'input> Lexer<'input> {
         }
 
         // The `#` is the first non-whitespace character.
-        // Compute byte offset of `#` within line.content using char_indices —
-        // security: byte-index from char_indices, never character-count arithmetic.
-        let hash_byte_offset = line
-            .content
-            .char_indices()
-            .find(|&(_, ch)| ch == '#')
-            .map_or(0, |(i, _)| i);
+        // `#` is ASCII so memchr finds its byte offset directly.
+        let hash_byte_offset = memchr(b'#', line.content.as_bytes()).unwrap_or(0);
 
         let hash_col = crate::pos::column_at(line.content, hash_byte_offset);
         let hash_pos = Pos {
@@ -46,8 +43,8 @@ impl<'input> Lexer<'input> {
         };
 
         // Comment text: everything after the `#`.
-        // text_start is always ≤ line.content.len(): hash_byte_offset is from
-        // char_indices() (so < len) and `#` is 1 byte, giving text_start ≤ len.
+        // text_start is always ≤ line.content.len(): memchr returns a valid
+        // byte offset (< len) when Some, and `#` is 1 byte, giving text_start ≤ len.
         // The slice is always on a char boundary because `#` is ASCII.
         let text_start = hash_byte_offset + 1; // byte after `#`
         let text: &'input str = &line.content[text_start..];
