@@ -86,7 +86,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
-- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Tasks 11-14 pending
+- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Tasks 12-14 pending
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
@@ -276,17 +276,17 @@ Move all `MAX_*` constants and their doc comments from the "Security Limits" sec
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; conformance 368/368
 - [x] **Advisors:** none — pure move
 
-### Task 11: extract DirectiveScope into directive_scope.rs (#4a-ii)
+### Task 11: extract DirectiveScope into directive_scope.rs (#4a-ii) — 7a7127e
 
 Move the `DirectiveScope` struct (`src/lib.rs:142`) and its impl block (`lib.rs:153-236`, containing `resolve_tag` and `tag_directives`) into a new `src/directive_scope.rs` module.
 
 **Files:** `src/lib.rs`, `src/directive_scope.rs` (new)
 
-- [ ] Create `src/directive_scope.rs`
-- [ ] Move `DirectiveScope` struct definition + full `impl DirectiveScope` block
-- [ ] Add `mod directive_scope;` declaration in `lib.rs`; update `EventIter`'s field declaration to use `directive_scope::DirectiveScope`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none
+- [x] Create `src/directive_scope.rs`
+- [x] Move `DirectiveScope` struct definition + full `impl DirectiveScope` block
+- [x] Add `mod directive_scope;` declaration in `lib.rs`; update `EventIter`'s field declaration to use `directive_scope::DirectiveScope`
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none
 
 ### Task 12: extract state-machine enums into state.rs (#4a-iii)
 
