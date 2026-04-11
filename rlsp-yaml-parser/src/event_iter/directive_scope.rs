@@ -106,3 +106,278 @@ impl DirectiveScope {
         pairs
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::field_reassign_with_default
+)]
+mod tests {
+    use super::*;
+    use crate::limits::MAX_RESOLVED_TAG_LEN;
+    use crate::pos::Pos;
+
+    const POS: Pos = Pos::ORIGIN;
+
+    // -----------------------------------------------------------------------
+    // resolve_tag — verbatim tags (no leading `!`)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_tag_verbatim_returns_input_as_is() {
+        let scope = DirectiveScope::default();
+        let result = scope.resolve_tag("tag:yaml.org,2002:str", POS).unwrap();
+        assert_eq!(result, "tag:yaml.org,2002:str");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn resolve_tag_verbatim_empty_string() {
+        let scope = DirectiveScope::default();
+        let result = scope.resolve_tag("", POS).unwrap();
+        assert_eq!(result, "");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_tag — secondary handle `!!`
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_tag_double_bang_uses_default_yaml_prefix() {
+        let scope = DirectiveScope::default();
+        assert_eq!(
+            scope.resolve_tag("!!str", POS).unwrap(),
+            "tag:yaml.org,2002:str"
+        );
+    }
+
+    #[test]
+    fn resolve_tag_double_bang_empty_suffix() {
+        let scope = DirectiveScope::default();
+        assert_eq!(scope.resolve_tag("!!", POS).unwrap(), "tag:yaml.org,2002:");
+    }
+
+    #[test]
+    fn resolve_tag_double_bang_uses_custom_prefix_when_registered() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!!".to_string(), "tag:example.com:".to_string());
+        assert_eq!(
+            scope.resolve_tag("!!local", POS).unwrap(),
+            "tag:example.com:local"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_tag — named handles `!handle!`
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_tag_named_handle_expands_to_registered_prefix() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!foo!".to_string(), "tag:example.com:foo:".to_string());
+        assert_eq!(
+            scope.resolve_tag("!foo!bar", POS).unwrap(),
+            "tag:example.com:foo:bar"
+        );
+    }
+
+    #[test]
+    fn resolve_tag_named_handle_empty_suffix() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!foo!".to_string(), "tag:example.com:foo:".to_string());
+        assert_eq!(
+            scope.resolve_tag("!foo!", POS).unwrap(),
+            "tag:example.com:foo:"
+        );
+    }
+
+    #[test]
+    fn resolve_tag_named_handle_unknown_errors() {
+        let scope = DirectiveScope::default();
+        let err = scope.resolve_tag("!bar!baz", POS).unwrap_err();
+        assert!(err.message.contains("undefined tag handle"));
+        assert!(err.message.contains("!bar!"));
+    }
+
+    #[test]
+    fn resolve_tag_named_handle_multiple_handles_resolves_correct_one() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!a!".to_string(), "tag:a.com:".to_string());
+        scope
+            .tag_handles
+            .insert("!b!".to_string(), "tag:b.com:".to_string());
+        assert_eq!(scope.resolve_tag("!b!val", POS).unwrap(), "tag:b.com:val");
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_tag — primary handle `!` (local tags)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_tag_local_tag_returns_as_is() {
+        let scope = DirectiveScope::default();
+        let result = scope.resolve_tag("!local", POS).unwrap();
+        assert_eq!(result, "!local");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn resolve_tag_bare_bang_returns_as_is() {
+        let scope = DirectiveScope::default();
+        let result = scope.resolve_tag("!", POS).unwrap();
+        assert_eq!(result, "!");
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_tag — MAX_RESOLVED_TAG_LEN boundary
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_tag_double_bang_at_exact_max_length_succeeds() {
+        let scope = DirectiveScope::default();
+        let prefix = "tag:yaml.org,2002:";
+        let suffix = "a".repeat(MAX_RESOLVED_TAG_LEN - prefix.len());
+        let raw = format!("!!{suffix}");
+        let result = scope.resolve_tag(&raw, POS).unwrap();
+        assert_eq!(result.len(), MAX_RESOLVED_TAG_LEN);
+    }
+
+    #[test]
+    fn resolve_tag_double_bang_one_byte_over_max_length_errors() {
+        let scope = DirectiveScope::default();
+        let prefix = "tag:yaml.org,2002:";
+        let suffix = "a".repeat(MAX_RESOLVED_TAG_LEN - prefix.len() + 1);
+        let raw = format!("!!{suffix}");
+        let err = scope.resolve_tag(&raw, POS).unwrap_err();
+        assert!(err.message.contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn resolve_tag_named_handle_at_exact_max_length_succeeds() {
+        let mut scope = DirectiveScope::default();
+        let prefix = "tag:x.com:";
+        scope
+            .tag_handles
+            .insert("!x!".to_string(), prefix.to_string());
+        let suffix = "a".repeat(MAX_RESOLVED_TAG_LEN - prefix.len());
+        let raw = format!("!x!{suffix}");
+        let result = scope.resolve_tag(&raw, POS).unwrap();
+        assert_eq!(result.len(), MAX_RESOLVED_TAG_LEN);
+    }
+
+    #[test]
+    fn resolve_tag_named_handle_one_byte_over_max_length_errors() {
+        let mut scope = DirectiveScope::default();
+        let prefix = "tag:x.com:";
+        scope
+            .tag_handles
+            .insert("!x!".to_string(), prefix.to_string());
+        let suffix = "a".repeat(MAX_RESOLVED_TAG_LEN - prefix.len() + 1);
+        let raw = format!("!x!{suffix}");
+        let err = scope.resolve_tag(&raw, POS).unwrap_err();
+        assert!(err.message.contains("exceeds maximum length"));
+    }
+
+    // -----------------------------------------------------------------------
+    // tag_directives
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tag_directives_empty_when_no_handles_registered() {
+        let scope = DirectiveScope::default();
+        assert_eq!(scope.tag_directives(), vec![]);
+    }
+
+    #[test]
+    fn tag_directives_returns_single_registered_handle() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!foo!".to_string(), "tag:foo.com:".to_string());
+        assert_eq!(
+            scope.tag_directives(),
+            vec![("!foo!".to_string(), "tag:foo.com:".to_string())]
+        );
+    }
+
+    #[test]
+    fn tag_directives_returns_multiple_handles_sorted() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!z!".to_string(), "z:".to_string());
+        scope
+            .tag_handles
+            .insert("!a!".to_string(), "a:".to_string());
+        assert_eq!(
+            scope.tag_directives(),
+            vec![
+                ("!a!".to_string(), "a:".to_string()),
+                ("!z!".to_string(), "z:".to_string()),
+            ]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Scope lifecycle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fresh_scope_has_no_version() {
+        let scope = DirectiveScope::default();
+        assert_eq!(scope.version, None);
+    }
+
+    #[test]
+    fn fresh_scope_resolves_double_bang_with_default_prefix() {
+        let scope = DirectiveScope::default();
+        assert_eq!(
+            scope.resolve_tag("!!str", POS).unwrap(),
+            "tag:yaml.org,2002:str"
+        );
+    }
+
+    #[test]
+    fn registered_handle_is_resolved_after_direct_write() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!ns!".to_string(), "tag:ns.example.com:".to_string());
+        scope.directive_count = 1;
+        assert_eq!(
+            scope.resolve_tag("!ns!item", POS).unwrap(),
+            "tag:ns.example.com:item"
+        );
+    }
+
+    #[test]
+    fn scope_reset_clears_handles() {
+        let mut scope = DirectiveScope::default();
+        scope
+            .tag_handles
+            .insert("!ns!".to_string(), "tag:ns.example.com:".to_string());
+        let reset_scope = DirectiveScope::default();
+        let err = reset_scope.resolve_tag("!ns!item", POS).unwrap_err();
+        assert!(err.message.contains("undefined tag handle"));
+    }
+
+    #[test]
+    fn scope_reset_clears_version() {
+        let mut scope = DirectiveScope::default();
+        scope.version = Some((1, 2));
+        let reset_scope = DirectiveScope::default();
+        assert_eq!(reset_scope.version, None);
+    }
+}
