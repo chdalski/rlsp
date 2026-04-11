@@ -84,7 +84,7 @@ All three layers are preserved in their respective plan files and commit message
 
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
-- [ ] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6)
+- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Tasks 4-6 pending
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
@@ -122,19 +122,19 @@ The helper `is_directive_or_blank_or_comment` at `src/lexer.rs:469-476` is gated
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — mechanical move
 
-### Task 3: migrate plain-scalar tests from lexer.rs to lexer/plain.rs (#3a)
+### Task 3: migrate plain-scalar tests from lexer.rs to lexer/plain.rs (#3a) — 2e49640
 
 Migrate all test groups that exercise `try_consume_plain_scalar`, `scan_plain_line_block`, and `scan_plain_line_flow` into `lexer/plain.rs`'s existing `mod tests` at line 599. Pure test move; no logic changes.
 
 **Files:** `src/lexer.rs`, `src/lexer/plain.rs`
 
-- [ ] Move Group G (`try_consume_plain_scalar`, Task 6) from `src/lexer.rs:729` onwards through the TE-addition subgroups targeting plain-scalar behaviour (colon termination, hash with tab, multi-line folding, c-forbidden disambiguation, indicator chars, span byte offsets)
-- [ ] Move the "TE required" groups at `src/lexer.rs:1106`, `1122`, `1140` that target plain-scalar behaviour
-- [ ] Move Group SPF (`scan_plain_line_flow`, 14 tests) from `src/lexer.rs:2268-2353`
-- [ ] Append to `lexer/plain.rs:599 mod tests` — verify `use super::*;` covers the test dependencies
-- [ ] If any test uses a helper that's private to `lexer.rs`, either promote the helper to `pub(super)` or keep that specific test in `lexer.rs` with a comment explaining why
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — same test count as before, just relocated
-- [ ] **Advisors:** none — pure test move, existing tests unchanged
+- [x] Move Group G (`try_consume_plain_scalar`, Task 6) from `src/lexer.rs:729` onwards through the TE-addition subgroups targeting plain-scalar behaviour (colon termination, hash with tab, multi-line folding, c-forbidden disambiguation, indicator chars, span byte offsets)
+- [x] Move the "TE required" groups at `src/lexer.rs:1106`, `1122`, `1140` that target plain-scalar behaviour
+- [x] Move Group SPF (`scan_plain_line_flow`, 14 tests) from `src/lexer.rs:2268-2353`
+- [x] Append to `lexer/plain.rs:599 mod tests` — verify `use super::*;` covers the test dependencies
+- [x] If any test uses a helper that's private to `lexer.rs`, either promote the helper to `pub(super)` or keep that specific test in `lexer.rs` with a comment explaining why
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — same test count as before, just relocated
+- [x] **Advisors:** none — pure test move, existing tests unchanged
 
 ### Task 4: migrate quoted-scalar tests from lexer.rs to lexer/quoted.rs (#3b)
 
