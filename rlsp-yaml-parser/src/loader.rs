@@ -29,8 +29,10 @@
 //! where Lossless mode is the default.  The `expanded_nodes` volume limit
 //! provides the backstop.
 
+mod reloc;
 mod stream;
 
+use reloc::reloc;
 use stream::{
     consume_leading_comments, consume_leading_doc_comments, next_from, peek_trailing_comment,
 };
@@ -701,70 +703,6 @@ const fn empty_scalar() -> Node<Span> {
         },
         leading_comments: Vec::new(),
         trailing_comment: None,
-    }
-}
-
-/// Replace the location of a node (used when stamping alias-site spans).
-fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
-    match node {
-        Node::Scalar {
-            value,
-            style,
-            anchor,
-            tag,
-            leading_comments,
-            trailing_comment,
-            ..
-        } => Node::Scalar {
-            value,
-            style,
-            anchor,
-            tag,
-            loc,
-            leading_comments,
-            trailing_comment,
-        },
-        Node::Mapping {
-            entries,
-            anchor,
-            tag,
-            leading_comments,
-            trailing_comment,
-            ..
-        } => Node::Mapping {
-            entries,
-            anchor,
-            tag,
-            loc,
-            leading_comments,
-            trailing_comment,
-        },
-        Node::Sequence {
-            items,
-            anchor,
-            tag,
-            leading_comments,
-            trailing_comment,
-            ..
-        } => Node::Sequence {
-            items,
-            anchor,
-            tag,
-            loc,
-            leading_comments,
-            trailing_comment,
-        },
-        Node::Alias {
-            name,
-            leading_comments,
-            trailing_comment,
-            ..
-        } => Node::Alias {
-            name,
-            loc,
-            leading_comments,
-            trailing_comment,
-        },
     }
 }
 
