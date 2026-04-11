@@ -320,8 +320,8 @@ branch, matching today's behaviour.
 
 - [x] Task 1 — deduplicate `pos_after_line` with an Eof-safe
       fast path — `32a2809`
-- [ ] Task 2 — eliminate end-of-span char walks via
-      `pos::advance_within_line`
+- [x] Task 2 — eliminate end-of-span char walks via
+      `pos::advance_within_line` — `5966502`
 - [ ] Task 3 — collapse the scalar try-chain into a
       first-byte dispatcher
 
@@ -424,36 +424,50 @@ pattern at the 11 sites below with one call to
 site the caller already knows the slice contains no line
 break, so the helper's assumption holds.
 
-- [ ] Add `advance_within_line` to `src/pos.rs`; include a
+- [x] Add `advance_within_line` to `src/pos.rs`; include a
   unit test pinning its output for ASCII, multi-byte, and
-  empty inputs.
-- [ ] `src/lexer.rs`: replace the walks at the marker-line
+  empty inputs. (9 unit tests added, including two
+  equivalence proofs vs `chars().fold(pos, Pos::advance)`.)
+- [x] `src/lexer.rs`: replace the walks at the marker-line
   comment span (~line 266) and the inline-scalar end
   (~line 329).
-- [ ] `src/lexer/plain.rs`: replace the trailing-comment
+- [x] `src/lexer/plain.rs`: replace the trailing-comment
   span walk (~line 79) and the plain-scalar end walk
   (~line 139).
-- [ ] `src/lexer/quoted.rs`: replace the single-quoted
+- [x] `src/lexer/quoted.rs`: replace the single-quoted
   closing walk (~line 64) and the double-quoted closing
-  walk (~line 140). Double-check the `advance('\'')` /
-  `advance('"')` calls that follow — each is a single
-  ASCII character and can become `pos = pos.advance_char`
-  style or a direct byte_offset+1 update, whichever stays
-  clearest.
-- [ ] `src/lexer/comment.rs`: replace the comment-span walk
+  walk (~line 140). (All four quoted-scalar walk sites
+  replaced — 2 single-quoted + 2 double-quoted inside
+  `scan_double_quoted_line` — and the private
+  `pos_after_str` helper was deleted as no longer needed.)
+- [x] `src/lexer/comment.rs`: replace the comment-span walk
   (~line 63).
-- [ ] `src/event_iter/block/mapping.rs`: replace the
+- [x] `src/event_iter/block/mapping.rs`: replace the
   implicit-key end walk (~line 170).
-- [ ] `src/event_iter/flow.rs`: replace the flow-span walk
-  (~line 115).
-- [ ] `src/event_iter/directives.rs`: replace the `%TAG`
-  prefix walk (~line 208).
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `src/event_iter/flow.rs`: replace the flow-span walk
+  (~line 115). (Additionally replaced the flow-context
+  comment walk at ~line 263, which was not originally
+  enumerated but matched the same pattern.)
+- [x] `src/event_iter/directives.rs`: replace the `%TAG`
+  prefix walk (~line 208). (Verified non-applicable: the
+  loop at `directives.rs:208` is a `prefix.chars()`
+  control-character validation loop with no `p.advance(c)`
+  call, not a span walk. The plan's enumeration was
+  imprecise about this site; no replacement exists to
+  make.)
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml-parser` all green.
-- [ ] `cargo bench -p rlsp-yaml-parser --bench throughput`;
+- [x] `cargo bench -p rlsp-yaml-parser --bench throughput`;
   verify no regressions; update `docs/benchmarks.md`.
-- [ ] Commit: `perf(parser): replace end-of-span char
-  walks with ASCII-fast-path helper`.
+  (Same-session in-container comparison vs baseline SHA
+  `47f6f7e`: `flow_heavy` -21.3% — the big win, driven by
+  the `abs_pos` closure replacement; `scalar_heavy` and
+  `mixed` flat within noise; `block_sequence` showed ±1–2%
+  fluctuation across five re-runs with individual samples
+  both above and below baseline, dominated by container
+  scheduling noise per the plan's stated ±5% band.)
+- [x] Commit: `perf(parser): replace end-of-span char
+  walks with ASCII-fast-path helper` — `5966502`.
 
 **Reference impl consultation:**
 1. `src/pos.rs:50` `column_at` — existing ASCII fast-path
