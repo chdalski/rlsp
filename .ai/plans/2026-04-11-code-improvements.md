@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a)
+- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [ ] #27 — chars.rs verbatim-tag URI validation tightening (Task 27)
@@ -397,18 +397,18 @@ Move directive-parsing methods and the `BetweenDocs` stepper into `src/event_ite
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; 455 unit, 368 conformance, 513 smoke, 21 unicode, 3 doc; zero warnings
 - [x] **Advisors:** none — pure move
 
-### Task 20: create event_iter/flow.rs (#4b-iii)
+### Task 20: create event_iter/flow.rs (#4b-iii) — d6170c4
 
 Move `handle_flow_collection` (~1,310 lines) into `src/event_iter/flow.rs` as a single atom. Do NOT attempt to split the function — the in-code design note at `lib.rs:3245-3253` deliberately preserves the repetition and the function declares a local `FlowFrame` enum that would require module-scope promotion to break up.
 
 **Files:** `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/flow.rs` (new)
 
-- [ ] Create `src/event_iter/flow.rs`
-- [ ] Add `pub(crate) mod flow;` to `src/event_iter.rs`
-- [ ] Move `handle_flow_collection` (`lib.rs:3196-4505`) in its entirety, including the inner `FlowFrame` local enum
-- [ ] Convert to `pub(in crate::event_iter) fn`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — flow-collection tests are sensitive; verify full pass
-- [ ] **Advisors:** none (pure move). The reviewer should spot-check that the byte-for-byte function moved unchanged — no accidental edits inside the 1,310-line body.
+- [x] Create `src/event_iter/flow.rs`
+- [x] Add `pub(crate) mod flow;` to `src/event_iter.rs`
+- [x] Move `handle_flow_collection` (`lib.rs:3196-4505`) in its entirety, including the inner `FlowFrame` local enum
+- [x] Convert to `pub(in crate::event_iter) fn`
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — flow-collection tests are sensitive; verify full pass
+- [x] **Advisors:** none (pure move). The reviewer should spot-check that the byte-for-byte function moved unchanged — no accidental edits inside the 1,310-line body.
 
 ### Task 21: create event_iter/step.rs (#4b-iv)
 
