@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), test task 9b pending
+- [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -249,18 +249,20 @@ Create `#[cfg(test)] mod tests` in `src/loader/reloc.rs` with unit-level coverag
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green (432 → 439 unit tests)
 - [x] **Advisors required:** test-engineer input + output gates (same rationale as 7b; new test file, no existing coverage) — both gates satisfied
 
-### Task 9b: add unit tests for loader/comments.rs (#6 — follow-up)
+### Task 9b: add unit tests for loader/comments.rs (#6 — follow-up) — 84d789d
 
 Create `#[cfg(test)] mod tests` in `src/loader/comments.rs` (file created in Task 9) with unit-level coverage for `attach_leading_comments` and `attach_trailing_comment`. Must execute after Task 9 because the file does not exist yet.
 
+**Note during review:** the plan's original description said `attach_leading_comments` should "append" to existing comments. This was incorrect — the actual implementation *overwrites* on assign (`*leading_comments = comments;` at `loader/comments.rs:24`). Per plan directive ("verify against current behaviour, don't change it"), the developer tested the real overwrite semantics — same correction pattern as Task 8b's `reloc` shallow-semantics note.
+
 **Files:** `src/loader/comments.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/comments.rs`
-- [ ] Coverage for `attach_leading_comments`: empty input list is a no-op; non-empty list appended to the node's existing leading comments (or initialised if none); verify ordering is preserved
-- [ ] Coverage for `attach_trailing_comment`: attaches a single trailing comment to the node; semantics for overwriting vs appending if the node already has a trailing comment (verify against current behaviour, don't change it)
-- [ ] Verify the helpers reach into the correct `Node` variants (Scalar/Sequence/Mapping/Alias) — if the helpers only support some variants, test the supported ones
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green
-- [ ] **Advisors required:** test-engineer input + output gates (same rationale as 7b/8b)
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/comments.rs`
+- [x] Coverage for `attach_leading_comments`: empty input list is a no-op; non-empty list overwrites the node's existing leading comments (actual semantics, not append); verify ordering is preserved
+- [x] Coverage for `attach_trailing_comment`: attaches a single trailing comment to the node; overwrite semantics verified against current behaviour
+- [x] Verify the helpers reach into the correct `Node` variants — all four (Scalar/Sequence/Mapping/Alias) are supported and covered
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green (439 → 450 unit, 368/368 conformance)
+- [x] **Advisors required:** test-engineer input + output gates — both gates satisfied
 
 ### Task 10: extract lib.rs security-limit constants into limits.rs (#4a-i)
 
