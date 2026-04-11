@@ -159,7 +159,7 @@ with scalar fallback. Zero unsafe in the public API.
 - [x] Split lexer.rs into submodules (Task 1) — c1ff3ce
 - [x] Add memchr dependency and byte-level plain scalar scanning (Task 2) — c6c56ba
 - [x] Byte-level scanning for quoted scalars (Task 3) — 815d7c5
-- [ ] Byte-level scanning for block scalars and comment (Task 4)
+- [x] Byte-level scanning for block scalars and comment (Task 4) — cf772a9
 - [ ] Benchmark and verify improvement (Task 5)
 
 ## Tasks
@@ -270,25 +270,25 @@ inside quotes, `''` adjacent to non-ASCII). Get sign-off.
 
 Optimize remaining scanner functions.
 
-- [ ] Optimize `try_consume_comment()` in `lexer/comment.rs`:
+- [x] Optimize `try_consume_comment()` in `lexer/comment.rs`:
   - Use `memchr(b'\0', ...)` for the null-byte validation check
     (currently `char_indices().find()`)
   - The main comment body is already `&str` slice — no
     per-character iteration needed for content extraction
-- [ ] Review block scalar content collection in `lexer/block.rs`:
+- [x] Review block scalar content collection in `lexer/block.rs`:
   - Block scalars iterate lines (via `LineBuffer`), not chars
     within lines — the per-line `for ch in content.chars()`
     walks are for position tracking (already fixed by lazy Pos)
   - Identify any remaining char-level iteration and optimize
     if present
-- [ ] Optimize `extract_trailing_comment()` in `lexer/plain.rs`:
+- [x] Optimize `extract_trailing_comment()` in `lexer/plain.rs`:
   - Currently uses `suffix.char_indices()` to find `#`
   - Replace with `memchr(b'#', suffix.as_bytes())` + context
     validation
-- [ ] All tests pass
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `perf(parser): byte-level scanning for comments and
-  trailing comment extraction`
+- [x] All tests pass
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `perf(parser): byte-level scanning for comments and
+  trailing comment extraction` — cf772a9
 
 **Reference impl consultation:** Local implementations.
 **Advisors:** None (mechanical optimization, lower-impact paths).
