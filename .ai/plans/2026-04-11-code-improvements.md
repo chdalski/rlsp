@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction (Tasks 7-9) — Task 7 done (2ac29d0), Tasks 8-9 pending
+- [~] #6 — loader.rs helper extraction (Tasks 7-9) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -190,17 +190,17 @@ Move the four stream-helper functions from `src/loader.rs` into a new `src/loade
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure move
 
-### Task 8: extract loader/reloc.rs (#6)
+### Task 8: extract loader/reloc.rs (#6) — 3e1ff8a
 
 Move the `reloc` function from `src/loader.rs:778` into a new `src/loader/reloc.rs` submodule. Takes `Node<Span>` and `Span`, no `LoadState` dependency. Pure move.
 
 **Files:** `src/loader.rs`, `src/loader/reloc.rs` (new)
 
-- [ ] Create `src/loader/reloc.rs`
-- [ ] Move `reloc` (`loader.rs:778-840`)
-- [ ] Add `mod reloc;` declaration in `loader.rs`; update call sites
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none
+- [x] Create `src/loader/reloc.rs`
+- [x] Move `reloc` (`loader.rs:778-840`)
+- [x] Add `mod reloc;` declaration in `loader.rs`; update call sites
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none
 
 ### Task 9: extract loader/comments.rs (#6)
 
