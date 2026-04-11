@@ -84,7 +84,7 @@ All three layers are preserved in their respective plan files and commit message
 
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
-- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Tasks 5-6 pending
+- [~] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 pending
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
@@ -149,17 +149,17 @@ Migrate all test groups for `try_consume_single_quoted` and `try_consume_double_
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure test move
 
-### Task 5: migrate block-scalar tests and create test module in lexer/block.rs (#3c)
+### Task 5: migrate block-scalar tests and create test module in lexer/block.rs (#3c) — 4b37665
 
 Migrate all test groups for `try_consume_literal_block_scalar` (Task 8) from `src/lexer.rs:1676` through subgroups H-A through H-H into `lexer/block.rs`. **The block.rs file currently has no `mod tests`** — this task creates it.
 
 **Files:** `src/lexer.rs`, `src/lexer/block.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `lexer/block.rs`
-- [ ] Move Group H (literal block scalar, Task 8) and its subgroups H-A through H-H (header parsing happy path/errors, clip content collection, strip/keep chomping, explicit indent indicator, termination/boundary, tab handling, UTF-8 and special content)
-- [ ] Helper-visibility check
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure test move + new test module scaffolding
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `lexer/block.rs`
+- [x] Move Group H (literal block scalar, Task 8) and its subgroups H-A through H-H (header parsing happy path/errors, clip content collection, strip/keep chomping, explicit indent indicator, termination/boundary, tab handling, UTF-8 and special content)
+- [x] Helper-visibility check
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure test move + new test module scaffolding
 
 ### Task 6: add unit tests for lexer/comment.rs (#3d — new)
 
