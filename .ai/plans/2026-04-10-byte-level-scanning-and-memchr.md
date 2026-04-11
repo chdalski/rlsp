@@ -160,7 +160,7 @@ with scalar fallback. Zero unsafe in the public API.
 - [x] Add memchr dependency and byte-level plain scalar scanning (Task 2) — c6c56ba
 - [x] Byte-level scanning for quoted scalars (Task 3) — 815d7c5
 - [x] Byte-level scanning for block scalars and comment (Task 4) — cf772a9
-- [ ] Benchmark and verify improvement (Task 5)
+- [x] Benchmark and verify improvement (Task 5) — 0881d88
 
 ## Tasks
 
@@ -295,18 +295,26 @@ Optimize remaining scanner functions.
 
 ### Task 5: Benchmark and verify
 
-- [ ] Run `cargo bench` (full Criterion suite)
-- [ ] Compare throughput against baseline in `docs/benchmarks.md`
+- [x] Run `cargo bench` (full Criterion suite)
+- [x] Compare throughput against baseline in `docs/benchmarks.md`
   (updated after Task 4 of the lazy Pos plan)
-- [ ] Report: target vs measured for each fixture
-  - Target: 2× or better on scalar_heavy and block_sequence
-  - Target: measurable improvement on all fixture sizes
-- [ ] Compare first-event latency (should be unchanged)
-- [ ] Compare allocation counts (should be unchanged — this
-  optimization reduces CPU work, not allocations)
-- [ ] Update `docs/benchmarks.md` with new results
-- [ ] Commit: `docs(parser): benchmark results for byte-level
-  scanning optimization`
+- [x] Report: target vs measured for each fixture
+  - Target: 2× or better on scalar_heavy and block_sequence —
+    **NOT MET**; measured +2.7% (scalar_heavy) / +11.5%
+    (block_sequence) under CPU-pinned measurement. User
+    explicitly accepted measured results in place of the 2×
+    target (escalated per `no-silent-target-weakening.md`).
+  - Target: measurable improvement on all fixture sizes — met
+    (+2.0% to +11.5% synthetic, +5–9% real-world Kubernetes).
+- [x] Compare first-event latency (should be unchanged) —
+  unchanged within container noise.
+- [x] Compare allocation counts (should be unchanged — this
+  optimization reduces CPU work, not allocations) — unchanged.
+- [x] Update `docs/benchmarks.md` with new results — 0881d88
+- [x] Commit: `docs(parser): benchmark results for byte-level
+  scanning optimization` — committed as
+  `docs(parser): record byte-level scanning benchmark results`
+  (0881d88)
 
 **Reference impl consultation:** Not applicable.
 **Advisors:** None (measurement only).
