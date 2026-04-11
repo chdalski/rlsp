@@ -86,7 +86,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
-- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 pending
+- [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
@@ -312,18 +312,18 @@ Move node-property scanning functions from `src/lib.rs` into a new `src/properti
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure move (Task 1 already normalised the tag-char predicate)
 
-### Task 14: extract mapping-key line helpers into mapping.rs (#4a-v)
+### Task 14: extract mapping-key line helpers into mapping.rs (#4a-v) — 69596e2
 
 Move line-level mapping-key detection helpers from `src/lib.rs:1089-1259` into a new `src/mapping.rs` module. Also migrates the one lib.rs unit test at `lib.rs:4585-4627` which covers these helpers' contract.
 
 **Files:** `src/lib.rs`, `src/mapping.rs` (new)
 
-- [ ] Create `src/mapping.rs`
-- [ ] Move `is_implicit_mapping_line` (`lib.rs:1091`), `is_tab_indented_block_indicator` (`lib.rs:1101`), `inline_contains_mapping_key` (`lib.rs:1113`), `find_value_indicator_offset` (`lib.rs:1154`)
-- [ ] Move the `#[cfg(test)] mod tests` block at `lib.rs:4571-4628` (single test `find_value_indicator_agrees_with_is_implicit_mapping_line`) into the new `mapping.rs`
-- [ ] Add `mod mapping;` declaration in `lib.rs`; update call sites in `impl EventIter` blocks
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move including the test
+- [x] Create `src/mapping.rs`
+- [x] Move `is_implicit_mapping_line` (`lib.rs:1091`), `is_tab_indented_block_indicator` (`lib.rs:1101`), `inline_contains_mapping_key` (`lib.rs:1113`), `find_value_indicator_offset` (`lib.rs:1154`)
+- [x] Move the `#[cfg(test)] mod tests` block at `lib.rs:4571-4628` (single test `find_value_indicator_agrees_with_is_implicit_mapping_line`) into the new `mapping.rs`
+- [x] Add `mod mapping;` declaration in `lib.rs`; update call sites in `impl EventIter` blocks
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — pure move including the test
 
 ### Task 15: EventIter — pending_anchor enum consolidation (#5a)
 
