@@ -83,7 +83,7 @@ All three layers are preserved in their respective plan files and commit message
 ## Steps
 
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
-- [ ] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2)
+- [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [ ] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6)
 - [ ] #6 — loader.rs helper extraction (Tasks 7-9)
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
@@ -110,17 +110,17 @@ Delete 13 unused YAML 1.2 character predicates from `src/chars.rs`, consolidate 
 - [x] `cargo fmt`, `cargo clippy --all-targets` zero warnings, `cargo test` all green
 - [x] **Advisors:** none — pure deletion/inlining, low risk, low uncertainty
 
-### Task 2: move `is_directive_or_blank_or_comment` into lexer.rs test module (#2)
+### Task 2: move `is_directive_or_blank_or_comment` into lexer.rs test module (#2) — 4c9428f
 
 The helper `is_directive_or_blank_or_comment` at `src/lexer.rs:469-476` is gated with `#[cfg(test)]` and defined outside the test module but is only called from one test at line 724 inside `mod tests`. Move it into the test module and drop the `#[cfg(test)]` attribute (implicit inside the test module).
 
 **Files:** `src/lexer.rs`
 
-- [ ] Move lines 461-476 (doc comment + `#[cfg(test)]` + function body) into `mod tests` at line 530
-- [ ] Remove the `#[cfg(test)]` attribute (now implicit)
-- [ ] Update the doc comment — the "Used only in tests..." line becomes self-evident from location and can be trimmed
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — mechanical move
+- [x] Move lines 461-476 (doc comment + `#[cfg(test)]` + function body) into `mod tests` at line 530
+- [x] Remove the `#[cfg(test)]` attribute (now implicit)
+- [x] Update the doc comment — the "Used only in tests..." line becomes self-evident from location and can be trimmed
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none — mechanical move
 
 ### Task 3: migrate plain-scalar tests from lexer.rs to lexer/plain.rs (#3a)
 
