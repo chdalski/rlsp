@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use memchr::{memchr, memchr2};
+
 use crate::chars::{decode_escape, is_c_printable};
 use crate::error::Error;
 use crate::pos::{Pos, Span};
@@ -437,37 +439,37 @@ pub(super) fn scan_single_quoted_line(body: &str) -> (SingleQuotedScan, bool) {
     let bytes = body.as_bytes();
     let mut has_escape = false;
 
-    while i < bytes.len() {
-        if bytes.get(i) == Some(&b'\'') {
-            // Either closing `'` or `''` escape.
-            if bytes.get(i + 1) == Some(&b'\'') {
-                // `''` escape: consume both, continue.
+    while let Some(rel) = memchr(b'\'', bytes.get(i..).unwrap_or_default()) {
+        let quote_pos = i + rel;
+
+        // Everything before quote_pos is plain content — skip it.
+        // But we must ensure we haven't landed mid-multibyte. Since `'` is
+        // ASCII (0x27), it can never be a continuation byte (0x80–0xBF), so
+        // any byte equal to 0x27 is the start of a new character.
+
+        match bytes.get(quote_pos + 1) {
+            Some(&b'\'') => {
+                // `''` escape: consume both quotes and continue.
                 has_escape = true;
-                i += 2;
-            } else {
+                i = quote_pos + 2;
+            }
+            _ => {
                 // Closing `'`.
                 return (
                     SingleQuotedScan {
-                        quoted_len: i,
+                        quoted_len: quote_pos,
                         has_escape,
                     },
                     true,
                 );
             }
-        } else {
-            // Advance by one character (handle multibyte).
-            let ch_len = body
-                .get(i..)
-                .and_then(|s| s.chars().next())
-                .map_or(1, char::len_utf8);
-            i += ch_len;
         }
     }
 
-    // Reached end of line without closing `'`.
+    // No more `'` in the remaining bytes — end of line without closing quote.
     (
         SingleQuotedScan {
-            quoted_len: i,
+            quoted_len: bytes.len(),
             has_escape,
         },
         false,
@@ -639,95 +641,91 @@ pub(super) fn scan_double_quoted_line(
     body: &str,
     start_pos: Pos,
 ) -> Result<DoubleQuotedLine<'_>, Error> {
+    let bytes = body.as_bytes();
     let mut i = 0;
     // We delay allocation until the first escape or discovery of multi-line.
     let mut owned: Option<String> = None;
-    // Borrow end (used only while `owned` is `None`).
+    // Byte length of the borrow-safe prefix (updated only while owned is None).
     let mut borrow_end: usize = 0;
 
-    while i < body.len() {
-        let ch = body[i..].chars().next().unwrap_or('\0');
+    while let Some(rel) = memchr2(b'"', b'\\', bytes.get(i..).unwrap_or_default()) {
+        let hit = i + rel;
 
-        match ch {
-            '"' => {
-                // Closing quote.
-                let content_end_pos = {
-                    let mut p = start_pos;
-                    for c in body[..i].chars() {
-                        p = p.advance(c);
-                    }
-                    p
-                };
-                let close_pos = content_end_pos.advance('"');
-                let value = owned.map_or_else(
-                    || DoubleQuotedValue::Borrowed(body.get(..i).unwrap_or("")),
-                    DoubleQuotedValue::Owned,
-                );
-                // `tail` is whatever follows the closing `"` on this line.
-                let tail = body.get(i + 1..).unwrap_or("");
-                return Ok(DoubleQuotedLine::Closed {
-                    value,
-                    close_pos,
-                    tail,
+        // Accumulate the plain span [i..hit] that memchr skipped over.
+        // For the borrow case we simply extend borrow_end; for owned we push.
+        if let Some(buf) = owned.as_mut() {
+            let span = body.get(i..hit).unwrap_or_default();
+            buf.push_str(span);
+            if buf.len() > 1_048_576 {
+                return Err(Error {
+                    pos: start_pos,
+                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
                 });
             }
-            '\\' => {
-                // Escape sequence.
-                let escape_pos = {
-                    let mut p = start_pos;
-                    for c in body[..i].chars() {
-                        p = p.advance(c);
-                    }
-                    p
-                };
-                let after_backslash = &body[i + 1..];
+        } else {
+            borrow_end = hit;
+        }
 
-                // Check for `\<newline>` (line continuation) — the backslash
-                // is the last character on the line (nothing follows).
-                if after_backslash.is_empty() {
-                    // Line continuation: `\` at end of line.  Force Owned so
-                    // the continuation accumulator starts with the prefix seen
-                    // so far.  Do not push anything — the newline and leading
-                    // whitespace on the next line are stripped by the caller.
-                    let prefix = owned.unwrap_or_else(|| body[..borrow_end].to_owned());
-                    return Ok(DoubleQuotedLine::Incomplete {
-                        value: DoubleQuotedValue::Owned(prefix),
-                        line_continuation: true,
-                    });
-                }
+        if bytes.get(hit) == Some(&b'"') {
+            // Closing quote.
+            let content_end_pos = pos_after_str(start_pos, body.get(..hit).unwrap_or_default());
+            let close_pos = content_end_pos.advance('"');
+            let value = owned.map_or_else(
+                || DoubleQuotedValue::Borrowed(body.get(..hit).unwrap_or_default()),
+                DoubleQuotedValue::Owned,
+            );
+            let tail = body.get(hit + 1..).unwrap_or_default();
+            return Ok(DoubleQuotedLine::Closed {
+                value,
+                close_pos,
+                tail,
+            });
+        }
+        // b'\\' — escape sequence.
+        {
+            let escape_pos = pos_after_str(start_pos, body.get(..hit).unwrap_or_default());
+            let after_backslash = body.get(hit + 1..).unwrap_or_default();
 
-                let consumed = decode_and_push_escape(
-                    after_backslash,
-                    escape_pos,
-                    &mut owned,
-                    &body[..borrow_end],
-                )?;
-                i += 1 + consumed; // skip `\` + escape body
+            if after_backslash.is_empty() {
+                // `\` at end of line — line continuation.
+                let prefix =
+                    owned.unwrap_or_else(|| body.get(..borrow_end).unwrap_or_default().to_owned());
+                return Ok(DoubleQuotedLine::Incomplete {
+                    value: DoubleQuotedValue::Owned(prefix),
+                    line_continuation: true,
+                });
             }
-            _ => {
-                if let Some(buf) = owned.as_mut() {
-                    buf.push(ch);
-                    if buf.len() > 1_048_576 {
-                        return Err(Error {
-                            pos: start_pos,
-                            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                        });
-                    }
-                } else {
-                    borrow_end = i + ch.len_utf8();
-                }
-                i += ch.len_utf8();
-            }
+
+            let consumed = decode_and_push_escape(
+                after_backslash,
+                escape_pos,
+                &mut owned,
+                body.get(..borrow_end).unwrap_or_default(),
+            )?;
+            i = hit + 1 + consumed; // skip `\` + escape body
         }
     }
 
-    // End of line without closing `"`.
-    // Trim trailing whitespace before fold.
+    // No more `"` or `\` — consume the rest of the line as plain content.
+    let rest = body.get(i..).unwrap_or_default();
+    if let Some(buf) = owned.as_mut() {
+        buf.push_str(rest);
+        if buf.len() > 1_048_576 {
+            return Err(Error {
+                pos: start_pos,
+                message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+            });
+        }
+    } else {
+        borrow_end = body.len();
+    }
+
+    // End of line without closing `"` — trim trailing whitespace before fold.
     let value = owned.map_or_else(
         || {
             let s = body
                 .get(..borrow_end)
-                .unwrap_or("")
+                .unwrap_or_default()
                 .trim_end_matches([' ', '\t']);
             DoubleQuotedValue::Borrowed(s)
         },
@@ -740,8 +738,374 @@ pub(super) fn scan_double_quoted_line(
     })
 }
 
+/// Advance `pos` over all characters in `s`, returning the resulting position.
+fn pos_after_str(pos: Pos, s: &str) -> Pos {
+    let mut p = pos;
+    for c in s.chars() {
+        p = p.advance(c);
+    }
+    p
+}
+
 /// Ensure `owned` is populated (allocating from `prefix` if needed), and
 /// return a mutable reference to it.
 fn ensure_owned<'s>(owned: &'s mut Option<String>, prefix: &str) -> &'s mut String {
     owned.get_or_insert_with(|| prefix.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::{
+        DoubleQuotedLine, DoubleQuotedValue, SingleQuotedScan, scan_double_quoted_line,
+        scan_single_quoted_line,
+    };
+    use crate::pos::Pos;
+
+    const START: Pos = Pos {
+        byte_offset: 0,
+        line: 1,
+        column: 0,
+    };
+
+    // ── scan_single_quoted_line ──────────────────────────────────────────────
+
+    #[test]
+    fn sq_empty_body_returns_not_closed_zero_len_no_escape() {
+        // Empty body means no closing quote was found on this line.
+        // The caller is responsible for finding the closing quote.
+        let (scan, closed) = scan_single_quoted_line("");
+        assert_eq!(scan.quoted_len, 0);
+        assert!(!scan.has_escape);
+        assert!(!closed);
+    }
+
+    #[test]
+    fn sq_just_closing_quote_returns_closed_zero_len() {
+        // "''" body is "'", the closing quote only.
+        let (scan, closed) = scan_single_quoted_line("'");
+        assert_eq!(scan.quoted_len, 0);
+        assert!(!scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_plain_ascii_closes_at_single_quote() {
+        let (scan, closed) = scan_single_quoted_line("hello'");
+        assert_eq!(scan.quoted_len, 5);
+        assert!(!scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_double_quote_escape_at_start() {
+        // "''rest'" — escape at 0-1, then "rest", then closing quote at 6.
+        // quoted_len is 6 (bytes 0-5 consumed: ''rest), closing ' is at 6.
+        let (scan, closed) = scan_single_quoted_line("''rest'");
+        assert_eq!(scan.quoted_len, 6);
+        assert!(scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_double_quote_escape_at_end_no_close() {
+        // `content''` — the `''` is an escape, no closing quote follows.
+        let (scan, closed) = scan_single_quoted_line("content''");
+        assert_eq!(scan.quoted_len, 9);
+        assert!(scan.has_escape);
+        assert!(!closed);
+    }
+
+    #[test]
+    fn sq_no_quote_returns_full_len_not_closed() {
+        let (scan, closed) = scan_single_quoted_line("no quote here");
+        assert_eq!(scan.quoted_len, 13);
+        assert!(!scan.has_escape);
+        assert!(!closed);
+    }
+
+    #[test]
+    fn sq_multibyte_no_quote_returns_byte_len() {
+        // "café" is 5 bytes in UTF-8.
+        let (scan, closed) = scan_single_quoted_line("café");
+        assert_eq!(scan.quoted_len, "café".len()); // 5
+        assert!(!scan.has_escape);
+        assert!(!closed);
+    }
+
+    #[test]
+    fn sq_multibyte_before_closing_quote() {
+        let (scan, closed) = scan_single_quoted_line("café'");
+        assert_eq!(scan.quoted_len, "café".len()); // 5
+        assert!(!scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_double_quote_escape_adjacent_to_multibyte() {
+        // "café''latte'" — escape between non-ASCII and ASCII
+        let body = "café''latte'";
+        let (scan, closed) = scan_single_quoted_line(body);
+        assert_eq!(scan.quoted_len, "café''latte".len()); // 12
+        assert!(scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_all_double_quote_escapes_no_close() {
+        // "''''" = two `''` escapes with no closing quote after them.
+        let (scan, closed) = scan_single_quoted_line("''''");
+        assert_eq!(scan.quoted_len, 4);
+        assert!(scan.has_escape);
+        assert!(!closed);
+    }
+
+    #[test]
+    fn sq_all_double_quote_escapes_then_close() {
+        // "'''''" = two `''` escapes followed by a closing `'` (5 quotes total).
+        // 0-1: escape, i=2. 2-3: escape, i=4. 4: closing quote.
+        let (scan, closed) = scan_single_quoted_line("'''''");
+        assert_eq!(scan.quoted_len, 4);
+        assert!(scan.has_escape);
+        assert!(closed);
+    }
+
+    #[test]
+    fn sq_three_quotes_escape_then_close() {
+        // "text'''" — first two `'` are escape, third is close
+        let (scan, closed) = scan_single_quoted_line("text'''");
+        assert_eq!(scan.quoted_len, 6); // "text''"
+        assert!(scan.has_escape);
+        assert!(closed);
+    }
+
+    // ── SingleQuotedScan::into_cow (tests unescape_single_quoted) ───────────
+
+    #[test]
+    fn us_no_escape_borrows_directly() {
+        let result = SingleQuotedScan {
+            quoted_len: 5,
+            has_escape: false,
+        }
+        .into_cow("hello'");
+        assert!(matches!(result, Cow::Borrowed("hello")));
+    }
+
+    #[test]
+    fn us_double_quote_escape_produces_single_quote() {
+        // Body "it''s'" — quoted_len 5 covers "it''s" (the escape + surrounding content).
+        let result = SingleQuotedScan {
+            quoted_len: 5,
+            has_escape: true,
+        }
+        .into_cow("it''s'");
+        assert_eq!(result, "it's");
+        assert!(matches!(result, Cow::Owned(_)));
+    }
+
+    #[test]
+    fn us_escape_adjacent_to_multibyte() {
+        let body = "café''latte'";
+        let result = SingleQuotedScan {
+            quoted_len: "café''latte".len(),
+            has_escape: true,
+        }
+        .into_cow(body);
+        assert_eq!(result, "café'latte");
+        assert!(matches!(result, Cow::Owned(_)));
+    }
+
+    #[test]
+    fn us_all_double_quote_escapes_produces_two_quotes() {
+        let result = SingleQuotedScan {
+            quoted_len: 4,
+            has_escape: true,
+        }
+        .into_cow("''''");
+        assert_eq!(result, "''");
+        assert!(matches!(result, Cow::Owned(_)));
+    }
+
+    // ── scan_double_quoted_line ──────────────────────────────────────────────
+
+    fn dq_ok(input: &str) -> DoubleQuotedLine<'_> {
+        scan_double_quoted_line(input, START)
+            .unwrap_or_else(|e| unreachable!("unexpected error: {}", e.message))
+    }
+
+    #[test]
+    fn dq_empty_body_closes_immediately() {
+        let result = dq_ok("\"");
+        assert!(matches!(
+            result,
+            DoubleQuotedLine::Closed {
+                value: DoubleQuotedValue::Borrowed(""),
+                tail: "",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dq_plain_ascii_borrows_and_closes() {
+        let result = dq_ok("hello\"");
+        assert!(matches!(
+            result,
+            DoubleQuotedLine::Closed {
+                value: DoubleQuotedValue::Borrowed("hello"),
+                tail: "",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dq_newline_escape_forces_owned() {
+        match dq_ok("a\\nb\"") {
+            DoubleQuotedLine::Closed { value, tail, .. } => {
+                assert_eq!(value.into_string(), "a\nb");
+                assert_eq!(tail, "");
+            }
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_unicode_escape_u4() {
+        match dq_ok("\\u00E9\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "é"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_unicode_escape_u8_supplementary() {
+        match dq_ok("\\U0001F600\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "😀"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_hex_escape_xff() {
+        match dq_ok("\\xFF\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\u{FF}"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_backslash_at_end_is_line_continuation() {
+        match dq_ok("text\\") {
+            DoubleQuotedLine::Incomplete {
+                value,
+                line_continuation,
+            } => {
+                assert_eq!(value.into_string(), "text");
+                assert!(line_continuation);
+            }
+            DoubleQuotedLine::Closed { .. } => unreachable!("expected Incomplete"),
+        }
+    }
+
+    #[test]
+    fn dq_no_delimiter_trims_trailing_whitespace() {
+        match dq_ok("hello   ") {
+            DoubleQuotedLine::Incomplete {
+                value,
+                line_continuation,
+            } => {
+                assert_eq!(value.into_string(), "hello");
+                assert!(!line_continuation);
+            }
+            DoubleQuotedLine::Closed { .. } => unreachable!("expected Incomplete"),
+        }
+    }
+
+    #[test]
+    fn dq_multibyte_no_escape_borrows() {
+        let result = dq_ok("café\"");
+        assert!(matches!(
+            result,
+            DoubleQuotedLine::Closed {
+                value: DoubleQuotedValue::Borrowed("café"),
+                tail: "",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dq_multibyte_then_escape_accumulates_correctly() {
+        match dq_ok("café\\n\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "café\n"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_escape_then_multibyte_accumulates_correctly() {
+        match dq_ok("\\ncafé\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\ncafé"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn dq_bidi_escape_is_rejected() {
+        match scan_double_quoted_line("\\u202A\"", START) {
+            Err(e) => assert!(
+                e.message.contains("bidirectional"),
+                "message: {}",
+                e.message
+            ),
+            Ok(_) => unreachable!("expected Err for bidi escape"),
+        }
+    }
+
+    #[test]
+    fn dq_non_printable_hex_escape_is_rejected() {
+        match scan_double_quoted_line("\\x01\"", START) {
+            Err(e) => assert!(
+                e.message.contains("non-printable"),
+                "message: {}",
+                e.message
+            ),
+            Ok(_) => unreachable!("expected Err for non-printable escape"),
+        }
+    }
+
+    #[test]
+    fn dq_unknown_escape_is_rejected() {
+        match scan_double_quoted_line("\\q\"", START) {
+            Err(e) => assert!(
+                e.message.contains("invalid escape"),
+                "message: {}",
+                e.message
+            ),
+            Ok(_) => unreachable!("expected Err for unknown escape"),
+        }
+    }
+
+    #[test]
+    fn dq_tail_after_closing_quote_is_captured() {
+        let result = dq_ok("hello\" world");
+        assert!(matches!(
+            result,
+            DoubleQuotedLine::Closed {
+                value: DoubleQuotedValue::Borrowed("hello"),
+                tail: " world",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dq_null_byte_escape_is_allowed() {
+        match dq_ok("\\0\"") {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\0"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
 }
