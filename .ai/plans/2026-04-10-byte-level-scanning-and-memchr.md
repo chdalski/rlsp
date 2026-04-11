@@ -158,7 +158,7 @@ with scalar fallback. Zero unsafe in the public API.
 
 - [x] Split lexer.rs into submodules (Task 1) — c1ff3ce
 - [x] Add memchr dependency and byte-level plain scalar scanning (Task 2) — c6c56ba
-- [ ] Byte-level scanning for quoted scalars (Task 3)
+- [x] Byte-level scanning for quoted scalars (Task 3) — 815d7c5
 - [ ] Byte-level scanning for block scalars and comment (Task 4)
 - [ ] Benchmark and verify improvement (Task 5)
 
@@ -240,23 +240,23 @@ Get sign-off on the completed implementation.
 Optimize `scan_single_quoted_line()` and
 `scan_double_quoted_line()`.
 
-- [ ] Rewrite `scan_single_quoted_line()` in `lexer/quoted.rs`:
+- [x] Rewrite `scan_single_quoted_line()` in `lexer/quoted.rs`:
   - Use `memchr(b'\'', &bytes[pos..])` to find end-of-string
     or `''` escape
   - Between quotes: content is passed through directly (no
     per-character decode needed for ASCII)
   - Non-ASCII: fall back to char decode at that position
-- [ ] Rewrite `scan_double_quoted_line()` in `lexer/quoted.rs`:
+- [x] Rewrite `scan_double_quoted_line()` in `lexer/quoted.rs`:
   - Use `memchr2(b'"', b'\\', &bytes[pos..])` to find
     end-of-string or escape sequence
   - Between delimiters: bulk copy (no per-character decode)
   - At `\\`: decode escape sequence (existing `decode_escape`
     logic, may need byte-level adaptation)
   - Non-ASCII: fall back to char decode
-- [ ] All tests pass
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `perf(parser): byte-level scanning with memchr for
-  quoted scalars`
+- [x] All tests pass
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `perf(parser): byte-level scanning with memchr for
+  quoted scalars` — 815d7c5
 
 **Reference impl consultation:**
 1. Local: existing quoted scanner implementations
