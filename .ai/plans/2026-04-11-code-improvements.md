@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
+- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [ ] #27 — chars.rs verbatim-tag URI validation tightening (Task 27)
@@ -370,19 +370,19 @@ Eliminate the `failed: bool` field by folding its semantics into `IterState::Don
 - [x] `cargo fmt`, `cargo clippy --all-targets` — zero warnings including `struct_excessive_bools`, `cargo test`, `cargo test --test conformance` — 1313 unit, 455 + 368 parser, 368 conformance, zero clippy warnings
 - [x] **Advisors:** none — small refactor, low risk. The clippy warning check is itself the acceptance criterion for removing the allow.
 
-### Task 18: create event_iter/base.rs (#4b-i)
+### Task 18: create event_iter/base.rs (#4b-i) — 9555145
 
 Create the `src/event_iter/` submodule and populate `base.rs` with mode-independent `EventIter` infrastructure: construction, scalar consumption, stack management, and the `Iterator` glue. These are called by every other `event_iter/` fragment, so this task must land first.
 
 **Files:** `src/lib.rs`, `src/event_iter/base.rs` (new), `src/event_iter.rs` (new — declares submodules)
 
-- [ ] Create `src/event_iter.rs` with `pub(crate) mod base;` (the parent module file per project convention — no `mod.rs`)
-- [ ] Create `src/event_iter/base.rs`
-- [ ] Move from `impl EventIter`: `new` (`lib.rs:403`), `try_consume_scalar` (`lib.rs:586`), `close_collections_at_or_above` (`lib.rs:432`), `close_all_collections` (`lib.rs:468`), `drain_trailing_comment` (`lib.rs:1013`), `min_standalone_property_indent` (`lib.rs:1048`), and the full `impl<'input> Iterator for EventIter<'input>` block (`lib.rs:4532`)
-- [ ] Convert moved methods to `pub(in crate::event_iter) fn` so sibling files can call them
-- [ ] Add `mod event_iter;` declaration in `lib.rs`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move + visibility adjustment
+- [x] Create `src/event_iter.rs` with `mod base;` (the parent module file per project convention — no `mod.rs`; the plan originally said `pub(crate) mod base;` but `mod base;` is equivalent because `event_iter` itself is crate-private)
+- [x] Create `src/event_iter/base.rs`
+- [x] Move from `impl EventIter`: `new` (`lib.rs:403`), `try_consume_scalar` (`lib.rs:586`), `close_collections_at_or_above` (`lib.rs:432`), `close_all_collections` (`lib.rs:468`), `drain_trailing_comment` (`lib.rs:1013`), `min_standalone_property_indent` (`lib.rs:1048`), and the full `impl<'input> Iterator for EventIter<'input>` block (`lib.rs:4532`)
+- [x] Moved methods use `pub(crate) fn` visibility — the plan's original directive (`pub(in crate::event_iter)`) is infeasible during this transient state because 14 call sites in `lib.rs` (inside the surviving `impl EventIter` blocks slated for Tasks 19-23) need to reach them. `pub(crate)` is the narrowest visibility that compiles. Tasks 19-23 drain those call sites out of `lib.rs`, after which a follow-up can tighten the visibility to `pub(in crate::event_iter)`. `zero_span` is also promoted to `pub(crate)` for the same reason.
+- [x] Add `mod event_iter;` declaration in `lib.rs`
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; 1313 unit, 368 conformance, 455 + 513 parser, zero warnings
+- [x] **Advisors:** none — pure move + visibility adjustment
 
 ### Task 19: create event_iter/directives.rs (#4b-ii)
 
