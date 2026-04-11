@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -452,19 +452,19 @@ Move the block-mapping handlers into `src/event_iter/block/mapping.rs`. This is 
 - [x] `cargo fmt`, `cargo clippy --all-targets` — zero warnings; `cargo test -p rlsp-yaml-parser` — 455 unit + 529 smoke + 21 unicode + 3 doc tests + supporting suites green; `cargo test --test conformance` — 368/368
 - [x] **Advisors:** none consulted — pure move, no logic changes, no new code paths, no behaviour change
 
-### Task 23b: relocate `src/properties.rs` → `src/event_iter/properties.rs` (#4c)
+### Task 23b: relocate `src/properties.rs` → `src/event_iter/properties.rs` (#4c) — 4316828
 
 Pure relocation of the `properties` module into the `event_iter/` subtree. The four functions (`scan_anchor_name`, `scan_tag`, `scan_tag_suffix`, `is_valid_tag_handle`) were extracted from `lib.rs` in Task 13 before `event_iter/` existed as a directory, so the module sits at crate root despite every caller living in `event_iter/`. Audit confirms: only `event_iter/step.rs`, `event_iter/flow.rs`, `event_iter/directives.rs` import from `crate::properties`.
 
 **Files:** `src/properties.rs` → `src/event_iter/properties.rs` (move), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/step.rs`, `src/event_iter/flow.rs`, `src/event_iter/directives.rs`
 
-- [ ] `git mv src/properties.rs src/event_iter/properties.rs`
-- [ ] Remove `mod properties;` from `src/lib.rs`
-- [ ] Add `pub(crate) mod properties;` to `src/event_iter.rs`
-- [ ] Update `use crate::properties::...` → `use super::properties::...` in `event_iter/step.rs`, `event_iter/flow.rs`, `event_iter/directives.rs`
-- [ ] Narrow the four functions' visibility to `pub(in crate::event_iter) fn` — they have no callers outside `event_iter/`, so the tightening is safe at this point
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 expected
-- [ ] **Advisors:** none — pure relocation, low risk, low uncertainty
+- [x] `git mv src/properties.rs src/event_iter/properties.rs`
+- [x] Remove `mod properties;` from `src/lib.rs`
+- [x] Add `pub(crate) mod properties;` to `src/event_iter.rs` — used plain `mod properties;` (clippy flags `pub(crate)` as redundant inside the already-crate-private `event_iter` module; matches the Task 18 / Task 22 precedent for `mod base;` and `mod block;`)
+- [x] Update `use crate::properties::...` → `use super::properties::...` in `event_iter/step.rs`, `event_iter/flow.rs`, `event_iter/directives.rs`
+- [x] Narrow the four functions' visibility to `pub(in crate::event_iter) fn` — they have no callers outside `event_iter/`, so the tightening is safe at this point
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 confirmed
+- [x] **Advisors:** none — pure relocation, low risk, low uncertainty
 
 ### Task 23c: add unit tests for `event_iter/properties.rs` (#4c — follow-up)
 
