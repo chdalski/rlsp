@@ -87,7 +87,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
-- [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
+- [~] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Tasks 16-17 pending
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
@@ -325,23 +325,23 @@ Move line-level mapping-key detection helpers from `src/lib.rs:1089-1259` into a
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none — pure move including the test
 
-### Task 15: EventIter — pending_anchor enum consolidation (#5a)
+### Task 15: EventIter — pending_anchor enum consolidation (#5a) — c5913f1
 
 Replace the pair `pending_anchor: Option<&'input str>` + `pending_anchor_for_collection: bool` with a single `pending_anchor: Option<PendingAnchor<'input>>` field backed by an enum. Eliminates the invalid-state representation where `_for_collection` is undefined when `pending_anchor` is `None`. Pure refactor; no behaviour change.
 
 **Files:** `src/lib.rs` (or `src/state.rs` if Task 12 has landed the enum module)
 
-- [ ] Define `PendingAnchor<'input>` enum with variants `Standalone(&'input str)` and `Inline(&'input str)` — place in `state.rs` alongside other state types
-- [ ] Update `EventIter` struct: remove `pending_anchor_for_collection: bool`, change `pending_anchor` type to `Option<PendingAnchor<'input>>`
-- [ ] Audit every call site that reads or writes `pending_anchor` or `pending_anchor_for_collection` (~20+ sites across `consume_mapping_entry`, `try_consume_scalar`, `handle_sequence_entry`, `handle_mapping_entry`, `handle_flow_collection`, anchor-scanning sites, and collection-open sites). Convert each:
+- [x] Define `PendingAnchor<'input>` enum with variants `Standalone(&'input str)` and `Inline(&'input str)` — place in `state.rs` alongside other state types
+- [x] Update `EventIter` struct: remove `pending_anchor_for_collection: bool`, change `pending_anchor` type to `Option<PendingAnchor<'input>>`
+- [x] Audit every call site that reads or writes `pending_anchor` or `pending_anchor_for_collection` (~20+ sites across `consume_mapping_entry`, `try_consume_scalar`, `handle_sequence_entry`, `handle_mapping_entry`, `handle_flow_collection`, anchor-scanning sites, and collection-open sites). Convert each:
   - Read access: match on `Option<PendingAnchor>` variants instead of reading two fields
   - Write access: construct `Some(PendingAnchor::Standalone(...))` or `Some(PendingAnchor::Inline(...))`
   - Clear: `None` (both old fields cleared at once)
-- [ ] Verify no call site inadvertently reads `pending_anchor_for_collection` without first checking `pending_anchor.is_some()` — the disjoint encoding made this latent; the refactor eliminates the possibility
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors required:**
-  - **test-engineer input gate:** consult before implementing — refactor touches ~20+ call sites and the disjoint representation may have hidden latent bugs; the TE should specify spot-check scenarios (e.g., "verify an `Inline` anchor on a key does not get attached to the enclosing mapping", "verify a `Standalone` anchor followed by a block sequence annotates the sequence, not the first item")
-  - **test-engineer output gate:** get sign-off on the completed call-site audit before submitting to reviewer
+- [x] Verify no call site inadvertently reads `pending_anchor_for_collection` without first checking `pending_anchor.is_some()` — the disjoint encoding made this latent; the refactor eliminates the possibility
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 conformance, 503 smoke, 1313 unit, zero warnings
+- [x] **Advisors required:**
+  - **test-engineer input gate:** test list embedded in dispatch message from prior-session TE (scenarios A-1 through A-11) — satisfied
+  - **test-engineer output gate:** TE gave conditional sign-off, developer added B-8/B-10/B-11 error-path tests, TE gave full sign-off — satisfied
 
 ### Task 16: EventIter — pending_tag enum consolidation (#5b)
 
