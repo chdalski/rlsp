@@ -91,7 +91,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
 - [x] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a), Task 23g done (9a48d38)
 - [x] #8 — docs/benchmarks.md historical cleanup (Task 24) — 73c3371
-- [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
+- [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26) — Task 25 done (cdd1a18)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
 
 ## Tasks
@@ -563,22 +563,22 @@ Remove all historical content from `rlsp-yaml-parser/docs/benchmarks.md`: PEG-pa
 - [x] `cargo fmt` (markdown unaffected but consistency), no other verification needed
 - [x] **Advisors:** none — docs-only cleanup
 
-### Task 25: write rlsp-yaml-parser/README.md (#7a)
+### Task 25: write rlsp-yaml-parser/README.md (#7a) — cdd1a18
 
 Create `rlsp-yaml-parser/README.md` using the old README at commit `560230d` as structural template but rewriting all content against the current streaming parser. The file was deleted during the streaming rewrite (commit `cc5c9a5`) and its old content no longer applies. Must include a Short AI Note section and a link to `docs/benchmarks.md` instead of an inline performance table.
 
 **Files:** `rlsp-yaml-parser/README.md` (new), `.ai/memory/project_followup_plans.md` (memory update)
 
-- [ ] Section: title + one-line description (spec-faithful streaming YAML 1.2 parser)
-- [ ] Section: Overview — describe streaming state-machine architecture, line-oriented lexing, zero-copy event iterator, separate loader. Do NOT reference parser combinators or "211 productions" — that was the PEG parser.
-- [ ] Section: Features — verify each claim against current code; adjust as needed. Spec-faithful, conformance pass rate (measure — see below), first-class comments, lossless spans, alias preservation (`LoadMode::Lossless` still exists), security controls
-- [ ] **Measure current conformance:** run `cargo test -p rlsp-yaml-parser --test conformance` and record the pass rate. Include the number in the Features section and Conformance section.
-- [ ] Section: Quick Start — verify examples compile against current API
+- [x] Section: title + one-line description (spec-faithful streaming YAML 1.2 parser)
+- [x] Section: Overview — describe streaming state-machine architecture, line-oriented lexing, zero-copy event iterator, separate loader. Do NOT reference parser combinators or "211 productions" — that was the PEG parser.
+- [x] Section: Features — verify each claim against current code; adjust as needed. Spec-faithful, conformance pass rate (measure — see below), first-class comments, lossless spans, alias preservation (`LoadMode::Lossless` still exists), security controls
+- [x] **Measure current conformance:** run `cargo test -p rlsp-yaml-parser --test conformance` and record the pass rate. Include the number in the Features section and Conformance section. — 368/368 measured and recorded
+- [x] Section: Quick Start — verify examples compile against current API
   - `parse_events` iterator example
   - `load` top-level example
   - `LoaderBuilder` example (`new().resolved().max_nesting_depth(128).build().load(...)`). All methods verified present at `loader.rs:140-187`.
   - DO NOT include the old "Emit YAML" example — no `emitter` module exists
-- [ ] Section: API Overview — table of current public modules
+- [x] Section: API Overview — table of current public modules
   - `parse_events` top-level fn
   - `loader` — `load`, `Loader`, `LoaderBuilder`, `LoaderOptions`, `LoadMode`, `LoadError`
   - `node` — `Document`, `Node`
@@ -586,12 +586,12 @@ Create `rlsp-yaml-parser/README.md` using the old README at commit `560230d` as 
   - `encoding` — brief note (UTF-8/16/32 + BOM handling, typically internal-use)
   - `lines` — brief note (`Line`, `LineBuffer`, `BreakType`, typically internal-use)
   - DO NOT include `stream`, `emitter`, `schema` — those modules don't exist
-- [ ] DELETE the old "Schemas" section entirely — no `schema` module in the current parser crate
-- [ ] Section: Security Limits — verify defaults against `loader.rs:110-118` (`max_nesting_depth=512`, `max_anchors=10_000`, `max_expanded_nodes=1_000_000`). These match the old README; keep the table.
-- [ ] Section: Performance — one-sentence summary + link to `docs/benchmarks.md` (no inline duplicate numbers)
-- [ ] Section: Building — `cargo build/test/clippy/bench -p rlsp-yaml-parser`
-- [ ] Section: License — `[MIT](../LICENSE) — Christoph Dalski`
-- [ ] Section: AI Note — use the **Short** variant agreed during planning:
+- [x] DELETE the old "Schemas" section entirely — no `schema` module in the current parser crate
+- [x] Section: Security Limits — verify defaults against `loader.rs:110-118` (`max_nesting_depth=512`, `max_anchors=10_000`, `max_expanded_nodes=1_000_000`). These match the old README; keep the table.
+- [x] Section: Performance — one-sentence summary + link to `docs/benchmarks.md` (no inline duplicate numbers)
+- [x] Section: Building — `cargo build/test/clippy/bench -p rlsp-yaml-parser`
+- [x] Section: License — `[MIT](../LICENSE) — Christoph Dalski`
+- [x] Section: AI Note — use the **Short** variant agreed during planning:
 
   ```markdown
   ## AI Note
@@ -605,8 +605,8 @@ Create `rlsp-yaml-parser/README.md` using the old README at commit `560230d` as 
   advisor review before being merged.
   ```
 
-- [ ] Update `.ai/memory/project_followup_plans.md` — the stale "Write rlsp-yaml-parser/README.md — DONE" entry has already been cleaned; verify no follow-up action needed, or add a note referencing this plan if historical continuity would help future agents
-- [ ] **Advisors:** none — docs only. Reviewer should verify that the Quick Start examples actually compile (`cargo check -p rlsp-yaml-parser --example ...` if any are set up, or by manual inspection against current API signatures).
+- [x] Update `.ai/memory/project_followup_plans.md` — the stale "Write rlsp-yaml-parser/README.md — DONE" entry has already been cleaned; verify no follow-up action needed, or add a note referencing this plan if historical continuity would help future agents — verified no action needed
+- [x] **Advisors:** none — docs only. Reviewer verified Quick Start examples against current API signatures (`parse_events` at `lib.rs:47`, `load` at `loader.rs:249`, `LoaderBuilder::{new, resolved, max_nesting_depth, build, load}` at `loader.rs:147-197`) and confirmed security-limit defaults against `loader.rs:122-127`.
 
 ### Task 26: retrofit AI Note across rlsp-yaml, rlsp-fmt, root README + add missing crates to root Crates table (#7b)
 
