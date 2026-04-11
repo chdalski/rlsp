@@ -7,12 +7,12 @@
 
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
+use crate::event_iter::line_mapping::is_tab_indented_block_indicator;
 use crate::event_iter::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::lines::Line;
-use crate::mapping::is_tab_indented_block_indicator;
 use crate::pos::Pos;
 use crate::{EventIter, zero_span};
 

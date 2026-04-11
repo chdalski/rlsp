@@ -6,13 +6,13 @@
 //! when the parser is in `IterState::InDocument`.
 
 use super::directive_scope::DirectiveScope;
+use super::line_mapping::{find_value_indicator_offset, inline_contains_mapping_key};
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
 use crate::error::Error;
 use crate::event::Event;
-use crate::mapping::{find_value_indicator_offset, inline_contains_mapping_key};
 use crate::pos::{Pos, Span};
 use crate::{EventIter, marker_span, zero_span};
 

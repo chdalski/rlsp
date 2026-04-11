@@ -2,7 +2,7 @@
 
 /// True when `trimmed` (content after stripping leading spaces) represents
 /// an implicit mapping key: it contains `: `, `:\t`, or ends with `:`.
-pub fn is_implicit_mapping_line(trimmed: &str) -> bool {
+pub(in crate::event_iter) fn is_implicit_mapping_line(trimmed: &str) -> bool {
     find_value_indicator_offset(trimmed).is_some()
 }
 
@@ -12,7 +12,7 @@ pub fn is_implicit_mapping_line(trimmed: &str) -> bool {
 /// EOL), or an implicit mapping key (contains a `:` value indicator).
 ///
 /// Used to detect tab-as-block-indentation violations (YAML 1.2 §6.1).
-pub fn is_tab_indented_block_indicator(s: &str) -> bool {
+pub(in crate::event_iter) fn is_tab_indented_block_indicator(s: &str) -> bool {
     s.strip_prefix(['-', '?']).map_or_else(
         || is_implicit_mapping_line(s),
         |after| after.is_empty() || after.starts_with([' ', '\t']),
@@ -24,7 +24,7 @@ pub fn is_tab_indented_block_indicator(s: &str) -> bool {
 ///
 /// This handles cases like `&anchor key: value` or `!!str &a key: value`
 /// where the actual key content starts after the properties.
-pub fn inline_contains_mapping_key(inline: &str) -> bool {
+pub(in crate::event_iter) fn inline_contains_mapping_key(inline: &str) -> bool {
     if find_value_indicator_offset(inline).is_some() {
         return true;
     }
@@ -65,7 +65,7 @@ pub fn inline_contains_mapping_key(inline: &str) -> bool {
 /// `!`, `|`, `>`) are rejected immediately — they are not implicit mapping
 /// keys.  Quoted-scalar starts (`"`, `'`) and bare-indicator starts (`?`, `-`,
 /// `:`) are handled specially.
-pub fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
+pub(in crate::event_iter) fn find_value_indicator_offset(trimmed: &str) -> Option<usize> {
     // Reject lines that start with indicator characters that cannot begin a
     // plain scalar (and are thus not valid implicit mapping keys).
     // Also reject lines starting with `\t`: YAML 1.2 §6.1 forbids tabs as

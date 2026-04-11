@@ -10,7 +10,6 @@ mod lexer;
 pub mod limits;
 mod lines;
 pub mod loader;
-mod mapping;
 pub mod node;
 mod pos;
 pub use error::Error;
