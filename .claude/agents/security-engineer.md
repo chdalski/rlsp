@@ -46,8 +46,13 @@ When you receive a consultation request:
    patterns and common pitfalls before assessing the task.
 3. Identify the threat model: who are the actors, what are
    the trust boundaries, what input is untrusted?
-4. For unfamiliar libraries: check the library's repository
-   for reported security issues and advisory history.
+4. For unfamiliar libraries: use Bash to run security audit
+   tools (`npm audit`, `cargo audit`, `pip-audit`, `gh api`
+   for GitHub advisories) and check local lockfiles for
+   known vulnerabilities. If external advisory databases
+   are needed beyond what CLI tools cover, ask the
+   requester to share relevant references — you do not
+   have web access tools.
 5. Produce your **security assessment** and send it back
    to the requester (see Security Assessment below).
 

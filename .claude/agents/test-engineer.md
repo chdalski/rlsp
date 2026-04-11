@@ -55,10 +55,13 @@ When you receive a consultation request:
    (e.g., read the framework's own test suite). This
    reveals the correct testing patterns and avoids fighting
    the framework.
-5. For unfamiliar libraries: consult published API
-   documentation and the library's repository for test
-   examples before choosing a test approach. Check the
-   package registry for the latest stable version.
+5. For unfamiliar libraries: use Bash to query the package
+   registry (`npm view`, `pip show`, `cargo info`) for the
+   latest stable version. Read local dependency files
+   (lockfiles, vendor dirs) and any bundled docs. If
+   external web documentation is needed, ask the requester
+   to share relevant references — you do not have web
+   access tools.
 6. Produce the **test list** and send it back to the
    requester (see Producing the Test List below).
 

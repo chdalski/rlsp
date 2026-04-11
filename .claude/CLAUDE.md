@@ -90,7 +90,7 @@ correct" changes enter the codebase undetected.
 
 After clarification is complete:
 
-1. **Invoke `/ensure-plans-dir`** to prepare the plans
+1. **Invoke `/ensure-ai-dirs`** to prepare the plans
    directory and its format guide. Do not skip this even if
    the plans directory appears to exist — the skill checks
    whether the format guide is current and refreshes it if
@@ -482,7 +482,7 @@ infrastructure that you commit directly.
 This covers:
 - `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
   config, TypeScript strictness config
-- `/ensure-plans-dir` outputs — plan format guide
+- `/ensure-ai-dirs` outputs — plan format guide
 - Plan status changes — marking plans Completed or Canceled
   after execution ends (task-level updates are committed by
   the reviewer during execution)

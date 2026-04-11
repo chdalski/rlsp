@@ -76,9 +76,10 @@ stopped.
      advisor verified the result — reject and tell the
      implementor to obtain sign-off before resubmitting.
    - **Consistent with changes** — if the status says "no
-     advisors consulted" but the changes are non-trivial,
-     apply the test adequacy backstop (see Test Coverage
-     below).
+     advisors consulted" but the implementation modifies
+     observable behavior, adds new code paths, or introduces
+     a new module, apply the test adequacy backstop (see
+     Test Coverage below).
 
    This verification exists because a production incident
    showed the implementor submitting before obtaining

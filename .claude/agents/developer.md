@@ -36,9 +36,18 @@ which files are involved, and any context from the plan.
 When you receive a task:
 
 1. Read the task description and understand the scope.
-2. Read all referenced source files to understand existing
+2. **Research referenced specifications and
+   implementations.** If the task description or the
+   project's `CLAUDE.md` References section mentions
+   specifications, reference implementations, or
+   authoritative sources, use WebSearch and WebFetch to
+   study them before reading code — understanding the
+   spec first lets you evaluate existing code against
+   correct behavior, rather than assuming the current
+   implementation is right.
+3. Read all referenced source files to understand existing
    patterns and architecture.
-3. **Take a baseline snapshot** — record the current
+4. **Take a baseline snapshot** — record the current
    `HEAD` SHA (`git rev-parse HEAD`) and run
    `git diff --name-only` and
    `git ls-files --others --exclude-standard` to record
@@ -50,7 +59,7 @@ When you receive a task:
    task. The file snapshot lets you identify exactly which
    files your work changed, excluding pre-existing
    modifications that belong to other work.
-4. **Independently assess risk and uncertainty** using the
+5. **Independently assess risk and uncertainty** using the
    risk-assessment rule (loaded automatically) to decide
    whether to consult advisors before implementing. Apply
    the rule's indicators to the actual work — not to what
@@ -106,7 +115,12 @@ entire pipeline.
 
 - Make all tests pass. That is your primary goal.
 - Implement the minimal solution that satisfies the
-  requirement. Do not over-engineer.
+  requirement. Do not over-engineer or implement code
+  that is not needed for the current task — even if the
+  plan shows it will be needed in a later task. Later
+  tasks may be reordered, modified, or canceled, and
+  pre-built scaffolding couples task slices that should
+  be independently committable.
 - Read existing code before modifying it. Understand the
   patterns in use and match them.
 - Follow all rules loaded by the rule system —

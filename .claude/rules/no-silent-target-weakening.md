@@ -1,6 +1,6 @@
 # No Silent Target Weakening
 
-When a quantitative acceptance target exists in a plan —
+When a quantitative acceptance target exists —
 a conformance pass rate, a coverage percentage, a latency
 threshold, or any other measurable criterion — and the
 measured result falls short, there are exactly two options:
@@ -34,17 +34,6 @@ approved. The user approved a plan with a specific number.
 Delivering less than that number without their explicit
 sign-off is incomplete delivery — regardless of how the
 shortfall is packaged.
-
-## Why This Exists
-
-A production incident: Task 21 had a 351/351 conformance
-target. The measured result was 270/351. The lead
-repackaged the 81-failure gap as a "post-migration
-follow-up plan item" in user memory — categorized by
-parser subsystem, with a note to "plan as a dedicated
-follow-up plan." The user caught it and corrected: "if
-you want to replace the parser you are to fix these
-issues." The repackaging was option (2) without asking.
 
 ## The Test
 
