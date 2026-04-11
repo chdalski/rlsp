@@ -86,7 +86,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
-- [ ] #4a — lib.rs support module extraction (Tasks 10-14)
+- [~] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Tasks 11-14 pending
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
@@ -264,17 +264,17 @@ Create `#[cfg(test)] mod tests` in `src/loader/comments.rs` (file created in Tas
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green (439 → 450 unit, 368/368 conformance)
 - [x] **Advisors required:** test-engineer input + output gates — both gates satisfied
 
-### Task 10: extract lib.rs security-limit constants into limits.rs (#4a-i)
+### Task 10: extract lib.rs security-limit constants into limits.rs (#4a-i) — 769b1dc
 
 Move all `MAX_*` constants and their doc comments from the "Security Limits" section of `src/lib.rs` (lines 44-129) into a new `src/limits.rs` module. Update lib.rs imports to re-export or bring them into scope.
 
 **Files:** `src/lib.rs`, `src/limits.rs` (new)
 
-- [ ] Create `src/limits.rs`
-- [ ] Move `MAX_COLLECTION_DEPTH`, `MAX_ANCHOR_NAME_BYTES`, `MAX_TAG_LEN`, `MAX_COMMENT_LEN`, `MAX_DIRECTIVES_PER_DOC`, `MAX_TAG_HANDLE_LEN`, `MAX_RESOLVED_TAG_LEN` (verify final names against current code) with their full doc comments
-- [ ] Add `mod limits;` declaration in `lib.rs`; update any internal references (most are inside `impl EventIter`)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move
+- [x] Create `src/limits.rs`
+- [x] Move `MAX_COLLECTION_DEPTH`, `MAX_ANCHOR_NAME_BYTES`, `MAX_TAG_LEN`, `MAX_COMMENT_LEN`, `MAX_DIRECTIVES_PER_DOC`, `MAX_TAG_HANDLE_BYTES`, `MAX_RESOLVED_TAG_LEN` (verified: code uses `MAX_TAG_HANDLE_BYTES`, not `MAX_TAG_HANDLE_LEN` as plan originally said) with their full doc comments; intra-doc links rewritten to `crate::` paths inside the new module
+- [x] Add `pub mod limits;` declaration in `lib.rs` and `pub use limits::{...}` re-export to preserve the public API; no internal references needed changes because the re-export keeps all identifiers visible at the crate root
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; conformance 368/368
+- [x] **Advisors:** none — pure move
 
 ### Task 11: extract DirectiveScope into directive_scope.rs (#4a-ii)
 
