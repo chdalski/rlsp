@@ -87,7 +87,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
-- [~] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 pending
+- [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
@@ -362,13 +362,13 @@ Eliminate the `failed: bool` field by folding its semantics into `IterState::Don
 
 **Files:** `src/lib.rs` (and `src/state.rs` if IterState lives there after Task 12)
 
-- [ ] Remove `failed: bool` field from `EventIter`
-- [ ] Remove `failed: false` from the constructor
-- [ ] At the error-yield site, replace `self.failed = true;` with `self.state = IterState::Done;`
-- [ ] In `Iterator::next`, the early-return guard that checks `self.failed` becomes a check for `matches!(self.state, IterState::Done)` (may already exist; verify no duplication)
-- [ ] Remove `#[allow(clippy::struct_excessive_bools)]` from the `EventIter` struct definition
-- [ ] `cargo fmt`, `cargo clippy --all-targets` — zero warnings including `struct_excessive_bools`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors:** none — small refactor, low risk. The clippy warning check is itself the acceptance criterion for removing the allow.
+- [x] Remove `failed: bool` field from `EventIter`
+- [x] Remove `failed: false` from the constructor
+- [x] At the error-yield site, replace `self.failed = true;` with `self.state = IterState::Done;`
+- [x] In `Iterator::next`, the early-return guard that checks `self.failed` becomes a check for `matches!(self.state, IterState::Done)` (may already exist; verify no duplication) — removed as redundant; the `IterState::Done` arm in the dispatch match already returns `None`
+- [x] Remove `#[allow(clippy::struct_excessive_bools)]` from the `EventIter` struct definition
+- [x] `cargo fmt`, `cargo clippy --all-targets` — zero warnings including `struct_excessive_bools`, `cargo test`, `cargo test --test conformance` — 1313 unit, 455 + 368 parser, 368 conformance, zero clippy warnings
+- [x] **Advisors:** none — small refactor, low risk. The clippy warning check is itself the acceptance criterion for removing the allow.
 
 ### Task 18: create event_iter/base.rs (#4b-i)
 
