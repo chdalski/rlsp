@@ -6,6 +6,8 @@ mod directive_scope;
 mod directives;
 mod flow;
 mod properties;
+mod state;
 mod step;
 
 pub use directive_scope::DirectiveScope;
+pub use state::{CollectionEntry, IterState, PendingAnchor, PendingTag};

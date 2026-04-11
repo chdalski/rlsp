@@ -3,13 +3,13 @@
 use std::collections::VecDeque;
 
 use super::directive_scope::DirectiveScope;
+use super::state::{
+    CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
+};
 use crate::error::Error;
 use crate::event::{Event, ScalarStyle};
 use crate::lexer::Lexer;
 use crate::pos::{Pos, Span};
-use crate::state::{
-    CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
-};
 use crate::{EventIter, zero_span};
 
 impl<'input> EventIter<'input> {

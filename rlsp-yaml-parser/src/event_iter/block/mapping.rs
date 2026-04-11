@@ -9,16 +9,16 @@
 
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
+use crate::event_iter::state::{
+    CollectionEntry, ConsumedMapping, IterState, MappingPhase, PendingAnchor, PendingTag,
+    StepResult,
+};
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::lines::Line;
 use crate::mapping::{
     find_value_indicator_offset, is_implicit_mapping_line, is_tab_indented_block_indicator,
 };
 use crate::pos::{Pos, Span};
-use crate::state::{
-    CollectionEntry, ConsumedMapping, IterState, MappingPhase, PendingAnchor, PendingTag,
-    StepResult,
-};
 use crate::{EventIter, zero_span};
 
 impl<'input> EventIter<'input> {

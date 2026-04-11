@@ -7,13 +7,13 @@
 
 use super::directive_scope::DirectiveScope;
 use super::properties::{scan_anchor_name, scan_tag};
+use super::state::{
+    CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
+};
 use crate::error::Error;
 use crate::event::Event;
 use crate::mapping::{find_value_indicator_offset, inline_contains_mapping_key};
 use crate::pos::{Pos, Span};
-use crate::state::{
-    CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
-};
 use crate::{EventIter, marker_span, zero_span};
 
 impl<'input> EventIter<'input> {

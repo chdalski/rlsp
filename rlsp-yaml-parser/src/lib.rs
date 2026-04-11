@@ -13,8 +13,6 @@ pub mod loader;
 mod mapping;
 pub mod node;
 mod pos;
-mod state;
-
 pub use error::Error;
 pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
@@ -28,8 +26,7 @@ pub use limits::{
 };
 use std::collections::VecDeque;
 
-use event_iter::DirectiveScope;
-use state::{CollectionEntry, IterState, PendingAnchor, PendingTag};
+use event_iter::{CollectionEntry, DirectiveScope, IterState, PendingAnchor, PendingTag};
 
 use lexer::Lexer;
 
