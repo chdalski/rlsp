@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use memchr::memchr2;
 use std::borrow::Cow;
 
 use crate::error::Error;
@@ -359,40 +360,78 @@ fn ns_plain_char_block(prev_was_ws: bool, ch: char, next: Option<char>) -> bool 
 /// This implements `nb-ns-plain-in-line(c)` applied to the full line content
 /// starting at the first non-space character position.
 pub(super) fn scan_plain_line_block(content: &str) -> &str {
-    // We track: the end of the last committed non-whitespace run.
-    // Whitespace is tentatively included but stripped if the line ends with it
-    // or if `#` follows whitespace.
-    let mut chars = content.char_indices().peekable();
-    // Last committed byte offset (exclusive): the scalar ends here.
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
     let mut committed_end: usize = 0;
-    // Whether the previous character was whitespace.
     let mut prev_was_ws = false;
 
-    while let Some((i, ch)) = chars.next() {
-        // Check for break characters (should never appear in line content, but
-        // guard anyway).
-        if matches!(ch, '\n' | '\r') {
-            break;
+    while pos < len {
+        // Use memchr2 to jump ahead to the next `:` or `#` — the only
+        // context-sensitive ASCII terminators. Everything between `pos` and
+        // the hit is processed with a fast byte-level scan.
+        let candidate =
+            memchr2(b':', b'#', bytes.get(pos..).unwrap_or_default()).map(|off| pos + off);
+
+        // Process bytes before the candidate (or the rest of the string).
+        let end = candidate.unwrap_or(len);
+        while pos < end {
+            let Some(&b) = bytes.get(pos) else { break };
+            if b >= 0x80 {
+                // Non-ASCII: decode one char and apply the char predicate.
+                // pos is on a char boundary: ASCII advances by 1, non-ASCII
+                // advances by ch.len_utf8(), so boundaries are always respected.
+                let Some(ch) = content.get(pos..).and_then(|s| s.chars().next()) else {
+                    break;
+                };
+                let ch_len = ch.len_utf8();
+                let next_ch = content.get(pos + ch_len..).and_then(|s| s.chars().next());
+                if !ns_plain_char_block(prev_was_ws, ch, next_ch) {
+                    return &content[..committed_end];
+                }
+                committed_end = pos + ch_len;
+                prev_was_ws = false;
+                pos += ch_len;
+            } else {
+                match b {
+                    b' ' | b'\t' => {
+                        prev_was_ws = true;
+                        pos += 1;
+                    }
+                    // NUL, control bytes, DEL, and line breaks are not ns-char.
+                    // Note: 0x00..=0x1F covers \t (0x09) but \t is matched above.
+                    0x00..=0x1F | 0x7F => {
+                        return &content[..committed_end];
+                    }
+                    _ => {
+                        // Safe printable ASCII (0x21–0x7E excluding `:` and `#`,
+                        // which are caught by memchr2 above).
+                        committed_end = pos + 1;
+                        prev_was_ws = false;
+                        pos += 1;
+                    }
+                }
+            }
         }
 
-        if is_s_white(ch) {
-            // Whitespace is tentative — don't advance committed_end yet.
-            prev_was_ws = true;
-            continue;
+        // Handle the candidate byte (`:` or `#`), if any.
+        let Some(hit) = candidate else { break };
+        let Some(&b) = bytes.get(hit) else { break };
+        if b == b'#' {
+            if prev_was_ws {
+                break;
+            }
+        } else {
+            // b == b':'
+            // `:` is content only when followed by an ns_plain_safe_block char.
+            let next_ch = content.get(hit + 1..).and_then(|s| s.chars().next());
+            if !next_ch.is_some_and(ns_plain_safe_block) {
+                break;
+            }
         }
-
-        // Non-whitespace character: check if it terminates the scalar.
-        let next_ch = chars.peek().map(|(_, c)| *c);
-
-        if !ns_plain_char_block(prev_was_ws, ch, next_ch) {
-            // This character cannot be part of the plain scalar.
-            // The scalar ends at committed_end (before any pending whitespace).
-            break;
-        }
-
-        // Character is valid — commit through this character.
-        committed_end = i + ch.len_utf8();
+        committed_end = hit + 1;
         prev_was_ws = false;
+        pos = hit + 1;
     }
 
     &content[..committed_end]
@@ -412,46 +451,73 @@ pub(super) fn scan_plain_line_block(content: &str) -> &str {
 /// [`scan_plain_line_block`] — the block scanner does not stop at flow
 /// indicators.
 pub fn scan_plain_line_flow(content: &str) -> &str {
-    let mut chars = content.char_indices().peekable();
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
     let mut committed_end: usize = 0;
     let mut prev_was_ws = false;
 
-    while let Some((i, ch)) = chars.next() {
-        if matches!(ch, '\n' | '\r') {
-            break;
-        }
+    while pos < len {
+        // Use memchr2 to jump ahead to the next `:` or `#`. Flow indicators
+        // (`,`, `[`, `]`, `{`, `}`) are checked byte-by-byte in the segment
+        // loop since they're simple ASCII terminators.
+        let candidate =
+            memchr2(b':', b'#', bytes.get(pos..).unwrap_or_default()).map(|off| pos + off);
 
-        // Flow indicators always terminate a plain scalar.
-        if matches!(ch, ',' | '[' | ']' | '{' | '}') {
-            break;
-        }
-
-        if is_s_white(ch) {
-            prev_was_ws = true;
-            continue;
-        }
-
-        // `#` preceded by whitespace (or at position 0) starts a comment.
-        if ch == '#' && (i == 0 || prev_was_ws) {
-            break;
-        }
-
-        // `:` in flow context: terminates when followed by a space, tab,
-        // flow indicator, or end-of-content.  (YAML 1.2 §7.3.3)
-        if ch == ':' {
-            let next = chars.peek().map(|(_, c)| *c);
-            match next {
-                None | Some(' ' | '\t' | ',' | '[' | ']' | '{' | '}') => break,
-                _ => {}
+        let end = candidate.unwrap_or(len);
+        while pos < end {
+            let Some(&b) = bytes.get(pos) else { break };
+            if b >= 0x80 {
+                let Some(ch) = content.get(pos..).and_then(|s| s.chars().next()) else {
+                    break;
+                };
+                let ch_len = ch.len_utf8();
+                if !ns_plain_safe_block(ch) {
+                    return &content[..committed_end];
+                }
+                committed_end = pos + ch_len;
+                prev_was_ws = false;
+                pos += ch_len;
+            } else {
+                match b {
+                    b' ' | b'\t' => {
+                        prev_was_ws = true;
+                        pos += 1;
+                    }
+                    // Flow indicators, line breaks, NUL, control bytes, and DEL
+                    // all terminate the plain scalar.
+                    b',' | b'[' | b']' | b'{' | b'}' | 0x00..=0x1F | 0x7F => {
+                        return &content[..committed_end];
+                    }
+                    _ => {
+                        committed_end = pos + 1;
+                        prev_was_ws = false;
+                        pos += 1;
+                    }
+                }
             }
         }
 
-        if !ns_plain_safe_block(ch) {
-            break;
+        let Some(hit) = candidate else { break };
+        let Some(&b) = bytes.get(hit) else { break };
+        if b == b'#' {
+            if prev_was_ws {
+                break;
+            }
+        } else {
+            // b == b':'
+            // In flow context, `:` terminates when followed by space, tab,
+            // flow indicator, or end-of-content.
+            match bytes.get(hit + 1).copied() {
+                None | Some(b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') => break,
+                // Non-ASCII next char: ns_plain_safe_block is true for all
+                // valid non-ASCII ns-chars, so `:` is content — fall through.
+                Some(_) => {}
+            }
         }
-
-        committed_end = i + ch.len_utf8();
+        committed_end = hit + 1;
         prev_was_ws = false;
+        pos = hit + 1;
     }
 
     &content[..committed_end]
@@ -498,11 +564,6 @@ pub const fn is_ns_char(ch: char) -> bool {
         )
 }
 
-/// `s-white` — space or tab.
-const fn is_s_white(ch: char) -> bool {
-    matches!(ch, ' ' | '\t')
-}
-
 // ---------------------------------------------------------------------------
 // Trailing comment extraction
 // ---------------------------------------------------------------------------
@@ -530,4 +591,237 @@ pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
         prev_was_ws = matches!(ch, ' ' | '\t');
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // Group A — scan_plain_line_block: ASCII baseline
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn block_empty_input_returns_empty() {
+        assert_eq!(scan_plain_line_block(""), "");
+    }
+
+    #[test]
+    fn block_single_ascii_safe_char_returns_itself() {
+        assert_eq!(scan_plain_line_block("a"), "a");
+    }
+
+    #[test]
+    fn block_plain_word_no_terminators_returns_full() {
+        assert_eq!(scan_plain_line_block("hello"), "hello");
+    }
+
+    #[test]
+    fn block_trailing_whitespace_excluded() {
+        assert_eq!(scan_plain_line_block("abc   "), "abc");
+    }
+
+    #[test]
+    fn block_colon_followed_by_space_terminates() {
+        assert_eq!(scan_plain_line_block("key: rest"), "key");
+    }
+
+    #[test]
+    fn block_colon_at_eol_terminates() {
+        assert_eq!(scan_plain_line_block("key:"), "key");
+    }
+
+    #[test]
+    fn block_colon_followed_by_alnum_is_content() {
+        assert_eq!(scan_plain_line_block("a:b"), "a:b");
+    }
+
+    #[test]
+    fn block_hash_after_space_terminates() {
+        assert_eq!(scan_plain_line_block("foo # comment"), "foo");
+    }
+
+    #[test]
+    fn block_hash_without_preceding_space_is_content() {
+        assert_eq!(scan_plain_line_block("a#b"), "a#b");
+    }
+
+    #[test]
+    fn block_url_with_colon_slash_slash_is_content() {
+        assert_eq!(
+            scan_plain_line_block("http://example.com"),
+            "http://example.com"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group B — scan_plain_line_block: memchr candidate bytes in multi-byte positions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn block_pure_cjk_scalar_no_ascii_terminators_returns_full() {
+        assert_eq!(scan_plain_line_block("日本語"), "日本語");
+    }
+
+    #[test]
+    fn block_mixed_ascii_then_multibyte_no_terminator_returns_full() {
+        assert_eq!(scan_plain_line_block("hello日本語"), "hello日本語");
+    }
+
+    #[test]
+    fn block_mixed_multibyte_then_ascii_no_terminator_returns_full() {
+        assert_eq!(scan_plain_line_block("日本語hello"), "日本語hello");
+    }
+
+    #[test]
+    fn block_colon_followed_by_multibyte_is_content() {
+        assert_eq!(scan_plain_line_block("key:値"), "key:値");
+    }
+
+    #[test]
+    fn block_colon_followed_by_two_byte_char_is_content() {
+        assert_eq!(scan_plain_line_block("key:ñ"), "key:ñ");
+    }
+
+    #[test]
+    fn block_colon_followed_by_four_byte_char_is_content() {
+        assert_eq!(scan_plain_line_block("key:😀"), "key:😀");
+    }
+
+    #[test]
+    fn block_hash_after_multibyte_not_whitespace_preceded_is_content() {
+        assert_eq!(scan_plain_line_block("日#本"), "日#本");
+    }
+
+    #[test]
+    fn block_hash_after_space_in_multibyte_context_terminates() {
+        assert_eq!(scan_plain_line_block("日本 #note"), "日本");
+    }
+
+    #[test]
+    fn block_two_byte_char_in_scalar_correct_slice_returned() {
+        let result = scan_plain_line_block("café");
+        assert_eq!(result, "café");
+        let _ = result.chars().count(); // must not panic (valid UTF-8 boundary)
+    }
+
+    #[test]
+    fn block_three_byte_char_in_scalar_correct_slice_returned() {
+        let result = scan_plain_line_block("中文abc");
+        assert_eq!(result, "中文abc");
+        let _ = result.chars().count();
+    }
+
+    #[test]
+    fn block_four_byte_char_in_scalar_correct_slice_returned() {
+        let result = scan_plain_line_block("😀abc");
+        assert_eq!(result, "😀abc");
+        let _ = result.chars().count();
+    }
+
+    // -----------------------------------------------------------------------
+    // Group C — scan_plain_line_block: NUL and BOM as terminators
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn block_nul_byte_mid_scalar_terminates_before_nul() {
+        assert_eq!(scan_plain_line_block("hello\0world"), "hello");
+    }
+
+    #[test]
+    fn block_nul_byte_at_start_returns_empty() {
+        assert_eq!(scan_plain_line_block("\0abc"), "");
+    }
+
+    #[test]
+    fn block_bom_mid_scalar_terminates_before_bom() {
+        assert_eq!(scan_plain_line_block("hello\u{FEFF}world"), "hello");
+    }
+
+    #[test]
+    fn block_bom_at_start_returns_empty() {
+        assert_eq!(scan_plain_line_block("\u{FEFF}abc"), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group D — scan_plain_line_block: whitespace edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn block_tab_between_words_included() {
+        assert_eq!(scan_plain_line_block("abc\tdef"), "abc\tdef");
+    }
+
+    #[test]
+    fn block_multiple_spaces_between_words_included() {
+        assert_eq!(scan_plain_line_block("foo  bar"), "foo  bar");
+    }
+
+    #[test]
+    fn block_trailing_tab_excluded() {
+        assert_eq!(scan_plain_line_block("abc\t"), "abc");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group E — scan_plain_line_flow: multi-byte parity with block
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flow_pure_cjk_returns_full() {
+        assert_eq!(scan_plain_line_flow("日本語"), "日本語");
+    }
+
+    #[test]
+    fn flow_colon_followed_by_multibyte_is_content() {
+        assert_eq!(scan_plain_line_flow("key:値"), "key:値");
+    }
+
+    #[test]
+    fn flow_colon_followed_by_flow_indicator_terminates() {
+        assert_eq!(scan_plain_line_flow("key:]rest"), "key");
+    }
+
+    #[test]
+    fn flow_nul_mid_scalar_terminates() {
+        assert_eq!(scan_plain_line_flow("hello\0world"), "hello");
+    }
+
+    #[test]
+    fn flow_bom_mid_scalar_terminates() {
+        assert_eq!(scan_plain_line_flow("hello\u{FEFF}world"), "hello");
+    }
+
+    #[test]
+    fn flow_mixed_ascii_cjk_no_terminator() {
+        assert_eq!(scan_plain_line_flow("abc中文"), "abc中文");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group F — slice validity (UTF-8 boundary regression guard)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn block_slice_valid_utf8_colon_then_multibyte() {
+        let result = scan_plain_line_block("a:b中文");
+        assert_eq!(result, "a:b中文");
+        let _ = result.chars().count();
+    }
+
+    #[test]
+    fn block_slice_valid_after_termination_before_multibyte() {
+        let result = scan_plain_line_block("foo: 日本語");
+        assert_eq!(result, "foo");
+        let _ = result.chars().count();
+    }
+
+    #[test]
+    fn flow_slice_valid_utf8_after_flow_indicator() {
+        let result = scan_plain_line_flow("日本語]rest");
+        assert_eq!(result, "日本語");
+        assert_eq!(result.chars().count(), 3);
+    }
 }

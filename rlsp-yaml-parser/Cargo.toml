@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Spec-faithful streaming YAML 1.2 parser"
 
 [dependencies]
+memchr = "2"
 thiserror = "2"
 
 [dev-dependencies]

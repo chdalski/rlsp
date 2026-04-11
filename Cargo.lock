@@ -1026,6 +1026,7 @@ name = "rlsp-yaml-parser"
 version = "0.0.0"
 dependencies = [
  "criterion 0.5.1",
+ "memchr",
  "rstest",
  "thiserror",
 ]
