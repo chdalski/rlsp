@@ -559,6 +559,11 @@ pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
+
+    fn make_lexer(input: &str) -> super::super::Lexer<'_> {
+        super::super::Lexer::new(input)
+    }
 
     // -----------------------------------------------------------------------
     // Group A — scan_plain_line_block: ASCII baseline
@@ -782,5 +787,549 @@ mod tests {
         let result = scan_plain_line_flow("日本語]rest");
         assert_eq!(result, "日本語");
         assert_eq!(result.chars().count(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group G — try_consume_plain_scalar unit tests (Task 6)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_single_word() {
+        let mut lex = make_lexer("hello");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "hello");
+    }
+
+    #[test]
+    fn plain_scalar_multi_word() {
+        let mut lex = make_lexer("hello world");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "hello world");
+    }
+
+    #[test]
+    fn plain_scalar_cow_borrowed_for_single_line() {
+        let mut lex = make_lexer("hello");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert!(
+            matches!(val, Cow::Borrowed(_)),
+            "single-line must be Borrowed"
+        );
+    }
+
+    #[test]
+    fn plain_scalar_cow_owned_for_multiline() {
+        let mut lex = make_lexer("foo\n  bar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
+        assert_eq!(val, "foo bar");
+    }
+
+    #[test]
+    fn plain_scalar_with_url() {
+        // `:` not followed by space → allowed inside plain scalar.
+        let mut lex = make_lexer("http://x.com");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "http://x.com");
+    }
+
+    #[test]
+    fn plain_scalar_with_hash_no_preceding_space() {
+        // `#` not preceded by whitespace → allowed inside plain scalar.
+        let mut lex = make_lexer("a#b");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "a#b");
+    }
+
+    #[test]
+    fn plain_scalar_terminated_by_colon_space() {
+        // `: ` (colon + space) terminates the scalar — the colon is not safe.
+        let mut lex = make_lexer("key: value");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "key");
+    }
+
+    #[test]
+    fn plain_scalar_terminated_by_hash_with_space() {
+        // ` #` (space + hash) terminates the scalar — `#` preceded by whitespace.
+        let mut lex = make_lexer("foo # comment");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    #[test]
+    fn plain_scalar_trailing_whitespace_stripped() {
+        // Trailing spaces on a line are not part of the scalar value.
+        let mut lex = make_lexer("foo   ");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    #[test]
+    fn plain_scalar_multiline_folds_single_break_to_space() {
+        let mut lex = make_lexer("foo\n  bar\n  baz");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo bar baz");
+    }
+
+    #[test]
+    fn plain_scalar_multiline_blank_line_folds_to_newline() {
+        // A blank line in the middle of a multi-line scalar becomes a newline.
+        let mut lex = make_lexer("foo\n\nbar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo\nbar");
+    }
+
+    #[test]
+    fn plain_scalar_empty_input_returns_none() {
+        let mut lex = make_lexer("");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    #[test]
+    fn plain_scalar_blank_line_returns_none() {
+        let mut lex = make_lexer("   ");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    #[test]
+    fn plain_scalar_comment_line_returns_none() {
+        let mut lex = make_lexer("# comment");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    #[test]
+    fn plain_scalar_indicator_chars_return_none() {
+        // These characters cannot start a plain scalar when not followed by safe chars.
+        // Standalone indicators at the start of a line.
+        for indicator in &[
+            "[", "{", "&", "!", "*", ":", "?", "-", "|", ">", "'", "\"", "#", "%", ",", "]", "}",
+        ] {
+            let mut lex = make_lexer(indicator);
+            let result = lex.try_consume_plain_scalar(0);
+            assert!(
+                result.is_none(),
+                "indicator '{indicator}' should not start a plain scalar"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_scalar_minus_followed_by_safe_char_is_valid() {
+        // `-a` starts a plain scalar (ns-plain-first allows `-` + ns-plain-safe).
+        let mut lex = make_lexer("-a");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "-a");
+    }
+
+    #[test]
+    fn plain_scalar_colon_followed_by_safe_char_is_valid() {
+        // `:a` starts a plain scalar.
+        let mut lex = make_lexer(":a");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, ":a");
+    }
+
+    #[test]
+    fn plain_scalar_forbidden_continuation_stops_at_marker() {
+        // A `---` marker at column 0 terminates multi-line continuation.
+        let mut lex = make_lexer("foo\n---\nbar");
+        // Only "foo" should be collected (the --- terminates the scalar).
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    #[test]
+    fn plain_scalar_span_start_byte_offset() {
+        let mut lex = make_lexer("hello");
+        let (_, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(span.start.byte_offset, 0);
+    }
+
+    #[test]
+    fn plain_scalar_span_end_byte_offset() {
+        // "hello" = 5 bytes; span.end should be at byte offset 5.
+        let mut lex = make_lexer("hello");
+        let (_, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(span.end.byte_offset, 5);
+    }
+
+    #[test]
+    fn plain_scalar_indented_start_span_byte_offset() {
+        // "  hello" — leading 2 spaces, scalar starts at byte 2.
+        let mut lex = make_lexer("  hello");
+        let (val, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "hello");
+        assert_eq!(span.start.byte_offset, 2);
+    }
+
+    #[test]
+    fn plain_scalar_with_multibyte_utf8() {
+        // '中' (3 bytes) should be consumed as a valid plain scalar.
+        let mut lex = make_lexer("中文");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "中文");
+    }
+
+    #[test]
+    fn plain_scalar_dedented_continuation_stops() {
+        // A line at indent < parent_indent stops continuation.
+        // For parent_indent=2: "  foo\nbar" — bar at indent 0 < 2, terminates.
+        let mut lex = make_lexer("  foo\nbar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(2)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    #[test]
+    fn plain_scalar_with_backslashes() {
+        // Backslashes are not special in plain scalars.
+        let mut lex = make_lexer("plain\\value\\with\\backslashes");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "plain\\value\\with\\backslashes");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group B (TE additions) — colon termination edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_colon_tab_terminates() {
+        // `:`+tab is not ns-plain-safe (tab is s-white, not ns-char) → terminates.
+        let mut lex = make_lexer("key:\tvalue");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "key");
+    }
+
+    #[test]
+    fn plain_scalar_colon_eof_terminates() {
+        // `:`+EOF: next char is None → ns_plain_char_block returns false → `:` not included.
+        let mut lex = make_lexer("key:");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "key");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group C (TE additions) — hash with tab preceding
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_hash_preceded_by_tab_terminates() {
+        // tab before `#` — tab is s-white, so `#` is whitespace-preceded → terminates.
+        let mut lex = make_lexer("foo\t# comment");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group D (TE additions) — multi-line folding edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_multiline_two_blank_lines_fold_to_two_newlines() {
+        // Two blank lines in the middle: N blank lines → N newlines.
+        let mut lex = make_lexer("foo\n\n\nbar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo\n\nbar");
+    }
+
+    #[test]
+    fn plain_scalar_multiline_continuation_trailing_space_stripped() {
+        // Trailing space on a continuation line is stripped before folding.
+        let mut lex = make_lexer("foo\nbar   \nbaz");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo bar baz");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group F (TE additions) — c-forbidden disambiguation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_dots_terminated_by_document_end_marker() {
+        // `...` at column 0 terminates the plain scalar.
+        let mut lex = make_lexer("foo\n...\nbar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    #[test]
+    fn plain_scalar_dash_dash_dash_word_attached_is_not_forbidden() {
+        // `---word` at column 0 is NOT a c-forbidden marker — it's a valid continuation.
+        let mut lex = make_lexer("foo\n---word");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo ---word");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H (TE additions) — indicator chars that need safe-char context
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_dash_space_returns_none() {
+        // `- ` is a block sequence entry indicator, not a plain scalar start.
+        let mut lex = make_lexer("- ");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    #[test]
+    fn plain_scalar_question_space_returns_none() {
+        // `? ` is a mapping key indicator.
+        let mut lex = make_lexer("? ");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    #[test]
+    fn plain_scalar_colon_space_returns_none() {
+        // `: ` is a mapping value indicator.
+        let mut lex = make_lexer(": ");
+        assert!(lex.try_consume_plain_scalar(0).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Group I (TE additions) — span byte offsets with multi-byte UTF-8
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_multibyte_utf8_span_byte_offset() {
+        // '中' = U+4E2D = 3 UTF-8 bytes; '文' = U+6587 = 3 UTF-8 bytes.
+        // "中文" = 6 bytes; span should be [0, 6).
+        let mut lex = make_lexer("中文");
+        let (val, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "中文");
+        assert_eq!(span.start.byte_offset, 0);
+        assert_eq!(span.end.byte_offset, 6);
+    }
+
+    #[test]
+    fn plain_scalar_multibyte_utf8_with_leading_space_span() {
+        // "  中" — 2-byte prefix, then 3-byte char; scalar starts at byte 2.
+        let mut lex = make_lexer("  中");
+        let (val, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "中");
+        assert_eq!(span.start.byte_offset, 2);
+        assert_eq!(span.end.byte_offset, 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group F (TE required) — exact name from TE spec
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_forbidden_dot_dot_dot_at_col_0_terminates() {
+        // `...` at column 0 terminates multi-line plain scalar continuation.
+        // Covers the b'.' arm of `is_marker` in collect_plain_continuations.
+        let mut lex = make_lexer("foo\n...\nbar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, "foo");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group D (TE required) — exact name and input from TE spec
+    // -----------------------------------------------------------------------
+
+    // Note: plain_scalar_multiline_two_blank_lines_fold_to_two_newlines
+    // exists above with input "foo\n\n\nbar". The TE spec input is
+    // "foo\n\n\n  bar" (indented continuation). Adding the TE's exact variant:
+    #[test]
+    fn plain_scalar_multiline_two_blank_lines_fold_to_two_newlines_indented() {
+        // Two blank lines + indented continuation: "foo\n\n\n  bar" → "foo\n\nbar"
+        let mut lex = make_lexer("foo\n\n\n  bar");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
+        assert_eq!(val, "foo\n\nbar");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group I (TE required) — exact name from TE spec
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_multibyte_span_byte_offset() {
+        // "中文" = 6 UTF-8 bytes, 2 chars. Span width must equal byte count.
+        let mut lex = make_lexer("中文");
+        let (_, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(span.end.byte_offset - span.start.byte_offset, 6);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group G extension — inline scalar after --- marker
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_inline_after_marker_is_extracted() {
+        // `--- text` — after consuming the marker line, try_consume_plain_scalar
+        // returns the inline content "text".
+        let mut lex = make_lexer("--- text");
+        lex.consume_marker_line(false);
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
+        assert_eq!(val, "text");
+    }
+
+    #[test]
+    fn plain_scalar_inline_after_marker_is_cow_borrowed() {
+        // Inline content from `---` line is a zero-copy borrowed slice.
+        let mut lex = make_lexer("--- text");
+        lex.consume_marker_line(false);
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
+        assert!(
+            matches!(val, Cow::Borrowed(_)),
+            "inline scalar from marker line must be Cow::Borrowed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group SPF: scan_plain_line_flow (Task 14)
+    // -----------------------------------------------------------------------
+
+    // SPF-1: plain word terminates at `]`
+    #[test]
+    fn flow_plain_terminates_at_close_bracket() {
+        assert_eq!(scan_plain_line_flow("abc]rest"), "abc");
+    }
+
+    // SPF-2: plain word terminates at `}`
+    #[test]
+    fn flow_plain_terminates_at_close_brace() {
+        assert_eq!(scan_plain_line_flow("abc}rest"), "abc");
+    }
+
+    // SPF-3: plain word terminates at `,`
+    #[test]
+    fn flow_plain_terminates_at_comma() {
+        assert_eq!(scan_plain_line_flow("abc,rest"), "abc");
+    }
+
+    // SPF-4: plain word terminates at `[`
+    #[test]
+    fn flow_plain_terminates_at_open_bracket() {
+        assert_eq!(scan_plain_line_flow("abc[rest"), "abc");
+    }
+
+    // SPF-5: plain word terminates at `{`
+    #[test]
+    fn flow_plain_terminates_at_open_brace() {
+        assert_eq!(scan_plain_line_flow("abc{rest"), "abc");
+    }
+
+    // SPF-6: plain word is returned in full when no terminator
+    #[test]
+    fn flow_plain_returns_full_when_no_terminator() {
+        assert_eq!(scan_plain_line_flow("hello"), "hello");
+    }
+
+    // SPF-7: empty input returns empty
+    #[test]
+    fn flow_plain_empty_input_returns_empty() {
+        assert_eq!(scan_plain_line_flow(""), "");
+    }
+
+    // SPF-8: `#` preceded by whitespace starts a comment (terminates scalar)
+    #[test]
+    fn flow_plain_hash_after_space_starts_comment() {
+        assert_eq!(scan_plain_line_flow("abc # comment"), "abc");
+    }
+
+    // SPF-9: `#` not preceded by whitespace is part of the scalar
+    #[test]
+    fn flow_plain_hash_without_preceding_space_is_content() {
+        assert_eq!(scan_plain_line_flow("abc#def"), "abc#def");
+    }
+
+    // SPF-10: `:` followed by space terminates plain scalar
+    #[test]
+    fn flow_plain_colon_space_terminates() {
+        assert_eq!(scan_plain_line_flow("key: rest"), "key");
+    }
+
+    // SPF-11: `:` followed by flow indicator terminates plain scalar
+    #[test]
+    fn flow_plain_colon_flow_indicator_terminates() {
+        assert_eq!(scan_plain_line_flow("key:}rest"), "key");
+    }
+
+    // SPF-12: `:` at EOL terminates plain scalar (None next)
+    #[test]
+    fn flow_plain_colon_at_eol_terminates() {
+        assert_eq!(scan_plain_line_flow("key:"), "key");
+    }
+
+    // SPF-13: `:` in the middle not followed by separator is part of scalar
+    #[test]
+    fn flow_plain_colon_followed_by_alnum_is_content() {
+        assert_eq!(scan_plain_line_flow("a:b"), "a:b");
+    }
+
+    // SPF-14: trailing whitespace is not included in the result
+    #[test]
+    fn flow_plain_trailing_whitespace_excluded() {
+        assert_eq!(scan_plain_line_flow("abc   "), "abc");
     }
 }
