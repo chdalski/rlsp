@@ -459,23 +459,6 @@ pub fn is_blank_or_comment(line: &Line<'_>) -> bool {
     trimmed.is_empty() || trimmed.starts_with('#')
 }
 
-/// True when `line` is blank, comment-only, or a directive (`%`-prefixed).
-///
-/// Directive lines (`%YAML`, `%TAG`, and unknown `%` directives) are
-/// stream-level metadata that precede `---`.  This predicate is only correct
-/// to use in the between-documents context; inside a document body `%`-prefixed
-/// lines are content and must be handled by [`is_blank_or_comment`] instead.
-///
-/// Used only in tests to verify the `BetweenDocs` predicate.
-#[cfg(test)]
-fn is_directive_or_blank_or_comment(line: &Line<'_>) -> bool {
-    if is_blank_or_comment(line) {
-        return true;
-    }
-    let trimmed = line.content.trim_start_matches([' ', '\t']);
-    trimmed.starts_with('%')
-}
-
 /// True when `content` is a YAML document marker for the given byte `ch`
 /// (`b'-'` for `---`, `b'.'` for `...`).
 ///
@@ -532,6 +515,20 @@ mod tests {
     use super::*;
     use crate::event::Chomp;
     use std::borrow::Cow;
+
+    /// True when `line` is blank, comment-only, or a directive (`%`-prefixed).
+    ///
+    /// Directive lines (`%YAML`, `%TAG`, and unknown `%` directives) are
+    /// stream-level metadata that precede `---`.  This predicate is only correct
+    /// to use in the between-documents context; inside a document body `%`-prefixed
+    /// lines are content and must be handled by [`is_blank_or_comment`] instead.
+    fn is_directive_or_blank_or_comment(line: &Line<'_>) -> bool {
+        if is_blank_or_comment(line) {
+            return true;
+        }
+        let trimmed = line.content.trim_start_matches([' ', '\t']);
+        trimmed.starts_with('%')
+    }
 
     fn make_lexer(input: &str) -> Lexer<'_> {
         Lexer::new(input)
