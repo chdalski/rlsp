@@ -61,7 +61,6 @@ pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span
 // ---------------------------------------------------------------------------
 
 /// Lazy iterator that yields events by walking a [`Lexer`].
-#[allow(clippy::struct_excessive_bools)]
 struct EventIter<'input> {
     lexer: Lexer<'input>,
     state: IterState,
@@ -78,12 +77,6 @@ struct EventIter<'input> {
     /// expected node is a key or a value.  The combined length of this stack
     /// is bounded by [`MAX_COLLECTION_DEPTH`].
     coll_stack: Vec<CollectionEntry>,
-    /// Set to `true` after an `Err` is yielded.
-    ///
-    /// Once set, `next()` immediately returns `None` to prevent infinite
-    /// error loops (e.g. depth-limit firing on the same prepended synthetic
-    /// line).
-    failed: bool,
     /// A pending anchor that has been scanned but not yet attached to a node
     /// event.  The [`PendingAnchor`] variant encodes both the anchor name and
     /// whether it was standalone (applies to the next node of any type) or
@@ -143,7 +136,6 @@ impl<'input> EventIter<'input> {
             state: IterState::BeforeStream,
             queue: VecDeque::new(),
             coll_stack: Vec::new(),
-            failed: false,
             pending_anchor: None,
             pending_tag: None,
             directive_scope: DirectiveScope::default(),
@@ -384,14 +376,12 @@ impl<'input> EventIter<'input> {
                     let ws_len = tail.len() - first_non_ws.len();
                     if first_non_ws.starts_with('#') && ws_len == 0 {
                         // `#` immediately after closing quote — not a comment.
-                        self.failed = true;
                         return Err(Error {
                             pos: tail_pos,
                             message: "comment requires at least one space before '#'".into(),
                         });
                     } else if !first_non_ws.starts_with('#') {
                         // Non-comment content after quoted scalar.
-                        self.failed = true;
                         return Err(Error {
                             pos: tail_pos,
                             message: "unexpected content after quoted scalar".into(),
@@ -1068,7 +1058,7 @@ impl<'input> EventIter<'input> {
         match self.consume_preamble_between_docs() {
             Ok(()) => {}
             Err(e) => {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
         }
@@ -1082,7 +1072,7 @@ impl<'input> EventIter<'input> {
             // A directive followed by EOF (no `---`) is a spec violation.
             if self.directive_scope.directive_count > 0 {
                 let pos = self.lexer.current_pos();
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos,
                     message: "directives must be followed by a '---' document-start marker".into(),
@@ -1095,7 +1085,7 @@ impl<'input> EventIter<'input> {
         if self.lexer.is_directives_end() {
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
             if let Some(e) = self.lexer.marker_inline_error.take() {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
             self.state = IterState::InDocument;
@@ -1119,7 +1109,7 @@ impl<'input> EventIter<'input> {
             // that is a spec violation (YAML 1.2 §9.2: directives require `---`).
             if self.directive_scope.directive_count > 0 {
                 let pos = self.lexer.current_pos();
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos,
                     message: "directives must be followed by a '---' document-start marker".into(),
@@ -1127,7 +1117,7 @@ impl<'input> EventIter<'input> {
             }
             self.lexer.consume_marker_line(true);
             if let Some(e) = self.lexer.marker_inline_error.take() {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
             return StepResult::Continue; // orphan `...`, no event
@@ -1137,7 +1127,7 @@ impl<'input> EventIter<'input> {
         // spec violation — reject before emitting an implicit DocumentStart.
         if self.directive_scope.directive_count > 0 {
             let pos = self.lexer.current_pos();
-            self.failed = true;
+            self.state = IterState::Done;
             return StepResult::Yield(Err(Error {
                 pos,
                 message: "directives must be followed by a '---' document-start marker".into(),
@@ -1169,7 +1159,7 @@ impl<'input> EventIter<'input> {
         match self.skip_and_collect_comments_in_doc() {
             Ok(()) => {}
             Err(e) => {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
         }
@@ -1194,7 +1184,7 @@ impl<'input> EventIter<'input> {
                 let first_non_tab = line.content.trim_start_matches('\t').chars().next();
                 if !matches!(first_non_tab, Some('[' | '{' | ']' | '}')) {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1220,7 +1210,7 @@ impl<'input> EventIter<'input> {
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(true);
             if let Some(e) = self.lexer.marker_inline_error.take() {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
             // Reset directive scope at the document boundary so directives from
@@ -1239,7 +1229,7 @@ impl<'input> EventIter<'input> {
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
             if let Some(e) = self.lexer.marker_inline_error.take() {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
             // A bare `---` inside a document implicitly ends the current document
@@ -1255,7 +1245,7 @@ impl<'input> EventIter<'input> {
                 if tag_val.starts_with('!') {
                     if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
                         self.lexer.drain_inline_scalar();
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                 }
@@ -1303,7 +1293,7 @@ impl<'input> EventIter<'input> {
                 });
                 if next_is_doc_start {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1323,7 +1313,7 @@ impl<'input> EventIter<'input> {
         if self.root_node_emitted && self.coll_stack.is_empty() && !self.lexer.has_inline_scalar() {
             if let Some(line) = self.lexer.peek_next_line() {
                 let err_pos = line.pos;
-                self.failed = true;
+                self.state = IterState::Done;
                 self.lexer.consume_line();
                 return StepResult::Yield(Err(Error {
                     pos: err_pos,
@@ -1348,7 +1338,7 @@ impl<'input> EventIter<'input> {
                 };
                 // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
                 if self.pending_tag.is_some() {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
                         message: "alias node cannot have a tag property".into(),
@@ -1358,7 +1348,7 @@ impl<'input> EventIter<'input> {
                 // the alias node, which is illegal.  A Standalone anchor belongs to
                 // the surrounding collection, not the alias, so it is not an error here.
                 if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_))) {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
                         message: "alias node cannot have an anchor property".into(),
@@ -1366,7 +1356,7 @@ impl<'input> EventIter<'input> {
                 }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok(name) => {
@@ -1432,7 +1422,7 @@ impl<'input> EventIter<'input> {
                 let after_bang: &'input str = &content[leading + 1..];
                 match scan_tag(after_bang, tag_start, bang_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok((tag_slice, advance_past_bang)) => {
@@ -1461,7 +1451,7 @@ impl<'input> EventIter<'input> {
                                 || first == '%'
                                 || matches!(first, ',' | '[' | ']' | '{' | '}')
                             {
-                                self.failed = true;
+                                self.state = IterState::Done;
                                 return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
                                     message:
@@ -1484,7 +1474,7 @@ impl<'input> EventIter<'input> {
                                     && had_inline
                                     && inline_contains_mapping_key(inline);
                             if !is_different_node {
-                                self.failed = true;
+                                self.state = IterState::Done;
                                 return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
                                     message: "a node may not have more than one tag".into(),
@@ -1496,7 +1486,7 @@ impl<'input> EventIter<'input> {
                             match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
                                 Ok(t) => t,
                                 Err(e) => {
-                                    self.failed = true;
+                                    self.state = IterState::Done;
                                     return StepResult::Yield(Err(e));
                                 }
                             };
@@ -1533,7 +1523,7 @@ impl<'input> EventIter<'input> {
                             // Validate: the tag must be indented enough for this context.
                             let min = self.min_standalone_property_indent();
                             if line_indent < min {
-                                self.failed = true;
+                                self.state = IterState::Done;
                                 return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
                                     message:
@@ -1576,7 +1566,7 @@ impl<'input> EventIter<'input> {
                 };
                 match scan_anchor_name(after_amp, amp_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok(name) => {
@@ -1635,7 +1625,7 @@ impl<'input> EventIter<'input> {
                                 false
                             };
                         if is_duplicate {
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: amp_pos2,
                                 message: "a node may not have more than one anchor".into(),
@@ -1650,7 +1640,7 @@ impl<'input> EventIter<'input> {
                                 rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
                             });
                             if is_seq {
-                                self.failed = true;
+                                self.state = IterState::Done;
                                 let seq_pos = Pos {
                                     byte_offset: inline_offset,
                                     line: line_pos.line,
@@ -1696,7 +1686,7 @@ impl<'input> EventIter<'input> {
                             // Validate: the anchor must be indented enough for this context.
                             let min = self.min_standalone_property_indent();
                             if line_indent < min {
-                                self.failed = true;
+                                self.state = IterState::Done;
                                 let err_pos = amp_pos;
                                 return StepResult::Yield(Err(Error {
                                     pos: err_pos,
@@ -1725,7 +1715,7 @@ impl<'input> EventIter<'input> {
             if trimmed.starts_with(']') || trimmed.starts_with('}') {
                 let err_pos = line.pos;
                 let ch = trimmed.chars().next().unwrap_or(']');
-                self.failed = true;
+                self.state = IterState::Done;
                 self.lexer.consume_line();
                 return StepResult::Yield(Err(Error {
                     pos: err_pos,
@@ -1790,7 +1780,7 @@ impl<'input> EventIter<'input> {
                     // invalid. peek_sequence_entry already returned None, so this
                     // line is not a sequence entry.
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1802,7 +1792,7 @@ impl<'input> EventIter<'input> {
                     if line_indent == map_indent =>
                 {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1823,7 +1813,7 @@ impl<'input> EventIter<'input> {
                         && !self.lexer.is_next_line_synthetic() =>
                 {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1875,7 +1865,7 @@ impl<'input> EventIter<'input> {
                 return StepResult::Yield(Ok(event));
             }
             Err(e) => {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
             Ok(None) => {}
@@ -1890,7 +1880,7 @@ impl<'input> EventIter<'input> {
             if let Some(ch) = first_ch {
                 if ch != ' ' && ch != '\t' && !crate::lexer::is_ns_char(ch) {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -1942,7 +1932,7 @@ impl<'input> EventIter<'input> {
                 Some(&CollectionEntry::Mapping(_, MappingPhase::Key, true))
             ) && !self.explicit_key_pending
             {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos: dash_pos,
                     message: "block sequence cannot appear as an implicit mapping key".into(),
@@ -1955,7 +1945,7 @@ impl<'input> EventIter<'input> {
             // sequence entry.
             if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last() {
                 if dash_indent != parent_col {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: dash_pos,
                         message: "block sequence entry at wrong indentation level".into(),
@@ -1963,7 +1953,7 @@ impl<'input> EventIter<'input> {
                 }
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos: dash_pos,
                     message: "collection nesting depth exceeds limit".into(),
@@ -2031,7 +2021,7 @@ impl<'input> EventIter<'input> {
                 let separator = &rest[..rest.len() - inline.len()];
                 if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
                     let err_pos = line.pos;
-                    self.failed = true;
+                    self.state = IterState::Done;
                     self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
@@ -2137,7 +2127,7 @@ impl<'input> EventIter<'input> {
             //    inlines at their column — 74H7).
             match self.coll_stack.last() {
                 Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == effective_key_indent => {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: key_pos,
                         message:
@@ -2151,7 +2141,7 @@ impl<'input> EventIter<'input> {
                         && self.pending_anchor.is_none()
                         && !self.is_value_indicator_line() =>
                 {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: key_pos,
                         message: "wrong indentation: mapping key is more indented than the enclosing mapping".into(),
@@ -2160,7 +2150,7 @@ impl<'input> EventIter<'input> {
                 _ => {}
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos: key_pos,
                     message: "collection nesting depth exceeds limit".into(),
@@ -2254,7 +2244,7 @@ impl<'input> EventIter<'input> {
                         let separator = &after_colon[..after_colon.len() - value.len()];
                         if separator.contains('\t') && is_tab_indented_block_indicator(value) {
                             let err_pos = line.pos;
-                            self.failed = true;
+                            self.state = IterState::Done;
                             self.lexer.consume_line();
                             return StepResult::Yield(Err(Error {
                                 pos: err_pos,
@@ -2299,7 +2289,7 @@ impl<'input> EventIter<'input> {
                     let separator = &after_q[..after_q.len() - inline.len()];
                     if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
                         let err_pos = line.pos;
-                        self.failed = true;
+                        self.state = IterState::Done;
                         self.lexer.consume_line();
                         return StepResult::Yield(Err(Error {
                             pos: err_pos,
@@ -2356,14 +2346,14 @@ impl<'input> EventIter<'input> {
                 self.advance_mapping_to_value();
             }
             ConsumedMapping::QuotedKeyError { pos, message } => {
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error { pos, message }));
             }
             ConsumedMapping::InlineImplicitMappingError { pos } => {
                 // The inline value is a block node (mapping or sequence indicator)
                 // which cannot appear inline as a mapping value — block nodes must
                 // start on a new line.
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos,
                     message:
@@ -2635,7 +2625,7 @@ impl<'input> EventIter<'input> {
                 let rest = &cur_content[3..];
                 if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, 0);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "document marker is not allowed inside a flow collection".into(),
@@ -2653,7 +2643,7 @@ impl<'input> EventIter<'input> {
                     cur_content.starts_with('\t') && !cur_content.trim().is_empty();
                 if has_tab_indent {
                     let err_pos = abs_pos(cur_base_pos, cur_content, 0);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "tab character is not allowed as indentation in flow context"
@@ -2721,7 +2711,7 @@ impl<'input> EventIter<'input> {
                 (cur_content, cur_base_pos) = resync!();
                 if cur_content.is_empty() && self.lexer.at_eof() {
                     let err_pos = self.lexer.current_pos();
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "unterminated flow collection: unexpected end of input".into(),
@@ -2739,7 +2729,7 @@ impl<'input> EventIter<'input> {
                         let trimmed = next_line.content.trim();
                         if !trimmed.is_empty() && next_line.indent <= min_indent {
                             let err_pos = next_line.pos;
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: err_pos,
                                 message: "flow collection continuation line is not indented enough"
@@ -2765,7 +2755,7 @@ impl<'input> EventIter<'input> {
                 let total_depth = self.coll_stack.len() + flow_stack.len();
                 if total_depth >= MAX_COLLECTION_DEPTH {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "collection nesting depth exceeds limit".into(),
@@ -2818,7 +2808,7 @@ impl<'input> EventIter<'input> {
 
                 let Some(top) = flow_stack.pop() else {
                     // Closing delimiter with empty stack — mismatched.
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: close_pos,
                         message: format!("unexpected '{ch}' in flow context"),
@@ -2838,14 +2828,14 @@ impl<'input> EventIter<'input> {
                         events.push((Event::MappingEnd, close_span));
                     }
                     (']', FlowFrame::Mapping { .. }) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: close_pos,
                             message: "expected '}' to close flow mapping, found ']'".into(),
                         }));
                     }
                     ('}', FlowFrame::Sequence { .. }) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: close_pos,
                             message: "expected ']' to close flow sequence, found '}'".into(),
@@ -2902,7 +2892,7 @@ impl<'input> EventIter<'input> {
                                 .is_some_and(|c| c == ' ' || c == '\t');
                         if !prev_was_ws {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: err_pos,
                                 message: "comment requires at least one space before '#'".into(),
@@ -2916,7 +2906,7 @@ impl<'input> EventIter<'input> {
                     // opening delimiter, reject as a multi-line flow key.
                     if tail_trimmed.starts_with(':') && cur_base_pos.line != start_line {
                         let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: err_pos,
                             message: "multi-line flow collection cannot be used as an implicit mapping key".into(),
@@ -2963,7 +2953,7 @@ impl<'input> EventIter<'input> {
                 };
                 if leading {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "invalid leading comma in flow collection".into(),
@@ -2983,7 +2973,7 @@ impl<'input> EventIter<'input> {
                 // Double-comma check: next char must not be another comma.
                 if cur_content[pos_in_line..].starts_with(',') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "invalid empty entry: consecutive commas in flow collection"
@@ -3072,7 +3062,7 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             if ch == '|' || ch == '>' {
                 let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos: err_pos,
                     message: format!(
@@ -3095,7 +3085,7 @@ impl<'input> EventIter<'input> {
                 let next_c = after.chars().next();
                 if next_c.is_none_or(|c| matches!(c, ' ' | '\t')) {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "block sequence entry '-' is not allowed inside a flow collection"
@@ -3144,14 +3134,14 @@ impl<'input> EventIter<'input> {
                 let (value, span) = match result {
                     Ok(Some(vs)) => vs,
                     Ok(None) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: cur_abs_pos,
                             message: "expected quoted scalar".into(),
                         }));
                     }
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                 };
@@ -3215,7 +3205,7 @@ impl<'input> EventIter<'input> {
 
                 if cur_content.is_empty() && self.lexer.at_eof() && !flow_stack.is_empty() {
                     let err_pos = self.lexer.current_pos();
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: "unterminated flow collection: unexpected end of input".into(),
@@ -3302,7 +3292,7 @@ impl<'input> EventIter<'input> {
                     let in_sequence = matches!(flow_stack.last(), Some(FlowFrame::Sequence { .. }));
                     if in_sequence && cur_base_pos.line != last_token_line && !explicit_key_in_seq {
                         let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: colon_pos,
                             message: "implicit flow mapping key must be on a single line".into(),
@@ -3371,7 +3361,7 @@ impl<'input> EventIter<'input> {
                 let tag_start = &cur_content[pos_in_line..];
                 match scan_tag(after_bang, tag_start, bang_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok((tag_slice, advance_past_bang)) => {
@@ -3381,7 +3371,7 @@ impl<'input> EventIter<'input> {
                         // `!suffix`: advance_past_bang = suffix.len()
                         // `!` alone: advance_past_bang = 0
                         if pending_flow_tag.is_some() {
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: bang_pos,
                                 message: "a node may not have more than one tag".into(),
@@ -3392,7 +3382,7 @@ impl<'input> EventIter<'input> {
                             match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
                                 Ok(t) => t,
                                 Err(e) => {
-                                    self.failed = true;
+                                    self.state = IterState::Done;
                                     return StepResult::Yield(Err(e));
                                 }
                             };
@@ -3418,14 +3408,14 @@ impl<'input> EventIter<'input> {
                 let amp_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                 match scan_anchor_name(after_amp, amp_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok(name) => {
                         // Two anchors on the same flow node are an error.
                         if pending_flow_anchor.is_some() {
                             let amp_pos2 = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: amp_pos2,
                                 message: "a node may not have more than one anchor".into(),
@@ -3453,14 +3443,14 @@ impl<'input> EventIter<'input> {
                 let star_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                 // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
                 if pending_flow_tag.is_some() {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
                         message: "alias node cannot have a tag property".into(),
                     }));
                 }
                 if pending_flow_anchor.is_some() {
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
                         message: "alias node cannot have an anchor property".into(),
@@ -3468,7 +3458,7 @@ impl<'input> EventIter<'input> {
                 }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
-                        self.failed = true;
+                        self.state = IterState::Done;
                         return StepResult::Yield(Err(e));
                     }
                     Ok(name) => {
@@ -3660,7 +3650,7 @@ impl<'input> EventIter<'input> {
                             ..
                         }) => {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: err_pos,
                                 message: "missing comma between flow mapping entries".into(),
@@ -3672,7 +3662,7 @@ impl<'input> EventIter<'input> {
                             last_was_plain: false,
                         }) => {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                            self.failed = true;
+                            self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
                                 pos: err_pos,
                                 message: "missing comma between flow sequence entries".into(),
@@ -3741,7 +3731,7 @@ impl<'input> EventIter<'input> {
                 // YAML structure, so we error early here.
                 if matches!(ch, '%' | '@' | '`') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    self.failed = true;
+                    self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: err_pos,
                         message: format!(
@@ -3755,7 +3745,7 @@ impl<'input> EventIter<'input> {
                 // DEL, C1 controls, surrogates) is invalid here. Error rather
                 // than panicking — this is user-supplied input.
                 let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                self.failed = true;
+                self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
                     pos: err_pos,
                     message: format!("invalid character {ch:?} inside flow collection"),
@@ -3808,12 +3798,6 @@ impl<'input> Iterator for EventIter<'input> {
     type Item = Result<(Event<'input>, Span), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // After an error, stop immediately — prevent infinite loops on the
-        // same problematic input (e.g. depth-limit on a prepended synthetic line).
-        if self.failed {
-            return None;
-        }
-
         // Iterative dispatch — avoids unbounded recursion on large bare docs.
         loop {
             // Drain the event queue first.

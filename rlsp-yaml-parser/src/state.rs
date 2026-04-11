@@ -22,7 +22,7 @@ pub enum IterState {
     BetweenDocs,
     /// Inside a document: consume lines until a boundary marker or EOF.
     InDocument,
-    /// `StreamEnd` emitted; done.
+    /// `StreamEnd` emitted or an error was yielded; iteration is finished.
     Done,
 }
 
