@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1)
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -512,19 +512,19 @@ Create `#[cfg(test)] mod tests` in `src/event_iter/directive_scope.rs`. The modu
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — 553 unit tests pass (up from 530, +23 new), 368/368 conformance, zero clippy warnings
 - [x] **Advisors required:** test-engineer input + output gates — both satisfied (23 tests, TE sign-off granted); security-engineer not consulted (TE confirmed MAX_RESOLVED_TAG_LEN is a simple numeric boundary with no trust-boundary crossing, already reviewed when limit was established)
 
-### Task 23f: relocate `src/state.rs` → `src/event_iter/state.rs` (#4c)
+### Task 23f: relocate `src/state.rs` → `src/event_iter/state.rs` (#4c) — b66b26a
 
 Pure relocation. The state-machine types (`StepResult`, `IterState`, `MappingPhase`, `CollectionEntry`, `FlowMappingPhase`, `ConsumedMapping`, `PendingAnchor`, `PendingTag`) were extracted in Task 12 before `event_iter/` existed. Audit confirms consumers are all event_iter submodules: `base.rs`, `directives.rs`, `flow.rs`, `step.rs`, `block/sequence.rs`, `block/mapping.rs`. **The existing `#[cfg(test)] mod tests` block at `state.rs:158` migrates alongside the code.**
 
 **Files:** `src/state.rs` → `src/event_iter/state.rs` (move), `src/lib.rs`, `src/event_iter.rs`, all `event_iter/*.rs` that import `crate::state::...`
 
-- [ ] `git mv src/state.rs src/event_iter/state.rs`
-- [ ] Remove `mod state;` from `src/lib.rs`
-- [ ] Add `pub(crate) mod state;` to `src/event_iter.rs`
-- [ ] Update `use crate::state::...` → `use super::state::...` (or equivalent) in all six event_iter consumers
-- [ ] Narrow types to `pub(in crate::event_iter)` where the surface is not referenced outside event_iter (most — if not all — should qualify)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors:** none — pure relocation; existing tests migrate unchanged
+- [x] `git mv src/state.rs src/event_iter/state.rs`
+- [x] Remove `mod state;` from `src/lib.rs`
+- [x] Add `pub(crate) mod state;` to `src/event_iter.rs` — used plain `mod state;` (clippy flags `pub(crate)` as redundant inside the already-crate-private `event_iter` module; matches the Task 23b/23d precedent for `mod properties;` / `mod directive_scope;`)
+- [x] Update `use crate::state::...` → `use super::state::...` (or equivalent) in all six event_iter consumers — four use `super::state::` (base, directives, flow, step), two use `crate::event_iter::state::` (block/sequence, block/mapping — one level deeper)
+- [x] Narrow types to `pub(in crate::event_iter)` where the surface is not referenced outside event_iter — types left as `pub` inside the private `event_iter::state` module (effective crate-private visibility; same precedent as Task 23b/23d). `CollectionEntry`, `IterState`, `PendingAnchor`, `PendingTag` re-exported via `pub use state::{...}` in `event_iter.rs` because `EventIter`'s field declarations in `lib.rs` reference them; `MappingPhase` dropped from the re-export since `lib.rs` does not reference it directly
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 553 unit + 368 conformance + 529 smoke + 21 unicode + 3 doc tests, zero clippy warnings
+- [x] **Advisors:** none — pure relocation; existing tests migrate unchanged
 
 ### Task 23g: relocate and rename `src/mapping.rs` → `src/event_iter/line_mapping.rs` (#4c)
 
