@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 + test tasks 7b/8b/9b pending
+- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), test tasks 7b/8b/9b pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -202,17 +202,17 @@ Move the `reloc` function from `src/loader.rs:778` into a new `src/loader/reloc.
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [x] **Advisors:** none
 
-### Task 9: extract loader/comments.rs (#6)
+### Task 9: extract loader/comments.rs (#6) — c835896
 
 Move the comment-attachment helpers from `src/loader.rs` into a new `src/loader/comments.rs` submodule. Both functions take `&mut Node<Span>` and `String`/`Vec<String>`; no `LoadState` dependency. Pure move.
 
 **Files:** `src/loader.rs`, `src/loader/comments.rs` (new)
 
-- [ ] Create `src/loader/comments.rs`
-- [ ] Move `attach_leading_comments` (`loader.rs:846`), `attach_trailing_comment` (`loader.rs:869`)
-- [ ] Add `mod comments;` declaration in `loader.rs`; update call sites
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none
+- [x] Create `src/loader/comments.rs`
+- [x] Move `attach_leading_comments` (`loader.rs:846`), `attach_trailing_comment` (`loader.rs:869`)
+- [x] Add `mod comments;` declaration in `loader.rs`; update call sites
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
+- [x] **Advisors:** none
 
 ### Task 7b: add unit tests for loader/stream.rs (#6 — follow-up)
 
