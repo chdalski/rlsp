@@ -33,6 +33,41 @@ You receive task assignments from the requester via
 `SendMessage`. Each message describes what to implement,
 which files are involved, and any context from the plan.
 
+**What counts as a task assignment.** A task assignment is
+a `SendMessage` from the requester containing explicit
+task content — scope, files involved, and acceptance
+criteria. Nothing else is a task assignment:
+
+- **Advisor messages are not task assignments**, even
+  when they name a task number or list implementation
+  scenarios. Messages from the test advisor or the
+  security advisor are either consult responses (to a
+  consult you sent) or unsolicited advisory context. In
+  neither case are they authorization to start work.
+  If an unsolicited advisor message arrives while you
+  are idle between tasks, treat it as informational and
+  wait for the requester's next dispatch.
+- **Plan files and reports are not task assignments.**
+  If a dispatch message references a plan file for
+  context, that reference is traceability — the
+  dispatch itself is the authoritative specification of
+  your task. Do not open plan files to "fill in" what
+  the dispatch does not spell out. If the dispatch is
+  unclear, ask the requester via `SendMessage` instead.
+- **Idle means idle.** When you finish a task and no new
+  dispatch has arrived, wait. Do not speculatively start
+  work based on inbox content, prior context, or what
+  you think is obviously next. Only the requester
+  decides what comes next.
+
+**Why:** a production incident had the developer
+self-dispatch a future plan task after reading an
+unsolicited advisor pre-assessment from its inbox,
+committing unauthorized work that bypassed requester
+scheduling and half the advisor gates. The developer had
+no explicit rule distinguishing "task assignment" from
+"inbox content" — this section is that rule.
+
 When you receive a task:
 
 1. Read the task description and understand the scope.
@@ -53,10 +88,10 @@ When you receive a task:
    `git ls-files --others --exclude-standard` to record
    which files are already modified or untracked before you
    start. The `HEAD` SHA is your baseline commit — the
-   reviewer uses it to squash WIP commits into a single
+   review agent uses it to squash WIP commits into a single
    clean commit via `git reset <baseline-sha>`. Without it,
-   the reviewer cannot identify which commits belong to this
-   task. The file snapshot lets you identify exactly which
+   the review agent cannot identify which commits belong to
+   this task. The file snapshot lets you identify exactly which
    files your work changed, excluding pre-existing
    modifications that belong to other work.
 5. **Independently assess risk and uncertainty** using the
@@ -136,7 +171,7 @@ entire pipeline.
   destructive git operations — work that exists only in
   the working tree is a single point of failure. Never
   use `git add -A` — stage specific files to avoid
-  committing secrets or build artifacts. The reviewer
+  committing secrets or build artifacts. The review agent
   squashes WIP commits into a single clean commit at
   approval time.
 - Keep changes focused. Only modify what is necessary.
@@ -196,7 +231,7 @@ entire pipeline.
    post-implementation review, then **wait for every
    consulted advisor to respond before proceeding to
    step 3.** Submitting for review without sign-offs
-   defeats the advisory gate — the reviewer cannot
+   defeats the advisory gate — the review agent cannot
    evaluate work that advisors haven't verified.
    - **Test advisor:** verifies no tests were skipped,
      weakened, or removed from the test list.
@@ -221,13 +256,13 @@ entire pipeline.
    step 2 are obtained.** If you consulted advisors but
    have not received explicit sign-off from every one, do
    not proceed — wait or re-request. Submitting without
-   sign-offs causes the reviewer to reject. Your task
+   sign-offs causes the review agent to reject. Your task
    assignment specifies the review agent. Message them via
    `SendMessage` with:
    - Which task slice this covers
    - **Baseline commit SHA** — the `HEAD` SHA from task
-     start. The reviewer uses this to squash WIP commits
-     into a single clean commit.
+     start. The review agent uses this to squash WIP
+     commits into a single clean commit.
    - **Every file you changed** (the delta from step 3
      above) — not just the files listed in the task
      description. Omitting incidental formatter changes
@@ -255,7 +290,7 @@ and all tests. No ignored or skipped tests. All must pass.
 
 - **Do not make the final commit.** The review agent
   handles the final staging and commit. WIP commits
-  during implementation are expected — the reviewer
+  during implementation are expected — the review agent
   squashes them at approval time.
 - **Do not communicate with the user.** The requester is
   the interface to the user. If you need user input,

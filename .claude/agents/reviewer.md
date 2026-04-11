@@ -103,6 +103,23 @@ stopped.
    only discovered when users hit the missing
    functionality.
 
+   **Verify task identity against plan order.** The
+   handoff message names the task being submitted. Check
+   that task against the plan: it must be the next
+   incomplete task, not a future one. If the handoff
+   names a task that skips ahead of the plan's current
+   position — for example, the plan shows tasks 1–20
+   complete and task 21 in progress, but the handoff
+   claims task 27 — reject as out-of-order and escalate
+   to the requester. Out-of-order submissions indicate
+   the implementor may have self-dispatched without a
+   requester dispatch, which bypasses queue management
+   and the requester's dispatch-time risk assessment. A
+   production incident had the implementor self-dispatch
+   a deferred end-of-plan task after reading an
+   unsolicited advisor message; this check is the
+   reviewer-side backstop for that failure mode.
+
    **Investigation and audit deliverables.** When the
    deliverable is an investigation or audit rather than
    code, apply scope verification to the *conclusions*,

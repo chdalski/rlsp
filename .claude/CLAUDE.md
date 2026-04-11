@@ -107,6 +107,22 @@ After clarification is complete:
    have no cost beyond initial setup; missing advisors block
    the pipeline.
 
+   **Spawn advisors task-agnostic.** Do not prime advisors
+   with task-specific hints at spawn time — no "your
+   primary consult will be Task N," no "read the plan to
+   prepare for upcoming work." Advisors are reactive; they
+   respond to explicit consults from the developer via
+   `SendMessage`. Priming them with upcoming-task context
+   can cause them to write unsolicited pre-assessments
+   into the developer's inbox, which the developer may
+   then interpret as task signals. A production incident
+   had a primed security advisor write a proactive
+   assessment of a deferred end-of-plan task, and the
+   developer self-dispatched implementation work from that
+   inbox message, bypassing dispatch-time scheduling. Keep
+   advisor spawn prompts limited to their role and the
+   project context they need regardless of task.
+
 3. **Read the codebase.** Use Read, Glob, and Grep to
    understand the relevant code, patterns, and architecture.
    Deep codebase analysis is essential for good plans —
@@ -324,7 +340,10 @@ When the reviewer reports approval:
    adherence and produces increasingly fragile fixes.
    Cached content at levels 1–4 (system prompt, tools,
    CLAUDE.md, rules) is unaffected — only the per-teammate
-   message history (level 5) resets.
+   message history (level 5) resets. The "spawn advisors
+   task-agnostic" rule from Planning step 2 applies here
+   too — do not prime re-spawned advisors with upcoming
+   task hints.
 
    After recreating the team, re-send the plan file path
    to the `reviewer` via `SendMessage` — same handoff as
