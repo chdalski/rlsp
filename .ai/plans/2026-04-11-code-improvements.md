@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a)
+- [x] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1), Task 23f done (b66b26a), Task 23g done (9a48d38)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -526,7 +526,7 @@ Pure relocation. The state-machine types (`StepResult`, `IterState`, `MappingPha
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 553 unit + 368 conformance + 529 smoke + 21 unicode + 3 doc tests, zero clippy warnings
 - [x] **Advisors:** none — pure relocation; existing tests migrate unchanged
 
-### Task 23g: relocate and rename `src/mapping.rs` → `src/event_iter/line_mapping.rs` (#4c)
+### Task 23g: relocate and rename `src/mapping.rs` → `src/event_iter/line_mapping.rs` (#4c) — 9a48d38
 
 Pure relocation combined with a rename. The line-level mapping-key helpers (`is_implicit_mapping_line`, `is_tab_indented_block_indicator`, `inline_contains_mapping_key`, `find_value_indicator_offset`) were extracted in Task 14 before `event_iter/` existed. Audit confirms only event_iter submodules import `crate::mapping`: `step.rs`, `block/sequence.rs`, `block/mapping.rs`. **The existing `#[cfg(test)] mod tests` block at `mapping.rs:174` migrates alongside.**
 
@@ -534,13 +534,13 @@ Pure relocation combined with a rename. The line-level mapping-key helpers (`is_
 
 **Files:** `src/mapping.rs` → `src/event_iter/line_mapping.rs` (move + rename), `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/step.rs`, `src/event_iter/block/sequence.rs`, `src/event_iter/block/mapping.rs`
 
-- [ ] `git mv src/mapping.rs src/event_iter/line_mapping.rs`
-- [ ] Remove `mod mapping;` from `src/lib.rs`
-- [ ] Add `pub(crate) mod line_mapping;` to `src/event_iter.rs`
-- [ ] Update `use crate::mapping::...` → `use super::line_mapping::...` (or equivalent absolute path) in the three event_iter consumers
-- [ ] Narrow functions to `pub(in crate::event_iter)` where possible
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors:** none — pure relocation + rename; existing tests migrate unchanged
+- [x] `git mv src/mapping.rs src/event_iter/line_mapping.rs` — git detected 96% similarity rename
+- [x] Remove `mod mapping;` from `src/lib.rs`
+- [x] Add `pub(crate) mod line_mapping;` to `src/event_iter.rs` — used plain `mod line_mapping;` (clippy flags `pub(crate)` as redundant inside the already-crate-private `event_iter` module; matches the Task 23b/23d/23f precedent)
+- [x] Update `use crate::mapping::...` → `use super::line_mapping::...` (or equivalent absolute path) in the three event_iter consumers — `step.rs` uses `super::line_mapping::`, `block/sequence.rs` and `block/mapping.rs` use `crate::event_iter::line_mapping::` (one level deeper)
+- [x] Narrow functions to `pub(in crate::event_iter)` where possible — all four functions narrowed
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 553 unit + 529 smoke + 368/368 conformance + 21 unicode + 3 doc tests, zero clippy warnings
+- [x] **Advisors:** none — pure relocation + rename; existing tests migrate unchanged
 
 ### Task 24: clean docs/benchmarks.md to current-state-only snapshot (#8)
 
