@@ -89,7 +89,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
 - [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
-- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d)
+- [ ] #4c — relocate single-consumer support modules into `event_iter/` (Tasks 23b-23g) — added 2026-04-11 after Task 23, see Decisions; Task 23b done (4316828), Task 23c done (94721e4), Task 23d done (01a4f3d), Task 23e done (5ad49a1)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -499,18 +499,18 @@ Pure relocation. `DirectiveScope` was extracted from `lib.rs` in Task 11 before 
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — all green; 368/368 conformance, zero clippy warnings
 - [x] **Advisors:** none — pure relocation
 
-### Task 23e: add unit tests for `event_iter/directive_scope.rs` (#4c — follow-up)
+### Task 23e: add unit tests for `event_iter/directive_scope.rs` (#4c — follow-up) — 5ad49a1
 
 Create `#[cfg(test)] mod tests` in `src/event_iter/directive_scope.rs`. The module currently has no unit tests — same coverage gap as properties.rs. Follows the Task 6/7b/8b/9b/23c precedent.
 
 **Files:** `src/event_iter/directive_scope.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
-- [ ] Coverage for `resolve_tag`: primary handle `!`, named handles `!foo!`, secondary handle `!!`, verbatim tags, unknown handles, empty suffix, oversized resolved tag against `MAX_RESOLVED_TAG_LEN`
-- [ ] Coverage for `tag_directives`: returns the directive map; interaction with `%TAG` handle registration (if the struct exposes a registration method — confirm against current API)
-- [ ] Coverage for scope lifecycle: fresh scope has no handles; registering a handle and resolving against it; scope reset between documents
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors required:** test-engineer input + output gates — new test file for previously-untested module; follows 23c precedent
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of the file
+- [x] Coverage for `resolve_tag`: primary handle `!`, named handles `!foo!`, secondary handle `!!`, verbatim tags, unknown handles, empty suffix, oversized resolved tag against `MAX_RESOLVED_TAG_LEN`
+- [x] Coverage for `tag_directives`: returns the directive map; interaction with `%TAG` handle registration (if the struct exposes a registration method — confirm against current API). Note during review: `DirectiveScope` exposes no public registration method — handles are inserted via `parse_tag_directive` in `event_iter/directives.rs` writing to the `pub(in crate::event_iter) tag_handles` field. The tests are in the same visibility scope and write directly to `tag_handles`, which is the only feasible API surface at the unit-test level.
+- [x] Coverage for scope lifecycle: fresh scope has no handles; registering a handle and resolving against it; scope reset between documents. Note during review: production code "resets" the scope by reassignment of `DirectiveScope::default()` (`event_iter/step.rs:82,103`) — there is no `reset()` method. The lifecycle tests model this by asserting fresh-default invariants, which is what the production reset path relies on.
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — 553 unit tests pass (up from 530, +23 new), 368/368 conformance, zero clippy warnings
+- [x] **Advisors required:** test-engineer input + output gates — both satisfied (23 tests, TE sign-off granted); security-engineer not consulted (TE confirmed MAX_RESOLVED_TAG_LEN is a simple numeric boundary with no trust-boundary crossing, already reviewed when limit was established)
 
 ### Task 23f: relocate `src/state.rs` → `src/event_iter/state.rs` (#4c)
 
