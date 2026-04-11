@@ -6,13 +6,13 @@
 
 ## Goal
 
-Address the eight items catalogued in `rlsp-yaml-parser/code-improvements.md`: remove dead code and duplication in the character-predicates module; colocate tests with the lexer submodules they cover and add missing coverage for `comment.rs`; split the monolithic `lib.rs` (4,628 lines) and `loader.rs` (985 lines) into cohesive smaller files; consolidate `EventIter`'s boolean state into enums so invalid states are unrepresentable; rewrite the stale parser README and retrofit an AI-authorship note across all crate READMEs; and strip orphaned historical content from `docs/benchmarks.md`. The work is decomposed into 27 small, independently-committable tasks ordered so later tasks build on earlier ones.
+Address the eight items catalogued in `rlsp-yaml-parser/code-improvements.md`: remove dead code and duplication in the character-predicates module; colocate tests with the lexer submodules they cover and add missing coverage for `comment.rs`; split the monolithic `lib.rs` (4,628 lines) and `loader.rs` (985 lines) into cohesive smaller files; consolidate `EventIter`'s boolean state into enums so invalid states are unrepresentable; rewrite the stale parser README and retrofit an AI-authorship note across all crate READMEs; and strip orphaned historical content from `docs/benchmarks.md`. The work is decomposed into 30 small, independently-committable tasks ordered so later tasks build on earlier ones.
 
 ## Context
 
-### Source document
+### Origin
 
-Full improvement list: `rlsp-yaml-parser/code-improvements.md`. This plan records the verification findings, decomposition decisions, and execution ordering settled during user clarification on 2026-04-11.
+The user supplied an initial code-improvements checklist as a scratchpad during the 2026-04-11 clarification session. This plan records the verification findings, decomposition decisions, and execution ordering that came out of that discussion — the original checklist is not committed to the repo (user preference; the plan is the single source of truth).
 
 ### Specifications and reference implementations
 
@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction (Tasks 7-9) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 pending
+- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 + test tasks 7b/8b/9b pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -213,6 +213,52 @@ Move the comment-attachment helpers from `src/loader.rs` into a new `src/loader/
 - [ ] Add `mod comments;` declaration in `loader.rs`; update call sites
 - [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
 - [ ] **Advisors:** none
+
+### Task 7b: add unit tests for loader/stream.rs (#6 — follow-up)
+
+Create `#[cfg(test)] mod tests` in `src/loader/stream.rs` with unit-level coverage for the four functions extracted in Task 7 (`next_from`, `consume_leading_doc_comments`, `consume_leading_comments`, `peek_trailing_comment`). Mirrors the Task 6 precedent (first unit tests for `lexer/comment.rs`). Added mid-plan after the user observed that Task 7 extracted functions whose direct unit-test coverage was nil — they were only exercised indirectly through `tests/loader.rs` and `tests/smoke.rs`.
+
+**Files:** `src/loader/stream.rs`
+
+- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/stream.rs`
+- [ ] Coverage for `next_from`: forwards `Some(Ok(event, span))`, propagates `Some(Err(e))` as `LoadError::Parse`, returns `Ok(None)` on `None`
+- [ ] Coverage for `consume_leading_doc_comments`: accumulates comment-text events into the caller's Vec until a non-comment event is peeked (without consuming the non-comment); empty case (first event is non-comment)
+- [ ] Coverage for `consume_leading_comments`: same accumulation pattern for in-doc context
+- [ ] Coverage for `peek_trailing_comment`: respects the `value_end_line` cutoff — returns `Some(text)` when the next comment is on the same line as `value_end_line`, returns `None` when the comment is on a later line, returns `None` when the next event is not a comment
+- [ ] Test helper: build a mock `EventStream` from a `Vec<Result<(Event, Span), Error>>` or parse a small YAML string to get a real stream — the TE will recommend the pattern at the input gate
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green, existing tests unaffected
+- [ ] **Advisors required:**
+  - **test-engineer input gate:** consult before implementing — this is a new test file for a previously-untested module, triggering both "new test file establishes testing pattern" and "modified code has no existing test coverage" in the risk-assessment rule
+  - **test-engineer output gate:** get explicit sign-off on the completed test list before submitting to reviewer
+- [ ] **Submission:** developer's handoff message to reviewer must cite both advisor gates explicitly; reviewer rejects if either citation is missing (per Task 6 precedent)
+
+### Task 8b: add unit tests for loader/reloc.rs (#6 — follow-up)
+
+Create `#[cfg(test)] mod tests` in `src/loader/reloc.rs` with unit-level coverage for `reloc`. Easiest of the three follow-up tasks because `reloc` is a pure function over `Node<Span>`.
+
+**Files:** `src/loader/reloc.rs`
+
+- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/reloc.rs`
+- [ ] Coverage for scalar relocation: `reloc(Node::Scalar { span, ... }, new_span)` replaces `span` with `new_span`
+- [ ] Coverage for sequence relocation: top-level sequence span rewritten; child spans also rewritten (recursive)
+- [ ] Coverage for mapping relocation: top-level mapping span rewritten; each key and value span also rewritten
+- [ ] Coverage for nested collection: mapping-inside-sequence-inside-mapping — every descendant span becomes `new_span`
+- [ ] Coverage for alias relocation: `Node::Alias` span rewritten
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green
+- [ ] **Advisors required:** test-engineer input + output gates (same rationale as 7b; new test file, no existing coverage)
+
+### Task 9b: add unit tests for loader/comments.rs (#6 — follow-up)
+
+Create `#[cfg(test)] mod tests` in `src/loader/comments.rs` (file created in Task 9) with unit-level coverage for `attach_leading_comments` and `attach_trailing_comment`. Must execute after Task 9 because the file does not exist yet.
+
+**Files:** `src/loader/comments.rs`
+
+- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/comments.rs`
+- [ ] Coverage for `attach_leading_comments`: empty input list is a no-op; non-empty list appended to the node's existing leading comments (or initialised if none); verify ordering is preserved
+- [ ] Coverage for `attach_trailing_comment`: attaches a single trailing comment to the node; semantics for overwriting vs appending if the node already has a trailing comment (verify against current behaviour, don't change it)
+- [ ] Verify the helpers reach into the correct `Node` variants (Scalar/Sequence/Mapping/Alias) — if the helpers only support some variants, test the supported ones
+- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green
+- [ ] **Advisors required:** test-engineer input + output gates (same rationale as 7b/8b)
 
 ### Task 10: extract lib.rs security-limit constants into limits.rs (#4a-i)
 
@@ -513,4 +559,5 @@ Close the spec-conformance gap in `scan_tag` (`lib.rs:1355-1363` — will move d
 - **Benchmarks doc becomes current-state-only** (not a running log of optimizations). Each historical layer — PEG comparison, Lazy Pos, byte-level scanning — is preserved permanently in its corresponding plan file and commits. The live doc focuses on current rlsp-yaml-parser vs libfyaml only.
 - **Ordering: #5 between #4a and #4b.** The EventIter bool consolidation touches 40+ call sites. Doing it before the `event_iter/` split means the refactor lives inside a single file (`lib.rs`), which is much easier to reason about than a refactor spread across `event_iter/base.rs`, `flow.rs`, `step.rs`, `block/sequence.rs`, `block/mapping.rs`. #5 is orthogonal to #4a (none of the support-module extractions touch `EventIter` fields), so #4a can execute before #5.
 - **Ordering: #7 after #4 and #8.** The parser README's Architecture section references the final folder layout (including `event_iter/`, `limits.rs`, `directive_scope.rs`, etc.), so it must be written after the splits land. The README's Performance section links to `docs/benchmarks.md`, so that doc should be in its cleaned-up form first.
-- **Execution protocol: pause between tasks.** Per user directive — the lead waits for user confirmation after every reviewer-approved task before dispatching the next. Opt-out phrase: "auto go on".
+- **Execution protocol: pause between tasks.** Per user directive — the lead waits for user confirmation after every reviewer-approved task before dispatching the next. Opt-out phrase: "auto go on". (User opted out mid-plan after Task 1; auto-advance mode since.)
+- **Tasks 7b/8b/9b added mid-plan (2026-04-11).** After Task 7 (stream.rs extraction) was committed, the user observed that the extracted helper functions had no direct unit-test coverage and asked whether tests should be migrated alongside the functions. Verified: the four `stream.rs` functions, the `reloc` function, and the two `attach_*_comment` helpers had no direct unit tests anywhere in the codebase — they were only exercised indirectly through integration tests in `tests/loader.rs` and `tests/smoke.rs`. Same situation as `lexer/comment.rs` before Task 6. Following the Task 6 precedent, Tasks 7b/8b/9b were added to create direct unit tests for each extracted helper module. Plan grew from 27 → 30 tasks. Execution ordering: at-end-of-improvement-6 (8 → 9 → 7b → 8b → 9b → 10…). Each new task requires test-engineer input AND output gate consultation.
