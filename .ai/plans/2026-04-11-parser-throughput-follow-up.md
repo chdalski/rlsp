@@ -24,24 +24,81 @@ fixture, and no fixture may regress.
 A fresh `cargo bench -p rlsp-yaml-parser --bench
 throughput` run on 2026-04-11 reproduces the numbers
 published in `rlsp-yaml-parser/docs/benchmarks.md` within
-normal run-to-run noise. The event-drain gap against
-`libfyaml` for the main synthetic fixtures:
+normal run-to-run noise. The same bench was then re-run
+on the user's **bare-metal** host to validate the
+container numbers and produce a cleaner baseline for
+verification runs. Both sets of medians:
 
-| Fixture     | rlsp/events | libfyaml | ratio     |
-|-------------|------------:|---------:|----------:|
-| tiny_100B   |   1.50 µs   |  3.16 µs | **0.47×** |
-| medium_10KB |   106.8 µs  | 95.6 µs  |  1.12×    |
-| large_100KB |   1.07 ms   |  819 µs  |  1.31×    |
-| huge_1MB    |   10.15 ms  | 7.80 ms  |  1.30×    |
-| block_seq   |   739 µs    |  395 µs  |  1.87×    |
-| flow_heavy  |   960 µs    | 1.12 ms  | **0.86×** |
-| scalar_hvy  |   531 µs    |  462 µs  |  1.15×    |
-| mixed       |   1.08 ms   |  825 µs  |  1.31×    |
-| k8s_3KB     |   38.6 µs   |  27.1 µs |  1.42×    |
+| Fixture     | rlsp/events (container) | libfyaml (container) | ratio  | rlsp/events (bare) | libfyaml (bare) | ratio  |
+|-------------|------------------------:|---------------------:|-------:|-------------------:|----------------:|-------:|
+| tiny_100B   |    1.50 µs              |     3.16 µs          | **0.47×** |      1.61 µs    |    2.85 µs      | **0.56×** |
+| medium_10KB |  106.76 µs              |    95.56 µs          |  1.12× |    108.61 µs      |   90.31 µs      |  1.20× |
+| large_100KB |    1.07 ms              |   819.0 µs           |  1.31× |      1.078 ms     |  814.5 µs       |  1.32× |
+| huge_1MB    |   10.15 ms              |    7.80 ms           |  1.30× |     10.26 ms      |    7.63 ms      |  1.34× |
+| block_heavy |    1.257 ms             |  930.4 µs            |  1.35× |      1.162 ms     |  904.4 µs       |  1.28× |
+| block_seq   |  739.25 µs              |  394.6 µs            |  1.87× |    711.53 µs      |  403.6 µs       |  1.76× |
+| flow_heavy  |  960.15 µs              |    1.117 ms          | **0.86×** |    921.10 µs    |    1.088 ms     | **0.85×** |
+| scalar_hvy  |  531.34 µs              |  462.4 µs            |  1.15× |    541.86 µs      |  420.4 µs       |  1.29× |
+| mixed       |    1.081 ms             |  824.8 µs            |  1.31× |      1.033 ms     |  822.9 µs       |  1.26× |
+| k8s_3KB     |   38.63 µs              |   27.11 µs           |  1.42× |     35.84 µs      |   26.47 µs      |  1.35× |
 
-The gap is smallest on flow_heavy (rlsp wins), largest on
-block_sequence (1.87×), and sits at 1.3× on the general
-mixed workloads.
+Takeaways from the two-host comparison:
+
+- **Relative gap is stable** — most fixtures move by
+  ±2–8% between hosts and the ordering is preserved.
+  Neither run paints a materially different picture.
+- **Bare-metal confidence intervals are tighter** —
+  `block_heavy` dropped from 18% outliers and a wide CI
+  in-container to 2% outliers and a ±0.1% CI on bare
+  metal. This matters because Task 2's expected
+  per-fixture improvement is small (2–5%) and could be
+  swallowed by in-container noise.
+- **libfyaml relatively gained more from bare metal**
+  on `scalar_heavy` (9% faster) and `block_heavy` (3%
+  faster) — the C code benefits from cache locality
+  more than rlsp's bounds-checked Rust. The measured
+  gap on those fixtures is therefore slightly wider on
+  bare metal than the container run suggested.
+- **The gap is smallest on `flow_heavy`** (rlsp wins by
+  ~15% on both hosts), **largest on `block_sequence`**
+  (1.76× bare / 1.87× container), and sits at ~1.3× on
+  the general mixed workloads.
+
+### Measurement protocol
+
+Each task in this plan runs its verification bench
+**in-container** for iteration speed. The developer
+compares medians against `docs/benchmarks.md` manually —
+**do not trust criterion's "Performance has improved /
+regressed" lines in the log output**, because criterion's
+stored baseline (`target/criterion/<group>/<fixture>/base/`)
+may contain cross-host numbers and its comparisons then
+reflect host differences, not code changes.
+
+Regression policy:
+
+- If an in-container re-run shows a median outside
+  criterion's confidence interval in the wrong direction,
+  re-run once (containers are noisy).
+- If the regression persists, treat it as a real
+  regression and fail the task.
+- After the final task, the user will re-run the bench
+  on bare metal once more for the authoritative
+  end-to-end delta. That run is the final verification
+  of the plan's goal.
+
+Per-task fixture watch list (where each optimisation is
+expected to register cleanly):
+
+| Task | Fixture to watch                | Expected direction |
+|------|---------------------------------|--------------------|
+| 1    | `huge_1MB`, `large_100KB`       | faster (10–25%)    |
+| 2    | `scalar_heavy`, `mixed`         | faster (2–5%)      |
+| 3    | `scalar_heavy`, `mixed`, `block_sequence` | faster (3–8%) |
+
+No fixture may regress on any task — the "expected
+direction" column is where the win should show up, not
+where the developer is allowed to take a hit elsewhere.
 
 ### Prior optimisation plans (context, not scope)
 
