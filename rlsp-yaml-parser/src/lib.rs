@@ -31,7 +31,8 @@ use std::collections::VecDeque;
 
 use directive_scope::DirectiveScope;
 use state::{
-    CollectionEntry, ConsumedMapping, FlowMappingPhase, IterState, MappingPhase, StepResult,
+    CollectionEntry, ConsumedMapping, FlowMappingPhase, IterState, MappingPhase, PendingAnchor,
+    StepResult,
 };
 
 use lexer::Lexer;
@@ -83,24 +84,11 @@ struct EventIter<'input> {
     /// error loops (e.g. depth-limit firing on the same prepended synthetic
     /// line).
     failed: bool,
-    /// A pending anchor name (`&name`) that has been scanned but not yet
-    /// attached to a node event.
-    ///
-    /// Anchors in YAML precede the node they annotate.  After scanning
-    /// `&name`, the parser stores the name here and attaches it to the next
-    /// `Scalar`, `SequenceStart`, or `MappingStart` event.
-    ///
-    /// `pending_anchor_for_collection` distinguishes two cases:
-    /// - `true`: anchor was on its own line (`&name\n- item`) — the anchor
-    ///   annotates the next node regardless of type (collection or scalar).
-    /// - `false`: anchor was inline with key content
-    ///   (`&name key: value`) — the anchor annotates the key scalar, not
-    ///   the enclosing mapping.
-    pending_anchor: Option<&'input str>,
-    /// True when `pending_anchor` was set from a standalone anchor line (no
-    /// inline content after the name).  False when set from an inline anchor
-    /// that precedes a key or scalar on the same line.
-    pending_anchor_for_collection: bool,
+    /// A pending anchor that has been scanned but not yet attached to a node
+    /// event.  The [`PendingAnchor`] variant encodes both the anchor name and
+    /// whether it was standalone (applies to the next node of any type) or
+    /// inline (applies to the key scalar, not the enclosing mapping).
+    pending_anchor: Option<PendingAnchor<'input>>,
     /// A pending tag that has been scanned but not yet attached to a node event.
     ///
     /// Tags in YAML precede the node they annotate (YAML 1.2 §6.8.1).  After
@@ -156,7 +144,6 @@ impl<'input> EventIter<'input> {
             coll_stack: Vec::new(),
             failed: false,
             pending_anchor: None,
-            pending_anchor_for_collection: false,
             pending_tag: None,
             pending_tag_for_collection: false,
             directive_scope: DirectiveScope::default(),
@@ -225,7 +212,7 @@ impl<'input> EventIter<'input> {
                         Event::Scalar {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
-                            anchor: self.pending_anchor.take(),
+                            anchor: self.pending_anchor.take().map(PendingAnchor::name),
                             tag: None,
                         },
                         zero_span(pos),
@@ -345,7 +332,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Literal(chomp),
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 span,
@@ -360,7 +347,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Folded(chomp),
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 span,
@@ -371,7 +358,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::SingleQuoted,
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 span,
@@ -419,7 +406,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::DoubleQuoted,
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 span,
@@ -435,7 +422,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value,
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 span,
@@ -1367,11 +1354,10 @@ impl<'input> EventIter<'input> {
                         message: "alias node cannot have a tag property".into(),
                     }));
                 }
-                // An anchor is only a property of the alias if it's item-level
-                // (pending_anchor_for_collection=false).  A collection-level anchor
-                // (pending_anchor_for_collection=true) belongs to the surrounding
-                // collection, not the alias node.
-                if self.pending_anchor.is_some() && !self.pending_anchor_for_collection {
+                // An Inline anchor preceding `*alias` is an error — it would annotate
+                // the alias node, which is illegal.  A Standalone anchor belongs to
+                // the surrounding collection, not the alias, so it is not an error here.
+                if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_))) {
                     self.failed = true;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
@@ -1607,42 +1593,46 @@ impl<'input> EventIter<'input> {
                         let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;
                         // Duplicate anchors on the same node are an error.
                         //
-                        // Case 1: existing anchor is item-level (pending_anchor_for_collection=false)
-                        // and no collection tag is pending — both this and the existing anchor
+                        // Case 1: existing anchor is inline (Inline variant) and no
+                        // collection tag is pending — both this and the existing anchor
                         // are for the same item-level node.
                         //
-                        // Case 2: existing anchor is collection-level (pending_anchor_for_collection=true)
-                        // and the new anchor has inline content that is NOT a collection opener
-                        // ([, {) or property (!, &) — both anchors apply to the same scalar node.
+                        // Case 2: existing anchor is standalone (Standalone variant)
+                        // and the new anchor has inline content that is NOT a collection
+                        // opener ([, {) or property (!, &) — both anchors apply to the
+                        // same scalar node.
                         let amp_pos2 = amp_pos;
-                        let is_duplicate = if self.pending_anchor.is_some()
-                            && !self.pending_anchor_for_collection
-                            && !self.pending_tag_for_collection
-                        {
-                            true
-                        } else if self.pending_anchor.is_some()
-                            && self.pending_anchor_for_collection
-                            && had_inline
-                            && !self.pending_tag_for_collection
-                        {
-                            // The existing anchor is collection-level, but the new anchor
-                            // has inline content.  If that content is a mapping key line
-                            // (contains `: ` etc.), the new anchor is for the key and the
-                            // existing anchor is for the mapping — different nodes, no error.
-                            // If the inline is a plain scalar (no key indicator), both
-                            // anchors apply to the same scalar node — error.
-                            let first_ch = inline.chars().next();
-                            // If inline starts with a collection/property opener, treat as
-                            // different node — no error.
-                            let starts_with_opener =
-                                matches!(first_ch, Some('[' | '{' | '!' | '&' | '*' | '|' | '>'));
-                            // If inline contains a mapping key indicator (`: `), the new
-                            // anchor is for a key — different node from the collection.
-                            let is_mapping_key = find_value_indicator_offset(inline).is_some();
-                            !starts_with_opener && !is_mapping_key
-                        } else {
-                            false
-                        };
+                        let is_duplicate =
+                            if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
+                                && !self.pending_tag_for_collection
+                            {
+                                true
+                            } else if matches!(
+                                self.pending_anchor,
+                                Some(PendingAnchor::Standalone(_))
+                            ) && had_inline
+                                && !self.pending_tag_for_collection
+                            {
+                                // The existing anchor is collection-level, but the new anchor
+                                // has inline content.  If that content is a mapping key line
+                                // (contains `: ` etc.), the new anchor is for the key and the
+                                // existing anchor is for the mapping — different nodes, no error.
+                                // If the inline is a plain scalar (no key indicator), both
+                                // anchors apply to the same scalar node — error.
+                                let first_ch = inline.chars().next();
+                                // If inline starts with a collection/property opener, treat as
+                                // different node — no error.
+                                let starts_with_opener = matches!(
+                                    first_ch,
+                                    Some('[' | '{' | '!' | '&' | '*' | '|' | '>')
+                                );
+                                // If inline contains a mapping key indicator (`: `), the new
+                                // anchor is for a key — different node from the collection.
+                                let is_mapping_key = find_value_indicator_offset(inline).is_some();
+                                !starts_with_opener && !is_mapping_key
+                            } else {
+                                false
+                            };
                         if is_duplicate {
                             self.failed = true;
                             return StepResult::Yield(Err(Error {
@@ -1650,7 +1640,6 @@ impl<'input> EventIter<'input> {
                                 message: "a node may not have more than one anchor".into(),
                             }));
                         }
-                        self.pending_anchor = Some(name);
                         self.lexer.consume_line();
                         if had_inline {
                             // Detect illegal inline block sequence: `&anchor - item`
@@ -1660,7 +1649,6 @@ impl<'input> EventIter<'input> {
                                 rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
                             });
                             if is_seq {
-                                self.pending_anchor = None;
                                 self.failed = true;
                                 let seq_pos = Pos {
                                     byte_offset: inline_offset,
@@ -1677,7 +1665,7 @@ impl<'input> EventIter<'input> {
                             // Inline content after anchor — anchor applies to the
                             // inline node (scalar or key), not to any enclosing
                             // collection opened on this same line.
-                            self.pending_anchor_for_collection = false;
+                            self.pending_anchor = Some(PendingAnchor::Inline(name));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
@@ -1707,7 +1695,6 @@ impl<'input> EventIter<'input> {
                             // Validate: the anchor must be indented enough for this context.
                             let min = self.min_standalone_property_indent();
                             if line_indent < min {
-                                self.pending_anchor = None;
                                 self.failed = true;
                                 let err_pos = amp_pos;
                                 return StepResult::Yield(Err(Error {
@@ -1717,7 +1704,7 @@ impl<'input> EventIter<'input> {
                                             .into(),
                                 }));
                             }
-                            self.pending_anchor_for_collection = true;
+                            self.pending_anchor = Some(PendingAnchor::Standalone(name));
                         }
                         // Let the next iteration handle whatever follows.
                         return StepResult::Continue;
@@ -1993,7 +1980,7 @@ impl<'input> EventIter<'input> {
                 .push(CollectionEntry::Sequence(dash_indent, false));
             self.queue.push_back((
                 Event::SequenceStart {
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                     style: CollectionStyle::Block,
                 },
@@ -2015,7 +2002,8 @@ impl<'input> EventIter<'input> {
         // applies to an empty scalar for the previous item.  Emit it now before
         // processing the current `-`.
         if !opens_new
-            && (self.pending_tag_for_collection || self.pending_anchor_for_collection)
+            && (self.pending_tag_for_collection
+                || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))))
             && (self.pending_tag.is_some() || self.pending_anchor.is_some())
         {
             let item_pos = self.lexer.current_pos();
@@ -2023,13 +2011,12 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: self.pending_tag.take(),
                 },
                 zero_span(item_pos),
             ));
             self.pending_tag_for_collection = false;
-            self.pending_anchor_for_collection = false;
         }
         // Check for tab-indented block structure before consuming the dash.
         // In YAML, tabs cannot be used for block-level indentation.  When the
@@ -2067,7 +2054,7 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
-                        anchor: self.pending_anchor.take(),
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
                         tag: None,
                     },
                     zero_span(item_pos),
@@ -2204,11 +2191,12 @@ impl<'input> EventIter<'input> {
             // suite 9KAX: inline property → key scalar).  The pending anchor/tag
             // is left on `self.pending_anchor`/`self.pending_tag` and will be
             // consumed by `consume_mapping_entry` when it emits the key scalar.
-            let mapping_anchor = if self.pending_anchor_for_collection {
-                self.pending_anchor.take()
-            } else {
-                None
-            };
+            let mapping_anchor =
+                if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
+                    self.pending_anchor.take().map(PendingAnchor::name)
+                } else {
+                    None
+                };
             let mapping_tag = if self.pending_tag_for_collection {
                 self.pending_tag.take()
             } else {
@@ -2238,7 +2226,7 @@ impl<'input> EventIter<'input> {
             });
             if in_key_phase
                 && !self.pending_tag_for_collection
-                && !self.pending_anchor_for_collection
+                && !matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_)))
                 && (self.pending_tag.is_some() || self.pending_anchor.is_some())
             {
                 let pos = self.lexer.current_pos();
@@ -2246,7 +2234,7 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
-                        anchor: self.pending_anchor.take(),
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
                         tag: self.pending_tag.take(),
                     },
                     zero_span(pos),
@@ -2290,7 +2278,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take(),
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
                     tag: None,
                 },
                 zero_span(pos),
@@ -2339,7 +2327,7 @@ impl<'input> EventIter<'input> {
                         Event::Scalar {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
-                            anchor: self.pending_anchor.take(),
+                            anchor: self.pending_anchor.take().map(PendingAnchor::name),
                             tag: self.pending_tag.take(),
                         },
                         zero_span(pos),
@@ -2360,7 +2348,7 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: key_value,
                         style: key_style,
-                        anchor: self.pending_anchor.take(),
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
                         tag: self.pending_tag.take(),
                     },
                     key_span,
@@ -2592,7 +2580,8 @@ impl<'input> EventIter<'input> {
         // Seeded from any block-context anchor that was pending when this flow
         // collection was entered (e.g. `&seq [a, b]` sets pending_anchor before
         // the `[` is dispatched to handle_flow_collection).
-        let mut pending_flow_anchor: Option<&'input str> = self.pending_anchor.take();
+        let mut pending_flow_anchor: Option<&'input str> =
+            self.pending_anchor.take().map(PendingAnchor::name);
         // Pending tag for the next node in this flow collection.
         // Seeded from any block-context tag that was pending when this flow
         // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before

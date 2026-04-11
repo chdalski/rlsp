@@ -58,6 +58,15 @@ pub enum CollectionEntry {
     Mapping(usize, MappingPhase, bool),
 }
 
+impl CollectionEntry {
+    /// The indentation column of this collection's indicator/key.
+    pub const fn indent(self) -> usize {
+        match self {
+            Self::Sequence(col, _) | Self::Mapping(col, _, _) => col,
+        }
+    }
+}
+
 /// Whether the next expected token in a flow mapping is a key or value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowMappingPhase {
@@ -67,11 +76,27 @@ pub enum FlowMappingPhase {
     Value,
 }
 
-impl CollectionEntry {
-    /// The indentation column of this collection's indicator/key.
-    pub const fn indent(self) -> usize {
+/// Disposition of a pending anchor before it's attached to a node event.
+///
+/// Anchors in YAML precede the node they annotate. After scanning `&name`,
+/// the parser stores the name here until the next `Scalar`, `SequenceStart`,
+/// or `MappingStart` event is emitted. The disposition determines which
+/// node the anchor annotates:
+///
+/// - `Standalone`: anchor was on its own line (`&name\n- item`) — annotates
+///   the next node regardless of type (collection or scalar).
+/// - `Inline`: anchor was inline with key content (`&name key: value`) —
+///   annotates the key scalar, not the enclosing mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAnchor<'input> {
+    Standalone(&'input str),
+    Inline(&'input str),
+}
+
+impl<'input> PendingAnchor<'input> {
+    pub const fn name(self) -> &'input str {
         match self {
-            Self::Sequence(col, _) | Self::Mapping(col, _, _) => col,
+            Self::Standalone(n) | Self::Inline(n) => n,
         }
     }
 }
@@ -103,4 +128,34 @@ pub enum ConsumedMapping<'input> {
     InlineImplicitMappingError { pos: Pos },
     /// A quoted implicit key could not be decoded (e.g. bad escape sequence).
     QuotedKeyError { pos: Pos, message: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PendingAnchor;
+
+    // A-1: Standalone variant carries the anchor name.
+    #[test]
+    fn pending_anchor_standalone_carries_name() {
+        let a = PendingAnchor::Standalone("myanchor");
+        assert_eq!(a.name(), "myanchor");
+        assert!(matches!(a, PendingAnchor::Standalone("myanchor")));
+    }
+
+    // A-2: Inline variant carries the anchor name.
+    #[test]
+    fn pending_anchor_inline_carries_name() {
+        let a = PendingAnchor::Inline("inlineanchor");
+        assert_eq!(a.name(), "inlineanchor");
+        assert!(matches!(a, PendingAnchor::Inline("inlineanchor")));
+    }
+
+    // A-3: None::<PendingAnchor> matches the None arm (documents cleared state).
+    #[test]
+    fn pending_anchor_none_matches_none_arm() {
+        let a: Option<PendingAnchor<'_>> = None;
+        assert!(a.is_none());
+        assert!(!matches!(a, Some(PendingAnchor::Standalone(_))));
+        assert!(!matches!(a, Some(PendingAnchor::Inline(_))));
+    }
 }

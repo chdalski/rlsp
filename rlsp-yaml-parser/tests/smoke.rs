@@ -7924,6 +7924,214 @@ mod anchors_and_aliases {
             "plain scalar 'two' with no anchor must be present"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Group I: PendingAnchor enum consolidation (Task 15)
+    // -----------------------------------------------------------------------
+
+    // A-4: Standalone anchor on block sequence — SequenceStart carries the anchor.
+    #[test]
+    fn standalone_anchor_applies_to_block_sequence_start() {
+        let events = evs("&seq\n- a\n- b\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    anchor: Some("seq"),
+                    ..
+                }
+            )),
+            "standalone &seq must be attached to SequenceStart"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "a"
+            )),
+            "first sequence item must have no anchor"
+        );
+    }
+
+    // A-5: Inline anchor annotates the key scalar, not the mapping (9KAX scenario).
+    #[test]
+    fn inline_anchor_on_key_annotates_key_scalar_not_mapping() {
+        let events = evs("&k key: value\n");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
+            "MappingStart must have no anchor when &k is inline before key"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            )),
+            "key scalar must carry anchor &k"
+        );
+    }
+
+    // A-6: Standalone anchor on block mapping — MappingStart carries the anchor.
+    #[test]
+    fn standalone_anchor_applies_to_block_mapping_start() {
+        let events = evs("&map\nkey: value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::MappingStart {
+                    anchor: Some("map"),
+                    ..
+                }
+            )),
+            "standalone &map must be attached to MappingStart"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
+            )),
+            "key scalar must have no anchor"
+        );
+    }
+
+    // A-7: Inline anchor on a scalar value — value scalar carries the anchor.
+    #[test]
+    fn inline_anchor_on_scalar_value_attaches_to_value() {
+        let events = evs("key: &a value\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "value"
+            )),
+            "value scalar must carry anchor &a"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
+            )),
+            "key scalar must have no anchor"
+        );
+    }
+
+    // A-8: Nested anchors — outer on sequence, inner on first item.
+    #[test]
+    fn nested_anchors_outer_on_sequence_inner_on_item() {
+        let events = evs("&outer\n- &inner a\n- b\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::SequenceStart {
+                    anchor: Some("outer"),
+                    ..
+                }
+            )),
+            "SequenceStart must carry anchor &outer"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: Some("inner"), value, .. } if value.as_ref() == "a"
+            )),
+            "first item scalar must carry anchor &inner"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "b"
+            )),
+            "second item scalar must have no anchor"
+        );
+    }
+
+    // A-9: When a standalone anchor is followed by a second inline key anchor,
+    // the second anchor overwrites the first (pre-existing parser behaviour —
+    // the standalone anchor is consumed and replaced).  The key scalar carries
+    // the inline anchor; no error is produced.
+    #[test]
+    fn standalone_anchor_overwritten_by_subsequent_inline_key_anchor() {
+        // "&map\n&k key: value\n" — &map is scanned as standalone, then &k is
+        // scanned as inline before the key.  The parser replaces &map with &k.
+        // MappingStart has no anchor; key scalar carries &k.
+        let events = evs("&map\n&k key: value\n");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
+            "MappingStart must have no anchor (standalone &map is replaced by inline &k)"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            )),
+            "key scalar must carry anchor &k"
+        );
+    }
+
+    // A-10: Duplicate anchors on the same node return an error.
+    #[test]
+    fn duplicate_anchors_on_same_node_return_error() {
+        assert!(
+            parse_events("&a &b scalar\n").any(|r| r.is_err()),
+            "two anchors on one node must return an error"
+        );
+    }
+
+    // A-11: Anchor cleared after use — second sequence item has no anchor.
+    #[test]
+    fn anchor_cleared_after_use_second_item_has_none() {
+        let events = evs("- &a first\n- second\n");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "first"
+            )),
+            "first item must carry anchor &a"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Scalar { anchor: None, value, .. } if value.as_ref() == "second"
+            )),
+            "second item must have no anchor"
+        );
+    }
+
+    // B-8: Inline anchor immediately before an alias is an error.
+    #[test]
+    fn inline_anchor_before_alias_returns_error() {
+        assert!(
+            parse_events("&a *b\n").any(|r| r.is_err()),
+            "inline anchor &a before alias *b must return an error"
+        );
+    }
+
+    // B-10: Standalone anchor at insufficient indent returns an error.
+    #[test]
+    fn standalone_anchor_at_insufficient_indent_returns_error() {
+        // `"key:\n  nested: val\n&a\n"` — after opening the nested mapping at
+        // indent 2, a standalone `&a` at indent 0 is below the minimum required
+        // indent for that context.
+        let result: Vec<_> = parse_events("key:\n  nested: val\n&a\n").collect();
+        let has_indent_error = result.iter().any(|r| {
+            r.as_ref()
+                .is_err_and(|e| e.to_string().to_lowercase().contains("indent"))
+        });
+        assert!(
+            has_indent_error,
+            "standalone anchor below minimum indent must return an indent error"
+        );
+    }
+
+    // B-11: Anchor followed immediately by a block-sequence dash on the same line is an error.
+    #[test]
+    fn anchor_followed_by_inline_dash_returns_error() {
+        assert!(
+            parse_events("&a - item\n").any(|r| r.is_err()),
+            "anchor &a directly before block-sequence dash on same line must return an error"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
