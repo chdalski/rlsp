@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab)
+- [x] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a), Task 20 done (d6170c4), Task 21 done (d1f0e10), Task 22 done (a7657ab), Task 23 done (8705972)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [x] #27 — chars.rs verbatim-tag URI validation tightening (Task 27) — ad790db
@@ -437,19 +437,19 @@ Create the `event_iter/block/` sub-submodule hierarchy and populate it with bloc
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — 1313 unit, 455 parser, 529 smoke, 368/368 conformance, zero warnings
 - [x] **Advisors:** none — pure move + scaffolding
 
-### Task 23: create event_iter/block/mapping.rs (#4b-vi)
+### Task 23: create event_iter/block/mapping.rs (#4b-vi) — 8705972
 
-Move the block-mapping handlers into `src/event_iter/block/mapping.rs`. This is the final `impl EventIter` split task — after this, `lib.rs` should be reduced to ~80 lines (the `parse_events` public API, module declarations, and crate-level attributes).
+Move the block-mapping handlers into `src/event_iter/block/mapping.rs`. This is the final `impl EventIter` split task — after this, `lib.rs` is reduced to 165 lines (not ~80 as originally estimated; see note below).
 
 **Files:** `src/lib.rs`, `src/event_iter/block.rs`, `src/event_iter/block/mapping.rs` (new)
 
-- [ ] Add `pub(in crate::event_iter) mod mapping;` to `src/event_iter/block.rs`
-- [ ] Create `src/event_iter/block/mapping.rs`
-- [ ] Move from `impl EventIter`: `handle_mapping_entry` (`lib.rs:2797`), `consume_mapping_entry` (`lib.rs:759`), `consume_explicit_value_line` (`lib.rs:3127`), `peek_mapping_entry` (`lib.rs:539`), `advance_mapping_to_value` (`lib.rs:986`), `advance_mapping_to_key` (`lib.rs:1028`), `tick_mapping_phase_after_scalar` (`lib.rs:4506`), `is_value_indicator_line` (`lib.rs:3107`)
-- [ ] Convert to `pub(in crate::event_iter) fn`
-- [ ] Verify `lib.rs` is now ~80 lines — only `parse_events`, module declarations, crate-level attributes remain
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors:** none — pure move; this is the commit where lib.rs reaches its target size
+- [x] Add `pub(in crate::event_iter) mod mapping;` to `src/event_iter/block.rs`
+- [x] Create `src/event_iter/block/mapping.rs`
+- [x] Move from `impl EventIter`: `handle_mapping_entry`, `consume_mapping_entry`, `consume_explicit_value_line`, `peek_mapping_entry`, `advance_mapping_to_value`, `advance_mapping_to_key`, `tick_mapping_phase_after_scalar`, `is_value_indicator_line` — all 8 methods moved byte-for-byte, no logic changes
+- [x] Convert to `pub(in crate::event_iter) fn` — no `pub(crate)` fallback needed (cleaner than Tasks 18-22's transient visibility). Minor incidental changes noted during review: (a) `impl<'input> EventIter<'input>` → `impl EventIter<'_>` for the remaining `collection_depth` method, since `'input` is now unused; (b) `empty_scalar_event` tightened from `const fn` (implicitly crate-visible because child modules see private items in ancestor modules) to `pub(crate) const fn` for stylistic consistency with the sibling `marker_span`/`zero_span`
+- [x] lib.rs is now 165 lines (not ~80 as the plan estimated). The plan's target didn't account for what must remain: the `EventIter` struct definition itself (~65 lines with doc comments for each of 12 fields), three `pub(crate) const fn` helpers (`empty_scalar_event`, `marker_span`, `zero_span`) shared across event_iter submodules, and the `collection_depth` method. Moving any of these would constitute scope creep — the Task 23 checkboxes specify only the 8 method moves, which are complete.
+- [x] `cargo fmt`, `cargo clippy --all-targets` — zero warnings; `cargo test -p rlsp-yaml-parser` — 455 unit + 529 smoke + 21 unicode + 3 doc tests + supporting suites green; `cargo test --test conformance` — 368/368
+- [x] **Advisors:** none consulted — pure move, no logic changes, no new code paths, no behaviour change
 
 ### Task 24: clean docs/benchmarks.md to current-state-only snapshot (#8)
 
