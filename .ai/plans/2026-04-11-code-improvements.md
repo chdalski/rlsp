@@ -87,7 +87,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
-- [~] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Tasks 16-17 pending
+- [~] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 pending
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
@@ -343,18 +343,18 @@ Replace the pair `pending_anchor: Option<&'input str>` + `pending_anchor_for_col
   - **test-engineer input gate:** test list embedded in dispatch message from prior-session TE (scenarios A-1 through A-11) — satisfied
   - **test-engineer output gate:** TE gave conditional sign-off, developer added B-8/B-10/B-11 error-path tests, TE gave full sign-off — satisfied
 
-### Task 16: EventIter — pending_tag enum consolidation (#5b)
+### Task 16: EventIter — pending_tag enum consolidation (#5b) — 5b316fc
 
 Parallel refactor to Task 15 for the tag state. Replace `pending_tag: Option<Cow<'input, str>>` + `pending_tag_for_collection: bool` with `pending_tag: Option<PendingTag<'input>>`. Same structure, same advisor requirements.
 
 **Files:** `src/lib.rs` and/or `src/state.rs`
 
-- [ ] Define `PendingTag<'input>` enum with variants `Standalone(Cow<'input, str>)` and `Inline(Cow<'input, str>)` — place alongside `PendingAnchor` in `state.rs`
-- [ ] Update `EventIter` struct: remove `pending_tag_for_collection: bool`, change `pending_tag` type to `Option<PendingTag<'input>>`
-- [ ] Audit every call site (~20+ — symmetric with Task 15 since tags and anchors flow through the same state-machine sites)
-- [ ] Same latent-bug check as Task 15
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance`
-- [ ] **Advisors required:** test-engineer input + output gates. The reviewer may apply the same checklist from Task 15 (byte-for-byte parallel refactor) — but the TE should still sign off on the tag-specific edge cases (e.g., tag resolution flowing into the loader).
+- [x] Define `PendingTag<'input>` enum with variants `Standalone(Cow<'input, str>)` and `Inline(Cow<'input, str>)` — place alongside `PendingAnchor` in `state.rs`
+- [x] Update `EventIter` struct: remove `pending_tag_for_collection: bool`, change `pending_tag` type to `Option<PendingTag<'input>>`
+- [x] Audit every call site (~20+ — symmetric with Task 15 since tags and anchors flow through the same state-machine sites)
+- [x] Same latent-bug check as Task 15
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`, `cargo test --test conformance` — 368/368 conformance, 513 smoke, 455 unit, zero warnings
+- [x] **Advisors required:** test-engineer input + output gates — both satisfied (T-1/T-2 inline enum tests, T-3 through T-12 smoke tests covering standalone/inline propagation, Cow::Owned via %TAG directive, tag clearing between items, tag+anchor pairing)
 
 ### Task 17: EventIter — fold `failed` into IterState::Done + remove allow (#5c)
 
