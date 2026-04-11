@@ -322,8 +322,8 @@ branch, matching today's behaviour.
       fast path — `32a2809`
 - [x] Task 2 — eliminate end-of-span char walks via
       `pos::advance_within_line` — `5966502`
-- [ ] Task 3 — collapse the scalar try-chain into a
-      first-byte dispatcher
+- [x] Task 3 — collapse the scalar try-chain into a
+      first-byte dispatcher — `8650780`
 
 ## Tasks
 
@@ -526,27 +526,38 @@ Rules the implementation must preserve:
 - Error propagation via `?` is preserved.
 - The function signature and return type stay identical.
 
-- [ ] Rewrite `try_consume_scalar` with the dispatch
+- [x] Rewrite `try_consume_scalar` with the dispatch
   structure above.
-- [ ] Add a targeted unit test in `src/event_iter/base.rs`
+- [x] Add a targeted unit test in `src/event_iter/base.rs`
   (or a sibling test file) asserting that each first-byte
   case dispatches to the expected scalar style on minimal
   inputs (`|\n  a`, `>\n  a`, `'a'`, `"a"`, `a`). This
   pins the dispatch decision so future refactors can't
-  silently re-order it.
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+  silently re-order it. (12 unit tests in Groups A–D
+  added in `src/event_iter/base.rs`; 13 integration
+  tests in Groups E–H added in `tests/smoke.rs`.)
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml-parser` all green, including
   the full YAML 1.2 conformance suite. Pay specific
   attention to any test that exercises a line starting
   with a block indicator followed by unusual whitespace
   patterns, and to the `---` inline-scalar paths.
-- [ ] `cargo bench -p rlsp-yaml-parser --bench throughput`;
-  expect the biggest gains on `scalar_heavy` and `mixed`
-  (where plain scalars dominate) and on
-  `block_sequence`. Verify no regression anywhere; update
-  `docs/benchmarks.md`.
-- [ ] Commit: `perf(parser): dispatch scalar try-chain on
-  first-byte peek`.
+- [x] `cargo bench -p rlsp-yaml-parser --bench throughput`;
+  verify no regression anywhere; update `docs/benchmarks.md`.
+  (Reviewer ran a four-point in-session back-to-back
+  protocol — BASE×2 and HEAD×2 — on the style group.
+  Container noise floor on the style fixtures is ±5–10%;
+  the dispatcher shows no consistent signal above that
+  floor and no regression in either direction. Net result
+  on the plan's watch list [`scalar_heavy`, `mixed`,
+  `block_sequence`]: no-op within noise. Acceptance
+  criterion satisfied as "no-op, no regression". The
+  handoff's single-shot deltas [−1.3% / −2.3% / −10.8%]
+  were measured across sessions with different host load
+  and did not survive the reviewer's in-session
+  verification.)
+- [x] Commit: `perf(parser): dispatch scalar try-chain on
+  first-byte peek` — `8650780`.
 
 **Reference impl consultation:**
 1. libfyaml scanner (`fy_scan_scalar`-adjacent code in
