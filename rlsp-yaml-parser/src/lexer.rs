@@ -262,10 +262,8 @@ impl<'input> Lexer<'input> {
             // If the inline content is a comment (`# ...`), store it as a
             // trailing comment on the marker line rather than as a scalar.
             if let Some(comment_text) = inline.strip_prefix('#') {
-                let mut comment_end = inline_start.advance('#');
-                for ch in comment_text.chars() {
-                    comment_end = comment_end.advance(ch);
-                }
+                let comment_end =
+                    crate::pos::advance_within_line(inline_start.advance('#'), comment_text);
                 self.trailing_comment = Some((
                     comment_text,
                     Span {
@@ -325,10 +323,7 @@ impl<'input> Lexer<'input> {
                             message: "invalid content after document-start marker '---'".into(),
                         });
                     } else {
-                        let mut inline_end = inline_start;
-                        for ch in scanned.chars() {
-                            inline_end = inline_end.advance(ch);
-                        }
+                        let inline_end = crate::pos::advance_within_line(inline_start, scanned);
                         self.inline_scalar = Some((
                             Cow::Borrowed(scanned),
                             Span {

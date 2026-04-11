@@ -61,11 +61,11 @@ impl<'input> Lexer<'input> {
         if closed {
             // Entire scalar on one line.
             // Span: from open `'` through closing `'`.
-            let mut end_pos = open_pos.advance('\''); // past opening `'`
-            for ch in body_start[..value.quoted_len].chars() {
-                end_pos = end_pos.advance(ch);
-            }
-            end_pos = end_pos.advance('\''); // past closing `'`
+            let end_pos = crate::pos::advance_within_line(
+                open_pos.advance('\''),
+                &body_start[..value.quoted_len],
+            )
+            .advance('\'');
             return Ok(Some((
                 value.into_cow(body_start),
                 Span {
@@ -137,11 +137,11 @@ impl<'input> Lexer<'input> {
                 // Compute position right after the closing `'` by advancing from
                 // the line start over leading whitespace + content + closing `'`.
                 let leading_len = line_content.len() - trimmed.len();
-                let mut close_pos = line_start_pos;
-                for ch in line_content[..leading_len + cont_value.quoted_len].chars() {
-                    close_pos = close_pos.advance(ch);
-                }
-                close_pos = close_pos.advance('\''); // past closing `'`
+                let close_pos = crate::pos::advance_within_line(
+                    line_start_pos,
+                    &line_content[..leading_len + cont_value.quoted_len],
+                )
+                .advance('\'');
                 // If there is content after the closing `'`, store it so the
                 // flow parser can continue parsing `,`, `]`, `}`, etc.
                 let tail = trimmed.get(cont_value.quoted_len + 1..).unwrap_or("");
@@ -669,7 +669,8 @@ pub(super) fn scan_double_quoted_line(
 
         if bytes.get(hit) == Some(&b'"') {
             // Closing quote.
-            let content_end_pos = pos_after_str(start_pos, body.get(..hit).unwrap_or_default());
+            let content_end_pos =
+                crate::pos::advance_within_line(start_pos, body.get(..hit).unwrap_or_default());
             let close_pos = content_end_pos.advance('"');
             let value = owned.map_or_else(
                 || DoubleQuotedValue::Borrowed(body.get(..hit).unwrap_or_default()),
@@ -684,7 +685,8 @@ pub(super) fn scan_double_quoted_line(
         }
         // b'\\' — escape sequence.
         {
-            let escape_pos = pos_after_str(start_pos, body.get(..hit).unwrap_or_default());
+            let escape_pos =
+                crate::pos::advance_within_line(start_pos, body.get(..hit).unwrap_or_default());
             let after_backslash = body.get(hit + 1..).unwrap_or_default();
 
             if after_backslash.is_empty() {
@@ -737,15 +739,6 @@ pub(super) fn scan_double_quoted_line(
         value,
         line_continuation: false,
     })
-}
-
-/// Advance `pos` over all characters in `s`, returning the resulting position.
-fn pos_after_str(pos: Pos, s: &str) -> Pos {
-    let mut p = pos;
-    for c in s.chars() {
-        p = p.advance(c);
-    }
-    p
 }
 
 /// Ensure `owned` is populated (allocating from `prefix` if needed), and

@@ -60,10 +60,7 @@ impl<'input> Lexer<'input> {
         }
 
         // Span: from `#` through end of text (not the newline).
-        let mut span_end = hash_pos.advance('#');
-        for ch in text.chars() {
-            span_end = span_end.advance(ch);
-        }
+        let span_end = crate::pos::advance_within_line(hash_pos.advance('#'), text);
         let span = Span {
             start: hash_pos,
             end: span_end,

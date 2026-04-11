@@ -76,10 +76,7 @@ impl<'input> Lexer<'input> {
                     line: consumed_first.pos.line,
                     column: consumed_first.pos.column + hash_col_in_line,
                 };
-                let mut span_end = hash_pos.advance('#');
-                for ch in comment_text.chars() {
-                    span_end = span_end.advance(ch);
-                }
+                let span_end = crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
                 // Validate comment text: YAML 1.2 §8.1.1 — comment lines must
                 // not contain NUL (U+0000) since it is not a c-printable char.
                 if let Some(bad_i) = memchr(b'\0', comment_text.as_bytes()) {
@@ -136,10 +133,7 @@ impl<'input> Lexer<'input> {
         let span_end = self.current_pos;
         Some(extra.map_or_else(
             || {
-                let mut end_pos = scalar_start_pos;
-                for ch in first_value_ref.chars() {
-                    end_pos = end_pos.advance(ch);
-                }
+                let end_pos = crate::pos::advance_within_line(scalar_start_pos, first_value_ref);
                 (
                     Cow::Borrowed(first_value_ref),
                     Span {

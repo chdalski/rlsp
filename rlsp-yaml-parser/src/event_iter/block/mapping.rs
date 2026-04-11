@@ -165,13 +165,7 @@ impl<'input> EventIter<'input> {
             line: line_pos.line,
             column: line_pos.column + leading_spaces,
         };
-        let key_end_pos = {
-            let mut p = key_start_pos;
-            for ch in key_content.chars() {
-                p = p.advance(ch);
-            }
-            p
-        };
+        let key_end_pos = crate::pos::advance_within_line(key_start_pos, key_content);
         let key_span = Span {
             start: key_start_pos,
             end: key_end_pos,

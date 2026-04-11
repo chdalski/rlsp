@@ -85,10 +85,10 @@ The streaming parser yields its first event in ~47 ns regardless of document siz
 #### Criterion output
 
 ```
-throughput/rlsp_events/parse_events/tiny_100B    time: [1.4075 µs 1.4084 µs 1.4093 µs]  thrpt: [76.517 MiB/s]
-throughput/rlsp_events/parse_events/medium_10KB  time: [105.40 µs 105.55 µs 105.71 µs]  thrpt: [90.492 MiB/s]
-throughput/rlsp_events/parse_events/large_100KB  time: [975.56 µs 984.04 µs 992.34 µs]  thrpt: [96.956 MiB/s]
-throughput/rlsp_events/parse_events/huge_1MB     time: [8.7638 ms 8.7728 ms 8.7820 ms]  thrpt: [108.71 MiB/s]
+throughput/rlsp_events/parse_events/tiny_100B    time: [1.3362 µs 1.3378 µs 1.3395 µs]  thrpt: [80.229 MiB/s]
+throughput/rlsp_events/parse_events/medium_10KB  time: [95.405 µs 95.520 µs 95.640 µs]  thrpt: [99.990 MiB/s]
+throughput/rlsp_events/parse_events/large_100KB  time: [946.29 µs 953.59 µs 961.87 µs]  thrpt: [100.05 MiB/s]
+throughput/rlsp_events/parse_events/huge_1MB     time: [8.7887 ms 8.7984 ms 8.8091 ms]  thrpt: [108.39 MiB/s]
 
 throughput/libfyaml/parse_events/tiny_100B    time: [3.2119 µs 3.2163 µs 3.2211 µs]  thrpt:  [33.505 MiB/s]
 throughput/libfyaml/parse_events/medium_10KB  time: [89.406 µs 89.666 µs 89.954 µs]   thrpt: [106.52 MiB/s]
@@ -100,19 +100,19 @@ throughput/libfyaml/parse_events/huge_1MB     time: [8.1379 ms 8.1591 ms 8.1802 
 
 | Fixture | rlsp/load | rlsp/events | libfyaml/events | rlsp/events vs libfyaml |
 |---------|---------------:|-----------------:|----------------:|-----------------------------:|
-| tiny_100B (~100 B) | 47.4 MiB/s | 76.5 MiB/s | 33.5 MiB/s | 2.3× **faster** |
-| medium_10KB (~10 KB) | 53.2 MiB/s | 90.5 MiB/s | 106.5 MiB/s | 1.2× slower |
-| large_100KB (~100 KB) | 40.8 MiB/s | 97.0 MiB/s | 117.4 MiB/s | 1.2× slower |
-| huge_1MB (~1 MB) | 33.9 MiB/s | 108.7 MiB/s | 116.9 MiB/s | 1.1× slower |
+| tiny_100B (~100 B) | 45.0 MiB/s | 80.2 MiB/s | 33.5 MiB/s | 2.4× **faster** |
+| medium_10KB (~10 KB) | 53.4 MiB/s | 100.0 MiB/s | 106.5 MiB/s | 1.1× slower |
+| large_100KB (~100 KB) | 41.3 MiB/s | 100.1 MiB/s | 117.4 MiB/s | 1.2× slower |
+| huge_1MB (~1 MB) | 34.3 MiB/s | 108.4 MiB/s | 116.9 MiB/s | 1.1× slower |
 
 Raw timings (median):
 
 | Fixture | rlsp/load | rlsp/events | libfyaml/events |
 |---------|---------------:|-----------------:|----------------:|
-| tiny_100B | 2.27 µs | 1.41 µs | 3.22 µs |
-| medium_10KB | 179.5 µs | 105.6 µs | 89.7 µs |
-| large_100KB | 2.341 ms | 984 µs | 812.9 µs |
-| huge_1MB | 28.12 ms | 8.773 ms | 8.159 ms |
+| tiny_100B | 2.12 µs | 1.34 µs | 3.22 µs |
+| medium_10KB | 178.1 µs | 95.5 µs | 89.7 µs |
+| large_100KB | 2.311 ms | 953.6 µs | 812.9 µs |
+| huge_1MB | 27.67 ms | 8.798 ms | 8.159 ms |
 
 ### Throughput by YAML style (~100 KB each)
 
@@ -123,11 +123,11 @@ Raw timings (median):
 #### Criterion output
 
 ```
-throughput_style/rlsp_events/parse_events/block_heavy    time: [1.1065 ms 1.1074 ms 1.1082 ms]  thrpt:  [86.151 MiB/s]
-throughput_style/rlsp_events/parse_events/block_sequence time: [631.02 µs 631.98 µs 633.22 µs]  thrpt: [150.90 MiB/s]
-throughput_style/rlsp_events/parse_events/flow_heavy     time: [939.30 µs 940.29 µs 941.31 µs]  thrpt: [101.47 MiB/s]
-throughput_style/rlsp_events/parse_events/scalar_heavy   time: [467.85 µs 468.15 µs 468.46 µs]  thrpt: [203.76 MiB/s]
-throughput_style/rlsp_events/parse_events/mixed          time: [961.81 µs 963.02 µs 964.14 µs]  thrpt:  [99.072 MiB/s]
+throughput_style/rlsp_events/parse_events/block_heavy    time: [1.1099 ms 1.1111 ms 1.1123 ms]  thrpt:  [86.133 MiB/s]
+throughput_style/rlsp_events/parse_events/block_sequence time: [675.03 µs 675.36 µs 675.81 µs]  thrpt: [141.07 MiB/s]
+throughput_style/rlsp_events/parse_events/flow_heavy     time: [721.44 µs 722.15 µs 722.95 µs]  thrpt: [132.23 MiB/s]
+throughput_style/rlsp_events/parse_events/scalar_heavy   time: [469.46 µs 470.61 µs 471.94 µs]  thrpt: [202.89 MiB/s]
+throughput_style/rlsp_events/parse_events/mixed          time: [959.60 µs 962.61 µs 966.38 µs]  thrpt:  [99.309 MiB/s]
 
 throughput_style/libfyaml/parse_events/block_heavy    time: [914.19 µs 915.33 µs 916.76 µs]  thrpt: [104.22 MiB/s]
 throughput_style/libfyaml/parse_events/block_sequence time: [393.94 µs 394.27 µs 394.67 µs]  thrpt: [241.88 MiB/s]
@@ -140,27 +140,27 @@ throughput_style/libfyaml/parse_events/mixed          time: [792.25 µs 793.55 �
 
 | Style | rlsp/load | rlsp/events | libfyaml/events | rlsp/events vs libfyaml |
 |-------|---------------:|-----------------:|----------------:|-----------------------------:|
-| block_heavy | 50.4 MiB/s | 86.2 MiB/s | 104.2 MiB/s | 1.2× slower |
-| block_sequence | 96.0 MiB/s | 150.9 MiB/s | 241.9 MiB/s | 1.6× slower |
-| flow_heavy | 51.4 MiB/s | 101.5 MiB/s | 88.3 MiB/s | 1.1× **faster** |
-| scalar_heavy | 131.8 MiB/s | 203.8 MiB/s | 215.0 MiB/s | 1.1× slower |
-| mixed | 57.3 MiB/s | 99.1 MiB/s | 120.2 MiB/s | 1.2× slower |
+| block_heavy | 49.1 MiB/s | 86.1 MiB/s | 104.2 MiB/s | 1.2× slower |
+| block_sequence | 95.5 MiB/s | 141.1 MiB/s | 241.9 MiB/s | 1.7× slower |
+| flow_heavy | 56.8 MiB/s | 132.2 MiB/s | 88.3 MiB/s | 1.5× **faster** |
+| scalar_heavy | 130.7 MiB/s | 202.9 MiB/s | 215.0 MiB/s | 1.1× slower |
+| mixed | 55.5 MiB/s | 99.3 MiB/s | 120.2 MiB/s | 1.2× slower |
 
 ### Throughput — real-world (Kubernetes Deployment, ~3 KB)
 
 #### Criterion output
 
 ```
-throughput_real/rlsp/load             time: [52.609 µs 52.682 µs 52.764 µs]  thrpt: [70.401 MiB/s]
-throughput_real/rlsp_events/parse_events time: [35.911 µs 35.945 µs 35.984 µs]  thrpt: [103.18 MiB/s]
-throughput_real/libfyaml/parse_events time: [27.439 µs 27.463 µs 27.486 µs]  thrpt: [135.05 MiB/s]
+throughput_real/rlsp/load             time: [53.822 µs 53.872 µs 53.933 µs]  thrpt: [68.942 MiB/s]
+throughput_real/rlsp_events/parse_events time: [35.481 µs 35.550 µs 35.650 µs]  thrpt: [104.38 MiB/s]
+throughput_real/libfyaml/parse_events time: [28.787 µs 28.818 µs 28.851 µs]  thrpt: [128.78 MiB/s]
 ```
 
 | API | Time (median) | Throughput |
 |-----|-------------:|----------:|
-| rlsp/load | 52.68 µs | 70.4 MiB/s |
-| rlsp/parse_events | 35.95 µs | 103.2 MiB/s |
-| libfyaml/parse_events | 27.46 µs | 135.1 MiB/s |
+| rlsp/load | 53.87 µs | 68.9 MiB/s |
+| rlsp/parse_events | 35.55 µs | 104.4 MiB/s |
+| libfyaml/parse_events | 28.82 µs | 128.8 MiB/s |
 
 ### Latency — full event drain
 

@@ -56,6 +56,16 @@ pub fn column_at(line_content: &str, byte_offset_in_line: usize) -> usize {
     }
 }
 
+/// Advance `pos` past `content`, assuming `content` contains no line break.
+/// Uses the ASCII fast path in [`column_at`].
+pub fn advance_within_line(pos: Pos, content: &str) -> Pos {
+    Pos {
+        byte_offset: pos.byte_offset + content.len(),
+        line: pos.line,
+        column: pos.column + column_at(content, content.len()),
+    }
+}
+
 /// A half-open span `[start, end)` within the input stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
@@ -184,5 +194,106 @@ mod tests {
     fn column_at_full_multibyte_line() {
         // "日本語" = 9 bytes / 3 chars; prefix = entire string
         assert_eq!(column_at("日本語", 9), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // advance_within_line
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn advance_within_line_empty_content_returns_pos_unchanged() {
+        let pos = Pos {
+            byte_offset: 5,
+            line: 2,
+            column: 3,
+        };
+        assert_eq!(advance_within_line(pos, ""), pos);
+    }
+
+    #[test]
+    fn advance_within_line_ascii_only_advances_byte_and_column() {
+        let result = advance_within_line(Pos::ORIGIN, "hello");
+        assert_eq!(result.byte_offset, 5);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 5);
+    }
+
+    #[test]
+    fn advance_within_line_ascii_mid_line_accumulates_correctly() {
+        let pos = Pos {
+            byte_offset: 10,
+            line: 3,
+            column: 4,
+        };
+        let result = advance_within_line(pos, "abc");
+        assert_eq!(result.byte_offset, 13);
+        assert_eq!(result.line, 3);
+        assert_eq!(result.column, 7);
+    }
+
+    #[test]
+    fn advance_within_line_multibyte_utf8_column_counts_codepoints() {
+        // "日本語" = 9 bytes / 3 codepoints
+        let result = advance_within_line(Pos::ORIGIN, "日本語");
+        assert_eq!(result.byte_offset, 9);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 3);
+    }
+
+    #[test]
+    fn advance_within_line_multibyte_mid_line_accumulates_correctly() {
+        let pos = Pos {
+            byte_offset: 4,
+            line: 1,
+            column: 2,
+        };
+        let result = advance_within_line(pos, "日本語");
+        assert_eq!(result.byte_offset, 13);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 5);
+    }
+
+    #[test]
+    fn advance_within_line_mixed_ascii_then_multibyte() {
+        // "ab日" = 2 + 3 = 5 bytes / 3 codepoints
+        let result = advance_within_line(Pos::ORIGIN, "ab日");
+        assert_eq!(result.byte_offset, 5);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.column, 3);
+    }
+
+    #[test]
+    fn advance_within_line_line_field_is_preserved() {
+        let pos = Pos {
+            byte_offset: 0,
+            line: 7,
+            column: 0,
+        };
+        let result = advance_within_line(pos, "xyz");
+        assert_eq!(result.line, 7);
+    }
+
+    #[test]
+    fn advance_within_line_matches_advance_loop_ascii() {
+        let pos = Pos {
+            byte_offset: 2,
+            line: 1,
+            column: 2,
+        };
+        let content = "abc";
+        let expected = content.chars().fold(pos, super::Pos::advance);
+        assert_eq!(advance_within_line(pos, content), expected);
+    }
+
+    #[test]
+    fn advance_within_line_matches_advance_loop_multibyte() {
+        let pos = Pos {
+            byte_offset: 0,
+            line: 1,
+            column: 0,
+        };
+        let content = "日本語xyz";
+        let expected = content.chars().fold(pos, super::Pos::advance);
+        assert_eq!(advance_within_line(pos, content), expected);
     }
 }

@@ -111,11 +111,7 @@ impl<'input> EventIter<'input> {
         // Helper: advance `pos` over `content[..byte_len]`, one char at a time.
 
         let abs_pos = |base: Pos, content: &str, i: usize| -> Pos {
-            let mut p = base;
-            for ch in content[..i].chars() {
-                p = p.advance(ch);
-            }
-            p
+            crate::pos::advance_within_line(base, &content[..i])
         };
 
         // -----------------------------------------------------------------------
@@ -263,10 +259,8 @@ impl<'input> EventIter<'input> {
                     // SAFETY: text_start <= cur_content.len() because we found
                     // `#` at pos_in_line which is < cur_content.len().
                     let comment_text: &'input str = cur_content.get(text_start..).unwrap_or("");
-                    let mut comment_end = hash_pos.advance('#');
-                    for c in comment_text.chars() {
-                        comment_end = comment_end.advance(c);
-                    }
+                    let comment_end =
+                        crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
                     let comment_span = Span {
                         start: hash_pos,
                         end: comment_end,
