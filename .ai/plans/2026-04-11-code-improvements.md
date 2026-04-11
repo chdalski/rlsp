@@ -85,7 +85,7 @@ All three layers are preserved in their respective plan files and commit message
 - [~] #1 — chars.rs dead-code removal + de-duplication + spec tightening (Tasks 1, 27) — Task 1 done (17abda2), Task 27 pending
 - [x] #2 — lexer.rs `is_directive_or_blank_or_comment` test-helper move (Task 2) — 4c9428f
 - [x] #3 — lexer.rs test migration to submodules + comment.rs test creation (Tasks 3-6) — Task 3 done (2e49640), Task 4 done (cd8937c), Task 5 done (4b37665), Task 6 done (082c565)
-- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), test tasks 8b/9b pending
+- [~] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), test task 9b pending
 - [ ] #4a — lib.rs support module extraction (Tasks 10-14)
 - [ ] #5 — EventIter boolean consolidation (Tasks 15-17)
 - [ ] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23)
@@ -232,20 +232,22 @@ Create `#[cfg(test)] mod tests` in `src/loader/stream.rs` with unit-level covera
   - **test-engineer output gate:** get explicit sign-off on the completed test list before submitting to reviewer
 - [x] **Submission:** developer's handoff message to reviewer must cite both advisor gates explicitly; reviewer rejects if either citation is missing (per Task 6 precedent)
 
-### Task 8b: add unit tests for loader/reloc.rs (#6 — follow-up)
+### Task 8b: add unit tests for loader/reloc.rs (#6 — follow-up) — a330847
 
 Create `#[cfg(test)] mod tests` in `src/loader/reloc.rs` with unit-level coverage for `reloc`. Easiest of the three follow-up tasks because `reloc` is a pure function over `Node<Span>`.
 
+**Note during review:** the plan's original description claimed `reloc` recursively rewrites child spans. This was incorrect — `reloc` is shallow: it only replaces the top-level `loc` (see `loader.rs:619` — the single call site re-stamps an expanded alias target with the alias-site's location while leaving descendant spans at their original definition sites). The developer tested actual behavior and added `reloc_mapping_with_entries_only_replaces_top_loc` to document the shallow semantics.
+
 **Files:** `src/loader/reloc.rs`
 
-- [ ] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/reloc.rs`
-- [ ] Coverage for scalar relocation: `reloc(Node::Scalar { span, ... }, new_span)` replaces `span` with `new_span`
-- [ ] Coverage for sequence relocation: top-level sequence span rewritten; child spans also rewritten (recursive)
-- [ ] Coverage for mapping relocation: top-level mapping span rewritten; each key and value span also rewritten
-- [ ] Coverage for nested collection: mapping-inside-sequence-inside-mapping — every descendant span becomes `new_span`
-- [ ] Coverage for alias relocation: `Node::Alias` span rewritten
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green
-- [ ] **Advisors required:** test-engineer input + output gates (same rationale as 7b; new test file, no existing coverage)
+- [x] Create `#[cfg(test)] mod tests { use super::*; ... }` at the bottom of `src/loader/reloc.rs`
+- [x] Coverage for scalar relocation: `reloc(Node::Scalar { span, ... }, new_span)` replaces `span` with `new_span`
+- [x] Coverage for sequence relocation: top-level sequence span rewritten (shallow — child spans preserved, per actual semantics)
+- [x] Coverage for mapping relocation: top-level mapping span rewritten (shallow — key/value spans preserved, per actual semantics)
+- [x] Coverage for shallow semantics: mapping with scalar entries — top-level `loc` rewritten, child `loc` unchanged (`reloc_mapping_with_entries_only_replaces_top_loc`)
+- [x] Coverage for alias relocation: `Node::Alias` span rewritten
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — new tests green (432 → 439 unit tests)
+- [x] **Advisors required:** test-engineer input + output gates (same rationale as 7b; new test file, no existing coverage) — both gates satisfied
 
 ### Task 9b: add unit tests for loader/comments.rs (#6 — follow-up)
 
