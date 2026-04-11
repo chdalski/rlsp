@@ -88,7 +88,7 @@ All three layers are preserved in their respective plan files and commit message
 - [x] #6 — loader.rs helper extraction + unit tests (Tasks 7-9, 7b-9b) — Task 7 done (2ac29d0), Task 8 done (3e1ff8a), Task 9 done (c835896), Task 7b done (617519a), Task 8b done (a330847), Task 9b done (84d789d)
 - [x] #4a — lib.rs support module extraction (Tasks 10-14) — Task 10 done (769b1dc), Task 11 done (7a7127e), Task 12 done (7b04cd0), Task 13 done (b171ce1), Task 14 done (69596e2)
 - [x] #5 — EventIter boolean consolidation (Tasks 15-17) — Task 15 done (c5913f1), Task 16 done (5b316fc), Task 17 done (fd183ab)
-- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145)
+- [~] #4b — lib.rs `event_iter/` submodule split (Tasks 18-23) — Task 18 done (9555145), Task 19 done (56a603a)
 - [ ] #8 — docs/benchmarks.md historical cleanup (Task 24)
 - [ ] #7 — parser README rewrite + cross-crate AI Note retrofit (Tasks 25-26)
 - [ ] #27 — chars.rs verbatim-tag URI validation tightening (Task 27)
@@ -384,18 +384,18 @@ Create the `src/event_iter/` submodule and populate `base.rs` with mode-independ
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; 1313 unit, 368 conformance, 455 + 513 parser, zero warnings
 - [x] **Advisors:** none — pure move + visibility adjustment
 
-### Task 19: create event_iter/directives.rs (#4b-ii)
+### Task 19: create event_iter/directives.rs (#4b-ii) — 56a603a
 
 Move directive-parsing methods and the `BetweenDocs` stepper into `src/event_iter/directives.rs`.
 
 **Files:** `src/lib.rs`, `src/event_iter.rs`, `src/event_iter/directives.rs` (new)
 
-- [ ] Create `src/event_iter/directives.rs`
-- [ ] Add `pub(crate) mod directives;` to `src/event_iter.rs`
-- [ ] Move from `impl EventIter`: `consume_preamble_between_docs` (`lib.rs:1577`), `parse_directive` (`lib.rs:1614`), `parse_yaml_directive` (`lib.rs:1647`), `parse_tag_directive` (`lib.rs:1699`), `skip_and_collect_comments_in_doc` (`lib.rs:1773`), `step_between_docs` (`lib.rs:1795`)
-- [ ] Convert to `pub(in crate::event_iter) fn`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test`
-- [ ] **Advisors:** none — pure move
+- [x] Create `src/event_iter/directives.rs`
+- [x] Add `pub(crate) mod directives;` to `src/event_iter.rs`
+- [x] Move from `impl EventIter`: `consume_preamble_between_docs` (`lib.rs:1577`), `parse_directive` (`lib.rs:1614`), `parse_yaml_directive` (`lib.rs:1647`), `parse_tag_directive` (`lib.rs:1699`), `skip_and_collect_comments_in_doc` (`lib.rs:1773`), `step_between_docs` (`lib.rs:1795`)
+- [x] Convert to `pub(in crate::event_iter) fn` — used `pub(crate)` as transient (same Task 18 precedent; 3 call sites in lib.rs — 2 for `marker_span`, and step dispatch — reach directly until Tasks 20-23 drain them). `marker_span` also promoted to `pub(crate)` for the same reason.
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` — all green; 455 unit, 368 conformance, 513 smoke, 21 unicode, 3 doc; zero warnings
+- [x] **Advisors:** none — pure move
 
 ### Task 20: create event_iter/flow.rs (#4b-iii)
 
