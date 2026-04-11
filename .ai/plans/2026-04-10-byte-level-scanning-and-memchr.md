@@ -157,7 +157,7 @@ with scalar fallback. Zero unsafe in the public API.
 ## Steps
 
 - [x] Split lexer.rs into submodules (Task 1) — c1ff3ce
-- [ ] Add memchr dependency and byte-level plain scalar scanning (Task 2)
+- [x] Add memchr dependency and byte-level plain scalar scanning (Task 2) — c6c56ba
 - [ ] Byte-level scanning for quoted scalars (Task 3)
 - [ ] Byte-level scanning for block scalars and comment (Task 4)
 - [ ] Benchmark and verify improvement (Task 5)
@@ -202,8 +202,8 @@ Pure refactoring — no behavior change, no new dependencies.
 Optimize the hottest inner loops: `scan_plain_line_block()` and
 `scan_plain_line_flow()`.
 
-- [ ] Add `memchr` dependency to `rlsp-yaml-parser/Cargo.toml`
-- [ ] Rewrite `scan_plain_line_block()` in `lexer/plain.rs`:
+- [x] Add `memchr` dependency to `rlsp-yaml-parser/Cargo.toml`
+- [x] Rewrite `scan_plain_line_block()` in `lexer/plain.rs`:
   - Use `content.as_bytes()` and iterate byte-by-byte for ASCII
   - Use `memchr2(b':', b'#', ...)` to skip ahead to the next
     candidate terminator in bulk
@@ -212,16 +212,16 @@ Optimize the hottest inner loops: `scan_plain_line_block()` and
   - For non-ASCII bytes (≥ 0x80): decode one char, apply
     `ns_plain_char_block`, advance by `char.len_utf8()`
   - Return the same `&str` slice as before
-- [ ] Rewrite `scan_plain_line_flow()` in `lexer/plain.rs`:
+- [x] Rewrite `scan_plain_line_flow()` in `lexer/plain.rs`:
   - Same pattern but include flow indicators (`,`, `[`, `]`,
     `{`, `}`) in the delimiter set
   - `memchr3` can cover `:`, `#`, `,` — check remaining flow
     indicators at candidate validation
-- [ ] All tests pass (351 conformance, 21 Unicode position, all
+- [x] All tests pass (351 conformance, 21 Unicode position, all
   integration tests)
-- [ ] `cargo clippy --all-targets` clean
-- [ ] Commit: `perf(parser): byte-level scanning with memchr for
-  plain scalars`
+- [x] `cargo clippy --all-targets` clean
+- [x] Commit: `perf(parser): byte-level scanning with memchr for
+  plain scalars` — c6c56ba
 
 **Reference impl consultation:**
 1. Local: existing `scan_plain_line_block()` and
