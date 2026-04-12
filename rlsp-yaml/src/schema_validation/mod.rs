@@ -1401,6 +1401,7 @@ fn validate_composition(
 
 fn yaml_type_name(node: &Node<Span>) -> &'static str {
     use rlsp_yaml_parser::ScalarStyle;
+    use scalar_helpers::PlainScalarKind;
     match node {
         Node::Scalar { value, style, .. } => {
             // Only plain (unquoted) scalars undergo type inference.
@@ -1408,16 +1409,12 @@ fn yaml_type_name(node: &Node<Span>) -> &'static str {
             if !matches!(style, ScalarStyle::Plain) {
                 return "string";
             }
-            if scalar_helpers::is_null(value) {
-                "null"
-            } else if scalar_helpers::is_bool(value) {
-                "boolean"
-            } else if scalar_helpers::is_integer(value) {
-                "integer"
-            } else if scalar_helpers::is_float(value) {
-                "number"
-            } else {
-                "string"
+            match scalar_helpers::classify_plain_scalar(value) {
+                PlainScalarKind::Null => "null",
+                PlainScalarKind::Bool => "boolean",
+                PlainScalarKind::Integer => "integer",
+                PlainScalarKind::Float => "number",
+                PlainScalarKind::String => "string",
             }
         }
         Node::Mapping { .. } => "object",

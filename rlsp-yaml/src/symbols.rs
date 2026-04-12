@@ -6,7 +6,7 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
-use crate::scalar_helpers;
+use crate::scalar_helpers::{self, PlainScalarKind};
 
 /// Produce a hierarchical list of document symbols for the given YAML text.
 ///
@@ -376,17 +376,12 @@ fn node_symbol_kind(node: &Node<Span>) -> SymbolKind {
     match node {
         Node::Mapping { .. } => SymbolKind::OBJECT,
         Node::Sequence { .. } => SymbolKind::ARRAY,
-        Node::Scalar { value, .. } => {
-            if scalar_helpers::is_null(value) {
-                SymbolKind::NULL
-            } else if scalar_helpers::is_bool(value) {
-                SymbolKind::BOOLEAN
-            } else if scalar_helpers::is_integer(value) || scalar_helpers::is_float(value) {
-                SymbolKind::NUMBER
-            } else {
-                SymbolKind::STRING
-            }
-        }
+        Node::Scalar { value, .. } => match scalar_helpers::classify_plain_scalar(value) {
+            PlainScalarKind::Null => SymbolKind::NULL,
+            PlainScalarKind::Bool => SymbolKind::BOOLEAN,
+            PlainScalarKind::Integer | PlainScalarKind::Float => SymbolKind::NUMBER,
+            PlainScalarKind::String => SymbolKind::STRING,
+        },
         Node::Alias { .. } => SymbolKind::STRING,
     }
 }

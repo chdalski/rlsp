@@ -6,6 +6,37 @@
 //! the logical type from string content, matching the Core schema rules in
 //! `rlsp_yaml_parser::schema::CoreSchema`.
 
+/// The inferred YAML Core schema type of a plain scalar value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlainScalarKind {
+    /// `null`, `Null`, `NULL`, `~`, or empty string.
+    Null,
+    /// `true`/`True`/`TRUE` or `false`/`False`/`FALSE`.
+    Bool,
+    /// Decimal, octal (`0o`), or hexadecimal integer with optional sign.
+    Integer,
+    /// Floating-point, including `.inf`/`.nan` variants.
+    Float,
+    /// Any value that does not match the above.
+    String,
+}
+
+/// Classify a plain (unquoted) scalar by its YAML Core schema type.
+#[must_use]
+pub fn classify_plain_scalar(value: &str) -> PlainScalarKind {
+    if is_null(value) {
+        PlainScalarKind::Null
+    } else if is_bool(value) {
+        PlainScalarKind::Bool
+    } else if is_integer(value) {
+        PlainScalarKind::Integer
+    } else if is_float(value) {
+        PlainScalarKind::Float
+    } else {
+        PlainScalarKind::String
+    }
+}
+
 /// Returns `true` if the value represents a YAML null.
 ///
 /// Matches: `null`, `Null`, `NULL`, `~`, empty string.
