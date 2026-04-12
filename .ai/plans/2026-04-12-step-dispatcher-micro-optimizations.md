@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-12
 
 # step_in_document dispatcher micro-optimizations
@@ -158,8 +158,8 @@ Same as the prior plan:
 
 ## Steps
 
-- [ ] Task 1 — cache the trim + short-circuit marker
-      checks
+- [x] Task 1 — cache the trim + short-circuit marker
+      checks (`ba11228`)
 - [ ] Task 2 — reorder probes by frequency
 
 ## Tasks
@@ -250,19 +250,19 @@ This eliminates 2 function calls + 2 `is_marker` checks
   leading_spaces_len)` as `Copy` values and re-slice when
   needed.
 
-- [ ] Add the cached peek + trim + first_byte at the top
+- [x] Add the cached peek + trim + first_byte at the top
   of `step_in_document` (after comment/blank skip + queue
   drain).
-- [ ] Replace the inline trims in alias (line ~191), tag
+- [x] Replace the inline trims in alias (line ~191), tag
   (line ~271), anchor (line ~408), flow (line ~574), and
   stray closer (line ~579) probes with the cached values.
-- [ ] Add the `could_be_marker` indent guard before
+- [x] Add the `could_be_marker` indent guard before
   `is_document_end()` and `is_directives_end()`.
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml-parser` all green.
-- [ ] `cargo bench --bench throughput`; compare medians
+- [x] `cargo bench --bench throughput`; compare medians
   against `docs/benchmarks.md`; update the doc.
-- [ ] Commit: `perf(parser): cache step_in_document
+- [x] Commit: `perf(parser): cache step_in_document
   trim and short-circuit marker checks`.
 
 **Advisors:** test-engineer — both gates. The change is
