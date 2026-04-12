@@ -68,7 +68,7 @@ be preserved in a `#[case]`.
 - [x] Parameterize schema_validation.rs groups
       (f969e21)
 - [x] Parameterize validators.rs (f3b8444)
-- [ ] Parameterize formatter.rs
+- [x] Parameterize formatter.rs (77b2033)
 - [ ] Parameterize completion.rs + hover.rs
 - [ ] Parameterize document_links.rs + rename.rs +
       references.rs
@@ -206,10 +206,10 @@ Convert repetitive tests in `formatter.rs` (110 tests,
 expected strings. Group by formatting feature (indentation,
 comments, flow style, etc.).
 
-- [ ] Parameterize format-and-assert tests by feature group
-- [ ] Leave tests with unique format options standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize format-and-assert tests by feature group
+- [x] Leave tests with unique format options standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 6: Parameterize `completion.rs` + `hover.rs`
 
