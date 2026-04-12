@@ -61,8 +61,8 @@ be preserved in a `#[case]`.
 
 ## Steps
 
-- [ ] Add rstest + parameterize scalar_helpers.rs +
-      suppression.rs
+- [x] Add rstest + parameterize scalar_helpers.rs +
+      suppression.rs (74df89b)
 - [ ] Parameterize schema.rs modeline extraction groups
 - [ ] Parameterize schema_validation.rs groups
 - [ ] Parameterize validators.rs
@@ -104,12 +104,12 @@ small files.
   code, expected_suppressed).
 - Multi-assertion tests stay standalone.
 
-- [ ] Add `rstest = "0.26"` to `[dev-dependencies]`
-- [ ] Parameterize scalar_helpers.rs tests
-- [ ] Parameterize suppression.rs single-assertion tests
-- [ ] Leave multi-assertion suppression tests standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Add `rstest = "0.26"` to `[dev-dependencies]`
+- [x] Parameterize scalar_helpers.rs tests
+- [x] Parameterize suppression.rs single-assertion tests
+- [x] Leave multi-assertion suppression tests standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 2: Parameterize `schema.rs` modeline groups
 
