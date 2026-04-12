@@ -997,6 +997,8 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
     use serde_json::json;
@@ -1047,27 +1049,52 @@ mod tests {
     // Backward-Compatibility Tests (Tests 1–15): None schema
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 1
-    #[test]
-    fn should_suggest_sibling_keys_not_yet_present() {
-        let text = "name: Alice\nage: 30\n";
+    // Tests 1, 3, 4, 5 — sibling key suggestions and exclusions
+    #[rstest]
+    #[case::sibling_keys(
+        "name: Alice\nage: 30\n",
+        pos(0, 0),
+        &["age"][..],
+        &["name"][..]
+    )]
+    #[case::nested_sibling_keys(
+        "server:\n  host: localhost\n  port: 8080\n",
+        pos(1, 2),
+        &["port"][..],
+        &["server", "host"][..]
+    )]
+    #[case::deeply_nested_keys(
+        "a:\n  b:\n    c: 1\n    d: 2\n",
+        pos(2, 4),
+        &["d"][..],
+        &["a", "b", "c"][..]
+    )]
+    #[case::sequence_item_sibling(
+        "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n",
+        pos(3, 4),
+        &["age"][..],
+        &[][..]
+    )]
+    fn sibling_key_suggests_and_excludes(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] expected: &[&str],
+        #[case] absent: &[&str],
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), None);
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"age"),
-            "should suggest sibling key 'age', got: {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"name"),
-            "should not suggest the key at cursor position"
-        );
+        let result = complete_at(text, docs.as_ref(), cursor, None);
+        let ls = labels(&result);
+        for key in expected {
+            assert!(ls.contains(key), "should suggest {key:?}, got: {ls:?}");
+        }
+        for key in absent {
+            assert!(!ls.contains(key), "should not suggest {key:?}, got: {ls:?}");
+        }
         assert!(
             result
                 .iter()
                 .all(|i| i.kind == Some(CompletionItemKind::FIELD)),
-            "key completions should have FIELD kind"
+            "all no-schema key completions should have FIELD kind"
         );
     }
 
@@ -1082,65 +1109,6 @@ mod tests {
         assert!(
             !labels.contains(&"name"),
             "should not suggest 'name' which is at the cursor line"
-        );
-    }
-
-    // Test 3
-    #[test]
-    fn should_suggest_nested_sibling_keys() {
-        let text = "server:\n  host: localhost\n  port: 8080\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(1, 2), None);
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"port"),
-            "should suggest sibling key 'port', got: {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"server"),
-            "should not suggest parent key 'server'"
-        );
-        assert!(
-            !labels.contains(&"host"),
-            "should not suggest the key at cursor line"
-        );
-    }
-
-    // Test 4
-    #[test]
-    fn should_suggest_keys_from_deeply_nested_mapping() {
-        let text = "a:\n  b:\n    c: 1\n    d: 2\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(2, 4), None);
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"d"),
-            "should suggest sibling key 'd', got: {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"a"),
-            "should not suggest ancestor key 'a'"
-        );
-        assert!(!labels.contains(&"b"), "should not suggest parent key 'b'");
-        assert!(
-            !labels.contains(&"c"),
-            "should not suggest the key at cursor line"
-        );
-    }
-
-    // Test 5
-    #[test]
-    fn should_suggest_keys_from_sibling_sequence_items() {
-        let text = "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(3, 4), None);
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"age"),
-            "should suggest 'age' from sibling sequence item, got: {labels:?}"
         );
     }
 
@@ -1197,16 +1165,6 @@ mod tests {
         );
     }
 
-    // Test 9
-    #[test]
-    fn should_return_empty_for_empty_document() {
-        let text = "";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), None);
-
-        assert!(result.is_empty(), "should return empty for empty document");
-    }
-
     // Test 10
     #[test]
     fn should_return_empty_when_ast_is_none() {
@@ -1219,53 +1177,17 @@ mod tests {
         );
     }
 
-    // Test 11
-    #[test]
-    fn should_return_empty_for_comment_line() {
-        let text = "# comment\nkey: value\n";
+    // Tests 9, 11, 12, 13, 14 — empty result for various degenerate inputs (no schema)
+    #[rstest]
+    #[case::empty_document("", pos(0, 0))]
+    #[case::comment_line("# comment\nkey: value\n", pos(0, 0))]
+    #[case::document_separator("key1: v1\n---\nkey2: v2\n", pos(1, 0))]
+    #[case::position_beyond_lines("key: value\n", pos(10, 0))]
+    #[case::position_beyond_line_length("key: value\n", pos(0, 100))]
+    fn returns_empty_for_structural_no_schema(#[case] text: &str, #[case] cursor: Position) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), None);
-
-        assert!(result.is_empty(), "should return empty for comment line");
-    }
-
-    // Test 12
-    #[test]
-    fn should_return_empty_for_document_separator() {
-        let text = "key1: v1\n---\nkey2: v2\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(1, 0), None);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for document separator"
-        );
-    }
-
-    // Test 13
-    #[test]
-    fn should_return_empty_for_position_beyond_document_lines() {
-        let text = "key: value\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(10, 0), None);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for position beyond document lines"
-        );
-    }
-
-    // Test 14
-    #[test]
-    fn should_return_empty_for_position_beyond_line_length() {
-        let text = "key: value\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 100), None);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for position beyond line length"
-        );
+        let result = complete_at(text, docs.as_ref(), cursor, None);
+        assert!(result.is_empty(), "should return empty, got: {result:?}");
     }
 
     // Test 15
@@ -1579,68 +1501,50 @@ mod tests {
     // Group D — Path Resolution
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 29
-    #[test]
-    fn should_resolve_nested_path_for_schema_property_completion() {
-        let schema = object_schema(vec![(
-            "database",
-            object_schema(vec![("host", string_schema()), ("port", integer_schema())]),
-        )]);
-        let text = "database:\n  host: localhost\n";
+    // Tests 29, 30, 31 — schema path resolution suggests nested property
+    #[rstest]
+    #[case::nested_path(
+        object_schema(vec![("database", object_schema(vec![("host", string_schema()), ("port", integer_schema())]))]),
+        "database:\n  host: localhost\n",
+        pos(1, 2),
+        "port",
+        "database"
+    )]
+    #[case::array_items_schema(
+        object_schema(vec![("servers", JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            items: Some(Box::new(object_schema(vec![("host", string_schema()), ("port", integer_schema())]))),
+            ..JsonSchema::default()
+        })]),
+        "servers:\n  - host: localhost\n",
+        pos(1, 4),
+        "port",
+        "servers"
+    )]
+    #[case::third_level_nesting(
+        object_schema(vec![("a", object_schema(vec![("b", object_schema(vec![("c", string_schema()), ("d", integer_schema())]))]))]),
+        "a:\n  b:\n    c: v\n",
+        pos(2, 4),
+        "d",
+        "a"
+    )]
+    fn schema_path_resolution_suggests_nested_property(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] expected: &str,
+        #[case] absent: &str,
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(1, 2), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(labels.contains(&"port"), "should suggest nested 'port'");
+        let result = complete_at(text, docs.as_ref(), cursor, Some(&schema));
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"database"),
-            "should not suggest parent 'database'"
+            ls.contains(&expected),
+            "should suggest {expected:?}, got: {ls:?}"
         );
-    }
-
-    // Test 30
-    #[test]
-    fn should_resolve_array_items_schema_for_key_completion() {
-        let schema = object_schema(vec![(
-            "servers",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("array".to_string())),
-                items: Some(Box::new(object_schema(vec![
-                    ("host", string_schema()),
-                    ("port", integer_schema()),
-                ]))),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "servers:\n  - host: localhost\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(1, 4), Some(&schema));
-
-        let labels = labels(&result);
         assert!(
-            labels.contains(&"port"),
-            "should suggest 'port' from items schema"
-        );
-    }
-
-    // Test 31
-    #[test]
-    fn should_resolve_path_to_third_level_nesting() {
-        let schema = object_schema(vec![(
-            "a",
-            object_schema(vec![(
-                "b",
-                object_schema(vec![("c", string_schema()), ("d", integer_schema())]),
-            )]),
-        )]);
-        let text = "a:\n  b:\n    c: v\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(2, 4), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"d"),
-            "should suggest deep schema property 'd'"
+            !ls.contains(&absent),
+            "should not suggest {absent:?}, got: {ls:?}"
         );
     }
 
@@ -1648,66 +1552,38 @@ mod tests {
     // Group E — Composition Schemas
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 32
-    #[test]
-    fn should_suggest_properties_from_allof_branches() {
-        let schema = JsonSchema {
-            all_of: Some(vec![
-                object_schema(vec![("name", string_schema())]),
-                object_schema(vec![("age", integer_schema())]),
-            ]),
-            ..JsonSchema::default()
-        };
-        let text = "name: Alice\n";
+    // Tests 32, 33, 34 — composition schema suggests properties from branches
+    #[rstest]
+    #[case::allof_branches(
+        JsonSchema { all_of: Some(vec![object_schema(vec![("name", string_schema())]), object_schema(vec![("age", integer_schema())])]), ..JsonSchema::default() },
+        "name: Alice\n",
+        pos(0, 0),
+        "age"
+    )]
+    #[case::anyof_branches(
+        JsonSchema { any_of: Some(vec![object_schema(vec![("host", string_schema())]), object_schema(vec![("socket", string_schema())])]), ..JsonSchema::default() },
+        "host: localhost\n",
+        pos(0, 0),
+        "socket"
+    )]
+    #[case::oneof_branches(
+        JsonSchema { one_of: Some(vec![object_schema(vec![("url", string_schema())]), object_schema(vec![("path", string_schema())])]), ..JsonSchema::default() },
+        "url: http://example.com\n",
+        pos(0, 0),
+        "path"
+    )]
+    fn composition_schema_suggests_from_branches(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] expected: &str,
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
+        let result = complete_at(text, docs.as_ref(), cursor, Some(&schema));
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"age"),
-            "should suggest 'age' merged from allOf branches"
-        );
-    }
-
-    // Test 33
-    #[test]
-    fn should_suggest_properties_from_anyof_branches() {
-        let schema = JsonSchema {
-            any_of: Some(vec![
-                object_schema(vec![("host", string_schema())]),
-                object_schema(vec![("socket", string_schema())]),
-            ]),
-            ..JsonSchema::default()
-        };
-        let text = "host: localhost\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"socket"),
-            "should suggest 'socket' merged from anyOf branches"
-        );
-    }
-
-    // Test 34
-    #[test]
-    fn should_suggest_properties_from_oneof_branches() {
-        let schema = JsonSchema {
-            one_of: Some(vec![
-                object_schema(vec![("url", string_schema())]),
-                object_schema(vec![("path", string_schema())]),
-            ]),
-            ..JsonSchema::default()
-        };
-        let text = "url: http://example.com\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"path"),
-            "should suggest 'path' from oneOf branches"
+            ls.contains(&expected),
+            "should suggest {expected:?} from composition branches, got: {ls:?}"
         );
     }
 
@@ -2031,32 +1907,28 @@ mod tests {
     // Group H — Multi-Document Boundary Tests
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 51 — sibling keys must not cross --- boundary
-    #[test]
-    fn should_not_suggest_sibling_keys_from_other_document() {
-        // doc1 has "alpha"; doc2 has "beta". Cursor on "beta" should not see "alpha".
-        let text = "alpha: 1\n---\nbeta: 2\n";
+    // Tests 51, 52, 54 — cross-document label contamination prevention
+    #[rstest]
+    #[case::sibling_not_cross_dash("alpha: 1\n---\nbeta: 2\n", pos(2, 0), None, "alpha")]
+    #[case::sibling_not_cross_ellipsis("alpha: 1\n...\nbeta: 2\n", pos(2, 0), None, "alpha")]
+    #[case::values_not_from_other_doc(
+        "env: production\n---\nenv: \n",
+        pos(2, 5),
+        None,
+        "production"
+    )]
+    fn cross_document_label_not_contaminated(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] schema: Option<&JsonSchema>,
+        #[case] absent_label: &str,
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(2, 0), None);
-
-        let labels = labels(&result);
+        let result = complete_at(text, docs.as_ref(), cursor, schema);
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"alpha"),
-            "should not suggest 'alpha' from document 1 when cursor is in document 2, got: {labels:?}"
-        );
-    }
-
-    // Test 52 — sibling keys must not cross ... boundary
-    #[test]
-    fn should_not_suggest_sibling_keys_across_document_end_marker() {
-        let text = "alpha: 1\n...\nbeta: 2\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(2, 0), None);
-
-        let labels = labels(&result);
-        assert!(
-            !labels.contains(&"alpha"),
-            "should not suggest 'alpha' from before '...' separator, got: {labels:?}"
+            !ls.contains(&absent_label),
+            "should not suggest {absent_label:?} from other document, got: {ls:?}"
         );
     }
 
@@ -2076,22 +1948,6 @@ mod tests {
         assert!(
             labels.contains(&"name"),
             "should suggest 'name' because it is absent from document 2, got: {labels:?}"
-        );
-    }
-
-    // Test 54 — suggest_values_for_key must not include values from other document
-    #[test]
-    fn should_not_suggest_values_from_other_document() {
-        // doc1 has "env: production"; doc2 has "env: " (cursor here).
-        // Value completion for "env" in doc2 should not see "production" from doc1.
-        let text = "env: production\n---\nenv: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(2, 5), None);
-
-        let labels = labels(&result);
-        assert!(
-            !labels.contains(&"production"),
-            "should not suggest 'production' from document 1 when cursor is in document 2, got: {labels:?}"
         );
     }
 
@@ -2332,42 +2188,30 @@ mod tests {
         );
     }
 
-    // Test 63 — 3 required, 2 already present → no snippet (only 1 missing)
-    #[test]
-    fn should_not_offer_snippet_when_only_one_required_prop_missing() {
-        let schema = schema_with_required(
-            vec![
-                ("name", string_schema()),
-                ("age", integer_schema()),
-                ("enabled", boolean_schema()),
-            ],
+    // Tests 63, 64 — no snippet offered when insufficient required props missing
+    #[rstest]
+    #[case::only_one_missing(
+        schema_with_required(
+            vec![("name", string_schema()), ("age", integer_schema()), ("enabled", boolean_schema())],
             vec!["name", "age", "enabled"],
-        );
-        // "name" and "age" are already present; only "enabled" is missing
-        let text = "name: Alice\nage: 30\n";
+        ),
+        "name: Alice\nage: 30\n",
+        pos(0, 0)
+    )]
+    #[case::no_required_props(
+        object_schema(vec![("name", string_schema()), ("age", integer_schema())]),
+        "\n",
+        pos(0, 0)
+    )]
+    fn should_not_offer_snippet(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] cursor: Position,
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
+        let result = complete_at(text, docs.as_ref(), cursor, Some(&schema));
         let has_snippet = result.iter().any(|i| i.label == "(all required)");
-        assert!(
-            !has_snippet,
-            "should not offer snippet when only 1 required prop is missing"
-        );
-    }
-
-    // Test 64 — schema with 0 required → no snippet
-    #[test]
-    fn should_not_offer_snippet_when_no_required_props() {
-        let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
-        let text = "\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
-        let has_snippet = result.iter().any(|i| i.label == "(all required)");
-        assert!(
-            !has_snippet,
-            "should not offer snippet when schema has no required array"
-        );
+        assert!(!has_snippet, "should not offer '(all required)' snippet");
     }
 
     // Test 65 — type-aware defaults: string → "", integer → 0, boolean → false
@@ -2464,16 +2308,20 @@ mod tests {
     // Group J — Previously Uncovered Paths
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Line 74: blank line with no schema → returns empty vec
-    #[test]
-    fn should_return_empty_for_blank_line_when_no_schema() {
-        let text = "key: value\n\n";
+    // Lines 64-74: blank line → empty for both None-schema and empty-schema paths
+    #[rstest]
+    #[case::no_schema("key: value\n\n", pos(1, 0), None)]
+    #[case::schema_no_properties("\n", pos(0, 0), Some(JsonSchema::default()))]
+    fn blank_line_returns_empty(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] schema: Option<JsonSchema>,
+    ) {
         let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(1, 0), None);
-
+        let result = complete_at(text, docs.as_ref(), cursor, schema.as_ref());
         assert!(
             result.is_empty(),
-            "blank line with no schema should return empty"
+            "blank line should return empty, got: {result:?}"
         );
     }
 
@@ -2693,32 +2541,30 @@ mod tests {
         );
     }
 
-    // Lines 538-542: find_mapping_colon single-quote handling
-    #[test]
-    fn should_find_colon_after_single_quoted_key_containing_colon() {
-        // Key with colon inside single quotes; the mapping colon is after the closing quote
-        let line = "'key:with:colons': value";
-        let pos_colon = find_mapping_colon(line);
+    // Lines 538-542, 950, 969-971: find_mapping_colon returns Some with expected key prefix
+    #[rstest]
+    #[case::single_quoted_key_with_colon("'key:with:colons': value", "'key:with:colons'")]
+    #[case::double_quoted_key_with_colon("\"key:with:colons\": value", "\"key:with:colons\"")]
+    fn find_mapping_colon_returns_some_with_key(#[case] line: &str, #[case] expected_key: &str) {
+        let colon_pos = find_mapping_colon(line);
         assert!(
-            pos_colon.is_some(),
-            "should find mapping colon after closing quote, got: {pos_colon:?}"
+            colon_pos.is_some(),
+            "should find mapping colon, got: {colon_pos:?}"
         );
-        let colon_pos = pos_colon.unwrap();
-        assert_eq!(
-            &line[..colon_pos],
-            "'key:with:colons'",
-            "key should be the single-quoted string"
-        );
+        assert_eq!(&line[..colon_pos.unwrap()], expected_key);
     }
 
-    #[test]
-    fn should_return_none_when_colon_is_inside_single_quotes() {
-        // Line like "'no: colon here'" — no mapping colon outside quotes
-        let line = "'no: colon here'";
+    // Lines 538-542, 950, 969-971, 981-993: find_mapping_colon returns None
+    #[rstest]
+    #[case::colon_inside_single_quotes("'no: colon here'")]
+    #[case::colon_inside_double_quotes("\"no: colon here\"")]
+    #[case::no_colon("just a plain value")]
+    #[case::colon_not_followed_by_space("key:value")]
+    fn find_mapping_colon_returns_none(#[case] line: &str) {
         assert_eq!(
             find_mapping_colon(line),
             None,
-            "colon inside single quotes should not count as mapping colon"
+            "should not find mapping colon in {line:?}"
         );
     }
 
@@ -2816,62 +2662,19 @@ mod tests {
         );
     }
 
-    // Lines 950, 969-971, 981-993: find_mapping_colon quote-aware edge cases
-    #[test]
-    fn should_find_colon_after_double_quoted_key_containing_colon() {
-        let line = "\"key:with:colons\": value";
-        let pos_colon = find_mapping_colon(line);
+    // classify_cursor: Key context from various line forms
+    #[rstest]
+    #[case::sequence_item_with_key_colon("- mykey: value", 2u32, "mykey")]
+    #[case::bare_text_no_colon("justtext", 0u32, "justtext")]
+    fn classify_cursor_produces_key_context(
+        #[case] line: &str,
+        #[case] col: u32,
+        #[case] expected_key: &str,
+    ) {
+        let result = classify_cursor(line, col as usize);
         assert!(
-            pos_colon.is_some(),
-            "should find mapping colon after closing double-quote, got: {pos_colon:?}"
-        );
-        let colon_pos = pos_colon.unwrap();
-        assert_eq!(&line[..colon_pos], "\"key:with:colons\"");
-    }
-
-    #[test]
-    fn should_return_none_for_line_with_no_colon() {
-        assert_eq!(find_mapping_colon("just a plain value"), None);
-    }
-
-    #[test]
-    fn should_return_none_for_colon_not_followed_by_space() {
-        // "key:value" — colon not followed by space, not a mapping colon
-        assert_eq!(
-            find_mapping_colon("key:value"),
-            None,
-            "colon not followed by space should not be a mapping colon"
-        );
-    }
-
-    #[test]
-    fn should_return_none_for_colon_inside_double_quotes() {
-        let line = "\"no: colon here\"";
-        assert_eq!(
-            find_mapping_colon(line),
-            None,
-            "colon inside double quotes should not count as mapping colon"
-        );
-    }
-
-    // classify_cursor: Key context from sequence item line (lines 549-551)
-    #[test]
-    fn should_classify_cursor_as_key_for_sequence_item_with_key_colon() {
-        // "- key: value" — effective_line is "key: value", find_mapping_colon on effective_line
-        let result = classify_cursor("- mykey: value", 2);
-        assert!(
-            matches!(result, CursorContext::Key(k) if k == "mykey"),
-            "should classify as Key with 'mykey'"
-        );
-    }
-
-    // classify_cursor: Key context when line has no colon at all (line 554)
-    #[test]
-    fn should_classify_cursor_as_key_when_no_colon_on_line() {
-        let result = classify_cursor("justtext", 0);
-        assert!(
-            matches!(result, CursorContext::Key(k) if k == "justtext"),
-            "should classify bare text as Key"
+            matches!(&result, CursorContext::Key(k) if k == expected_key),
+            "should classify as Key({expected_key:?})"
         );
     }
 
@@ -2887,21 +2690,6 @@ mod tests {
         assert!(
             ls.contains(&"port"),
             "should suggest 'port' on blank line with schema, got: {ls:?}"
-        );
-    }
-
-    // blank line + schema but schema has no properties → returns empty (lines 68-74)
-    #[test]
-    fn should_return_empty_on_blank_line_when_schema_has_no_matching_path() {
-        // Schema has "database" which has no sub-properties at top level cursor
-        let schema = JsonSchema::default();
-        let text = "\n";
-        let docs = parse_docs(text);
-        let result = complete_at(text, docs.as_ref(), pos(0, 0), Some(&schema));
-
-        assert!(
-            result.is_empty(),
-            "blank line with schema having no properties should return empty"
         );
     }
 }

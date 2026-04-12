@@ -612,6 +612,7 @@ fn json_value_to_display_string(value: &serde_json::Value) -> String {
 mod tests {
     use std::collections::HashMap;
 
+    use rstest::rstest;
     use serde_json::Value as JsonValue;
 
     use super::*;
@@ -639,19 +640,26 @@ mod tests {
         }
     }
 
-    // Test 1
-    #[test]
-    fn should_return_hover_for_simple_key() {
-        let text = "name: Alice\n";
+    // Tests 1, 5, 6 — hover contains key path and scalar type mention
+    #[rstest]
+    #[case::simple_key("name: Alice\n", pos(0, 0), "name")]
+    #[case::nested_key("server:\n  port: 8080\n", pos(1, 2), "server.port")]
+    #[case::deeply_nested_key("a:\n  b:\n    c: deep\n", pos(2, 4), "a.b.c")]
+    fn hover_contains_key_path_and_scalar_type(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] expected_path: &str,
+    ) {
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
-
-        let hover = result.expect("should return hover");
+        let hover = hover_at(text, docs.as_ref(), cursor, None).expect("should return hover");
         let content = hover_content(&hover);
-        assert!(content.contains("name"), "should contain key path 'name'");
+        assert!(
+            content.contains(expected_path),
+            "should contain key path {expected_path:?}, got: {content}"
+        );
         assert!(
             content.to_lowercase().contains("scalar"),
-            "should mention scalar type"
+            "should mention scalar type, got: {content}"
         );
     }
 
@@ -672,59 +680,17 @@ mod tests {
         assert!(content.contains("Alice"), "should contain value 'Alice'");
     }
 
-    // Test 3
-    #[test]
-    fn should_return_none_for_whitespace() {
-        let text = "key: value\n\n";
+    // Tests 3, 4, 12, 15, 16 — hover returns None for degenerate structural positions
+    #[rstest]
+    #[case::whitespace("key: value\n\n", pos(1, 0))]
+    #[case::comment("# comment\nkey: value\n", pos(0, 2))]
+    #[case::empty_document("", pos(0, 0))]
+    #[case::position_beyond_document("key: value\n", pos(5, 0))]
+    #[case::document_separator_line("key1: value1\n---\nkey2: value2\n", pos(1, 0))]
+    fn hover_returns_none_for_structural_cases(#[case] text: &str, #[case] cursor: Position) {
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 0), None);
-
-        assert!(result.is_none());
-    }
-
-    // Test 4
-    #[test]
-    fn should_return_none_for_comment() {
-        let text = "# comment\nkey: value\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 2), None);
-
-        assert!(result.is_none());
-    }
-
-    // Test 5
-    #[test]
-    fn should_return_hover_for_nested_key() {
-        let text = "server:\n  port: 8080\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 2), None);
-
-        let hover = result.expect("should return hover");
-        let content = hover_content(&hover);
-        assert!(
-            content.contains("server.port"),
-            "should contain key path 'server.port'"
-        );
-        assert!(
-            content.to_lowercase().contains("scalar"),
-            "should mention scalar type"
-        );
-    }
-
-    // Test 6
-    #[test]
-    fn should_return_hover_for_deeply_nested_key() {
-        let text = "a:\n  b:\n    c: deep\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(2, 4), None);
-
-        let hover = result.expect("should return hover");
-        let content = hover_content(&hover);
-        assert!(content.contains("a.b.c"), "should contain key path 'a.b.c'");
-        assert!(
-            content.to_lowercase().contains("scalar"),
-            "should mention scalar type"
-        );
+        let result = hover_at(text, docs.as_ref(), cursor, None);
+        assert!(result.is_none(), "expected None but got Some hover");
     }
 
     // Test 7
@@ -743,38 +709,26 @@ mod tests {
         assert!(content.contains("first"), "should contain value 'first'");
     }
 
-    // Test 8
-    #[test]
-    fn should_return_hover_for_mapping_value_type() {
-        let text = "server:\n  port: 8080\n";
+    // Tests 8, 9 — hover contains key path and compound (mapping/sequence) type mention
+    #[rstest]
+    #[case::mapping_value_type("server:\n  port: 8080\n", pos(0, 0), "server", "mapping")]
+    #[case::sequence_value_type("items:\n  - one\n  - two\n", pos(0, 0), "items", "sequence")]
+    fn hover_contains_key_path_and_compound_type(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] expected_path: &str,
+        #[case] expected_type: &str,
+    ) {
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
-
-        let hover = result.expect("should return hover");
+        let hover = hover_at(text, docs.as_ref(), cursor, None).expect("should return hover");
         let content = hover_content(&hover);
         assert!(
-            content.contains("server"),
-            "should contain key path 'server'"
+            content.contains(expected_path),
+            "should contain key path {expected_path:?}, got: {content}"
         );
         assert!(
-            content.to_lowercase().contains("mapping"),
-            "should mention mapping type"
-        );
-    }
-
-    // Test 9
-    #[test]
-    fn should_return_hover_for_sequence_value_type() {
-        let text = "items:\n  - one\n  - two\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
-
-        let hover = result.expect("should return hover");
-        let content = hover_content(&hover);
-        assert!(content.contains("items"), "should contain key path 'items'");
-        assert!(
-            content.to_lowercase().contains("sequence"),
-            "should mention sequence type"
+            content.to_lowercase().contains(expected_type),
+            "should mention {expected_type:?} type, got: {content}"
         );
     }
 
@@ -806,16 +760,6 @@ mod tests {
         }
     }
 
-    // Test 12
-    #[test]
-    fn should_return_none_for_empty_document() {
-        let text = "";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
-
-        assert!(result.is_none());
-    }
-
     // Test 13
     #[test]
     fn should_return_none_when_document_failed_to_parse() {
@@ -838,26 +782,6 @@ mod tests {
             content.contains("doc2key"),
             "should contain key path 'doc2key'"
         );
-    }
-
-    // Test 15
-    #[test]
-    fn should_return_none_for_position_beyond_document() {
-        let text = "key: value\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(5, 0), None);
-
-        assert!(result.is_none());
-    }
-
-    // Test 16
-    #[test]
-    fn should_return_none_for_document_separator_line() {
-        let text = "key1: value1\n---\nkey2: value2\n";
-        let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(1, 0), None);
-
-        assert!(result.is_none());
     }
 
     // Test 17
@@ -1941,19 +1865,6 @@ mod tests {
         );
     }
 
-    // Test 58 — cursor before content in sequence item returns SequenceValue (col < dash_col
-    // but the sequence item has a plain value, lines 143-148)
-    #[test]
-    fn hover_on_dash_of_sequence_with_empty_value_returns_none() {
-        // Bare dash line "  -" (no value after dash+space)
-        let text = "items:\n  -\n";
-        let docs = parse_docs(text);
-        // Line 1: "  -" — trimmed is "-", no value after dash
-        let result = hover_at(text, docs.as_ref(), pos(1, 2), None);
-
-        assert!(result.is_none());
-    }
-
     // Test 59 — plain scalar line (no colon) triggers Value path (lines 170-172)
     #[test]
     fn hover_on_plain_scalar_line_returns_value_token() {
@@ -2007,52 +1918,35 @@ mod tests {
         assert!(content.contains("active"), "should contain value 'active'");
     }
 
-    // Test 62 — key with empty name after colon strip returns None (line 163-164 fallthrough)
+    // Tests 58, 65 — hover returns None for degenerate input
+    #[rstest]
+    #[case::bare_dash_no_value("items:\n  -\n", pos(1, 2))]
+    #[case::ellipsis_terminator("key: value\n...\n", pos(1, 0))]
+    fn hover_returns_none_for_degenerate_input(#[case] text: &str, #[case] cursor: Position) {
+        let docs = parse_docs(text);
+        let result = hover_at(text, docs.as_ref(), cursor, None);
+        assert!(result.is_none(), "expected None but got Some hover");
+    }
+
+    // Test 62 — key with empty name after colon strip: must not panic (may return Some or None)
     #[test]
-    fn hover_returns_none_for_line_starting_with_colon() {
-        // A line starting with ": value" has an empty key — falls through to None
+    fn hover_does_not_panic_for_line_starting_with_colon() {
         let text = ": orphan\n";
         let docs = parse_docs(text);
-        let result = hover_at(text, docs.as_ref(), pos(0, 0), None);
-
-        // Either None (no token found) or a hover — the key point is no panic
-        let _ = result; // must not panic
+        let _result = hover_at(text, docs.as_ref(), pos(0, 0), None);
     }
 
-    // Test 63 — sequence item key before colon exercises the key-token path (lines 130-131)
-    // The token is constructed but AST path resolution returns None because the path traversal
-    // goes through a sequence index not a key. The important thing is no panic.
-    #[test]
-    fn hover_on_sequence_item_key_before_colon_does_not_panic() {
-        let text = "people:\n  - name: Alice\n";
+    // Tests 63, 64 — hover does not panic on sequence item positions
+    #[rstest]
+    #[case::key_before_colon("people:\n  - name: Alice\n", pos(1, 5))]
+    #[case::value_after_colon("people:\n  - name: Alice\n", pos(1, 12))]
+    fn hover_does_not_panic_on_sequence_item_positions(
+        #[case] text: &str,
+        #[case] cursor: Position,
+    ) {
         let docs = parse_docs(text);
-        // Line 1: "  - name: Alice"; cursor at col 5 (within "name", before colon).
-        // token_at_cursor exercises the col < abs_colon branch (lines 130-131).
-        let _result = hover_at(text, docs.as_ref(), pos(1, 5), None);
-        // No assertion on value — AST path resolution may or may not find the node.
-        // The key invariant is that the function completes without panicking.
-    }
-
-    // Test 64 — sequence item value after colon exercises the value-token path (lines 133-134)
-    #[test]
-    fn hover_on_sequence_item_value_after_colon_does_not_panic() {
-        let text = "people:\n  - name: Alice\n";
-        let docs = parse_docs(text);
-        // Line 1: "  - name: Alice"; cursor at col 12 (within "Alice", after colon).
-        // token_at_cursor exercises the !value_part.is_empty() branch (lines 133-134).
-        let _result = hover_at(text, docs.as_ref(), pos(1, 12), None);
-        // No assertion on value — same reasoning as Test 63.
-    }
-
-    // Test 65 — document with only empty lines and a valid key: no None from is_empty check
-    #[test]
-    fn hover_returns_none_for_ellipsis_document_terminator() {
-        let text = "key: value\n...\n";
-        let docs = parse_docs(text);
-        // "..." is a document terminator — should return None
-        let result = hover_at(text, docs.as_ref(), pos(1, 0), None);
-
-        assert!(result.is_none());
+        let _result = hover_at(text, docs.as_ref(), cursor, None);
+        // must not panic — AST path resolution may or may not find the node
     }
 
     // ──────────────────────────────────────────────────────────────────────────
