@@ -70,8 +70,8 @@ be preserved in a `#[case]`.
 - [x] Parameterize validators.rs (f3b8444)
 - [x] Parameterize formatter.rs (77b2033)
 - [x] Parameterize completion.rs + hover.rs (6a918bc)
-- [ ] Parameterize document_links.rs + rename.rs +
-      references.rs
+- [x] Parameterize document_links.rs + rename.rs +
+      references.rs (deffa03)
 - [ ] Parameterize code_actions.rs + semantic_tokens.rs +
       symbols.rs
 - [ ] Parameterize selection.rs + folding.rs +
@@ -241,12 +241,12 @@ range/name. Very uniform (88%).
 `goto_definition(text, uri, pos)` → assert on
 location/range. Uniform (80%).
 
-- [ ] Parameterize document_links.rs link-result tests
-- [ ] Parameterize rename.rs rename-result tests
-- [ ] Parameterize references.rs definition-result tests
-- [ ] Leave heterogeneous tests standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize document_links.rs link-result tests
+- [x] Parameterize rename.rs rename-result tests
+- [x] Parameterize references.rs definition-result tests
+- [x] Leave heterogeneous tests standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 8: Parameterize `code_actions.rs` + `semantic_tokens.rs` + `symbols.rs`
 
