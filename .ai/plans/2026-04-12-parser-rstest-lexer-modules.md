@@ -84,8 +84,8 @@ in a `#[case]`.
 - [x] Parameterize `src/lexer/quoted.rs` tests (d563134)
 - [x] Parameterize `src/lexer/block.rs` tests (451a69a)
 - [x] Parameterize `src/lexer/comment.rs` + `src/lines.rs` (baa2ee5)
-- [ ] Parameterize `src/chars.rs` + `src/encoding.rs` +
-      `src/pos.rs` + `src/lexer.rs`
+- [x] Parameterize `src/chars.rs` + `src/encoding.rs` +
+      `src/pos.rs` + `src/lexer.rs` (5e80a5d)
 - [ ] Parameterize integration tests: `unicode_positions.rs`
       + `encoding.rs` + `error_reporting.rs` +
       `loader_spans.rs` + `loader.rs`
@@ -277,13 +277,13 @@ tuples.
 tests are uniform. Tests with complex state setup
 (consume_marker_line) left standalone.
 
-- [ ] Parameterize chars.rs predicate tests
-- [ ] Parameterize src/encoding.rs detection tests
-- [ ] Parameterize pos.rs advancement tests
-- [ ] Parameterize lexer.rs uniform predicate tests
-- [ ] Leave standalone: lexer.rs complex-state tests
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Parameterize chars.rs predicate tests
+- [x] Parameterize src/encoding.rs detection tests
+- [x] Parameterize pos.rs advancement tests
+- [x] Parameterize lexer.rs uniform predicate tests
+- [x] Leave standalone: lexer.rs complex-state tests
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 6: Parameterize integration tests
 
