@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-12)
 **Created:** 2026-04-12
 
 # Cleanup queue — validated items from code-improvements plan
