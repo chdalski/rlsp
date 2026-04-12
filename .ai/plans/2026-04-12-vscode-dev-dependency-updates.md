@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-12
 
 ## Goal
@@ -67,7 +67,7 @@ code and configuration as needed.
 ## Steps
 
 - [x] Research breaking changes for each major version
-- [ ] Fix engines.vscode mismatch (CI fix)
+- [x] Fix engines.vscode mismatch (CI fix) — 4032830
 - [ ] Update all 4 major-version packages
 - [ ] Adapt tsconfig.json for TypeScript 6 if needed
 - [ ] Adapt eslint.config.mjs for ESLint 10 if needed
@@ -84,9 +84,9 @@ Bump `engines.vscode` from `^1.93.0` to `^1.115.0` in
 `@types/vscode: ^1.115.0`. This is a one-line change that
 unblocks CI.
 
-- [ ] Update `engines.vscode` to `^1.115.0`
-- [ ] Verify `pnpm run build` succeeds
-- [ ] Verify `pnpx @vscode/vsce package --no-dependencies`
+- [x] Update `engines.vscode` to `^1.115.0`
+- [x] Verify `pnpm run build` succeeds
+- [x] Verify `pnpx @vscode/vsce package --no-dependencies`
       succeeds (the specific check that broke CI)
 
 ### Task 2: Update major-version dev dependencies
