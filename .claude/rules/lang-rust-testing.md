@@ -134,6 +134,52 @@ mod tests {
 }
 ```
 
+## Parameterized Tests
+
+When consolidating standalone `#[test]` functions into a
+parameterized test (via `rstest`, `test-case`, or any
+macro that collapses multiple scenarios into one function),
+preserve the intent of each original test name using the
+framework's named-case syntax.
+
+The original function name documents *what behavior* the
+case exercises. A bare case line with only input and
+expected values loses that documentation — a failing case
+then shows raw values, and the developer cannot tell what
+scenario broke without reading production code.
+
+For rstest, use the `#[case::name]` syntax — the name
+becomes part of the test identity, appears in test output
+and failure messages, and is grep-able:
+
+```rust
+// Bad — intent lost
+#[rstest]
+#[case("abc   ", "abc")]
+#[case("", "")]
+#[case("a:b", "a:b")]
+fn scan_plain(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(scan_plain_line_block(input), expected);
+}
+
+// Good — intent preserved via named cases
+#[rstest]
+#[case::trailing_whitespace_excluded("abc   ", "abc")]
+#[case::empty_input_returns_empty("", "")]
+#[case::colon_mid_word_is_content("a:b", "a:b")]
+fn scan_plain(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(scan_plain_line_block(input), expected);
+}
+```
+
+When a group has mixed assertion shapes (`assert_eq!`,
+`matches!`, span-field checks), split into multiple
+parameterized functions named after their assertion shape
+(e.g. `scalar_cases_eq`, `scalar_cases_cow`). Do not
+create helpers that normalize diverse outputs into one
+unified return type — keep assertion shape obvious at the
+test site.
+
 ## Property-Based Testing
 
 Use proptest to verify properties over random inputs — it

@@ -43,11 +43,10 @@ be preserved in a `#[case]`.
   `JsonSchema` structs with multiple fields) as standalone
   tests — the parameterization win requires that the setup
   is near-identical across cases
-- **Descriptive `#[case]` comments required.** Same rule
-  as the parser plan: every `#[case]` line must carry an
-  inline comment preserving the intent of the original
-  test name. Bare `#[case]` lines are grounds for reviewer
-  rejection
+- **Named `#[case::name]` syntax required.** Same rule
+  as the parser plan: every `#[case]` must use rstest's
+  named-case syntax to preserve the original test name's
+  intent. Bare `#[case]` lines are grounds for rejection
 - **Implementation sequence — add first, then remove.**
   Same as the parser plan: (1) write new `#[rstest]`
   parameterized tests, (2) run `cargo test` with both old
@@ -321,10 +320,9 @@ with AST structure checks. ~70% uniform.
 - **Test-engineer on every task** — same as parser plan.
   Input gate: scan for duplicates/gaps. Output gate:
   verify case parity
-- **Descriptive `#[case]` comments** — every `#[case]`
-  line must have an inline comment preserving the intent
-  of the original test name. Bare `#[case]` lines are
-  grounds for reviewer rejection
+- **Named `#[case::name]` syntax** — every `#[case]` uses
+  rstest's named-case syntax. Bare `#[case]` lines
+  without names are grounds for rejection
 - **Excluded files** — `server.rs` (too heterogeneous at
   53%), `code_lens.rs` (only 5 tests),
   `ecosystem_fixtures.rs` and `lsp_lifecycle.rs` (async/

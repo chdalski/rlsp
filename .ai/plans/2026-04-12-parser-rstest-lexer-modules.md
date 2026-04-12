@@ -44,17 +44,17 @@ in a `#[case]`.
   paths with complex setup should remain as standalone
   `#[test]` functions. The goal is to parameterize
   repetitive tests, not force every test into rstest
-- **Descriptive `#[case]` comments required.** Every
-  `#[case]` line must carry an inline comment that
-  preserves the intent of the original test name. The
+- **Named `#[case::name]` syntax required.** Every
+  `#[case]` must use rstest's named-case syntax to
+  preserve the intent of the original test name. The
   original `#[test] fn block_trailing_whitespace_excluded`
   documents *what behavior* the case exercises — a bare
   `#[case("abc   ", "abc")]` does not. Format:
-  `#[case("abc   ", "abc")] // trailing whitespace excluded`.
-  Without these comments, a failing case shows only raw
-  input/expected values, and a future developer cannot
-  tell what scenario is being tested without reading
-  production code
+  `#[case::trailing_whitespace_excluded("abc   ", "abc")]`.
+  The name becomes part of the test identity, appears in
+  test output and failure messages, and is grep-able.
+  Bare `#[case]` lines without names are grounds for
+  reviewer rejection
 - **Implementation sequence — add first, then remove.**
   For each group being converted: (1) write the new
   `#[rstest]` parameterized test with all `#[case]`
@@ -388,11 +388,10 @@ security/depth-limit groups, error-assertion groups,
 - **Preserve group comments** — keep the `// Group X`
   section headers as documentation around parameterized
   functions
-- **Descriptive `#[case]` comments** — every `#[case]`
-  line must have an inline comment preserving the intent
-  of the original test name (e.g. `// trailing whitespace
-  excluded`). Bare `#[case]` lines without comments are
-  grounds for reviewer rejection
+- **Named `#[case::name]` syntax** — every `#[case]` uses
+  rstest's named-case syntax (e.g.
+  `#[case::trailing_whitespace_excluded(...)]`). Bare
+  `#[case]` lines without names are grounds for rejection
 - **smoke.rs tiered approach** — focus on Tier 1+2 (~183
   tests with uniform patterns). Leave Tier 4 (~283 tests
   with heterogeneous assertions) as standalone
