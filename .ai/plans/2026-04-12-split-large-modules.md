@@ -140,8 +140,8 @@ maintain the public API.
 - [x] Split `smoke.rs` into `tests/smoke/` directory (8809c48)
 - [x] Split `schema_validation.rs` into
       `src/schema_validation/` directory (dcdd239)
-- [ ] Split `schema.rs` into `src/schema/` directory
-- [ ] Verify full test suite and clippy pass after each
+- [x] Split `schema.rs` into `src/schema/` directory (f45b206)
+- [x] Verify full test suite and clippy pass after each
 
 ## Tasks
 
@@ -254,14 +254,14 @@ mod tests` block inside `association.rs`:
 - "match_schema_by_filename" tests
 - "detect_kubernetes_resource + kubernetes_schema_url" tests
 
-- [ ] `schema/mod.rs` with `mod association;` + re-exports
-- [ ] `schema/association.rs` with 7 functions
-- [ ] Association tests moved to `association.rs`
-- [ ] External import paths unchanged (`crate::schema::*`)
-- [ ] Original `schema.rs` deleted
-- [ ] `cargo test -p rlsp-yaml` passes
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo fmt --check` — clean
+- [x] `schema/mod.rs` with `mod association;` + re-exports
+- [x] `schema/association.rs` with 7 functions
+- [x] Association tests moved to `association.rs`
+- [x] External import paths unchanged (`crate::schema::*`)
+- [x] Original `schema.rs` deleted
+- [x] `cargo test -p rlsp-yaml` passes
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo fmt --check` — clean
 
 ## Decisions
 
