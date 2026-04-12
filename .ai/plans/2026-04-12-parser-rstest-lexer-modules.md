@@ -83,7 +83,7 @@ in a `#[case]`.
 - [x] Parameterize `src/lexer/plain.rs` tests (96f8df6)
 - [x] Parameterize `src/lexer/quoted.rs` tests (d563134)
 - [x] Parameterize `src/lexer/block.rs` tests (451a69a)
-- [ ] Parameterize `src/lexer/comment.rs` + `src/lines.rs`
+- [x] Parameterize `src/lexer/comment.rs` + `src/lines.rs` (baa2ee5)
 - [ ] Parameterize `src/chars.rs` + `src/encoding.rs` +
       `src/pos.rs` + `src/lexer.rs`
 - [ ] Parameterize integration tests: `unicode_positions.rs`
@@ -246,12 +246,12 @@ Convert repetitive tests in `comment.rs` (26 tests) and
 - CR/CRLF/LF break detection: varying line ending type.
 - Leave alone: complex iteration tests (while-let loops).
 
-- [ ] Parameterize comment.rs groups A, B, C, E, F
-- [ ] Parameterize lines.rs BreakType::advance tests
-- [ ] Parameterize lines.rs initial-state and offset tests
-- [ ] Leave standalone: comment.rs D, lines.rs iteration
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Parameterize comment.rs groups A, B, C, E, F
+- [x] Parameterize lines.rs BreakType::advance tests
+- [x] Parameterize lines.rs initial-state and offset tests
+- [x] Leave standalone: comment.rs D, lines.rs iteration
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 5: Parameterize `src/chars.rs` + `src/encoding.rs` + `src/pos.rs` + `src/lexer.rs`
 
