@@ -648,6 +648,8 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn approx_eq(a: f32, b: f32) -> bool {
@@ -659,6 +661,16 @@ mod tests {
             && approx_eq(a.green, b.green)
             && approx_eq(a.blue, b.blue)
             && approx_eq(a.alpha, b.alpha)
+    }
+
+    // Group: find_colors_returns_empty — assert colors.is_empty()
+    #[rstest]
+    #[case::invalid_hex_gg("color: #gggggg")]
+    #[case::unknown_named_color("color: notacolor")]
+    #[case::comment_line_skipped("# this is a comment with red")]
+    fn find_colors_returns_empty(#[case] text: &str) {
+        let colors = find_colors(text);
+        assert!(colors.is_empty(), "expected no colors for: {text:?}");
     }
 
     // ── Hex colors ──────────────────────────────────────────────────────────
@@ -708,12 +720,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn invalid_hex_gg_not_matched() {
-        let colors = find_colors("color: #gggggg");
-        assert!(colors.is_empty());
-    }
-
     // ── CSS named colors ────────────────────────────────────────────────────
 
     #[test]
@@ -759,12 +765,6 @@ mod tests {
                 alpha: 1.0
             }
         ));
-    }
-
-    #[test]
-    fn unknown_name_not_matched() {
-        let colors = find_colors("color: notacolor");
-        assert!(colors.is_empty());
     }
 
     // ── RGB / RGBA ───────────────────────────────────────────────────────────
@@ -892,13 +892,6 @@ mod tests {
                 alpha: 1.0
             }
         ));
-    }
-
-    #[test]
-    fn comment_line_skipped() {
-        // A line starting with # that is a comment (not a hex color) is skipped
-        let colors = find_colors("# this is a comment with red");
-        assert!(colors.is_empty());
     }
 
     #[test]

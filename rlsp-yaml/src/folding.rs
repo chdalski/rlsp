@@ -293,6 +293,8 @@ fn push_fold(
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use tower_lsp::lsp_types::FoldingRangeKind;
 
@@ -300,152 +302,46 @@ mod tests {
         ranges.iter().map(|r| (r.start_line, r.end_line)).collect()
     }
 
+    // ---- Mappings / Sequences / Block Scalars ----
+
+    // Group: folding_ranges_contains_range — single tuples.contains assertion
+    #[rstest]
     // ---- Mappings ----
-
-    // Test 1
-    #[test]
-    fn should_fold_mapping_with_nested_content() {
-        let text = "server:\n  host: localhost\n  port: 8080\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 2)),
-            "should fold server mapping from line 0 to 2, got: {tuples:?}"
-        );
-    }
-
-    // Test 2
-    #[test]
-    fn should_not_fold_single_line_mapping() {
-        let text = "key: value\n";
-        let result = folding_ranges(text);
-
-        assert!(result.is_empty(), "should not fold single-line mapping");
-    }
-
-    // Test 3
-    #[test]
-    fn should_fold_multiple_top_level_mappings() {
-        let text =
-            "server:\n  host: localhost\n  port: 8080\ndatabase:\n  name: mydb\n  port: 5432\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 2)),
-            "should fold server mapping (lines 0-2), got: {tuples:?}"
-        );
-        assert!(
-            tuples.contains(&(3, 5)),
-            "should fold database mapping (lines 3-5), got: {tuples:?}"
-        );
-    }
-
-    // Test 4
-    #[test]
-    fn should_fold_deeply_nested_mappings() {
-        let text = "a:\n  b:\n    c:\n      d: value\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 3)),
-            "should fold 'a' (lines 0-3), got: {tuples:?}"
-        );
-        assert!(
-            tuples.contains(&(1, 3)),
-            "should fold 'b' (lines 1-3), got: {tuples:?}"
-        );
-        assert!(
-            tuples.contains(&(2, 3)),
-            "should fold 'c' (lines 2-3), got: {tuples:?}"
-        );
-    }
-
-    // Test 5
-    #[test]
-    fn should_not_fold_mapping_with_inline_value_only() {
-        let text = "name: Alice\nage: 30\n";
-        let result = folding_ranges(text);
-
-        assert!(
-            result.is_empty(),
-            "should not fold flat key-value pairs with no nesting"
-        );
-    }
-
+    #[case::mapping_with_nested_content("server:\n  host: localhost\n  port: 8080\n", (0, 2))]
     // ---- Sequences ----
-
-    // Test 6
-    #[test]
-    fn should_fold_sequence() {
-        let text = "items:\n  - one\n  - two\n  - three\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 3)),
-            "should fold items sequence (lines 0-3), got: {tuples:?}"
-        );
-    }
-
-    // Test 7
-    #[test]
-    fn should_fold_sequence_of_mappings() {
-        let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 4)),
-            "should fold users sequence (lines 0-4), got: {tuples:?}"
-        );
-    }
-
+    #[case::sequence("items:\n  - one\n  - two\n  - three\n", (0, 3))]
+    #[case::sequence_of_mappings("users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n", (0, 4))]
     // ---- Block Scalars ----
-
-    // Test 8
-    #[test]
-    fn should_fold_literal_block_scalar() {
-        let text = "description: |\n  This is a\n  multi-line\n  description\n";
+    #[case::literal_block_scalar("description: |\n  This is a\n  multi-line\n  description\n", (0, 3))]
+    #[case::folded_block_scalar("summary: >\n  This is a\n  folded\n  paragraph\n", (0, 3))]
+    // ---- Comments ----
+    #[case::comment_within_server_fold("server:\n  # This is a comment\n  host: localhost\n  port: 8080\n", (0, 3))]
+    // ---- Edge Cases ----
+    #[case::blank_lines_within_fold("server:\n  host: localhost\n\n  port: 8080\n", (0, 3))]
+    #[case::mixed_content_types("config:\n  name: app\n  ports:\n    - 80\n    - 443\n  description: |\n    A multi-line\n    description\n", (0, 7))]
+    #[case::block_scalar_with_indentation_indicator("text: |2\n  indented content\n  more content\n", (0, 2))]
+    fn folding_ranges_contains_range(#[case] text: &str, #[case] expected: (u32, u32)) {
         let result = folding_ranges(text);
-
         let tuples = ranges_as_tuples(&result);
         assert!(
-            tuples.contains(&(0, 3)),
-            "should fold literal block scalar (lines 0-3), got: {tuples:?}"
+            tuples.contains(&expected),
+            "expected tuple {expected:?} in folding ranges, got: {tuples:?}"
         );
     }
 
-    // Test 9
-    #[test]
-    fn should_fold_folded_block_scalar() {
-        let text = "summary: >\n  This is a\n  folded\n  paragraph\n";
+    // Group: folding_ranges_returns_empty — assert result.is_empty()
+    #[rstest]
+    #[case::empty_document("")]
+    #[case::single_line_document("key: value")]
+    #[case::mapping_with_inline_value_only("name: Alice\nage: 30\n")]
+    #[case::gt_or_pipe_in_value_not_block_scalar("condition: a > b\nresult: true\n")]
+    fn folding_ranges_returns_empty(#[case] text: &str) {
         let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 3)),
-            "should fold folded block scalar (lines 0-3), got: {tuples:?}"
-        );
-    }
-
-    // Test 10
-    #[test]
-    fn should_not_treat_gt_or_pipe_in_value_as_block_scalar() {
-        let text = "condition: a > b\nresult: true\n";
-        let result = folding_ranges(text);
-
-        assert!(
-            result.is_empty(),
-            "should not fold -- '>' in 'a > b' is not a block scalar indicator"
-        );
+        assert!(result.is_empty(), "expected empty result, got: {result:?}");
     }
 
     // ---- Multi-Document Sections ----
 
-    // Test 11
     #[test]
     fn should_fold_document_sections() {
         let text = "key1: val1\nkey2: val2\n---\nkey3: val3\nkey4: val4\n";
@@ -458,7 +354,6 @@ mod tests {
         );
     }
 
-    // Test 12
     #[test]
     fn should_fold_document_sections_with_nested_content() {
         let text = "doc1:\n  key: val\n---\ndoc2:\n  key: val\n";
@@ -477,20 +372,6 @@ mod tests {
 
     // ---- Comments ----
 
-    // Test 13
-    #[test]
-    fn should_not_break_fold_region_for_comment_lines() {
-        let text = "server:\n  # This is a comment\n  host: localhost\n  port: 8080\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 3)),
-            "should fold server mapping (lines 0-3) including comment, got: {tuples:?}"
-        );
-    }
-
-    // Test 14
     #[test]
     fn should_fold_consecutive_comment_block() {
         let text = "# Header comment\n# continues here\n# and here\nkey: value\n";
@@ -530,28 +411,6 @@ mod tests {
 
     // ---- Edge Cases ----
 
-    // Test 15
-    #[test]
-    fn should_return_empty_for_empty_document() {
-        let text = "";
-        let result = folding_ranges(text);
-
-        assert!(result.is_empty(), "should return empty for empty document");
-    }
-
-    // Test 16
-    #[test]
-    fn should_return_empty_for_single_line_document() {
-        let text = "key: value";
-        let result = folding_ranges(text);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for single-line document"
-        );
-    }
-
-    // Test 17
     #[test]
     fn should_return_empty_for_comment_only_document() {
         let text = "# just a comment\n";
@@ -566,33 +425,7 @@ mod tests {
         }
     }
 
-    // Test 18
-    #[test]
-    fn should_handle_blank_lines_within_fold_region() {
-        let text = "server:\n  host: localhost\n\n  port: 8080\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 3)),
-            "should fold server mapping (lines 0-3) across blank line, got: {tuples:?}"
-        );
-    }
-
-    // Test 19
-    #[test]
-    fn should_handle_mixed_content_types() {
-        let text = "config:\n  name: app\n  ports:\n    - 80\n    - 443\n  description: |\n    A multi-line\n    description\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 7)),
-            "should fold config mapping (lines 0-7), got: {tuples:?}"
-        );
-    }
-
-    // Test 20 — multi-document: three sections (exercises windows(2) with two pairs)
+    // multi-document: three sections (exercises windows(2) with two pairs)
     #[test]
     fn should_fold_three_document_sections() {
         let text = "a: 1\nb: 2\n---\nc: 3\nd: 4\n---\ne: 5\nf: 6\n";
@@ -609,7 +442,7 @@ mod tests {
         );
     }
 
-    // Test 21 — multi-document: content only after last separator (last section fold)
+    // multi-document: content only after last separator (last section fold)
     #[test]
     fn should_fold_last_section_after_final_separator() {
         let text = "---\nkey1: val1\nkey2: val2\n";
@@ -624,7 +457,7 @@ mod tests {
         );
     }
 
-    // Test 22 — comment block at end of file (no trailing non-comment line)
+    // comment block at end of file (no trailing non-comment line)
     #[test]
     fn should_fold_comment_block_at_end_of_file() {
         let text = "key: value\n# comment line 1\n# comment line 2\n# comment line 3\n";
@@ -648,7 +481,6 @@ mod tests {
         );
     }
 
-    // Test 23 — is_block_scalar_indicator: strip indicator variants
     #[test]
     fn should_fold_block_scalar_with_chomping_indicator() {
         let text =
@@ -666,20 +498,7 @@ mod tests {
         );
     }
 
-    // Test 24 — is_block_scalar_indicator: indentation digit after indicator
-    #[test]
-    fn should_fold_block_scalar_with_indentation_indicator() {
-        let text = "text: |2\n  indented content\n  more content\n";
-        let result = folding_ranges(text);
-
-        let tuples = ranges_as_tuples(&result);
-        assert!(
-            tuples.contains(&(0, 2)),
-            "should fold '|2' block scalar (lines 0-2), got: {tuples:?}"
-        );
-    }
-
-    // Test 25 — find_last_content_line_in_range: range where all lines are blank/separator
+    // find_last_content_line_in_range: range where all lines are blank/separator
     #[test]
     fn should_not_fold_section_consisting_only_of_blank_lines() {
         // Two separators with only blank lines between them
@@ -699,7 +518,7 @@ mod tests {
         }
     }
 
-    // Test 26 — comment block of exactly 1 line (i - 1 == start, should NOT fold)
+    // comment block of exactly 1 line (i - 1 == start, should NOT fold)
     #[test]
     fn should_not_fold_single_comment_line() {
         // Only 1 comment line — `i - 1 == start` so condition `i - 1 > start` is false

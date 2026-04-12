@@ -68,24 +68,44 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 mod tests {
     use std::fmt::Write as _;
 
+    use rstest::rstest;
+
     use super::*;
 
-    #[test]
-    fn should_return_no_diagnostics_for_valid_yaml() {
-        let result = parse_yaml("key: value\n");
-
-        assert!(result.diagnostics.is_empty());
-        assert_eq!(result.documents.len(), 1);
+    // Group: parse_yaml_no_diagnostics — assert diagnostics.is_empty() + document count
+    #[rstest]
+    #[case::valid_yaml("key: value\n", 1)]
+    #[case::empty_document("", 0)]
+    #[case::comment_only("# this is a comment\n", 0)]
+    #[case::complex_types(
+        "root:\n  list:\n    - item1\n    - item2\n  nested:\n    key: value\n",
+        1
+    )]
+    #[case::multi_document("key1: value1\n---\nkey2: value2\n", 2)]
+    fn parse_yaml_no_diagnostics(#[case] text: &str, #[case] expected_doc_count: usize) {
+        let result = parse_yaml(text);
+        assert!(
+            result.diagnostics.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.documents.len(), expected_doc_count);
     }
 
-    #[test]
-    fn should_return_diagnostic_for_invalid_yaml() {
-        let result = parse_yaml("key: [invalid\n");
-
-        assert!(!result.diagnostics.is_empty());
-        let diag = &result.diagnostics[0];
-        assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
-        assert!(!diag.message.is_empty());
+    // Group: parse_yaml_returns_error_diagnostic — assert !diagnostics.is_empty() + ERROR severity
+    #[rstest]
+    #[case::invalid_yaml("key: [invalid\n")]
+    #[case::bad_nested_flow(":\n  bad: [")]
+    fn parse_yaml_returns_error_diagnostic(#[case] text: &str) {
+        let result = parse_yaml(text);
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected at least one diagnostic"
+        );
+        assert_eq!(
+            result.diagnostics[0].severity,
+            Some(DiagnosticSeverity::ERROR)
+        );
     }
 
     #[test]
@@ -114,40 +134,6 @@ mod tests {
         let diag = &result.diagnostics[0];
         // Error is on line 0 (0-based) or later — just verify it is reported.
         assert!(diag.range.start.line <= 1);
-    }
-
-    #[test]
-    fn should_parse_multi_document_yaml() {
-        let input = "key1: value1\n---\nkey2: value2\n";
-        let result = parse_yaml(input);
-
-        assert!(result.diagnostics.is_empty());
-        assert_eq!(result.documents.len(), 2);
-    }
-
-    #[test]
-    fn should_return_no_diagnostics_for_empty_document() {
-        let result = parse_yaml("");
-
-        assert!(result.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn should_return_no_diagnostics_for_comment_only_document() {
-        let result = parse_yaml("# this is a comment\n");
-
-        assert!(result.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn should_return_diagnostic_with_error_severity() {
-        let result = parse_yaml(":\n  bad: [");
-
-        assert!(!result.diagnostics.is_empty());
-        assert_eq!(
-            result.diagnostics[0].severity,
-            Some(DiagnosticSeverity::ERROR)
-        );
     }
 
     #[test]
@@ -209,15 +195,6 @@ mod tests {
         // Must not panic regardless of whether it parses or errors.
         let result = parse_yaml(&text);
         let _ = result;
-    }
-
-    #[test]
-    fn should_parse_valid_yaml_with_complex_types() {
-        let input = "root:\n  list:\n    - item1\n    - item2\n  nested:\n    key: value\n";
-        let result = parse_yaml(input);
-
-        assert!(result.diagnostics.is_empty());
-        assert_eq!(result.documents.len(), 1);
     }
 
     #[test]

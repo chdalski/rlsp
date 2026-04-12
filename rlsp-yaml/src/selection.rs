@@ -259,6 +259,8 @@ fn span_to_lsp_range(span: &Span) -> Range {
 mod tests {
     use std::fmt::Write as _;
 
+    use rstest::rstest;
+
     use super::*;
 
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
@@ -438,43 +440,44 @@ mod tests {
     }
 
     #[test]
-    fn should_return_empty_for_position_beyond_document() {
+    fn should_handle_empty_positions_slice() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(99, 0)]);
-        let _ = result;
+        let result = selection_ranges(text, docs.as_ref(), &[]);
+        assert!(
+            result.is_empty(),
+            "should return empty Vec for empty positions slice"
+        );
     }
 
     #[test]
-    fn should_return_safe_result_for_position_beyond_line_length() {
-        let text = "key: value\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 999)]);
-        let _ = result;
-    }
-
-    #[test]
-    fn should_return_empty_for_cursor_on_document_separator() {
-        let text = "a: 1\n---\nb: 2\n";
+    fn should_return_empty_for_cursor_on_dot_dot_dot_line() {
+        let text = "key: value\n...\nother: val\n";
         let docs = parse_docs(text);
         let result = selection_ranges(text, docs.as_ref(), &[pos(1, 0)]);
-        let _ = result;
+        assert!(
+            result.is_empty(),
+            "cursor on '...' line should produce no selection range"
+        );
     }
 
-    #[test]
-    fn should_return_empty_for_comment_only_document() {
-        let text = "# just a comment\n";
+    // Group: selection_ranges_does_not_panic — no assertion, must not panic
+    #[rstest]
+    #[case::position_beyond_document("key: value\n", pos(99, 0))]
+    #[case::position_beyond_line_length("key: value\n", pos(0, 999))]
+    #[case::cursor_on_document_separator("a: 1\n---\nb: 2\n", pos(1, 0))]
+    #[case::cursor_on_comment_only_document("# just a comment\n", pos(0, 2))]
+    #[case::cursor_on_comment_line_in_middle(
+        "key: value\n# this is a comment\nother: data\n",
+        pos(1, 5)
+    )]
+    #[case::sequence_value_in_mapping("items:\n  - alpha\n  - beta\n  - gamma\n", pos(1, 4))]
+    #[case::deeply_nested_sequence_value("data:\n  - nested:\n      - deep_value\n", pos(2, 10))]
+    #[case::key_at_column_zero("empty:\nother: val\n", pos(0, 0))]
+    #[case::alias_in_sequence("base: &anchor value\ncopy:\n  - *anchor\n", pos(2, 4))]
+    fn selection_ranges_does_not_panic(#[case] text: &str, #[case] position: Position) {
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 2)]);
-        let _ = result;
-    }
-
-    #[test]
-    fn should_handle_cursor_on_comment_line() {
-        let text = "key: value\n# this is a comment\nother: data\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 5)]);
-        let _ = result;
+        let _ = selection_ranges(text, docs.as_ref(), &[position]);
     }
 
     #[test]
@@ -505,17 +508,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn should_handle_empty_positions_slice() {
-        let text = "key: value\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[]);
-        assert!(
-            result.is_empty(),
-            "should return empty Vec for empty positions slice"
-        );
-    }
-
     // ---- Additional coverage tests ----
 
     #[test]
@@ -535,33 +527,6 @@ mod tests {
                 outermost.range.end.line
             );
         }
-    }
-
-    #[test]
-    fn should_return_empty_for_cursor_on_dot_dot_dot_line() {
-        let text = "key: value\n...\nother: val\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 0)]);
-        assert!(
-            result.is_empty(),
-            "cursor on '...' line should produce no selection range"
-        );
-    }
-
-    #[test]
-    fn should_handle_sequence_value_in_mapping() {
-        let text = "items:\n  - alpha\n  - beta\n  - gamma\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 4)]);
-        let _ = result;
-    }
-
-    #[test]
-    fn should_handle_deeply_nested_sequence_value() {
-        let text = "data:\n  - nested:\n      - deep_value\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 10)]);
-        let _ = result;
     }
 
     #[test]
@@ -594,22 +559,6 @@ mod tests {
                 outermost.range.start.line
             );
         }
-    }
-
-    #[test]
-    fn should_handle_key_at_column_zero_with_no_value() {
-        let text = "empty:\nother: val\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 0)]);
-        let _ = result;
-    }
-
-    #[test]
-    fn should_handle_alias_in_sequence() {
-        let text = "base: &anchor value\ncopy:\n  - *anchor\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 4)]);
-        let _ = result;
     }
 
     // ---- Tests for real-span traversal (containers have correct spans after loader fix) ----

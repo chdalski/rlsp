@@ -126,6 +126,8 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn pos(line: u32, character: u32) -> Position {
@@ -136,123 +138,47 @@ mod tests {
         edit.new_text.len()
     }
 
-    // Test 1: After `key:` — indents by tab_size
-    #[test]
-    fn should_indent_after_bare_mapping_key() {
-        let text = "key:\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
+    // Group: format_on_type_produces_indent — single edit, assert indent size
+    #[rstest]
+    #[case::bare_mapping_key("key:\n", pos(1, 0), "\n", 2, 2)]
+    #[case::complete_key_value_pair("key: value\n", pos(1, 0), "\n", 2, 0)]
+    #[case::indented_bare_key("  key:\n", pos(1, 0), "\n", 2, 4)]
+    #[case::sequence_item("- item\n", pos(1, 0), "\n", 2, 0)]
+    #[case::literal_block_scalar("key: |\n", pos(1, 0), "\n", 2, 2)]
+    #[case::folded_block_scalar("key: >\n", pos(1, 0), "\n", 2, 2)]
+    #[case::block_scalar_strip_chomping("key: |-\n", pos(1, 0), "\n", 2, 2)]
+    #[case::folded_block_scalar_strip_chomping("key: >-\n", pos(1, 0), "\n", 2, 2)]
+    #[case::block_scalar_keep_chomping("key: |+\n", pos(1, 0), "\n", 2, 2)]
+    #[case::comment_line_maintains_indent("  # a comment\n", pos(1, 0), "\n", 2, 2)]
+    #[case::empty_prev_line_fallback("key:\n\n", pos(2, 0), "\n", 2, 2)]
+    fn format_on_type_produces_indent(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] ch: &str,
+        #[case] tab_size: u32,
+        #[case] expected_indent: usize,
+    ) {
+        let edits = format_on_type(text, position, ch, tab_size);
         assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
+        assert_eq!(indent_of(&edits[0]), expected_indent);
     }
 
-    // Test 2: After `key: value` — maintains same indent as previous line
-    #[test]
-    fn should_maintain_indent_after_complete_key_value_pair() {
-        let text = "key: value\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 0);
-    }
-
-    // Test 3: After `  key:` (indented key) — indents to previous indent + tab_size
-    #[test]
-    fn should_add_extra_indent_after_indented_bare_key() {
-        let text = "  key:\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 4);
-    }
-
-    // Test 4: After `- item` — maintains same indent
-    #[test]
-    fn should_maintain_indent_after_sequence_item() {
-        let text = "- item\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 0);
-    }
-
-    // Test 5: After `key: |` — indents by tab_size
-    #[test]
-    fn should_indent_after_literal_block_scalar() {
-        let text = "key: |\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 6: After `key: >` — indents by tab_size
-    #[test]
-    fn should_indent_after_folded_block_scalar() {
-        let text = "key: >\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 7: After `key: |-` — indents by tab_size
-    #[test]
-    fn should_indent_after_block_scalar_with_strip_chomping() {
-        let text = "key: |-\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 7b: After `key: >-` — indents by tab_size
-    #[test]
-    fn should_indent_after_folded_block_scalar_with_strip_chomping() {
-        let text = "key: >-\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 7c: After `key: |+` — indents by tab_size
-    #[test]
-    fn should_indent_after_block_scalar_with_keep_chomping() {
-        let text = "key: |+\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 8: Non-newline character — empty vec
-    #[test]
-    fn should_return_empty_for_non_newline_character() {
-        let text = "key:\n";
-        let edits = format_on_type(text, pos(1, 0), "a", 2);
-
+    // Group: format_on_type_returns_empty — assert edits.is_empty()
+    #[rstest]
+    #[case::non_newline_character("key:\n", pos(1, 0), "a", 2)]
+    #[case::position_at_line_zero("key: value\n", pos(0, 0), "\n", 2)]
+    #[case::empty_text("", pos(0, 0), "\n", 2)]
+    fn format_on_type_returns_empty(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] ch: &str,
+        #[case] tab_size: u32,
+    ) {
+        let edits = format_on_type(text, position, ch, tab_size);
         assert!(edits.is_empty());
     }
 
-    // Test 9: Position at line 0 — empty vec
-    #[test]
-    fn should_return_empty_when_position_is_line_zero() {
-        let text = "key: value\n";
-        let edits = format_on_type(text, pos(0, 0), "\n", 2);
-
-        assert!(edits.is_empty());
-    }
-
-    // Test 10: Empty text — empty vec (line 1 exists but prev line is empty)
-    #[test]
-    fn should_return_empty_for_empty_text() {
-        let edits = format_on_type("", pos(0, 0), "\n", 2);
-
-        assert!(edits.is_empty());
-    }
-
-    // Test 11: Different tab_size values work correctly
+    // Different tab_size values work correctly
     #[test]
     fn should_respect_tab_size_parameter() {
         let text = "key:\n";
@@ -267,7 +193,7 @@ mod tests {
         assert_eq!(indent_of(&edits_0[0]), 2);
     }
 
-    // Test 12: TextEdit range covers col 0 to cursor on the new line
+    // TextEdit range covers col 0 to cursor on the new line
     #[test]
     fn edit_range_replaces_existing_characters_on_new_line() {
         // Simulate the cursor at column 3 (some pre-existing chars on the line)
@@ -278,29 +204,5 @@ mod tests {
         let edit = &edits[0];
         assert_eq!(edit.range.start, Position::new(1, 0));
         assert_eq!(edit.range.end, Position::new(1, 3));
-    }
-
-    // Test 13: Empty previous line falls back to nearest non-empty line above
-    #[test]
-    fn should_use_nearest_non_empty_line_when_prev_is_empty() {
-        // line 0: "key:" (indent 0, ends with :)
-        // line 1: "" (empty)
-        // line 2: new line (position)
-        let text = "key:\n\n";
-        let edits = format_on_type(text, pos(2, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        // Falls back to "key:" → indent 0 + 2 = 2
-        assert_eq!(indent_of(&edits[0]), 2);
-    }
-
-    // Test 14: Comment line — maintain same indent
-    #[test]
-    fn should_maintain_indent_after_comment_line() {
-        let text = "  # a comment\n";
-        let edits = format_on_type(text, pos(1, 0), "\n", 2);
-
-        assert_eq!(edits.len(), 1);
-        assert_eq!(indent_of(&edits[0]), 2);
     }
 }
