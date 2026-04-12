@@ -553,6 +553,8 @@ pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use std::borrow::Cow;
 
@@ -564,217 +566,98 @@ mod tests {
     // Group A — scan_plain_line_block: ASCII baseline
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn block_empty_input_returns_empty() {
-        assert_eq!(scan_plain_line_block(""), "");
-    }
-
-    #[test]
-    fn block_single_ascii_safe_char_returns_itself() {
-        assert_eq!(scan_plain_line_block("a"), "a");
-    }
-
-    #[test]
-    fn block_plain_word_no_terminators_returns_full() {
-        assert_eq!(scan_plain_line_block("hello"), "hello");
-    }
-
-    #[test]
-    fn block_trailing_whitespace_excluded() {
-        assert_eq!(scan_plain_line_block("abc   "), "abc");
-    }
-
-    #[test]
-    fn block_colon_followed_by_space_terminates() {
-        assert_eq!(scan_plain_line_block("key: rest"), "key");
-    }
-
-    #[test]
-    fn block_colon_at_eol_terminates() {
-        assert_eq!(scan_plain_line_block("key:"), "key");
-    }
-
-    #[test]
-    fn block_colon_followed_by_alnum_is_content() {
-        assert_eq!(scan_plain_line_block("a:b"), "a:b");
-    }
-
-    #[test]
-    fn block_hash_after_space_terminates() {
-        assert_eq!(scan_plain_line_block("foo # comment"), "foo");
-    }
-
-    #[test]
-    fn block_hash_without_preceding_space_is_content() {
-        assert_eq!(scan_plain_line_block("a#b"), "a#b");
-    }
-
-    #[test]
-    fn block_url_with_colon_slash_slash_is_content() {
-        assert_eq!(
-            scan_plain_line_block("http://example.com"),
-            "http://example.com"
-        );
+    #[rstest]
+    #[case::empty_input_returns_empty("", "")]
+    #[case::single_ascii_safe_char("a", "a")]
+    #[case::plain_word_no_terminators("hello", "hello")]
+    #[case::trailing_whitespace_excluded("abc   ", "abc")]
+    #[case::colon_followed_by_space_terminates("key: rest", "key")]
+    #[case::colon_at_eol_terminates("key:", "key")]
+    #[case::colon_followed_by_alnum_is_content("a:b", "a:b")]
+    #[case::hash_after_space_terminates("foo # comment", "foo")]
+    #[case::hash_without_preceding_space_is_content("a#b", "a#b")]
+    #[case::url_with_colon_slash_slash_is_content("http://example.com", "http://example.com")]
+    fn scan_plain_line_block_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_block(input), expected);
     }
 
     // -----------------------------------------------------------------------
     // Group B — scan_plain_line_block: memchr candidate bytes in multi-byte positions
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn block_pure_cjk_scalar_no_ascii_terminators_returns_full() {
-        assert_eq!(scan_plain_line_block("日本語"), "日本語");
-    }
-
-    #[test]
-    fn block_mixed_ascii_then_multibyte_no_terminator_returns_full() {
-        assert_eq!(scan_plain_line_block("hello日本語"), "hello日本語");
-    }
-
-    #[test]
-    fn block_mixed_multibyte_then_ascii_no_terminator_returns_full() {
-        assert_eq!(scan_plain_line_block("日本語hello"), "日本語hello");
-    }
-
-    #[test]
-    fn block_colon_followed_by_multibyte_is_content() {
-        assert_eq!(scan_plain_line_block("key:値"), "key:値");
-    }
-
-    #[test]
-    fn block_colon_followed_by_two_byte_char_is_content() {
-        assert_eq!(scan_plain_line_block("key:ñ"), "key:ñ");
-    }
-
-    #[test]
-    fn block_colon_followed_by_four_byte_char_is_content() {
-        assert_eq!(scan_plain_line_block("key:😀"), "key:😀");
-    }
-
-    #[test]
-    fn block_hash_after_multibyte_not_whitespace_preceded_is_content() {
-        assert_eq!(scan_plain_line_block("日#本"), "日#本");
-    }
-
-    #[test]
-    fn block_hash_after_space_in_multibyte_context_terminates() {
-        assert_eq!(scan_plain_line_block("日本 #note"), "日本");
-    }
-
-    #[test]
-    fn block_two_byte_char_in_scalar_correct_slice_returned() {
-        let result = scan_plain_line_block("café");
-        assert_eq!(result, "café");
-        let _ = result.chars().count(); // must not panic (valid UTF-8 boundary)
-    }
-
-    #[test]
-    fn block_three_byte_char_in_scalar_correct_slice_returned() {
-        let result = scan_plain_line_block("中文abc");
-        assert_eq!(result, "中文abc");
-        let _ = result.chars().count();
-    }
-
-    #[test]
-    fn block_four_byte_char_in_scalar_correct_slice_returned() {
-        let result = scan_plain_line_block("😀abc");
-        assert_eq!(result, "😀abc");
-        let _ = result.chars().count();
+    #[rstest]
+    #[case::pure_cjk_no_terminators("日本語", "日本語")]
+    #[case::mixed_ascii_then_multibyte_no_terminator("hello日本語", "hello日本語")]
+    #[case::mixed_multibyte_then_ascii_no_terminator("日本語hello", "日本語hello")]
+    #[case::colon_followed_by_multibyte_is_content("key:値", "key:値")]
+    #[case::colon_followed_by_two_byte_char_is_content("key:ñ", "key:ñ")]
+    #[case::colon_followed_by_four_byte_char_is_content("key:😀", "key:😀")]
+    #[case::hash_after_multibyte_not_whitespace_preceded_is_content("日#本", "日#本")]
+    #[case::hash_after_space_in_multibyte_context_terminates("日本 #note", "日本")]
+    fn scan_plain_line_block_multibyte_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_block(input), expected);
     }
 
     // -----------------------------------------------------------------------
     // Group C — scan_plain_line_block: NUL and BOM as terminators
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn block_nul_byte_mid_scalar_terminates_before_nul() {
-        assert_eq!(scan_plain_line_block("hello\0world"), "hello");
-    }
-
-    #[test]
-    fn block_nul_byte_at_start_returns_empty() {
-        assert_eq!(scan_plain_line_block("\0abc"), "");
-    }
-
-    #[test]
-    fn block_bom_mid_scalar_terminates_before_bom() {
-        assert_eq!(scan_plain_line_block("hello\u{FEFF}world"), "hello");
-    }
-
-    #[test]
-    fn block_bom_at_start_returns_empty() {
-        assert_eq!(scan_plain_line_block("\u{FEFF}abc"), "");
+    #[rstest]
+    #[case::nul_byte_mid_scalar_terminates_before_nul("hello\0world", "hello")]
+    #[case::nul_byte_at_start_returns_empty("\0abc", "")]
+    #[case::bom_mid_scalar_terminates_before_bom("hello\u{FEFF}world", "hello")]
+    #[case::bom_at_start_returns_empty("\u{FEFF}abc", "")]
+    fn scan_plain_line_block_terminator_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_block(input), expected);
     }
 
     // -----------------------------------------------------------------------
     // Group D — scan_plain_line_block: whitespace edge cases
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn block_tab_between_words_included() {
-        assert_eq!(scan_plain_line_block("abc\tdef"), "abc\tdef");
-    }
-
-    #[test]
-    fn block_multiple_spaces_between_words_included() {
-        assert_eq!(scan_plain_line_block("foo  bar"), "foo  bar");
-    }
-
-    #[test]
-    fn block_trailing_tab_excluded() {
-        assert_eq!(scan_plain_line_block("abc\t"), "abc");
+    #[rstest]
+    #[case::tab_between_words_included("abc\tdef", "abc\tdef")]
+    #[case::multiple_spaces_between_words_included("foo  bar", "foo  bar")]
+    #[case::trailing_tab_excluded("abc\t", "abc")]
+    fn scan_plain_line_block_whitespace_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_block(input), expected);
     }
 
     // -----------------------------------------------------------------------
     // Group E — scan_plain_line_flow: multi-byte parity with block
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn flow_pure_cjk_returns_full() {
-        assert_eq!(scan_plain_line_flow("日本語"), "日本語");
-    }
-
-    #[test]
-    fn flow_colon_followed_by_multibyte_is_content() {
-        assert_eq!(scan_plain_line_flow("key:値"), "key:値");
-    }
-
-    #[test]
-    fn flow_colon_followed_by_flow_indicator_terminates() {
-        assert_eq!(scan_plain_line_flow("key:]rest"), "key");
-    }
-
-    #[test]
-    fn flow_nul_mid_scalar_terminates() {
-        assert_eq!(scan_plain_line_flow("hello\0world"), "hello");
-    }
-
-    #[test]
-    fn flow_bom_mid_scalar_terminates() {
-        assert_eq!(scan_plain_line_flow("hello\u{FEFF}world"), "hello");
-    }
-
-    #[test]
-    fn flow_mixed_ascii_cjk_no_terminator() {
-        assert_eq!(scan_plain_line_flow("abc中文"), "abc中文");
+    #[rstest]
+    #[case::pure_cjk_returns_full("日本語", "日本語")]
+    #[case::colon_followed_by_multibyte_is_content("key:値", "key:値")]
+    #[case::colon_followed_by_flow_indicator_terminates("key:]rest", "key")]
+    #[case::nul_mid_scalar_terminates("hello\0world", "hello")]
+    #[case::bom_mid_scalar_terminates("hello\u{FEFF}world", "hello")]
+    #[case::mixed_ascii_cjk_no_terminator("abc中文", "abc中文")]
+    fn scan_plain_line_flow_multibyte_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_flow(input), expected);
     }
 
     // -----------------------------------------------------------------------
     // Group F — slice validity (UTF-8 boundary regression guard)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn block_slice_valid_utf8_colon_then_multibyte() {
-        let result = scan_plain_line_block("a:b中文");
-        assert_eq!(result, "a:b中文");
-        let _ = result.chars().count();
-    }
-
-    #[test]
-    fn block_slice_valid_after_termination_before_multibyte() {
-        let result = scan_plain_line_block("foo: 日本語");
-        assert_eq!(result, "foo");
-        let _ = result.chars().count();
+    // Tests where result is asserted equal and chars().count() must not panic.
+    // Merges Group B last 3 tests + Group F first 2 tests.
+    #[rstest]
+    #[case::block_two_byte_char_correct_slice(scan_plain_line_block as fn(&str) -> &str, "café", "café")]
+    #[case::block_three_byte_char_correct_slice(scan_plain_line_block as fn(&str) -> &str, "中文abc", "中文abc")]
+    #[case::block_four_byte_char_correct_slice(scan_plain_line_block as fn(&str) -> &str, "😀abc", "😀abc")]
+    #[case::block_colon_then_multibyte(scan_plain_line_block as fn(&str) -> &str, "a:b中文", "a:b中文")]
+    #[case::block_termination_before_multibyte(scan_plain_line_block as fn(&str) -> &str, "foo: 日本語", "foo")]
+    fn scan_plain_line_slice_no_panic_cases(
+        #[case] scan_fn: fn(&str) -> &str,
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let result = scan_fn(input);
+        assert_eq!(result, expected);
+        let _ = result.chars().count(); // must not panic (valid UTF-8 boundary)
     }
 
     #[test]
@@ -785,133 +668,56 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Group G — try_consume_plain_scalar unit tests (Task 6)
+    // Group G — try_consume_plain_scalar unit tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_scalar_single_word() {
-        let mut lex = make_lexer("hello");
+    #[rstest]
+    #[case::single_word("hello", "hello")]
+    #[case::multi_word("hello world", "hello world")]
+    #[case::with_url("http://x.com", "http://x.com")]
+    #[case::with_hash_no_preceding_space("a#b", "a#b")]
+    #[case::terminated_by_colon_space("key: value", "key")]
+    #[case::terminated_by_hash_with_space("foo # comment", "foo")]
+    #[case::trailing_whitespace_stripped("foo   ", "foo")]
+    #[case::multiline_folds_single_break_to_space("foo\n  bar\n  baz", "foo bar baz")]
+    #[case::multiline_blank_line_folds_to_newline("foo\n\nbar", "foo\nbar")]
+    #[case::minus_followed_by_safe_char_is_valid("-a", "-a")]
+    #[case::colon_followed_by_safe_char_is_valid(":a", ":a")]
+    #[case::forbidden_continuation_stops_at_marker("foo\n---\nbar", "foo")]
+    #[case::with_multibyte_utf8("中文", "中文")]
+    #[case::with_backslashes("plain\\value\\with\\backslashes", "plain\\value\\with\\backslashes")]
+    fn try_consume_plain_scalar_value_cases(#[case] input: &str, #[case] expected: &str) {
+        let mut lex = make_lexer(input);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "hello");
+        assert_eq!(val, expected);
     }
 
-    #[test]
-    fn plain_scalar_multi_word() {
-        let mut lex = make_lexer("hello world");
+    #[rstest]
+    #[case::cow_borrowed_for_single_line("hello", true)]
+    #[case::cow_owned_for_multiline("foo\n  bar", false)]
+    fn try_consume_plain_scalar_cow_cases(#[case] input: &str, #[case] expect_borrowed: bool) {
+        let mut lex = make_lexer(input);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "hello world");
+        if expect_borrowed {
+            assert!(matches!(val, Cow::Borrowed(_)), "expected Cow::Borrowed");
+        } else {
+            assert!(matches!(val, Cow::Owned(_)), "expected Cow::Owned");
+        }
     }
 
-    #[test]
-    fn plain_scalar_cow_borrowed_for_single_line() {
-        let mut lex = make_lexer("hello");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert!(
-            matches!(val, Cow::Borrowed(_)),
-            "single-line must be Borrowed"
-        );
-    }
-
-    #[test]
-    fn plain_scalar_cow_owned_for_multiline() {
-        let mut lex = make_lexer("foo\n  bar");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
-        assert_eq!(val, "foo bar");
-    }
-
-    #[test]
-    fn plain_scalar_with_url() {
-        // `:` not followed by space → allowed inside plain scalar.
-        let mut lex = make_lexer("http://x.com");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "http://x.com");
-    }
-
-    #[test]
-    fn plain_scalar_with_hash_no_preceding_space() {
-        // `#` not preceded by whitespace → allowed inside plain scalar.
-        let mut lex = make_lexer("a#b");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "a#b");
-    }
-
-    #[test]
-    fn plain_scalar_terminated_by_colon_space() {
-        // `: ` (colon + space) terminates the scalar — the colon is not safe.
-        let mut lex = make_lexer("key: value");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "key");
-    }
-
-    #[test]
-    fn plain_scalar_terminated_by_hash_with_space() {
-        // ` #` (space + hash) terminates the scalar — `#` preceded by whitespace.
-        let mut lex = make_lexer("foo # comment");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo");
-    }
-
-    #[test]
-    fn plain_scalar_trailing_whitespace_stripped() {
-        // Trailing spaces on a line are not part of the scalar value.
-        let mut lex = make_lexer("foo   ");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo");
-    }
-
-    #[test]
-    fn plain_scalar_multiline_folds_single_break_to_space() {
-        let mut lex = make_lexer("foo\n  bar\n  baz");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo bar baz");
-    }
-
-    #[test]
-    fn plain_scalar_multiline_blank_line_folds_to_newline() {
-        // A blank line in the middle of a multi-line scalar becomes a newline.
-        let mut lex = make_lexer("foo\n\nbar");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo\nbar");
-    }
-
-    #[test]
-    fn plain_scalar_empty_input_returns_none() {
-        let mut lex = make_lexer("");
-        assert!(lex.try_consume_plain_scalar(0).is_none());
-    }
-
-    #[test]
-    fn plain_scalar_blank_line_returns_none() {
-        let mut lex = make_lexer("   ");
-        assert!(lex.try_consume_plain_scalar(0).is_none());
-    }
-
-    #[test]
-    fn plain_scalar_comment_line_returns_none() {
-        let mut lex = make_lexer("# comment");
+    #[rstest]
+    #[case::empty_input_returns_none("")]
+    #[case::blank_line_returns_none("   ")]
+    #[case::comment_line_returns_none("# comment")]
+    #[case::dash_space_returns_none("- ")]
+    #[case::question_space_returns_none("? ")]
+    #[case::colon_space_returns_none(": ")]
+    fn try_consume_plain_scalar_returns_none_cases(#[case] input: &str) {
+        let mut lex = make_lexer(input);
         assert!(lex.try_consume_plain_scalar(0).is_none());
     }
 
@@ -931,75 +737,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn plain_scalar_minus_followed_by_safe_char_is_valid() {
-        // `-a` starts a plain scalar (ns-plain-first allows `-` + ns-plain-safe).
-        let mut lex = make_lexer("-a");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "-a");
-    }
-
-    #[test]
-    fn plain_scalar_colon_followed_by_safe_char_is_valid() {
-        // `:a` starts a plain scalar.
-        let mut lex = make_lexer(":a");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, ":a");
-    }
-
-    #[test]
-    fn plain_scalar_forbidden_continuation_stops_at_marker() {
-        // A `---` marker at column 0 terminates multi-line continuation.
-        let mut lex = make_lexer("foo\n---\nbar");
-        // Only "foo" should be collected (the --- terminates the scalar).
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo");
-    }
-
-    #[test]
-    fn plain_scalar_span_start_byte_offset() {
-        let mut lex = make_lexer("hello");
-        let (_, span) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(span.start.byte_offset, 0);
-    }
-
-    #[test]
-    fn plain_scalar_span_end_byte_offset() {
-        // "hello" = 5 bytes; span.end should be at byte offset 5.
-        let mut lex = make_lexer("hello");
-        let (_, span) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(span.end.byte_offset, 5);
-    }
-
-    #[test]
-    fn plain_scalar_indented_start_span_byte_offset() {
-        // "  hello" — leading 2 spaces, scalar starts at byte 2.
-        let mut lex = make_lexer("  hello");
+    // Span cases: (input, parent_indent, expected_val, expected_start, expected_end)
+    // expected_val is checked when Some; None means skip val assertion.
+    #[rstest]
+    #[case::ascii_word_span("hello", 0, Some("hello"), 0, 5)]
+    #[case::indented_start_span("  hello", 0, Some("hello"), 2, 7)]
+    #[case::multibyte_utf8_span("中文", 0, Some("中文"), 0, 6)]
+    #[case::multibyte_with_leading_space_span("  中", 0, Some("中"), 2, 5)]
+    fn try_consume_plain_scalar_span_cases(
+        #[case] input: &str,
+        #[case] parent_indent: usize,
+        #[case] expected_val: Option<&str>,
+        #[case] expected_start: usize,
+        #[case] expected_end: usize,
+    ) {
+        let mut lex = make_lexer(input);
         let (val, span) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(parent_indent)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "hello");
-        assert_eq!(span.start.byte_offset, 2);
-    }
-
-    #[test]
-    fn plain_scalar_with_multibyte_utf8() {
-        // '中' (3 bytes) should be consumed as a valid plain scalar.
-        let mut lex = make_lexer("中文");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "中文");
+        if let Some(ev) = expected_val {
+            assert_eq!(val, ev);
+        }
+        assert_eq!(span.start.byte_offset, expected_start);
+        assert_eq!(span.end.byte_offset, expected_end);
     }
 
     #[test]
@@ -1013,38 +773,19 @@ mod tests {
         assert_eq!(val, "foo");
     }
 
-    #[test]
-    fn plain_scalar_with_backslashes() {
-        // Backslashes are not special in plain scalars.
-        let mut lex = make_lexer("plain\\value\\with\\backslashes");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "plain\\value\\with\\backslashes");
-    }
-
     // -----------------------------------------------------------------------
     // Group B (TE additions) — colon termination edge cases
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_scalar_colon_tab_terminates() {
-        // `:`+tab is not ns-plain-safe (tab is s-white, not ns-char) → terminates.
-        let mut lex = make_lexer("key:\tvalue");
+    #[rstest]
+    #[case::colon_tab_terminates("key:\tvalue", "key")]
+    #[case::colon_eof_terminates("key:", "key")]
+    fn try_consume_plain_scalar_colon_edge_cases(#[case] input: &str, #[case] expected: &str) {
+        let mut lex = make_lexer(input);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "key");
-    }
-
-    #[test]
-    fn plain_scalar_colon_eof_terminates() {
-        // `:`+EOF: next char is None → ns_plain_char_block returns false → `:` not included.
-        let mut lex = make_lexer("key:");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "key");
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
@@ -1065,126 +806,24 @@ mod tests {
     // Group D (TE additions) — multi-line folding edge cases
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_scalar_multiline_two_blank_lines_fold_to_two_newlines() {
-        // Two blank lines in the middle: N blank lines → N newlines.
-        let mut lex = make_lexer("foo\n\n\nbar");
+    #[rstest]
+    #[case::two_blank_lines_fold_to_two_newlines("foo\n\n\nbar", "foo\n\nbar")]
+    #[case::continuation_trailing_space_stripped("foo\nbar   \nbaz", "foo bar baz")]
+    fn try_consume_plain_scalar_multiline_folding_cases(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let mut lex = make_lexer(input);
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo\n\nbar");
-    }
-
-    #[test]
-    fn plain_scalar_multiline_continuation_trailing_space_stripped() {
-        // Trailing space on a continuation line is stripped before folding.
-        let mut lex = make_lexer("foo\nbar   \nbaz");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo bar baz");
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
-    // Group F (TE additions) — c-forbidden disambiguation
+    // Group D (TE required) — two blank lines with indented continuation
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_scalar_dots_terminated_by_document_end_marker() {
-        // `...` at column 0 terminates the plain scalar.
-        let mut lex = make_lexer("foo\n...\nbar");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo");
-    }
-
-    #[test]
-    fn plain_scalar_dash_dash_dash_word_attached_is_not_forbidden() {
-        // `---word` at column 0 is NOT a c-forbidden marker — it's a valid continuation.
-        let mut lex = make_lexer("foo\n---word");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo ---word");
-    }
-
-    // -----------------------------------------------------------------------
-    // Group H (TE additions) — indicator chars that need safe-char context
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn plain_scalar_dash_space_returns_none() {
-        // `- ` is a block sequence entry indicator, not a plain scalar start.
-        let mut lex = make_lexer("- ");
-        assert!(lex.try_consume_plain_scalar(0).is_none());
-    }
-
-    #[test]
-    fn plain_scalar_question_space_returns_none() {
-        // `? ` is a mapping key indicator.
-        let mut lex = make_lexer("? ");
-        assert!(lex.try_consume_plain_scalar(0).is_none());
-    }
-
-    #[test]
-    fn plain_scalar_colon_space_returns_none() {
-        // `: ` is a mapping value indicator.
-        let mut lex = make_lexer(": ");
-        assert!(lex.try_consume_plain_scalar(0).is_none());
-    }
-
-    // -----------------------------------------------------------------------
-    // Group I (TE additions) — span byte offsets with multi-byte UTF-8
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn plain_scalar_multibyte_utf8_span_byte_offset() {
-        // '中' = U+4E2D = 3 UTF-8 bytes; '文' = U+6587 = 3 UTF-8 bytes.
-        // "中文" = 6 bytes; span should be [0, 6).
-        let mut lex = make_lexer("中文");
-        let (val, span) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "中文");
-        assert_eq!(span.start.byte_offset, 0);
-        assert_eq!(span.end.byte_offset, 6);
-    }
-
-    #[test]
-    fn plain_scalar_multibyte_utf8_with_leading_space_span() {
-        // "  中" — 2-byte prefix, then 3-byte char; scalar starts at byte 2.
-        let mut lex = make_lexer("  中");
-        let (val, span) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "中");
-        assert_eq!(span.start.byte_offset, 2);
-        assert_eq!(span.end.byte_offset, 5);
-    }
-
-    // -----------------------------------------------------------------------
-    // Group F (TE required) — exact name from TE spec
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn plain_scalar_forbidden_dot_dot_dot_at_col_0_terminates() {
-        // `...` at column 0 terminates multi-line plain scalar continuation.
-        // Covers the b'.' arm of `is_marker` in collect_plain_continuations.
-        let mut lex = make_lexer("foo\n...\nbar");
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(val, "foo");
-    }
-
-    // -----------------------------------------------------------------------
-    // Group D (TE required) — exact name and input from TE spec
-    // -----------------------------------------------------------------------
-
-    // Note: plain_scalar_multiline_two_blank_lines_fold_to_two_newlines
-    // exists above with input "foo\n\n\nbar". The TE spec input is
-    // "foo\n\n\n  bar" (indented continuation). Adding the TE's exact variant:
     #[test]
     fn plain_scalar_multiline_two_blank_lines_fold_to_two_newlines_indented() {
         // Two blank lines + indented continuation: "foo\n\n\n  bar" → "foo\n\nbar"
@@ -1197,17 +836,21 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Group I (TE required) — exact name from TE spec
+    // Group F (TE additions) — c-forbidden disambiguation
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_scalar_multibyte_span_byte_offset() {
-        // "中文" = 6 UTF-8 bytes, 2 chars. Span width must equal byte count.
-        let mut lex = make_lexer("中文");
-        let (_, span) = lex
+    #[rstest]
+    #[case::dots_terminated_by_document_end_marker("foo\n...\nbar", "foo")]
+    #[case::dash_dash_dash_word_attached_is_not_forbidden("foo\n---word", "foo ---word")]
+    fn try_consume_plain_scalar_forbidden_marker_cases(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let mut lex = make_lexer(input);
+        let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert_eq!(span.end.byte_offset - span.start.byte_offset, 6);
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
@@ -1241,90 +884,25 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Group SPF: scan_plain_line_flow (Task 14)
+    // Group SPF: scan_plain_line_flow
     // -----------------------------------------------------------------------
 
-    // SPF-1: plain word terminates at `]`
-    #[test]
-    fn flow_plain_terminates_at_close_bracket() {
-        assert_eq!(scan_plain_line_flow("abc]rest"), "abc");
-    }
-
-    // SPF-2: plain word terminates at `}`
-    #[test]
-    fn flow_plain_terminates_at_close_brace() {
-        assert_eq!(scan_plain_line_flow("abc}rest"), "abc");
-    }
-
-    // SPF-3: plain word terminates at `,`
-    #[test]
-    fn flow_plain_terminates_at_comma() {
-        assert_eq!(scan_plain_line_flow("abc,rest"), "abc");
-    }
-
-    // SPF-4: plain word terminates at `[`
-    #[test]
-    fn flow_plain_terminates_at_open_bracket() {
-        assert_eq!(scan_plain_line_flow("abc[rest"), "abc");
-    }
-
-    // SPF-5: plain word terminates at `{`
-    #[test]
-    fn flow_plain_terminates_at_open_brace() {
-        assert_eq!(scan_plain_line_flow("abc{rest"), "abc");
-    }
-
-    // SPF-6: plain word is returned in full when no terminator
-    #[test]
-    fn flow_plain_returns_full_when_no_terminator() {
-        assert_eq!(scan_plain_line_flow("hello"), "hello");
-    }
-
-    // SPF-7: empty input returns empty
-    #[test]
-    fn flow_plain_empty_input_returns_empty() {
-        assert_eq!(scan_plain_line_flow(""), "");
-    }
-
-    // SPF-8: `#` preceded by whitespace starts a comment (terminates scalar)
-    #[test]
-    fn flow_plain_hash_after_space_starts_comment() {
-        assert_eq!(scan_plain_line_flow("abc # comment"), "abc");
-    }
-
-    // SPF-9: `#` not preceded by whitespace is part of the scalar
-    #[test]
-    fn flow_plain_hash_without_preceding_space_is_content() {
-        assert_eq!(scan_plain_line_flow("abc#def"), "abc#def");
-    }
-
-    // SPF-10: `:` followed by space terminates plain scalar
-    #[test]
-    fn flow_plain_colon_space_terminates() {
-        assert_eq!(scan_plain_line_flow("key: rest"), "key");
-    }
-
-    // SPF-11: `:` followed by flow indicator terminates plain scalar
-    #[test]
-    fn flow_plain_colon_flow_indicator_terminates() {
-        assert_eq!(scan_plain_line_flow("key:}rest"), "key");
-    }
-
-    // SPF-12: `:` at EOL terminates plain scalar (None next)
-    #[test]
-    fn flow_plain_colon_at_eol_terminates() {
-        assert_eq!(scan_plain_line_flow("key:"), "key");
-    }
-
-    // SPF-13: `:` in the middle not followed by separator is part of scalar
-    #[test]
-    fn flow_plain_colon_followed_by_alnum_is_content() {
-        assert_eq!(scan_plain_line_flow("a:b"), "a:b");
-    }
-
-    // SPF-14: trailing whitespace is not included in the result
-    #[test]
-    fn flow_plain_trailing_whitespace_excluded() {
-        assert_eq!(scan_plain_line_flow("abc   "), "abc");
+    #[rstest]
+    #[case::terminates_at_close_bracket("abc]rest", "abc")]
+    #[case::terminates_at_close_brace("abc}rest", "abc")]
+    #[case::terminates_at_comma("abc,rest", "abc")]
+    #[case::terminates_at_open_bracket("abc[rest", "abc")]
+    #[case::terminates_at_open_brace("abc{rest", "abc")]
+    #[case::returns_full_when_no_terminator("hello", "hello")]
+    #[case::empty_input_returns_empty("", "")]
+    #[case::hash_after_space_starts_comment("abc # comment", "abc")]
+    #[case::hash_without_preceding_space_is_content("abc#def", "abc#def")]
+    #[case::colon_space_terminates("key: rest", "key")]
+    #[case::colon_flow_indicator_terminates("key:}rest", "key")]
+    #[case::colon_at_eol_terminates("key:", "key")]
+    #[case::colon_followed_by_alnum_is_content("a:b", "a:b")]
+    #[case::trailing_whitespace_excluded("abc   ", "abc")]
+    fn scan_plain_line_flow_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(scan_plain_line_flow(input), expected);
     }
 }
