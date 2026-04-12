@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-12
 
 # Cleanup queue — validated items from code-improvements plan
@@ -36,11 +36,11 @@ Apply four validated cleanup items (C1, C2 partial, C3, C4a) accumulated during 
 
 ## Steps
 
-- [ ] Fix stale line-number references in test comments (C1)
-- [ ] Replace `for _ in 0..n` newline loops with `repeat_n` (C4a)
-- [ ] Convert `parse_block_header` if/else to match (C2)
+- [x] Fix stale line-number references in test comments (C1) — 10be323
+- [x] Replace `for _ in 0..n` newline loops with `repeat_n` (C4a) — 10be323
+- [x] Convert `parse_block_header` if/else to match (C2) — 10be323
 - [ ] Extract `PlainScalarKind` enum and `classify_plain_scalar` helper (C3)
-- [ ] Grep for any remaining `\w+\.rs:\d+` references (verification)
+- [x] Grep for any remaining `\w+\.rs:\d+` references (verification) — 10be323
 - [ ] Run `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`
 
 ## Tasks
@@ -81,11 +81,11 @@ Some(_) => { /* error: invalid indicator */ }
 
 This eliminates the nested `ch == '0'` check inside the `is_ascii_digit()` branch. The `chomp.is_some()` duplicate-chomp checks remain in each arm — do not extract them (each arm returns a different error position).
 
-- [ ] Rewrite 3 stale line-number comments (C1)
-- [ ] Replace 5 for-loops with `repeat_n` (C4a)
-- [ ] Verify no remaining `\w+\.rs:\d+` patterns in parser crate
-- [ ] Refactor `parse_block_header` `Some(ch) =>` arm to direct pattern matching (C2)
-- [ ] `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`
+- [x] Rewrite 3 stale line-number comments (C1)
+- [x] Replace 5 for-loops with `repeat_n` (C4a)
+- [x] Verify no remaining `\w+\.rs:\d+` patterns in parser crate
+- [x] Refactor `parse_block_header` `Some(ch) =>` arm to direct pattern matching (C2)
+- [x] `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`
 
 ### Task 2: Extract `PlainScalarKind` enum and `classify_plain_scalar`
 
