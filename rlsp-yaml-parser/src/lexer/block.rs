@@ -624,6 +624,8 @@ pub(super) fn apply_chomping(
 mod tests {
     use std::borrow::Cow;
 
+    use rstest::rstest;
+
     use super::*;
     use crate::event::Chomp;
 
@@ -671,25 +673,13 @@ mod tests {
     // Group H-A: Header parsing — happy path
     // -----------------------------------------------------------------------
 
-    // UT-LB-A1: `|` (no indicators) → Clip, auto-detect indent
-    #[test]
-    fn literal_header_no_indicators_yields_clip() {
-        let (_, chomp) = lit_ok("|\n  hello\n");
-        assert_eq!(chomp, Chomp::Clip);
-    }
-
-    // UT-LB-A2: `|-` → Strip
-    #[test]
-    fn literal_header_minus_yields_strip() {
-        let (_, chomp) = lit_ok("|-\n  hello\n");
-        assert_eq!(chomp, Chomp::Strip);
-    }
-
-    // UT-LB-A3: `|+` → Keep
-    #[test]
-    fn literal_header_plus_yields_keep() {
-        let (_, chomp) = lit_ok("|+\n  hello\n");
-        assert_eq!(chomp, Chomp::Keep);
+    #[rstest]
+    #[case::no_indicators_yields_clip("|\n  hello\n", Chomp::Clip)]
+    #[case::minus_yields_strip("|-\n  hello\n", Chomp::Strip)]
+    #[case::plus_yields_keep("|+\n  hello\n", Chomp::Keep)]
+    fn literal_header_chomp_only(#[case] input: &str, #[case] expected: Chomp) {
+        let (_, chomp) = lit_ok(input);
+        assert_eq!(chomp, expected);
     }
 
     // UT-LB-A4: `|2` → explicit indent 2 (relative to parent=0)
@@ -699,44 +689,24 @@ mod tests {
         assert_eq!(val, "hello\n");
     }
 
-    // UT-LB-A5: `|-2` → Strip + indent 2
-    #[test]
-    fn literal_header_minus_indent_2() {
-        let (val, chomp) = lit_ok("|-2\n  hello\n");
-        assert_eq!(chomp, Chomp::Strip);
-        assert_eq!(val, "hello");
-    }
-
-    // UT-LB-A6: `|2-` → same as |-2 (either order)
-    #[test]
-    fn literal_header_indent_2_then_minus() {
-        let (val, chomp) = lit_ok("|2-\n  hello\n");
-        assert_eq!(chomp, Chomp::Strip);
-        assert_eq!(val, "hello");
-    }
-
-    // UT-LB-A7: `|+2` → Keep + indent 2
-    #[test]
-    fn literal_header_plus_indent_2() {
-        let (val, chomp) = lit_ok("|+2\n  hello\n\n");
-        assert_eq!(chomp, Chomp::Keep);
-        assert_eq!(val, "hello\n\n");
-    }
-
-    // UT-LB-A8: `|2+` → same (either order)
-    #[test]
-    fn literal_header_indent_2_then_plus() {
-        let (val, chomp) = lit_ok("|2+\n  hello\n\n");
-        assert_eq!(chomp, Chomp::Keep);
-        assert_eq!(val, "hello\n\n");
-    }
-
-    // UT-LB-A9: `| # comment` → Clip (comment ignored)
-    #[test]
-    fn literal_header_with_comment_yields_clip() {
-        let (val, chomp) = lit_ok("| # this is a comment\n  hello\n");
-        assert_eq!(chomp, Chomp::Clip);
-        assert_eq!(val, "hello\n");
+    #[rstest]
+    #[case::minus_indent_2("|-2\n  hello\n", "hello", Chomp::Strip)]
+    #[case::indent_2_then_minus("|2-\n  hello\n", "hello", Chomp::Strip)]
+    #[case::plus_indent_2("|+2\n  hello\n\n", "hello\n\n", Chomp::Keep)]
+    #[case::indent_2_then_plus("|2+\n  hello\n\n", "hello\n\n", Chomp::Keep)]
+    #[case::with_comment_yields_clip("| # this is a comment\n  hello\n", "hello\n", Chomp::Clip)]
+    #[case::leading_spaces_before_pipe("  |\n    hello\n", "hello\n", Chomp::Clip)]
+    #[case::space_then_comment_gives_clip("|  # comment\n  hello\n", "hello\n", Chomp::Clip)]
+    #[case::explicit_indent_nine("|9\n         foo\n", "foo\n", Chomp::Clip)]
+    #[case::empty_scalar_clip_yields_empty("|\n", "", Chomp::Clip)]
+    fn literal_header_val_and_chomp(
+        #[case] input: &str,
+        #[case] expected_val: &str,
+        #[case] expected_chomp: Chomp,
+    ) {
+        let (val, chomp) = lit_ok(input);
+        assert_eq!(val, expected_val);
+        assert_eq!(chomp, expected_chomp);
     }
 
     // UT-LB-A10: returns None for non-`|` input
@@ -751,107 +721,23 @@ mod tests {
         assert!(lit_none(""));
     }
 
-    // UT-LB-A12: `|` at leading whitespace — leading spaces before `|` are allowed
-    #[test]
-    fn literal_block_with_leading_spaces_before_pipe() {
-        let (val, chomp) = lit_ok("  |\n    hello\n");
-        assert_eq!(chomp, Chomp::Clip);
-        assert_eq!(val, "hello\n");
-    }
-
-    // UT-LB-A13: `|  # comment` (spaces then comment) → Clip
-    #[test]
-    fn header_space_then_comment_gives_clip() {
-        let (val, chomp) = lit_ok("|  # comment\n  hello\n");
-        assert_eq!(chomp, Chomp::Clip);
-        assert_eq!(val, "hello\n");
-    }
-
-    // UT-LB-A14: `|9` → explicit indent 9
-    #[test]
-    fn header_explicit_indent_nine() {
-        let (val, chomp) = lit_ok("|9\n         foo\n");
-        assert_eq!(chomp, Chomp::Clip);
-        assert_eq!(val, "foo\n");
-    }
-
     // -----------------------------------------------------------------------
     // Group H-B: Header parsing — errors
     // -----------------------------------------------------------------------
 
-    // UT-LB-B1: `|!` → error (invalid indicator)
-    #[test]
-    fn literal_header_invalid_indicator_exclamation_is_error() {
-        let e = lit_err("|!\n  hello\n");
+    #[rstest]
+    #[case::invalid_indicator_exclamation("|!\n  hello\n", "invalid")]
+    #[case::zero_indent_forbidden("|0\n  hello\n", "'0'")]
+    #[case::duplicate_indent_digit("|99\n  hello\n", "duplicate")]
+    #[case::duplicate_chomp_keep("|++\n  hello\n", "duplicate")]
+    #[case::duplicate_chomp_strip("|--\n  hello\n", "duplicate")]
+    #[case::mixed_chomp_indicators("|+-\n  hello\n", "duplicate")]
+    #[case::invalid_char_after_digit("|2!\n  hello\n", "invalid")]
+    fn literal_header_errors(#[case] input: &str, #[case] expected_substring: &str) {
+        let e = lit_err(input);
         assert!(
-            e.message.contains("invalid") || e.message.contains("indicator"),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B2: `|0` → error (zero is forbidden as indent digit)
-    #[test]
-    fn literal_header_zero_indent_is_error() {
-        let e = lit_err("|0\n  hello\n");
-        assert!(
-            e.message.contains("indent") || e.message.contains('0'),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B3: `|99` → error (duplicate indent digit)
-    #[test]
-    fn literal_header_duplicate_indent_digit_is_error() {
-        let e = lit_err("|99\n  hello\n");
-        assert!(
-            e.message.contains("duplicate") || e.message.contains("indent"),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B4: `|++` → error (duplicate chomp indicator)
-    #[test]
-    fn literal_header_duplicate_chomp_indicator_is_error() {
-        let e = lit_err("|++\n  hello\n");
-        assert!(
-            e.message.contains("duplicate") || e.message.contains("chomp"),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B5: `|--` → error (duplicate chomp indicator)
-    #[test]
-    fn literal_header_duplicate_strip_indicator_is_error() {
-        let e = lit_err("|--\n  hello\n");
-        assert!(
-            e.message.contains("duplicate") || e.message.contains("chomp"),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B6: `|+-` → error (two different chomp indicators)
-    #[test]
-    fn header_two_chomp_indicators_mixed_is_error() {
-        let e = lit_err("|+-\n  hello\n");
-        assert!(
-            e.message.contains("duplicate") || e.message.contains("chomp"),
-            "unexpected error: {}",
-            e.message
-        );
-    }
-
-    // UT-LB-B7: `|2!` → error (invalid char after digit)
-    #[test]
-    fn header_invalid_char_after_digit_is_error() {
-        let e = lit_err("|2!\n  hello\n");
-        assert!(
-            e.message.contains("invalid") || e.message.contains("indicator"),
-            "unexpected error: {}",
+            e.message.contains(expected_substring),
+            "expected message containing {expected_substring:?}, got: {}",
             e.message
         );
     }
@@ -860,80 +746,25 @@ mod tests {
     // Group H-C: Clip content collection
     // -----------------------------------------------------------------------
 
-    // UT-LB-C1: single-line content
-    #[test]
-    fn literal_single_line_content() {
-        let (val, _) = lit_ok("|\n  hello\n");
-        assert_eq!(val, "hello\n");
-    }
-
-    // UT-LB-C2: multi-line content
-    #[test]
-    fn literal_multi_line_content() {
-        let (val, _) = lit_ok("|\n  foo\n  bar\n");
-        assert_eq!(val, "foo\nbar\n");
-    }
-
-    // UT-LB-C3: blank line between content lines
-    #[test]
-    fn literal_blank_line_in_content() {
-        let (val, _) = lit_ok("|\n  foo\n\n  bar\n");
-        assert_eq!(val, "foo\n\nbar\n");
-    }
-
-    // UT-LB-C4: leading blank before first content (blank becomes \n per spec)
-    #[test]
-    fn leading_blank_before_first_content_is_included_clip() {
-        // Per YAML 1.2 §8.1.2, blank lines before the first content line
-        // are included as newlines via l-empty.  A completely empty line
-        // has s-indent(0) which satisfies l-empty(n,BLOCK-IN) for any n>0.
-        let (val, _) = lit_ok("|\n\n  foo\n");
-        assert_eq!(val, "\nfoo\n");
-    }
-
-    // UT-LB-C5: empty scalar (header only, no content)
-    #[test]
-    fn literal_empty_scalar_clip_yields_empty_string() {
-        let (val, chomp) = lit_ok("|\n");
-        assert_eq!(chomp, Chomp::Clip);
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-C4b: two interior blank lines preserved
-    #[test]
-    fn two_interior_blank_lines_preserved() {
-        let (val, _) = lit_ok("|\n  foo\n\n\n  bar\n");
-        assert_eq!(val, "foo\n\n\nbar\n");
-    }
-
-    // UT-LB-C5b: empty scalar with trailing blank still yields empty string
-    #[test]
-    fn empty_scalar_with_trailing_blank_still_empty() {
-        let (val, _) = lit_ok("|\n\n");
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-C6: trailing blank line with Clip → single newline kept
-    #[test]
-    fn literal_trailing_blank_with_clip_keeps_single_newline() {
-        let (val, _) = lit_ok("|\n  foo\n\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-C6b: two trailing blanks with Clip → still single newline
-    #[test]
-    fn two_trailing_blanks_dropped_clip() {
-        let (val, _) = lit_ok("|\n  foo\n\n\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-C7: content at higher indent → extra spaces in value
-    #[test]
-    fn literal_content_with_extra_indent_preserves_spaces() {
-        // "|\n   foo\n" with content_indent=3: value is "foo\n"
-        // "|\n  foo\n   bar\n" with content_indent=2: bar has 1 extra space
-        let (val, _) = lit_ok("|\n  foo\n   bar\n");
-        assert_eq!(val, "foo\n bar\n");
+    #[rstest]
+    #[case::single_line("|\n  hello\n", "hello\n")]
+    #[case::multi_line("|\n  foo\n  bar\n", "foo\nbar\n")]
+    #[case::blank_line_in_content("|\n  foo\n\n  bar\n", "foo\n\nbar\n")]
+    // Per YAML 1.2 §8.1.2, blank lines before the first content line
+    // are included as newlines via l-empty.  A completely empty line
+    // has s-indent(0) which satisfies l-empty(n,BLOCK-IN) for any n>0.
+    #[case::leading_blank_before_first_content("|\n\n  foo\n", "\nfoo\n")]
+    #[case::two_interior_blank_lines_preserved("|\n  foo\n\n\n  bar\n", "foo\n\n\nbar\n")]
+    #[case::empty_scalar_with_trailing_blank_still_empty("|\n\n", "")]
+    #[case::trailing_blank_clips_to_one("|\n  foo\n\n", "foo\n")]
+    #[case::two_trailing_blanks_dropped("|\n  foo\n\n\n", "foo\n")]
+    // "|\n  foo\n   bar\n" with content_indent=2: bar has 1 extra space
+    #[case::extra_indent_preserves_spaces("|\n  foo\n   bar\n", "foo\n bar\n")]
+    // "|\n  foo" — no final newline; no b-as-line-feed, so value is "foo".
+    #[case::eof_without_trailing_newline("|\n  foo", "foo")]
+    fn literal_clip_content_val(#[case] input: &str, #[case] expected_val: &str) {
+        let (val, _) = lit_ok(input);
+        assert_eq!(val, expected_val);
     }
 
     // UT-LB-C8: content terminated by dedent
@@ -950,146 +781,53 @@ mod tests {
         assert_eq!(remaining, Some("key: val"));
     }
 
-    // UT-LB-C9: EOF without trailing newline (no physical newline on last line)
-    #[test]
-    fn literal_eof_without_trailing_newline() {
-        // "|\n  foo" — no final newline; no b-as-line-feed, so value is "foo".
-        let (val, _) = lit_ok("|\n  foo");
-        assert_eq!(val, "foo");
-    }
-
     // -----------------------------------------------------------------------
     // Group H-D: Strip and Keep chomping
     // -----------------------------------------------------------------------
 
-    // UT-LB-D1: Strip — no trailing newline
-    #[test]
-    fn literal_strip_no_trailing_newline() {
-        let (val, chomp) = lit_ok("|-\n  foo\n");
-        assert_eq!(chomp, Chomp::Strip);
-        assert_eq!(val, "foo");
+    #[rstest]
+    #[case::strip_no_trailing_newline("|-\n  foo\n", "foo", Chomp::Strip)]
+    #[case::strip_empty_scalar("|-\n", "", Chomp::Strip)]
+    #[case::keep_all_trailing_newlines("|+\n  foo\n\n\n", "foo\n\n\n", Chomp::Keep)]
+    #[case::keep_empty_scalar("|+\n", "", Chomp::Keep)]
+    fn literal_chomp_val_and_chomp(
+        #[case] input: &str,
+        #[case] expected_val: &str,
+        #[case] expected_chomp: Chomp,
+    ) {
+        let (val, chomp) = lit_ok(input);
+        assert_eq!(val, expected_val);
+        assert_eq!(chomp, expected_chomp);
     }
 
-    // UT-LB-D2: Strip — trailing blank lines removed
-    #[test]
-    fn literal_strip_with_trailing_blanks_removes_all() {
-        let (val, _) = lit_ok("|-\n  foo\n\n\n");
-        assert_eq!(val, "foo");
-    }
-
-    // UT-LB-D3: Strip — empty scalar
-    #[test]
-    fn literal_strip_empty_scalar_yields_empty_string() {
-        let (val, chomp) = lit_ok("|-\n");
-        assert_eq!(chomp, Chomp::Strip);
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-D4: Keep — all trailing newlines kept
-    #[test]
-    fn literal_keep_all_trailing_newlines() {
-        let (val, chomp) = lit_ok("|+\n  foo\n\n\n");
-        assert_eq!(chomp, Chomp::Keep);
-        assert_eq!(val, "foo\n\n\n");
-    }
-
-    // UT-LB-D5: Keep — single trailing newline
-    #[test]
-    fn literal_keep_single_trailing_newline() {
-        let (val, _) = lit_ok("|+\n  foo\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-D6: Keep — empty scalar
-    #[test]
-    fn literal_keep_empty_scalar_yields_empty_string() {
-        let (val, chomp) = lit_ok("|+\n");
-        assert_eq!(chomp, Chomp::Keep);
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-D7: Clip — single content line, no trailing blank
-    #[test]
-    fn literal_clip_no_trailing_blank_yields_one_newline() {
-        let (val, _) = lit_ok("|\n  foo\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-D8: Clip — multiple trailing blanks → only one newline kept
-    #[test]
-    fn literal_clip_multiple_trailing_blanks_clips_to_one() {
-        let (val, _) = lit_ok("|\n  foo\n\n\n\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-D9: Strip with multi-line content
-    #[test]
-    fn literal_strip_multiline_removes_last_newline() {
-        let (val, _) = lit_ok("|-\n  foo\n  bar\n");
-        assert_eq!(val, "foo\nbar");
-    }
-
-    // UT-LB-D10: Keep with multi-line content and multiple trailing blanks
-    #[test]
-    fn literal_keep_multiline_preserves_all_trailing() {
-        let (val, _) = lit_ok("|+\n  foo\n  bar\n\n");
-        assert_eq!(val, "foo\nbar\n\n");
-    }
-
-    // UT-LB-D11: Keep — only blank lines (no content) → newlines from blanks
-    #[test]
-    fn keep_only_blanks_produces_newlines() {
-        let (val, _) = lit_ok("|+\n\n\n");
-        assert_eq!(val, "\n\n");
-    }
-
-    // UT-LB-D12: Strip — only blank lines → empty string
-    #[test]
-    fn strip_only_blanks_produces_empty_string() {
-        let (val, _) = lit_ok("|-\n\n\n");
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-D13: Clip — only blank lines → empty string
-    #[test]
-    fn clip_only_blanks_produces_empty_string() {
-        let (val, _) = lit_ok("|\n\n\n");
-        assert_eq!(val, "");
+    #[rstest]
+    #[case::strip_trailing_blanks_removes_all("|-\n  foo\n\n\n", "foo")]
+    #[case::keep_single_trailing_newline("|+\n  foo\n", "foo\n")]
+    #[case::clip_no_trailing_blank("|\n  foo\n", "foo\n")]
+    #[case::clip_multiple_trailing_blanks("|\n  foo\n\n\n\n", "foo\n")]
+    #[case::strip_multiline_removes_last_newline("|-\n  foo\n  bar\n", "foo\nbar")]
+    #[case::keep_multiline_preserves_all_trailing("|+\n  foo\n  bar\n\n", "foo\nbar\n\n")]
+    #[case::keep_only_blanks_produces_newlines("|+\n\n\n", "\n\n")]
+    #[case::strip_only_blanks_produces_empty("|-\n\n\n", "")]
+    #[case::clip_only_blanks_produces_empty("|\n\n\n", "")]
+    fn literal_chomp_val_only(#[case] input: &str, #[case] expected_val: &str) {
+        let (val, _) = lit_ok(input);
+        assert_eq!(val, expected_val);
     }
 
     // -----------------------------------------------------------------------
     // Group H-E: Explicit indent indicator
     // -----------------------------------------------------------------------
 
-    // UT-LB-E1: explicit indent 2 with parent=0
-    #[test]
-    fn literal_explicit_indent_2_parent_0() {
-        let (val, _) = lit_ok("|2\n  foo\n");
-        assert_eq!(val, "foo\n");
-    }
-
-    // UT-LB-E2: explicit indent with more indented line → extra spaces preserved
-    #[test]
-    fn literal_explicit_indent_2_extra_spaces_preserved() {
-        let (val, _) = lit_ok("|2\n   foo\n");
-        assert_eq!(val, " foo\n");
-    }
-
-    // UT-LB-E3: explicit indent 2 with parent=0, content less indented → no content
-    // (foo has 0 spaces < 2: content_indent=0+2=2, but foo only has 0 spaces)
-    // Actually "foo" without leading spaces is indent=0 < 2 — scalar is empty.
-    #[test]
-    fn literal_explicit_indent_content_insufficient_indent_yields_empty() {
-        let (val, _) = lit_ok("|4\n  foo\n");
-        // content_indent=4, foo has indent=2 < 4 → empty scalar
-        assert_eq!(val, "");
-    }
-
-    // UT-LB-E4: explicit indent 1 with parent=0
-    #[test]
-    fn literal_explicit_indent_1() {
-        let (val, _) = lit_ok("|1\n foo\n");
-        assert_eq!(val, "foo\n");
+    #[rstest]
+    #[case::indent_2_parent_0("|2\n  foo\n", "foo\n")]
+    #[case::indent_2_extra_spaces_preserved("|2\n   foo\n", " foo\n")]
+    // content_indent=4, foo has indent=2 < 4 → empty scalar
+    #[case::indent_content_insufficient_yields_empty("|4\n  foo\n", "")]
+    #[case::indent_1_parent_0("|1\n foo\n", "foo\n")]
+    fn literal_explicit_indent_val(#[case] input: &str, #[case] expected_val: &str) {
+        let (val, _) = lit_ok(input);
+        assert_eq!(val, expected_val);
     }
 
     // UT-LB-E5: explicit indent 2 relative to parent_indent=2 → content_indent=4
@@ -1193,19 +931,13 @@ mod tests {
     // Group H-H: UTF-8 and special content
     // -----------------------------------------------------------------------
 
-    // UT-LB-H1: multi-byte UTF-8 content
-    #[test]
-    fn literal_multibyte_utf8_content() {
-        let (val, _) = lit_ok("|\n  héllo\n");
-        assert_eq!(val, "héllo\n");
-    }
-
-    // UT-LB-H2: content with embedded null byte (valid in Rust strings)
-    #[test]
-    fn literal_content_with_backslash_is_preserved_verbatim() {
-        // Backslashes are not escape sequences in literal block scalars.
-        let (val, _) = lit_ok("|\n  foo\\bar\n");
-        assert_eq!(val, "foo\\bar\n");
+    #[rstest]
+    #[case::multibyte_utf8("|\n  héllo\n", "héllo\n")]
+    // Backslashes are not escape sequences in literal block scalars.
+    #[case::backslash_preserved_verbatim("|\n  foo\\bar\n", "foo\\bar\n")]
+    fn literal_special_content_val(#[case] input: &str, #[case] expected_val: &str) {
+        let (val, _) = lit_ok(input);
+        assert_eq!(val, expected_val);
     }
 
     // UT-LB-H3: result is always Cow::Owned
