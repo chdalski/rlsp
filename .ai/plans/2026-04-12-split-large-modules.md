@@ -138,8 +138,8 @@ maintain the public API.
 ## Steps
 
 - [x] Split `smoke.rs` into `tests/smoke/` directory (8809c48)
-- [ ] Split `schema_validation.rs` into
-      `src/schema_validation/` directory
+- [x] Split `schema_validation.rs` into
+      `src/schema_validation/` directory (dcdd239)
 - [ ] Split `schema.rs` into `src/schema/` directory
 - [ ] Verify full test suite and clippy pass after each
 
@@ -209,14 +209,14 @@ block into a `#[cfg(test)] mod tests` block inside
 "Format validation" group header (~line 4731) and runs
 through the format-related assertions.
 
-- [ ] `schema_validation/mod.rs` with `mod formats;`
-- [ ] `schema_validation/formats.rs` with 23 validators
-- [ ] `validate_format` updated to call `formats::*`
-- [ ] Format-related tests moved to `formats.rs`
-- [ ] Original `schema_validation.rs` deleted
-- [ ] `cargo test -p rlsp-yaml` passes
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo fmt --check` — clean
+- [x] `schema_validation/mod.rs` with `mod formats;`
+- [x] `schema_validation/formats.rs` with 23 validators
+- [x] `validate_format` updated to call `formats::*`
+- [x] Format-related tests moved to `formats.rs`
+- [x] Original `schema_validation.rs` deleted
+- [x] `cargo test -p rlsp-yaml` passes
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo fmt --check` — clean
 
 ### Task 3: Extract association functions from schema.rs
 
