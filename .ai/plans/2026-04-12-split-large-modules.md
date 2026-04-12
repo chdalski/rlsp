@@ -137,7 +137,7 @@ maintain the public API.
 
 ## Steps
 
-- [ ] Split `smoke.rs` into `tests/smoke/` directory
+- [x] Split `smoke.rs` into `tests/smoke/` directory (8809c48)
 - [ ] Split `schema_validation.rs` into
       `src/schema_validation/` directory
 - [ ] Split `schema.rs` into `src/schema/` directory
@@ -167,13 +167,13 @@ module-specific helpers in their respective files.
 
 Delete the original `smoke.rs`.
 
-- [ ] `mod.rs` with shared imports and 18 mod declarations
-- [ ] 18 submodule `.rs` files
-- [ ] Duplicate helpers removed from submodules
-- [ ] Original `smoke.rs` deleted
-- [ ] `cargo test --test smoke` passes (463 tests)
-- [ ] `cargo clippy --all-targets` — zero warnings
-- [ ] `cargo fmt --check` — clean
+- [x] `mod.rs` with shared imports and 18 mod declarations
+- [x] 18 submodule `.rs` files
+- [x] Duplicate helpers removed from submodules
+- [x] Original `smoke.rs` deleted
+- [x] `cargo test --test smoke` passes (547 tests)
+- [x] `cargo clippy --all-targets` — zero warnings
+- [x] `cargo fmt --check` — clean
 
 ### Task 2: Extract format validators from schema_validation.rs
 
