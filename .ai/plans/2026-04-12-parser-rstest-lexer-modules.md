@@ -81,7 +81,7 @@ in a `#[case]`.
 ## Steps
 
 - [x] Parameterize `src/lexer/plain.rs` tests (96f8df6)
-- [ ] Parameterize `src/lexer/quoted.rs` tests
+- [x] Parameterize `src/lexer/quoted.rs` tests (d563134)
 - [ ] Parameterize `src/lexer/block.rs` tests
 - [ ] Parameterize `src/lexer/comment.rs` + `src/lines.rs`
 - [ ] Parameterize `src/chars.rs` + `src/encoding.rs` +
@@ -167,18 +167,18 @@ to `#[rstest]` parameterized tests.
     tests. Some check specific message substrings — split
     by assertion: plain-error-exists vs message-contains.
 
-- [ ] Group single-quoted happy-path value-eq tests
-- [ ] Group single-quoted Cow allocation tests
-- [ ] Group single-quoted folding tests
-- [ ] Group single-quoted error tests
-- [ ] Group double-quoted happy-path value-eq tests
-- [ ] Group double-quoted escape value-eq tests
-- [ ] Group double-quoted escape error tests
-- [ ] Group double-quoted folding tests
-- [ ] Group double-quoted Cow allocation tests
-- [ ] Group double-quoted error + security tests
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Group single-quoted happy-path value-eq tests
+- [x] Group single-quoted Cow allocation tests
+- [x] Group single-quoted folding tests
+- [x] Group single-quoted error tests
+- [x] Group double-quoted happy-path value-eq tests
+- [x] Group double-quoted escape value-eq tests
+- [x] Group double-quoted escape error tests
+- [x] Group double-quoted folding tests
+- [x] Group double-quoted Cow allocation tests
+- [x] Group double-quoted error + security tests
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 3: Parameterize `src/lexer/block.rs`
 
