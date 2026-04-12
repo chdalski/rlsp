@@ -751,6 +751,8 @@ fn ensure_owned<'s>(owned: &'s mut Option<String>, prefix: &str) -> &'s mut Stri
 mod tests {
     use std::borrow::Cow;
 
+    use rstest::rstest;
+
     use super::{
         DoubleQuotedLine, DoubleQuotedValue, SingleQuotedScan, scan_double_quoted_line,
         scan_single_quoted_line,
@@ -975,121 +977,61 @@ mod tests {
             .unwrap_or_else(|e| unreachable!("unexpected error: {}", e.message))
     }
 
-    #[test]
-    fn dq_empty_body_closes_immediately() {
-        let result = dq_ok("\"");
-        assert!(matches!(
-            result,
-            DoubleQuotedLine::Closed {
-                value: DoubleQuotedValue::Borrowed(""),
-                tail: "",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn dq_plain_ascii_borrows_and_closes() {
-        let result = dq_ok("hello\"");
-        assert!(matches!(
-            result,
-            DoubleQuotedLine::Closed {
-                value: DoubleQuotedValue::Borrowed("hello"),
-                tail: "",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn dq_newline_escape_forces_owned() {
-        match dq_ok("a\\nb\"") {
+    #[rstest]
+    #[case::empty_body_borrows_empty("\"", "", "")]
+    #[case::plain_ascii_borrows_and_closes("hello\"", "hello", "")]
+    #[case::multibyte_no_escape_borrows("café\"", "café", "")]
+    #[case::tail_after_closing_quote_is_captured("hello\" world", "hello", " world")]
+    fn dq_line_closed_borrowed_cases(
+        #[case] input: &str,
+        #[case] expected_val: &str,
+        #[case] expected_tail: &str,
+    ) {
+        match dq_ok(input) {
             DoubleQuotedLine::Closed { value, tail, .. } => {
-                assert_eq!(value.into_string(), "a\nb");
-                assert_eq!(tail, "");
+                assert!(
+                    matches!(value, DoubleQuotedValue::Borrowed(_)),
+                    "expected Borrowed for {input:?}"
+                );
+                assert_eq!(value.into_string(), expected_val);
+                assert_eq!(tail, expected_tail);
             }
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed for {input:?}"),
         }
     }
 
-    #[test]
-    fn dq_unicode_escape_u4() {
-        match dq_ok("\\u00E9\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "é"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+    #[rstest]
+    #[case::newline_escape_forces_owned("a\\nb\"", "a\nb")]
+    #[case::unicode_escape_u4("\\u00E9\"", "é")]
+    #[case::unicode_escape_u8_supplementary("\\U0001F600\"", "😀")]
+    #[case::hex_escape_xff("\\xFF\"", "\u{FF}")]
+    #[case::multibyte_then_escape_accumulates_correctly("café\\n\"", "café\n")]
+    #[case::escape_then_multibyte_accumulates_correctly("\\ncafé\"", "\ncafé")]
+    #[case::null_byte_escape_is_allowed("\\0\"", "\0")]
+    fn dq_line_closed_escaped_value_cases(#[case] input: &str, #[case] expected: &str) {
+        match dq_ok(input) {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), expected),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed for {input:?}"),
         }
     }
 
-    #[test]
-    fn dq_unicode_escape_u8_supplementary() {
-        match dq_ok("\\U0001F600\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "😀"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
-        }
-    }
-
-    #[test]
-    fn dq_hex_escape_xff() {
-        match dq_ok("\\xFF\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\u{FF}"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
-        }
-    }
-
-    #[test]
-    fn dq_backslash_at_end_is_line_continuation() {
-        match dq_ok("text\\") {
+    #[rstest]
+    #[case::backslash_at_end_is_line_continuation("text\\", "text", true)]
+    #[case::no_delimiter_trims_trailing_whitespace("hello   ", "hello", false)]
+    fn dq_line_incomplete_cases(
+        #[case] input: &str,
+        #[case] expected_val: &str,
+        #[case] expected_continuation: bool,
+    ) {
+        match dq_ok(input) {
             DoubleQuotedLine::Incomplete {
                 value,
                 line_continuation,
             } => {
-                assert_eq!(value.into_string(), "text");
-                assert!(line_continuation);
+                assert_eq!(value.into_string(), expected_val);
+                assert_eq!(line_continuation, expected_continuation);
             }
-            DoubleQuotedLine::Closed { .. } => unreachable!("expected Incomplete"),
-        }
-    }
-
-    #[test]
-    fn dq_no_delimiter_trims_trailing_whitespace() {
-        match dq_ok("hello   ") {
-            DoubleQuotedLine::Incomplete {
-                value,
-                line_continuation,
-            } => {
-                assert_eq!(value.into_string(), "hello");
-                assert!(!line_continuation);
-            }
-            DoubleQuotedLine::Closed { .. } => unreachable!("expected Incomplete"),
-        }
-    }
-
-    #[test]
-    fn dq_multibyte_no_escape_borrows() {
-        let result = dq_ok("café\"");
-        assert!(matches!(
-            result,
-            DoubleQuotedLine::Closed {
-                value: DoubleQuotedValue::Borrowed("café"),
-                tail: "",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn dq_multibyte_then_escape_accumulates_correctly() {
-        match dq_ok("café\\n\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "café\n"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
-        }
-    }
-
-    #[test]
-    fn dq_escape_then_multibyte_accumulates_correctly() {
-        match dq_ok("\\ncafé\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\ncafé"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+            DoubleQuotedLine::Closed { .. } => unreachable!("expected Incomplete for {input:?}"),
         }
     }
 
@@ -1129,27 +1071,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn dq_tail_after_closing_quote_is_captured() {
-        let result = dq_ok("hello\" world");
-        assert!(matches!(
-            result,
-            DoubleQuotedLine::Closed {
-                value: DoubleQuotedValue::Borrowed("hello"),
-                tail: " world",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn dq_null_byte_escape_is_allowed() {
-        match dq_ok("\\0\"") {
-            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), "\0"),
-            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
-        }
-    }
-
     // =======================================================================
     // Group H — try_consume_single_quoted (Task 7)
     // =======================================================================
@@ -1158,115 +1079,51 @@ mod tests {
     // Group H-A — happy path
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn single_quoted_simple_word_returns_value() {
-        let (val, _) = sq("'hello'");
-        assert_eq!(val, "hello");
-    }
-
-    #[test]
-    fn single_quoted_empty_string_returns_empty() {
-        let (val, _) = sq("''");
-        assert_eq!(val, "");
-    }
-
-    #[test]
-    fn single_quoted_escaped_quote_in_middle() {
-        let (val, _) = sq("'it''s'");
-        assert_eq!(val, "it's");
-    }
-
-    #[test]
-    fn single_quoted_escaped_quote_at_start() {
-        let (val, _) = sq("'''leading'");
-        assert_eq!(val, "'leading");
-    }
-
-    #[test]
-    fn single_quoted_escaped_quote_at_end() {
-        let (val, _) = sq("'trailing'''");
-        assert_eq!(val, "trailing'");
-    }
-
-    #[test]
-    fn single_quoted_multiple_escaped_quotes() {
-        let (val, _) = sq("'a''b''c'");
-        assert_eq!(val, "a'b'c");
-    }
-
-    #[test]
-    fn single_quoted_multi_word() {
-        let (val, _) = sq("'hello world'");
-        assert_eq!(val, "hello world");
-    }
-
-    #[test]
-    fn single_quoted_multibyte_utf8() {
-        let (val, _) = sq("'日本語'");
-        assert_eq!(val, "日本語");
-    }
-
-    #[test]
-    fn single_quoted_special_chars_not_escaped() {
-        // Backslash is not special in single-quoted scalars.
-        let (val, _) = sq(r"'foo\nbar'");
-        assert_eq!(val, r"foo\nbar");
-    }
-
-    #[test]
-    fn single_quoted_double_quote_inside() {
-        let (val, _) = sq(r#"'say "hello"'"#);
-        assert_eq!(val, r#"say "hello""#);
+    #[rstest]
+    #[case::simple_word("'hello'", "hello")]
+    #[case::empty_string("''", "")]
+    #[case::escaped_quote_in_middle("'it''s'", "it's")]
+    #[case::escaped_quote_at_start("'''leading'", "'leading")]
+    #[case::escaped_quote_at_end("'trailing'''", "trailing'")]
+    #[case::multiple_escaped_quotes("'a''b''c'", "a'b'c")]
+    #[case::multi_word("'hello world'", "hello world")]
+    #[case::multibyte_utf8("'日本語'", "日本語")]
+    #[case::backslash_not_special("'foo\\nbar'", "foo\\nbar")]
+    #[case::double_quote_inside("'say \"hello\"'", "say \"hello\"")]
+    fn single_quoted_happy_path_cases(#[case] input: &str, #[case] expected: &str) {
+        let (val, _) = sq(input);
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
     // Group H-B — Cow allocation
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn single_quoted_single_line_no_escape_is_borrowed() {
-        let (val, _) = sq("'hello'");
-        assert!(matches!(val, Cow::Borrowed(_)), "must be Borrowed");
-    }
-
-    #[test]
-    fn single_quoted_with_escaped_quote_is_owned() {
-        let (val, _) = sq("'it''s'");
-        assert!(matches!(val, Cow::Owned(_)), "must be Owned");
-    }
-
-    #[test]
-    fn single_quoted_multiline_is_owned() {
-        let (val, _) = sq("'foo\n  bar'");
-        assert!(matches!(val, Cow::Owned(_)), "must be Owned");
+    #[rstest]
+    #[case::single_line_no_escape_is_borrowed("'hello'", true)]
+    #[case::with_escaped_quote_is_owned("'it''s'", false)]
+    #[case::multiline_is_owned("'foo\n  bar'", false)]
+    fn single_quoted_cow_allocation_cases(#[case] input: &str, #[case] expect_borrowed: bool) {
+        let (val, _) = sq(input);
+        if expect_borrowed {
+            assert!(matches!(val, Cow::Borrowed(_)), "must be Borrowed");
+        } else {
+            assert!(matches!(val, Cow::Owned(_)), "must be Owned");
+        }
     }
 
     // -----------------------------------------------------------------------
     // Group H-C — multi-line folding
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn single_quoted_multiline_single_break_folds_to_space() {
-        let (val, _) = sq("'foo\nbar'");
-        assert_eq!(val, "foo bar");
-    }
-
-    #[test]
-    fn single_quoted_multiline_leading_whitespace_stripped_on_continuation() {
-        let (val, _) = sq("'foo\n  bar'");
-        assert_eq!(val, "foo bar");
-    }
-
-    #[test]
-    fn single_quoted_multiline_blank_line_produces_newline() {
-        let (val, _) = sq("'foo\n\nbar'");
-        assert_eq!(val, "foo\nbar");
-    }
-
-    #[test]
-    fn single_quoted_multiline_two_blank_lines_produce_two_newlines() {
-        let (val, _) = sq("'foo\n\n\nbar'");
-        assert_eq!(val, "foo\n\nbar");
+    #[rstest]
+    #[case::single_break_folds_to_space("'foo\nbar'", "foo bar")]
+    #[case::leading_whitespace_stripped_on_continuation("'foo\n  bar'", "foo bar")]
+    #[case::blank_line_produces_newline("'foo\n\nbar'", "foo\nbar")]
+    #[case::two_blank_lines_produce_two_newlines("'foo\n\n\nbar'", "foo\n\nbar")]
+    fn single_quoted_multiline_folding_cases(#[case] input: &str, #[case] expected: &str) {
+        let (val, _) = sq(input);
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
@@ -1296,58 +1153,24 @@ mod tests {
     // Group I-E — happy path
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn double_quoted_simple_word_returns_value() {
-        let (val, _) = dq("\"hello\"");
-        assert_eq!(val, "hello");
-    }
-
-    #[test]
-    fn double_quoted_empty_string_returns_empty() {
-        let (val, _) = dq("\"\"");
-        assert_eq!(val, "");
-    }
-
-    #[test]
-    fn double_quoted_escape_newline() {
-        let (val, _) = dq("\"foo\\nbar\"");
-        assert_eq!(val, "foo\nbar");
-    }
-
-    #[test]
-    fn double_quoted_escape_tab() {
-        let (val, _) = dq("\"foo\\tbar\"");
-        assert_eq!(val, "foo\tbar");
-    }
-
-    #[test]
-    fn double_quoted_escape_backslash() {
-        let (val, _) = dq("\"foo\\\\bar\"");
-        assert_eq!(val, "foo\\bar");
-    }
-
-    #[test]
-    fn double_quoted_escape_double_quote() {
-        let (val, _) = dq("\"say \\\"hi\\\"\"");
-        assert_eq!(val, "say \"hi\"");
+    #[rstest]
+    #[case::simple_word("\"hello\"", "hello")]
+    #[case::empty_string("\"\"", "")]
+    #[case::escape_newline("\"foo\\nbar\"", "foo\nbar")]
+    #[case::escape_tab("\"foo\\tbar\"", "foo\tbar")]
+    #[case::escape_backslash("\"foo\\\\bar\"", "foo\\bar")]
+    #[case::escape_double_quote("\"say \\\"hi\\\"\"", "say \"hi\"")]
+    #[case::escape_slash("\"foo\\/bar\"", "foo/bar")]
+    #[case::escape_space("\"foo\\ bar\"", "foo bar")]
+    fn double_quoted_happy_path_cases(#[case] input: &str, #[case] expected: &str) {
+        let (val, _) = dq(input);
+        assert_eq!(val, expected);
     }
 
     #[test]
     fn double_quoted_escape_null() {
         let (val, _) = dq("\"\\0\"");
         assert_eq!(val.as_bytes(), b"\x00");
-    }
-
-    #[test]
-    fn double_quoted_escape_slash() {
-        let (val, _) = dq("\"foo\\/bar\"");
-        assert_eq!(val, "foo/bar");
-    }
-
-    #[test]
-    fn double_quoted_escape_space() {
-        let (val, _) = dq("\"foo\\ bar\"");
-        assert_eq!(val, "foo bar");
     }
 
     #[test]
@@ -1381,139 +1204,61 @@ mod tests {
     // Group I-F — hex/unicode escapes
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn double_quoted_hex_escape_2digit_correct() {
-        let (val, _) = dq("\"\\x41\"");
-        assert_eq!(val, "A");
+    #[rstest]
+    #[case::hex_escape_2digit_correct("\"\\x41\"", "A")]
+    #[case::hex_escape_2digit_lowercase("\"\\x61\"", "a")]
+    #[case::unicode_4digit_correct("\"\\u0041\"", "A")]
+    #[case::unicode_4digit_non_ascii("\"\\u00E9\"", "é")]
+    #[case::unicode_8digit_basic("\"\\U00000041\"", "A")]
+    #[case::unicode_8digit_supplementary("\"\\U0001F600\"", "😀")]
+    fn double_quoted_hex_unicode_success_cases(#[case] input: &str, #[case] expected: &str) {
+        let (val, _) = dq(input);
+        assert_eq!(val, expected);
     }
 
-    #[test]
-    fn double_quoted_hex_escape_2digit_lowercase() {
-        let (val, _) = dq("\"\\x61\"");
-        assert_eq!(val, "a");
-    }
-
-    #[test]
-    fn double_quoted_unicode_4digit_correct() {
-        let (val, _) = dq("\"\\u0041\"");
-        assert_eq!(val, "A");
-    }
-
-    #[test]
-    fn double_quoted_unicode_4digit_non_ascii() {
-        let (val, _) = dq("\"\\u00E9\"");
-        assert_eq!(val, "é");
-    }
-
-    #[test]
-    fn double_quoted_unicode_8digit_basic() {
-        let (val, _) = dq("\"\\U00000041\"");
-        assert_eq!(val, "A");
-    }
-
-    #[test]
-    fn double_quoted_unicode_8digit_supplementary() {
-        let (val, _) = dq("\"\\U0001F600\"");
-        assert_eq!(val, "😀");
-    }
-
-    #[test]
-    fn double_quoted_hex_invalid_digits_returns_err() {
-        let _ = dq_err("\"\\xGG\"");
-    }
-
-    #[test]
-    fn double_quoted_hex_truncated_returns_err() {
-        // Only one hex digit before closing quote.
-        let _ = dq_err("\"\\xA\"");
-    }
-
-    #[test]
-    fn double_quoted_unicode_4digit_truncated_returns_err() {
-        let _ = dq_err("\"\\u004\"");
-    }
-
-    #[test]
-    fn double_quoted_unicode_surrogate_returns_err() {
-        let _ = dq_err("\"\\uD800\"");
-    }
-
-    #[test]
-    fn double_quoted_unicode_surrogate_range_high_returns_err() {
-        let _ = dq_err("\"\\uDFFF\"");
-    }
-
-    #[test]
-    fn double_quoted_unicode_8digit_out_of_range_returns_err() {
-        let _ = dq_err("\"\\U00110000\"");
-    }
-
-    #[test]
-    fn double_quoted_unknown_escape_code_returns_err() {
-        let _ = dq_err("\"\\q\"");
+    #[rstest]
+    #[case::hex_invalid_digits("\"\\xGG\"")]
+    #[case::hex_truncated("\"\\xA\"")]
+    #[case::unicode_4digit_truncated("\"\\u004\"")]
+    #[case::unicode_surrogate_low("\"\\uD800\"")]
+    #[case::unicode_surrogate_high("\"\\uDFFF\"")]
+    #[case::unicode_8digit_out_of_range("\"\\U00110000\"")]
+    #[case::unknown_escape_code("\"\\q\"")]
+    fn double_quoted_hex_unicode_error_cases(#[case] input: &str) {
+        let _ = dq_err(input);
     }
 
     // -----------------------------------------------------------------------
     // Group I-G — line continuation and folding
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn double_quoted_backslash_newline_suppresses_break() {
-        // `\` as last char of line → line continuation, no separator.
-        let (val, _) = dq("\"foo\\\nbar\"");
-        assert_eq!(val, "foobar");
-    }
-
-    #[test]
-    fn double_quoted_backslash_newline_strips_leading_whitespace_on_next_line() {
-        let (val, _) = dq("\"foo\\\n   bar\"");
-        assert_eq!(val, "foobar");
-    }
-
-    #[test]
-    fn double_quoted_real_newline_folds_to_space() {
-        let (val, _) = dq("\"foo\nbar\"");
-        assert_eq!(val, "foo bar");
-    }
-
-    #[test]
-    fn double_quoted_real_newline_with_leading_whitespace_on_continuation() {
-        let (val, _) = dq("\"foo\n  bar\"");
-        assert_eq!(val, "foo bar");
-    }
-
-    #[test]
-    fn double_quoted_blank_line_in_multiline_produces_newline() {
-        let (val, _) = dq("\"foo\n\nbar\"");
-        assert_eq!(val, "foo\nbar");
-    }
-
-    #[test]
-    fn double_quoted_two_blank_lines_produce_two_newlines() {
-        let (val, _) = dq("\"foo\n\n\nbar\"");
-        assert_eq!(val, "foo\n\nbar");
+    #[rstest]
+    #[case::backslash_newline_suppresses_break("\"foo\\\nbar\"", "foobar")]
+    #[case::backslash_newline_strips_leading_whitespace_on_next_line("\"foo\\\n   bar\"", "foobar")]
+    #[case::real_newline_folds_to_space("\"foo\nbar\"", "foo bar")]
+    #[case::real_newline_with_leading_whitespace_on_continuation("\"foo\n  bar\"", "foo bar")]
+    #[case::blank_line_in_multiline_produces_newline("\"foo\n\nbar\"", "foo\nbar")]
+    #[case::two_blank_lines_produce_two_newlines("\"foo\n\n\nbar\"", "foo\n\nbar")]
+    fn double_quoted_line_folding_cases(#[case] input: &str, #[case] expected: &str) {
+        let (val, _) = dq(input);
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
     // Group I-H — Cow allocation
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn double_quoted_single_line_no_escape_is_borrowed() {
-        let (val, _) = dq("\"hello\"");
-        assert!(matches!(val, Cow::Borrowed(_)), "must be Borrowed");
-    }
-
-    #[test]
-    fn double_quoted_with_escape_is_owned() {
-        let (val, _) = dq("\"\\n\"");
-        assert!(matches!(val, Cow::Owned(_)), "must be Owned");
-    }
-
-    #[test]
-    fn double_quoted_multiline_is_owned() {
-        let (val, _) = dq("\"foo\nbar\"");
-        assert!(matches!(val, Cow::Owned(_)), "must be Owned");
+    #[rstest]
+    #[case::single_line_no_escape_is_borrowed("\"hello\"", true)]
+    #[case::with_escape_is_owned("\"\\n\"", false)]
+    #[case::multiline_is_owned("\"foo\nbar\"", false)]
+    fn double_quoted_cow_allocation_cases(#[case] input: &str, #[case] expect_borrowed: bool) {
+        let (val, _) = dq(input);
+        if expect_borrowed {
+            assert!(matches!(val, Cow::Borrowed(_)), "must be Borrowed");
+        } else {
+            assert!(matches!(val, Cow::Owned(_)), "must be Owned");
+        }
     }
 
     // -----------------------------------------------------------------------
