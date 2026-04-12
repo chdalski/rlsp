@@ -125,29 +125,26 @@ fn parse_rule(rest: &str) -> SuppressionRule {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     // ── Section 1: disable-next-line with specific codes ──────────────────────
 
-    #[test]
-    fn disable_next_line_suppresses_specified_code_on_next_line() {
+    /// All three cases use the same input text; each case checks a different
+    /// (line, code, expected) property of the same parsed map.
+    #[rstest]
+    #[case::suppresses_specified_code_on_next_line(1, "yaml-schema", true)]
+    #[case::does_not_suppress_unlisted_code_on_next_line(1, "other-code", false)]
+    #[case::does_not_suppress_the_comment_line_itself(0, "yaml-schema", false)]
+    fn disable_next_line_with_specific_code(
+        #[case] line: u32,
+        #[case] code: &str,
+        #[case] expected: bool,
+    ) {
         let text = "# rlsp-yaml-disable-next-line yaml-schema\nkey: value\n";
         let map = build_suppression_map(text);
-        assert!(map.is_suppressed(1, "yaml-schema"));
-    }
-
-    #[test]
-    fn disable_next_line_does_not_suppress_unlisted_code_on_next_line() {
-        let text = "# rlsp-yaml-disable-next-line yaml-schema\nkey: value\n";
-        let map = build_suppression_map(text);
-        assert!(!map.is_suppressed(1, "other-code"));
-    }
-
-    #[test]
-    fn disable_next_line_does_not_suppress_the_comment_line_itself() {
-        let text = "# rlsp-yaml-disable-next-line yaml-schema\nkey: value\n";
-        let map = build_suppression_map(text);
-        assert!(!map.is_suppressed(0, "yaml-schema"));
+        assert_eq!(map.is_suppressed(line, code), expected);
     }
 
     #[test]
@@ -279,10 +276,35 @@ mod tests {
 
     // ── Section 6: Ignored / unrecognised input ───────────────────────────────
 
-    #[test]
-    fn empty_input_returns_map_with_no_suppressions() {
-        let map = build_suppression_map("");
-        assert!(!map.is_suppressed(0, "any-code"));
+    #[rstest]
+    #[case::empty_input("", 0, "any-code")]
+    #[case::unrecognized_keyword_line_0(
+        "# rlsp-yaml-disable yaml-schema\nkey: value\n",
+        0,
+        "yaml-schema"
+    )]
+    #[case::unrecognized_keyword_line_1(
+        "# rlsp-yaml-disable yaml-schema\nkey: value\n",
+        1,
+        "yaml-schema"
+    )]
+    #[case::wrong_prefix(
+        "# yaml-language-server: disable-next-line yaml-schema\nkey: value\n",
+        1,
+        "yaml-schema"
+    )]
+    #[case::non_comment_line(
+        "rlsp-yaml-disable-next-line yaml-schema\nkey: value\n",
+        1,
+        "yaml-schema"
+    )]
+    fn ignored_input_produces_no_suppressions(
+        #[case] text: &str,
+        #[case] line: u32,
+        #[case] code: &str,
+    ) {
+        let map = build_suppression_map(text);
+        assert!(!map.is_suppressed(line, code));
     }
 
     #[test]
@@ -291,29 +313,6 @@ mod tests {
         let map = build_suppression_map(text);
         assert!(!map.is_suppressed(0, "any-code"));
         assert!(!map.is_suppressed(1, "any-code"));
-    }
-
-    #[test]
-    fn unrecognized_comment_keyword_is_ignored() {
-        // Missing `-next-line` or `-file` suffix.
-        let text = "# rlsp-yaml-disable yaml-schema\nkey: value\n";
-        let map = build_suppression_map(text);
-        assert!(!map.is_suppressed(0, "yaml-schema"));
-        assert!(!map.is_suppressed(1, "yaml-schema"));
-    }
-
-    #[test]
-    fn wrong_prefix_is_ignored() {
-        let text = "# yaml-language-server: disable-next-line yaml-schema\nkey: value\n";
-        let map = build_suppression_map(text);
-        assert!(!map.is_suppressed(1, "yaml-schema"));
-    }
-
-    #[test]
-    fn non_comment_line_is_ignored() {
-        let text = "rlsp-yaml-disable-next-line yaml-schema\nkey: value\n";
-        let map = build_suppression_map(text);
-        assert!(!map.is_suppressed(1, "yaml-schema"));
     }
 
     // ── Section 7: Interaction between disable-file and disable-next-line ─────

@@ -31,6 +31,7 @@ data-encoding = "2.9"
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 futures = "0.3"
+rstest = "0.26"
 tiny_http = "0.12"
 tower = "0.5"
 

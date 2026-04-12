@@ -950,6 +950,7 @@ dependencies = [
  "regex",
  "rlsp-fmt",
  "rlsp-yaml-parser",
+ "rstest",
  "serde",
  "serde_json",
  "tiny_http",

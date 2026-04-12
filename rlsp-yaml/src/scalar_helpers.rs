@@ -99,197 +99,138 @@ pub fn parse_float(value: &str) -> Option<f64> {
 #[cfg(test)]
 #[allow(clippy::approx_constant, clippy::float_cmp, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
-    // is_null
+    // ── is_null ───────────────────────────────────────────────────────────────
 
-    #[test]
-    fn null_lowercase() {
-        assert!(is_null("null"));
+    #[rstest]
+    #[case::lowercase("null")]
+    #[case::titlecase("Null")]
+    #[case::uppercase("NULL")]
+    #[case::tilde("~")]
+    #[case::empty("")]
+    fn is_null_returns_true(#[case] input: &str) {
+        assert!(is_null(input));
     }
 
-    #[test]
-    fn null_titlecase() {
-        assert!(is_null("Null"));
+    #[rstest]
+    #[case::none_string("none")]
+    #[case::nil_string("nil")]
+    #[case::mixed_case("nUll")]
+    #[case::single_space(" ")]
+    #[case::double_space("  ")]
+    fn is_null_returns_false(#[case] input: &str) {
+        assert!(!is_null(input));
     }
 
-    #[test]
-    fn null_uppercase() {
-        assert!(is_null("NULL"));
+    // ── is_bool ───────────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::true_lowercase("true")]
+    #[case::true_titlecase("True")]
+    #[case::true_uppercase("TRUE")]
+    #[case::false_lowercase("false")]
+    #[case::false_titlecase("False")]
+    #[case::false_uppercase("FALSE")]
+    fn is_bool_returns_true(#[case] input: &str) {
+        assert!(is_bool(input));
     }
 
-    #[test]
-    fn null_tilde() {
-        assert!(is_null("~"));
+    #[rstest]
+    #[case::yes("yes")]
+    #[case::no("no")]
+    #[case::on("on")]
+    #[case::off("off")]
+    #[case::mixed_case("tRue")]
+    fn is_bool_returns_false(#[case] input: &str) {
+        assert!(!is_bool(input));
     }
 
-    #[test]
-    fn null_empty() {
-        assert!(is_null(""));
+    // ── parse_integer ─────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::decimal_positive("42", 42)]
+    #[case::decimal_zero("0", 0)]
+    #[case::decimal_negative("-1", -1)]
+    #[case::decimal_plus_prefix("+100", 100)]
+    #[case::octal("0o17", 15)]
+    #[case::octal_negative("-0o10", -8)]
+    #[case::hex_uppercase("0xFF", 255)]
+    #[case::hex_negative("-0x1A", -26)]
+    #[case::hex_lowercase("0xdeadbeef", 0xdead_beef)]
+    fn parse_integer_returns_some(#[case] input: &str, #[case] expected: i64) {
+        assert_eq!(parse_integer(input), Some(expected));
     }
 
-    #[test]
-    fn not_null_string() {
-        assert!(!is_null("none"));
-        assert!(!is_null("nil"));
-        assert!(!is_null("nUll"));
+    #[rstest]
+    #[case::leading_zeros_triple("007")]
+    #[case::leading_zeros_double("00")]
+    #[case::empty_octal_prefix("0o")]
+    #[case::empty_hex_prefix("0x")]
+    #[case::bare_plus("+")]
+    #[case::bare_minus("-")]
+    #[case::empty("")]
+    fn parse_integer_returns_none(#[case] input: &str) {
+        assert_eq!(parse_integer(input), None);
     }
 
-    // is_bool
-
-    #[test]
-    fn bool_true_variants() {
-        assert!(is_bool("true"));
-        assert!(is_bool("True"));
-        assert!(is_bool("TRUE"));
+    #[rstest]
+    #[case::decimal("42", true)]
+    #[case::positive_signed_zero("+0", true)]
+    #[case::positive_signed("+42", true)]
+    #[case::float_with_dot("3.14", false)]
+    #[case::float_looking_dot("1.0", false)]
+    #[case::float_looking_exp("1e5", false)]
+    #[case::float_looking_exp_dot("1.5e3", false)]
+    #[case::alpha("abc", false)]
+    #[case::alpha_mixed("1a2", false)]
+    fn is_integer_bool_cases(#[case] input: &str, #[case] expected: bool) {
+        assert_eq!(is_integer(input), expected);
     }
 
-    #[test]
-    fn bool_false_variants() {
-        assert!(is_bool("false"));
-        assert!(is_bool("False"));
-        assert!(is_bool("FALSE"));
+    // ── parse_float ───────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::decimal_pi("3.14", 3.14)]
+    #[case::decimal_negative("-0.5", -0.5)]
+    #[case::decimal_positive_signed("+1.0", 1.0)]
+    #[case::exponent("1e10", 1e10)]
+    #[case::exponent_negative("1.5E-3", 1.5e-3)]
+    #[case::inf_lowercase(".inf", f64::INFINITY)]
+    #[case::inf_titlecase(".Inf", f64::INFINITY)]
+    #[case::inf_uppercase(".INF", f64::INFINITY)]
+    #[case::neg_inf_lowercase("-.inf", f64::NEG_INFINITY)]
+    #[case::neg_inf_titlecase("-.Inf", f64::NEG_INFINITY)]
+    #[case::neg_inf_uppercase("-.INF", f64::NEG_INFINITY)]
+    fn parse_float_returns_value(#[case] input: &str, #[case] expected: f64) {
+        assert_eq!(parse_float(input), Some(expected));
     }
 
-    #[test]
-    fn not_bool() {
-        assert!(!is_bool("yes"));
-        assert!(!is_bool("no"));
-        assert!(!is_bool("on"));
-        assert!(!is_bool("off"));
-        assert!(!is_bool("tRue"));
+    #[rstest]
+    #[case::nan_lowercase(".nan")]
+    #[case::nan_titlecase(".NaN")]
+    #[case::nan_uppercase(".NAN")]
+    fn parse_float_returns_nan(#[case] input: &str) {
+        assert!(parse_float(input).unwrap().is_nan());
     }
 
-    // is_integer / parse_integer
-
-    #[test]
-    fn integer_decimal() {
-        assert_eq!(parse_integer("42"), Some(42));
-        assert_eq!(parse_integer("0"), Some(0));
-        assert_eq!(parse_integer("-1"), Some(-1));
-        assert_eq!(parse_integer("+100"), Some(100));
+    #[rstest]
+    #[case::integer("42")]
+    #[case::alpha("abc")]
+    #[case::empty("")]
+    fn parse_float_returns_none(#[case] input: &str) {
+        assert_eq!(parse_float(input), None);
     }
 
-    #[test]
-    fn integer_octal() {
-        assert_eq!(parse_integer("0o17"), Some(15));
-        assert_eq!(parse_integer("-0o10"), Some(-8));
-    }
-
-    #[test]
-    fn integer_hex() {
-        assert_eq!(parse_integer("0xFF"), Some(255));
-        assert_eq!(parse_integer("-0x1A"), Some(-26));
-    }
-
-    #[test]
-    fn integer_leading_zeros_rejected() {
-        assert_eq!(parse_integer("007"), None);
-        assert_eq!(parse_integer("00"), None);
-    }
-
-    #[test]
-    fn integer_empty_prefix_rejected() {
-        assert_eq!(parse_integer("0o"), None);
-        assert_eq!(parse_integer("0x"), None);
-        assert_eq!(parse_integer("+"), None);
-        assert_eq!(parse_integer("-"), None);
-        assert_eq!(parse_integer(""), None);
-    }
-
-    #[test]
-    fn is_integer_delegates_to_parse() {
-        assert!(is_integer("42"));
-        assert!(!is_integer("3.14"));
-        assert!(!is_integer("abc"));
-    }
-
-    // is_float / parse_float
-
-    #[test]
-    fn float_decimal() {
-        assert_eq!(parse_float("3.14"), Some(3.14));
-        assert_eq!(parse_float("-0.5"), Some(-0.5));
-        assert_eq!(parse_float("+1.0"), Some(1.0));
-    }
-
-    #[test]
-    fn float_exponent() {
-        assert_eq!(parse_float("1e10"), Some(1e10));
-        assert_eq!(parse_float("1.5E-3"), Some(1.5e-3));
-    }
-
-    #[test]
-    fn float_inf() {
-        assert_eq!(parse_float(".inf"), Some(f64::INFINITY));
-        assert_eq!(parse_float(".Inf"), Some(f64::INFINITY));
-        assert_eq!(parse_float(".INF"), Some(f64::INFINITY));
-        assert_eq!(parse_float("-.inf"), Some(f64::NEG_INFINITY));
-        assert_eq!(parse_float("-.Inf"), Some(f64::NEG_INFINITY));
-        assert_eq!(parse_float("-.INF"), Some(f64::NEG_INFINITY));
-    }
-
-    #[test]
-    fn float_nan() {
-        assert!(parse_float(".nan").unwrap().is_nan());
-        assert!(parse_float(".NaN").unwrap().is_nan());
-        assert!(parse_float(".NAN").unwrap().is_nan());
-    }
-
-    #[test]
-    fn not_float() {
-        assert_eq!(parse_float("42"), None);
-        assert_eq!(parse_float("abc"), None);
-        assert_eq!(parse_float(""), None);
-    }
-
-    #[test]
-    fn is_float_delegates_to_parse() {
-        assert!(is_float("3.14"));
-        assert!(is_float(".inf"));
-        assert!(!is_float("42"));
-    }
-
-    // TE tests 7, 13, 19, 20, 27, 33, 41
-
-    #[test]
-    fn is_null_returns_false_for_whitespace() {
-        assert!(!is_null(" "));
-        assert!(!is_null("  "));
-    }
-
-    #[test]
-    fn is_integer_returns_true_for_positive_signed() {
-        assert!(is_integer("+0"));
-        assert!(is_integer("+42"));
-    }
-
-    #[test]
-    fn is_integer_returns_false_for_float_looking_strings() {
-        assert!(!is_integer("1.0"));
-        assert!(!is_integer("1e5"));
-        assert!(!is_integer("1.5e3"));
-    }
-
-    #[test]
-    fn is_integer_returns_false_for_non_numeric_with_letters() {
-        assert!(!is_integer("abc"));
-        assert!(!is_integer("1a2"));
-    }
-
-    #[test]
-    fn is_float_returns_false_for_bare_inf_and_nan() {
-        assert!(!is_float("inf"));
-        assert!(!is_float("nan"));
-    }
-
-    #[test]
-    fn parse_integer_hex_lowercase() {
-        assert_eq!(parse_integer("0xdeadbeef"), Some(0xdead_beef));
-    }
-
-    #[test]
-    fn parse_float_positive_signed() {
-        assert_eq!(parse_float("+1.0"), Some(1.0));
+    #[rstest]
+    #[case::decimal("3.14", true)]
+    #[case::inf(".inf", true)]
+    #[case::integer("42", false)]
+    #[case::bare_inf("inf", false)]
+    #[case::bare_nan("nan", false)]
+    fn is_float_bool_cases(#[case] input: &str, #[case] expected: bool) {
+        assert_eq!(is_float(input), expected);
     }
 }
