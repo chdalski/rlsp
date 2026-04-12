@@ -19,6 +19,16 @@
     "onLanguage:yaml"
   ],
   "main": "./out/main.js",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The rlsp-yaml.server.path setting is ignored in untrusted workspaces. Only the bundled server binary is used.",
+      "restrictedConfigurations": [
+        "rlsp-yaml.server.path"
+      ]
+    }
+  },
   "contributes": {
     "configuration": {
       "type": "object",
