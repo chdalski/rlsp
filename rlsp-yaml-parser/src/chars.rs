@@ -221,41 +221,40 @@ fn decode_hex_escape(input: &str, start: usize, digit_count: usize) -> Option<(c
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     // -----------------------------------------------------------------------
     // c_printable [1]
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn c_printable_accepts_tab_lf_cr_and_printable_ascii() {
-        assert!(is_c_printable('\t'));
-        assert!(is_c_printable('\n'));
-        assert!(is_c_printable('\r'));
-        assert!(is_c_printable(' '));
-        assert!(is_c_printable('~'));
-        assert!(is_c_printable('M'));
+    #[rstest]
+    #[case::tab('\t')]
+    #[case::lf('\n')]
+    #[case::cr('\r')]
+    #[case::space(' ')]
+    #[case::tilde('~')]
+    #[case::ascii_letter('M')]
+    #[case::nel('\u{85}')]
+    #[case::non_breaking_space('\u{A0}')]
+    fn c_printable_accepts(#[case] ch: char) {
+        assert!(is_c_printable(ch));
     }
 
-    #[test]
-    fn c_printable_accepts_nel_and_non_breaking_space() {
-        assert!(is_c_printable('\u{85}'));
-        assert!(is_c_printable('\u{A0}'));
-    }
-
-    #[test]
-    fn c_printable_rejects_null_del_and_c0_control_chars() {
-        assert!(!is_c_printable('\x00'));
-        assert!(!is_c_printable('\x7F'));
-        for ch in ['\x01', '\x08', '\x0B', '\x0C', '\x0E', '\x1F'] {
-            assert!(!is_c_printable(ch), "should reject {ch:?}");
-        }
-    }
-
-    #[test]
-    fn c_printable_rejects_fffe_and_ffff() {
-        assert!(!is_c_printable('\u{FFFE}'));
-        assert!(!is_c_printable('\u{FFFF}'));
+    #[rstest]
+    #[case::null('\x00')]
+    #[case::del('\x7F')]
+    #[case::soh('\x01')]
+    #[case::bs('\x08')]
+    #[case::vt('\x0B')]
+    #[case::ff('\x0C')]
+    #[case::so('\x0E')]
+    #[case::us('\x1F')]
+    #[case::fffe('\u{FFFE}')]
+    #[case::ffff('\u{FFFF}')]
+    fn c_printable_rejects(#[case] ch: char) {
+        assert!(!is_c_printable(ch));
     }
 
     // -----------------------------------------------------------------------
@@ -273,11 +272,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn c_indicator_rejects_plain_alphanum_and_whitespace() {
-        assert!(!is_c_indicator('a'));
-        assert!(!is_c_indicator('0'));
-        assert!(!is_c_indicator(' '));
+    #[rstest]
+    #[case::lowercase_letter('a')]
+    #[case::digit('0')]
+    #[case::space(' ')]
+    fn c_indicator_rejects(#[case] ch: char) {
+        assert!(!is_c_indicator(ch));
     }
 
     #[test]
@@ -301,30 +301,33 @@ mod tests {
     // ns_char [34] — whitespace exclusion
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn ns_char_accepts_printable_non_whitespace() {
-        assert!(is_ns_char('a'));
-        assert!(is_ns_char('!'));
-        assert!(is_ns_char('\u{4E2D}')); // 中
+    #[rstest]
+    #[case::lowercase_letter('a')]
+    #[case::exclamation('!')]
+    #[case::cjk_ideograph('\u{4E2D}')]
+    fn ns_char_accepts(#[case] ch: char) {
+        assert!(is_ns_char(ch));
     }
 
-    #[test]
-    fn ns_char_rejects_space_tab_and_line_breaks() {
-        assert!(!is_ns_char(' '));
-        assert!(!is_ns_char('\t'));
-        assert!(!is_ns_char('\n'));
-        assert!(!is_ns_char('\r'));
+    #[rstest]
+    #[case::space(' ')]
+    #[case::tab('\t')]
+    #[case::lf('\n')]
+    #[case::cr('\r')]
+    fn ns_char_rejects(#[case] ch: char) {
+        assert!(!is_ns_char(ch));
     }
 
     // -----------------------------------------------------------------------
     // ns_anchor_char [102] — flow-indicator exclusion from ns-char
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn ns_anchor_char_accepts_non_flow_ns_chars() {
-        assert!(is_ns_anchor_char('a'));
-        assert!(is_ns_anchor_char('-'));
-        assert!(is_ns_anchor_char(':'));
+    #[rstest]
+    #[case::lowercase_letter('a')]
+    #[case::hyphen('-')]
+    #[case::colon(':')]
+    fn ns_anchor_char_accepts(#[case] ch: char) {
+        assert!(is_ns_anchor_char(ch));
     }
 
     #[test]
@@ -334,31 +337,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ns_anchor_char_rejects_whitespace_and_bom() {
-        assert!(!is_ns_anchor_char(' '));
-        assert!(!is_ns_anchor_char('\t'));
-        assert!(!is_ns_anchor_char('\u{FEFF}'));
+    #[rstest]
+    #[case::space(' ')]
+    #[case::tab('\t')]
+    #[case::bom('\u{FEFF}')]
+    fn ns_anchor_char_rejects(#[case] ch: char) {
+        assert!(!is_ns_anchor_char(ch));
     }
 
     // -----------------------------------------------------------------------
     // ns_tag_char [40] — excludes '!' and flow indicators vs ns_uri_char
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn ns_tag_char_rejects_exclamation_and_flow_indicators() {
-        assert!(!is_ns_tag_char_single('!'));
-        for ch in [',', '[', ']', '{', '}'] {
-            assert!(!is_ns_tag_char_single(ch), "should reject {ch:?}");
-        }
+    #[rstest]
+    #[case::comma(',')]
+    #[case::open_bracket('[')]
+    #[case::close_bracket(']')]
+    #[case::open_brace('{')]
+    #[case::close_brace('}')]
+    fn ns_tag_char_rejects_flow_indicators(#[case] ch: char) {
+        assert!(!is_ns_tag_char_single(ch));
     }
 
-    #[test]
-    fn ns_tag_char_accepts_word_chars_and_uri_punctuation() {
-        assert!(is_ns_tag_char_single('a'));
-        assert!(is_ns_tag_char_single('-'));
-        assert!(is_ns_tag_char_single('9'));
-        assert!(is_ns_tag_char_single(':'));
+    #[rstest]
+    #[case::lowercase_letter('a')]
+    #[case::hyphen('-')]
+    #[case::digit('9')]
+    #[case::colon(':')]
+    fn ns_tag_char_accepts(#[case] ch: char) {
+        assert!(is_ns_tag_char_single(ch));
     }
 
     #[test]
@@ -372,62 +379,34 @@ mod tests {
     // decode_escape — non-trivial escape sequences
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn decode_escape_single_char_codes() {
-        assert_eq!(decode_escape("0"), Some(('\x00', 1)));
-        assert_eq!(decode_escape("n"), Some(('\n', 1)));
-        assert_eq!(decode_escape("t"), Some(('\t', 1)));
-        assert_eq!(decode_escape("\\"), Some(('\\', 1)));
-        assert_eq!(decode_escape("N"), Some(('\u{85}', 1)));
-        assert_eq!(decode_escape("_"), Some(('\u{A0}', 1)));
-        assert_eq!(decode_escape("L"), Some(('\u{2028}', 1)));
-        assert_eq!(decode_escape("P"), Some(('\u{2029}', 1)));
+    #[rstest]
+    #[case::null_escape("0", '\x00', 1)]
+    #[case::newline_escape("n", '\n', 1)]
+    #[case::tab_escape("t", '\t', 1)]
+    #[case::backslash_escape("\\", '\\', 1)]
+    #[case::nel_escape("N", '\u{85}', 1)]
+    #[case::nbsp_escape("_", '\u{A0}', 1)]
+    #[case::line_sep_escape("L", '\u{2028}', 1)]
+    #[case::para_sep_escape("P", '\u{2029}', 1)]
+    #[case::hex_2digit("x41", 'A', 3)]
+    #[case::hex_4digit("u0041", 'A', 5)]
+    #[case::hex_8digit("U00000041", 'A', 9)]
+    #[case::high_plane_codepoint("U0001F600", '\u{1F600}', 9)]
+    fn decode_escape_success(
+        #[case] input: &str,
+        #[case] expected_char: char,
+        #[case] expected_len: usize,
+    ) {
+        assert_eq!(decode_escape(input), Some((expected_char, expected_len)));
     }
 
-    #[test]
-    fn decode_escape_hex_2digit() {
-        assert_eq!(decode_escape("x41"), Some(('A', 3)));
-    }
-
-    #[test]
-    fn decode_escape_hex_4digit() {
-        assert_eq!(decode_escape("u0041"), Some(('A', 5)));
-    }
-
-    #[test]
-    fn decode_escape_hex_8digit() {
-        assert_eq!(decode_escape("U00000041"), Some(('A', 9)));
-    }
-
-    #[test]
-    fn decode_escape_high_plane_codepoint() {
-        assert_eq!(decode_escape("U0001F600"), Some(('\u{1F600}', 9)));
-    }
-
-    #[test]
-    fn decode_escape_rejects_unknown_code() {
-        assert_eq!(decode_escape("q"), None);
-    }
-
-    #[test]
-    fn decode_escape_rejects_truncated_hex() {
-        assert_eq!(decode_escape("x4"), None);
-    }
-
-    #[test]
-    fn decode_escape_rejects_non_hex_digits() {
-        assert_eq!(decode_escape("xGG"), None);
-    }
-
-    #[test]
-    fn decode_escape_rejects_surrogate_codepoint() {
-        // U+D800 is a high surrogate — not a valid Unicode scalar
-        assert_eq!(decode_escape("uD800"), None);
-    }
-
-    #[test]
-    fn decode_escape_rejects_out_of_range_codepoint() {
-        // U+110000 is beyond U+10FFFF
-        assert_eq!(decode_escape("U00110000"), None);
+    #[rstest]
+    #[case::unknown_code("q")]
+    #[case::truncated_hex("x4")]
+    #[case::non_hex_digits("xGG")]
+    #[case::surrogate_codepoint("uD800")]
+    #[case::out_of_range_codepoint("U00110000")]
+    fn decode_escape_rejects(#[case] input: &str) {
+        assert_eq!(decode_escape(input), None);
     }
 }

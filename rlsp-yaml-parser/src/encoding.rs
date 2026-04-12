@@ -199,6 +199,8 @@ pub fn normalize_line_breaks(s: String) -> String {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     // -----------------------------------------------------------------------
@@ -210,41 +212,14 @@ mod tests {
         assert_eq!(detect_encoding(b""), Encoding::Utf8);
     }
 
-    #[test]
-    fn detect_encoding_recognizes_utf8_bom() {
-        assert_eq!(detect_encoding(&[0xEF, 0xBB, 0xBF, b'a']), Encoding::Utf8);
-    }
-
-    #[test]
-    fn detect_encoding_recognizes_utf16_le_bom() {
-        assert_eq!(
-            detect_encoding(&[0xFF, 0xFE, b'a', 0x00]),
-            Encoding::Utf16Le
-        );
-    }
-
-    #[test]
-    fn detect_encoding_recognizes_utf16_be_bom() {
-        assert_eq!(
-            detect_encoding(&[0xFE, 0xFF, 0x00, b'a']),
-            Encoding::Utf16Be
-        );
-    }
-
-    #[test]
-    fn detect_encoding_recognizes_utf32_le_bom() {
-        assert_eq!(
-            detect_encoding(&[0xFF, 0xFE, 0x00, 0x00]),
-            Encoding::Utf32Le
-        );
-    }
-
-    #[test]
-    fn detect_encoding_recognizes_utf32_be_bom() {
-        assert_eq!(
-            detect_encoding(&[0x00, 0x00, 0xFE, 0xFF]),
-            Encoding::Utf32Be
-        );
+    #[rstest]
+    #[case::utf8_bom(&[0xEF, 0xBB, 0xBF, b'a'], Encoding::Utf8)]
+    #[case::utf16_le_bom(&[0xFF, 0xFE, b'a', 0x00], Encoding::Utf16Le)]
+    #[case::utf16_be_bom(&[0xFE, 0xFF, 0x00, b'a'], Encoding::Utf16Be)]
+    #[case::utf32_le_bom(&[0xFF, 0xFE, 0x00, 0x00], Encoding::Utf32Le)]
+    #[case::utf32_be_bom(&[0x00, 0x00, 0xFE, 0xFF], Encoding::Utf32Be)]
+    fn detect_encoding_bom(#[case] bytes: &[u8], #[case] expected: Encoding) {
+        assert_eq!(detect_encoding(bytes), expected);
     }
 
     #[test]
@@ -252,106 +227,46 @@ mod tests {
         assert_eq!(detect_encoding(b"key: value\n"), Encoding::Utf8);
     }
 
-    #[test]
-    fn detect_encoding_uses_null_byte_heuristic_for_utf16_le_without_bom() {
-        assert_eq!(
-            detect_encoding(&[b'a', 0x00, b'b', 0x00]),
-            Encoding::Utf16Le
-        );
-    }
-
-    #[test]
-    fn detect_encoding_uses_null_byte_heuristic_for_utf16_be_without_bom() {
-        assert_eq!(
-            detect_encoding(&[0x00, b'a', 0x00, b'b']),
-            Encoding::Utf16Be
-        );
+    #[rstest]
+    #[case::utf16_le_without_bom(&[b'a', 0x00, b'b', 0x00], Encoding::Utf16Le)]
+    #[case::utf16_be_without_bom(&[0x00, b'a', 0x00, b'b'], Encoding::Utf16Be)]
+    fn detect_encoding_null_byte_heuristic(#[case] bytes: &[u8], #[case] expected: Encoding) {
+        assert_eq!(detect_encoding(bytes), expected);
     }
 
     // -----------------------------------------------------------------------
     // decode
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn decode_utf8_plain_ascii_roundtrips() {
-        let result = decode(b"hello: world\n");
-        assert_eq!(result.unwrap(), "hello: world\n");
-    }
-
-    #[test]
-    fn decode_utf8_strips_bom() {
-        let result = decode(&[0xEF, 0xBB, 0xBF, b'k', b'e', b'y']);
-        assert_eq!(result.unwrap(), "key");
-    }
-
-    #[test]
-    fn decode_utf16_le_produces_correct_utf8() {
-        // "hi" in UTF-16 LE (no BOM)
-        let result = decode(&[0x68, 0x00, 0x69, 0x00]);
-        assert_eq!(result.unwrap(), "hi");
-    }
-
-    #[test]
-    fn decode_utf16_be_produces_correct_utf8() {
-        // "hi" in UTF-16 BE (no BOM)
-        let result = decode(&[0x00, 0x68, 0x00, 0x69]);
-        assert_eq!(result.unwrap(), "hi");
+    #[rstest]
+    #[case::utf8_plain_ascii(b"hello: world\n" as &[u8], "hello: world\n")]
+    #[case::utf8_strips_bom(&[0xEF, 0xBB, 0xBF, b'k', b'e', b'y'], "key")]
+    #[case::utf16_le_no_bom(&[0x68, 0x00, 0x69, 0x00], "hi")]
+    #[case::utf16_be_no_bom(&[0x00, 0x68, 0x00, 0x69], "hi")]
+    #[case::utf16_le_strips_bom(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00], "hi")]
+    #[case::empty_input(b"", "")]
+    fn decode_ok(#[case] bytes: &[u8], #[case] expected: &str) {
+        assert_eq!(decode(bytes).unwrap(), expected);
     }
 
     #[test]
     fn decode_invalid_utf8_returns_error() {
         // Lone continuation byte — not valid UTF-8, no BOM so treated as UTF-8
-        let result = decode(&[0x80]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn decode_utf16_le_strips_bom() {
-        // UTF-16 LE BOM + "hi"
-        let result = decode(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]);
-        assert_eq!(result.unwrap(), "hi");
-    }
-
-    #[test]
-    fn decode_empty_input_returns_empty_string() {
-        let result = decode(b"");
-        assert_eq!(result.unwrap(), "");
+        assert!(decode(&[0x80]).is_err());
     }
 
     // -----------------------------------------------------------------------
     // normalize_line_breaks
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn normalize_crlf_to_lf() {
-        assert_eq!(normalize_line_breaks("a\r\nb\r\nc".to_string()), "a\nb\nc");
-    }
-
-    #[test]
-    fn normalize_lone_cr_to_lf() {
-        assert_eq!(normalize_line_breaks("a\rb\rc".to_string()), "a\nb\nc");
-    }
-
-    #[test]
-    fn normalize_lf_only_is_unchanged() {
-        assert_eq!(normalize_line_breaks("a\nb\nc".to_string()), "a\nb\nc");
-    }
-
-    #[test]
-    fn normalize_mixed_line_endings() {
-        assert_eq!(
-            normalize_line_breaks("a\r\nb\rc\nd".to_string()),
-            "a\nb\nc\nd"
-        );
-    }
-
-    #[test]
-    fn normalize_empty_string_is_unchanged() {
-        assert_eq!(normalize_line_breaks(String::new()), "");
-    }
-
-    #[test]
-    fn normalize_does_not_double_lf_after_crlf() {
-        assert_eq!(normalize_line_breaks("\r\n".to_string()), "\n");
+    #[rstest]
+    #[case::crlf_to_lf("a\r\nb\r\nc".to_string(), "a\nb\nc")]
+    #[case::lone_cr_to_lf("a\rb\rc".to_string(), "a\nb\nc")]
+    #[case::lf_only_unchanged("a\nb\nc".to_string(), "a\nb\nc")]
+    #[case::mixed_line_endings("a\r\nb\rc\nd".to_string(), "a\nb\nc\nd")]
+    #[case::empty_string_unchanged(String::new(), "")]
+    #[case::crlf_not_doubled("\r\n".to_string(), "\n")]
+    fn normalize_line_breaks_cases(#[case] input: String, #[case] expected: &str) {
+        assert_eq!(normalize_line_breaks(input), expected);
     }
 }

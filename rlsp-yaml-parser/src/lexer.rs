@@ -505,6 +505,8 @@ pub fn is_doc_marker_line(content: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     /// True when `line` is blank, comment-only, or a directive (`%`-prefixed).
@@ -529,68 +531,38 @@ mod tests {
     // Group A — is_directives_end
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn directives_end_exact_three_dashes() {
-        let lex = make_lexer("---");
-        assert!(lex.is_directives_end());
+    #[rstest]
+    #[case::exact_three_dashes("---")]
+    #[case::followed_by_space("--- ")]
+    #[case::followed_by_tab("---\t")]
+    fn directives_end_true(#[case] input: &str) {
+        assert!(make_lexer(input).is_directives_end());
     }
 
-    #[test]
-    fn directives_end_followed_by_space() {
-        let lex = make_lexer("--- ");
-        assert!(lex.is_directives_end());
-    }
-
-    #[test]
-    fn directives_end_followed_by_tab() {
-        let lex = make_lexer("---\t");
-        assert!(lex.is_directives_end());
-    }
-
-    #[test]
-    fn directives_end_false_for_word_attached() {
-        let lex = make_lexer("---word");
-        assert!(!lex.is_directives_end());
-    }
-
-    #[test]
-    fn directives_end_false_for_partial_dashes() {
-        let lex = make_lexer("--");
-        assert!(!lex.is_directives_end());
-    }
-
-    #[test]
-    fn directives_end_false_for_empty_line() {
-        let lex = make_lexer("");
-        assert!(!lex.is_directives_end());
+    #[rstest]
+    #[case::word_attached("---word")]
+    #[case::partial_dashes("--")]
+    #[case::empty_line("")]
+    fn directives_end_false(#[case] input: &str) {
+        assert!(!make_lexer(input).is_directives_end());
     }
 
     // -----------------------------------------------------------------------
     // Group B — is_document_end
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn document_end_exact_three_dots() {
-        let lex = make_lexer("...");
-        assert!(lex.is_document_end());
+    #[rstest]
+    #[case::exact_three_dots("...")]
+    #[case::followed_by_space("... ")]
+    fn document_end_true(#[case] input: &str) {
+        assert!(make_lexer(input).is_document_end());
     }
 
-    #[test]
-    fn document_end_followed_by_space() {
-        let lex = make_lexer("... ");
-        assert!(lex.is_document_end());
-    }
-
-    #[test]
-    fn document_end_false_for_word_attached() {
-        let lex = make_lexer("...word");
-        assert!(!lex.is_document_end());
-    }
-
-    #[test]
-    fn document_end_false_for_partial_dots() {
-        let lex = make_lexer("..");
-        assert!(!lex.is_document_end());
+    #[rstest]
+    #[case::word_attached("...word")]
+    #[case::partial_dots("..")]
+    fn document_end_false(#[case] input: &str) {
+        assert!(!make_lexer(input).is_document_end());
     }
 
     // -----------------------------------------------------------------------
@@ -658,16 +630,11 @@ mod tests {
     // Group E — has_content / drain_to_end
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn has_content_false_for_empty_input() {
-        let lex = make_lexer("");
-        assert!(!lex.has_content());
-    }
-
-    #[test]
-    fn has_content_false_for_blank_and_comment_lines_only() {
-        let lex = make_lexer("\n# comment\n   \n");
-        assert!(!lex.has_content());
+    #[rstest]
+    #[case::empty_input("")]
+    #[case::blank_and_comment_lines("\n# comment\n   \n")]
+    fn has_content_false(#[case] input: &str) {
+        assert!(!make_lexer(input).has_content());
     }
 
     #[test]

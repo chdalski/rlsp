@@ -75,6 +75,8 @@ pub struct Span {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -116,29 +118,20 @@ mod tests {
         let _ = span2.start;
     }
 
-    #[test]
-    fn advance_ascii_increments_byte_and_column() {
-        let pos = Pos::ORIGIN.advance('a');
-        assert_eq!(pos.byte_offset, 1);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.column, 1);
-    }
-
-    #[test]
-    fn advance_newline_increments_line_and_resets_column() {
-        let pos = Pos::ORIGIN.advance('a').advance('\n');
-        assert_eq!(pos.byte_offset, 2);
-        assert_eq!(pos.line, 2);
-        assert_eq!(pos.column, 0);
-    }
-
-    #[test]
-    fn advance_multibyte_char_increments_byte_offset_by_utf8_len() {
-        // '中' is 3 bytes in UTF-8
-        let pos = Pos::ORIGIN.advance('中');
-        assert_eq!(pos.byte_offset, 3);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.column, 1);
+    #[rstest]
+    #[case::ascii_char('a', 1, 1, 1)]
+    #[case::newline('\n', 1, 2, 0)]
+    #[case::multibyte_cjk('中', 3, 1, 1)]
+    fn advance_basic(
+        #[case] ch: char,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_line: usize,
+        #[case] expected_column: usize,
+    ) {
+        let pos = Pos::ORIGIN.advance(ch);
+        assert_eq!(pos.byte_offset, expected_byte_offset);
+        assert_eq!(pos.line, expected_line);
+        assert_eq!(pos.column, expected_column);
     }
 
     #[test]
@@ -157,109 +150,44 @@ mod tests {
     // column_at
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn column_at_empty_prefix_is_zero() {
-        assert_eq!(column_at("hello", 0), 0);
-    }
-
-    #[test]
-    fn column_at_ascii_only_line_returns_byte_offset() {
-        assert_eq!(column_at("hello world", 5), 5);
-    }
-
-    #[test]
-    fn column_at_ascii_full_line_returns_byte_len() {
-        assert_eq!(column_at("abc", 3), 3);
-    }
-
-    #[test]
-    fn column_at_multibyte_prefix_counts_chars() {
-        // "日本語xyz": 日本語 = 9 bytes / 3 chars
-        assert_eq!(column_at("日本語xyz", 9), 3);
-    }
-
-    #[test]
-    fn column_at_mixed_prefix_ascii_then_multibyte() {
-        // "ab日本": ab = 2 bytes, 日本 = 6 bytes; prefix = 8 bytes = 4 chars
-        assert_eq!(column_at("ab日本", 8), 4);
-    }
-
-    #[test]
-    fn column_at_multibyte_then_ascii() {
-        // "日ab": 日 = 3 bytes, ab = 2 bytes; prefix = first 5 bytes = "日ab" = 3 chars
-        assert_eq!(column_at("日ab", 5), 3);
-    }
-
-    #[test]
-    fn column_at_full_multibyte_line() {
-        // "日本語" = 9 bytes / 3 chars; prefix = entire string
-        assert_eq!(column_at("日本語", 9), 3);
+    #[rstest]
+    #[case::empty_prefix("hello", 0, 0)]
+    #[case::ascii_mid_line("hello world", 5, 5)]
+    #[case::ascii_full_line("abc", 3, 3)]
+    #[case::multibyte_only_prefix("日本語xyz", 9, 3)]
+    #[case::ascii_then_multibyte("ab日本", 8, 4)]
+    #[case::multibyte_then_ascii("日ab", 5, 3)]
+    #[case::full_multibyte_line("日本語", 9, 3)]
+    fn column_at_cases(
+        #[case] line_content: &str,
+        #[case] byte_offset: usize,
+        #[case] expected: usize,
+    ) {
+        assert_eq!(column_at(line_content, byte_offset), expected);
     }
 
     // -----------------------------------------------------------------------
     // advance_within_line
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn advance_within_line_empty_content_returns_pos_unchanged() {
-        let pos = Pos {
-            byte_offset: 5,
-            line: 2,
-            column: 3,
-        };
-        assert_eq!(advance_within_line(pos, ""), pos);
-    }
-
-    #[test]
-    fn advance_within_line_ascii_only_advances_byte_and_column() {
-        let result = advance_within_line(Pos::ORIGIN, "hello");
-        assert_eq!(result.byte_offset, 5);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 5);
-    }
-
-    #[test]
-    fn advance_within_line_ascii_mid_line_accumulates_correctly() {
-        let pos = Pos {
-            byte_offset: 10,
-            line: 3,
-            column: 4,
-        };
-        let result = advance_within_line(pos, "abc");
-        assert_eq!(result.byte_offset, 13);
-        assert_eq!(result.line, 3);
-        assert_eq!(result.column, 7);
-    }
-
-    #[test]
-    fn advance_within_line_multibyte_utf8_column_counts_codepoints() {
-        // "日本語" = 9 bytes / 3 codepoints
-        let result = advance_within_line(Pos::ORIGIN, "日本語");
-        assert_eq!(result.byte_offset, 9);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 3);
-    }
-
-    #[test]
-    fn advance_within_line_multibyte_mid_line_accumulates_correctly() {
-        let pos = Pos {
-            byte_offset: 4,
-            line: 1,
-            column: 2,
-        };
-        let result = advance_within_line(pos, "日本語");
-        assert_eq!(result.byte_offset, 13);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 5);
-    }
-
-    #[test]
-    fn advance_within_line_mixed_ascii_then_multibyte() {
-        // "ab日" = 2 + 3 = 5 bytes / 3 codepoints
-        let result = advance_within_line(Pos::ORIGIN, "ab日");
-        assert_eq!(result.byte_offset, 5);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 3);
+    #[rstest]
+    #[case::empty_content(Pos { byte_offset: 5, line: 2, column: 3 }, "", 5, 2, 3)]
+    #[case::ascii_from_origin(Pos::ORIGIN, "hello", 5, 1, 5)]
+    #[case::ascii_mid_line(Pos { byte_offset: 10, line: 3, column: 4 }, "abc", 13, 3, 7)]
+    #[case::multibyte_from_origin(Pos::ORIGIN, "日本語", 9, 1, 3)]
+    #[case::multibyte_mid_line(Pos { byte_offset: 4, line: 1, column: 2 }, "日本語", 13, 1, 5)]
+    #[case::mixed_ascii_then_multibyte(Pos::ORIGIN, "ab日", 5, 1, 3)]
+    fn advance_within_line_fields(
+        #[case] start: Pos,
+        #[case] content: &str,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_line: usize,
+        #[case] expected_column: usize,
+    ) {
+        let result = advance_within_line(start, content);
+        assert_eq!(result.byte_offset, expected_byte_offset);
+        assert_eq!(result.line, expected_line);
+        assert_eq!(result.column, expected_column);
     }
 
     #[test]
