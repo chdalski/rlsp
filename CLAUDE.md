@@ -50,6 +50,7 @@ pnpm run format    # check formatting (prettier)
 - AI-written project — external contributions via GitHub issues only
 - Each `rlsp-<language>` crate must have `README.md`, `docs/configuration.md`, `docs/feature-log.md`
 - Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference
+- Workspace path dependencies must include a `version` field — `cargo publish` rejects path-only deps
 
 ## References
 
