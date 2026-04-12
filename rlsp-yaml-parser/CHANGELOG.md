@@ -1,6 +1,16 @@
 # Changelog
 
 
+## Refactoring
+
+- Parameterize plain.rs tests with rstest (96f8df6)
+- Parameterize quoted.rs tests with rstest (d563134)
+- Parameterize block.rs tests with rstest (451a69a)
+- Parameterize comment.rs and lines.rs tests with rstest (baa2ee5)
+- Parameterize chars/encoding/pos/lexer tests with rstest (5e80a5d)
+- Parameterize integration tests with rstest (c8437c1)
+- Convert smoke.rs uniform test groups to rstest parameterized tests (a70cd02)
+
 ## Bug Fixes
 
 - Use physical line indent for anchor/tag before mapping key (55c3846)
