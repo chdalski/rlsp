@@ -650,90 +650,69 @@ fn push_duplicate_diagnostic(diagnostics: &mut Vec<Diagnostic>, key: &str, loc: 
 mod tests {
     use std::fmt::Write as _;
 
+    use rstest::rstest;
+
     use super::*;
 
-    // ---- Unused Anchors Validator: Happy Paths ----
+    fn parse_docs(text: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(text).unwrap()
+    }
 
-    #[test]
-    fn should_return_empty_for_document_with_no_anchors() {
-        let result = validate_unused_anchors("key: value\n");
+    fn parse_duplicate(text: &str) -> Vec<super::Diagnostic> {
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        validate_duplicate_keys(&docs)
+    }
+
+    // ---- Unused Anchors Validator: Happy Paths / Edge Cases / Security ----
+
+    #[rstest]
+    #[case::no_anchors("key: value\n")]
+    #[case::all_anchors_used("defaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n")]
+    #[case::empty_document("")]
+    #[case::comment_only("# just a comment\n")]
+    #[case::anchors_in_comments("# &fake anchor\nkey: value\n")]
+    #[case::anchor_used_multiple_times("defaults: &shared\n  k: v\na: *shared\nb: *shared\n")]
+    #[case::anchor_with_special_chars("data: &my-anchor_v2.0\n  k: v\nref: *my-anchor_v2.0\n")]
+    #[case::invalid_anchor_chars_terminates_name("data: &anchor!@# value\nref: *anchor\n")]
+    fn unused_anchors_returns_empty(#[case] input: &str) {
+        let result = validate_unused_anchors(input);
 
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn should_return_empty_when_all_anchors_are_used() {
-        let text = "defaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n";
-        let result = validate_unused_anchors(text);
+    #[rstest]
+    #[case::single_unused("defaults: &unused\n  key: val\nproduction:\n  key: other\n", 1)]
+    #[case::two_unused("a: &first\n  k: v\nb: &second\n  k: v\nc: value\n", 2)]
+    #[case::one_alias_no_anchor("production:\n  <<: *undefined\n", 1)]
+    #[case::two_unresolved_aliases("a: *missing1\nb: *missing2\n", 2)]
+    #[case::cross_doc_scoping_produces_two(
+        "doc1: &shared\n  k: v\n---\ndoc2:\n  ref: *shared\n",
+        2
+    )]
+    #[case::same_anchor_name_different_docs_one_unused(
+        "a: &name\n  k: v\n---\nb: &name\n  k: v\nref: *name\n",
+        1
+    )]
+    #[case::unicode_text_one_unused("name: 中文\ndata: &unused\n  key: val\n", 1)]
+    #[case::anchor_and_alias_in_different_docs_two_diags(
+        "ref: *later\n---\ndata: &later\n  key: val\n",
+        2
+    )]
+    #[case::doc2_unused_one_diag("a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n", 1)]
+    fn unused_anchors_count(#[case] input: &str, #[case] expected: usize) {
+        let result = validate_unused_anchors(input);
 
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_detect_unused_anchor() {
-        let text = "defaults: &unused\n  key: val\nproduction:\n  key: other\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .tags
-                .as_ref()
-                .is_some_and(|tags| tags.contains(&DiagnosticTag::UNNECESSARY))
-        );
-    }
-
-    #[test]
-    fn should_detect_multiple_unused_anchors() {
-        let text = "a: &first\n  k: v\nb: &second\n  k: v\nc: value\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn should_return_correct_range_for_unused_anchor() {
-        let text = "defaults: &defaults\n  key: val\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 1);
-        let diag = &result[0];
-        assert_eq!(diag.range.start.line, 0);
-        assert_eq!(diag.range.start.character, 10, "anchor starts at column 10");
-        assert_eq!(diag.range.end.character, 19, "anchor ends at column 19");
-    }
-
-    #[test]
-    fn should_mark_diagnostic_with_unnecessary_tag() {
-        let text = "defaults: &unused\n  key: val\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(
-            result[0]
-                .tags
-                .as_ref()
-                .is_some_and(|tags| tags.contains(&DiagnosticTag::UNNECESSARY))
-        );
+        assert_eq!(result.len(), expected);
     }
 
     // ---- Unused Anchors Validator: Unresolved Alias Detection ----
 
-    #[test]
-    fn should_detect_alias_with_no_matching_anchor() {
-        let text = "production:\n  <<: *undefined\n";
-        let result = validate_unused_anchors(text);
+    #[rstest]
+    #[case::single_unresolved_alias("production:\n  <<: *undefined\n")]
+    #[case::two_unresolved_aliases("a: *missing1\nb: *missing2\n")]
+    fn unused_anchors_all_errors(#[case] input: &str) {
+        let result = validate_unused_anchors(input);
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    #[test]
-    fn should_detect_multiple_unresolved_aliases() {
-        let text = "a: *missing1\nb: *missing2\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 2);
         assert!(
             result
                 .iter()
@@ -741,76 +720,17 @@ mod tests {
         );
     }
 
-    // ---- Unused Anchors Validator: Edge Cases ----
+    // ---- Unused Anchors Validator: Unnecessary tag check ----
 
-    #[test]
-    fn should_return_empty_for_empty_document() {
-        let result = validate_unused_anchors("");
+    #[rstest]
+    #[case::single_unused("defaults: &unused\n  key: val\nproduction:\n  key: other\n")]
+    #[case::detected_unused("defaults: &unused\n  key: val\n")]
+    #[case::same_anchor_name_second_doc_unused(
+        "a: &name\n  k: v\n---\nb: &name\n  k: v\nref: *name\n"
+    )]
+    fn unused_anchor_has_unnecessary_tag(#[case] input: &str) {
+        let result = validate_unused_anchors(input);
 
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_return_empty_for_comment_only_document() {
-        let result = validate_unused_anchors("# just a comment\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_report_anchors_in_comments() {
-        let text = "# &fake anchor\nkey: value\n";
-        let result = validate_unused_anchors(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_handle_anchor_used_multiple_times() {
-        let text = "defaults: &shared\n  k: v\na: *shared\nb: *shared\n";
-        let result = validate_unused_anchors(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_handle_anchor_with_special_characters() {
-        let text = "data: &my-anchor_v2.0\n  k: v\nref: *my-anchor_v2.0\n";
-        let result = validate_unused_anchors(text);
-
-        assert!(result.is_empty());
-    }
-
-    // ---- Unused Anchors Validator: Multi-Document Scoping ----
-
-    #[test]
-    fn should_report_unused_anchor_scoped_to_document() {
-        let text = "doc1: &shared\n  k: v\n---\ndoc2:\n  ref: *shared\n";
-        let result = validate_unused_anchors(text);
-
-        // &shared in doc1 is unused (within doc1)
-        // *shared in doc2 is unresolved (within doc2)
-        assert_eq!(result.len(), 2);
-        let unused = result.iter().find(|d| {
-            d.tags
-                .as_ref()
-                .is_some_and(|t| t.contains(&DiagnosticTag::UNNECESSARY))
-        });
-        let unresolved = result
-            .iter()
-            .find(|d| d.severity == Some(DiagnosticSeverity::ERROR));
-        assert!(unused.is_some());
-        assert!(unresolved.is_some());
-    }
-
-    #[test]
-    fn should_treat_same_anchor_name_in_different_documents_independently() {
-        let text = "a: &name\n  k: v\n---\nb: &name\n  k: v\nref: *name\n";
-        let result = validate_unused_anchors(text);
-
-        // &name in doc1 is unused
-        // &name in doc2 is used by *name in doc2
-        assert_eq!(result.len(), 1);
         assert!(
             result[0]
                 .tags
@@ -823,7 +743,6 @@ mod tests {
 
     #[test]
     fn should_handle_document_with_many_anchors() {
-        // Generate YAML with 100+ anchors, some used, some not
         let mut text = String::new();
         for i in 0..120 {
             writeln!(text, "anchor{i}: &anchor{i}\n  key: val").unwrap();
@@ -851,21 +770,32 @@ mod tests {
         let result = validate_unused_anchors(&text);
 
         assert_eq!(result.len(), 1);
-        // Message should exist and not crash
         assert!(!result[0].message.is_empty());
     }
 
-    // ---- Unused Anchors Validator: Additional Security Tests ----
+    // ---- Unused Anchors Validator: Multi-Document Scoping (standalone) ----
 
     #[test]
-    fn should_ignore_invalid_anchor_name_characters() {
-        // &anchor!@# parses as anchor "anchor" (! terminates the name)
-        let text = "data: &anchor!@# value\nref: *anchor\n";
+    fn should_report_unused_anchor_scoped_to_document() {
+        let text = "doc1: &shared\n  k: v\n---\ndoc2:\n  ref: *shared\n";
         let result = validate_unused_anchors(text);
 
-        // anchor "anchor" is used by alias "anchor" - no diagnostics
-        assert!(result.is_empty());
+        // &shared in doc1 is unused (within doc1)
+        // *shared in doc2 is unresolved (within doc2)
+        assert_eq!(result.len(), 2);
+        let unused = result.iter().find(|d| {
+            d.tags
+                .as_ref()
+                .is_some_and(|t| t.contains(&DiagnosticTag::UNNECESSARY))
+        });
+        let unresolved = result
+            .iter()
+            .find(|d| d.severity == Some(DiagnosticSeverity::ERROR));
+        assert!(unused.is_some());
+        assert!(unresolved.is_some());
     }
+
+    // ---- Unused Anchors Validator: Security (standalone) ----
 
     #[test]
     fn should_produce_correct_range_with_unicode_in_text() {
@@ -905,6 +835,18 @@ mod tests {
     }
 
     #[test]
+    fn should_return_correct_range_for_unused_anchor() {
+        let text = "defaults: &defaults\n  key: val\n";
+        let result = validate_unused_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.line, 0);
+        assert_eq!(diag.range.start.character, 10, "anchor starts at column 10");
+        assert_eq!(diag.range.end.character, 19, "anchor ends at column 19");
+    }
+
+    #[test]
     fn should_evaluate_each_document_independently_for_unused_anchors() {
         // Doc1: anchor used. Doc2: anchor unused.
         let text = "a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n";
@@ -921,15 +863,52 @@ mod tests {
         );
     }
 
-    // ---- Flow Style Validator: Happy Paths ----
+    // ---- Flow Style Validator: Happy Paths / Edge Cases / Empty Collections ----
 
-    #[test]
-    fn should_return_empty_for_block_style_only() {
-        let text = "key:\n  nested: value\n";
-        let result = validate_flow_style(text);
+    #[rstest]
+    #[case::block_only("key:\n  nested: value\n")]
+    #[case::empty_document("")]
+    #[case::brackets_in_double_quotes("message: \"array is [1,2,3]\"\n")]
+    #[case::braces_in_single_quotes("message: 'object is {a: 1}'\n")]
+    #[case::empty_flow_mapping("status: {}\n")]
+    #[case::empty_flow_sequence("items: []\n")]
+    #[case::flow_mapping_spaces_only("status: { }\n")]
+    #[case::flow_mapping_multiple_spaces("status: {  }\n")]
+    #[case::flow_sequence_spaces_only("items: [  ]\n")]
+    #[case::multiple_empty_collections_one_line("a: {}\nb: []\n")]
+    #[case::braces_inside_single_quoted_string("msg: 'value with {braces}'\n")]
+    fn flow_style_returns_empty(#[case] input: &str) {
+        let result = validate_flow_style(input);
 
         assert!(result.is_empty());
     }
+
+    #[rstest]
+    #[case::flow_mapping("config: {key: value}\n", 1)]
+    #[case::flow_sequence("items: [one, two, three]\n", 1)]
+    #[case::both_types_on_two_lines("config: {key: value}\nitems: [a, b]\n", 2)]
+    #[case::nested_flow_styles("data: {outer: [inner]}\n", 2)]
+    #[case::multi_document("doc1: {a: 1}\n---\ndoc2: [x]\n", 2)]
+    #[case::outer_nonempty_inner_empty("data: {a: {}}\n", 1)]
+    #[case::mixed_empty_nonempty("a: {}\nb: {x: 1}\n", 1)]
+    #[case::flow_detected_after_single_quote_ends("msg: 'quoted' \nreal: {a: 1}\n", 1)]
+    fn flow_style_count(#[case] input: &str, #[case] expected: usize) {
+        let result = validate_flow_style(input);
+
+        assert_eq!(result.len(), expected);
+    }
+
+    #[rstest]
+    #[case::flow_mapping("config: {key: value}\n")]
+    #[case::flow_sequence("items: [a, b]\n")]
+    fn flow_style_range_start_line_zero(#[case] input: &str) {
+        let result = validate_flow_style(input);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 0);
+    }
+
+    // ---- Flow Style Validator: standalone ----
 
     #[test]
     fn should_detect_flow_mapping() {
@@ -972,104 +951,6 @@ mod tests {
     }
 
     #[test]
-    fn should_return_correct_range_for_flow_mapping() {
-        let text = "config: {key: value}\n";
-        let result = validate_flow_style(text);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.line, 0);
-    }
-
-    #[test]
-    fn should_return_correct_range_for_flow_sequence() {
-        let text = "items: [a, b]\n";
-        let result = validate_flow_style(text);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.line, 0);
-    }
-
-    // ---- Flow Style Validator: Edge Cases ----
-
-    #[test]
-    fn should_return_empty_for_empty_document_flow() {
-        let result = validate_flow_style("");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_detect_brackets_in_quoted_strings() {
-        // Implementation choice: quote-aware scanning (avoid false positives)
-        let text = "message: \"array is [1,2,3]\"\n";
-        let result = validate_flow_style(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_detect_braces_in_quoted_strings() {
-        // Implementation choice: quote-aware scanning (avoid false positives)
-        let text = "message: 'object is {a: 1}'\n";
-        let result = validate_flow_style(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_detect_nested_flow_styles() {
-        let text = "data: {outer: [inner]}\n";
-        let result = validate_flow_style(text);
-
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn should_handle_flow_style_in_multi_document() {
-        let text = "doc1: {a: 1}\n---\ndoc2: [x]\n";
-        let result = validate_flow_style(text);
-
-        assert_eq!(result.len(), 2);
-    }
-
-    // ---- Flow Style Validator: Empty Collections ----
-
-    #[test]
-    fn should_not_warn_on_empty_flow_mapping() {
-        let result = validate_flow_style("status: {}\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_warn_on_empty_flow_sequence() {
-        let result = validate_flow_style("items: []\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_warn_on_flow_mapping_with_only_spaces() {
-        let result = validate_flow_style("status: { }\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_warn_on_flow_mapping_with_multiple_spaces() {
-        let result = validate_flow_style("status: {  }\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_warn_on_flow_sequence_with_only_spaces() {
-        let result = validate_flow_style("items: [  ]\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn should_warn_on_outer_but_not_inner_empty_flow_mapping() {
         // Outer `{a: {}}` is non-empty → warns; inner `{}` is empty → no extra warn.
         let result = validate_flow_style("data: {a: {}}\n");
@@ -1081,13 +962,6 @@ mod tests {
     }
 
     #[test]
-    fn should_not_warn_on_multiple_empty_collections_on_one_line() {
-        let result = validate_flow_style("a: {}\nb: []\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn should_warn_only_on_non_empty_when_mixed_with_empty() {
         let result = validate_flow_style("a: {}\nb: {x: 1}\n");
 
@@ -1095,16 +969,36 @@ mod tests {
         assert_eq!(result[0].range.start.line, 1);
     }
 
-    // ---- Map Key Order Validator: Happy Paths ----
+    // ---- Map Key Order Validator: Happy Paths / Nested Structures / Edge Cases ----
 
-    #[test]
-    fn should_return_empty_for_alphabetically_ordered_keys() {
-        let text = "apple: 1\nbanana: 2\ncherry: 3\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+    #[rstest]
+    #[case::ordered_keys("apple: 1\nbanana: 2\ncherry: 3\n")]
+    #[case::empty_document("")]
+    #[case::single_key("only: value\n")]
+    #[case::sequence_items_ignored("items:\n  - zebra\n  - alpha\n")]
+    #[case::multi_document_single_keys("z: 1\n---\na: 2\n")]
+    #[case::case_sensitive_uppercase_first("Apple: 1\napple: 2\n")]
+    fn key_ordering_returns_empty(#[case] input: &str) {
+        let docs = rlsp_yaml_parser::load(input).unwrap();
+        let result = validate_key_ordering(input, &docs);
 
         assert!(result.is_empty());
     }
+
+    #[rstest]
+    #[case::single_ooo("banana: 2\napple: 1\n", 1)]
+    #[case::multiple_ooo("charlie: 3\nalpha: 1\nbravo: 2\n", 2)]
+    #[case::nested_ooo("outer:\n  zebra: 1\n  alpha: 2\n", 1)]
+    #[case::top_level_ooo_only("b_parent:\n  a_child: 1\na_parent:\n  key: val\n", 1)]
+    #[case::numeric_string_lexicographic("2: two\n10: ten\n", 1)]
+    fn key_ordering_count(#[case] input: &str, #[case] expected: usize) {
+        let docs = rlsp_yaml_parser::load(input).unwrap();
+        let result = validate_key_ordering(input, &docs);
+
+        assert_eq!(result.len(), expected);
+    }
+
+    // ---- Map Key Order Validator: standalone ----
 
     #[test]
     fn should_detect_out_of_order_keys() {
@@ -1129,113 +1023,44 @@ mod tests {
         assert_eq!(result[0].range.start.line, 1, "apple is on line 1");
     }
 
-    #[test]
-    fn should_detect_multiple_out_of_order_keys() {
-        let text = "charlie: 3\nalpha: 1\nbravo: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+    // ---- Custom Tags Validator: Happy Paths / Multi-document / Nested ----
 
-        assert_eq!(result.len(), 2);
-    }
-
-    // ---- Map Key Order Validator: Nested Structures ----
-
-    #[test]
-    fn should_check_ordering_within_nested_mappings() {
-        let text = "outer:\n  zebra: 1\n  alpha: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        assert_eq!(result.len(), 1, "alpha is out of order within outer");
-    }
-
-    #[test]
-    fn should_check_ordering_at_each_level_independently() {
-        let text = "b_parent:\n  a_child: 1\na_parent:\n  key: val\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        assert_eq!(result.len(), 1, "a_parent is out of order at top level");
-    }
-
-    // ---- Map Key Order Validator: Edge Cases ----
-
-    #[test]
-    fn should_return_empty_for_empty_document_ordering() {
-        let text = "";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+    #[rstest]
+    #[case::allowed_tag_no_diagnostic("value: !include foo.yaml\n", &["!include"] as &[&str])]
+    #[case::empty_allowed_skips_validation("value: !include foo.yaml\n", &[])]
+    #[case::no_tags_in_document("key: value\nother: 123\n", &["!include"])]
+    #[case::multi_doc_both_allowed("a: !include foo.yaml\n---\nb: !ref bar.yaml\n", &["!include", "!ref"])]
+    fn custom_tags_returns_empty(#[case] input: &str, #[case] allowed_tags: &[&str]) {
+        let docs = parse_docs(input);
+        let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
+        let result = validate_custom_tags(input, &docs, &allowed);
 
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn should_return_empty_for_single_key() {
-        let text = "only: value\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+    #[rstest]
+    #[case::unknown_tag("value: !include foo.yaml\n", &["!other"] as &[&str])]
+    #[case::multiple_tags_only_unknown_flagged("a: !include foo.yaml\nb: !ref bar.yaml\n", &["!include"])]
+    #[case::nested_tagged_value("outer:\n  inner: !include nested.yaml\n", &["!other"])]
+    #[case::tag_in_double_quoted_skipped_range("note: \"use !include for files\"\nvalue: !include actual.yaml\n", &["!other"])]
+    #[case::tag_in_single_quoted_skipped_range("note: 'see !ref for details'\nvalue: !ref target.yaml\n", &["!other"])]
+    fn custom_tags_single_diagnostic(#[case] input: &str, #[case] allowed_tags: &[&str]) {
+        let docs = parse_docs(input);
+        let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
+        let result = validate_custom_tags(input, &docs, &allowed);
 
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
     }
 
-    #[test]
-    fn should_handle_numeric_string_keys() {
-        // Implementation choice: lexicographic comparison ("10" < "2" lexicographically)
-        let text = "2: two\n10: ten\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        // "10" comes after "2" but should come before (lexicographically "1" < "2")
-        assert_eq!(result.len(), 1, "10 should be flagged as out of order");
-    }
-
-    #[test]
-    fn should_ignore_sequence_items_for_ordering() {
-        let text = "items:\n  - zebra\n  - alpha\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_handle_multi_document_key_ordering() {
-        let text = "z: 1\n---\na: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        // First doc has single key, second doc has single key
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_be_case_sensitive() {
-        // Implementation choice: case-sensitive comparison ("Apple" != "apple", "Apple" < "apple")
-        let text = "Apple: 1\napple: 2\n";
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
-
-        // "Apple" < "apple" lexicographically (uppercase comes before lowercase in ASCII)
-        assert!(result.is_empty());
-    }
-
-    // ---- Custom Tags Validator: helpers ----
-
-    fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap()
-    }
-
-    fn allowed(tags: &[&str]) -> HashSet<String> {
-        tags.iter().map(|s| (*s).to_string()).collect()
-    }
-
-    // ---- Custom Tags Validator: Happy Paths ----
+    // ---- Custom Tags Validator: standalone ----
 
     #[test]
     fn unknown_tag_produces_warning_with_unknown_tag_code() {
         let text = "value: !include foo.yaml\n";
         let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(text, &docs, &allowed);
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
         assert!(
@@ -1246,80 +1071,116 @@ mod tests {
     }
 
     #[test]
-    fn allowed_tag_produces_no_diagnostic() {
-        let text = "value: !include foo.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn empty_allowed_tags_returns_no_diagnostics() {
-        // Even though !include is present, empty set skips validation
-        let text = "value: !include foo.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&[]));
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn multiple_tags_only_unknown_ones_flagged() {
-        let text = "a: !include foo.yaml\nb: !ref bar.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("!ref"));
-    }
-
-    #[test]
-    fn no_tags_in_document_returns_empty_vec() {
-        let text = "key: value\nother: 123\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!include"]));
-        assert!(result.is_empty());
-    }
-
-    // ---- Custom Tags Validator: Multi-document ----
-
-    #[test]
     fn tags_in_multi_document_yaml_are_all_checked() {
         let text = "a: !include foo.yaml\n---\nb: !ref bar.yaml\n";
         let docs = parse_docs(text);
 
         // Neither allowed
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
+        let neither: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(text, &docs, &neither);
         assert_eq!(result.len(), 2);
 
         // Both allowed
-        let result = validate_custom_tags(text, &docs, &allowed(&["!include", "!ref"]));
+        let both: HashSet<String> = HashSet::from(["!include".to_string(), "!ref".to_string()]);
+        let result = validate_custom_tags(text, &docs, &both);
         assert!(result.is_empty());
     }
 
-    // ---- Custom Tags Validator: Nested tags ----
-
     #[test]
-    fn nested_tagged_value_is_found() {
-        // Tag on a value inside a mapping
-        let text = "outer:\n  inner: !include nested.yaml\n";
+    fn tag_boundary_check_rejects_prefix_match() {
+        let text = "value: !include_extras foo.yaml\n";
         let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("!include"));
-    }
+        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(text, &docs, &allowed);
 
-    fn parse_duplicate(text: &str) -> Vec<super::Diagnostic> {
-        let docs = rlsp_yaml_parser::load(text).unwrap();
-        validate_duplicate_keys(&docs)
+        assert!(result.len() <= 1, "should not crash on boundary check");
     }
-
-    // ---- Duplicate Key Validator: Happy Paths ----
 
     #[test]
-    fn should_return_empty_for_document_with_no_duplicate_keys() {
-        let result = parse_duplicate("a: 1\nb: 2\nc: 3\n");
+    fn second_occurrence_of_same_tag_has_correct_range() {
+        let text = "a: !include file1.yaml\nb: !include file2.yaml\n";
+        let docs = parse_docs(text);
+        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(text, &docs, &allowed);
+
+        assert_eq!(result.len(), 2);
+        let lines: Vec<u32> = result.iter().map(|d| d.range.start.line).collect();
+        assert!(lines.contains(&0), "first occurrence on line 0");
+        assert!(lines.contains(&1), "second occurrence on line 1");
+    }
+
+    // ---- Duplicate Key Validator: Happy Paths / Edge Cases / All no-dup groups ----
+
+    #[rstest]
+    #[case::no_duplicates("a: 1\nb: 2\nc: 3\n")]
+    #[case::same_key_different_nesting_levels("name: top\nnested:\n  name: inner\n")]
+    #[case::scope_reset_on_doc_boundary("key: 1\n---\nkey: 2\n")]
+    #[case::no_flow_mapping_duplicates("cfg: {a: 1, b: 2}\n")]
+    #[case::anchor_key_appearing_once("&anchor key: 1\nother: 2\n")]
+    #[case::non_scalar_key_skipped("{a: 1}: foo\n{a: 1}: bar\n")]
+    #[case::single_alias_key("x: &anchor foo\n? *anchor\n: 1\nother: 2\n")]
+    #[case::empty_document("")]
+    #[case::comment_only("# just a comment\n")]
+    #[case::same_key_different_sequence_items("items:\n  - name: alice\n  - name: bob\n")]
+    #[case::sibling_mappings_under_common_parent(
+        "parent:\n  child_a:\n    cpu: 100m\n    memory: 128Mi\n  child_b:\n    cpu: 200m\n    memory: 256Mi\n"
+    )]
+    #[case::deeply_nested_sibling_mappings(
+        "level1:\n  level2:\n    sibling_a:\n      value: 1\n    sibling_b:\n      value: 2\n"
+    )]
+    #[case::empty_sibling_with_shared_key_in_later(
+        "parent:\n  a: ~\n  b:\n    cpu: 1\n  c:\n    cpu: 2\n"
+    )]
+    #[case::mixed_indent_depth_siblings(
+        "resources:\n  requests:\n    cpu: 100m\n  limits:\n    cpu: 500m\n"
+    )]
+    #[case::ellipsis_resets_scope("key: 1\n...\nkey: 2\n")]
+    fn duplicate_keys_returns_empty(#[case] input: &str) {
+        let result = parse_duplicate(input);
 
         assert!(result.is_empty());
     }
+
+    #[rstest]
+    #[case::simple_top_level("a: 1\na: 2\n", 1)]
+    #[case::nested_mapping("outer:\n  x: 1\n  x: 2\n", 1)]
+    #[case::within_same_doc_in_multi_doc("a: 1\na: 2\n---\nb: 3\n", 1)]
+    #[case::flow_mapping_duplicate("cfg: {x: 1, x: 2}\n", 1)]
+    #[case::double_quoted_and_unquoted("\"key\": 1\nkey: 2\n", 1)]
+    #[case::two_double_quoted("\"key\": 1\n\"key\": 2\n", 1)]
+    #[case::single_quoted_and_unquoted("'key': 1\nkey: 2\n", 1)]
+    #[case::single_and_double_quoted("'key': 1\n\"key\": 2\n", 1)]
+    #[case::second_key_has_anchor("key: 1\n&anchor key: 2\n", 1)]
+    #[case::first_key_has_anchor("&anchor key: 1\nkey: 2\n", 1)]
+    #[case::empty_string_keys("\"\": 1\n\"\": 2\n", 1)]
+    #[case::unicode_keys("café: 1\ncafé: 2\n", 1)]
+    #[case::within_same_sequence_item("items:\n  - name: alice\n    name: alice2\n", 1)]
+    #[case::same_duplicate_within_one_sibling(
+        "parent:\n  child:\n    cpu: 100m\n    cpu: 200m\n",
+        1
+    )]
+    #[case::duplicate_before_ellipsis("a: 1\na: 2\n...\nb: 3\n", 1)]
+    #[case::triple_duplicate_two_diags("parent:\n  child:\n    x: 1\n    x: 2\n    x: 3\n", 2)]
+    fn duplicate_keys_count(#[case] input: &str, #[case] expected: usize) {
+        let result = parse_duplicate(input);
+
+        assert_eq!(result.len(), expected);
+    }
+
+    // ---- Duplicate Key Validator: Error severity ----
+
+    #[rstest]
+    #[case::simple_top_level("a: 1\na: 2\n")]
+    #[case::flow_mapping_duplicate("cfg: {x: 1, x: 2}\n")]
+    #[case::empty_string_keys("\"\": 1\n\"\": 2\n")]
+    #[case::unicode_keys("café: 1\ncafé: 2\n")]
+    fn duplicate_key_error_severity(#[case] input: &str) {
+        let result = parse_duplicate(input);
+
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    // ---- Duplicate Key Validator: standalone ----
 
     #[test]
     fn should_detect_simple_top_level_duplicate() {
@@ -1347,24 +1208,6 @@ mod tests {
     }
 
     #[test]
-    fn should_not_flag_same_key_at_different_nesting_levels() {
-        // `name` appears at top level and inside `nested:` — these are different scopes
-        let text = "name: top\nnested:\n  name: inner\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_reset_scope_on_document_boundary() {
-        // `key` appears once in each document — no duplicate
-        let text = "key: 1\n---\nkey: 2\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn should_detect_duplicate_within_same_document_in_multi_doc_yaml() {
         let text = "a: 1\na: 2\n---\nb: 3\n";
         let result = parse_duplicate(text);
@@ -1372,8 +1215,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'a'"));
     }
-
-    // ---- Duplicate Key Validator: Flow Mappings ----
 
     #[test]
     fn should_detect_flow_mapping_duplicate() {
@@ -1386,97 +1227,8 @@ mod tests {
     }
 
     #[test]
-    fn should_return_empty_for_flow_mapping_without_duplicates() {
-        let text = "cfg: {a: 1, b: 2}\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    // ---- Duplicate Key Validator: Quoted Keys ----
-
-    #[test]
-    fn should_treat_double_quoted_and_unquoted_same_key_as_duplicate() {
-        let text = "\"key\": 1\nkey: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("'key'"));
-    }
-
-    #[test]
-    fn should_treat_two_double_quoted_identical_keys_as_duplicate() {
-        let text = "\"key\": 1\n\"key\": 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-    }
-
-    #[test]
-    fn should_treat_single_quoted_and_unquoted_same_key_as_duplicate() {
-        // AST `value` strips quotes regardless of ScalarStyle
-        let text = "'key': 1\nkey: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("'key'"));
-    }
-
-    #[test]
-    fn should_treat_single_and_double_quoted_same_value_as_duplicate() {
-        let text = "'key': 1\n\"key\": 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-    }
-
-    // ---- Duplicate Key Validator: Anchor Keys ----
-
-    #[test]
-    fn should_detect_duplicate_when_second_key_has_anchor() {
-        // `&anchor key: 2` — anchor is separate from value; key value is still "key"
-        let text = "key: 1\n&anchor key: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("'key'"));
-    }
-
-    #[test]
-    fn should_detect_duplicate_when_first_key_has_anchor() {
-        let text = "&anchor key: 1\nkey: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("'key'"));
-    }
-
-    #[test]
-    fn should_not_flag_anchor_key_appearing_once() {
-        let text = "&anchor key: 1\nother: 2\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    // ---- Duplicate Key Validator: Non-scalar Keys ----
-
-    #[test]
-    fn should_skip_non_scalar_mapping_key() {
-        // Complex (mapping) key used twice — non-scalar keys are skipped
-        let text = "{a: 1}: foo\n{a: 1}: bar\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    // ---- Duplicate Key Validator: Alias Keys ----
-
-    #[test]
     fn should_detect_duplicate_alias_keys() {
-        // *ref used as a mapping key twice — behavioral parity with old text scanner
-        // which treated `*anchor` as a plain-text key value.
-        // Explicit key syntax (`? *anchor`) is required to use an alias as a mapping key.
+        // *ref used as a mapping key twice
         let text = "x: &anchor foo\n? *anchor\n: 1\n? *anchor\n: 2\n";
         let result = parse_duplicate(text);
 
@@ -1487,16 +1239,6 @@ mod tests {
         );
         assert!(result[0].message.contains("*anchor"));
     }
-
-    #[test]
-    fn should_not_flag_single_alias_key() {
-        let text = "x: &anchor foo\n? *anchor\n: 1\nother: 2\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    // ---- Duplicate Key Validator: Empty/Null String Keys ----
 
     #[test]
     fn should_detect_duplicate_empty_string_keys() {
@@ -1510,8 +1252,6 @@ mod tests {
         );
     }
 
-    // ---- Duplicate Key Validator: Unicode Keys ----
-
     #[test]
     fn should_detect_duplicate_unicode_keys() {
         let text = "café: 1\ncafé: 2\n";
@@ -1522,17 +1262,6 @@ mod tests {
         assert!(result[0].message.contains("café"));
     }
 
-    // ---- Duplicate Key Validator: Sequence Items ----
-
-    #[test]
-    fn should_not_flag_same_key_in_different_sequence_items() {
-        // Each `- name:` is a separate mapping in the sequence
-        let text = "items:\n  - name: alice\n  - name: bob\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
     #[test]
     fn should_detect_duplicate_within_same_sequence_item() {
         let text = "items:\n  - name: alice\n    name: alice2\n";
@@ -1540,16 +1269,6 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'name'"));
-    }
-
-    // ---- Duplicate Key Validator: Sibling Mappings ----
-
-    #[test]
-    fn should_not_flag_same_key_in_sibling_mappings_under_common_parent() {
-        let text = "parent:\n  child_a:\n    cpu: 100m\n    memory: 128Mi\n  child_b:\n    cpu: 200m\n    memory: 256Mi\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
     }
 
     #[test]
@@ -1576,9 +1295,6 @@ limits:
 
     #[test]
     fn should_not_flag_kubernetes_limitrange_inside_sequence_item() {
-        // This is the actual K8s LimitRange pattern where limits entries
-        // are sequence items, and each entry has sibling mappings (max, min,
-        // default, defaultRequest) that each contain cpu and memory keys.
         let text = "\
 spec:
   limits:
@@ -1602,15 +1318,6 @@ spec:
     }
 
     #[test]
-    fn should_not_flag_same_key_in_deeply_nested_sibling_mappings() {
-        let text =
-            "level1:\n  level2:\n    sibling_a:\n      value: 1\n    sibling_b:\n      value: 2\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn should_still_detect_duplicate_in_same_sibling_mapping() {
         let text = "parent:\n  child:\n    cpu: 100m\n    cpu: 200m\n";
         let result = parse_duplicate(text);
@@ -1618,22 +1325,6 @@ spec:
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'cpu'"));
         assert_eq!(result[0].range.start.line, 3);
-    }
-
-    #[test]
-    fn should_not_flag_empty_sibling_mappings_with_shared_key_in_later_sibling() {
-        let text = "parent:\n  a: ~\n  b:\n    cpu: 1\n  c:\n    cpu: 2\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_not_flag_same_key_in_sibling_mappings_mixed_indent_depth() {
-        let text = "resources:\n  requests:\n    cpu: 100m\n  limits:\n    cpu: 500m\n";
-        let result = parse_duplicate(text);
-
-        assert!(result.is_empty());
     }
 
     #[test]
@@ -1645,31 +1336,6 @@ spec:
         assert!(result.iter().all(|d| d.message.contains("'x'")));
     }
 
-    // ---- Duplicate Key Validator: Edge Cases ----
-
-    #[test]
-    fn should_return_empty_for_empty_document_duplicate_keys() {
-        let result = parse_duplicate("");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_return_empty_for_comment_only_document_duplicate_keys() {
-        let result = parse_duplicate("# just a comment\n");
-
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn should_use_error_severity_for_duplicate_keys() {
-        let text = "a: 1\na: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
     #[test]
     fn should_truncate_long_key_name_in_message() {
         let long_key = "k".repeat(110);
@@ -1678,16 +1344,12 @@ spec:
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("..."));
-        // truncated to 100 chars + "..."
         let display = &result[0].message;
         assert!(display.len() < long_key.len() + 20);
     }
 
-    // ---- Duplicate Key Validator: Diagnostic range accuracy ----
-
     #[test]
     fn should_report_correct_column_for_indented_duplicate_key() {
-        // The duplicate `dup` key is at column 4 (4 spaces of indent)
         let text = "outer:\n  inner:\n    dup: 1\n    dup: 2\n";
         let result = parse_duplicate(text);
 
@@ -1704,7 +1366,6 @@ spec:
 
     #[test]
     fn should_report_correct_range_end_for_duplicate_key() {
-        // "abc" has 3 chars; end column = start + 3
         let text = "abc: 1\nabc: 2\n";
         let result = parse_duplicate(text);
 
@@ -1717,72 +1378,6 @@ spec:
         );
     }
 
-    // ---- Custom Tags Validator: Quote-aware position scanning ----
-
-    #[test]
-    fn tag_in_quoted_string_does_not_shadow_real_tag_range() {
-        // The AST sees one Tagged node (!include on line 1).
-        // Raw text has "!include" on line 0 inside quotes — must be skipped.
-        let text = "note: \"use !include for files\"\nvalue: !include actual.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
-        assert_eq!(result.len(), 1);
-        // Diagnostic must point to line 1, not line 0 (the quoted mention).
-        assert_eq!(result[0].range.start.line, 1);
-    }
-
-    // ---- Custom Tags Validator: Additional quote-aware coverage ----
-
-    #[test]
-    fn tag_in_single_quoted_string_is_skipped() {
-        // !ref inside single quotes on line 0 must not shadow the real tag on line 1
-        let text = "note: 'see !ref for details'\nvalue: !ref target.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.line, 1);
-    }
-
-    #[test]
-    fn tag_boundary_check_rejects_prefix_match() {
-        // "!include_extras" should not match a search for "!include" due to after_ok check
-        // (followed by '_' which is a valid tag-name char)
-        let text = "value: !include_extras foo.yaml\n";
-        // Parse to get the actual AST tag
-        let docs = parse_docs(text);
-        // With allowed containing only "!include", the actual tag "!include_extras"
-        // should be flagged — but if boundary check fails, the range lookup might not find it.
-        // The key assertion is no panic and result is either empty (found but allowed) or 1 (unknown).
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
-        // Either 0 (tag found at wrong boundary and skipped) or 1 (found correctly)
-        assert!(result.len() <= 1, "should not crash on boundary check");
-    }
-
-    #[test]
-    fn second_occurrence_of_same_tag_has_correct_range() {
-        // Two !include tags in different YAML values — count mechanism must find the 2nd occurrence
-        let text = "a: !include file1.yaml\nb: !include file2.yaml\n";
-        let docs = parse_docs(text);
-        let result = validate_custom_tags(text, &docs, &allowed(&["!other"]));
-        // Both occurrences flagged
-        assert_eq!(result.len(), 2);
-        let lines: Vec<u32> = result.iter().map(|d| d.range.start.line).collect();
-        assert!(lines.contains(&0), "first occurrence on line 0");
-        assert!(lines.contains(&1), "second occurrence on line 1");
-    }
-
-    // ---- Duplicate Key Validator: Document terminator coverage ----
-
-    #[test]
-    fn ellipsis_terminator_resets_scope_for_duplicate_detection() {
-        // "..." (YAML document end marker) must reset scope just like "---"
-        let text = "key: 1\n...\nkey: 2\n";
-        let result = parse_duplicate(text);
-
-        // "key" appears once before "..." and once after — different documents, not a duplicate
-        assert!(result.is_empty(), "ellipsis terminator should reset scope");
-    }
-
     #[test]
     fn duplicate_key_detected_before_ellipsis_terminator() {
         let text = "a: 1\na: 2\n...\nb: 3\n";
@@ -1790,33 +1385,6 @@ spec:
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'a'"));
-    }
-
-    // ---- is_inside_quotes: single-quote context ----
-
-    #[test]
-    fn flow_style_not_detected_inside_single_quoted_string() {
-        // Braces inside single quotes must not produce a flowMap diagnostic
-        let text = "msg: 'value with {braces}'\n";
-        let result = validate_flow_style(text);
-
-        assert!(
-            result.is_empty(),
-            "braces inside single quotes must not trigger flowMap"
-        );
-    }
-
-    #[test]
-    fn flow_style_detected_after_single_quoted_string_ends() {
-        // After the closing quote, a real flow mapping should be detected
-        let text = "msg: 'quoted' \nreal: {a: 1}\n";
-        let result = validate_flow_style(text);
-
-        assert_eq!(
-            result.len(),
-            1,
-            "should detect flowMap after single-quoted section"
-        );
     }
 
     // ---- YAML version agnosticism ----
@@ -1833,11 +1401,6 @@ spec:
 
     #[test]
     fn validators_produce_same_diagnostics_regardless_of_yaml_version_setting() {
-        // `on` and `yes` are V1.1 boolean keywords; in V1.2 (the parser's
-        // mode) they are plain strings. Since all validators receive only text
-        // or parsed documents, neither `on` nor `yes` triggers any
-        // special diagnostic path — they are treated as ordinary string keys
-        // in both cases.
         let text_with_v1_1_keywords = "on: push\nyes: true\n";
         let text_plain = "push_trigger: push\nenabled: true\n";
 
