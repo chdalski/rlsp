@@ -199,6 +199,49 @@ impl<'input> EventIter<'input> {
             }
         }
 
+        // ---- Block sequence / mapping entry detection ----
+        //
+        // Most YAML lines are sequence entries (`- item`) or mapping entries
+        // (`key: value`). Check these first before the rare alias/tag/anchor
+        // probes so common-path dispatch hits on the first or second try.
+        //
+        // Safety: the probes are non-overlapping by first non-space byte:
+        //   sequence entry: `b'-'` followed by space or newline
+        //   mapping entry:  plain char (not `*`, `!`, `&`, `[`, `{`, `]`, `}`, `-`)
+        //   flow:           `b'['` or `b'{'`
+        //   stray closer:   `b']'` or `b'}'`
+        //   alias:          `b'*'`
+        //   tag:            `b'!'`
+        //   anchor:         `b'&'`
+        // No two probes can match the same line, so reordering does not change
+        // which probe fires — only how many misses precede the match.
+
+        if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
+            return self.handle_sequence_entry(dash_indent, dash_pos);
+        }
+        if let Some((key_indent, key_pos)) = self.peek_mapping_entry() {
+            return self.handle_mapping_entry(key_indent, key_pos);
+        }
+
+        // ---- Flow collection detection: `[` or `{` starts a flow collection ----
+        // Stray closing flow indicators (`]`, `}`) in block context are errors.
+
+        if first_byte == Some(b'[') || first_byte == Some(b'{') {
+            return self.handle_flow_collection();
+        }
+        if let Some(line) = self.lexer.peek_next_line() {
+            if trimmed.starts_with(']') || trimmed.starts_with('}') {
+                let err_pos = line.pos;
+                let ch = trimmed.chars().next().unwrap_or(']');
+                self.state = IterState::Done;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: format!("unexpected '{ch}' outside flow collection"),
+                }));
+            }
+        }
+
         // ---- Alias node: `*name` is a complete node ----
 
         if let Some(peek) = self.lexer.peek_next_line() {
@@ -576,34 +619,6 @@ impl<'input> EventIter<'input> {
                     }
                 }
             }
-        }
-
-        // ---- Flow collection detection: `[` or `{` starts a flow collection ----
-        // Stray closing flow indicators (`]`, `}`) in block context are errors.
-
-        if first_byte == Some(b'[') || first_byte == Some(b'{') {
-            return self.handle_flow_collection();
-        }
-        if let Some(line) = self.lexer.peek_next_line() {
-            if trimmed.starts_with(']') || trimmed.starts_with('}') {
-                let err_pos = line.pos;
-                let ch = trimmed.chars().next().unwrap_or(']');
-                self.state = IterState::Done;
-                self.lexer.consume_line();
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: format!("unexpected '{ch}' outside flow collection"),
-                }));
-            }
-        }
-
-        // ---- Block sequence / mapping entry detection ----
-
-        if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
-            return self.handle_sequence_entry(dash_indent, dash_pos);
-        }
-        if let Some((key_indent, key_pos)) = self.peek_mapping_entry() {
-            return self.handle_mapping_entry(key_indent, key_pos);
         }
 
         // ---- Dedent: close collections more deeply nested than the current line ----
