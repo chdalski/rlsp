@@ -666,6 +666,8 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn default_opts() -> YamlFormatOptions {
@@ -679,19 +681,282 @@ mod tests {
         }
     }
 
-    // Test 1: Simple key-value formats correctly.
-    #[test]
-    fn simple_key_value() {
-        let result = format_yaml("key: value\n", &default_opts());
-        assert_eq!(result, "key: value\n");
+    // ---- Group: Exact-output tests ----
+
+    #[rstest]
+    #[case::simple_key_value("key: value\n", "key: value\n")]
+    #[case::multiple_keys("a: 1\nb: 2\nc: 3\n", "a: 1\nb: 2\nc: 3\n")]
+    #[case::empty_document("", "")]
+    #[case::syntax_error_returns_original("key: [unclosed\n", "key: [unclosed\n")]
+    #[case::no_comments_regression("a: 1\nb: 2\nc: 3\n", "a: 1\nb: 2\nc: 3\n")]
+    #[case::blank_line_at_eof_stripped("a: 1\n\n", "a: 1\n")]
+    #[case::no_blank_lines_not_added("a: 1\nb: 2\n", "a: 1\nb: 2\n")]
+    #[case::invalid_input_unchanged("key: [bad\n", "key: [bad\n")]
+    fn format_yaml_exact_output(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(format_yaml(input, &default_opts()), expected);
     }
 
-    // Test 2: Multiple keys — preserves order, one per line.
-    #[test]
-    fn multiple_keys() {
-        let result = format_yaml("a: 1\nb: 2\nc: 3\n", &default_opts());
-        assert_eq!(result, "a: 1\nb: 2\nc: 3\n");
+    // ---- Group: Idempotency tests ----
+
+    #[rstest]
+    #[case::key_value("key: value\n")]
+    #[case::multi_key("a: 1\nb: 2\n")]
+    #[case::nested_mapping("parent:\n  child: value\n")]
+    #[case::block_sequence("items:\n  - one\n  - two\n")]
+    #[case::trailing_comment("key: value  # comment\n")]
+    #[case::leading_comment("# header\nkey: value\n")]
+    #[case::sections_with_blank("# section 1\nkey1: v1\n\n# section 2\nkey2: v2\n")]
+    #[case::nested_sequence("outer:\n  - - inner1\n    - inner2\n  - simple\n")]
+    #[case::blank_line_between_keys(
+        "on: push\n\npermissions:\n  contents: read\n\njobs:\n  build: {}\n"
+    )]
+    #[case::quote_stripping("value: \"python\"\n")]
+    #[case::flow_to_block(
+        "spec:\n  containers:\n    - name: test\n      command: [\"python\", \"-m\", \"http.server\", \"5000\"]\n"
+    )]
+    fn format_yaml_is_idempotent(#[case] input: &str) {
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(
+            first, second,
+            "idempotency failed for {input:?}:\nfirst:  {first:?}\nsecond: {second:?}"
+        );
     }
+
+    // ---- Group: Multi-contains checks (basic formatting) ----
+
+    #[rstest]
+    #[case::boolean_values("enabled: true\ndisabled: false\n", &["true", "false"] as &[&str])]
+    #[case::numeric_values("port: 8080\nratio: 0.5\n", &["8080", "0.5"])]
+    #[case::mapping_block_style("a: 1\nb: 2\n", &["a: 1", "b: 2"])]
+    #[case::flow_sequence_items("items:\n  - a\n  - b\n  - c\n", &["a", "b", "c"])]
+    #[case::multi_document(
+        "key1: value1\n---\nkey2: value2\n",
+        &["key1: value1", "---", "key2: value2"]
+    )]
+    #[case::float_special_values(
+        "nan_val: .nan\ninf_val: .inf\nneg_inf_val: -.inf\n",
+        &[".nan", ".inf", "-.inf"]
+    )]
+    #[case::tagged_node("tagged: !mytag some_value\n", &["!mytag", "some_value"])]
+    #[case::literal_block_scalar(
+        "body: |\n  line one\n  line two\n",
+        &["|", "line one", "line two"]
+    )]
+    #[case::folded_block_scalar("body: >\n  folded line\n", &[">", "folded line"])]
+    #[case::single_quoted_scalar_content("key: 'quoted value'\n", &["quoted value", "key:"])]
+    #[case::double_quoted_scalar_content("key: \"quoted value\"\n", &["quoted value", "key:"])]
+    fn format_yaml_multi_contains(#[case] input: &str, #[case] expected: &[&str]) {
+        let result = format_yaml(input, &default_opts());
+        for &s in expected {
+            assert!(result.contains(s), "{s:?} missing: {result:?}");
+        }
+    }
+
+    // ---- Group: Single-contains checks ----
+
+    #[rstest]
+    #[case::null_value("key: null\n", "null")]
+    #[case::whole_number_float("x: 42.0\n", "42.0")]
+    #[case::integer_preserved("port: 8080\n", "8080")]
+    fn format_yaml_single_contains(#[case] input: &str, #[case] expected: &str) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains(expected),
+            "{expected:?} missing: {result:?}"
+        );
+    }
+
+    // ---- Group: escape_double_quoted unit tests ----
+
+    // EDQ1: Newline, carriage return, and tab are escaped.
+    // EDQ2: Double-quote and backslash are escaped.
+    #[rstest]
+    #[case::newline_escaped("a\nb", "a\\nb")]
+    #[case::carriage_return_escaped("a\rb", "a\\rb")]
+    #[case::tab_escaped("a\tb", "a\\tb")]
+    #[case::double_quote_escaped("say \"hi\"", "say \\\"hi\\\"")]
+    #[case::backslash_escaped("a\\b", "a\\\\b")]
+    fn escape_double_quoted_escapes(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(escape_double_quoted(input), expected);
+    }
+
+    // ---- Group: needs_quoting — returns true ----
+
+    // NQ1 (empty string), NQ2 (numeric), and version-aware cases.
+    #[rstest]
+    #[case::on_v1_1("on", YamlVersion::V1_1)]
+    #[case::yes_v1_1("yes", YamlVersion::V1_1)]
+    #[case::off_v1_1("off", YamlVersion::V1_1)]
+    #[case::no_v1_1("no", YamlVersion::V1_1)]
+    #[case::true_v1_1("true", YamlVersion::V1_1)]
+    #[case::true_v1_2("true", YamlVersion::V1_2)]
+    #[case::null_v1_1("null", YamlVersion::V1_1)]
+    #[case::null_v1_2("null", YamlVersion::V1_2)]
+    #[case::uppercase_yes_v1_1("YES", YamlVersion::V1_1)]
+    #[case::empty_string_v1_1("", YamlVersion::V1_1)]
+    #[case::empty_string_v1_2("", YamlVersion::V1_2)]
+    #[case::numeric_123_v1_1("123", YamlVersion::V1_1)]
+    #[case::numeric_123_v1_2("123", YamlVersion::V1_2)]
+    #[case::numeric_3_14_v1_2("3.14", YamlVersion::V1_2)]
+    fn needs_quoting_returns_true(#[case] word: &str, #[case] version: YamlVersion) {
+        assert!(
+            needs_quoting(word, version),
+            "{word:?} should require quoting in {version:?}"
+        );
+    }
+
+    // ---- Group: needs_quoting — returns false ----
+
+    #[rstest]
+    #[case::on_v1_2("on", YamlVersion::V1_2)]
+    #[case::yes_v1_2("yes", YamlVersion::V1_2)]
+    #[case::off_v1_2("off", YamlVersion::V1_2)]
+    #[case::no_v1_2("no", YamlVersion::V1_2)]
+    #[case::uppercase_yes_v1_2("YES", YamlVersion::V1_2)]
+    fn needs_quoting_returns_false(#[case] word: &str, #[case] version: YamlVersion) {
+        assert!(
+            !needs_quoting(word, version),
+            "{word:?} should not require quoting in {version:?}"
+        );
+    }
+
+    // ---- Group: Quote stripping — safe strings → plain ----
+
+    // QS1 (double-quoted safe → plain), QS2 (single-quoted safe → plain),
+    // and duplicates from "scalar style preserved" section.
+    #[rstest]
+    #[case::double_quoted_safe("value: \"python\"\n", "\"python\"", "python")]
+    #[case::single_quoted_safe("value: 'hello'\n", "'hello'", "hello")]
+    #[case::double_quoted_greeting("greeting: \"hello\"\n", "\"hello\"", "hello")]
+    #[case::single_quoted_greeting("greeting: 'hello'\n", "'hello'", "hello")]
+    fn format_yaml_quotes_stripped(#[case] input: &str, #[case] quoted: &str, #[case] plain: &str) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            !result.contains(quoted),
+            "unnecessary {quoted:?} should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains(plain),
+            "{plain:?} should be present as plain: {result:?}"
+        );
+    }
+
+    // ---- Group: Quote stripping — special strings → kept quoted ----
+
+    // QS3 (number-like), QS4 (boolean keyword), QS7 (starts with #).
+    #[rstest]
+    #[case::number_like("value: \"5000\"\n", "\"5000\"")]
+    #[case::boolean_keyword("value: \"true\"\n", "\"true\"")]
+    #[case::hash_start("value: \"#comment\"\n", "\"#comment\"")]
+    fn format_yaml_quotes_preserved(#[case] input: &str, #[case] expected: &str) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains(expected),
+            "{expected:?} must be preserved: {result:?}"
+        );
+    }
+
+    // ---- Group: Plain scalars — value present, not re-quoted ----
+
+    // Covers scalar style preservation for true/false/null/on (default opts).
+    #[rstest]
+    #[case::true_preserved("enabled: true\n", "true", "\"true\"")]
+    #[case::false_preserved("active: false\n", "false", "\"false\"")]
+    #[case::null_preserved("value: null\n", "null", "\"null\"")]
+    #[case::on_key_unquoted("on: push\n", "on:", "\"on\"")]
+    fn format_yaml_plain_scalar_not_quoted(
+        #[case] input: &str,
+        #[case] contains: &str,
+        #[case] not_quoted: &str,
+    ) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains(contains),
+            "{contains:?} missing: {result:?}"
+        );
+        let not_sq = not_quoted.replace('"', "'");
+        assert!(
+            !result.contains(not_quoted) && !result.contains(&not_sq),
+            "{contains:?} must not be quoted: {result:?}"
+        );
+    }
+
+    // ---- Group: Version-aware quoting — keyword stays quoted ----
+
+    // QS5 (on in V1.1) absorbed here alongside v1_1 on/yes and both-version true.
+    #[rstest]
+    #[case::on_stays_quoted_v1_1("value: \"on\"\n", YamlVersion::V1_1, "\"on\"")]
+    #[case::yes_stays_quoted_v1_1("value: \"yes\"\n", YamlVersion::V1_1, "\"yes\"")]
+    #[case::true_stays_quoted_v1_1("value: \"true\"\n", YamlVersion::V1_1, "\"true\"")]
+    #[case::true_stays_quoted_v1_2("value: \"true\"\n", YamlVersion::V1_2, "\"true\"")]
+    fn format_yaml_quoted_keyword_stays_quoted(
+        #[case] input: &str,
+        #[case] version: YamlVersion,
+        #[case] expected: &str,
+    ) {
+        let result = format_yaml(input, &opts_with_version(version));
+        assert!(
+            result.contains(expected),
+            "{expected:?} must stay quoted in {version:?}: {result:?}"
+        );
+    }
+
+    // ---- Group: Version-aware quoting — V1.2 strips non-reserved keywords ----
+
+    #[rstest]
+    #[case::on_stripped_v1_2("value: \"on\"\n", YamlVersion::V1_2, "\"on\"", "'on'", "on")]
+    #[case::yes_stripped_v1_2("value: \"yes\"\n", YamlVersion::V1_2, "\"yes\"", "'yes'", "yes")]
+    fn format_yaml_v1_2_keyword_quotes_stripped(
+        #[case] input: &str,
+        #[case] version: YamlVersion,
+        #[case] not_dq: &str,
+        #[case] not_sq: &str,
+        #[case] plain: &str,
+    ) {
+        let result = format_yaml(input, &opts_with_version(version));
+        assert!(
+            !result.contains(not_dq) && !result.contains(not_sq),
+            "{plain:?} is not reserved in V1.2; quotes should be stripped: {result:?}"
+        );
+        assert!(
+            result.contains(plain),
+            "{plain:?} must appear as plain: {result:?}"
+        );
+    }
+
+    // ---- Group: on plain key — never quoted regardless of version ----
+
+    #[rstest]
+    #[case::v1_2(YamlVersion::V1_2)]
+    #[case::v1_1(YamlVersion::V1_1)]
+    fn format_yaml_on_plain_key_never_quoted(#[case] version: YamlVersion) {
+        let result = format_yaml("on: push\n", &opts_with_version(version));
+        assert!(
+            result.contains("on:"),
+            "on: key should not be quoted in {version:?}: {result:?}"
+        );
+        assert!(
+            !result.contains("\"on\"") && !result.contains("'on'"),
+            "on: plain key must not gain quotes in {version:?}: {result:?}"
+        );
+    }
+
+    // ---- Group: Scalar style — single-contains checks (Task 23 Phase A) ----
+
+    #[rstest]
+    #[case::plain_scalar("key: plain_value\n", "key: plain_value")]
+    #[case::literal_block_chomp_clip("key: |\n  line one\n  line two\n", "|")]
+    #[case::folded_block_chomp_strip("key: >-\n  content\n", ">-")]
+    fn format_yaml_scalar_style_contains(#[case] input: &str, #[case] expected: &str) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.contains(expected),
+            "{expected:?} missing: {result:?}"
+        );
+    }
+
+    // ---- Standalone: Tests with unique assertion shapes or custom options ----
 
     // Test 3: Nested mapping — child indented under parent.
     #[test]
@@ -736,12 +1001,10 @@ mod tests {
         let input = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
         let result = format_yaml(input, &default_opts());
         assert!(result.contains("users:"), "missing users: {result:?}");
-        // name: Alice must appear after a `- ` prefix.
         assert!(
             result.contains("- name: Alice"),
             "first item first key missing: {result:?}"
         );
-        // age: 30 must be indented (at least 2 spaces) — not at the `- ` column.
         assert!(
             result.contains("  age: 30"),
             "age should be indented under its sequence item: {result:?}"
@@ -754,93 +1017,6 @@ mod tests {
             result.contains("  age: 25"),
             "second item age should be indented: {result:?}"
         );
-    }
-
-    // Test 7: Flow mapping stays inline when it fits.
-    // Note: the parser parses flow maps into the same Mapping type — our formatter
-    // always emits block for mappings. This test verifies multi-key mappings render correctly.
-    #[test]
-    fn mapping_block_style() {
-        let input = "a: 1\nb: 2\n";
-        let result = format_yaml(input, &default_opts());
-        // Both keys should appear.
-        assert!(result.contains("a: 1"), "a missing: {result:?}");
-        assert!(result.contains("b: 2"), "b missing: {result:?}");
-    }
-
-    // Test 8: Flow sequence stays flat when short enough.
-    #[test]
-    fn flow_sequence_flat_when_fits() {
-        // Short scalar sequence → should render as [a, b, c] or block.
-        let input = "items:\n  - a\n  - b\n  - c\n";
-        let result = format_yaml(input, &default_opts());
-        // Either inline or block — must contain all items.
-        assert!(result.contains('a'), "a missing: {result:?}");
-        assert!(result.contains('b'), "b missing: {result:?}");
-        assert!(result.contains('c'), "c missing: {result:?}");
-    }
-
-    // Test 9: Multi-document — `---` separators preserved.
-    #[test]
-    fn multi_document() {
-        let input = "key1: value1\n---\nkey2: value2\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("key1: value1"), "missing doc1: {result:?}");
-        assert!(result.contains("---"), "missing separator: {result:?}");
-        assert!(result.contains("key2: value2"), "missing doc2: {result:?}");
-    }
-
-    // Test 10: Null values handled correctly.
-    #[test]
-    fn null_values() {
-        let input = "key: null\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("null"), "null missing: {result:?}");
-    }
-
-    // Test 11: Boolean values — `true`/`false` preserved.
-    #[test]
-    fn boolean_values() {
-        let input = "enabled: true\ndisabled: false\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("true"), "true missing: {result:?}");
-        assert!(result.contains("false"), "false missing: {result:?}");
-    }
-
-    // Test 12: Numeric values — integers and floats preserved.
-    #[test]
-    fn numeric_values() {
-        let input = "port: 8080\nratio: 0.5\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("8080"), "integer missing: {result:?}");
-        assert!(result.contains("0.5"), "float missing: {result:?}");
-    }
-
-    // Test 13: Idempotency — format(format(x)) == format(x).
-    #[test]
-    fn idempotent() {
-        let inputs = [
-            "key: value\n",
-            "a: 1\nb: 2\n",
-            "parent:\n  child: value\n",
-            "items:\n  - one\n  - two\n",
-        ];
-        for input in inputs {
-            let first = format_yaml(input, &default_opts());
-            let second = format_yaml(&first, &default_opts());
-            assert_eq!(
-                first, second,
-                "idempotency failed for {input:?}:\nfirst:  {first:?}\nsecond: {second:?}"
-            );
-        }
-    }
-
-    // Test 14: Syntax error — returns original text unchanged.
-    #[test]
-    fn syntax_error_returns_original() {
-        let bad = "key: [unclosed\n";
-        let result = format_yaml(bad, &default_opts());
-        assert_eq!(result, bad, "should return original on parse error");
     }
 
     // Extra: string values that need quoting get quoted.
@@ -873,13 +1049,6 @@ mod tests {
             result.contains("'hello'"),
             "expected single-quoted: {result:?}"
         );
-    }
-
-    // Extra: empty document.
-    #[test]
-    fn empty_document() {
-        let result = format_yaml("", &default_opts());
-        assert_eq!(result, "");
     }
 
     // Test C1: Trailing comment preserved.
@@ -960,7 +1129,6 @@ mod tests {
         );
         assert!(result.contains("key1: v1"), "key1 missing: {result:?}");
         assert!(result.contains("key2: v2"), "key2 missing: {result:?}");
-        // Section 1 comment before key1, section 2 comment before key2.
         let s1_pos = result.find("# section 1").unwrap();
         let k1_pos = result.find("key1: v1").unwrap();
         let s2_pos = result.find("# section 2").unwrap();
@@ -1004,7 +1172,6 @@ mod tests {
             result.contains("# between"),
             "between comment missing: {result:?}"
         );
-        // Comment must appear between item1 and item2.
         let i1_pos = result.find("- item1").unwrap();
         let bet_pos = result.find("# between").unwrap();
         let i2_pos = result.find("- item2").unwrap();
@@ -1012,38 +1179,11 @@ mod tests {
         assert!(bet_pos < i2_pos, "comment should be before item2");
     }
 
-    // Test C8: Idempotency with comments.
-    #[test]
-    fn idempotent_with_comments() {
-        let inputs = [
-            "key: value  # comment\n",
-            "# header\nkey: value\n",
-            "# section 1\nkey1: v1\n\n# section 2\nkey2: v2\n",
-        ];
-        for input in inputs {
-            let first = format_yaml(input, &default_opts());
-            let second = format_yaml(&first, &default_opts());
-            assert_eq!(
-                first, second,
-                "idempotency failed for {input:?}:\nfirst:  {first:?}\nsecond: {second:?}"
-            );
-        }
-    }
-
-    // Test C9: No comments — existing formatting still works (regression).
-    #[test]
-    fn no_comments_regression() {
-        let input = "a: 1\nb: 2\nc: 3\n";
-        let result = format_yaml(input, &default_opts());
-        assert_eq!(result, "a: 1\nb: 2\nc: 3\n", "regression: {result:?}");
-    }
-
     // Test C10: Hash inside quoted string is NOT extracted as a comment.
     #[test]
     fn hash_inside_quoted_string_not_extracted() {
         let input = "key: \"value # not a comment\"\n";
         let result = format_yaml(input, &default_opts());
-        // The # must not be extracted as a standalone comment.
         for line in result.lines() {
             if line.contains("key:") {
                 assert!(
@@ -1052,124 +1192,31 @@ mod tests {
                 );
             }
         }
-        // The value content (decoded from the double-quoted scalar) must be present.
         assert!(
             result.contains("value") && result.contains("not a comment"),
             "quoted string content should be present: {result:?}"
         );
     }
 
-    // Unit tests for needs_quoting.
-
-    // NQ1: Empty string requires quoting (line 380).
-    #[test]
-    fn needs_quoting_empty_string() {
-        assert!(
-            needs_quoting("", YamlVersion::V1_2),
-            "empty string must be quoted"
-        );
-    }
-
-    // NQ2: Numeric-looking string requires quoting (line 384 — looks_like_number path).
-    #[test]
-    fn needs_quoting_numeric_string() {
-        assert!(
-            needs_quoting("123", YamlVersion::V1_2),
-            "integer-looking string must be quoted"
-        );
-        assert!(
-            needs_quoting("3.14", YamlVersion::V1_2),
-            "float-looking string must be quoted"
-        );
-    }
-
-    // Unit tests for escape_double_quoted.
-
-    // EDQ1: Newline, carriage return, and tab are escaped (lines 454-458).
-    #[test]
-    fn escape_double_quoted_control_chars() {
-        assert_eq!(escape_double_quoted("a\nb"), "a\\nb");
-        assert_eq!(escape_double_quoted("a\rb"), "a\\rb");
-        assert_eq!(escape_double_quoted("a\tb"), "a\\tb");
-    }
-
-    // EDQ2: Double-quote and backslash are escaped.
-    #[test]
-    fn escape_double_quoted_quote_and_backslash() {
-        assert_eq!(escape_double_quoted("say \"hi\""), "say \\\"hi\\\"");
-        assert_eq!(escape_double_quoted("a\\b"), "a\\\\b");
-    }
-
-    // Integration tests for node_to_doc paths reachable via format_yaml.
-
-    // ND1: Tagged node — tags are inline fields on each node variant.
-    #[test]
-    fn tagged_node_preserves_tag() {
-        let input = "tagged: !mytag some_value\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("!mytag"),
-            "tag prefix should be preserved: {result:?}"
-        );
-        assert!(
-            result.contains("some_value"),
-            "tagged value should be preserved: {result:?}"
-        );
-    }
-
-    // ND2: Float special values round-trip through format_yaml (lines 340, 342-345, 354).
-    // The parser preserves .nan, .inf, -.inf as plain scalar strings.
-    #[test]
-    fn float_special_values_round_trip() {
-        let input = "nan_val: .nan\ninf_val: .inf\nneg_inf_val: -.inf\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains(".nan"),
-            ".nan should be preserved: {result:?}"
-        );
-        assert!(
-            result.contains(".inf"),
-            ".inf should be preserved: {result:?}"
-        );
-        assert!(
-            result.contains("-.inf"),
-            "-.inf should be preserved: {result:?}"
-        );
-    }
-
-    // ND3: Whole-number float gets .0 suffix (line 354).
-    // The parser preserves "42.0" as a plain scalar string.
-    #[test]
-    fn whole_number_float_rendered_with_decimal() {
-        let input = "x: 42.0\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("42.0"),
-            "whole-number float should retain decimal: {result:?}"
-        );
-    }
-
-    // ND4: Empty string value is quoted in output (line 380 needs_quoting path).
+    // ND4: Empty string value is quoted in output.
     // The parser preserves "" as a double-quoted scalar; needs_quoting("") returns true.
     #[test]
     fn empty_string_value_is_quoted() {
         let input = "key: \"\"\n";
         let result = format_yaml(input, &default_opts());
-        // The empty string must be quoted — plain empty would be ambiguous.
         assert!(
             result.contains("\"\"") || result.contains("''"),
             "empty string should be quoted: {result:?}"
         );
     }
 
-    // ND5: Numeric-looking string stays quoted (line 384 — looks_like_number path).
+    // ND5: Numeric-looking string stays quoted.
     // The parser preserves "123" (double-quoted in source) as a double-quoted scalar.
     // needs_quoting("123") is true (looks_like_number), so it is re-quoted on output.
     #[test]
     fn numeric_looking_string_stays_quoted() {
         let input = "version: \"123\"\n";
         let result = format_yaml(input, &default_opts());
-        // "123" must be re-quoted so it doesn't become the integer 123.
         assert!(
             result.contains("\"123\"") || result.contains("'123'"),
             "numeric-looking string should be quoted: {result:?}"
@@ -1184,25 +1231,9 @@ mod tests {
 
     // ND8: (Removed — no longer applicable.)
 
-    // ---- Formatter: Scalar Style Preservation (early_parse false) ----
-
-    #[test]
-    fn format_yaml_on_key_stays_unquoted() {
-        // `on` is a YAML 1.1 boolean keyword; early_parse(false) preserves it as plain.
-        let result = format_yaml("on: push\n", &default_opts());
-        assert!(
-            result.contains("on:"),
-            "on: key should not be quoted: {result:?}"
-        );
-        assert!(
-            !result.contains("\"on\"") && !result.contains("'on'"),
-            "on: key must not be quoted: {result:?}"
-        );
-    }
-
+    // `"on"` is a V1.1 boolean keyword; quotes preserved only when V1.1 is active.
     #[test]
     fn format_yaml_quoted_on_key_stays_quoted() {
-        // `"on"` is a V1.1 boolean keyword; quotes are preserved only when V1.1 is active.
         let result = format_yaml("\"on\": push\n", &opts_with_version(YamlVersion::V1_1));
         assert!(
             result.contains("\"on\""),
@@ -1210,117 +1241,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn format_yaml_true_plain_scalar_preserved() {
-        let result = format_yaml("enabled: true\n", &default_opts());
-        assert!(
-            result.contains("true"),
-            "true should be preserved: {result:?}"
-        );
-        assert!(
-            !result.contains("\"true\"") && !result.contains("'true'"),
-            "true must not be quoted: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_false_plain_scalar_preserved() {
-        let result = format_yaml("active: false\n", &default_opts());
-        assert!(
-            result.contains("false"),
-            "false should be preserved: {result:?}"
-        );
-        assert!(
-            !result.contains("\"false\"") && !result.contains("'false'"),
-            "false must not be quoted: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_null_plain_scalar_preserved() {
-        let result = format_yaml("value: null\n", &default_opts());
-        assert!(
-            result.contains("null"),
-            "null should be preserved: {result:?}"
-        );
-        assert!(
-            !result.contains("\"null\"") && !result.contains("'null'"),
-            "null must not be quoted: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_integer_preserved() {
-        let result = format_yaml("port: 8080\n", &default_opts());
-        assert!(
-            result.contains("8080"),
-            "integer should be preserved: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_double_quoted_string_preserved() {
-        // Unnecessary quotes on a safe string are stripped to plain.
-        let result = format_yaml("greeting: \"hello\"\n", &default_opts());
-        assert!(
-            !result.contains("\"hello\""),
-            "unnecessary double quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("hello"),
-            "value should still be present as plain: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_single_quoted_string_preserved() {
-        // Unnecessary quotes on a safe string are stripped to plain.
-        let result = format_yaml("greeting: 'hello'\n", &default_opts());
-        assert!(
-            !result.contains("'hello'"),
-            "unnecessary single quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("hello"),
-            "value should still be present as plain: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_literal_block_scalar_preserved() {
-        let input = "body: |\n  line one\n  line two\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains('|'),
-            "literal block indicator missing: {result:?}"
-        );
-        assert!(
-            result.contains("line one"),
-            "block content missing: {result:?}"
-        );
-        assert!(
-            result.contains("line two"),
-            "block content missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_folded_block_scalar_preserved() {
-        let input = "body: >\n  folded line\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains('>'),
-            "folded block indicator missing: {result:?}"
-        );
-        assert!(
-            result.contains("folded line"),
-            "block content missing: {result:?}"
-        );
-    }
-
+    // `yes` and `no` are YAML 1.1 boolean keywords; preserved as plain scalars.
     #[test]
     fn format_yaml_other_yaml11_booleans_unquoted() {
-        // `yes` and `no` are YAML 1.1 boolean keywords; preserved as plain scalars.
         let result = format_yaml("yes: no\n", &default_opts());
         assert!(
             result.contains("yes:"),
@@ -1332,30 +1255,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn format_yaml_multi_document_round_trip_with_early_parse_false() {
-        let input = "a: 1\n---\nb: 2\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(result.contains("a: 1"), "first doc missing: {result:?}");
-        assert!(
-            result.contains("---"),
-            "document separator missing: {result:?}"
-        );
-        assert!(result.contains("b: 2"), "second doc missing: {result:?}");
-    }
-
     // ---- Formatter: Blank Line Preservation ----
 
     #[test]
     fn format_yaml_blank_line_between_top_level_keys_preserved() {
         let input = "on: push\n\npermissions:\n  contents: read\n\njobs:\n  build: {}\n";
         let result = format_yaml(input, &default_opts());
-        // Blank line between `on: push` and `permissions:` must be present.
         assert!(
             result.contains("on: push\n\npermissions:"),
             "blank line between on: and permissions: missing: {result:?}"
         );
-        // Blank line between permissions block and jobs: must be present.
         assert!(result.contains("jobs:"), "jobs: key missing: {result:?}");
         let on_pos = result.find("on: push").unwrap();
         let jobs_pos = result.find("jobs:").unwrap();
@@ -1380,7 +1289,6 @@ mod tests {
     fn format_yaml_multiple_consecutive_blank_lines_collapsed_to_one() {
         let input = "a: 1\n\n\nb: 2\n";
         let result = format_yaml(input, &default_opts());
-        // Must contain exactly one blank line, not two.
         assert!(
             result.contains("a: 1\n\nb: 2"),
             "expected exactly one blank line: {result:?}"
@@ -1389,14 +1297,6 @@ mod tests {
             !result.contains("a: 1\n\n\nb: 2"),
             "two consecutive blank lines should collapse to one: {result:?}"
         );
-    }
-
-    #[test]
-    fn format_yaml_blank_line_preservation_is_idempotent() {
-        let input = "on: push\n\npermissions:\n  contents: read\n\njobs:\n  build: {}\n";
-        let first = format_yaml(input, &default_opts());
-        let second = format_yaml(&first, &default_opts());
-        assert_eq!(first, second, "blank line preservation is not idempotent");
     }
 
     #[test]
@@ -1421,22 +1321,12 @@ mod tests {
             result.contains("# section two"),
             "second comment missing: {result:?}"
         );
-        // Blank line between sections must be present.
         let first_pos = result.find("a: 1").unwrap();
         let second_pos = result.find("# section two").unwrap();
         let between = &result[first_pos..second_pos];
         assert!(
             between.contains("\n\n"),
             "blank line between sections missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_blank_line_at_end_of_file_not_added() {
-        let result = format_yaml("a: 1\n\n", &default_opts());
-        assert_eq!(
-            result, "a: 1\n",
-            "trailing blank line should be stripped: {result:?}"
         );
     }
 
@@ -1451,16 +1341,6 @@ mod tests {
         assert!(
             result.contains("line three"),
             "block content missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_no_blank_lines_not_added() {
-        let input = "a: 1\nb: 2\n";
-        let result = format_yaml(input, &default_opts());
-        assert_eq!(
-            result, "a: 1\nb: 2\n",
-            "no blank lines should be added: {result:?}"
         );
     }
 
@@ -1527,24 +1407,11 @@ mod tests {
         assert!(result.contains("inner1"), "inner1 missing: {result:?}");
         assert!(result.contains("inner2"), "inner2 missing: {result:?}");
         assert!(result.contains("simple"), "simple missing: {result:?}");
-        // The outer sequence must be under `outer:`.
         let outer_pos = result.find("outer:").unwrap();
         let inner1_pos = result.find("inner1").unwrap();
         assert!(
             inner1_pos > outer_pos,
             "inner1 should appear after outer key: {result:?}"
-        );
-    }
-
-    // SQ4: Nested sequence idempotency.
-    #[test]
-    fn nested_sequence_idempotent() {
-        let input = "outer:\n  - - inner1\n    - inner2\n  - simple\n";
-        let first = format_yaml(input, &default_opts());
-        let second = format_yaml(&first, &default_opts());
-        assert_eq!(
-            first, second,
-            "nested sequence formatting should be idempotent:\nfirst:  {first:?}\nsecond: {second:?}"
         );
     }
 
@@ -1556,7 +1423,6 @@ mod tests {
     // preserved in the output — this is a known limitation. Content is preserved.
     #[test]
     fn document_end_terminator_content_preserved() {
-        // `...` followed by a new document introduced by `---`.
         let input = "key1: value1\n...\n---\nkey2: value2\n";
         let result = format_yaml(input, &default_opts());
         assert!(
@@ -1567,7 +1433,6 @@ mod tests {
             result.contains("key2: value2"),
             "doc2 content missing: {result:?}"
         );
-        // Documents are separated by `---` in the output regardless of input separator.
         assert!(
             result.contains("---"),
             "document separator missing: {result:?}"
@@ -1593,7 +1458,6 @@ mod tests {
         let input = "key: value\n...\n";
         let result = format_yaml(input, &default_opts());
         assert!(result.contains("key: value"), "content missing: {result:?}");
-        // No `---` separator should appear — there is only one document.
         assert!(
             !result.contains("---"),
             "no separator expected for single doc: {result:?}"
@@ -1614,19 +1478,16 @@ mod tests {
         let input = "spec:\n  containers:\n    - name: test\n      command: [\"python\", \"-m\", \"http.server\", \"5000\"]\n";
         let result = format_yaml(input, &default_opts());
 
-        // `command:` key must be present.
         assert!(
             result.contains("command:"),
             "command: key missing: {result:?}"
         );
 
-        // Collect lines that are sequence items under `command:`.
         let command_pos = result.find("command:").expect("command: not found");
         let command_line = result[..command_pos].lines().count().saturating_sub(1);
         let lines: Vec<&str> = result.lines().collect();
         let command_indent = leading_spaces(lines[command_line]);
 
-        // All `- ` items after `command:` must be indented more than `command:`.
         let item_lines: Vec<&str> = lines[command_line + 1..]
             .iter()
             .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
@@ -1723,14 +1584,11 @@ mod tests {
 
         assert!(result.contains("run:"), "run: key missing: {result:?}");
 
-        // Find the `run:` key that has a list value (not the `run:` that is a
-        // plain scalar — look for the one followed by a sequence item line).
         let run_pos = result.rfind("run:").expect("run: not found");
         let run_line = result[..run_pos].lines().count().saturating_sub(1);
         let lines: Vec<&str> = result.lines().collect();
         let run_indent = leading_spaces(lines[run_line]);
 
-        // If `run:` is followed by sequence items, check indentation.
         let after_run: Vec<&str> = lines[run_line + 1..]
             .iter()
             .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
@@ -1746,8 +1604,6 @@ mod tests {
                 );
             }
         }
-        // Whether run: emits block or inline, the document must round-trip
-        // without losing content.
         assert!(
             result.contains("bash") || result.contains("echo"),
             "sequence content missing: {result:?}"
@@ -1787,76 +1643,9 @@ mod tests {
         }
     }
 
-    // FI6: Idempotency — formatting a block sequence twice produces the same output.
-    #[test]
-    fn format_yaml_flow_to_block_sequence_is_idempotent() {
-        let input = "spec:\n  containers:\n    - name: test\n      command: [\"python\", \"-m\", \"http.server\", \"5000\"]\n";
-        let first = format_yaml(input, &default_opts());
-        let second = format_yaml(&first, &default_opts());
-        assert_eq!(first, second, "flow-to-block conversion is not idempotent");
-    }
-
     // ---- Formatter: Unnecessary Quote Stripping ----
 
-    // QS1: Double-quoted safe string → plain.
-    #[test]
-    fn format_yaml_double_quoted_safe_string_stripped_to_plain() {
-        let result = format_yaml("value: \"python\"\n", &default_opts());
-        assert!(
-            !result.contains("\"python\""),
-            "unnecessary double quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("python"),
-            "value should be present as plain: {result:?}"
-        );
-    }
-
-    // QS2: Single-quoted safe string → plain.
-    #[test]
-    fn format_yaml_single_quoted_safe_string_stripped_to_plain() {
-        let result = format_yaml("value: 'hello'\n", &default_opts());
-        assert!(
-            !result.contains("'hello'"),
-            "unnecessary single quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("hello"),
-            "value should be present as plain: {result:?}"
-        );
-    }
-
-    // QS3: Double-quoted number-like string → quotes preserved.
-    #[test]
-    fn format_yaml_double_quoted_number_like_string_kept_quoted() {
-        let result = format_yaml("value: \"5000\"\n", &default_opts());
-        assert!(
-            result.contains("\"5000\""),
-            "quotes on number-like string must be preserved: {result:?}"
-        );
-    }
-
-    // QS4: Double-quoted boolean keyword → quotes preserved.
-    #[test]
-    fn format_yaml_double_quoted_boolean_like_string_kept_quoted() {
-        let result = format_yaml("value: \"true\"\n", &default_opts());
-        assert!(
-            result.contains("\"true\""),
-            "quotes on boolean keyword must be preserved: {result:?}"
-        );
-    }
-
-    // QS5: Double-quoted YAML 1.1 keyword → quotes preserved in V1_1.
-    #[test]
-    fn format_yaml_double_quoted_on_keyword_kept_quoted() {
-        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_1));
-        assert!(
-            result.contains("\"on\""),
-            "quotes on YAML 1.1 keyword must be preserved in V1.1 mode: {result:?}"
-        );
-    }
-
-    // QS6: Double-quoted string containing `: ` → quotes preserved.
+    // QS6: Double-quoted string containing `: ` — parser limitation note.
     // Known parser limitation: rlsp-yaml-parser strips spaces after `:` in
     // double-quoted strings, so "key: value" becomes "key:value". Since the
     // space is lost, needs_quoting no longer triggers and the value is emitted
@@ -1864,21 +1653,9 @@ mod tests {
     #[test]
     fn format_yaml_double_quoted_string_with_colon_space_kept_quoted() {
         let result = format_yaml("value: \"key: value\"\n", &default_opts());
-        // With the parser limitation, the value loses its internal space and
-        // quotes. The key invariant is that the formatter produces valid output.
         assert!(
             result.contains("key:"),
             "value content should be present: {result:?}"
-        );
-    }
-
-    // QS7: Double-quoted string starting with `#` → quotes preserved.
-    #[test]
-    fn format_yaml_double_quoted_string_with_special_char_kept_quoted() {
-        let result = format_yaml("value: \"#comment\"\n", &default_opts());
-        assert!(
-            result.contains("\"#comment\""),
-            "quotes on string starting with '#' must be preserved: {result:?}"
         );
     }
 
@@ -1905,15 +1682,6 @@ mod tests {
         );
     }
 
-    // QS9: Idempotency — stripping is stable on second format pass.
-    #[test]
-    fn format_yaml_quote_stripping_is_idempotent() {
-        let input = "value: \"python\"\n";
-        let first = format_yaml(input, &default_opts());
-        let second = format_yaml(&first, &default_opts());
-        assert_eq!(first, second, "quote stripping is not idempotent");
-    }
-
     // QS10: When `single_quote: true`, stripped value is re-quoted in single quotes.
     #[test]
     fn format_yaml_quote_stripping_respects_single_quote_option() {
@@ -1922,7 +1690,6 @@ mod tests {
             ..default_opts()
         };
         let result = format_yaml("value: \"python\"\n", &opts);
-        // `single_quote: true` means safe strings get single quotes, not plain.
         assert!(
             result.contains("'python'"),
             "single_quote option should apply single quotes: {result:?}"
@@ -1930,239 +1697,6 @@ mod tests {
         assert!(
             !result.contains("\"python\""),
             "original double quotes should not be preserved: {result:?}"
-        );
-    }
-
-    // ---- needs_quoting: version-aware ----
-
-    #[test]
-    fn needs_quoting_on_is_false_in_v1_2() {
-        assert!(!needs_quoting("on", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_on_is_true_in_v1_1() {
-        assert!(needs_quoting("on", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_yes_is_false_in_v1_2() {
-        assert!(!needs_quoting("yes", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_yes_is_true_in_v1_1() {
-        assert!(needs_quoting("yes", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_off_is_false_in_v1_2() {
-        assert!(!needs_quoting("off", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_off_is_true_in_v1_1() {
-        assert!(needs_quoting("off", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_no_is_false_in_v1_2() {
-        assert!(!needs_quoting("no", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_no_is_true_in_v1_1() {
-        assert!(needs_quoting("no", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_true_is_true_in_v1_2() {
-        assert!(needs_quoting("true", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_true_is_true_in_v1_1() {
-        assert!(needs_quoting("true", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_null_is_true_in_v1_2() {
-        assert!(needs_quoting("null", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_null_is_true_in_v1_1() {
-        assert!(needs_quoting("null", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_uppercase_yes_is_false_in_v1_2() {
-        assert!(!needs_quoting("YES", YamlVersion::V1_2));
-    }
-
-    #[test]
-    fn needs_quoting_uppercase_yes_is_true_in_v1_1() {
-        assert!(needs_quoting("YES", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_empty_string_is_true_in_both_versions() {
-        assert!(needs_quoting("", YamlVersion::V1_2));
-        assert!(needs_quoting("", YamlVersion::V1_1));
-    }
-
-    #[test]
-    fn needs_quoting_numeric_string_is_true_in_both_versions() {
-        assert!(needs_quoting("123", YamlVersion::V1_2));
-        assert!(needs_quoting("123", YamlVersion::V1_1));
-    }
-
-    // ---- Formatter: Version-aware quoting ----
-
-    #[test]
-    fn format_yaml_v1_1_double_quoted_on_value_stays_quoted() {
-        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_1));
-        assert!(
-            result.contains("\"on\""),
-            "already-quoted on must stay quoted in V1.1: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_v1_2_double_quoted_on_value_stripped_to_plain() {
-        let result = format_yaml("value: \"on\"\n", &opts_with_version(YamlVersion::V1_2));
-        assert!(
-            !result.contains("\"on\"") && !result.contains("'on'"),
-            "on is not reserved in V1.2; quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("on"),
-            "on value must appear as plain: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_v1_1_double_quoted_yes_value_stays_quoted() {
-        let result = format_yaml("value: \"yes\"\n", &opts_with_version(YamlVersion::V1_1));
-        assert!(
-            result.contains("\"yes\""),
-            "already-quoted yes must stay quoted in V1.1: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_v1_2_double_quoted_yes_value_stripped_to_plain() {
-        let result = format_yaml("value: \"yes\"\n", &opts_with_version(YamlVersion::V1_2));
-        assert!(
-            !result.contains("\"yes\"") && !result.contains("'yes'"),
-            "yes is not reserved in V1.2; quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains("yes"),
-            "yes value must appear as plain: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_true_value_quoted_in_both_versions() {
-        let r1 = format_yaml("value: \"true\"\n", &opts_with_version(YamlVersion::V1_1));
-        let r2 = format_yaml("value: \"true\"\n", &opts_with_version(YamlVersion::V1_2));
-        assert!(
-            r1.contains("\"true\""),
-            "true must stay quoted in V1.1: {r1:?}"
-        );
-        assert!(
-            r2.contains("\"true\""),
-            "true must stay quoted in V1.2: {r2:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_on_key_stays_unquoted_in_v1_2() {
-        let result = format_yaml("on: push\n", &opts_with_version(YamlVersion::V1_2));
-        assert!(
-            result.contains("on:"),
-            "on: key should not be quoted in V1.2: {result:?}"
-        );
-        assert!(
-            !result.contains("\"on\"") && !result.contains("'on'"),
-            "on: key must not be quoted in V1.2: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_on_key_stays_unquoted_in_v1_1() {
-        let result = format_yaml("on: push\n", &opts_with_version(YamlVersion::V1_1));
-        assert!(
-            result.contains("on:"),
-            "on: key should remain as plain in V1.1 (plain scalars are emitted verbatim): {result:?}"
-        );
-        assert!(
-            !result.contains("\"on\"") && !result.contains("'on'"),
-            "on: plain key must not gain quotes even in V1.1: {result:?}"
-        );
-    }
-
-    // TE tests for Task 23 Phase A: ScalarStyle and Chomp variant verification
-
-    #[test]
-    fn format_yaml_plain_scalar_roundtrips() {
-        let result = format_yaml("key: plain_value\n", &default_opts());
-        assert!(
-            result.contains("key: plain_value"),
-            "plain scalar missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_literal_block_scalar_chomp_clip() {
-        let result = format_yaml("key: |\n  line one\n  line two\n", &default_opts());
-        assert!(
-            result.contains('|'),
-            "literal block indicator missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_folded_block_scalar_chomp_strip() {
-        let result = format_yaml("key: >-\n  content\n", &default_opts());
-        assert!(
-            result.contains(">-"),
-            "folded-strip indicator missing: {result:?}"
-        );
-    }
-
-    #[test]
-    fn format_yaml_single_quoted_scalar() {
-        // The formatter normalizes away unnecessary quotes from plain-safe scalars.
-        // Confirm the value content ("quoted value") is preserved, even if quotes are stripped.
-        let result = format_yaml("key: 'quoted value'\n", &default_opts());
-        assert!(
-            result.contains("quoted value"),
-            "single-quoted scalar content missing: {result:?}"
-        );
-        assert!(result.contains("key:"), "key missing: {result:?}");
-    }
-
-    #[test]
-    fn format_yaml_double_quoted_scalar() {
-        // The formatter normalizes away unnecessary quotes from plain-safe scalars.
-        // Confirm the value content ("quoted value") is preserved, even if quotes are stripped.
-        let result = format_yaml("key: \"quoted value\"\n", &default_opts());
-        assert!(
-            result.contains("quoted value"),
-            "double-quoted scalar content missing: {result:?}"
-        );
-        assert!(result.contains("key:"), "key missing: {result:?}");
-    }
-
-    #[test]
-    fn format_yaml_invalid_input_returns_input_unchanged() {
-        let input = "key: [bad\n";
-        let result = format_yaml(input, &default_opts());
-        assert_eq!(
-            result, input,
-            "invalid input should be returned unchanged: {result:?}"
         );
     }
 }
