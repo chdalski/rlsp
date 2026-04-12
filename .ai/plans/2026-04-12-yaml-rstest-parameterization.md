@@ -72,8 +72,8 @@ be preserved in a `#[case]`.
 - [x] Parameterize completion.rs + hover.rs (6a918bc)
 - [x] Parameterize document_links.rs + rename.rs +
       references.rs (deffa03)
-- [ ] Parameterize code_actions.rs + semantic_tokens.rs +
-      symbols.rs
+- [x] Parameterize code_actions.rs + semantic_tokens.rs +
+      symbols.rs (71c5c2f)
 - [ ] Parameterize selection.rs + folding.rs +
       on_type_formatting.rs + document_store.rs + color.rs +
       parser.rs
@@ -262,12 +262,12 @@ type (keyword, string, number). ~68% uniform.
 `document_symbols(text, docs)` → `find_symbol` → assert on
 kind/children. ~74% uniform.
 
-- [ ] Parameterize code_actions.rs by action type
-- [ ] Parameterize semantic_tokens.rs by token type
-- [ ] Parameterize symbols.rs symbol-kind tests
-- [ ] Leave heterogeneous tests standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize code_actions.rs by action type
+- [x] Parameterize semantic_tokens.rs by token type
+- [x] Parameterize symbols.rs symbol-kind tests
+- [x] Leave heterogeneous tests standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 9: Parameterize remaining small files
 
