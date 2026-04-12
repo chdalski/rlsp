@@ -160,7 +160,7 @@ Same as the prior plan:
 
 - [x] Task 1 — cache the trim + short-circuit marker
       checks (`ba11228`)
-- [ ] Task 2 — reorder probes by frequency
+- [x] Task 2 — reorder probes by frequency (`4728ea3`)
 
 ## Tasks
 
@@ -336,20 +336,20 @@ earlier). If `first_byte` is an alphabetic/digit char,
 only mapping or plain scalar. The probes are
 non-overlapping by first byte for all common cases.
 
-- [ ] Move sequence entry probe (currently line ~593)
+- [x] Move sequence entry probe (currently line ~593)
   before alias/tag/anchor/flow probes.
-- [ ] Move mapping entry probe (currently line ~596)
+- [x] Move mapping entry probe (currently line ~596)
   immediately after sequence entry.
-- [ ] Move alias, tag, anchor, flow, stray-closer probes
+- [x] Move alias, tag, anchor, flow, stray-closer probes
   after mapping entry.
-- [ ] Verify: no probe's match condition depends on the
+- [x] Verify: no probe's match condition depends on the
   absence of a prior probe's side effect.
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml-parser` all green.
-- [ ] `cargo bench --bench throughput`; compare medians;
+- [x] `cargo bench --bench throughput`; compare medians;
   update `docs/benchmarks.md`.
-- [ ] Commit: `perf(parser): reorder step_in_document
-  probes by frequency`.
+- [x] Commit: `perf(parser): reorder step_in_document
+  probes by frequency` (`4728ea3`).
 
 **Advisors:** test-engineer — both gates. The reorder
 changes dispatch order for every line, which is exactly
