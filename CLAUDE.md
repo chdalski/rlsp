@@ -51,6 +51,7 @@ pnpm run format    # check formatting (prettier)
 - Each `rlsp-<language>` crate must have `README.md`, `docs/configuration.md`, `docs/feature-log.md`
 - Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference
 - Workspace path dependencies must include a `version` field — `cargo publish` rejects path-only deps
+- Use `#[expect(lint, reason = "...")]` instead of `#[allow(lint)]` — enforced by `allow_attributes = "deny"` and `allow_attributes_without_reason = "deny"` in workspace lints
 
 ## References
 

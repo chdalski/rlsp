@@ -52,11 +52,11 @@ and (4) update the project-init skill template to match.
 - [x] Add `panic = "deny"` to workspace Cargo.toml, remove
       crate-level deny, fix test modules (37e66c0)
 - [x] Remove dead code and `#[allow(dead_code)]` blankets (be0f7f3)
-- [ ] Convert all `#[allow]` → `#[expect(..., reason)]`
-      across all crates
-- [ ] Add `allow_attributes` + `allow_attributes_without_reason`
-      to workspace Cargo.toml
-- [ ] Verify `cargo clippy --all-targets` passes clean
+- [x] Convert all `#[allow]` → `#[expect(..., reason)]`
+      across all crates (b248fca)
+- [x] Add `allow_attributes` + `allow_attributes_without_reason`
+      to workspace Cargo.toml (b248fca)
+- [x] Verify `cargo clippy --all-targets` passes clean (b248fca)
 
 ## Tasks
 
@@ -131,12 +131,14 @@ c) Verify `cargo clippy --all-targets` passes clean.
 Note: `rust-init.md` was already updated and committed
 (`10757da`) as a skill-output commit before plan execution.
 
-- [ ] Convert all `#[allow]` in `rlsp-fmt`
-- [ ] Convert all `#[allow]` in `rlsp-yaml-parser`
-- [ ] Convert all `#[allow]` in `rlsp-yaml`
-- [ ] Add `allow_attributes` + `allow_attributes_without_reason`
+- [x] Convert all `#[allow]` in `rlsp-fmt`
+- [x] Convert all `#[allow]` in `rlsp-yaml-parser`
+- [x] Convert all `#[allow]` in `rlsp-yaml`
+- [x] Add `allow_attributes` + `allow_attributes_without_reason`
       to workspace Cargo.toml
-- [ ] Verify clean clippy pass
+- [x] Verify clean clippy pass
+
+Commit: b248fca
 
 ## Decisions
 
@@ -154,7 +156,8 @@ Note: `rust-init.md` was already updated and committed
   attribute works independently of `allow_attributes`, but
   the build would break if the deny is added before all
   `#[allow]` annotations are converted.
-- **Bench fixture `dead_code` blankets removed, not
-  converted** — all functions in both fixture files are
-  actually used. The blankets were precautionary and
-  suppress nothing.
+- **Bench fixture `dead_code` blankets are load-bearing** —
+  each bench binary compiles the fixture file independently
+  and uses a different subset of functions. Blankets are
+  converted to `#![expect(dead_code, reason = "...")]` in
+  Task 3, not removed.
