@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Documentation
+
+- Retrofit AI Note across all crate READMEs and list all crates in root (0bf9706)
+
 ## Refactoring
 
 - Replace expect/unwrap with safe alternatives and allow test lints (7092dcd)
