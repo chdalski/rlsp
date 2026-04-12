@@ -4,6 +4,7 @@ export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   {
+    name: 'rlsp-yaml/project-service',
     languageOptions: {
       parserOptions: {
         projectService: true,

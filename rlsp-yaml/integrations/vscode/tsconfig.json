@@ -8,7 +8,8 @@
     "lib": ["ES2022"],
     "sourceMap": true,
     "rootDir": ".",
-    "newLine": "lf"
+    "newLine": "lf",
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "out"]
