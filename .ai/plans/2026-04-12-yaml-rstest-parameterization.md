@@ -74,9 +74,9 @@ be preserved in a `#[case]`.
       references.rs (deffa03)
 - [x] Parameterize code_actions.rs + semantic_tokens.rs +
       symbols.rs (71c5c2f)
-- [ ] Parameterize selection.rs + folding.rs +
+- [x] Parameterize selection.rs + folding.rs +
       on_type_formatting.rs + document_store.rs + color.rs +
-      parser.rs
+      parser.rs (930cf21)
 
 ## Tasks
 
@@ -295,15 +295,15 @@ Group by color format. ~68% uniform.
 **parser.rs (23 tests, ~16 uniform):** parse operations
 with AST structure checks. ~70% uniform.
 
-- [ ] Parameterize selection.rs range tests
-- [ ] Parameterize folding.rs range tests
-- [ ] Parameterize on_type_formatting.rs edit tests
-- [ ] Parameterize document_store.rs state tests
-- [ ] Parameterize color.rs by color format
-- [ ] Parameterize parser.rs uniform parse tests
-- [ ] Leave heterogeneous tests standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize selection.rs range tests
+- [x] Parameterize folding.rs range tests
+- [x] Parameterize on_type_formatting.rs edit tests
+- [x] Parameterize document_store.rs state tests (assessed — heterogeneous setup, left standalone)
+- [x] Parameterize color.rs by color format
+- [x] Parameterize parser.rs uniform parse tests
+- [x] Leave heterogeneous tests standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ## Decisions
 
