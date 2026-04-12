@@ -935,11 +935,11 @@ dependencies = [
 
 [[package]]
 name = "rlsp-fmt"
-version = "0.1.4"
+version = "0.1.5"
 
 [[package]]
 name = "rlsp-yaml"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "criterion",
  "data-encoding",
@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "rlsp-yaml-parser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "memchr",

@@ -3,6 +3,19 @@
 
 ## Bug Fixes
 
+- Add binary existence check and skip test when binary present (bb1179b)
+- Decode quoted block mapping keys and attach trailing comments (620720f)
+
+## Documentation
+
+- Retrofit AI Note across all crate READMEs and list all crates in root (0bf9706)
+
+## Features
+
+- Replace PEG parser with streaming implementation (cc5c9a5)
+
+## Bug Fixes
+
 - Upgrade lodash to fix CVE-2026-4800 and CVE-2026-2950 (1f0cb2a)
 - Fix false duplicate-key diagnostics for sibling mappings (e5e5cd8)
 - Suppress flow-style warnings for empty collections (f34a305)
