@@ -89,7 +89,7 @@ in a `#[case]`.
 - [x] Parameterize integration tests: `unicode_positions.rs`
       + `encoding.rs` + `error_reporting.rs` +
       `loader_spans.rs` + `loader.rs` (c8437c1)
-- [ ] Parameterize `tests/smoke.rs`
+- [x] Parameterize `tests/smoke.rs` (a70cd02)
 
 ## Tasks
 
@@ -365,13 +365,13 @@ span/error/event assertions), `nested_flow_block_mixing`
 security/depth-limit groups, error-assertion groups,
 `probe_dispatch` (4 tests), `conformance` (fixture-based).
 
-- [ ] Parameterize Tier 1 groups (scalars, quoted, block,
+- [x] Parameterize Tier 1 groups (scalars, quoted, block,
       folded, directives, tags)
-- [ ] Parameterize Tier 2 groups (sequences, mappings,
+- [x] Parameterize Tier 2 groups (sequences, mappings,
       flow, anchors, comments, dispatch, stream)
-- [ ] Leave standalone: all Tier 4 heterogeneous groups
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Leave standalone: all Tier 4 heterogeneous groups
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ## Decisions
 
