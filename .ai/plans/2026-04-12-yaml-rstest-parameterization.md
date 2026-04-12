@@ -67,7 +67,7 @@ be preserved in a `#[case]`.
       (d608e6f)
 - [x] Parameterize schema_validation.rs groups
       (f969e21)
-- [ ] Parameterize validators.rs
+- [x] Parameterize validators.rs (f3b8444)
 - [ ] Parameterize formatter.rs
 - [ ] Parameterize completion.rs + hover.rs
 - [ ] Parameterize document_links.rs + rename.rs +
@@ -192,11 +192,11 @@ Convert the repetitive test groups in `validators.rs`
 candidates: duplicate key detection, flow style
 enforcement, key length/naming validation.
 
-- [ ] Read and identify parameterization candidates
-- [ ] Parameterize uniform groups
-- [ ] Leave heterogeneous groups standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Read and identify parameterization candidates
+- [x] Parameterize uniform groups
+- [x] Leave heterogeneous groups standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 5: Parameterize `formatter.rs`
 
