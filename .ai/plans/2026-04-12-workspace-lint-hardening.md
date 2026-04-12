@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-12
 
 ## Goal
@@ -49,8 +49,8 @@ and (4) update the project-init skill template to match.
 
 ## Steps
 
-- [ ] Add `panic = "deny"` to workspace Cargo.toml, remove
-      crate-level deny, fix test modules
+- [x] Add `panic = "deny"` to workspace Cargo.toml, remove
+      crate-level deny, fix test modules (37e66c0)
 - [ ] Remove dead code and `#[allow(dead_code)]` blankets
 - [ ] Convert all `#[allow]` → `#[expect(..., reason)]`
       across all crates
@@ -70,12 +70,14 @@ are in `#[cfg(test)]` modules, so add `clippy::panic` to
 their existing `#[allow(...)]` lists. Verify with
 `cargo clippy --all-targets`.
 
-- [ ] Add `panic = "deny"` to `[workspace.lints.clippy]`
-- [ ] Remove `#![deny(clippy::panic)]` from
+- [x] Add `panic = "deny"` to `[workspace.lints.clippy]`
+- [x] Remove `#![deny(clippy::panic)]` from
       `rlsp-yaml-parser/src/lib.rs`
-- [ ] Add `clippy::panic` to test module allow-lists in
+- [x] Add `clippy::panic` to test module allow-lists in
       `rlsp-yaml` where `panic!()` is used
-- [ ] Verify `cargo clippy --all-targets` passes
+- [x] Verify `cargo clippy --all-targets` passes
+
+Commit: 37e66c0
 
 ### Task 2: Dead code cleanup
 
