@@ -6,8 +6,13 @@
 //
 // Ported from rlsp-yaml-parser/tests/loader_spans.rs with import paths updated.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
-#![allow(clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "test code"
+)]
 
 use rstest::rstest;
 

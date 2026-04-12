@@ -41,9 +41,15 @@ pub fn parse_yaml(text: &str) -> ParseResult {
                     (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())
                 }
             };
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
             let line = pos.line.saturating_sub(1) as u32;
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
             let col = pos.column as u32;
             let start = Position::new(line, col);
             let end = Position::new(line, u32::MAX);
@@ -64,11 +70,12 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::panic
+    clippy::panic,
+    reason = "test code"
 )]
 mod tests {
     use std::fmt::Write as _;

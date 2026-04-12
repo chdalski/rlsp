@@ -350,7 +350,10 @@ impl<'opt> LoadState<'opt> {
     /// Parse a single node from the stream.
     ///
     /// Advances the stream past the node (including end-of-container events).
-    #[allow(clippy::too_many_lines)] // match-on-event-type; splitting would obscure flow
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     fn parse_node(&mut self, stream: &mut EventStream<'_>) -> Result<Node<Span>> {
         let Some((event, span)) = next_from(stream)? else {
             return Ok(empty_scalar());
@@ -713,13 +716,7 @@ const fn empty_scalar() -> Node<Span> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::too_many_lines,
-    clippy::doc_markdown
-)]
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

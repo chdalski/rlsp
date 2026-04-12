@@ -96,7 +96,10 @@ fn yaml_to_symbols(node: &Node<Span>, lines: &[&str], base_line: usize) -> Vec<D
 }
 
 /// Create a `DocumentSymbol` for a key-value pair.
-#[allow(deprecated)] // DocumentSymbol.deprecated field
+#[expect(
+    deprecated,
+    reason = "DocumentSymbol.deprecated field is required by LSP spec"
+)]
 fn make_symbol(
     key: &str,
     value: &Node<Span>,
@@ -106,11 +109,20 @@ fn make_symbol(
     let kind = node_symbol_kind(value);
     let (key_line, key_col) = find_key_in_lines(key, lines, search_from)?;
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let key_line_u32 = key_line as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let key_col_u32 = key_col as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let key_end_col = (key_col + key.len()) as u32;
 
     let selection_range = Range::new(
@@ -120,10 +132,16 @@ fn make_symbol(
 
     // Determine the end of this symbol's range
     let end_line = find_value_end_line(lines, key_line);
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let end_line_u32 = end_line as u32;
     let end_col = lines.get(end_line).map_or(0, |l| l.len());
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let end_col_u32 = end_col as u32;
 
     let range = Range::new(
@@ -169,7 +187,10 @@ fn make_symbol(
 }
 
 /// Create child symbols for sequence items.
-#[allow(deprecated)] // DocumentSymbol.deprecated field
+#[expect(
+    deprecated,
+    reason = "DocumentSymbol.deprecated field is required by LSP spec"
+)]
 fn make_sequence_children(
     items: &[Node<Span>],
     lines: &[&str],
@@ -189,17 +210,29 @@ fn make_sequence_children(
         let _ = write!(name, "[{idx}]");
         let kind = node_symbol_kind(item);
 
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let item_line_u32 = item_line as u32;
         let end_line = find_value_end_line(lines, item_line);
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let end_line_u32 = end_line as u32;
         let end_col = lines.get(end_line).map_or(0, |l| l.len());
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let end_col_u32 = end_col as u32;
 
         let dash_col = lines.get(item_line).and_then(|l| l.find("- ")).unwrap_or(0);
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let dash_col_u32 = dash_col as u32;
 
         let range = Range::new(
@@ -369,7 +402,7 @@ fn node_to_string(node: &Node<Span>) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

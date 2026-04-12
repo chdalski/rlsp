@@ -6,12 +6,7 @@
 // Tag names are ASCII-only per YAML 1.2 (URI characters), so no multi-byte
 // tag content is possible in conforming input — tag tests are not needed.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::indexing_slicing
-)]
+#![expect(clippy::expect_used, clippy::panic, reason = "test code")]
 
 use rstest::rstest;
 

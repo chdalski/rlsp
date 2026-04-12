@@ -95,7 +95,10 @@ impl<'input> EventIter<'input> {
     }
 
     /// Handle a block-sequence dash entry (`-`).
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(crate) fn handle_sequence_entry(
         &mut self,
         dash_indent: usize,

@@ -124,7 +124,7 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

@@ -10,12 +10,7 @@
 //      empty flow collection warnings, blank line preservation,
 //      flow-to-block indentation
 
-#![allow(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic
-)]
+#![expect(clippy::indexing_slicing, clippy::expect_used, reason = "test code")]
 
 use rlsp_yaml::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;

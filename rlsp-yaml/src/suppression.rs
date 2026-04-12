@@ -82,7 +82,10 @@ pub fn build_suppression_map(text: &str) -> SuppressionMap {
             // If the comment is on the last line there is no next line, but
             // inserting idx+1 is harmless — no diagnostic is ever emitted for
             // a line beyond the document end.
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
             let target = (idx as u32).saturating_add(1);
             line_suppressions.entry(target).or_insert(rule);
         } else if let Some(rest) = trimmed.strip_prefix(FILE_PREFIX) {
@@ -123,7 +126,6 @@ fn parse_rule(rest: &str) -> SuppressionRule {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use rstest::rstest;
 

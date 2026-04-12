@@ -126,7 +126,6 @@ impl<Loc> Node<Loc> {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::event::ScalarStyle;

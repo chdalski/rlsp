@@ -3,13 +3,7 @@
 // Security and robustness stress tests — adversarial and pathological input
 // that exercises security limits, panic safety, and completion guarantees.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::missing_const_for_fn
-)]
+#![expect(clippy::unwrap_used, reason = "test code")]
 
 use std::fmt::Write;
 use std::time::{Duration, Instant};

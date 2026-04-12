@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-#![allow(clippy::panic)]
-#![allow(
+#![expect(
+    clippy::panic,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::too_many_lines
+    reason = "test code"
 )]
 
 //! Integration tests for the rlsp-yaml-parser loader.

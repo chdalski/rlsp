@@ -197,7 +197,7 @@ pub fn normalize_line_breaks(s: String) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

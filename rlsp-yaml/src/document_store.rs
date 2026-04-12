@@ -77,11 +77,11 @@ impl DocumentStore {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
     clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic
+    clippy::panic,
+    reason = "test code"
 )]
 mod tests {
     use super::*;

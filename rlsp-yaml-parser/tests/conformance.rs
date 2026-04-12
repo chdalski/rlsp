@@ -13,12 +13,12 @@
 // rstest `#[files]` generates one independent test per matched file,
 // giving per-file pass/fail visibility in test output.
 
-#![allow(
+#![expect(
     clippy::indexing_slicing,
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    clippy::print_stderr
+    reason = "test code"
 )]
 
 use std::path::{Path, PathBuf};

@@ -995,7 +995,7 @@ fn find_mapping_colon(line: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 
@@ -2216,7 +2216,10 @@ mod tests {
 
     // Test 65 — type-aware defaults: string → "", integer → 0, boolean → false
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // snippet placeholders look like format args
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "snippet placeholders look like format args"
+    )]
     fn should_use_type_aware_defaults_in_snippet() {
         let schema = schema_with_required(
             vec![
@@ -2458,7 +2461,10 @@ mod tests {
 
     // Lines 475-477: json_value_to_yaml_label for Number, Null, Array, Object
     #[test]
-    #[allow(clippy::approx_constant)] // 3.14 is a test value, not an approximation of PI
+    #[expect(
+        clippy::approx_constant,
+        reason = "3.14 is a test value, not an approximation of PI"
+    )]
     fn should_render_number_and_null_enum_values_as_yaml_labels() {
         let schema = object_schema(vec![(
             "value",

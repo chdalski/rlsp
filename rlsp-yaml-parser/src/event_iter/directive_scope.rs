@@ -108,11 +108,10 @@ impl DirectiveScope {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::indexing_slicing,
-    clippy::expect_used,
+#[expect(
     clippy::unwrap_used,
-    clippy::field_reassign_with_default
+    clippy::field_reassign_with_default,
+    reason = "test code"
 )]
 mod tests {
     use super::*;

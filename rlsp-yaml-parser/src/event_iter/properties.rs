@@ -78,7 +78,10 @@ pub(in crate::event_iter) fn scan_anchor_name(
 ///
 /// Returns `Err` on invalid verbatim tags (unmatched `<`, empty URI, control
 /// character in URI) or when the tag length exceeds [`MAX_TAG_LEN`].
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "match-on-event-type; splitting would obscure flow"
+)]
 pub(in crate::event_iter) fn scan_tag<'i>(
     content: &'i str,
     tag_start: &'i str,
@@ -292,7 +295,7 @@ pub(in crate::event_iter) fn is_valid_tag_handle(handle: &str) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::limits::{MAX_ANCHOR_NAME_BYTES, MAX_TAG_LEN};

@@ -1126,7 +1126,11 @@ fn parse_additional_properties(
     value: Option<&Value>,
     root: &Value,
     base_uri: Option<&str>,
-    #[allow(unused_mut)] mut ctx: Option<&mut ParseContext<'_>>,
+    #[expect(
+        unused_mut,
+        reason = "ctx is only mutated in some branches; parameter signature is stable"
+    )]
+    mut ctx: Option<&mut ParseContext<'_>>,
     depth: usize,
 ) -> Option<AdditionalProperties> {
     match value? {
@@ -1319,11 +1323,12 @@ fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    reason = "test code"
 )]
 mod tests {
     use rstest::rstest;

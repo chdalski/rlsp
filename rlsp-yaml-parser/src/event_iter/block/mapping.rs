@@ -81,7 +81,10 @@ impl<'input> EventIter<'input> {
     ///   synthetic line.
     ///
     /// Returns a `ConsumedMapping` describing what was found.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(in crate::event_iter) fn consume_mapping_entry(
         &mut self,
         key_indent: usize,
@@ -345,7 +348,10 @@ impl<'input> EventIter<'input> {
     }
 
     /// Handle a block-mapping key entry.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(in crate::event_iter) fn handle_mapping_entry(
         &mut self,
         key_indent: usize,

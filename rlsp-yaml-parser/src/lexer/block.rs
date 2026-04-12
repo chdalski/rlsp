@@ -34,7 +34,10 @@ impl<'input> Lexer<'input> {
     /// assembled from stripped lines and does not exist contiguously in input.
     ///
     /// **Span:** Covers from the `|` through the last consumed line terminator.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub fn try_consume_literal_block_scalar(
         &mut self,
         parent_indent: usize,
@@ -454,7 +457,10 @@ impl<'input> Lexer<'input> {
 ///
 /// - `explicit_indent` is `Some(n)` for `|n` or `None` for auto-detect.
 /// - Error is `Some(Error)` for invalid indicator characters.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "match-on-event-type; splitting would obscure flow"
+)]
 pub(super) fn parse_block_header(
     after_pipe: &str,
     pipe_pos: Pos,

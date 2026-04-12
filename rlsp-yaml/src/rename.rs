@@ -141,7 +141,10 @@ fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token>
             continue;
         }
 
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let line_num = line_idx as u32;
 
         let mut chars = line.char_indices().peekable();
@@ -164,7 +167,10 @@ fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token>
 
                 // Must have at least one name character
                 if name_end > name_start {
-                    #[allow(clippy::cast_possible_truncation)]
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "LSP line/col are u32; always fits"
+                    )]
                     tokens.push(Token {
                         name: line[name_start..name_end].to_string(),
                         line: line_num,
@@ -192,7 +198,7 @@ fn is_valid_anchor_name(name: &str) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

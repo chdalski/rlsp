@@ -664,7 +664,12 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test code"
+)]
 mod tests {
     use rstest::rstest;
 

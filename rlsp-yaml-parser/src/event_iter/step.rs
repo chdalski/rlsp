@@ -18,7 +18,10 @@ use crate::{EventIter, marker_span, zero_span};
 
 impl<'input> EventIter<'input> {
     /// Handle one iteration step in the `InDocument` state.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(in crate::event_iter) fn step_in_document(&mut self) -> StepResult<'input> {
         match self.skip_and_collect_comments_in_doc() {
             Ok(()) => {}

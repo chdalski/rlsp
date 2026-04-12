@@ -233,12 +233,6 @@ fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_possible_truncation
-)]
 mod tests {
     use rstest::rstest;
 

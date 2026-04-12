@@ -279,7 +279,10 @@ fn push_fold(
     end: usize,
     kind: Option<FoldingRangeKind>,
 ) {
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     ranges.push(FoldingRange {
         start_line: start as u32,
         start_character: None,
@@ -291,7 +294,6 @@ fn push_fold(
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use rstest::rstest;
 

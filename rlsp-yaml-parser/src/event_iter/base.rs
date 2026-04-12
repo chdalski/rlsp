@@ -111,7 +111,10 @@ impl<'input> EventIter<'input> {
     /// block scalars collect content that is more indented than this value.
     ///
     /// Consumes `self.pending_anchor` and attaches it to the emitted scalar.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(crate) fn try_consume_scalar(
         &mut self,
         plain_parent_indent: usize,
@@ -323,12 +326,6 @@ impl<'input> Iterator for EventIter<'input> {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::wildcard_enum_match_arm,
-    clippy::indexing_slicing
-)]
 mod tests {
     use super::*;
     use crate::EventIter;

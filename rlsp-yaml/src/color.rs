@@ -246,7 +246,11 @@ pub fn color_presentations(color: Color) -> Vec<ColorPresentation> {
 fn channel_to_u8(v: f32) -> u8 {
     // Value is clamped to [0.0, 1.0] before multiplying, so result is [0.0, 255.0].
     // Saturating u8 cast via intermediate i32 to avoid sign-loss and truncation lints.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "value is clamped to [0,255] before cast; result always fits"
+    )]
     let byte = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     byte
 }
@@ -254,7 +258,11 @@ fn channel_to_u8(v: f32) -> u8 {
 /// Convert an HSL component (hue 0–360, sat/lum 0–100) to a rounded integer.
 fn hsl_to_u32(v: f32) -> u32 {
     // v is always non-negative (hue 0-360, sat/lum 0-100), round gives integer in range.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "value is non-negative and bounded; result always fits"
+    )]
     let n = v.max(0.0).round() as u32;
     n
 }
@@ -646,7 +654,7 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

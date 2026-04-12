@@ -666,7 +666,7 @@ fn validate_scalar_constraints(
         if is_plain {
             let numeric_val = scalar_helpers::parse_integer(value)
                 .map(|i| {
-                    #[allow(clippy::cast_precision_loss)]
+                    #[expect(clippy::cast_precision_loss, reason = "integer-to-f64 for numeric comparison; precision loss acceptable here")]
                     {
                         i as f64
                     }
@@ -1578,11 +1578,12 @@ fn format_path(path: &[String]) -> String {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::panic
+    clippy::panic,
+    reason = "test code"
 )]
 mod tests {
     use rstest::rstest;

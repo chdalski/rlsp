@@ -5,16 +5,26 @@
 //! Time-to-first-event is important for the LSP use case where the server needs
 //! to start producing diagnostics before a large document is fully parsed.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "FFI bindings to libfyaml for benchmark comparison"
+)]
 // Criterion's BenchmarkGroup has a significant Drop but the idiomatic usage
 // is to keep the group alive for the whole bench function and call finish().
-#![allow(clippy::significant_drop_tightening)]
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Criterion BenchmarkGroup must stay alive until finish()"
+)]
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::os::raw::{c_char, c_int, c_uint};
 
 #[path = "fixtures.rs"]
+#[expect(
+    dead_code,
+    reason = "bench fixture; each binary uses a subset of functions"
+)]
 mod fixtures;
 
 // ---------------------------------------------------------------------------

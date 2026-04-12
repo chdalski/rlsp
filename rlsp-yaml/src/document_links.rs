@@ -216,11 +216,11 @@ fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
-    clippy::expect_used,
     clippy::unwrap_used,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    reason = "test code"
 )]
 mod tests {
     use rstest::rstest;

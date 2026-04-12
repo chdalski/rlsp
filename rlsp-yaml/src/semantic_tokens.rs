@@ -53,7 +53,10 @@ pub fn semantic_tokens(text: &str) -> Vec<SemanticToken> {
 
     for (line_idx, line) in text.lines().enumerate() {
         // LSP line numbers fit in u32 for any realistic document.
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let line_no = line_idx as u32;
         let trimmed = line.trim_start();
         let indent = to_u32(line.len() - trimmed.len());
@@ -347,7 +350,7 @@ fn to_u32(v: usize) -> u32 {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

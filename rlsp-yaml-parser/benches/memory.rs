@@ -6,10 +6,10 @@
 //! parse. Criterion's measurement is wall-clock time; the allocation count is
 //! reported as a custom metric via `iter_custom`.
 
-#![allow(unsafe_code)]
-// Criterion's BenchmarkGroup has a significant Drop but the idiomatic usage
-// is to keep the group alive for the whole bench function and call finish().
-#![allow(clippy::significant_drop_tightening)]
+#![expect(
+    unsafe_code,
+    reason = "custom allocator wrapper requires unsafe GlobalAlloc impl"
+)]
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -18,6 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 #[path = "fixtures.rs"]
+#[expect(
+    dead_code,
+    reason = "bench fixture; each binary uses a subset of functions"
+)]
 mod fixtures;
 
 // ---------------------------------------------------------------------------

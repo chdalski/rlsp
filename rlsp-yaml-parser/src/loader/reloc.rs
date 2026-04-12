@@ -68,12 +68,11 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
     clippy::panic,
-    clippy::wildcard_enum_match_arm
+    clippy::wildcard_enum_match_arm,
+    reason = "test code"
 )]
 mod tests {
     use super::*;

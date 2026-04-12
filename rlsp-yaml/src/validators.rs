@@ -137,7 +137,10 @@ fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token>
             continue;
         }
 
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let line_num = line_idx as u32;
 
         let mut chars = line.char_indices().peekable();
@@ -160,7 +163,10 @@ fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token>
 
                 // Must have at least one name character
                 if name_end > name_start {
-                    #[allow(clippy::cast_possible_truncation)]
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "LSP line/col are u32; always fits"
+                    )]
                     tokens.push(Token {
                         name: line[name_start..name_end].to_string(),
                         line: line_num,
@@ -193,7 +199,10 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
     let lines: Vec<&str> = text.lines().collect();
 
     for (line_idx, line) in lines.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "LSP line/col are u32; always fits"
+        )]
         let line_num = line_idx as u32;
 
         let mut in_single_quote = false;
@@ -207,7 +216,10 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
                     // Find matching closing brace; skip empty collections (`{}`, `{ }`)
                     if let Some(close_pos) = find_closing_char(line, i, '{', '}') {
                         if !line[i + 1..close_pos].trim().is_empty() {
-                            #[allow(clippy::cast_possible_truncation)]
+                            #[expect(
+                                clippy::cast_possible_truncation,
+                                reason = "LSP line/col are u32; always fits"
+                            )]
                             diagnostics.push(Diagnostic {
                                 range: Range::new(
                                     Position::new(line_num, i as u32),
@@ -226,7 +238,10 @@ pub fn validate_flow_style(text: &str) -> Vec<Diagnostic> {
                     // Find matching closing bracket; skip empty collections (`[]`, `[ ]`)
                     if let Some(close_pos) = find_closing_char(line, i, '[', ']') {
                         if !line[i + 1..close_pos].trim().is_empty() {
-                            #[allow(clippy::cast_possible_truncation)]
+                            #[expect(
+                                clippy::cast_possible_truncation,
+                                reason = "LSP line/col are u32; always fits"
+                            )]
                             diagnostics.push(Diagnostic {
                                 range: Range::new(
                                     Position::new(line_num, i as u32),
@@ -416,7 +431,10 @@ fn find_tag_occurrence(lines: &[&str], tag_str: &str, occurrence: usize) -> Opti
 
             if !in_quotes && before_ok && after_ok {
                 if count == occurrence {
-                    #[allow(clippy::cast_possible_truncation)]
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "LSP line/col are u32; always fits"
+                    )]
                     return Some(Range::new(
                         Position::new(line_idx as u32, abs_pos as u32),
                         Position::new(line_idx as u32, after_end as u32),
@@ -472,7 +490,10 @@ pub fn validate_key_ordering(text: &str, docs: &[Document<Span>]) -> Vec<Diagnos
             if key.is_empty() {
                 return None;
             }
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
             Some((key.to_string(), line_idx as u32))
         })
         .fold(HashMap::new(), |mut map, (key, line)| {
@@ -523,7 +544,10 @@ fn check_yaml_ordering(
                 if key.as_str() < max_key {
                     // Look up the line number in the pre-built index (O(1)).
                     if let Some(&line_num) = key_index.get(key.as_str()) {
-                        #[allow(clippy::cast_possible_truncation)]
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            reason = "LSP line/col are u32; always fits"
+                        )]
                         let key_len = key.len() as u32;
                         diagnostics.push(Diagnostic {
                             range: Range::new(
@@ -626,11 +650,20 @@ fn push_duplicate_diagnostic(diagnostics: &mut Vec<Diagnostic>, key: &str, loc: 
     } else {
         key.to_string()
     };
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let start_line = loc.start.line.saturating_sub(1) as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let start_col = loc.start.column as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let end_col = loc.end.column as u32;
     diagnostics.push(Diagnostic {
         range: Range::new(
@@ -646,7 +679,7 @@ fn push_duplicate_diagnostic(diagnostics: &mut Vec<Diagnostic>, key: &str, loc: 
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use std::fmt::Write as _;
 

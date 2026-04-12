@@ -5,10 +5,16 @@
 //! Compares `rlsp-yaml-parser::load()` against libfyaml's event API.
 //! Criterion groups pair the two parsers for direct comparison.
 
-#![allow(unsafe_code)]
+#![expect(
+    unsafe_code,
+    reason = "FFI bindings to libfyaml for benchmark comparison"
+)]
 // Criterion's BenchmarkGroup has a significant Drop but the idiomatic usage
 // is to keep the group alive for the whole bench function and call finish().
-#![allow(clippy::significant_drop_tightening)]
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Criterion BenchmarkGroup must stay alive until finish()"
+)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;

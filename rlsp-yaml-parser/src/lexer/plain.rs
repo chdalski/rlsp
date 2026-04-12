@@ -28,7 +28,6 @@ impl<'input> Lexer<'input> {
     /// If [`Self::inline_scalar`] is set (populated by a preceding
     /// [`Self::consume_marker_line`] call for a `--- text` line), it is
     /// drained and returned immediately without consuming any new lines.
-    #[allow(clippy::too_many_lines)]
     pub fn try_consume_plain_scalar(
         &mut self,
         parent_indent: usize,

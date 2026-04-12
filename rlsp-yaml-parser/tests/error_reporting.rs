@@ -4,12 +4,12 @@
 // duplicate keys (accepted silently), error detection, error positions,
 // error recovery (stream stops after first error), and merge key handling.
 
-#![allow(
+#![expect(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing,
-    clippy::missing_const_for_fn
+    reason = "test code"
 )]
 
 use rstest::rstest;

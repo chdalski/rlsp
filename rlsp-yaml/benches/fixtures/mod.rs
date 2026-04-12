@@ -4,7 +4,10 @@
 //!
 //! All generators are deterministic — same inputs produce the same output.
 
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    reason = "bench fixture compiled into multiple binaries; each uses a subset"
+)]
 
 use std::fmt::Write as _;
 

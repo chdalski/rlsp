@@ -36,7 +36,10 @@ impl<'input> EventIter<'input> {
     ///   `String` buffer holds the entire flow body.
     /// - **Unterminated collection:** reaching EOF without the matching closing
     ///   delimiter returns `Err`.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(crate) fn handle_flow_collection(&mut self) -> StepResult<'input> {
         use crate::lexer::scan_plain_line_flow;
         use std::borrow::Cow;

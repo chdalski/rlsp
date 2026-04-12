@@ -22,6 +22,8 @@ must_use_candidate = "deny"
 panic = "deny"
 expect_used = "deny"
 unwrap_used = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
 
 [workspace.lints.rust]
 warnings = "deny"

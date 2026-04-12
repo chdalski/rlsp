@@ -120,7 +120,10 @@ fn find_document_end(lines: &[&str], doc_start: usize) -> usize {
 
 /// Build an LSP `Range` spanning full lines from `start_line` to `end_line` (0-based).
 fn make_line_range(start_line: usize, end_line: usize) -> Range {
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     Range::new(
         Position::new(start_line as u32, 0),
         Position::new(end_line as u32, u32::MAX),
@@ -234,13 +237,25 @@ fn collect_ancestor_spans(
 /// Convert an `rlsp-yaml-parser` `Span` to an LSP `Range`.
 /// Pos: line 1-based, column 0-based -> LSP: both 0-based.
 fn span_to_lsp_range(span: &Span) -> Range {
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let start_line = span.start.line.saturating_sub(1) as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let start_col = span.start.column as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let end_line = span.end.line.saturating_sub(1) as u32;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let end_col = span.end.column as u32;
 
     Range::new(
@@ -250,11 +265,12 @@ fn span_to_lsp_range(span: &Span) -> Range {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::indexing_slicing,
     clippy::expect_used,
     clippy::unwrap_used,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    reason = "test code"
 )]
 mod tests {
     use std::fmt::Write as _;

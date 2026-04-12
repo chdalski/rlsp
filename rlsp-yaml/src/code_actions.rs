@@ -155,7 +155,10 @@ fn flow_map_to_block(
         block_lines.join("\n")
     };
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(diag.range.start.line, 0),
         Position::new(diag.range.start.line, line.len() as u32),
@@ -234,7 +237,10 @@ fn flow_seq_to_block(
         block_lines.join("\n")
     };
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(diag.range.start.line, 0),
         Position::new(diag.range.start.line, line.len() as u32),
@@ -331,7 +337,10 @@ fn block_to_flow(
         "Convert block to flow style".to_string()
     };
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(line_idx as u32, 0),
         Position::new(
@@ -366,7 +375,10 @@ fn tab_to_spaces(
 
     let new_text = line.replace('\t', "  ");
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(line_idx as u32, 0),
         Position::new(line_idx as u32, line.len() as u32),
@@ -406,7 +418,10 @@ fn delete_unused_anchor(
     let after = after.strip_prefix(' ').unwrap_or(after);
     let new_text = format!("{before}{after}");
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(line_idx as u32, 0),
         Position::new(line_idx as u32, line.len() as u32),
@@ -445,7 +460,10 @@ fn quoted_bool_to_unquoted(
                 let after = &line[pattern_end..];
                 let new_text = format!("{before}{unquoted}{after}");
 
-                #[allow(clippy::cast_possible_truncation)]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "LSP line/col are u32; always fits"
+                )]
                 let edit_range = Range::new(
                     Position::new(line_idx as u32, 0),
                     Position::new(line_idx as u32, line.len() as u32),
@@ -515,7 +533,10 @@ fn string_to_block_scalar(
 
     let new_text = format!("{key_part} |\n{indent_str}{block_value}");
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
     let edit_range = Range::new(
         Position::new(line_idx as u32, 0),
         Position::new(line_idx as u32, line.len() as u32),
@@ -607,7 +628,7 @@ fn split_flow_items(content: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

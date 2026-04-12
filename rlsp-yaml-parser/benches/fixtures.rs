@@ -5,8 +5,6 @@
 //! Produces deterministic YAML documents at controlled sizes and styles.
 //! All generators are pure functions with no I/O.
 
-#![allow(dead_code)]
-
 use std::fmt::Write as _;
 
 // ---------------------------------------------------------------------------
@@ -175,7 +173,10 @@ pub fn huge() -> String {
 ///
 /// Hardcoded string literal — deterministic and representative of real LSP input.
 #[must_use]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "large hardcoded fixture; splitting would obscure the YAML structure"
+)]
 pub fn kubernetes_deployment() -> String {
     r#"apiVersion: apps/v1
 kind: Deployment
