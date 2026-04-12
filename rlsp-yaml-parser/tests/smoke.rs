@@ -51,6 +51,7 @@ fn parse_to_vec(input: &str) -> Vec<Result<(Event<'_>, Span), Error>> {
 
 mod stream {
     use super::*;
+    use rstest::rstest;
 
     // -----------------------------------------------------------------------
     // Group A: Helper contract
@@ -67,9 +68,14 @@ mod stream {
     // Group B: StreamStart/StreamEnd — happy path
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn empty_input_emits_stream_start_then_stream_end() {
-        let events = parse_to_vec("");
+    #[rstest]
+    #[case::empty_string("")]
+    #[case::whitespace_only("   \n\n")]
+    #[case::tab_only("\t\t\t")]
+    #[case::single_newline("\n")]
+    #[case::crlf_only("\r\n\r\n")]
+    fn stream_start_end_empty_inputs(#[case] input: &str) {
+        let events = parse_to_vec(input);
         assert_eq!(events.len(), 2, "expected exactly 2 events");
         assert!(
             matches!(events.first(), Some(Ok((Event::StreamStart, _)))),
@@ -79,38 +85,6 @@ mod stream {
             matches!(events.get(1), Some(Ok((Event::StreamEnd, _)))),
             "second event must be StreamEnd"
         );
-    }
-
-    #[test]
-    fn whitespace_only_input_emits_stream_start_then_stream_end() {
-        let events = parse_to_vec("   \n\n");
-        assert_eq!(events.len(), 2, "expected exactly 2 events");
-        assert!(matches!(events.first(), Some(Ok((Event::StreamStart, _)))));
-        assert!(matches!(events.get(1), Some(Ok((Event::StreamEnd, _)))));
-    }
-
-    #[test]
-    fn tab_only_input_emits_stream_start_then_stream_end() {
-        let events = parse_to_vec("\t\t\t");
-        assert_eq!(events.len(), 2, "expected exactly 2 events");
-        assert!(matches!(events.first(), Some(Ok((Event::StreamStart, _)))));
-        assert!(matches!(events.get(1), Some(Ok((Event::StreamEnd, _)))));
-    }
-
-    #[test]
-    fn single_newline_emits_stream_start_then_stream_end() {
-        let events = parse_to_vec("\n");
-        assert_eq!(events.len(), 2, "expected exactly 2 events");
-        assert!(matches!(events.first(), Some(Ok((Event::StreamStart, _)))));
-        assert!(matches!(events.get(1), Some(Ok((Event::StreamEnd, _)))));
-    }
-
-    #[test]
-    fn crlf_only_input_emits_stream_start_then_stream_end() {
-        let events = parse_to_vec("\r\n\r\n");
-        assert_eq!(events.len(), 2, "expected exactly 2 events");
-        assert!(matches!(events.first(), Some(Ok((Event::StreamStart, _)))));
-        assert!(matches!(events.get(1), Some(Ok((Event::StreamEnd, _)))));
     }
 
     #[test]
@@ -1088,6 +1062,7 @@ mod documents {
 
 mod scalars {
     use super::*;
+    use rstest::rstest;
 
     // Helper: make a plain `Scalar` event for easy comparison.
     fn plain(value: &str) -> Event<'_> {
@@ -1099,10 +1074,30 @@ mod scalars {
         }
     }
 
-    // IT-S1 — single plain scalar in bare document.
-    #[test]
-    fn plain_scalar_emits_scalar_event() {
-        let events = event_variants("hello");
+    // IT-S1/S3/S4/S5/S7/S11/S12/S13 — plain scalar in bare (implicit) document.
+    #[rstest]
+    #[case::plain_scalar_emits_scalar_event("hello", "hello")]
+    #[case::multi_line_plain_scalar_folds_to_spaces("foo\n  bar\n  baz\n", "foo bar baz")]
+    #[case::plain_scalar_with_url("http://example.com", "http://example.com")]
+    #[case::plain_scalar_with_hash_inside("a#b", "a#b")]
+    #[case::multi_line_plain_scalar_blank_line_folds_to_newline("foo\n\nbar\n", "foo\nbar")]
+    #[case::plain_scalar_with_backslashes(
+        "plain\\value\\with\\backslashes",
+        "plain\\value\\with\\backslashes"
+    )]
+    #[case::multi_line_plain_scalar_two_blank_lines_fold_to_two_newlines(
+        "foo\n\n\nbar\n",
+        "foo\n\nbar"
+    )]
+    #[case::multi_line_plain_scalar_continuation_trailing_space_stripped(
+        "foo\nbar   \nbaz\n",
+        "foo bar baz"
+    )]
+    fn plain_scalar_implicit_doc_emits_correct_events(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+    ) {
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
@@ -1112,17 +1107,23 @@ mod scalars {
                     version: None,
                     tag_directives: vec![]
                 },
-                plain("hello"),
+                plain(expected_value),
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
         );
     }
 
-    // IT-S2 — plain scalar with explicit `---` and `...` markers.
-    #[test]
-    fn plain_scalar_explicit_doc_markers() {
-        let events = event_variants("---\nhello\n...\n");
+    // IT-S2/S14 — plain scalar with explicit `---` document marker.
+    #[rstest]
+    #[case::plain_scalar_explicit_doc_markers("---\nhello\n...\n", "hello", true)]
+    #[case::plain_scalar_inline_after_directives_end_marker("--- text\n", "text", false)]
+    fn plain_scalar_explicit_doc_emits_correct_events(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+        #[case] explicit_end: bool,
+    ) {
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
@@ -1132,75 +1133,16 @@ mod scalars {
                     version: None,
                     tag_directives: vec![]
                 },
-                plain("hello"),
-                Event::DocumentEnd { explicit: true },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S3 — multi-line plain scalar folds to spaces.
-    #[test]
-    fn multi_line_plain_scalar_folds_to_spaces() {
-        // "foo\n  bar\n  baz\n" → "foo bar baz"
-        let events = event_variants("foo\n  bar\n  baz\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
+                plain(expected_value),
+                Event::DocumentEnd {
+                    explicit: explicit_end
                 },
-                plain("foo bar baz"),
-                Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
         );
     }
 
-    // IT-S4 — plain scalar with embedded URL (`:` disambiguation).
-    #[test]
-    fn plain_scalar_with_url() {
-        let events = event_variants("http://example.com");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("http://example.com"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S5 — plain scalar with `#` not preceded by whitespace.
-    #[test]
-    fn plain_scalar_with_hash_inside() {
-        let events = event_variants("a#b");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("a#b"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S6 — plain scalar terminated by inline comment.
+    // IT-S6 — plain scalar terminated by inline comment (different shape: Comment event).
     #[test]
     fn plain_scalar_terminated_by_comment() {
         // "foo # comment\n" → scalar "foo" (trailing space stripped), then Comment.
@@ -1216,27 +1158,6 @@ mod scalars {
                 },
                 plain("foo"),
                 Event::Comment { text: " comment" },
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S7 — blank line in multi-line plain scalar folds to newline.
-    #[test]
-    fn multi_line_plain_scalar_blank_line_folds_to_newline() {
-        // "foo\n\nbar\n" → "foo\nbar"
-        let events = event_variants("foo\n\nbar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("foo\nbar"),
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -1274,89 +1195,6 @@ mod scalars {
         };
         assert_eq!(span.start.byte_offset, 2);
     }
-
-    // IT-S11 — plain scalar with backslashes (no escaping in plain scalars).
-    #[test]
-    fn plain_scalar_with_backslashes() {
-        let events = event_variants("plain\\value\\with\\backslashes");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("plain\\value\\with\\backslashes"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S12 — two blank lines in multi-line scalar fold to two newlines.
-    #[test]
-    fn multi_line_plain_scalar_two_blank_lines_fold_to_two_newlines() {
-        // "foo\n\n\nbar\n" — two blank lines → "foo\n\nbar"
-        let events = event_variants("foo\n\n\nbar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("foo\n\nbar"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S13 — trailing space on continuation lines is stripped before folding.
-    #[test]
-    fn multi_line_plain_scalar_continuation_trailing_space_stripped() {
-        // "foo\nbar   \nbaz\n" — trailing spaces on "bar" stripped; → "foo bar baz"
-        let events = event_variants("foo\nbar   \nbaz\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("foo bar baz"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-S14 — inline scalar on same line as `---` marker.
-    #[test]
-    fn plain_scalar_inline_after_directives_end_marker() {
-        // "--- text\n" — "text" follows the marker on the same line.
-        let events = event_variants("--- text\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: true,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                plain("text"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,93 +1204,45 @@ mod scalars {
 mod quoted_scalars {
     use std::borrow::Cow;
 
+    use rstest::rstest;
+
     use super::*;
 
-    fn single(value: &str) -> Event<'_> {
-        Event::Scalar {
-            value: value.into(),
-            style: ScalarStyle::SingleQuoted,
-            anchor: None,
-            tag: None,
-        }
-    }
-
-    fn double(value: &str) -> Event<'_> {
-        Event::Scalar {
-            value: value.into(),
-            style: ScalarStyle::DoubleQuoted,
-            anchor: None,
-            tag: None,
-        }
-    }
-
+    // IT-1 through IT-5, IT-8, IT-9: quoted scalar emits correct full event sequence.
+    // Cases with SingleQuoted style use single(); cases with DoubleQuoted use double().
+    #[rstest]
     // IT-1 (spike): single-quoted scalar emits Scalar with SingleQuoted style.
     // Use bare document (no --- marker) so quoted scalar starts on its own line,
     // avoiding the inline_scalar slot which is plain-scalar only.
-    #[test]
-    fn single_quoted_scalar_emits_scalar_event_with_single_quoted_style() {
-        let events = event_variants("'hello'\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                single("hello"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
+    #[case::single_quoted_hello("'hello'\n", "hello", ScalarStyle::SingleQuoted)]
     // IT-2: double-quoted scalar emits Scalar with DoubleQuoted style.
-    #[test]
-    fn double_quoted_scalar_emits_scalar_event_with_double_quoted_style() {
-        let events = event_variants("\"hello\"\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                double("hello"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-3: double-quoted escape produces correct value.
-    #[test]
-    fn double_quoted_escape_produces_correct_value() {
-        // Input: `"with\nescape"` — `\n` is an escape sequence → literal newline.
-        let events = event_variants("\"with\\nescape\"\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                double("with\nescape"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
+    #[case::double_quoted_hello("\"hello\"\n", "hello", ScalarStyle::DoubleQuoted)]
+    // IT-3: double-quoted escape sequence produces the unescaped value.
+    #[case::double_quoted_escape_newline(
+        "\"with\\nescape\"\n",
+        "with\nescape",
+        ScalarStyle::DoubleQuoted
+    )]
     // IT-4: unicode escape in double-quoted produces correct codepoint.
-    #[test]
-    fn unicode_escape_in_double_quoted_produces_correct_codepoint() {
-        let events = event_variants("\"\\u00E9\"\n");
+    #[case::double_quoted_unicode_escape("\"\\u00E9\"\n", "é", ScalarStyle::DoubleQuoted)]
+    // IT-5: single-quoted doubled-quote produces literal apostrophe.
+    #[case::single_quoted_escaped_quote("'it''s'\n", "it's", ScalarStyle::SingleQuoted)]
+    // IT-8: single-quoted empty scalar.
+    #[case::single_quoted_empty("''\n", "", ScalarStyle::SingleQuoted)]
+    // IT-9: double-quoted empty scalar.
+    #[case::double_quoted_empty("\"\"\n", "", ScalarStyle::DoubleQuoted)]
+    fn quoted_scalar_emits_full_event_sequence(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+        #[case] expected_style: ScalarStyle,
+    ) {
+        let scalar = Event::Scalar {
+            value: expected_value.into(),
+            style: expected_style,
+            anchor: None,
+            tag: None,
+        };
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
@@ -1462,30 +1252,41 @@ mod quoted_scalars {
                     version: None,
                     tag_directives: vec![]
                 },
-                double("é"),
+                scalar,
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
         );
     }
 
-    // IT-5: single-quoted with escaped quote.
-    #[test]
-    fn single_quoted_with_escaped_quote() {
-        let events = event_variants("'it''s'\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                single("it's"),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
+    // IT-10, IT-11: malformed double-quoted input propagates at least one Err.
+    #[rstest]
+    // IT-10: surrogate pair codepoint is invalid in YAML.
+    #[case::malformed_surrogate_escape("\"\\uD800\"\n")]
+    // IT-11: unterminated double-quoted scalar is a parse error.
+    #[case::unterminated_double_quoted("\"unterminated\n")]
+    fn quoted_scalar_malformed_input_propagates_err(#[case] input: &str) {
+        let results = parse_to_vec(input);
+        assert!(
+            results.iter().any(Result::is_err),
+            "expected at least one Err in results"
+        );
+    }
+
+    // IT-12, IT-13: no-escape quoted scalar value is Cow::Borrowed (zero-copy).
+    #[rstest]
+    // IT-12: single-quoted with no escapes borrows from input.
+    #[case::single_quoted_no_escape("'hello'\n")]
+    // IT-13: double-quoted with no escapes borrows from input.
+    #[case::double_quoted_no_escape("\"hello\"\n")]
+    fn quoted_scalar_no_escape_is_cow_borrowed(#[case] input: &str) {
+        let results = parse_to_vec(input);
+        let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
+            unreachable!("expected Scalar as third event");
+        };
+        assert!(
+            matches!(value, Cow::Borrowed(_)),
+            "quoted scalar with no escapes must be Cow::Borrowed"
         );
     }
 
@@ -1519,92 +1320,6 @@ mod quoted_scalars {
             "span must start at opening quote"
         );
         assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
-    }
-
-    // IT-8: single-quoted empty scalar.
-    #[test]
-    fn single_quoted_empty_scalar() {
-        let events = event_variants("''\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                single(""),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-9: double-quoted empty scalar.
-    #[test]
-    fn double_quoted_empty_scalar() {
-        let events = event_variants("\"\"\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                double(""),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-10: double-quoted malformed escape propagates Err.
-    #[test]
-    fn double_quoted_malformed_escape_propagates_err() {
-        let results = parse_to_vec("\"\\uD800\"\n");
-        assert!(
-            results.iter().any(Result::is_err),
-            "expected at least one Err in results"
-        );
-    }
-
-    // IT-11: double-quoted unterminated propagates Err.
-    #[test]
-    fn double_quoted_unterminated_propagates_err() {
-        let results = parse_to_vec("\"unterminated\n");
-        assert!(
-            results.iter().any(Result::is_err),
-            "expected at least one Err in results"
-        );
-    }
-
-    // IT-12: single-quoted Cow borrow for no-escape content.
-    #[test]
-    fn single_quoted_cow_borrow_for_no_escape() {
-        let results = parse_to_vec("'hello'\n");
-        let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
-            unreachable!("expected Scalar as third event");
-        };
-        assert!(
-            matches!(value, Cow::Borrowed(_)),
-            "single-quoted with no escapes must be Cow::Borrowed"
-        );
-    }
-
-    // IT-13: double-quoted Cow borrow for no-escape content.
-    #[test]
-    fn double_quoted_cow_borrow_for_no_escape() {
-        let results = parse_to_vec("\"hello\"\n");
-        let Some(Ok((Event::Scalar { value, .. }, _))) = results.get(2) else {
-            unreachable!("expected Scalar as third event");
-        };
-        assert!(
-            matches!(value, Cow::Borrowed(_)),
-            "double-quoted with no escapes must be Cow::Borrowed"
-        );
     }
 
     // IT-14: plain scalar regression guard — adding quoted paths must not break plain.
@@ -2009,6 +1724,8 @@ mod conformance {
 // ---------------------------------------------------------------------------
 
 mod block_scalars {
+    use rstest::rstest;
+
     use super::*;
 
     // Helper: make a literal Scalar event for easy comparison.
@@ -2021,12 +1738,35 @@ mod block_scalars {
         }
     }
 
-    // IT-LB-1 (spike) — simple literal block scalar in bare document.
-    // Validates type wiring: `|` dispatch, Literal(Clip) style, basic content.
-    #[test]
-    fn spike_simple_literal_block_scalar() {
-        // "|\n  hello\n" → scalar "hello\n" (Clip)
-        let events = event_variants("|\n  hello\n");
+    // IT-LB-1 through IT-LB-5, IT-LB-7, IT-LB-13, IT-LB-14:
+    // Literal block scalar emits correct full event sequence (implicit document).
+    #[rstest]
+    // IT-LB-1 (spike): simple literal block scalar; validates `|` dispatch and Literal(Clip) style.
+    #[case::spike_simple_literal_clip("|\n  hello\n", "hello\n", Chomp::Clip)]
+    // IT-LB-2: Strip chomping removes all trailing newlines.
+    #[case::strip_chomping_removes_trailing_newlines("|-\n  foo\n\n", "foo", Chomp::Strip)]
+    // IT-LB-3: Keep chomping retains all trailing blank lines (content + blank = two newlines).
+    #[case::keep_chomping_retains_trailing_newlines("|+\n  foo\n\n", "foo\n\n", Chomp::Keep)]
+    // IT-LB-4: Clip chomping keeps exactly one trailing newline (trailing blank dropped).
+    #[case::clip_chomping_keeps_one_trailing_newline("|\n  foo\n\n", "foo\n", Chomp::Clip)]
+    // IT-LB-5: Explicit indent indicator; `|2` forces content_indent=2 regardless of auto-detect.
+    #[case::explicit_indent_indicator("|2\n  foo\n", "foo\n", Chomp::Clip)]
+    // IT-LB-7: Empty scalar — header only, no content; Clip with empty input yields "".
+    #[case::empty_literal_clip_yields_empty_string("|\n", "", Chomp::Clip)]
+    // IT-LB-13: Multi-line content with blank line between lines; blank becomes a newline.
+    #[case::multiline_content_with_blank_line_between(
+        "|\n  foo\n\n  bar\n",
+        "foo\n\nbar\n",
+        Chomp::Clip
+    )]
+    // IT-LB-14: Leading blank before first content line is included as newline (l-empty per spec §8.1.2).
+    #[case::leading_blank_before_first_content("|\n\n  foo\n", "\nfoo\n", Chomp::Clip)]
+    fn literal_scalar_emits_full_event_sequence(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+        #[case] chomp: Chomp,
+    ) {
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
@@ -2036,91 +1776,7 @@ mod block_scalars {
                     version: None,
                     tag_directives: vec![]
                 },
-                literal("hello\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-LB-2 — Strip chomping removes all trailing newlines.
-    #[test]
-    fn strip_chomping_removes_trailing_newlines() {
-        // "|-\n  foo\n\n" → "foo" (no trailing newline)
-        let events = event_variants("|-\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("foo", Chomp::Strip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-LB-3 — Keep chomping retains all trailing blank lines.
-    #[test]
-    fn keep_chomping_retains_all_trailing_newlines() {
-        // "|+\n  foo\n\n" → "foo\n\n" (content newline + 1 blank line)
-        let events = event_variants("|+\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("foo\n\n", Chomp::Keep),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-LB-4 — Clip chomping keeps exactly one trailing newline.
-    #[test]
-    fn clip_chomping_keeps_exactly_one_trailing_newline() {
-        // "|\n  foo\n\n" → "foo\n" (one newline, trailing blank dropped)
-        let events = event_variants("|\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("foo\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-LB-5 — Explicit indent indicator.
-    // parent_indent=0, explicit=2 → content_indent=2; "  foo" → "foo\n"
-    #[test]
-    fn explicit_indent_indicator() {
-        let events = event_variants("|2\n  foo\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("foo\n", Chomp::Clip),
+                literal(expected_value, chomp),
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -2149,27 +1805,6 @@ mod block_scalars {
             _ => None,
         });
         assert_eq!(scalar_event, Some("foo\n"));
-    }
-
-    // IT-LB-7 — Empty scalar (just `|` header, no content).
-    // "|\n" → "" (Clip: empty content → empty string)
-    #[test]
-    fn empty_literal_scalar_clip_yields_empty_string() {
-        let events = event_variants("|\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
     }
 
     // IT-LB-8 — Literal block scalar in explicit document.
@@ -2259,50 +1894,6 @@ mod block_scalars {
         let results = parse_to_vec("|!\n  hello\n");
         let has_err = results.iter().any(Result::is_err);
         assert!(has_err, "expected a parse error for invalid indicator `!`");
-    }
-
-    // IT-LB-13 — Multi-line content with blank lines between content lines.
-    #[test]
-    fn multiline_content_with_blank_line_between() {
-        // "|\n  foo\n\n  bar\n" → "foo\n\nbar\n"
-        let events = event_variants("|\n  foo\n\n  bar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("foo\n\nbar\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-LB-14 — Leading blank before first content line.
-    // Per YAML 1.2 spec §8.1.2, blank lines between the header and the first
-    // content line are included in the scalar value as newlines (via l-empty).
-    #[test]
-    fn leading_blank_before_first_content() {
-        // "|\n\n  foo\n" → "\nfoo\n" (leading blank produces a newline)
-        let events = event_variants("|\n\n  foo\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                literal("\nfoo\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
     }
 
     // ---------------------------------------------------------------------------
@@ -2395,6 +1986,8 @@ mod block_scalars {
 // ---------------------------------------------------------------------------
 
 mod folded_scalars {
+    use rstest::rstest;
+
     use super::*;
 
     // Helper: make a folded Scalar event for easy comparison.
@@ -2407,12 +2000,70 @@ mod folded_scalars {
         }
     }
 
-    // IT-FB-1 (spike) — simple two-line folded scalar, single break becomes space.
-    // Validates `>` dispatch, `Folded(Clip)` style, and basic folding.
-    #[test]
-    fn spike_two_line_folded_break_becomes_space() {
-        // ">\n  foo\n  bar\n" → scalar "foo bar\n" (Clip)
-        let events = event_variants(">\n  foo\n  bar\n");
+    // IT-FB-1 through IT-FB-20 (excluding 19): folded scalar emits correct full event
+    // sequence (implicit document). Cases cover folding rules, chomping, explicit indent,
+    // and edge cases.
+    #[rstest]
+    // IT-FB-1 (spike): two-line folded scalar; validates `>` dispatch and Folded(Clip) style.
+    #[case::spike_two_line_break_becomes_space(">\n  foo\n  bar\n", "foo bar\n", Chomp::Clip)]
+    // IT-FB-2: single non-blank line is not folded (no preceding content to join).
+    #[case::single_line_not_folded(">\n  hello\n", "hello\n", Chomp::Clip)]
+    // IT-FB-3: three equally-indented non-blank lines — all breaks folded to spaces.
+    #[case::three_lines_all_breaks_become_spaces(">\n  a\n  b\n  c\n", "a b c\n", Chomp::Clip)]
+    // IT-FB-4: one blank line between non-blank lines produces one newline (§8.1.3).
+    #[case::one_blank_line_produces_one_newline(">\n  foo\n\n  bar\n", "foo\nbar\n", Chomp::Clip)]
+    // IT-FB-5: two blank lines between non-blank lines produce two newlines.
+    #[case::two_blank_lines_produce_two_newlines(
+        ">\n  foo\n\n\n  bar\n",
+        "foo\n\nbar\n",
+        Chomp::Clip
+    )]
+    // IT-FB-6: more-indented line — break before preserved as `\n`; relative indent kept.
+    #[case::more_indented_break_before_preserved(
+        ">\n  normal\n    indented\n",
+        "normal\n  indented\n",
+        Chomp::Clip
+    )]
+    // IT-FB-7: breaks surrounding more-indented region both preserved (§8.1.3).
+    #[case::breaks_surrounding_more_indented_both_preserved(
+        ">\n  a\n    b\n  c\n",
+        "a\n  b\nc\n",
+        Chomp::Clip
+    )]
+    // IT-FB-8: all lines at same deeper indent — auto-detect, normal folding.
+    #[case::all_deep_lines_equally_indented_normal_folding(
+        ">\n    deep\n    also deep\n",
+        "deep also deep\n",
+        Chomp::Clip
+    )]
+    // IT-FB-9: Strip (`>-`) — trailing newlines removed.
+    #[case::strip_chomp_removes_trailing_newlines(">-\n  foo\n\n", "foo", Chomp::Strip)]
+    // IT-FB-10: Keep (`>+`) — trailing blank lines preserved.
+    #[case::keep_chomp_preserves_trailing_blank_lines(">+\n  foo\n\n", "foo\n\n", Chomp::Keep)]
+    // IT-FB-11: Clip (`>`) — single trailing newline kept, extra blanks dropped.
+    #[case::clip_chomp_keeps_one_trailing_newline(">\n  foo\n\n", "foo\n", Chomp::Clip)]
+    // IT-FB-12: explicit indent indicator `>2`.
+    #[case::explicit_indent_indicator(">2\n  foo\n  bar\n", "foo bar\n", Chomp::Clip)]
+    // IT-FB-13: explicit indent with strip, chomp-then-indent order `>-2`.
+    #[case::explicit_indent_with_strip_chomp_then_indent(">-2\n  foo\n", "foo", Chomp::Strip)]
+    // IT-FB-14: explicit indent with keep, chomp-then-indent order `>+2`.
+    #[case::explicit_indent_with_keep_chomp_then_indent(">+2\n  foo\n\n", "foo\n\n", Chomp::Keep)]
+    // IT-FB-15: explicit indent with strip, indent-then-chomp order `>2-` (both orderings accepted).
+    #[case::explicit_indent_with_strip_indent_then_chomp(">2-\n  foo\n", "foo", Chomp::Strip)]
+    // IT-FB-16: empty folded scalar (header only, no content) yields "".
+    #[case::empty_folded_scalar_yields_empty_string(">\n", "", Chomp::Clip)]
+    // IT-FB-17: all-blank content (blank lines only, no non-blank lines) yields "" with Clip.
+    #[case::all_blank_content_yields_empty_string(">\n\n\n", "", Chomp::Clip)]
+    // IT-FB-18: single-line with trailing blanks (Keep preserves all trailing blank lines).
+    #[case::keep_chomp_with_multiple_trailing_blanks(">+\n  only\n\n\n", "only\n\n\n", Chomp::Keep)]
+    // IT-FB-20: leading blank before first content line becomes a newline prefix (l-empty).
+    #[case::leading_blank_before_first_content(">\n\n  foo\n", "\nfoo\n", Chomp::Clip)]
+    fn folded_scalar_emits_full_event_sequence(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+        #[case] chomp: Chomp,
+    ) {
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
@@ -2422,377 +2073,7 @@ mod folded_scalars {
                     version: None,
                     tag_directives: vec![]
                 },
-                folded("foo bar\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Core folding rules
-    // -----------------------------------------------------------------------
-
-    // IT-FB-2 — single non-blank line is not folded (no preceding content to join).
-    #[test]
-    fn single_line_not_folded() {
-        let events = event_variants(">\n  hello\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("hello\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-3 — three equally-indented non-blank lines, all breaks folded to spaces.
-    #[test]
-    fn three_lines_all_breaks_become_spaces() {
-        let events = event_variants(">\n  a\n  b\n  c\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("a b c\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-4 — one blank line between non-blank lines produces one newline.
-    // Per §8.1.3: N blank lines → N newlines (first break discarded, blanks' breaks kept).
-    #[test]
-    fn one_blank_line_produces_one_newline() {
-        let events = event_variants(">\n  foo\n\n  bar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo\nbar\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-5 — two blank lines between non-blank lines produce two newlines.
-    #[test]
-    fn two_blank_lines_produce_two_newlines() {
-        let events = event_variants(">\n  foo\n\n\n  bar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo\n\nbar\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-6 — more-indented line: break before is preserved as `\n`, relative indent kept.
-    // content_indent=2; "indented" line has indent 4 (more-indented by 2 spaces).
-    // Break before → `\n`; content after stripping content_indent=2 spaces: "  indented".
-    #[test]
-    fn more_indented_break_before_preserved_relative_indent_kept() {
-        // ">\n  normal\n    indented\n"
-        // → "normal\n  indented\n"
-        let events = event_variants(">\n  normal\n    indented\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("normal\n  indented\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-7 — breaks surrounding a more-indented region are both preserved as `\n`.
-    // YAML 1.2 §8.1.3: "folding does not apply to line breaks *surrounding* text
-    // lines that contain leading white space." Both the break BEFORE and the break
-    // AFTER a more-indented line are preserved (neither is folded to a space).
-    // content_indent=2; `b` at indent 4 (more-indented).
-    // Break before `b` → `\n`; relative content of `b` → "  b"; break after `b` → `\n`.
-    #[test]
-    fn breaks_surrounding_more_indented_region_both_preserved() {
-        // ">\n  a\n    b\n  c\n"
-        // → "a\n  b\nc\n"
-        let events = event_variants(">\n  a\n    b\n  c\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("a\n  b\nc\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-8 — all content lines at same (deeper) indent → auto-detect, normal folding.
-    // Auto-detect gives content_indent=4; both lines at indent 4 (equally indented).
-    #[test]
-    fn all_deep_lines_equally_indented_normal_folding() {
-        let events = event_variants(">\n    deep\n    also deep\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("deep also deep\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Chomping
-    // -----------------------------------------------------------------------
-
-    // IT-FB-9 — Strip (`>-`): trailing newlines removed.
-    #[test]
-    fn strip_chomp_removes_trailing_newlines() {
-        let events = event_variants(">-\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo", Chomp::Strip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-10 — Keep (`>+`): trailing blank lines preserved.
-    #[test]
-    fn keep_chomp_preserves_trailing_blank_lines() {
-        let events = event_variants(">+\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo\n\n", Chomp::Keep),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-11 — Clip (`>`): single trailing newline kept, extra blanks dropped.
-    #[test]
-    fn clip_chomp_keeps_one_trailing_newline() {
-        let events = event_variants(">\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Explicit indent indicator
-    // -----------------------------------------------------------------------
-
-    // IT-FB-12 — explicit indent indicator `>2`.
-    #[test]
-    fn explicit_indent_indicator() {
-        let events = event_variants(">2\n  foo\n  bar\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo bar\n", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-13 — explicit indent with strip, chomp-then-indent order: `>-2`.
-    #[test]
-    fn explicit_indent_with_strip_chomp_then_indent_order() {
-        let events = event_variants(">-2\n  foo\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo", Chomp::Strip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-14 — explicit indent with keep, chomp-then-indent order: `>+2`.
-    #[test]
-    fn explicit_indent_with_keep_chomp_then_indent_order() {
-        let events = event_variants(">+2\n  foo\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo\n\n", Chomp::Keep),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-15 — explicit indent with strip, indent-then-chomp order: `>2-`.
-    // `parse_block_header` accepts either order.
-    #[test]
-    fn explicit_indent_with_strip_indent_then_chomp_order() {
-        let events = event_variants(">2-\n  foo\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("foo", Chomp::Strip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Edge cases
-    // -----------------------------------------------------------------------
-
-    // IT-FB-16 — empty folded scalar (header only, no content).
-    #[test]
-    fn empty_folded_scalar_yields_empty_string() {
-        let events = event_variants(">\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-17 — all-blank content (blank lines only, no non-blank lines).
-    #[test]
-    fn all_blank_content_yields_empty_string_with_clip() {
-        let events = event_variants(">\n\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("", Chomp::Clip),
-                Event::DocumentEnd { explicit: false },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // IT-FB-18 — single-line with trailing blanks (Keep).
-    #[test]
-    fn keep_chomp_with_multiple_trailing_blanks() {
-        let events = event_variants(">+\n  only\n\n\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::DocumentStart {
-                    explicit: false,
-                    version: None,
-                    tag_directives: vec![]
-                },
-                folded("only\n\n\n", Chomp::Keep),
+                folded(expected_value, chomp),
                 Event::DocumentEnd { explicit: false },
                 Event::StreamEnd,
             ]
@@ -2911,28 +2192,20 @@ mod folded_scalars {
     // Error paths
     // -----------------------------------------------------------------------
 
-    // IT-FB-24 — invalid indicator character produces an error.
-    #[test]
-    fn invalid_indicator_character_produces_error() {
-        let results = parse_to_vec(">!\n  hello\n");
-        let has_err = results.iter().any(Result::is_err);
-        assert!(has_err, "expected a parse error for invalid indicator `!`");
-    }
-
-    // IT-FB-25 — indent indicator `0` is invalid.
-    #[test]
-    fn indent_indicator_zero_is_invalid() {
-        let results = parse_to_vec(">0\n  hello\n");
-        let has_err = results.iter().any(Result::is_err);
-        assert!(has_err, "expected a parse error for indent indicator `0`");
-    }
-
-    // IT-FB-26 — duplicate chomp indicator is invalid.
-    #[test]
-    fn duplicate_chomp_indicator_is_invalid() {
-        let results = parse_to_vec(">++\n  hello\n");
-        let has_err = results.iter().any(Result::is_err);
-        assert!(has_err, "expected a parse error for duplicate chomp `++`");
+    // IT-FB-24, IT-FB-25, IT-FB-26: invalid folded scalar headers produce at least one Err.
+    #[rstest]
+    // IT-FB-24: invalid indicator character — `!` is not a valid chomping or indent indicator.
+    #[case::invalid_indicator_character(">!\n  hello\n")]
+    // IT-FB-25: indent indicator `0` is invalid per spec (indentation must be 1–9).
+    #[case::indent_indicator_zero_is_invalid(">0\n  hello\n")]
+    // IT-FB-26: duplicate chomp indicator `++` is invalid.
+    #[case::duplicate_chomp_indicator_is_invalid(">++\n  hello\n")]
+    fn folded_scalar_invalid_header_produces_err(#[case] input: &str) {
+        let results = parse_to_vec(input);
+        assert!(
+            results.iter().any(Result::is_err),
+            "expected at least one Err for invalid header in: {input:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2985,6 +2258,8 @@ mod folded_scalars {
 // ---------------------------------------------------------------------------
 
 mod sequences {
+    use rstest::rstest;
+
     use super::*;
 
     // -----------------------------------------------------------------------
@@ -3100,9 +2375,14 @@ mod sequences {
     // Group B: Empty items
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn dash_followed_by_newline_emits_empty_plain_scalar() {
-        let events = event_variants("-\n");
+    // Dash-only items (with or without trailing space) emit an empty plain scalar.
+    #[rstest]
+    // Bare `-\n` — no value token; empty scalar is synthesized.
+    #[case::dash_followed_by_newline("-\n")]
+    // `- \n` — trailing space stripped; same result as bare dash.
+    #[case::dash_space_then_newline("- \n")]
+    fn sequence_empty_item_emits_empty_plain_scalar(#[case] input: &str) {
+        let events = event_variants(input);
         assert!(
             events.iter().any(|e| matches!(
                 e,
@@ -3113,23 +2393,7 @@ mod sequences {
                     tag: None,
                 } if value.as_ref() == ""
             )),
-            "empty item must emit empty plain scalar"
-        );
-    }
-
-    #[test]
-    fn dash_space_then_newline_emits_empty_plain_scalar() {
-        let events = event_variants("- \n");
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::Scalar {
-                    value,
-                    style: ScalarStyle::Plain,
-                    ..
-                } if value.as_ref() == ""
-            )),
-            "dash+space+newline must emit empty plain scalar"
+            "empty sequence item must emit empty plain scalar for input: {input:?}"
         );
     }
 
@@ -3533,9 +2797,18 @@ mod sequences {
     // Group G: Scalar style variety
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn sequence_with_single_quoted_item() {
-        let events = event_variants("- 'hello'\n");
+    // Quoted sequence items carry the correct ScalarStyle discriminant.
+    #[rstest]
+    // Single-quoted item must emit SingleQuoted style.
+    #[case::single_quoted_item("- 'hello'\n", "hello", ScalarStyle::SingleQuoted)]
+    // Double-quoted item must emit DoubleQuoted style.
+    #[case::double_quoted_item("- \"world\"\n", "world", ScalarStyle::DoubleQuoted)]
+    fn sequence_quoted_item_emits_correct_scalar_style(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+        #[case] expected_style: ScalarStyle,
+    ) {
+        let events = event_variants(input);
         let scalar = events.iter().find_map(|e| match e {
             Event::Scalar { value, style, .. } => Some((value.as_ref(), *style)),
             Event::StreamStart
@@ -3551,31 +2824,8 @@ mod sequences {
         });
         assert_eq!(
             scalar,
-            Some(("hello", ScalarStyle::SingleQuoted)),
-            "single-quoted item must have SingleQuoted style"
-        );
-    }
-
-    #[test]
-    fn sequence_with_double_quoted_item() {
-        let events = event_variants("- \"world\"\n");
-        let scalar = events.iter().find_map(|e| match e {
-            Event::Scalar { value, style, .. } => Some((value.as_ref(), *style)),
-            Event::StreamStart
-            | Event::StreamEnd
-            | Event::DocumentStart { .. }
-            | Event::DocumentEnd { .. }
-            | Event::SequenceStart { .. }
-            | Event::SequenceEnd
-            | Event::MappingStart { .. }
-            | Event::MappingEnd
-            | Event::Alias { .. }
-            | Event::Comment { .. } => None,
-        });
-        assert_eq!(
-            scalar,
-            Some(("world", ScalarStyle::DoubleQuoted)),
-            "double-quoted item must have DoubleQuoted style"
+            Some((expected_value, expected_style)),
+            "sequence item must carry expected scalar style for input: {input:?}"
         );
     }
 
@@ -3891,6 +3141,7 @@ mod sequences {
 
 mod mappings {
     use super::*;
+    use rstest::rstest;
 
     // -----------------------------------------------------------------------
     // Spike: verify MappingStart / MappingEnd reach parse_events
@@ -3980,35 +3231,11 @@ mod mappings {
     // Group B: Empty values
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn key_colon_newline_emits_empty_plain_scalar_for_value() {
-        let events = event_variants("key:\n");
-        // Find the Scalar("key") then the next Scalar should be empty.
-        let scalars: Vec<_> = events
-            .iter()
-            .filter_map(|e| {
-                if let Event::Scalar { value, style, .. } = e {
-                    Some((value.as_ref(), *style))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert_eq!(scalars.len(), 2, "expected 2 scalars (key + empty value)");
-        if let [(key, _), (val, val_style)] = scalars.as_slice() {
-            assert_eq!(*key, "key");
-            assert_eq!(*val, "", "value must be empty string");
-            assert!(
-                matches!(val_style, ScalarStyle::Plain),
-                "empty value must be Plain style"
-            );
-        }
-    }
-
-    #[test]
-    fn key_colon_space_newline_emits_empty_plain_scalar_for_value() {
-        // `key: \n` — trailing space after `:` before EOL
-        let events = event_variants("key: \n");
+    #[rstest]
+    #[case::key_colon_newline("key:\n")]
+    #[case::key_colon_space_newline("key: \n")]
+    fn mapping_missing_value_emits_empty_plain_scalar(#[case] input: &str) {
+        let events = event_variants(input);
         let scalars: Vec<_> = events
             .iter()
             .filter_map(|e| {
@@ -4019,10 +3246,10 @@ mod mappings {
                 }
             })
             .collect();
-        assert_eq!(scalars.len(), 2, "expected 2 scalars");
+        assert_eq!(scalars.len(), 2, "expected 2 scalars (key + empty value)");
         if let [key, val] = scalars.as_slice() {
             assert_eq!(key, "key");
-            assert_eq!(val, "", "trailing-space value must be empty");
+            assert_eq!(val, "", "missing value must be empty string");
         }
     }
 
@@ -4306,36 +3533,27 @@ mod mappings {
     // Group G: Non-mapping disambiguation
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn colon_without_space_is_plain_scalar_not_mapping() {
-        // `key:value` — colon not followed by space, so it's a plain scalar
-        let events = event_variants("key:value\n");
+    #[rstest]
+    #[case::colon_without_space_is_plain_scalar("key:value\n", "key:value")]
+    #[case::url_colon_slash_slash_is_plain_scalar("http://example.com\n", "http://example.com")]
+    fn non_mapping_colon_produces_plain_scalar_not_mapping(
+        #[case] input: &str,
+        #[case] expected_value: &str,
+    ) {
+        let events = event_variants(input);
         let has_mapping = events
             .iter()
             .any(|e| matches!(e, Event::MappingStart { .. }));
         assert!(
             !has_mapping,
-            "colon without space must not create a mapping"
+            "colon pattern must not create a mapping; got: {events:?}"
         );
         let has_scalar = events
             .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key:value"));
-        assert!(has_scalar, "expected Scalar(key:value), got: {events:?}");
-    }
-
-    #[test]
-    fn url_colon_slash_slash_is_plain_scalar_not_mapping() {
-        let events = event_variants("http://example.com\n");
-        let has_mapping = events
-            .iter()
-            .any(|e| matches!(e, Event::MappingStart { .. }));
-        assert!(!has_mapping, "URL must not create a mapping");
-        let has_scalar = events.iter().any(
-            |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "http://example.com"),
-        );
+            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == expected_value));
         assert!(
             has_scalar,
-            "expected Scalar(http://example.com), got: {events:?}"
+            "expected Scalar({expected_value}), got: {events:?}"
         );
     }
 
@@ -5555,6 +4773,7 @@ mod nested_collections {
 
 mod flow_collections {
     use super::*;
+    use rstest::rstest;
 
     // -----------------------------------------------------------------------
     // Module-local event constructors (reduce repetition in exact-event assertions)
@@ -5750,45 +4969,21 @@ mod flow_collections {
     // Group D: Multi-item flow collections
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn multi_item_flow_sequence() {
-        let events = evs("[a, b, c]\n");
+    #[rstest]
+    #[case::multi_item_flow_sequence("[a, b, c]\n", vec!["a", "b", "c"])]
+    #[case::multi_pair_flow_mapping("{a: 1, b: 2}\n", vec!["a", "1", "b", "2"])]
+    #[case::trailing_comma_in_flow_sequence("[a, b,]\n", vec!["a", "b"])]
+    #[case::trailing_comma_in_flow_mapping("{a: b,}\n", vec!["a", "b"])]
+    fn flow_collection_scalar_values_are_correct(#[case] input: &str, #[case] expected: Vec<&str>) {
+        let events = evs(input);
         let scalars = scalar_values(&events);
-        assert_eq!(scalars, ["a", "b", "c"]);
-    }
-
-    #[test]
-    fn multi_pair_flow_mapping() {
-        let events = evs("{a: 1, b: 2}\n");
-        let scalars = scalar_values(&events);
-        assert_eq!(scalars, ["a", "1", "b", "2"]);
+        assert_eq!(scalars, expected);
     }
 
     // -----------------------------------------------------------------------
     // Group E: Trailing commas allowed
+    // (covered by flow_collection_scalar_values_are_correct above)
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn trailing_comma_in_flow_sequence() {
-        let events = evs("[a, b,]\n");
-        let scalars = scalar_values(&events);
-        assert_eq!(
-            scalars,
-            ["a", "b"],
-            "trailing comma does not add empty item"
-        );
-    }
-
-    #[test]
-    fn trailing_comma_in_flow_mapping() {
-        let events = evs("{a: b,}\n");
-        let scalars = scalar_values(&events);
-        assert_eq!(
-            scalars,
-            ["a", "b"],
-            "trailing comma does not add empty pair"
-        );
-    }
 
     // -----------------------------------------------------------------------
     // Group F: Quoted scalars inside flow collections
@@ -5862,23 +5057,15 @@ mod flow_collections {
     // Group H: Block scalar indicators forbidden in flow context
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn literal_block_scalar_in_flow_returns_error() {
-        let result: Vec<_> = parse_events("[|]\n").collect();
+    #[rstest]
+    #[case::literal_block_scalar_in_flow("[|]\n")]
+    #[case::folded_block_scalar_in_flow("[>]\n")]
+    fn block_scalar_indicator_in_flow_returns_error(#[case] input: &str) {
+        let result: Vec<_> = parse_events(input).collect();
         let has_error = result.iter().any(Result::is_err);
         assert!(
             has_error,
-            "literal block scalar inside flow must return an error"
-        );
-    }
-
-    #[test]
-    fn folded_block_scalar_in_flow_returns_error() {
-        let result: Vec<_> = parse_events("[>]\n").collect();
-        let has_error = result.iter().any(Result::is_err);
-        assert!(
-            has_error,
-            "folded block scalar inside flow must return an error"
+            "block scalar indicator inside flow must return an error"
         );
     }
 
@@ -7029,6 +6216,8 @@ mod nested_flow_block_mixing {
 // ---------------------------------------------------------------------------
 
 mod anchors_and_aliases {
+    use rstest::rstest;
+
     use super::*;
 
     fn evs(input: &str) -> Vec<Event<'_>> {
@@ -7263,27 +6452,19 @@ mod anchors_and_aliases {
     // Group D: Alias in block context
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn alias_as_block_mapping_value_emits_alias_event() {
-        // `key: *ref\n` — alias as mapping value.
-        let events = evs("key: *ref\n");
+    // D-1, D-2: `*ref` in different block positions emits Event::Alias { name: "ref" }.
+    #[rstest]
+    // D-1: Alias as block mapping value.
+    #[case::alias_as_block_mapping_value("key: *ref\n")]
+    // D-2: Alias as block sequence item.
+    #[case::alias_as_block_sequence_item("- *ref\n")]
+    fn alias_in_block_context_emits_alias_event(#[case] input: &str) {
+        let events = evs(input);
         assert!(
             events
                 .iter()
                 .any(|e| matches!(e, Event::Alias { name: "ref" })),
-            "alias `*ref` as mapping value must emit Alias event"
-        );
-    }
-
-    #[test]
-    fn alias_as_block_sequence_item_emits_alias_event() {
-        // `- *ref\n` — alias as sequence item.
-        let events = evs("- *ref\n");
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, Event::Alias { name: "ref" })),
-            "alias `*ref` as sequence item must emit Alias event"
+            "alias `*ref` must emit Alias {{ name: \"ref\" }} for input: {input:?}"
         );
     }
 
@@ -7413,26 +6594,19 @@ mod anchors_and_aliases {
         );
     }
 
-    #[test]
-    fn anchor_name_at_max_length_is_accepted() {
-        // Anchor name exactly at MAX_ANCHOR_NAME_BYTES bytes must be accepted.
-        let name = "a".repeat(MAX_ANCHOR_NAME_BYTES);
+    // Anchor name at the length boundary: at-limit accepted, over-limit rejected.
+    #[rstest]
+    // At exactly MAX_ANCHOR_NAME_BYTES: accepted.
+    #[case::at_max_length_accepted(MAX_ANCHOR_NAME_BYTES, false)]
+    // One byte over the limit: rejected.
+    #[case::over_max_length_returns_error(MAX_ANCHOR_NAME_BYTES + 1, true)]
+    fn anchor_name_length_boundary(#[case] name_len: usize, #[case] expect_error: bool) {
+        let name = "a".repeat(name_len);
         let input = format!("&{name} val\n");
-        assert!(
-            !has_error(&input),
-            "anchor name of exactly {MAX_ANCHOR_NAME_BYTES} bytes must be accepted"
-        );
-    }
-
-    #[test]
-    fn anchor_name_exceeding_max_length_returns_error() {
-        // Anchor name one byte over the limit must return an error.
-        let name = "a".repeat(MAX_ANCHOR_NAME_BYTES + 1);
-        let input = format!("&{name} val\n");
-        assert!(
+        assert_eq!(
             has_error(&input),
-            "anchor name of {} bytes must be rejected (limit is {MAX_ANCHOR_NAME_BYTES})",
-            MAX_ANCHOR_NAME_BYTES + 1
+            expect_error,
+            "anchor name of {name_len} bytes: expect_error={expect_error} (limit={MAX_ANCHOR_NAME_BYTES})"
         );
     }
 
@@ -8183,6 +7357,7 @@ mod anchors_and_aliases {
 
 mod tags {
     use super::*;
+    use rstest::rstest;
 
     fn evs(input: &str) -> Vec<Event<'_>> {
         parse_events(input)
@@ -8268,45 +7443,16 @@ mod tags {
     // Group A2: Verbatim tag URI validation — YAML 1.2 §6.8.1 production [38]
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn verbatim_tag_uri_alphanumeric_accepted() {
+    #[rstest]
+    #[case::alphanumeric("!<abc123> v\n")]
+    #[case::allowed_punctuation("!<a-_.~*'()[]#;/?:@&=+$,b> v\n")]
+    #[case::exclamation("!<tag:foo!bar> v\n")]
+    #[case::percent_encoded_space("!<%20> v\n")]
+    #[case::percent_encoded_slash("!<path%2Fto> v\n")]
+    fn verbatim_tag_uri_valid_chars_accepted(#[case] input: &str) {
         assert!(
-            !has_error("!<abc123> v\n"),
-            "alphanumeric-only URI must be accepted"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_allowed_punctuation_accepted() {
-        // All single-char ns-uri-char punctuation except `%` (handled separately).
-        assert!(
-            !has_error("!<a-_.~*'()[]#;/?:@&=+$,b> v\n"),
-            "URI with all allowed punctuation must be accepted"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_exclamation_accepted() {
-        // `!` is in ns-uri-char (YAML 1.2 §6.8.1), unlike ns-tag-char.
-        assert!(
-            !has_error("!<tag:foo!bar> v\n"),
-            "'!' is a valid ns-uri-char and must be accepted"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_percent_encoded_space_accepted() {
-        assert!(
-            !has_error("!<%20> v\n"),
-            "%20 (percent-encoded space) must be accepted"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_percent_encoded_slash_accepted() {
-        assert!(
-            !has_error("!<path%2Fto> v\n"),
-            "%2F (percent-encoded slash) must be accepted"
+            !has_error(input),
+            "verbatim tag URI must be accepted: {input:?}"
         );
     }
 
@@ -8316,77 +7462,20 @@ mod tags {
         assert!(!has_error("!<%2f> v\n"), "lowercase %2f must be accepted");
     }
 
-    #[test]
-    fn verbatim_tag_uri_space_rejected() {
+    #[rstest]
+    #[case::space("!<foo bar> v\n")]
+    #[case::curly_brace("!<foo{bar}> v\n")]
+    #[case::non_ascii("!<\u{4E2D}\u{6587}> v\n")]
+    #[case::bare_percent("!<%GG> v\n")]
+    #[case::percent_with_one_hex_digit("!<%2> v\n")]
+    #[case::del_char("!<foo\x7Fbar> v\n")]
+    #[case::vertical_bar("!<foo|bar> v\n")]
+    #[case::backslash("!<foo\\bar> v\n")]
+    #[case::less_than("!<foo<bar> v\n")]
+    fn verbatim_tag_uri_invalid_chars_rejected(#[case] input: &str) {
         assert!(
-            has_error("!<foo bar> v\n"),
-            "space in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_curly_brace_rejected() {
-        assert!(
-            has_error("!<foo{bar}> v\n"),
-            "curly brace in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_non_ascii_rejected() {
-        // Non-ASCII characters are not valid ns-uri-char single-char values.
-        assert!(
-            has_error("!<\u{4E2D}\u{6587}> v\n"),
-            "non-ASCII characters in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_bare_percent_rejected() {
-        assert!(
-            has_error("!<%GG> v\n"),
-            "bare %% without two hex digits must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_percent_with_one_hex_digit_rejected() {
-        assert!(
-            has_error("!<%2> v\n"),
-            "%% with only one hex digit must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_del_char_rejected() {
-        assert!(
-            has_error("!<foo\x7Fbar> v\n"),
-            "DEL (0x7F) in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_vertical_bar_rejected() {
-        assert!(
-            has_error("!<foo|bar> v\n"),
-            "vertical bar in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_backslash_rejected() {
-        // `\` is not in ns-uri-char.
-        assert!(
-            has_error("!<foo\\bar> v\n"),
-            "backslash in verbatim tag URI must be rejected"
-        );
-    }
-
-    #[test]
-    fn verbatim_tag_uri_less_than_rejected() {
-        assert!(
-            has_error("!<foo<bar> v\n"),
-            "less-than sign in verbatim tag URI must be rejected"
+            has_error(input),
+            "verbatim tag URI with invalid char must be rejected: {input:?}"
         );
     }
 
@@ -8649,19 +7738,16 @@ mod tags {
     // Group I: Error cases
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn duplicate_tag_on_same_node_returns_error() {
+    #[rstest]
+    #[case::duplicate_tag_on_same_node("!!str !!int val\n")]
+    #[case::alias_with_tag("&anchor val\n!!str *anchor\n")]
+    #[case::flow_duplicate_tag_on_same_node("[!t !t2 val]\n")]
+    #[case::flow_alias_with_pending_tag("[!t *a, val]\n")]
+    #[case::flow_alias_with_pending_tag_alone("[!a *name]\n")]
+    fn tag_error_cases_return_error(#[case] input: &str) {
         assert!(
-            has_error("!!str !!int val\n"),
-            "duplicate tags on the same node must return an error"
-        );
-    }
-
-    #[test]
-    fn alias_with_tag_returns_error() {
-        assert!(
-            has_error("&anchor val\n!!str *anchor\n"),
-            "alias node with tag must return an error"
+            has_error(input),
+            "invalid tag usage must return an error: {input:?}"
         );
     }
 
@@ -8684,34 +7770,6 @@ mod tags {
         assert!(
             has_error(&input),
             "tag URI exceeding MAX_TAG_LEN bytes must return an error"
-        );
-    }
-
-    #[test]
-    fn flow_duplicate_tag_on_same_node_returns_error() {
-        // `[!t !t2 val]\n` — two tags on the same flow-sequence element.
-        assert!(
-            has_error("[!t !t2 val]\n"),
-            "two tag indicators on the same flow node must return an error"
-        );
-    }
-
-    #[test]
-    fn flow_alias_with_pending_tag_returns_error() {
-        // `[!t *a, val]\n` — tag precedes alias in flow sequence.
-        // YAML 1.2 §7.1: alias nodes cannot have properties.
-        assert!(
-            has_error("[!t *a, val]\n"),
-            "alias with pending tag in flow context must return an error"
-        );
-    }
-
-    #[test]
-    fn flow_alias_with_pending_tag_alone_returns_error() {
-        // `[!a *name]\n` — tag precedes alias with no following element.
-        assert!(
-            has_error("[!a *name]\n"),
-            "alias with pending tag in flow sequence (sole element) must return an error"
         );
     }
 
@@ -9116,22 +8174,31 @@ mod tags {
 // ---------------------------------------------------------------------------
 
 mod comments {
+    use rstest::rstest;
+
     use super::*;
 
     // -----------------------------------------------------------------------
     // Group A — Standalone comment lines (stream level)
     // -----------------------------------------------------------------------
 
-    // A-1: Single comment line produces one Comment event.
-    #[test]
-    fn single_standalone_comment_emits_comment_event() {
-        let events = event_variants("# hello world\n");
+    // A-1, A-3: Single standalone comment → [StreamStart, Comment { text }, StreamEnd].
+    #[rstest]
+    // A-1: Single comment line with leading space — body includes the space.
+    #[case::single_standalone_comment_with_space("# hello world\n", " hello world")]
+    // A-3: Comment body with no leading space is preserved as-is.
+    #[case::comment_body_no_leading_space_preserved("#nospace\n", "nospace")]
+    fn single_standalone_comment_emits_stream_comment_stream(
+        #[case] input: &str,
+        #[case] expected_text: &str,
+    ) {
+        let events = event_variants(input);
         assert_eq!(
             events,
             [
                 Event::StreamStart,
                 Event::Comment {
-                    text: " hello world"
+                    text: expected_text
                 },
                 Event::StreamEnd,
             ]
@@ -9149,20 +8216,6 @@ mod comments {
                 Event::Comment { text: " first" },
                 Event::Comment { text: " second" },
                 Event::Comment { text: " third" },
-                Event::StreamEnd,
-            ]
-        );
-    }
-
-    // A-3: Comment with no trailing space — `#nospace` body is `"nospace"`.
-    #[test]
-    fn comment_body_no_leading_space_is_preserved() {
-        let events = event_variants("#nospace\n");
-        assert_eq!(
-            events,
-            [
-                Event::StreamStart,
-                Event::Comment { text: "nospace" },
                 Event::StreamEnd,
             ]
         );
@@ -9653,27 +8706,11 @@ mod comments {
         }
     }
 
-    // G-3: Comment with empty body (`#` with no trailing text) has a zero-width
-    //      span relative to the `#`.
-    #[test]
-    fn empty_comment_body_emits_empty_text() {
-        // "#\n" — comment with no body text.
-        let events = event_variants("#\n");
-        let text = events.iter().find_map(|e| {
-            if let Event::Comment { text } = e {
-                Some(*text)
-            } else {
-                None
-            }
-        });
-        assert_eq!(text, Some(""), "empty body should produce empty string");
-    }
-
-    // G-4: Comment body leading whitespace is preserved verbatim.
-    #[test]
-    fn comment_body_leading_whitespace_preserved() {
-        // "#   triple space\n"
-        let events = event_variants("#   triple space\n");
+    #[rstest]
+    #[case::empty_body("#\n", "")]
+    #[case::leading_whitespace_preserved("#   triple space\n", "   triple space")]
+    fn comment_body_text_is_preserved_verbatim(#[case] input: &str, #[case] expected_text: &str) {
+        let events = event_variants(input);
         let text = events.iter().find_map(|e| {
             if let Event::Comment { text } = e {
                 Some(*text)
@@ -9683,8 +8720,8 @@ mod comments {
         });
         assert_eq!(
             text,
-            Some("   triple space"),
-            "leading spaces in comment body must be preserved verbatim"
+            Some(expected_text),
+            "comment body text must be preserved verbatim"
         );
     }
 
@@ -10011,6 +9048,8 @@ mod comments {
 // ---------------------------------------------------------------------------
 
 mod directives {
+    use rstest::rstest;
+
     use super::*;
 
     fn evs(input: &str) -> Vec<Event<'_>> {
@@ -10030,99 +9069,44 @@ mod directives {
     // Group A — %YAML directive
     // -----------------------------------------------------------------------
 
-    // A-1: %YAML 1.2 before `---` populates version field.
-    #[test]
-    fn yaml_directive_version_propagated_to_document_start() {
-        let events = event_variants("%YAML 1.2\n---\nscalar\n");
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::DocumentStart {
-                    version: Some((1, 2)),
-                    ..
-                }
-            )),
-            "%YAML 1.2 must produce DocumentStart with version Some((1, 2))"
-        );
-    }
-
+    // A-1 through A-3: %YAML directive version propagated to DocumentStart.version.
+    #[rstest]
+    // A-1: %YAML 1.2 produces version Some((1, 2)).
+    #[case::yaml_1_2_propagated("%YAML 1.2\n---\nscalar\n", Some((1, 2)))]
     // A-2: %YAML 1.1 produces version Some((1, 1)).
-    #[test]
-    fn yaml_directive_version_1_1_propagated() {
-        let events = event_variants("%YAML 1.1\n---\nscalar\n");
+    #[case::yaml_1_1_propagated("%YAML 1.1\n---\nscalar\n", Some((1, 1)))]
+    // A-3: No %YAML directive produces version None.
+    #[case::no_yaml_directive_version_is_none("---\nscalar\n", None)]
+    // A-3b: Non-standard version %YAML 1.3 is accepted without validation.
+    #[case::yaml_non_standard_version_accepted("%YAML 1.3\n---\nscalar\n", Some((1, 3)))]
+    fn yaml_directive_version_propagated_to_document_start(
+        #[case] input: &str,
+        #[case] expected_version: Option<(u8, u8)>,
+    ) {
+        let events = event_variants(input);
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                Event::DocumentStart {
-                    version: Some((1, 1)),
-                    ..
-                }
+                Event::DocumentStart { version, .. } if *version == expected_version
             )),
-            "%YAML 1.1 must produce DocumentStart with version Some((1, 1))"
+            "%YAML directive must produce DocumentStart with version {expected_version:?} for input: {input:?}"
         );
     }
 
-    // A-3: No %YAML directive → version is None.
-    #[test]
-    fn no_yaml_directive_version_is_none() {
-        let events = event_variants("---\nscalar\n");
+    // A-4, A-5, A-6, A-8: Malformed or disallowed %YAML directives return at least one error.
+    #[rstest]
+    // A-4: Missing version number after %YAML.
+    #[case::missing_version_returns_error("%YAML\n---\nscalar\n")]
+    // A-5: Non-numeric version (e.g., %YAML abc) is rejected.
+    #[case::non_numeric_version_returns_error("%YAML abc\n---\nscalar\n")]
+    // A-6: Unsupported major version 2 is rejected (only major 1 is supported).
+    #[case::major_version_2_returns_error("%YAML 2.0\n---\nscalar\n")]
+    // A-8: Duplicate %YAML directives in the same preamble are rejected.
+    #[case::duplicate_yaml_directive_returns_error("%YAML 1.2\n%YAML 1.2\n---\nscalar\n")]
+    fn yaml_directive_invalid_input_returns_error(#[case] input: &str) {
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, Event::DocumentStart { version: None, .. })),
-            "absent %YAML directive must produce DocumentStart with version None"
-        );
-    }
-
-    // A-3: %YAML major.minor with non-standard version is accepted (no validation).
-    #[test]
-    fn yaml_directive_non_standard_version_accepted() {
-        let events = event_variants("%YAML 1.3\n---\nscalar\n");
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                Event::DocumentStart {
-                    version: Some((1, 3)),
-                    ..
-                }
-            )),
-            "%YAML 1.3 must produce DocumentStart with version Some((1, 3))"
-        );
-    }
-
-    // A-4: %YAML with missing version number returns error.
-    #[test]
-    fn yaml_directive_missing_version_returns_error() {
-        assert!(
-            has_error("%YAML\n---\nscalar\n"),
-            "%YAML with missing version number must return an error"
-        );
-    }
-
-    // A-5: %YAML with malformed version (non-numeric) returns error.
-    #[test]
-    fn yaml_directive_non_numeric_version_returns_error() {
-        assert!(
-            has_error("%YAML abc\n---\nscalar\n"),
-            "%YAML with non-numeric version must return an error"
-        );
-    }
-
-    // A-6: %YAML 2.0 (unsupported major version) returns error.
-    #[test]
-    fn yaml_directive_major_version_2_returns_error() {
-        assert!(
-            has_error("%YAML 2.0\n---\nscalar\n"),
-            "%YAML 2.0 must return an error — only major version 1 is supported"
-        );
-    }
-
-    // A-8: Duplicate %YAML directives in the same document preamble returns error.
-    #[test]
-    fn duplicate_yaml_directive_returns_error() {
-        assert!(
-            has_error("%YAML 1.2\n%YAML 1.2\n---\nscalar\n"),
-            "duplicate %YAML directives must return an error"
+            has_error(input),
+            "invalid %YAML directive must return an error for input: {input:?}"
         );
     }
 
@@ -10904,6 +9888,7 @@ mod directives {
 
 mod scalar_dispatch {
     use super::*;
+    use rstest::rstest;
 
     fn first_scalar(input: &str) -> Option<Event<'_>> {
         parse_events(input)
@@ -10938,30 +9923,18 @@ mod scalar_dispatch {
         );
     }
 
-    #[test]
-    fn it_single_quoted_scalar_round_trip() {
-        let ev = first_scalar("'hello'\n");
+    #[rstest]
+    #[case::single_quoted("'hello'\n", ScalarStyle::SingleQuoted)]
+    #[case::double_quoted("\"hello\"\n", ScalarStyle::DoubleQuoted)]
+    #[case::plain("hello\n", ScalarStyle::Plain)]
+    fn it_scalar_dispatch_round_trip_exact_style(
+        #[case] input: &str,
+        #[case] expected_style: ScalarStyle,
+    ) {
+        let ev = first_scalar(input);
         assert!(
-            matches!(ev, Some(Event::Scalar { style: ScalarStyle::SingleQuoted, ref value, .. }) if value == "hello"),
-            "expected single-quoted scalar 'hello', got {ev:?}"
-        );
-    }
-
-    #[test]
-    fn it_double_quoted_scalar_round_trip() {
-        let ev = first_scalar("\"hello\"\n");
-        assert!(
-            matches!(ev, Some(Event::Scalar { style: ScalarStyle::DoubleQuoted, ref value, .. }) if value == "hello"),
-            "expected double-quoted scalar 'hello', got {ev:?}"
-        );
-    }
-
-    #[test]
-    fn it_plain_scalar_round_trip() {
-        let ev = first_scalar("hello\n");
-        assert!(
-            matches!(ev, Some(Event::Scalar { style: ScalarStyle::Plain, ref value, .. }) if value == "hello"),
-            "expected plain scalar 'hello', got {ev:?}"
+            matches!(&ev, Some(Event::Scalar { style, value, .. }) if *style == expected_style && value.as_ref() == "hello"),
+            "expected scalar 'hello' with style {expected_style:?}, got {ev:?}"
         );
     }
 
@@ -11055,21 +10028,13 @@ mod scalar_dispatch {
         );
     }
 
-    #[test]
-    fn it_double_quoted_no_space_before_hash_is_error() {
-        // `"hello"#comment` — `#` immediately after closing quote, no space.
+    #[rstest]
+    #[case::no_space_before_hash("\"hello\"#comment\n")]
+    #[case::non_comment_trailing_content("\"hello\" extra\n")]
+    fn it_double_quoted_invalid_trailing_content_is_error(#[case] input: &str) {
         assert!(
-            has_parse_error("\"hello\"#comment\n"),
-            "# immediately after closing quote must be a parse error"
-        );
-    }
-
-    #[test]
-    fn it_double_quoted_non_comment_trailing_content_is_error() {
-        // `"hello" extra` — non-whitespace, non-comment after closing quote.
-        assert!(
-            has_parse_error("\"hello\" extra\n"),
-            "non-comment content after closing double-quote must be a parse error"
+            has_parse_error(input),
+            "invalid trailing content after double-quoted scalar must be a parse error"
         );
     }
 }
