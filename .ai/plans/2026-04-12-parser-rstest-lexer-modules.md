@@ -80,7 +80,7 @@ in a `#[case]`.
 
 ## Steps
 
-- [ ] Parameterize `src/lexer/plain.rs` tests
+- [x] Parameterize `src/lexer/plain.rs` tests (96f8df6)
 - [ ] Parameterize `src/lexer/quoted.rs` tests
 - [ ] Parameterize `src/lexer/block.rs` tests
 - [ ] Parameterize `src/lexer/comment.rs` + `src/lines.rs`
@@ -127,12 +127,12 @@ to `#[rstest]` parameterized tests.
 `consume_marker_line` first) unless there are 3+ tests
 with the same setup pattern.
 
-- [ ] Group scan_plain_line_block tests into `#[rstest]`
-- [ ] Group scan_plain_line_flow tests into `#[rstest]`
-- [ ] Group try_consume_plain_scalar value-eq tests
-- [ ] Group try_consume_plain_scalar Cow/span tests
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Group scan_plain_line_block tests into `#[rstest]`
+- [x] Group scan_plain_line_flow tests into `#[rstest]`
+- [x] Group try_consume_plain_scalar value-eq tests
+- [x] Group try_consume_plain_scalar Cow/span tests
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 2: Parameterize `src/lexer/quoted.rs`
 
