@@ -349,6 +349,8 @@ fn to_u32(v: usize) -> u32 {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     /// Decode delta-encoded tokens into `(abs_line, abs_start, length, token_type, modifiers)`.
@@ -447,39 +449,17 @@ mod tests {
         assert_eq!(nums[0].2, 4); // len("3.14")
     }
 
-    #[test]
-    fn boolean_true_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: true"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn boolean_false_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: false"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn boolean_yes_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: yes"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn boolean_no_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: no"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn null_value_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("x: null"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn tilde_null_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("x: ~"));
+    #[rstest]
+    #[case::true_keyword("flag: true")]
+    #[case::false_keyword("flag: false")]
+    #[case::yes_keyword("flag: yes")]
+    #[case::no_keyword("flag: no")]
+    #[case::null_keyword("x: null")]
+    #[case::tilde_null("x: ~")]
+    #[case::on_keyword("flag: on")]
+    #[case::off_keyword("flag: off")]
+    fn produces_keyword_token(#[case] input: &str) {
+        let abs = absolute(&semantic_tokens(input));
         assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
     }
 
@@ -504,15 +484,15 @@ mod tests {
         assert!(abs.iter().any(|t| t.3 == TOKEN_TYPE));
     }
 
-    #[test]
-    fn block_scalar_pipe_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: |"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
-    }
-
-    #[test]
-    fn block_scalar_gt_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: >"));
+    #[rstest]
+    #[case::pipe("text: |")]
+    #[case::gt("text: >")]
+    #[case::pipe_minus("text: |-")]
+    #[case::gt_minus("text: >-")]
+    #[case::pipe_plus("text: |+")]
+    #[case::gt_plus("text: >+")]
+    fn block_scalar_produces_operator_token(#[case] input: &str) {
+        let abs = absolute(&semantic_tokens(input));
         assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
     }
 
@@ -583,31 +563,6 @@ mod tests {
         assert_eq!(nums[0].2, 5); // len("-3.14")
     }
 
-    // block scalar variants: |- and >-
-    #[test]
-    fn block_scalar_pipe_minus_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: |-"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
-    }
-
-    #[test]
-    fn block_scalar_gt_minus_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: >-"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
-    }
-
-    #[test]
-    fn block_scalar_pipe_plus_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: |+"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
-    }
-
-    #[test]
-    fn block_scalar_gt_plus_produces_operator_token() {
-        let abs = absolute(&semantic_tokens("text: >+"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
-    }
-
     // sequence item with string value (no mapping colon)
     #[test]
     fn sequence_item_string_value_produces_string_token() {
@@ -650,19 +605,6 @@ mod tests {
                 .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION),
             "anchor on sequence item should produce variable with declaration modifier"
         );
-    }
-
-    // keyword variants: on/off
-    #[test]
-    fn on_keyword_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: on"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
-    }
-
-    #[test]
-    fn off_keyword_produces_keyword_token() {
-        let abs = absolute(&semantic_tokens("flag: off"));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
     }
 
     // comment stops inline marker scan (# in middle of line)

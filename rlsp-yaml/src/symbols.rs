@@ -371,6 +371,8 @@ fn node_to_string(node: &Node<Span>) -> String {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use tower_lsp::lsp_types::SymbolKind;
 
@@ -627,30 +629,16 @@ mod tests {
         let _ = symbols;
     }
 
-    // Test 16 — yaml_to_symbols: sequence root returns empty
-    #[test]
-    fn should_return_empty_for_sequence_root_document() {
-        let text = "- one\n- two\n- three\n";
+    // Tests 16-17 — yaml_to_symbols: non-mapping root returns empty
+    #[rstest]
+    #[case::sequence_root("- one\n- two\n- three\n")]
+    #[case::scalar_root("just a scalar\n")]
+    fn returns_empty_for_non_mapping_root(#[case] text: &str) {
         let docs = parse_docs(text);
         let symbols = document_symbols(text, docs.as_ref());
-
-        // Sequence is not a Mapping, so yaml_to_symbols returns empty
         assert!(
             symbols.is_empty(),
-            "sequence root should produce no symbols, got: {symbols:?}"
-        );
-    }
-
-    // Test 17 — yaml_to_symbols: scalar root returns empty
-    #[test]
-    fn should_return_empty_for_scalar_root_document() {
-        let text = "just a scalar\n";
-        let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
-
-        assert!(
-            symbols.is_empty(),
-            "scalar root should produce no symbols, got: {symbols:?}"
+            "non-mapping root should produce no symbols, got: {symbols:?}"
         );
     }
 

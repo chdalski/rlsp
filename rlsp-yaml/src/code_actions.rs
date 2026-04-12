@@ -609,6 +609,8 @@ fn split_flow_items(content: &str) -> Vec<String> {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn test_uri() -> tower_lsp::lsp_types::Url {
@@ -652,13 +654,18 @@ mod tests {
         assert!(!edits[0].new_text.contains('{'));
     }
 
-    #[test]
-    fn should_not_convert_flow_map_with_invalid_range() {
-        let text = "config: {a: 1}\n";
-        let diag = make_diagnostic(0, 100, 200, "flowMap");
+    #[rstest]
+    #[case::flow_map_invalid_range("config: {a: 1}\n", "flowMap", "flow mapping")]
+    #[case::flow_seq_invalid_range("items: [a]\n", "flowSeq", "flow sequence")]
+    #[case::unused_anchor_invalid_range("data: &unused\n", "unusedAnchor", "unused anchor")]
+    fn invalid_range_produces_no_action(
+        #[case] text: &str,
+        #[case] code: &str,
+        #[case] title_fragment: &str,
+    ) {
+        let diag = make_diagnostic(0, 100, 200, code);
         let actions = code_actions(text, line_range(0), &[diag], &test_uri());
-
-        assert!(actions.iter().all(|a| !a.title.contains("flow mapping")));
+        assert!(actions.iter().all(|a| !a.title.contains(title_fragment)));
     }
 
     // ---- Flow seq to block ----
@@ -680,15 +687,6 @@ mod tests {
         assert!(edits[0].new_text.contains("- two"));
         assert!(edits[0].new_text.contains("- three"));
         assert!(!edits[0].new_text.contains('['));
-    }
-
-    #[test]
-    fn should_not_convert_flow_seq_with_invalid_range() {
-        let text = "items: [a]\n";
-        let diag = make_diagnostic(0, 100, 200, "flowSeq");
-        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
-
-        assert!(actions.iter().all(|a| !a.title.contains("flow sequence")));
     }
 
     #[test]
@@ -997,15 +995,6 @@ mod tests {
         assert_eq!(edits[0].new_text, "data: ");
     }
 
-    #[test]
-    fn should_not_delete_anchor_with_invalid_range() {
-        let text = "data: &unused\n";
-        let diag = make_diagnostic(0, 100, 200, "unusedAnchor");
-        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
-
-        assert!(actions.iter().all(|a| !a.title.contains("unused anchor")));
-    }
-
     // ---- Quoted bool to unquoted ----
 
     #[test]
@@ -1078,34 +1067,18 @@ mod tests {
 
     // ---- split_flow_items helper ----
 
-    #[test]
-    fn should_split_simple_items() {
-        let items = split_flow_items("a: 1, b: 2, c: 3");
-        assert_eq!(items, vec!["a: 1", "b: 2", "c: 3"]);
+    #[rstest]
+    #[case::simple_pairs("a: 1, b: 2, c: 3", vec!["a: 1", "b: 2", "c: 3"])]
+    #[case::nested_braces("a: {x: 1}, b: 2", vec!["a: {x: 1}", "b: 2"])]
+    #[case::nested_brackets("a: [1, 2], b: 3", vec!["a: [1, 2]", "b: 3"])]
+    #[case::quoted_comma("a: \"hello, world\", b: 2", vec!["a: \"hello, world\"", "b: 2"])]
+    fn split_flow_items_cases(#[case] input: &str, #[case] expected: Vec<&str>) {
+        assert_eq!(split_flow_items(input), expected);
     }
 
     #[test]
-    fn should_handle_nested_braces() {
-        let items = split_flow_items("a: {x: 1}, b: 2");
-        assert_eq!(items, vec!["a: {x: 1}", "b: 2"]);
-    }
-
-    #[test]
-    fn should_handle_nested_brackets() {
-        let items = split_flow_items("a: [1, 2], b: 3");
-        assert_eq!(items, vec!["a: [1, 2]", "b: 3"]);
-    }
-
-    #[test]
-    fn should_handle_quoted_commas() {
-        let items = split_flow_items("a: \"hello, world\", b: 2");
-        assert_eq!(items, vec!["a: \"hello, world\"", "b: 2"]);
-    }
-
-    #[test]
-    fn should_handle_empty_input() {
-        let items = split_flow_items("");
-        assert!(items.is_empty());
+    fn split_flow_items_empty_input() {
+        assert!(split_flow_items("").is_empty());
     }
 
     // ---- Diagnostic overlap ----
@@ -1133,58 +1106,23 @@ mod tests {
 
     // ---- quote_flow_item ----
 
-    #[test]
-    fn quote_flow_item_returns_double_quoted_string_as_is() {
-        assert_eq!(quote_flow_item("\"true\""), "\"true\"");
-    }
-
-    #[test]
-    fn quote_flow_item_returns_single_quoted_string_as_is() {
-        assert_eq!(quote_flow_item("'hello'"), "'hello'");
-    }
-
-    #[test]
-    fn quote_flow_item_returns_plain_item_unchanged() {
-        assert_eq!(quote_flow_item("plain"), "plain");
-    }
-
-    #[test]
-    fn quote_flow_item_quotes_item_with_comma() {
-        assert_eq!(
-            quote_flow_item("value, with comma"),
-            "\"value, with comma\""
-        );
-    }
-
-    #[test]
-    fn quote_flow_item_quotes_item_starting_with_hash() {
-        assert_eq!(quote_flow_item("#comment-like"), "\"#comment-like\"");
-    }
-
-    #[test]
-    fn quote_flow_item_quotes_item_containing_brackets() {
-        assert_eq!(quote_flow_item("[nested]"), "\"[nested]\"");
-    }
-
-    #[test]
-    fn quote_flow_item_does_not_double_quote_item_with_only_opening_double_quote() {
-        // Starts with `"` but does not end with `"` — not a complete quoted string.
-        // Gets wrapped: `"` + `"unclosed` + `"` = `""unclosed"`
-        assert_eq!(quote_flow_item("\"unclosed"), "\"\"unclosed\"");
-    }
-
-    #[test]
-    fn quote_flow_item_does_not_double_quote_item_with_only_closing_double_quote() {
-        // Ends with `"` but does not start with `"` — not a complete quoted string.
-        // The first char is `u` (safe) and no flow-unsafe chars, so returned as-is.
-        assert_eq!(quote_flow_item("unclosed\""), "unclosed\"");
-    }
-
-    #[test]
-    fn quote_flow_item_does_not_double_quote_single_double_quote_char() {
-        // Single `"` char: starts and ends with `"` but len == 1, so not pre-quoted.
-        // Falls through to flow-unsafe path and gets wrapped: `"` + `"` + `"` = `"""`
-        assert_eq!(quote_flow_item("\""), "\"\"\"");
+    #[rstest]
+    #[case::double_quoted_passthrough("\"true\"", "\"true\"")]
+    #[case::single_quoted_passthrough("'hello'", "'hello'")]
+    #[case::plain_item_unchanged("plain", "plain")]
+    #[case::comma_triggers_quoting("value, with comma", "\"value, with comma\"")]
+    #[case::hash_prefix_triggers_quoting("#comment-like", "\"#comment-like\"")]
+    #[case::brackets_trigger_quoting("[nested]", "\"[nested]\"")]
+    // Starts with `"` but does not end with `"` — not a complete quoted string.
+    // Gets wrapped: `"` + `"unclosed` + `"` = `""unclosed"`
+    #[case::unclosed_opening_double_quote("\"unclosed", "\"\"unclosed\"")]
+    // Ends with `"` but does not start with `"` — safe, returned as-is.
+    #[case::only_trailing_double_quote("unclosed\"", "unclosed\"")]
+    // Single `"` char: starts and ends with `"` but len == 1, so not pre-quoted.
+    // Falls through to flow-unsafe path and gets wrapped: `"` + `"` + `"` = `"""`
+    #[case::single_double_quote_char("\"", "\"\"\"")]
+    fn quote_flow_item_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(quote_flow_item(input), expected);
     }
 
     #[test]
