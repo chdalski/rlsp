@@ -39,9 +39,9 @@ Apply four validated cleanup items (C1, C2 partial, C3, C4a) accumulated during 
 - [x] Fix stale line-number references in test comments (C1) — 10be323
 - [x] Replace `for _ in 0..n` newline loops with `repeat_n` (C4a) — 10be323
 - [x] Convert `parse_block_header` if/else to match (C2) — 10be323
-- [ ] Extract `PlainScalarKind` enum and `classify_plain_scalar` helper (C3)
+- [x] Extract `PlainScalarKind` enum and `classify_plain_scalar` helper (C3) — 6569e1c
 - [x] Grep for any remaining `\w+\.rs:\d+` references (verification) — 10be323
-- [ ] Run `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`
+- [x] Run `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check` — 6569e1c
 
 ## Tasks
 
@@ -147,10 +147,10 @@ match scalar_helpers::classify_plain_scalar(value) {
 - `node_symbol_kind`: no style check, `Integer | Float` → `NUMBER`, `Alias` → `STRING`
 - The `Node::Alias` mappings are NOT changed — that divergence is a behavioral question out of scope
 
-- [ ] Add `PlainScalarKind` enum and `classify_plain_scalar` to `scalar_helpers.rs`
-- [ ] Refactor `yaml_type_name` to use `classify_plain_scalar`
-- [ ] Refactor `node_symbol_kind` to use `classify_plain_scalar`
-- [ ] `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`
+- [x] Add `PlainScalarKind` enum and `classify_plain_scalar` to `scalar_helpers.rs` — 6569e1c
+- [x] Refactor `yaml_type_name` to use `classify_plain_scalar` — 6569e1c
+- [x] Refactor `node_symbol_kind` to use `classify_plain_scalar` — 6569e1c
+- [x] `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check` — 6569e1c
 
 ## Decisions
 
