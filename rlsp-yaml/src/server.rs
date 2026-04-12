@@ -1234,7 +1234,12 @@ impl LanguageServer for Backend {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic
+)]
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::{

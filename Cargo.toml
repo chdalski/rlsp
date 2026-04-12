@@ -19,6 +19,7 @@ wildcard_enum_match_arm = "deny"
 unneeded_field_pattern = "deny"
 fn_params_excessive_bools = "deny"
 must_use_candidate = "deny"
+panic = "deny"
 expect_used = "deny"
 unwrap_used = "deny"
 

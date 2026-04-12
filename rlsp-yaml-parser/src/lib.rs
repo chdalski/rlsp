@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-#![deny(clippy::panic)]
 
 mod chars;
 pub mod encoding;

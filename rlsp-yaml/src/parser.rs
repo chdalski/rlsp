@@ -64,7 +64,12 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic
+)]
 mod tests {
     use std::fmt::Write as _;
 
