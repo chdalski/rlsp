@@ -397,29 +397,32 @@ pub fn pos_after_line(line: &Line<'_>) -> Pos {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     // -----------------------------------------------------------------------
     // BreakType::advance
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn break_type_advance_lf() {
-        let pos = Pos::ORIGIN;
-        let after = BreakType::Lf.advance(pos);
-        assert_eq!(after.byte_offset, 1);
-        assert_eq!(after.line, 2);
-        assert_eq!(after.column, 0);
-    }
-
-    #[test]
-    fn break_type_advance_crlf() {
-        let pos = Pos::ORIGIN;
-        let after = BreakType::CrLf.advance(pos);
-        // \r = 1 byte, \n = 1 byte → 2 bytes total
-        assert_eq!(after.byte_offset, 2);
-        assert_eq!(after.line, 2);
-        assert_eq!(after.column, 0);
+    #[rstest]
+    #[case::break_type_advance_lf(BreakType::Lf, Pos::ORIGIN, 1, 2, 0)]
+    #[case::break_type_advance_crlf(BreakType::CrLf, Pos::ORIGIN, 2, 2, 0)]
+    // \r = 1 byte, \n = 1 byte → 2 bytes total for CrLf
+    #[case::break_type_advance_lf_at_non_origin_pos(BreakType::Lf, Pos { byte_offset: 5, line: 2, column: 3 }, 6, 3, 0)]
+    #[case::break_type_advance_crlf_at_non_origin_pos(BreakType::CrLf, Pos { byte_offset: 5, line: 2, column: 3 }, 7, 3, 0)]
+    #[case::break_type_advance_cr_resets_column(BreakType::Cr, Pos { byte_offset: 3, line: 1, column: 3 }, 4, 2, 0)]
+    fn break_type_advance_all_fields(
+        #[case] break_type: BreakType,
+        #[case] input: Pos,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_line: usize,
+        #[case] expected_column: usize,
+    ) {
+        let after = break_type.advance(input);
+        assert_eq!(after.byte_offset, expected_byte_offset);
+        assert_eq!(after.line, expected_line);
+        assert_eq!(after.column, expected_column);
     }
 
     #[test]
@@ -427,45 +430,6 @@ mod tests {
         let pos = Pos::ORIGIN;
         let after = BreakType::Cr.advance(pos);
         assert_eq!(after.line, 2);
-    }
-
-    #[test]
-    fn break_type_advance_cr_resets_column() {
-        let pos = Pos {
-            byte_offset: 3,
-            line: 1,
-            column: 3,
-        };
-        let after = BreakType::Cr.advance(pos);
-        assert_eq!(after.column, 0);
-        assert_eq!(after.byte_offset, 4); // \r = 1 byte
-        assert_eq!(after.line, 2);
-    }
-
-    #[test]
-    fn break_type_advance_lf_at_non_origin_pos() {
-        let pos = Pos {
-            byte_offset: 5,
-            line: 2,
-            column: 3,
-        };
-        let after = BreakType::Lf.advance(pos);
-        assert_eq!(after.byte_offset, 6);
-        assert_eq!(after.line, 3);
-        assert_eq!(after.column, 0);
-    }
-
-    #[test]
-    fn break_type_advance_crlf_at_non_origin_pos() {
-        let pos = Pos {
-            byte_offset: 5,
-            line: 2,
-            column: 3,
-        };
-        let after = BreakType::CrLf.advance(pos);
-        assert_eq!(after.byte_offset, 7); // \r (1) + \n (1) = +2
-        assert_eq!(after.line, 3);
-        assert_eq!(after.column, 0);
     }
 
     #[test]
@@ -483,6 +447,22 @@ mod tests {
     // new and initial state
     // -----------------------------------------------------------------------
 
+    #[rstest]
+    #[case::new_single_line_with_lf_primes_first_line("foo\n", "foo", BreakType::Lf)]
+    #[case::new_input_with_only_lf_primes_empty_line("\n", "", BreakType::Lf)]
+    fn new_single_line_peek(
+        #[case] input: &str,
+        #[case] expected_content: &str,
+        #[case] expected_break: BreakType,
+    ) {
+        let buf = LineBuffer::new(input);
+        let Some(line) = buf.peek_next() else {
+            unreachable!("expected a line");
+        };
+        assert_eq!(line.content, expected_content);
+        assert_eq!(line.break_type, expected_break);
+    }
+
     #[test]
     fn new_empty_input_at_eof_immediately() {
         let buf = LineBuffer::new("");
@@ -499,26 +479,6 @@ mod tests {
         assert_eq!(line.content, "foo");
         assert_eq!(line.break_type, BreakType::Eof);
         assert_eq!(line.offset, 0);
-    }
-
-    #[test]
-    fn new_single_line_with_lf_primes_first_line() {
-        let buf = LineBuffer::new("foo\n");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.content, "foo");
-        assert_eq!(line.break_type, BreakType::Lf);
-    }
-
-    #[test]
-    fn new_input_with_only_lf_primes_empty_line() {
-        let buf = LineBuffer::new("\n");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.content, "");
-        assert_eq!(line.break_type, BreakType::Lf);
     }
 
     // -----------------------------------------------------------------------
@@ -566,6 +526,23 @@ mod tests {
     // -----------------------------------------------------------------------
     // line terminator types
     // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::only_lf_produces_one_empty_line("\n", BreakType::Lf)]
+    #[case::only_cr_produces_one_empty_line("\r", BreakType::Cr)]
+    #[case::only_crlf_produces_one_empty_line_not_two("\r\n", BreakType::CrLf)]
+    fn single_terminator_produces_empty_line(
+        #[case] input: &str,
+        #[case] expected_break: BreakType,
+    ) {
+        let mut buf = LineBuffer::new(input);
+        let Some(line) = buf.consume_next() else {
+            unreachable!("expected a line");
+        };
+        assert_eq!(line.content, "");
+        assert_eq!(line.break_type, expected_break);
+        assert!(buf.consume_next().is_none());
+    }
 
     #[test]
     fn lf_terminator_produces_lf_break_type() {
@@ -636,39 +613,6 @@ mod tests {
     }
 
     #[test]
-    fn only_crlf_produces_one_empty_line_not_two() {
-        let mut buf = LineBuffer::new("\r\n");
-        let Some(line) = buf.consume_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.content, "");
-        assert_eq!(line.break_type, BreakType::CrLf);
-        assert!(buf.consume_next().is_none());
-    }
-
-    #[test]
-    fn only_cr_produces_one_empty_line() {
-        let mut buf = LineBuffer::new("\r");
-        let Some(line) = buf.consume_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.content, "");
-        assert_eq!(line.break_type, BreakType::Cr);
-        assert!(buf.consume_next().is_none());
-    }
-
-    #[test]
-    fn only_lf_produces_one_empty_line() {
-        let mut buf = LineBuffer::new("\n");
-        let Some(line) = buf.consume_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.content, "");
-        assert_eq!(line.break_type, BreakType::Lf);
-        assert!(buf.consume_next().is_none());
-    }
-
-    #[test]
     fn two_consecutive_lf_produce_two_empty_lines() {
         let mut buf = LineBuffer::new("\n\n");
         let Some(first) = buf.consume_next() else {
@@ -699,6 +643,22 @@ mod tests {
     // -----------------------------------------------------------------------
     // offset and Pos tracking
     // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::pos_line_increments_after_bare_cr("a\rb")]
+    #[case::pos_line_increments_after_crlf("a\r\nb")]
+    fn pos_line_increments_after_terminator(#[case] input: &str) {
+        let mut buf = LineBuffer::new(input);
+        let Some(first) = buf.consume_next() else {
+            unreachable!("expected first");
+        };
+        assert_eq!(first.pos.line, 1);
+        let Some(second) = buf.consume_next() else {
+            unreachable!("expected second");
+        };
+        assert_eq!(second.pos.line, 2);
+        assert_eq!(second.pos.column, 0);
+    }
 
     #[test]
     fn offset_is_byte_offset_of_content_start() {
@@ -740,21 +700,6 @@ mod tests {
     }
 
     #[test]
-    fn pos_line_increments_after_bare_cr() {
-        // Bare \r is a line terminator: the next line must start on line 2.
-        let mut buf = LineBuffer::new("a\rb");
-        let Some(first) = buf.consume_next() else {
-            unreachable!("expected first");
-        };
-        assert_eq!(first.pos.line, 1);
-        let Some(second) = buf.consume_next() else {
-            unreachable!("expected second");
-        };
-        assert_eq!(second.pos.line, 2);
-        assert_eq!(second.pos.column, 0);
-    }
-
-    #[test]
     fn pos_column_resets_after_bare_cr() {
         // After consuming a line that ends with bare \r, the next line's
         // column must be 0, not the column that followed the last content char.
@@ -763,21 +708,6 @@ mod tests {
         let Some(second) = buf.consume_next() else {
             unreachable!("expected second");
         };
-        assert_eq!(second.pos.column, 0);
-    }
-
-    #[test]
-    fn pos_line_increments_after_crlf() {
-        // CRLF is a line terminator: the next line must start on line 2.
-        let mut buf = LineBuffer::new("a\r\nb");
-        let Some(first) = buf.consume_next() else {
-            unreachable!("expected first");
-        };
-        assert_eq!(first.pos.line, 1);
-        let Some(second) = buf.consume_next() else {
-            unreachable!("expected second");
-        };
-        assert_eq!(second.pos.line, 2);
         assert_eq!(second.pos.column, 0);
     }
 
@@ -857,49 +787,18 @@ mod tests {
     // indent counting
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn indent_counts_only_leading_spaces() {
-        let buf = LineBuffer::new("   foo");
+    #[rstest]
+    #[case::indent_counts_only_leading_spaces("   foo", 3)]
+    #[case::indent_is_zero_for_no_leading_spaces("foo", 0)]
+    #[case::leading_tab_does_not_count_toward_indent("\tfoo", 0)]
+    #[case::tab_after_spaces_does_not_count("  \tfoo", 2)]
+    #[case::indent_of_blank_line_is_zero("\n", 0)]
+    fn indent_value(#[case] input: &str, #[case] expected: usize) {
+        let buf = LineBuffer::new(input);
         let Some(line) = buf.peek_next() else {
             unreachable!("expected a line");
         };
-        assert_eq!(line.indent, 3);
-    }
-
-    #[test]
-    fn indent_is_zero_for_no_leading_spaces() {
-        let buf = LineBuffer::new("foo");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.indent, 0);
-    }
-
-    #[test]
-    fn leading_tab_does_not_count_toward_indent() {
-        let buf = LineBuffer::new("\tfoo");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.indent, 0);
-    }
-
-    #[test]
-    fn tab_after_spaces_does_not_count() {
-        let buf = LineBuffer::new("  \tfoo");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.indent, 2);
-    }
-
-    #[test]
-    fn indent_of_blank_line_is_zero() {
-        let buf = LineBuffer::new("\n");
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
-        assert_eq!(line.indent, 0);
+        assert_eq!(line.indent, expected);
     }
 
     #[test]
@@ -916,16 +815,12 @@ mod tests {
     // peek_next_indent
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn peek_next_indent_returns_indent_of_next_line() {
-        let buf = LineBuffer::new("   foo");
-        assert_eq!(buf.peek_next_indent(), Some(3));
-    }
-
-    #[test]
-    fn peek_next_indent_returns_none_at_eof() {
-        let buf = LineBuffer::new("");
-        assert_eq!(buf.peek_next_indent(), None);
+    #[rstest]
+    #[case::peek_next_indent_returns_indent_of_next_line("   foo", Some(3))]
+    #[case::peek_next_indent_returns_none_at_eof("", None)]
+    fn peek_next_indent_returns(#[case] input: &str, #[case] expected: Option<usize>) {
+        let buf = LineBuffer::new(input);
+        assert_eq!(buf.peek_next_indent(), expected);
     }
 
     #[test]
@@ -1029,231 +924,29 @@ mod tests {
     // pos_after_line
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn pos_after_line_lf_ascii() {
-        let line = Line {
-            content: "hello",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::Lf,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
+    #[rstest]
+    #[case::pos_after_line_lf_ascii(Line { content: "hello", offset: 0, indent: 0, break_type: BreakType::Lf, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 6, 2, 0)]
+    #[case::pos_after_line_lf_empty_content(Line { content: "", offset: 10, indent: 0, break_type: BreakType::Lf, pos: Pos { byte_offset: 10, line: 3, column: 0 } }, 11, 4, 0)]
+    #[case::pos_after_line_lf_multibyte(Line { content: "日本", offset: 0, indent: 0, break_type: BreakType::Lf, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 7, 2, 0)]
+    // 6 bytes + 1 for \n = 7
+    #[case::pos_after_line_cr_ascii(Line { content: "abc", offset: 0, indent: 0, break_type: BreakType::Cr, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 4, 2, 0)]
+    #[case::pos_after_line_cr_empty_content(Line { content: "", offset: 5, indent: 0, break_type: BreakType::Cr, pos: Pos { byte_offset: 5, line: 2, column: 0 } }, 6, 3, 0)]
+    #[case::pos_after_line_crlf_ascii(Line { content: "key: val", offset: 0, indent: 0, break_type: BreakType::CrLf, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 10, 2, 0)]
+    #[case::pos_after_line_crlf_empty_content(Line { content: "", offset: 0, indent: 0, break_type: BreakType::CrLf, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 2, 2, 0)]
+    #[case::pos_after_line_eof_empty_content(Line { content: "", offset: 20, indent: 0, break_type: BreakType::Eof, pos: Pos { byte_offset: 20, line: 5, column: 0 } }, 20, 5, 0)]
+    #[case::pos_after_line_eof_ascii(Line { content: "last", offset: 10, indent: 0, break_type: BreakType::Eof, pos: Pos { byte_offset: 10, line: 3, column: 0 } }, 14, 3, 4)]
+    #[case::pos_after_line_eof_ascii_nonzero_start_column(Line { content: "end", offset: 7, indent: 0, break_type: BreakType::Eof, pos: Pos { byte_offset: 7, line: 2, column: 5 } }, 10, 2, 8)]
+    #[case::pos_after_line_eof_multibyte(Line { content: "日本語", offset: 0, indent: 0, break_type: BreakType::Eof, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 9, 1, 3)]
+    #[case::pos_after_line_eof_mixed_content(Line { content: "ab日", offset: 0, indent: 0, break_type: BreakType::Eof, pos: Pos { byte_offset: 0, line: 1, column: 0 } }, 5, 1, 3)]
+    fn pos_after_line_cases(
+        #[case] line: Line<'static>,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_line: usize,
+        #[case] expected_column: usize,
+    ) {
         let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 6);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_lf_empty_content() {
-        let line = Line {
-            content: "",
-            offset: 10,
-            indent: 0,
-            break_type: BreakType::Lf,
-            pos: Pos {
-                byte_offset: 10,
-                line: 3,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 11);
-        assert_eq!(result.line, 4);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_lf_multibyte() {
-        let line = Line {
-            content: "日本",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::Lf,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 7); // 6 bytes + 1 for \n
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_cr_ascii() {
-        let line = Line {
-            content: "abc",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::Cr,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 4);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_cr_empty_content() {
-        let line = Line {
-            content: "",
-            offset: 5,
-            indent: 0,
-            break_type: BreakType::Cr,
-            pos: Pos {
-                byte_offset: 5,
-                line: 2,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 6);
-        assert_eq!(result.line, 3);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_crlf_ascii() {
-        let line = Line {
-            content: "key: val",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::CrLf,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 10);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_crlf_empty_content() {
-        let line = Line {
-            content: "",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::CrLf,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 2);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_eof_empty_content() {
-        let line = Line {
-            content: "",
-            offset: 20,
-            indent: 0,
-            break_type: BreakType::Eof,
-            pos: Pos {
-                byte_offset: 20,
-                line: 5,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 20);
-        assert_eq!(result.line, 5);
-        assert_eq!(result.column, 0);
-    }
-
-    #[test]
-    fn pos_after_line_eof_ascii() {
-        let line = Line {
-            content: "last",
-            offset: 10,
-            indent: 0,
-            break_type: BreakType::Eof,
-            pos: Pos {
-                byte_offset: 10,
-                line: 3,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 14);
-        assert_eq!(result.line, 3);
-        assert_eq!(result.column, 4);
-    }
-
-    #[test]
-    fn pos_after_line_eof_ascii_nonzero_start_column() {
-        let line = Line {
-            content: "end",
-            offset: 7,
-            indent: 0,
-            break_type: BreakType::Eof,
-            pos: Pos {
-                byte_offset: 7,
-                line: 2,
-                column: 5,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 10);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.column, 8);
-    }
-
-    #[test]
-    fn pos_after_line_eof_multibyte() {
-        let line = Line {
-            content: "日本語",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::Eof,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 9);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 3);
-    }
-
-    #[test]
-    fn pos_after_line_eof_mixed_content() {
-        let line = Line {
-            content: "ab日",
-            offset: 0,
-            indent: 0,
-            break_type: BreakType::Eof,
-            pos: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-        };
-        let result = pos_after_line(&line);
-        assert_eq!(result.byte_offset, 5);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.column, 3);
+        assert_eq!(result.byte_offset, expected_byte_offset);
+        assert_eq!(result.line, expected_line);
+        assert_eq!(result.column, expected_column);
     }
 }

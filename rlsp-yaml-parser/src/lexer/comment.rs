@@ -78,6 +78,8 @@ impl<'input> Lexer<'input> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn make_lexer(input: &str) -> Lexer<'_> {
@@ -88,134 +90,74 @@ mod tests {
     // Group A — returns None (non-comment lines)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn returns_none_at_eof() {
-        let mut lex = make_lexer("");
-        assert_eq!(lex.try_consume_comment(1024), Ok(None));
-    }
-
-    #[test]
-    fn returns_none_for_blank_line() {
-        let mut lex = make_lexer("\n");
-        assert_eq!(lex.try_consume_comment(1024), Ok(None));
-    }
-
-    #[test]
-    fn returns_none_for_whitespace_only_line() {
-        let mut lex = make_lexer("   \n");
-        assert_eq!(lex.try_consume_comment(1024), Ok(None));
-    }
-
-    #[test]
-    fn returns_none_for_content_line() {
-        let mut lex = make_lexer("key: value\n");
-        assert_eq!(lex.try_consume_comment(1024), Ok(None));
-    }
-
-    #[test]
-    fn returns_none_for_directive_line() {
-        let mut lex = make_lexer("%YAML 1.2\n");
+    #[rstest]
+    #[case::returns_none_at_eof("")]
+    #[case::returns_none_for_blank_line("\n")]
+    #[case::returns_none_for_whitespace_only_line("   \n")]
+    #[case::returns_none_for_content_line("key: value\n")]
+    #[case::returns_none_for_directive_line("%YAML 1.2\n")]
+    fn returns_none(#[case] input: &str) {
+        let mut lex = make_lexer(input);
         assert_eq!(lex.try_consume_comment(1024), Ok(None));
     }
 
     // -----------------------------------------------------------------------
-    // Group B — happy path
+    // Group B — happy path (+ Group F text case)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn plain_comment_returns_text_after_hash() {
-        let mut lex = make_lexer("# hello\n");
+    #[rstest]
+    #[case::plain_comment_returns_text_after_hash("# hello\n", " hello")]
+    #[case::indented_comment_returns_text_after_hash("  # indented\n", " indented")]
+    #[case::tab_indented_comment_returns_text("\t# tabbed\n", " tabbed")]
+    #[case::empty_comment_body_returns_empty_text("#\n", "")]
+    #[case::comment_with_hash_in_body_preserves_inner_hash("# foo # bar\n", " foo # bar")]
+    #[case::unicode_body_text_is_slice_of_input("# 日本語\n", " 日本語")]
+    fn happy_path_text(#[case] input: &str, #[case] expected: &str) {
+        let mut lex = make_lexer(input);
         let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(text, " hello");
-    }
-
-    #[test]
-    fn indented_comment_returns_text_after_hash() {
-        let mut lex = make_lexer("  # indented\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, " indented");
-    }
-
-    #[test]
-    fn tab_indented_comment_returns_text() {
-        let mut lex = make_lexer("\t# tabbed\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, " tabbed");
-    }
-
-    #[test]
-    fn empty_comment_body_returns_empty_text() {
-        let mut lex = make_lexer("#\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, "");
-    }
-
-    #[test]
-    fn comment_with_hash_in_body_preserves_inner_hash() {
-        let mut lex = make_lexer("# foo # bar\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, " foo # bar");
+        assert_eq!(text, expected);
     }
 
     // -----------------------------------------------------------------------
     // Group C — span correctness
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn span_start_byte_offset_at_hash() {
-        let mut lex = make_lexer("# comment\n");
+    #[rstest]
+    #[case::span_start_byte_offset_at_hash("# comment\n", 0, 0, 1)]
+    #[case::span_start_column_at_hash_after_leading_spaces("   # comment\n", 3, 3, 1)]
+    fn span_start(
+        #[case] input: &str,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_column: usize,
+        #[case] expected_line: usize,
+    ) {
+        let mut lex = make_lexer(input);
         let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(span.start.byte_offset, 0);
+        assert_eq!(span.start.byte_offset, expected_byte_offset);
+        assert_eq!(span.start.column, expected_column);
+        assert_eq!(span.start.line, expected_line);
     }
 
-    #[test]
-    fn span_start_column_at_hash_after_leading_spaces() {
-        let mut lex = make_lexer("   # comment\n");
+    #[rstest]
+    // "# abc\n": # (1) + space (1) + abc (3) = 5 bytes before newline; columns: # = 0, space = 1, a = 2, b = 3, c = 4; end = 5
+    #[case::span_end_byte_offset_past_last_char("# abc\n", 5, 5)]
+    // "# 日\n": # (1) + space (1) + 日 (3) = 5 bytes; columns: # = 0, space = 1, 日 = 2, end = 3
+    #[case::span_end_byte_offset_for_multibyte_body("# 日\n", 5, 3)]
+    fn span_end(
+        #[case] input: &str,
+        #[case] expected_byte_offset: usize,
+        #[case] expected_column: usize,
+    ) {
+        let mut lex = make_lexer(input);
         let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(span.start.column, 3);
-    }
-
-    #[test]
-    fn span_start_line_is_one() {
-        let mut lex = make_lexer("# comment\n");
-        let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(span.start.line, 1);
-    }
-
-    #[test]
-    fn span_end_byte_offset_past_last_char() {
-        // "# abc\n": # (1) + space (1) + abc (3) = 5 bytes before newline
-        let mut lex = make_lexer("# abc\n");
-        let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(span.end.byte_offset, 5);
-    }
-
-    #[test]
-    fn span_end_column_past_last_char() {
-        // columns: # = 0, space = 1, a = 2, b = 3, c = 4; end = 5
-        let mut lex = make_lexer("# abc\n");
-        let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(span.end.column, 5);
+        assert_eq!(span.end.byte_offset, expected_byte_offset);
+        assert_eq!(span.end.column, expected_column);
     }
 
     #[test]
@@ -265,24 +207,17 @@ mod tests {
     // Group E — max_comment_len enforcement
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn comment_within_limit_returns_ok() {
-        // "# ab\n" -> text " ab" = 3 bytes; limit = 3
-        let mut lex = make_lexer("# ab\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(3) else {
+    #[rstest]
+    // "# ab\n" -> text " ab" = 3 bytes; limit = 3
+    #[case::comment_within_limit_returns_ok("# ab\n", 3, " ab")]
+    // "# abc\n" -> text " abc" = 4 bytes; limit = 4 (boundary inclusive)
+    #[case::comment_exactly_at_limit_returns_ok("# abc\n", 4, " abc")]
+    fn comment_len_ok(#[case] input: &str, #[case] limit: usize, #[case] expected_text: &str) {
+        let mut lex = make_lexer(input);
+        let Ok(Some((text, _))) = lex.try_consume_comment(limit) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(text, " ab");
-    }
-
-    #[test]
-    fn comment_exactly_at_limit_returns_ok() {
-        // "# abc\n" -> text " abc" = 4 bytes; limit = 4 (boundary inclusive)
-        let mut lex = make_lexer("# abc\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(4) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, " abc");
+        assert_eq!(text, expected_text);
     }
 
     #[test]
@@ -307,38 +242,5 @@ mod tests {
         };
         assert_eq!(err.pos.byte_offset, 2);
         assert_eq!(err.pos.column, 2);
-    }
-
-    // -----------------------------------------------------------------------
-    // Group F — multibyte / Unicode in comment body
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn unicode_body_text_is_slice_of_input() {
-        let mut lex = make_lexer("# 日本語\n");
-        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(text, " 日本語");
-    }
-
-    #[test]
-    fn span_end_byte_offset_for_multibyte_body() {
-        // "# 日\n": # (1) + space (1) + 日 (3) = 5 bytes
-        let mut lex = make_lexer("# 日\n");
-        let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(span.end.byte_offset, 5);
-    }
-
-    #[test]
-    fn span_end_column_for_multibyte_body() {
-        // columns: # = 0, space = 1, 日 = 2, end = 3 (column counts codepoints)
-        let mut lex = make_lexer("# 日\n");
-        let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
-            unreachable!("expected Ok(Some(...))")
-        };
-        assert_eq!(span.end.column, 3);
     }
 }
