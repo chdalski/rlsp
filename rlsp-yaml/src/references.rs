@@ -213,6 +213,8 @@ const fn is_anchor_name_char(ch: char) -> bool {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn pos(line: u32, character: u32) -> Position {
@@ -224,18 +226,6 @@ mod tests {
     }
 
     // ---- Go-to-Definition: Happy Path ----
-
-    // Test 1
-    #[test]
-    fn should_jump_from_alias_to_anchor_definition() {
-        let text = "defaults: &defaults\n  adapter: postgres\nproduction:\n  <<: *defaults\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(3, 6));
-
-        let loc = result.expect("should return a location");
-        assert_eq!(loc.uri, uri);
-        assert_eq!(loc.range.start.line, 0, "anchor should be on line 0");
-    }
 
     // Test 2
     #[test]
@@ -256,121 +246,71 @@ mod tests {
         );
     }
 
-    // Test 3
-    #[test]
-    fn should_handle_multiple_anchors_and_jump_to_correct_one() {
-        let text = "a: &first\n  key: val\nb: &second\n  key: val\nc:\n  ref: *second\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(5, 7));
+    // ---- Go-to-Definition: Returns anchor line (Tests 1, 3, 11, 22b, 22c) ----
 
-        let loc = result.expect("should return a location");
-        assert_eq!(loc.range.start.line, 2, "should jump to &second on line 2");
-    }
-
-    // ---- Go-to-Definition: Edge Cases ----
-
-    // Test 4
-    #[test]
-    fn should_return_none_when_cursor_not_on_alias() {
-        let text = "key: value\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(0, 0));
-
-        assert!(
-            result.is_none(),
-            "should return None when cursor is not on an alias"
-        );
-    }
-
-    // Test 5
-    #[test]
-    fn should_return_none_when_cursor_on_anchor_not_alias() {
-        let text = "defaults: &defaults\n  key: value\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(0, 10));
-
-        assert!(
-            result.is_none(),
-            "should return None when cursor is on anchor definition, not alias"
-        );
-    }
-
-    // Test 6
-    #[test]
-    fn should_return_none_when_alias_has_no_matching_anchor() {
-        let text = "production:\n  <<: *undefined\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(1, 6));
-
-        assert!(
-            result.is_none(),
-            "should return None when no matching anchor exists"
-        );
-    }
-
-    // Test 7
-    #[test]
-    fn should_return_none_for_empty_document() {
-        let text = "";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(0, 0));
-
-        assert!(result.is_none(), "should return None for empty document");
-    }
-
-    // Test 8
-    #[test]
-    fn should_return_none_for_position_beyond_document_lines() {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(10, 0));
-
-        assert!(
-            result.is_none(),
-            "should return None for position beyond document lines"
-        );
-    }
-
-    // Test 9
-    #[test]
-    fn should_return_none_for_position_beyond_line_length() {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(0, 100));
-
-        assert!(
-            result.is_none(),
-            "should return None for position beyond line length"
-        );
-    }
-
+    #[rstest]
+    // ---- Go-to-Definition: Happy Path ----
+    #[case::jumps_to_anchor_definition(
+        "defaults: &defaults\n  adapter: postgres\nproduction:\n  <<: *defaults\n",
+        3,
+        6,
+        0
+    )]
+    #[case::multiple_anchors_jumps_to_correct_one(
+        "a: &first\n  key: val\nb: &second\n  key: val\nc:\n  ref: *second\n",
+        5,
+        7,
+        2
+    )]
     // ---- Go-to-Definition: Multi-Document Scoping ----
-
-    // Test 10
-    #[test]
-    fn should_not_jump_across_document_boundaries() {
-        let text = "doc1: &shared\n  key: val\n---\ndoc2:\n  ref: *shared\n";
+    #[case::jump_within_same_document(
+        "---\ndefaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n",
+        4,
+        6,
+        1
+    )]
+    // ---- Additional Tests ----
+    #[case::finds_anchor_in_unparseable_yaml(
+        "defaults: &defaults\n  key: [bad\nproduction:\n  <<: *defaults\n",
+        3,
+        6,
+        0
+    )]
+    #[case::ignores_anchor_in_comment("# &fake\nreal: &real val\nref: *real\n", 2, 5, 1)]
+    fn goto_definition_returns_anchor_line(
+        #[case] text: &str,
+        #[case] line: u32,
+        #[case] character: u32,
+        #[case] expected_anchor_line: u32,
+    ) {
         let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(4, 7));
-
-        assert!(
-            result.is_none(),
-            "should return None when anchor is in a different document"
-        );
+        let result = goto_definition(text, &uri, pos(line, character));
+        let loc = result.expect("should return a location");
+        assert_eq!(loc.range.start.line, expected_anchor_line);
     }
 
-    // Test 11
-    #[test]
-    fn should_jump_to_anchor_within_same_document() {
-        let text = "---\ndefaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(4, 6));
+    // ---- Go-to-Definition: Edge Cases (returns None) ----
 
-        let loc = result.expect("should return a location");
-        assert_eq!(
-            loc.range.start.line, 1,
-            "anchor should be on line 1 within the same document"
-        );
+    #[rstest]
+    // ---- Go-to-Definition: Edge Cases ----
+    #[case::cursor_not_on_alias("key: value\n", 0, 0)]
+    #[case::cursor_on_anchor_not_alias("defaults: &defaults\n  key: value\n", 0, 10)]
+    #[case::alias_has_no_matching_anchor("production:\n  <<: *undefined\n", 1, 6)]
+    #[case::empty_document("", 0, 0)]
+    #[case::beyond_document_lines("key: &anchor value\n", 10, 0)]
+    #[case::beyond_line_length("key: &anchor value\n", 0, 100)]
+    // ---- Go-to-Definition: Multi-Document Scoping ----
+    #[case::not_across_document_boundaries(
+        "doc1: &shared\n  key: val\n---\ndoc2:\n  ref: *shared\n",
+        4,
+        7
+    )]
+    // ---- Additional Tests ----
+    #[case::ampersand_in_non_anchor_context("formula: a & b\nref: *undefined\n", 0, 11)]
+    fn goto_definition_returns_none(#[case] text: &str, #[case] line: u32, #[case] character: u32) {
+        let uri = test_uri();
+        let result = goto_definition(text, &uri, pos(line, character));
+        assert!(result.is_none());
     }
 
     // ---- Find References: Happy Path ----
@@ -435,30 +375,21 @@ mod tests {
 
     // ---- Find References: Edge Cases ----
 
-    // Test 16
-    #[test]
-    fn should_return_empty_when_cursor_not_on_anchor_or_alias() {
-        let text = "key: value\n";
+    #[rstest]
+    #[case::cursor_not_on_anchor_or_alias("key: value\n", 0, 0, false)]
+    #[case::anchor_has_no_alias_usages("defaults: &lonely\n  key: val\n", 0, 10, false)]
+    #[case::empty_document("", 0, 0, false)]
+    #[case::beyond_document_lines("key: &anchor value\n", 10, 0, false)]
+    #[case::beyond_line_length("key: &anchor value\n", 0, 100, false)]
+    fn find_references_returns_empty(
+        #[case] text: &str,
+        #[case] line: u32,
+        #[case] character: u32,
+        #[case] include_declaration: bool,
+    ) {
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 0), false);
-
-        assert!(
-            result.is_empty(),
-            "should return empty when cursor is not on an anchor or alias"
-        );
-    }
-
-    // Test 17
-    #[test]
-    fn should_return_empty_when_anchor_has_no_alias_usages() {
-        let text = "defaults: &lonely\n  key: val\n";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 10), false);
-
-        assert!(
-            result.is_empty(),
-            "should return empty when anchor has no alias usages"
-        );
+        let result = find_references(text, &uri, pos(line, character), include_declaration);
+        assert!(result.is_empty());
     }
 
     // Test 18
@@ -474,42 +405,6 @@ mod tests {
             "should return exactly 1 location (the anchor itself)"
         );
         assert_eq!(result[0].range.start.line, 0);
-    }
-
-    // Test 19
-    #[test]
-    fn should_return_empty_refs_for_empty_document() {
-        let text = "";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 0), false);
-
-        assert!(result.is_empty(), "should return empty for empty document");
-    }
-
-    // Test 20
-    #[test]
-    fn should_return_empty_refs_for_position_beyond_document_lines() {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(10, 0), false);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for position beyond document lines"
-        );
-    }
-
-    // Test 21
-    #[test]
-    fn should_return_empty_refs_for_position_beyond_line_length() {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 100), false);
-
-        assert!(
-            result.is_empty(),
-            "should return empty for position beyond line length"
-        );
     }
 
     // ---- Find References: Multi-Document Scoping ----
@@ -529,49 +424,6 @@ mod tests {
         assert_eq!(
             result[0].range.start.line, 1,
             "the reference should be on line 1 (document 1)"
-        );
-    }
-
-    // ---- Additional Tests ----
-
-    // Test 22a
-    #[test]
-    fn should_not_match_ampersand_in_non_anchor_context() {
-        let text = "formula: a & b\nref: *undefined\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(0, 11));
-
-        assert!(
-            result.is_none(),
-            "should return None for '&' followed by space (not a valid anchor)"
-        );
-    }
-
-    // Test 22b
-    #[test]
-    fn should_still_find_anchors_in_unparseable_yaml() {
-        let text = "defaults: &defaults\n  key: [bad\nproduction:\n  <<: *defaults\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(3, 6));
-
-        let loc = result.expect("should find anchor even in unparseable YAML");
-        assert_eq!(
-            loc.range.start.line, 0,
-            "anchor should be on line 0 even with syntax errors"
-        );
-    }
-
-    // Test 22c
-    #[test]
-    fn should_not_treat_anchor_in_comment_as_definition() {
-        let text = "# &fake\nreal: &real val\nref: *real\n";
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(2, 5));
-
-        let loc = result.expect("should find &real, not &fake");
-        assert_eq!(
-            loc.range.start.line, 1,
-            "should jump to &real on line 1, not &fake in comment on line 0"
         );
     }
 }

@@ -223,6 +223,8 @@ fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
     clippy::cast_possible_truncation
 )]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn base(uri: &str) -> Url {
@@ -248,6 +250,56 @@ mod tests {
     }
 
     // ========== Basic URL Detection Tests ==========
+
+    #[rstest]
+    // ========== Basic URL Detection Tests ==========
+    #[case::quoted_string("homepage: \"https://example.com\"\n", 1)]
+    #[case::single_quoted_string("url: 'https://example.com'\n", 1)]
+    #[case::unquoted_value("homepage: https://example.com\n", 1)]
+    #[case::in_comment("# See https://example.com for details\n", 1)]
+    // ========== Multiple URLs Tests ==========
+    #[case::multiple_on_same_line("urls: https://example.com https://other.com\n", 2)]
+    #[case::across_multiple_lines("url1: https://example.com\nurl2: https://other.com\n", 2)]
+    #[case::inline_comment("key: value # See https://example.com\n", 1)]
+    // ========== Multi-Document YAML Tests ==========
+    #[case::first_document_section("url: https://first.com\n---\nother: content\n", 1)]
+    #[case::middle_section("first: doc\n---\nurl: https://middle.com\n---\nlast: doc\n", 1)]
+    #[case::all_sections(
+        "url: https://first.com\n---\nurl: https://second.com\n---\nurl: https://third.com\n",
+        3
+    )]
+    // ========== Edge Cases Tests ==========
+    #[case::empty_document("", 0)]
+    #[case::no_urls("key: value\nother: data\n# comment\n", 0)]
+    #[case::url_at_line_end("# comment https://example.com\n", 1)]
+    #[case::mixed_schemes_same_line("http://a.com https://b.com file:///c\n", 3)]
+    #[case::stop_at_space("url: https://exam ple.com\n", 1)]
+    #[case::special_encodings("url: https://example.com/path%20with%20spaces\n", 1)]
+    #[case::multibyte_utf8_before_url("説明: https://example.com\n", 1)]
+    #[case::mixed_multibyte_chars("日本語: https://example.jp 説明\n", 1)]
+    // ========== Security Tests ==========
+    #[case::scheme_only_rejected("url: https://\n", 0)]
+    #[case::localhost_no_tld("url: https://localhost\n", 1)]
+    #[case::comment_no_space_after_hash("#https://example.com\n", 1)]
+    // ========== Scheme and Validation Tests ==========
+    #[case::three_schemes(
+        "http: http://example.com\nhttps: https://example.com\nfile: file:///path/to/file\n",
+        3
+    )]
+    #[case::only_allowed_schemes(
+        "\nurl1: https://example.com\nurl2: ftp://example.com\nurl3: http://example.com\nurl4: file:///path/to/file\nurl5: javascript:alert(1)\n",
+        3
+    )]
+    #[case::validated_urls_only(
+        "\nurl1: https://valid.com\nurl2: https://\nurl3: https://another-valid.com\n",
+        2
+    )]
+    fn find_document_links_returns_len(#[case] text: &str, #[case] expected_len: usize) {
+        let result = find_document_links(text, None);
+        assert_eq!(result.len(), expected_len);
+    }
+
+    // ========== Basic URL Detection Tests (tuple content) ==========
 
     #[test]
     fn should_detect_url_in_quoted_string() {
@@ -306,7 +358,7 @@ mod tests {
         assert!(tuples[2].3.starts_with("file:///"));
     }
 
-    // ========== Multiple URLs Tests ==========
+    // ========== Multiple URLs Tests (tuple content) ==========
 
     #[test]
     fn should_detect_multiple_urls_on_same_line() {
@@ -340,7 +392,7 @@ mod tests {
         assert_eq!(tuples[0].3, "https://example.com/");
     }
 
-    // ========== Multi-Document YAML Tests ==========
+    // ========== Multi-Document YAML Tests (tuple content) ==========
 
     #[test]
     fn should_detect_urls_in_first_document_section() {
@@ -375,23 +427,7 @@ mod tests {
         assert_eq!(tuples[2].3, "https://third.com/");
     }
 
-    // ========== Edge Cases Tests ==========
-
-    #[test]
-    fn should_return_empty_vec_for_empty_document() {
-        let text = "";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn should_return_empty_vec_for_document_with_no_urls() {
-        let text = "key: value\nother: data\n# comment\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 0);
-    }
+    // ========== Edge Cases Tests (tuple content) ==========
 
     #[test]
     fn should_detect_url_at_line_start() {
@@ -401,14 +437,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
         assert_eq!(tuples[0].1, 0, "URL starts at column 0");
-    }
-
-    #[test]
-    fn should_detect_url_at_line_end() {
-        let text = "# comment https://example.com\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -459,14 +487,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
         assert_eq!(tuples[0].3, "https://user@example.com/path");
-    }
-
-    #[test]
-    fn should_detect_mixed_schemes_on_same_line() {
-        let text = "http://a.com https://b.com file:///c\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 3);
     }
 
     #[test]
@@ -608,30 +628,6 @@ mod tests {
     }
 
     #[test]
-    fn should_skip_incomplete_url_scheme_only() {
-        let text = "url: https://\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(
-            result.len(),
-            0,
-            "URL with only scheme should fail validation"
-        );
-    }
-
-    #[test]
-    fn should_detect_url_without_tld() {
-        let text = "url: https://localhost\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(
-            result.len(),
-            1,
-            "URLs without TLD (like localhost) are valid"
-        );
-    }
-
-    #[test]
     fn should_handle_file_url_with_triple_slash() {
         let text = "file: file:///absolute/path/to/file\n";
         let result = find_document_links(text, None);
@@ -649,57 +645,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
         assert_eq!(tuples[0].3, "file:///C:/Windows/path");
-    }
-
-    #[test]
-    fn should_handle_comment_without_space_after_hash() {
-        let text = "#https://example.com\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 1);
-    }
-
-    // ========== Position Accuracy Tests ==========
-
-    #[test]
-    fn should_calculate_correct_positions_for_quoted_urls() {
-        let text = "url: \"https://example.com\"\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 1);
-        let link = &result[0];
-        // Should start after the opening quote (character 6)
-        assert_eq!(link.range.start.character, 6);
-        // Should end before the closing quote
-        let url_text = "https://example.com";
-        assert_eq!(
-            link.range.end.character - link.range.start.character,
-            url_text.len() as u32
-        );
-    }
-
-    #[test]
-    fn should_calculate_correct_line_numbers_in_multi_document() {
-        let text = "first: doc\n---\nurl: https://example.com\n---\nlast: doc\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.line, 2, "URL is on line 2");
-    }
-
-    #[test]
-    fn should_have_consistent_ranges_across_lines() {
-        let text = "line1: https://first.com\nline2: https://second.com\n";
-        let result = find_document_links(text, None);
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].range.start.line, 0);
-        assert_eq!(result[1].range.start.line, 1);
-        // Both URLs should have same relative position on their lines
-        assert_eq!(
-            result[0].range.start.character,
-            result[1].range.start.character
-        );
     }
 
     // ========== Scheme and Validation Tests ==========
@@ -758,50 +703,75 @@ url3: https://another-valid.com
         assert_eq!(tuples[1].3, "https://another-valid.com/");
     }
 
-    // ========== !include Tests ==========
+    // ========== Position Accuracy Tests ==========
 
-    // Test 1: relative path with base URI
     #[test]
-    fn should_resolve_relative_include_path_against_base_uri() {
-        let text = "config: !include foo.yaml\n";
-        let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
-
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
-        assert_eq!(include_links.len(), 1);
-        assert_eq!(
-            include_links[0].target.as_ref().unwrap().as_str(),
-            "file:///dir/foo.yaml"
-        );
-    }
-
-    // Test 2: absolute path
-    #[test]
-    fn should_resolve_absolute_include_path() {
-        let text = "config: !include /absolute/path.yaml\n";
+    fn should_calculate_correct_positions_for_quoted_urls() {
+        let text = "url: \"https://example.com\"\n";
         let result = find_document_links(text, None);
 
-        let include_links: Vec<_> = result
-            .iter()
-            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
-            .collect();
-        assert_eq!(include_links.len(), 1);
+        assert_eq!(result.len(), 1);
+        let link = &result[0];
+        // Should start after the opening quote (character 6)
+        assert_eq!(link.range.start.character, 6);
+        // Should end before the closing quote
+        let url_text = "https://example.com";
         assert_eq!(
-            include_links[0].target.as_ref().unwrap().as_str(),
-            "file:///absolute/path.yaml"
+            link.range.end.character - link.range.start.character,
+            url_text.len() as u32
         );
     }
 
-    // Test 3: parent-relative path
     #[test]
-    fn should_resolve_parent_relative_include_path() {
-        let text = "config: !include ../relative.yaml\n";
-        let b = base("file:///dir/subdir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+    fn should_calculate_correct_line_numbers_in_multi_document() {
+        let text = "first: doc\n---\nurl: https://example.com\n---\nlast: doc\n";
+        let result = find_document_links(text, None);
 
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 2, "URL is on line 2");
+    }
+
+    #[test]
+    fn should_have_consistent_ranges_across_lines() {
+        let text = "line1: https://first.com\nline2: https://second.com\n";
+        let result = find_document_links(text, None);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].range.start.line, 0);
+        assert_eq!(result[1].range.start.line, 1);
+        // Both URLs should have same relative position on their lines
+        assert_eq!(
+            result[0].range.start.character,
+            result[1].range.start.character
+        );
+    }
+
+    // ========== !include Tests ==========
+
+    // Tests 1–3: include path resolution (collapsed — same shape: len==1 + target url)
+    #[rstest]
+    #[case::relative_path_with_base(
+        "config: !include foo.yaml\n",
+        Some("file:///dir/doc.yaml"),
+        "file:///dir/foo.yaml"
+    )]
+    #[case::absolute_path(
+        "config: !include /absolute/path.yaml\n",
+        None,
+        "file:///absolute/path.yaml"
+    )]
+    #[case::parent_relative_path(
+        "config: !include ../relative.yaml\n",
+        Some("file:///dir/subdir/doc.yaml"),
+        "file:///dir/relative.yaml"
+    )]
+    fn include_resolves_to_expected_url(
+        #[case] text: &str,
+        #[case] base_uri: Option<&str>,
+        #[case] expected_url: &str,
+    ) {
+        let b = base_uri.map(base);
+        let result = find_document_links(text, b.as_ref());
         let include_links: Vec<_> = result
             .iter()
             .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
@@ -809,7 +779,7 @@ url3: https://another-valid.com
         assert_eq!(include_links.len(), 1);
         assert_eq!(
             include_links[0].target.as_ref().unwrap().as_str(),
-            "file:///dir/relative.yaml"
+            expected_url
         );
     }
 
