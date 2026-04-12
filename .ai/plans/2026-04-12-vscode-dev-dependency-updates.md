@@ -68,12 +68,12 @@ code and configuration as needed.
 
 - [x] Research breaking changes for each major version
 - [x] Fix engines.vscode mismatch (CI fix) — 4032830
-- [ ] Update all 4 major-version packages
-- [ ] Adapt tsconfig.json for TypeScript 6 if needed
-- [ ] Adapt eslint.config.mjs for ESLint 10 if needed
-- [ ] Fix any new TypeScript compilation errors
-- [ ] Fix any new ESLint errors
-- [ ] Verify build, lint, test, and vsce package all pass
+- [x] Update all 4 major-version packages — dcaecc7
+- [x] Adapt tsconfig.json for TypeScript 6 if needed — dcaecc7
+- [x] Adapt eslint.config.mjs for ESLint 10 if needed — dcaecc7
+- [x] Fix any new TypeScript compilation errors — none needed
+- [x] Fix any new ESLint errors — none needed
+- [x] Verify build, lint, test, and vsce package all pass — dcaecc7
 
 ## Tasks
 
@@ -107,11 +107,11 @@ versions and adapt code/configuration for breaking changes.
      ESLint 10 requires it; check for new rule changes
 4. Fix any compilation or lint errors in `src/**/*.ts`
 5. Verify full quality pipeline:
-   - [ ] `pnpm run build` succeeds
-   - [ ] `pnpm run lint` passes
-   - [ ] `pnpm run test` passes (28 tests)
-   - [ ] `pnpm run format` passes
-   - [ ] `pnpx @vscode/vsce package --no-dependencies`
+   - [x] `pnpm run build` succeeds
+   - [x] `pnpm run lint` passes
+   - [x] `pnpm run test` passes (28 tests)
+   - [x] `pnpm run format` passes
+   - [x] `pnpx @vscode/vsce package --no-dependencies`
          succeeds
 
 ## Decisions
