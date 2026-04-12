@@ -51,7 +51,7 @@ and (4) update the project-init skill template to match.
 
 - [x] Add `panic = "deny"` to workspace Cargo.toml, remove
       crate-level deny, fix test modules (37e66c0)
-- [ ] Remove dead code and `#[allow(dead_code)]` blankets
+- [x] Remove dead code and `#[allow(dead_code)]` blankets (be0f7f3)
 - [ ] Convert all `#[allow]` → `#[expect(..., reason)]`
       across all crates
 - [ ] Add `allow_attributes` + `allow_attributes_without_reason`
@@ -81,21 +81,23 @@ Commit: 37e66c0
 
 ### Task 2: Dead code cleanup
 
-Remove `#[allow(dead_code)]` annotations and clean up:
+Remove dead code and its `#[allow(dead_code)]` annotation:
 
 - `rlsp-yaml-parser/src/loader.rs:726` — delete the unused
   `load_one` test helper function and its `#[allow]`
-- `rlsp-yaml-parser/benches/fixtures.rs:8` — remove blanket
-  `#![allow(dead_code)]` (all functions are used; no dead
-  code exists)
-- `rlsp-yaml/benches/fixtures/mod.rs:7` — same: remove
-  blanket (no dead code)
+
+The bench fixture blankets (`rlsp-yaml-parser/benches/fixtures.rs:8`
+and `rlsp-yaml/benches/fixtures/mod.rs:7`) are load-bearing —
+each bench binary compiles the fixture file independently and
+uses a different subset of functions. These blankets will be
+converted to `#![expect(dead_code, reason = "...")]` in Task 3.
 
 Verify with `cargo clippy --all-targets`.
 
-- [ ] Delete `load_one` from loader.rs test module
-- [ ] Remove `#![allow(dead_code)]` from both bench fixtures
-- [ ] Verify no dead-code warnings
+- [x] Delete `load_one` from loader.rs test module
+- [x] Verify no new warnings
+
+Commit: be0f7f3
 
 ### Task 3: Convert `#[allow]` → `#[expect(..., reason)]` and enable enforcement lints
 
