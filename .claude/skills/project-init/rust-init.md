@@ -25,6 +25,8 @@ must_use_candidate = "deny"                  # functions whose return value shou
 panic = "deny"                               # explicit panic!() — use proper error handling
 expect_used = "deny"                         # panics with a message — use proper error handling
 unwrap_used = "deny"                         # panics on None/Err — use proper error handling
+allow_attributes = "deny"                    # forces #[expect] over #[allow] — self-cleaning suppressions
+allow_attributes_without_reason = "deny"     # every lint suppression must document why
 
 [lints.rust]
 warnings = "deny" # -D warnings
@@ -47,6 +49,8 @@ must_use_candidate = "deny"
 panic = "deny"
 expect_used = "deny"
 unwrap_used = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
 
 [workspace.lints.rust]
 warnings = "deny" # -D warnings
