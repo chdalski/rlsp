@@ -1550,10 +1550,16 @@ fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
     clippy::cast_possible_truncation
 )]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use serde_json::json;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    fn n_lines(n: usize) -> String {
+        "key: value\n".repeat(n)
+    }
 
     fn schema_type_str(s: &JsonSchema) -> Option<&str> {
         match s.schema_type.as_ref()? {
@@ -1566,259 +1572,137 @@ mod tests {
     // extract_schema_url
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 1
-    #[test]
-    fn should_extract_url_from_modeline_on_first_line() {
-        let text = "# yaml-language-server: $schema=https://example.com/schema.json\nkey: value\n";
-        assert_eq!(
-            extract_schema_url(text),
-            Some("https://example.com/schema.json".to_string())
-        );
+    #[rstest]
+    #[case::first_line(
+        "# yaml-language-server: $schema=https://example.com/schema.json\nkey: value\n",
+        "https://example.com/schema.json"
+    )]
+    #[case::second_line(
+        "key: value\n# yaml-language-server: $schema=https://example.com/schema.json\n",
+        "https://example.com/schema.json"
+    )]
+    #[case::leading_whitespace_in_url(
+        "# yaml-language-server: $schema=  https://example.com/schema.json\n",
+        "https://example.com/schema.json"
+    )]
+    #[case::http_url(
+        "# yaml-language-server: $schema=http://example.com/schema.json\n",
+        "http://example.com/schema.json"
+    )]
+    #[case::file_url(
+        "# yaml-language-server: $schema=file:///path/to/schema.json\n",
+        "file:///path/to/schema.json"
+    )]
+    #[case::none_sentinel_lowercase("# yaml-language-server: $schema=none\nkey: value\n", "none")]
+    #[case::none_sentinel_mixed_case("# yaml-language-server: $schema=None\nkey: value\n", "None")]
+    #[case::none_sentinel_uppercase("# yaml-language-server: $schema=NONE\nkey: value\n", "NONE")]
+    fn extract_schema_url_returns_some(#[case] text: &str, #[case] expected: &str) {
+        assert_eq!(extract_schema_url(text), Some(expected.to_string()));
     }
 
-    // Test 2
     #[test]
-    fn should_extract_url_from_modeline_on_second_line() {
-        let text = "key: value\n# yaml-language-server: $schema=https://example.com/schema.json\n";
-        assert_eq!(
-            extract_schema_url(text),
-            Some("https://example.com/schema.json".to_string())
-        );
-    }
-
-    // Test 3
-    #[test]
-    fn should_extract_url_from_modeline_on_tenth_line() {
-        let mut text = String::new();
-        for _ in 0..9 {
-            text.push_str("key: value\n");
-        }
-        text.push_str("# yaml-language-server: $schema=https://example.com/schema.json\n");
+    fn extract_schema_url_returns_some_on_tenth_line() {
+        let text = n_lines(9) + "# yaml-language-server: $schema=https://example.com/schema.json\n";
         assert_eq!(
             extract_schema_url(&text),
             Some("https://example.com/schema.json".to_string())
         );
     }
 
-    // Test 4
+    #[rstest]
+    #[case::no_modeline("key: value\nother: stuff\n")]
+    #[case::missing_equals("# yaml-language-server: $schema https://example.com/schema.json\n")]
+    #[case::wrong_prefix("# yaml-ls: $schema=https://example.com/schema.json\n")]
+    #[case::empty_input("")]
+    fn extract_schema_url_returns_none(#[case] text: &str) {
+        assert_eq!(extract_schema_url(text), None);
+    }
+
     #[test]
-    fn should_return_none_when_modeline_beyond_tenth_line() {
-        let mut text = String::new();
-        for _ in 0..10 {
-            text.push_str("key: value\n");
-        }
-        text.push_str("# yaml-language-server: $schema=https://example.com/schema.json\n");
+    fn extract_schema_url_returns_none_beyond_tenth_line() {
+        let text =
+            n_lines(10) + "# yaml-language-server: $schema=https://example.com/schema.json\n";
         assert_eq!(extract_schema_url(&text), None);
-    }
-
-    // Test 5
-    #[test]
-    fn should_return_none_when_no_modeline_present() {
-        let text = "key: value\nother: stuff\n";
-        assert_eq!(extract_schema_url(text), None);
-    }
-
-    // Test 6
-    #[test]
-    fn should_return_none_for_malformed_modeline_missing_equals() {
-        let text = "# yaml-language-server: $schema https://example.com/schema.json\n";
-        assert_eq!(extract_schema_url(text), None);
-    }
-
-    // Test 7
-    #[test]
-    fn should_return_none_for_modeline_with_wrong_prefix() {
-        let text = "# yaml-ls: $schema=https://example.com/schema.json\n";
-        assert_eq!(extract_schema_url(text), None);
-    }
-
-    // Test 8 — whitespace after `=` is stripped
-    #[test]
-    fn should_handle_modeline_with_extra_leading_whitespace_in_url() {
-        let text = "# yaml-language-server: $schema=  https://example.com/schema.json\n";
-        assert_eq!(
-            extract_schema_url(text),
-            Some("https://example.com/schema.json".to_string())
-        );
-    }
-
-    // Test 9
-    #[test]
-    fn should_extract_http_url() {
-        let text = "# yaml-language-server: $schema=http://example.com/schema.json\n";
-        assert_eq!(
-            extract_schema_url(text),
-            Some("http://example.com/schema.json".to_string())
-        );
-    }
-
-    // Test 10
-    #[test]
-    fn should_extract_file_url() {
-        let text = "# yaml-language-server: $schema=file:///path/to/schema.json\n";
-        assert_eq!(
-            extract_schema_url(text),
-            Some("file:///path/to/schema.json".to_string())
-        );
-    }
-
-    // Test 11
-    #[test]
-    fn should_return_none_for_empty_input() {
-        assert_eq!(extract_schema_url(""), None);
-    }
-
-    // Test 12 — $schema=none (lowercase) is extracted as-is
-    #[test]
-    fn should_extract_none_sentinel_lowercase() {
-        let text = "# yaml-language-server: $schema=none\nkey: value\n";
-        assert_eq!(extract_schema_url(text), Some("none".to_string()));
-    }
-
-    // Test 13 — $schema=None (mixed case) is extracted as-is
-    #[test]
-    fn should_extract_none_sentinel_mixed_case() {
-        let text = "# yaml-language-server: $schema=None\nkey: value\n";
-        assert_eq!(extract_schema_url(text), Some("None".to_string()));
-    }
-
-    // Test 14 — $schema=NONE (uppercase) is extracted as-is
-    #[test]
-    fn should_extract_none_sentinel_uppercase() {
-        let text = "# yaml-language-server: $schema=NONE\nkey: value\n";
-        assert_eq!(extract_schema_url(text), Some("NONE".to_string()));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
     // extract_custom_tags
     // ══════════════════════════════════════════════════════════════════════════
 
-    #[test]
-    fn should_extract_single_tag_from_modeline() {
-        let text = "# yaml-language-server: $tags=!include\nkey: value\n";
-        assert_eq!(extract_custom_tags(text), vec!["!include"]);
+    #[rstest]
+    #[case::single_tag(
+        "# yaml-language-server: $tags=!include\nkey: value\n",
+        vec!["!include"]
+    )]
+    #[case::multiple_tags(
+        "# yaml-language-server: $tags=!include,!ref,!Ref\nkey: value\n",
+        vec!["!include", "!ref", "!Ref"]
+    )]
+    #[case::whitespace_trimmed(
+        "# yaml-language-server: $tags= !include , !ref \nkey: value\n",
+        vec!["!include", "!ref"]
+    )]
+    #[case::second_line(
+        "key: value\n# yaml-language-server: $tags=!include,!ref\n",
+        vec!["!include", "!ref"]
+    )]
+    fn extract_custom_tags_returns_tags(#[case] text: &str, #[case] expected: Vec<&str>) {
+        assert_eq!(
+            extract_custom_tags(text),
+            expected.into_iter().map(str::to_string).collect::<Vec<_>>()
+        );
     }
 
-    #[test]
-    fn should_extract_multiple_tags_from_modeline() {
-        let text = "# yaml-language-server: $tags=!include,!ref,!Ref\nkey: value\n";
-        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref", "!Ref"]);
-    }
-
-    #[test]
-    fn should_trim_whitespace_around_tags() {
-        let text = "# yaml-language-server: $tags= !include , !ref \nkey: value\n";
-        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref"]);
-    }
-
-    #[test]
-    fn should_return_empty_vec_when_no_tags_modeline() {
-        let text = "key: value\nother: stuff\n";
+    #[rstest]
+    #[case::no_tags_modeline("key: value\nother: stuff\n")]
+    #[case::empty_input("")]
+    fn extract_custom_tags_returns_empty(#[case] text: &str) {
         assert_eq!(extract_custom_tags(text), Vec::<String>::new());
     }
 
     #[test]
-    fn should_return_empty_vec_when_tags_modeline_beyond_line_10() {
-        let mut text = String::new();
-        for _ in 0..10 {
-            text.push_str("key: value\n");
-        }
-        text.push_str("# yaml-language-server: $tags=!include\n");
+    fn extract_custom_tags_returns_empty_beyond_line_10() {
+        let text = n_lines(10) + "# yaml-language-server: $tags=!include\n";
         assert_eq!(extract_custom_tags(&text), Vec::<String>::new());
-    }
-
-    #[test]
-    fn should_return_empty_vec_for_empty_input() {
-        assert_eq!(extract_custom_tags(""), Vec::<String>::new());
-    }
-
-    #[test]
-    fn should_extract_tags_from_modeline_on_second_line() {
-        let text = "key: value\n# yaml-language-server: $tags=!include,!ref\n";
-        assert_eq!(extract_custom_tags(text), vec!["!include", "!ref"]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
     // extract_yaml_version
     // ══════════════════════════════════════════════════════════════════════════
 
-    #[test]
-    fn should_extract_version_1_1_from_modeline_on_first_line() {
-        let text = "# yaml-language-server: $yamlVersion=1.1\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), Some("1.1".to_string()));
+    #[rstest]
+    #[case::version_1_1_first_line("# yaml-language-server: $yamlVersion=1.1\nkey: value\n", "1.1")]
+    #[case::version_1_2_first_line("# yaml-language-server: $yamlVersion=1.2\nkey: value\n", "1.2")]
+    #[case::whitespace_stripped(
+        "# yaml-language-server: $yamlVersion=  1.2  \nkey: value\n",
+        "1.2"
+    )]
+    #[case::second_line("key: value\n# yaml-language-server: $yamlVersion=1.2\n", "1.2")]
+    fn extract_yaml_version_returns_some(#[case] text: &str, #[case] expected: &str) {
+        assert_eq!(extract_yaml_version(text), Some(expected.to_string()));
     }
 
     #[test]
-    fn should_extract_version_1_2_from_modeline_on_first_line() {
-        let text = "# yaml-language-server: $yamlVersion=1.2\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
-    }
-
-    #[test]
-    fn should_extract_version_from_modeline_on_tenth_line() {
-        let mut text = String::new();
-        for _ in 0..9 {
-            text.push_str("key: value\n");
-        }
-        text.push_str("# yaml-language-server: $yamlVersion=1.1\n");
+    fn extract_yaml_version_returns_some_on_tenth_line() {
+        let text = n_lines(9) + "# yaml-language-server: $yamlVersion=1.1\n";
         assert_eq!(extract_yaml_version(&text), Some("1.1".to_string()));
     }
 
+    #[rstest]
+    #[case::invalid_version_2_0("# yaml-language-server: $yamlVersion=2.0\nkey: value\n")]
+    #[case::invalid_version_1_0("# yaml-language-server: $yamlVersion=1.0\nkey: value\n")]
+    #[case::no_modeline("key: value\n")]
+    #[case::empty_input("")]
+    #[case::empty_version_value("# yaml-language-server: $yamlVersion=\nkey: value\n")]
+    #[case::wrong_prefix("# yaml-ls: $yamlVersion=1.1\nkey: value\n")]
+    fn extract_yaml_version_returns_none(#[case] text: &str) {
+        assert_eq!(extract_yaml_version(text), None);
+    }
+
     #[test]
-    fn should_return_none_when_yaml_version_modeline_beyond_tenth_line() {
-        let mut text = String::new();
-        for _ in 0..10 {
-            text.push_str("key: value\n");
-        }
-        text.push_str("# yaml-language-server: $yamlVersion=1.1\n");
+    fn extract_yaml_version_returns_none_beyond_tenth_line() {
+        let text = n_lines(10) + "# yaml-language-server: $yamlVersion=1.1\n";
         assert_eq!(extract_yaml_version(&text), None);
-    }
-
-    #[test]
-    fn should_return_none_for_invalid_version_value() {
-        let text = "# yaml-language-server: $yamlVersion=2.0\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), None);
-    }
-
-    #[test]
-    fn should_return_none_for_invalid_version_value_1_0() {
-        let text = "# yaml-language-server: $yamlVersion=1.0\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), None);
-    }
-
-    #[test]
-    fn should_return_none_when_no_yaml_version_modeline_present() {
-        let text = "key: value\n";
-        assert_eq!(extract_yaml_version(text), None);
-    }
-
-    #[test]
-    fn should_return_none_for_empty_input_yaml_version() {
-        assert_eq!(extract_yaml_version(""), None);
-    }
-
-    #[test]
-    fn should_strip_whitespace_around_version_value() {
-        let text = "# yaml-language-server: $yamlVersion=  1.2  \nkey: value\n";
-        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
-    }
-
-    #[test]
-    fn should_return_none_for_empty_version_value() {
-        let text = "# yaml-language-server: $yamlVersion=\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), None);
-    }
-
-    #[test]
-    fn should_return_none_for_wrong_prefix_yaml_version() {
-        let text = "# yaml-ls: $yamlVersion=1.1\nkey: value\n";
-        assert_eq!(extract_yaml_version(text), None);
-    }
-
-    #[test]
-    fn should_extract_version_from_second_line() {
-        let text = "key: value\n# yaml-language-server: $yamlVersion=1.2\n";
-        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1832,76 +1716,56 @@ mod tests {
         }
     }
 
-    // Test 12
-    #[test]
-    fn should_return_url_for_exact_filename_match() {
-        let associations = [assoc(
-            "config.yaml",
-            "https://example.com/config-schema.json",
-        )];
-        assert_eq!(
-            match_schema_by_filename("config.yaml", &associations),
-            Some("https://example.com/config-schema.json".to_string())
-        );
-    }
-
-    // Test 13
-    #[test]
-    fn should_return_url_for_glob_wildcard_match() {
-        let associations = [assoc("*.yaml", "https://example.com/generic.json")];
-        assert_eq!(
-            match_schema_by_filename("myfile.yaml", &associations),
-            Some("https://example.com/generic.json".to_string())
-        );
-    }
-
-    // Test 14
-    #[test]
-    fn should_return_url_for_double_star_glob_match() {
-        let associations = [assoc(
-            "configs/**/*.yaml",
-            "https://example.com/schema.json",
-        )];
-        assert_eq!(
-            match_schema_by_filename("configs/nested/file.yaml", &associations),
-            Some("https://example.com/schema.json".to_string())
-        );
-    }
-
-    // Test 15
-    #[test]
-    fn should_return_none_when_no_association_matches() {
-        let associations = [assoc("*.json", "https://example.com/schema.json")];
-        assert_eq!(match_schema_by_filename("myfile.yaml", &associations), None);
-    }
-
-    // Test 16
-    #[test]
-    fn should_return_none_for_empty_associations() {
-        assert_eq!(match_schema_by_filename("myfile.yaml", &[]), None);
-    }
-
-    // Test 17
-    #[test]
-    fn should_return_first_matching_association_when_multiple_match() {
-        let associations = [
+    #[rstest]
+    #[case::exact_filename_match(
+        "config.yaml",
+        vec![assoc("config.yaml", "https://example.com/config-schema.json")],
+        "https://example.com/config-schema.json"
+    )]
+    #[case::single_star_glob(
+        "myfile.yaml",
+        vec![assoc("*.yaml", "https://example.com/generic.json")],
+        "https://example.com/generic.json"
+    )]
+    #[case::double_star_glob(
+        "configs/nested/file.yaml",
+        vec![assoc("configs/**/*.yaml", "https://example.com/schema.json")],
+        "https://example.com/schema.json"
+    )]
+    #[case::first_matching_wins(
+        "test.yaml",
+        vec![
             assoc("*.yaml", "https://example.com/first.json"),
             assoc("*.yaml", "https://example.com/second.json"),
-        ];
+        ],
+        "https://example.com/first.json"
+    )]
+    fn match_schema_by_filename_returns_url(
+        #[case] filename: &str,
+        #[case] associations: Vec<SchemaAssociation>,
+        #[case] expected: &str,
+    ) {
         assert_eq!(
-            match_schema_by_filename("test.yaml", &associations),
-            Some("https://example.com/first.json".to_string())
+            match_schema_by_filename(filename, &associations),
+            Some(expected.to_string())
         );
     }
 
-    // Test 18
-    #[test]
-    fn should_not_match_partial_filename() {
-        let associations = [assoc("config.yaml", "https://example.com/schema.json")];
-        assert_eq!(
-            match_schema_by_filename("my-config.yaml", &associations),
-            None
-        );
+    #[rstest]
+    #[case::extension_mismatch(
+        "myfile.yaml",
+        vec![assoc("*.json", "https://example.com/schema.json")]
+    )]
+    #[case::empty_associations("myfile.yaml", vec![])]
+    #[case::partial_filename_no_match(
+        "my-config.yaml",
+        vec![assoc("config.yaml", "https://example.com/schema.json")]
+    )]
+    fn match_schema_by_filename_returns_none(
+        #[case] filename: &str,
+        #[case] associations: Vec<SchemaAssociation>,
+    ) {
+        assert_eq!(match_schema_by_filename(filename, &associations), None);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2859,111 +2723,81 @@ mod tests {
         rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
-    // Test K8s-1: core API (v1 Pod) — detection and URL
-    #[test]
-    fn should_detect_core_api_pod_and_build_url() {
-        let docs = parse_docs("apiVersion: v1\nkind: Pod\n");
-        let result = detect_kubernetes_resource(&docs);
-        assert_eq!(result, Some(("v1".to_string(), "Pod".to_string())));
-        let url = kubernetes_schema_url("v1", "Pod", "1.29.0");
+    #[rstest]
+    #[case::core_api_pod("apiVersion: v1\nkind: Pod\n", ("v1", "Pod"))]
+    #[case::grouped_api_deployment("apiVersion: apps/v1\nkind: Deployment\n", ("apps/v1", "Deployment"))]
+    #[case::hpa_autoscaling(
+        "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\n",
+        ("autoscaling/v2", "HorizontalPodAutoscaler")
+    )]
+    fn detect_kubernetes_resource_returns_some(#[case] text: &str, #[case] expected: (&str, &str)) {
+        let docs = parse_docs(text);
         assert_eq!(
-            url,
-            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/pod-v1.json"
+            detect_kubernetes_resource(&docs),
+            Some((expected.0.to_string(), expected.1.to_string()))
         );
     }
 
-    // Test K8s-2: grouped API (apps/v1 Deployment) — detection and URL
-    #[test]
-    fn should_detect_grouped_api_deployment_and_build_url() {
-        let docs = parse_docs("apiVersion: apps/v1\nkind: Deployment\n");
-        let result = detect_kubernetes_resource(&docs);
-        assert_eq!(
-            result,
-            Some(("apps/v1".to_string(), "Deployment".to_string()))
-        );
-        let url = kubernetes_schema_url("apps/v1", "Deployment", "1.29.0");
-        assert_eq!(
-            url,
-            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/deployment-apps-v1.json"
-        );
-    }
-
-    // Test K8s-3: HPA autoscaling/v2 case
-    #[test]
-    fn should_detect_hpa_and_build_url() {
-        let docs = parse_docs("apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\n");
-        let result = detect_kubernetes_resource(&docs);
-        assert_eq!(
-            result,
-            Some((
-                "autoscaling/v2".to_string(),
-                "HorizontalPodAutoscaler".to_string()
-            ))
-        );
-        let url = kubernetes_schema_url("autoscaling/v2", "HorizontalPodAutoscaler", "1.29.0");
-        assert_eq!(
-            url,
-            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/horizontalpodautoscaler-autoscaling-v2.json"
-        );
-    }
-
-    // Test K8s-4: missing apiVersion → None
-    #[test]
-    fn should_return_none_when_api_version_missing() {
-        let docs = parse_docs("kind: Pod\nmetadata:\n  name: test\n");
+    #[rstest]
+    #[case::missing_api_version("kind: Pod\nmetadata:\n  name: test\n")]
+    #[case::missing_kind("apiVersion: v1\nmetadata:\n  name: test\n")]
+    #[case::first_doc_has_no_fields("other: value\n---\napiVersion: v1\nkind: Pod\n")]
+    #[case::non_string_api_version_and_kind("apiVersion:\n  nested: true\nkind:\n  - item\n")]
+    fn detect_kubernetes_resource_returns_none(#[case] text: &str) {
+        let docs = parse_docs(text);
         assert_eq!(detect_kubernetes_resource(&docs), None);
     }
 
-    // Test K8s-5: missing kind → None
     #[test]
-    fn should_return_none_when_kind_missing() {
-        let docs = parse_docs("apiVersion: v1\nmetadata:\n  name: test\n");
-        assert_eq!(detect_kubernetes_resource(&docs), None);
-    }
-
-    // Test K8s-6: empty docs → None
-    #[test]
-    fn should_return_none_for_empty_docs() {
+    fn detect_kubernetes_resource_returns_none_for_empty_docs() {
         assert_eq!(detect_kubernetes_resource(&[]), None);
     }
 
-    // Test K8s-7: multi-document — only first doc inspected; second has fields, first doesn't
-    #[test]
-    fn should_inspect_only_first_document() {
-        let docs = parse_docs("other: value\n---\napiVersion: v1\nkind: Pod\n");
-        // First doc has no apiVersion/kind → None
-        assert_eq!(detect_kubernetes_resource(&docs), None);
-    }
-
-    // Test K8s-8: non-string values for apiVersion/kind → None
-    #[test]
-    fn should_return_none_when_api_version_or_kind_is_non_string() {
-        // apiVersion is a mapping, kind is a mapping — neither is a string scalar
-        let docs = parse_docs("apiVersion:\n  nested: true\nkind:\n  - item\n");
-        assert_eq!(detect_kubernetes_resource(&docs), None);
-    }
-
-    // Test K8s-9: master version — core API uses master-standalone-strict (no v prefix)
-    #[test]
-    fn should_build_url_with_master_standalone_strict_for_core_api() {
-        let url = kubernetes_schema_url("v1", "Pod", "master");
+    #[rstest]
+    #[case::core_api_versioned(
+        "v1",
+        "Pod",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/pod-v1.json"
+    )]
+    #[case::grouped_api_versioned(
+        "apps/v1",
+        "Deployment",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/deployment-apps-v1.json"
+    )]
+    #[case::hpa_autoscaling_versioned(
+        "autoscaling/v2",
+        "HorizontalPodAutoscaler",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/horizontalpodautoscaler-autoscaling-v2.json"
+    )]
+    #[case::core_api_master(
+        "v1",
+        "Pod",
+        "master",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/pod-v1.json"
+    )]
+    #[case::grouped_api_master(
+        "apps/v1",
+        "Deployment",
+        "master",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json"
+    )]
+    fn kubernetes_schema_url_returns_url(
+        #[case] api_version: &str,
+        #[case] kind: &str,
+        #[case] k8s_version: &str,
+        #[case] expected: &str,
+    ) {
         assert_eq!(
-            url,
-            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/pod-v1.json"
+            kubernetes_schema_url(api_version, kind, k8s_version),
+            expected
         );
     }
 
-    // Test K8s-10: master version — grouped API uses master-standalone-strict (no v prefix)
-    #[test]
-    fn should_build_url_with_master_standalone_strict_for_grouped_api() {
-        let url = kubernetes_schema_url("apps/v1", "Deployment", "master");
-        assert_eq!(
-            url,
-            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json"
-        );
-    }
-
-    // Test K8s-11: "Master" (capital M) falls through to versioned branch (case-sensitive match)
+    // K8s-11: "Master" (capital M) falls through to versioned branch (case-sensitive match)
+    // Different assertion shape (contains check) — left standalone.
     #[test]
     fn should_treat_capitalised_master_as_versioned_prefix() {
         let url = kubernetes_schema_url("v1", "Pod", "Master");
@@ -2991,7 +2825,8 @@ mod tests {
         json!({ "schemas": schemas_json })
     }
 
-    // SS-1: catalog with one YAML entry is parsed and kept
+    // SS-1: catalog with one YAML entry is parsed and kept — also checks field values
+    // Different assertion shape (checks url and file_match fields) — left standalone.
     #[test]
     fn should_parse_catalog_entry_with_yaml_pattern() {
         let v = make_catalog_json(&[("https://example.com/schema.json", &["*.yaml"])]);
@@ -3001,19 +2836,8 @@ mod tests {
         assert_eq!(catalog.entries[0].file_match, vec!["*.yaml"]);
     }
 
-    // SS-2: entry with only JSON patterns is filtered out
-    #[test]
-    fn should_filter_out_entry_with_only_json_patterns() {
-        let v = make_catalog_json(&[("https://example.com/schema.json", &["*.json"])]);
-        let catalog = parse_schemastore_catalog(&v).expect("should parse");
-        assert_eq!(
-            catalog.entries.len(),
-            0,
-            "JSON-only entries must be excluded"
-        );
-    }
-
     // SS-3: entry with mixed YAML and JSON patterns is kept; non-YAML patterns are discarded
+    // Different assertion shape (checks file_match field value) — left standalone.
     #[test]
     fn should_keep_entry_with_mixed_yaml_and_json_patterns() {
         let v = make_catalog_json(&[(
@@ -3026,81 +2850,42 @@ mod tests {
         assert_eq!(catalog.entries[0].file_match, vec!["docker-compose.yml"]);
     }
 
-    // SS-4: entry with .yml pattern is kept
-    #[test]
-    fn should_keep_entry_with_yml_extension_pattern() {
-        let v = make_catalog_json(&[("https://example.com/schema.json", &["*.yml"])]);
-        let catalog = parse_schemastore_catalog(&v).expect("should parse");
-        assert_eq!(catalog.entries.len(), 1);
-    }
-
-    // SS-5: entry without fileMatch field is skipped (parse returns None for that entry)
-    #[test]
-    fn should_skip_entry_without_file_match() {
-        let v = json!({
-            "schemas": [
-                { "name": "No FileMatch", "url": "https://example.com/schema.json" }
-            ]
-        });
-        let catalog = parse_schemastore_catalog(&v).expect("should parse catalog");
-        assert_eq!(
-            catalog.entries.len(),
-            0,
-            "entry missing fileMatch must be skipped"
-        );
-    }
-
-    // SS-6: empty schemas array yields empty catalog
-    #[test]
-    fn should_parse_empty_catalog() {
-        let v = json!({ "schemas": [] });
-        let catalog = parse_schemastore_catalog(&v).expect("should parse");
-        assert_eq!(catalog.entries.len(), 0);
-    }
-
-    // SS-7: non-object input returns None
-    #[test]
-    fn should_return_none_for_non_object_catalog() {
-        let v = json!(["not", "an", "object"]);
-        assert!(parse_schemastore_catalog(&v).is_none());
-    }
-
-    // SS-8: input missing the schemas key returns None
-    #[test]
-    fn should_return_none_for_catalog_missing_schemas_key() {
-        let v = json!({ "other": "data" });
-        assert!(parse_schemastore_catalog(&v).is_none());
-    }
-
-    // SS-8b: entry with empty url is skipped
-    #[test]
-    fn should_skip_entry_with_empty_url() {
-        let v = json!({
-            "schemas": [
-                { "name": "Empty URL", "url": "", "fileMatch": ["*.yaml"] }
-            ]
-        });
-        let catalog = parse_schemastore_catalog(&v).expect("should parse catalog");
-        assert_eq!(
-            catalog.entries.len(),
-            0,
-            "entry with empty url must be skipped"
-        );
-    }
-
-    // SS-9: multiple entries — both YAML ones kept, JSON-only one filtered
-    #[test]
-    fn should_filter_multiple_entries_correctly() {
-        let v = make_catalog_json(&[
-            (
-                "https://example.com/workflow.json",
-                &["**/.github/workflows/*.yml"],
-            ),
+    #[rstest]
+    #[case::json_only_entry_filtered(
+        make_catalog_json(&[("https://example.com/schema.json", &["*.json"])]),
+        0
+    )]
+    #[case::yml_extension_kept(
+        make_catalog_json(&[("https://example.com/schema.json", &["*.yml"])]),
+        1
+    )]
+    #[case::empty_schemas_array(json!({ "schemas": [] }), 0)]
+    #[case::empty_url_skipped(
+        json!({"schemas": [{"name": "Empty URL", "url": "", "fileMatch": ["*.yaml"]}]}),
+        0
+    )]
+    #[case::missing_file_match_skipped(
+        json!({"schemas": [{"name": "No FileMatch", "url": "https://example.com/schema.json"}]}),
+        0
+    )]
+    #[case::two_yaml_kept_one_json_filtered(
+        make_catalog_json(&[
+            ("https://example.com/workflow.json", &["**/.github/workflows/*.yml"]),
             ("https://example.com/compose.json", &["docker-compose.yaml"]),
             ("https://example.com/package.json", &["package.json"]),
-        ]);
-        let catalog = parse_schemastore_catalog(&v).expect("should parse");
-        assert_eq!(catalog.entries.len(), 2);
+        ]),
+        2
+    )]
+    fn parse_schemastore_catalog_entry_count(#[case] input: Value, #[case] expected_len: usize) {
+        let catalog = parse_schemastore_catalog(&input).expect("should parse");
+        assert_eq!(catalog.entries.len(), expected_len);
+    }
+
+    #[rstest]
+    #[case::non_object_input(json!(["not", "an", "object"]))]
+    #[case::missing_schemas_key(json!({ "other": "data" }))]
+    fn parse_schemastore_catalog_returns_none(#[case] input: Value) {
+        assert!(parse_schemastore_catalog(&input).is_none());
     }
 
     // SS-10: match_schemastore returns URL for matching filename
