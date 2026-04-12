@@ -69,7 +69,7 @@ be preserved in a `#[case]`.
       (f969e21)
 - [x] Parameterize validators.rs (f3b8444)
 - [x] Parameterize formatter.rs (77b2033)
-- [ ] Parameterize completion.rs + hover.rs
+- [x] Parameterize completion.rs + hover.rs (6a918bc)
 - [ ] Parameterize document_links.rs + rename.rs +
       references.rs
 - [ ] Parameterize code_actions.rs + semantic_tokens.rs +
@@ -221,11 +221,11 @@ pattern. Group by completion context (key, value, nested).
 `parse_docs → hover_at → hover_content → assert string
 contains` pattern. Very consistent assertion shape.
 
-- [ ] Parameterize completion.rs uniform groups
-- [ ] Parameterize hover.rs uniform groups
-- [ ] Leave heterogeneous tests standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize completion.rs uniform groups
+- [x] Parameterize hover.rs uniform groups
+- [x] Leave heterogeneous tests standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 7: Parameterize `document_links.rs` + `rename.rs` + `references.rs`
 
