@@ -65,7 +65,8 @@ be preserved in a `#[case]`.
       suppression.rs (74df89b)
 - [x] Parameterize schema.rs modeline extraction groups
       (d608e6f)
-- [ ] Parameterize schema_validation.rs groups
+- [x] Parameterize schema_validation.rs groups
+      (f969e21)
 - [ ] Parameterize validators.rs
 - [ ] Parameterize formatter.rs
 - [ ] Parameterize completion.rs + hover.rs
@@ -175,14 +176,14 @@ Convert the most repetitive test groups in
 - Security tests (unique setups)
 - contentSchema (multi-step validation)
 
-- [ ] Parameterize type mismatch tests
-- [ ] Parameterize enum violation tests
-- [ ] Parameterize scalar constraint groups
-- [ ] Parameterize format validation groups
-- [ ] Parameterize message consistency groups
-- [ ] Leave complex groups standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize type mismatch tests
+- [x] Parameterize enum violation tests
+- [x] Parameterize scalar constraint groups
+- [x] Parameterize format validation groups
+- [x] Parameterize message consistency groups
+- [x] Leave complex groups standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 4: Parameterize `validators.rs`
 
