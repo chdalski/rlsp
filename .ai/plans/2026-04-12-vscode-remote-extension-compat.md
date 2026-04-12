@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-12
 
 ## Goal
@@ -39,7 +39,7 @@ Codespaces, Dev Containers).
 - [x] Research remote extension requirements (VS Code docs)
 - [x] Audit extension source for remote compatibility
 - [x] Compare with rust-analyzer reference implementation
-- [ ] Add `extensionKind` and `capabilities` to package.json
+- [x] Add `extensionKind` and `capabilities` to package.json
 
 ## Tasks
 
@@ -58,14 +58,16 @@ Placement: `extensionKind` after the `main` field (groups
 it with other extension metadata), `capabilities` after
 `activationEvents` (mirrors rust-analyzer's layout).
 
-- [ ] Add `extensionKind: ["workspace"]` after `main`
-- [ ] Add `capabilities.untrustedWorkspaces` with
+- [x] Add `extensionKind: ["workspace"]` after `main`
+- [x] Add `capabilities.untrustedWorkspaces` with
       `"supported": "limited"`,
       `"restrictedConfigurations": ["rlsp-yaml.server.path"]`,
       and a description
-- [ ] Verify `pnpm run build` succeeds
-- [ ] Verify `pnpm run lint` passes
-- [ ] Verify `pnpm run test` passes
+- [x] Verify `pnpm run build` succeeds
+- [x] Verify `pnpm run lint` passes
+- [x] Verify `pnpm run test` passes
+
+**Commit:** f4a5786
 
 ## Decisions
 
