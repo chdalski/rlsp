@@ -82,7 +82,7 @@ in a `#[case]`.
 
 - [x] Parameterize `src/lexer/plain.rs` tests (96f8df6)
 - [x] Parameterize `src/lexer/quoted.rs` tests (d563134)
-- [ ] Parameterize `src/lexer/block.rs` tests
+- [x] Parameterize `src/lexer/block.rs` tests (451a69a)
 - [ ] Parameterize `src/lexer/comment.rs` + `src/lines.rs`
 - [ ] Parameterize `src/chars.rs` + `src/encoding.rs` +
       `src/pos.rs` + `src/lexer.rs`
@@ -213,13 +213,13 @@ to `#[rstest]` parameterized tests.
 - Group H-H (UTF-8/special content): small group, check
   if uniform enough.
 
-- [ ] Group literal block value-eq tests (H-C, H-D, H-E)
-- [ ] Group header parsing happy-path tests (H-A)
-- [ ] Group header parsing error tests (H-B)
-- [ ] Group tab handling / error tests (H-G)
-- [ ] Leave standalone: termination/boundary tests (H-F)
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Group literal block value-eq tests (H-C, H-D, H-E)
+- [x] Group header parsing happy-path tests (H-A)
+- [x] Group header parsing error tests (H-B)
+- [x] Group tab handling / error tests (H-G)
+- [x] Leave standalone: termination/boundary tests (H-F)
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 4: Parameterize `src/lexer/comment.rs` + `src/lines.rs`
 
