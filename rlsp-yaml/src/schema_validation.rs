@@ -2009,6 +2009,8 @@ fn format_path(path: &[String]) -> String {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
     use serde_json::json;
@@ -2142,146 +2144,92 @@ mod tests {
     // Type mismatches
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 7
-    #[test]
-    fn should_produce_no_diagnostics_when_type_matches_string() {
-        let schema = object_schema_with_props(vec![("name", string_schema())]);
-        let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema, true);
-        assert!(result.is_empty());
+    // Tests 8–13: type mismatch → schemaType ERROR
+    #[rstest]
+    #[case::string_where_integer_expected(
+        object_schema_with_props(vec![("count", integer_schema())]),
+        "count: \"hello\""
+    )]
+    #[case::integer_where_string_expected(
+        object_schema_with_props(vec![("name", string_schema())]),
+        "name: 42"
+    )]
+    #[case::boolean_where_string_expected(
+        object_schema_with_props(vec![("name", string_schema())]),
+        "name: true"
+    )]
+    #[case::mapping_where_string_expected(
+        object_schema_with_props(vec![("name", string_schema())]),
+        "name:\n  nested: value"
+    )]
+    #[case::sequence_where_object_expected(
+        object_schema_with_props(vec![("config", JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            ..JsonSchema::default()
+        })]),
+        "config:\n  - item"
+    )]
+    #[case::null_where_string_expected(
+        object_schema_with_props(vec![("name", string_schema())]),
+        "name: ~"
+    )]
+    fn type_mismatch_produces_schematype_error(#[case] schema: JsonSchema, #[case] text: &str) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 8
+    // Test 8: message names the expected type
     #[test]
-    fn should_produce_error_for_string_where_integer_expected() {
+    fn type_mismatch_message_names_expected_type() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: \"hello\"");
         let result = validate_schema("count: \"hello\"", &docs, &schema, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
         assert!(result[0].message.contains("integer"));
     }
 
-    // Test 9
-    #[test]
-    fn should_produce_error_for_integer_where_string_expected() {
-        let schema = object_schema_with_props(vec![("name", string_schema())]);
-        let docs = parse_docs("name: 42");
-        let result = validate_schema("name: 42", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 10
-    #[test]
-    fn should_produce_error_for_boolean_where_string_expected() {
-        let schema = object_schema_with_props(vec![("name", string_schema())]);
-        let docs = parse_docs("name: true");
-        let result = validate_schema("name: true", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 11
-    #[test]
-    fn should_produce_error_for_mapping_where_string_expected() {
-        let schema = object_schema_with_props(vec![("name", string_schema())]);
-        let text = "name:\n  nested: value";
-        let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 12
-    #[test]
-    fn should_produce_error_for_sequence_where_object_expected() {
-        let config_schema = JsonSchema {
-            schema_type: Some(SchemaType::Single("object".to_string())),
+    // Tests 7, 14–18: correct type → no diagnostics
+    #[rstest]
+    #[case::string_value_matches_string_type(
+        object_schema_with_props(vec![("name", string_schema())]),
+        "name: Alice"
+    )]
+    #[case::null_in_type_array_accepts_null(
+        object_schema_with_props(vec![("name", JsonSchema {
+            schema_type: Some(SchemaType::Multiple(vec![
+                "string".to_string(),
+                "null".to_string(),
+            ])),
             ..JsonSchema::default()
-        };
-        let schema = object_schema_with_props(vec![("config", config_schema)]);
-        let text = "config:\n  - item";
-        let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 13
-    #[test]
-    fn should_produce_error_for_null_where_string_expected() {
-        let schema = object_schema_with_props(vec![("name", string_schema())]);
-        let docs = parse_docs("name: ~");
-        let result = validate_schema("name: ~", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 14
-    #[test]
-    fn should_produce_no_diagnostics_for_null_when_null_in_type_array() {
-        let schema = object_schema_with_props(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Multiple(vec![
-                    "string".to_string(),
-                    "null".to_string(),
-                ])),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("name: ~");
-        let result = validate_schema("name: ~", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 15
-    #[test]
-    fn should_produce_no_diagnostics_when_no_type_specified() {
-        let schema = object_schema_with_props(vec![("name", JsonSchema::default())]);
-        let docs = parse_docs("name: 42");
-        let result = validate_schema("name: 42", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 16
-    #[test]
-    fn should_produce_no_diagnostics_for_integer_type_with_integer_value() {
-        let schema = object_schema_with_props(vec![("port", integer_schema())]);
-        let docs = parse_docs("port: 8080");
-        let result = validate_schema("port: 8080", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 17
-    #[test]
-    fn should_produce_no_diagnostics_for_boolean_type_with_boolean_value() {
-        let schema = object_schema_with_props(vec![(
-            "enabled",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("boolean".to_string())),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("enabled: true");
-        let result = validate_schema("enabled: true", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 18
-    #[test]
-    fn should_produce_no_diagnostics_for_array_type_with_sequence_value() {
-        let schema = object_schema_with_props(vec![(
-            "items",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("array".to_string())),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "items:\n  - one\n  - two";
+        })]),
+        "name: ~"
+    )]
+    #[case::no_type_specified_accepts_any(
+        object_schema_with_props(vec![("name", JsonSchema::default())]),
+        "name: 42"
+    )]
+    #[case::integer_value_matches_integer_type(
+        object_schema_with_props(vec![("port", integer_schema())]),
+        "port: 8080"
+    )]
+    #[case::boolean_value_matches_boolean_type(
+        object_schema_with_props(vec![("enabled", JsonSchema {
+            schema_type: Some(SchemaType::Single("boolean".to_string())),
+            ..JsonSchema::default()
+        })]),
+        "enabled: true"
+    )]
+    #[case::sequence_value_matches_array_type(
+        object_schema_with_props(vec![("items", JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            ..JsonSchema::default()
+        })]),
+        "items:\n  - one\n  - two"
+    )]
+    fn type_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
         let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
@@ -2291,23 +2239,37 @@ mod tests {
     // Enum violations
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 19
-    #[test]
-    fn should_produce_no_diagnostics_when_value_matches_enum() {
-        let schema = object_schema_with_props(vec![(
-            "env",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                enum_values: Some(vec![json!("prod"), json!("staging"), json!("dev")]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("env: staging");
-        let result = validate_schema("env: staging", &docs, &schema, true);
+    // Tests 19, 21, 23: enum match → no diagnostics
+    #[rstest]
+    #[case::string_value_in_string_enum(
+        object_schema_with_props(vec![("env", JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            enum_values: Some(vec![json!("prod"), json!("staging"), json!("dev")]),
+            ..JsonSchema::default()
+        })]),
+        "env: staging"
+    )]
+    #[case::integer_value_in_integer_enum(
+        object_schema_with_props(vec![("level", JsonSchema {
+            enum_values: Some(vec![json!(1), json!(2), json!(3)]),
+            ..JsonSchema::default()
+        })]),
+        "level: 2"
+    )]
+    #[case::string_value_in_mixed_type_enum(
+        object_schema_with_props(vec![("value", JsonSchema {
+            enum_values: Some(vec![json!("auto"), json!(0), serde_json::Value::Null]),
+            ..JsonSchema::default()
+        })]),
+        "value: auto"
+    )]
+    fn enum_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
-    // Test 20
+    // Test 20: enum value missing — message lists valid values (unique assertion shape)
     #[test]
     fn should_produce_error_when_value_not_in_enum() {
         let schema = object_schema_with_props(vec![(
@@ -2337,50 +2299,20 @@ mod tests {
         );
     }
 
-    // Test 21
-    #[test]
-    fn should_produce_no_diagnostics_for_enum_with_integer_match() {
-        let schema = object_schema_with_props(vec![(
-            "level",
-            JsonSchema {
-                enum_values: Some(vec![json!(1), json!(2), json!(3)]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("level: 2");
-        let result = validate_schema("level: 2", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 22
-    #[test]
-    fn should_produce_error_for_enum_with_integer_mismatch() {
-        let schema = object_schema_with_props(vec![(
-            "level",
-            JsonSchema {
-                enum_values: Some(vec![json!(1), json!(2), json!(3)]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("level: 5");
-        let result = validate_schema("level: 5", &docs, &schema, true);
+    // Test 22: integer enum mismatch → schemaEnum error
+    #[rstest]
+    #[case::integer_value_not_in_enum(
+        object_schema_with_props(vec![("level", JsonSchema {
+            enum_values: Some(vec![json!(1), json!(2), json!(3)]),
+            ..JsonSchema::default()
+        })]),
+        "level: 5"
+    )]
+    fn enum_mismatch_produces_schemaenum_error(#[case] schema: JsonSchema, #[case] text: &str) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
-    }
-
-    // Test 23
-    #[test]
-    fn should_handle_enum_with_mixed_types() {
-        let schema = object_schema_with_props(vec![(
-            "value",
-            JsonSchema {
-                enum_values: Some(vec![json!("auto"), json!(0), serde_json::Value::Null]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("value: auto");
-        let result = validate_schema("value: auto", &docs, &schema, true);
-        assert!(result.is_empty());
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -3290,32 +3222,15 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 70
-    #[test]
-    fn should_emit_warning_when_pattern_exceeds_max_length() {
-        let long_pattern = "a".repeat(1025);
+    // Tests 70–71: rejected pattern → schemaPatternLimit WARNING
+    #[rstest]
+    #[case::pattern_exceeds_max_length("a".repeat(1025))]
+    #[case::pattern_fails_to_compile("[invalid".to_string())]
+    fn pattern_rejected_produces_schemapatternlimit_warning(#[case] pattern: String) {
         let schema = object_schema_with_props(vec![(
             "val",
             JsonSchema {
-                pattern: Some(long_pattern),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: anything");
-        let result = validate_schema("val: anything", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaPatternLimit");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
-    }
-
-    // Test 71
-    #[test]
-    fn should_emit_warning_when_pattern_cannot_be_compiled() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                // A pattern that RegexBuilder rejects (unclosed bracket)
-                pattern: Some("[invalid".to_string()),
+                pattern: Some(pattern),
                 ..JsonSchema::default()
             },
         )]);
@@ -3330,71 +3245,62 @@ mod tests {
     // Scalar constraints — minLength / maxLength
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 72
-    #[test]
-    fn should_produce_no_diagnostics_when_string_meets_min_length() {
-        let schema = object_schema_with_props(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                min_length: Some(3),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("name: abc");
-        let result = validate_schema("name: abc", &docs, &schema, true);
+    // Tests 72, 74: string meets length constraint → no diagnostics
+    #[rstest]
+    #[case::string_meets_min_length(
+        object_schema_with_props(vec![("name", JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            min_length: Some(3),
+            ..JsonSchema::default()
+        })]),
+        "name: abc"
+    )]
+    #[case::string_meets_max_length(
+        object_schema_with_props(vec![("name", JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            max_length: Some(10),
+            ..JsonSchema::default()
+        })]),
+        "name: hello"
+    )]
+    fn string_length_constraint_valid_produces_no_diagnostics(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
-    // Test 73
-    #[test]
-    fn should_produce_error_when_string_is_shorter_than_min_length() {
-        let schema = object_schema_with_props(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                min_length: Some(5),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("name: hi");
-        let result = validate_schema("name: hi", &docs, &schema, true);
+    // Tests 73, 75: string violates length constraint → error with specific code
+    #[rstest]
+    #[case::string_shorter_than_min_length(
+        object_schema_with_props(vec![("name", JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            min_length: Some(5),
+            ..JsonSchema::default()
+        })]),
+        "name: hi",
+        "schemaMinLength"
+    )]
+    #[case::string_exceeds_max_length(
+        object_schema_with_props(vec![("name", JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            max_length: Some(3),
+            ..JsonSchema::default()
+        })]),
+        "name: toolong",
+        "schemaMaxLength"
+    )]
+    fn string_length_constraint_violated_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinLength");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 74
-    #[test]
-    fn should_produce_no_diagnostics_when_string_meets_max_length() {
-        let schema = object_schema_with_props(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                max_length: Some(10),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("name: hello");
-        let result = validate_schema("name: hello", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 75
-    #[test]
-    fn should_produce_error_when_string_exceeds_max_length() {
-        let schema = object_schema_with_props(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                max_length: Some(3),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("name: toolong");
-        let result = validate_schema("name: toolong", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaxLength");
+        assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
@@ -3402,71 +3308,62 @@ mod tests {
     // Scalar constraints — minimum / maximum (inclusive)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 76
-    #[test]
-    fn should_produce_no_diagnostics_when_integer_meets_minimum() {
-        let schema = object_schema_with_props(vec![(
-            "port",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("integer".to_string())),
-                minimum: Some(1.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("port: 80");
-        let result = validate_schema("port: 80", &docs, &schema, true);
+    // Tests 76, 78: integer meets inclusive bound → no diagnostics
+    #[rstest]
+    #[case::integer_meets_minimum(
+        object_schema_with_props(vec![("port", JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            minimum: Some(1.0),
+            ..JsonSchema::default()
+        })]),
+        "port: 80"
+    )]
+    #[case::integer_meets_maximum(
+        object_schema_with_props(vec![("port", JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            maximum: Some(65535.0),
+            ..JsonSchema::default()
+        })]),
+        "port: 8080"
+    )]
+    fn numeric_inclusive_bound_valid_produces_no_diagnostics(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
-    // Test 77
-    #[test]
-    fn should_produce_error_when_integer_is_below_minimum() {
-        let schema = object_schema_with_props(vec![(
-            "port",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("integer".to_string())),
-                minimum: Some(1.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("port: 0");
-        let result = validate_schema("port: 0", &docs, &schema, true);
+    // Tests 77, 79: integer violates inclusive bound → error with specific code
+    #[rstest]
+    #[case::integer_below_minimum(
+        object_schema_with_props(vec![("port", JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            minimum: Some(1.0),
+            ..JsonSchema::default()
+        })]),
+        "port: 0",
+        "schemaMinimum"
+    )]
+    #[case::integer_exceeds_maximum(
+        object_schema_with_props(vec![("port", JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            maximum: Some(65535.0),
+            ..JsonSchema::default()
+        })]),
+        "port: 99999",
+        "schemaMaximum"
+    )]
+    fn numeric_inclusive_bound_violated_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinimum");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 78
-    #[test]
-    fn should_produce_no_diagnostics_when_integer_meets_maximum() {
-        let schema = object_schema_with_props(vec![(
-            "port",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("integer".to_string())),
-                maximum: Some(65535.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("port: 8080");
-        let result = validate_schema("port: 8080", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 79
-    #[test]
-    fn should_produce_error_when_integer_exceeds_maximum() {
-        let schema = object_schema_with_props(vec![(
-            "port",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("integer".to_string())),
-                maximum: Some(65535.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("port: 99999");
-        let result = validate_schema("port: 99999", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaximum");
+        assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
@@ -3474,24 +3371,38 @@ mod tests {
     // Scalar constraints — Draft-04 exclusiveMinimum / exclusiveMaximum (bool)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 80
-    #[test]
-    fn should_produce_error_when_value_equals_minimum_and_exclusive_draft04() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                minimum: Some(5.0),
-                exclusive_minimum_draft04: Some(true),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true);
+    // Tests 80, 82: Draft-04 exclusiveMinimum/Maximum=true at boundary → error
+    #[rstest]
+    #[case::value_equals_exclusive_minimum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            minimum: Some(5.0),
+            exclusive_minimum_draft04: Some(true),
+            ..JsonSchema::default()
+        })]),
+        "val: 5",
+        "schemaMinimum"
+    )]
+    #[case::value_equals_exclusive_maximum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            maximum: Some(10.0),
+            exclusive_maximum_draft04: Some(true),
+            ..JsonSchema::default()
+        })]),
+        "val: 10",
+        "schemaMaximum"
+    )]
+    fn draft04_exclusive_bound_at_boundary_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinimum");
+        assert_eq!(code_of(&result[0]), expected_code);
     }
 
-    // Test 81
+    // Test 81: exclusive=false at boundary → no error (unique schema combination)
     #[test]
     fn should_produce_no_diagnostics_when_value_equals_minimum_and_not_exclusive_draft04() {
         let schema = object_schema_with_props(vec![(
@@ -3507,86 +3418,61 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 82
-    #[test]
-    fn should_produce_error_when_value_equals_maximum_and_exclusive_draft04() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                maximum: Some(10.0),
-                exclusive_maximum_draft04: Some(true),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaximum");
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // Scalar constraints — Draft-06+ exclusiveMinimum / exclusiveMaximum (f64)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 83
-    #[test]
-    fn should_produce_error_when_value_equals_exclusive_minimum_draft06() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_minimum: Some(5.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true);
+    // Tests 83, 85: Draft-06 exclusive bound at boundary → error
+    #[rstest]
+    #[case::value_equals_exclusive_minimum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_minimum: Some(5.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 5",
+        "schemaMinimum"
+    )]
+    #[case::value_equals_exclusive_maximum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_maximum: Some(10.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 10",
+        "schemaMaximum"
+    )]
+    fn draft06_exclusive_bound_at_boundary_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinimum");
+        assert_eq!(code_of(&result[0]), expected_code);
     }
 
-    // Test 84
-    #[test]
-    fn should_produce_no_diagnostics_when_value_exceeds_exclusive_minimum_draft06() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_minimum: Some(5.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 6");
-        let result = validate_schema("val: 6", &docs, &schema, true);
-        assert!(result.is_empty());
-    }
-
-    // Test 85
-    #[test]
-    fn should_produce_error_when_value_equals_exclusive_maximum_draft06() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_maximum: Some(10.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaximum");
-    }
-
-    // Test 86
-    #[test]
-    fn should_produce_no_diagnostics_when_value_is_below_exclusive_maximum_draft06() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_maximum: Some(10.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 9");
-        let result = validate_schema("val: 9", &docs, &schema, true);
+    // Tests 84, 86: Draft-06 exclusive bound past boundary → no diagnostics
+    #[rstest]
+    #[case::value_exceeds_exclusive_minimum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_minimum: Some(5.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 6"
+    )]
+    #[case::value_below_exclusive_maximum(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_maximum: Some(10.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 9"
+    )]
+    fn draft06_exclusive_bound_past_boundary_produces_no_diagnostics(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
@@ -3632,22 +3518,29 @@ mod tests {
     // Scalar constraints — const
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 89
-    #[test]
-    fn should_produce_no_diagnostics_when_value_equals_const() {
-        let schema = object_schema_with_props(vec![(
-            "version",
-            JsonSchema {
-                const_value: Some(json!("v1")),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("version: v1");
-        let result = validate_schema("version: v1", &docs, &schema, true);
+    // Tests 89, 91: value equals const → no diagnostics
+    #[rstest]
+    #[case::string_value_equals_const(
+        object_schema_with_props(vec![("version", JsonSchema {
+            const_value: Some(json!("v1")),
+            ..JsonSchema::default()
+        })]),
+        "version: v1"
+    )]
+    #[case::integer_value_equals_const(
+        object_schema_with_props(vec![("level", JsonSchema {
+            const_value: Some(json!(42)),
+            ..JsonSchema::default()
+        })]),
+        "level: 42"
+    )]
+    fn const_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert!(result.is_empty());
     }
 
-    // Test 90
+    // Test 90: const mismatch → schemaConst ERROR (standalone)
     #[test]
     fn should_produce_error_when_value_does_not_equal_const() {
         let schema = object_schema_with_props(vec![(
@@ -3662,21 +3555,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaConst");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 91
-    #[test]
-    fn should_produce_no_diagnostics_when_integer_equals_const() {
-        let schema = object_schema_with_props(vec![(
-            "level",
-            JsonSchema {
-                const_value: Some(json!(42)),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("level: 42");
-        let result = validate_schema("level: 42", &docs, &schema, true);
-        assert!(result.is_empty());
     }
 
     // Test 92
@@ -4864,253 +4742,105 @@ mod tests {
         validate_schema(text, &docs, &schema, true)
     }
 
-    // Test 157 — date-time: valid RFC 3339
-    #[test]
-    fn format_date_time_valid() {
-        assert!(run_format("2023-01-15T10:30:00Z", "date-time").is_empty());
-        assert!(run_format("2023-01-15T10:30:00+05:30", "date-time").is_empty());
-        assert!(run_format("2023-01-15T10:30:00.123Z", "date-time").is_empty());
+    // Tests 157, 159, 161, 163, 165, 167, 169, 171, 173, 175, 177, 179, 181, 183, 185:
+    // valid format value → no diagnostics
+    #[rstest]
+    #[case::date_time_utc("2023-01-15T10:30:00Z", "date-time")]
+    #[case::date_time_with_offset("2023-01-15T10:30:00+05:30", "date-time")]
+    #[case::date_time_with_milliseconds("2023-01-15T10:30:00.123Z", "date-time")]
+    #[case::date_simple("2023-01-15", "date")]
+    #[case::date_leap_year("2024-02-29", "date")]
+    #[case::email_simple("user@example.com", "email")]
+    #[case::email_with_plus_and_subdomain("a+b@sub.domain.org", "email")]
+    #[case::ipv4_typical("192.168.1.1", "ipv4")]
+    #[case::ipv4_all_zeros("0.0.0.0", "ipv4")]
+    #[case::ipv4_all_255("255.255.255.255", "ipv4")]
+    #[case::ipv6_full("2001:0db8:85a3:0000:0000:8a2e:0370:7334", "ipv6")]
+    #[case::ipv6_loopback("::1", "ipv6")]
+    #[case::ipv6_link_local("fe80::1", "ipv6")]
+    #[case::hostname_with_dots("example.com", "hostname")]
+    #[case::hostname_subdomain("sub.example.com", "hostname")]
+    #[case::hostname_single_label("localhost", "hostname")]
+    #[case::uri_https("https://example.com/path", "uri")]
+    #[case::uri_http("http://example.com", "uri")]
+    #[case::uri_urn("urn:isbn:0451450523", "uri")]
+    #[case::uuid_lowercase("550e8400-e29b-41d4-a716-446655440000", "uuid")]
+    #[case::uuid_uppercase("550E8400-E29B-41D4-A716-446655440000", "uuid")]
+    #[case::json_pointer_empty("", "json-pointer")]
+    #[case::json_pointer_simple_path("/foo/bar", "json-pointer")]
+    #[case::json_pointer_with_index("/foo/0", "json-pointer")]
+    #[case::json_pointer_tilde0_escape("/a~0b", "json-pointer")]
+    #[case::json_pointer_tilde1_escape("/a~1b", "json-pointer")]
+    #[case::regex_anchored("^[a-z]+$", "regex")]
+    #[case::regex_wildcard(".*", "regex")]
+    #[case::idn_hostname_ascii("example.com", "idn-hostname")]
+    #[case::idn_hostname_punycode("xn--nxasmq6b.com", "idn-hostname")]
+    #[case::idn_hostname_subdomain("sub.example.org", "idn-hostname")]
+    #[case::idn_email_ascii("user@example.com", "idn-email")]
+    #[case::idn_email_punycode_domain("user@xn--nxasmq6b.com", "idn-email")]
+    #[case::iri_https("https://example.com/path", "iri")]
+    #[case::iri_http("http://example.com", "iri")]
+    #[case::iri_urn("urn:isbn:0451450523", "iri")]
+    #[case::iri_reference_absolute("https://example.com/path", "iri-reference")]
+    #[case::iri_reference_root_relative("/relative/path", "iri-reference")]
+    #[case::iri_reference_relative("relative/path", "iri-reference")]
+    #[case::unknown_format_silently_ignored("anything", "some-unknown-format")]
+    fn format_valid_produces_no_diagnostics(#[case] value: &str, #[case] fmt: &str) {
+        assert!(run_format(value, fmt).is_empty());
     }
 
-    // Test 158 — date-time: invalid values emit schemaFormat WARNING
-    #[test]
-    fn format_date_time_invalid() {
-        let result = run_format("not-a-date", "date-time");
+    // Tests 158, 160, 162, 164, 166, 168, 170, 172, 174, 178, 180, 182, 184, 186:
+    // invalid format value → schemaFormat WARNING with format name in message
+    #[rstest]
+    #[case::date_time_not_a_date("not-a-date", "date-time")]
+    #[case::date_time_invalid_month("2023-13-01T00:00:00Z", "date-time")]
+    #[case::date_time_space_separator("2023-01-15 10:30:00Z", "date-time")]
+    #[case::date_invalid_month("2023-13-01", "date")]
+    #[case::date_non_leap_year_feb29("2023-02-29", "date")]
+    #[case::date_not_a_date("not-a-date", "date")]
+    #[case::email_no_at_sign("no-at-sign", "email")]
+    #[case::email_missing_domain_dot("missing-domain-dot@nodot", "email")]
+    #[case::email_no_domain("user-no-domain@", "email")]
+    #[case::ipv4_octet_too_large("256.0.0.1", "ipv4")]
+    #[case::ipv4_too_few_octets("192.168.1", "ipv4")]
+    #[case::ipv4_too_many_octets("192.168.1.1.1", "ipv4")]
+    #[case::ipv4_leading_zero("01.0.0.1", "ipv4")]
+    #[case::ipv6_too_many_groups("not::an::ipv6::address::with::too::many::groups::here", "ipv6")]
+    #[case::hostname_leading_hyphen("-invalid.com", "hostname")]
+    #[case::hostname_trailing_hyphen_label("invalid-.com", "hostname")]
+    #[case::hostname_double_dot("invalid..com", "hostname")]
+    #[case::uri_no_scheme("not-a-uri", "uri")]
+    #[case::uri_relative_reference("//no-scheme", "uri")]
+    #[case::uuid_not_uuid("not-a-uuid", "uuid")]
+    #[case::uuid_invalid_char("550e8400-e29b-41d4-a716-44665544000g", "uuid")]
+    #[case::uuid_no_hyphens("550e8400e29b41d4a716446655440000", "uuid")]
+    #[case::json_pointer_no_leading_slash("foo", "json-pointer")]
+    #[case::json_pointer_invalid_escape("/foo~2bar", "json-pointer")]
+    #[case::json_pointer_trailing_tilde("/foo~", "json-pointer")]
+    #[case::regex_unclosed_paren("(unclosed-paren", "regex")]
+    #[case::idn_hostname_with_space("not a hostname", "idn-hostname")]
+    #[case::idn_hostname_leading_hyphen("-bad-start.com", "idn-hostname")]
+    #[case::idn_email_no_at_sign("no-at-sign", "idn-email")]
+    #[case::idn_email_bad_domain("user@-bad-domain.com", "idn-email")]
+    #[case::iri_with_space("not an iri", "iri")]
+    #[case::iri_missing_scheme("://missing-scheme", "iri")]
+    #[case::iri_reference_with_space("not valid iri ref", "iri-reference")]
+    fn format_invalid_produces_schemaformat_warning(#[case] value: &str, #[case] fmt: &str) {
+        let result = run_format(value, fmt);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaFormat");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
-        assert!(result[0].message.contains("date-time"));
-
-        assert_eq!(run_format("2023-13-01T00:00:00Z", "date-time").len(), 1);
-        assert_eq!(run_format("2023-01-15 10:30:00Z", "date-time").len(), 1);
-    }
-
-    // Test 159 — date: valid YYYY-MM-DD
-    #[test]
-    fn format_date_valid() {
-        assert!(run_format("2023-01-15", "date").is_empty());
-        assert!(run_format("2024-02-29", "date").is_empty()); // leap year
-    }
-
-    // Test 160 — date: invalid
-    #[test]
-    fn format_date_invalid() {
-        assert_eq!(run_format("2023-13-01", "date").len(), 1); // month > 12
-        assert_eq!(run_format("2023-02-29", "date").len(), 1); // non-leap year
-        assert_eq!(run_format("not-a-date", "date").len(), 1);
-    }
-
-    // Test 161 — email: valid
-    #[test]
-    fn format_email_valid() {
-        assert!(run_format("user@example.com", "email").is_empty());
-        assert!(run_format("a+b@sub.domain.org", "email").is_empty());
-    }
-
-    // Test 162 — email: invalid
-    #[test]
-    fn format_email_invalid() {
-        assert_eq!(run_format("no-at-sign", "email").len(), 1);
-        assert_eq!(run_format("missing-domain-dot@nodot", "email").len(), 1);
-        assert_eq!(run_format("user-no-domain@", "email").len(), 1);
-    }
-
-    // Test 163 — ipv4: valid
-    #[test]
-    fn format_ipv4_valid() {
-        assert!(run_format("192.168.1.1", "ipv4").is_empty());
-        assert!(run_format("0.0.0.0", "ipv4").is_empty());
-        assert!(run_format("255.255.255.255", "ipv4").is_empty());
-    }
-
-    // Test 164 — ipv4: invalid
-    #[test]
-    fn format_ipv4_invalid() {
-        assert_eq!(run_format("256.0.0.1", "ipv4").len(), 1);
-        assert_eq!(run_format("192.168.1", "ipv4").len(), 1);
-        assert_eq!(run_format("192.168.1.1.1", "ipv4").len(), 1);
-        assert_eq!(run_format("01.0.0.1", "ipv4").len(), 1); // leading zero
-    }
-
-    // Test 165 — ipv6: valid
-    #[test]
-    fn format_ipv6_valid() {
-        assert!(run_format("2001:0db8:85a3:0000:0000:8a2e:0370:7334", "ipv6").is_empty());
-        assert!(run_format("::1", "ipv6").is_empty());
-        assert!(run_format("fe80::1", "ipv6").is_empty());
-    }
-
-    // Test 166 — ipv6: invalid
-    #[test]
-    fn format_ipv6_invalid() {
-        assert_eq!(
-            run_format(
-                "not::an::ipv6::address::with::too::many::groups::here",
-                "ipv6"
-            )
-            .len(),
-            1
-        );
-    }
-
-    // Test 167 — hostname: valid
-    #[test]
-    fn format_hostname_valid() {
-        assert!(run_format("example.com", "hostname").is_empty());
-        assert!(run_format("sub.example.com", "hostname").is_empty());
-        assert!(run_format("localhost", "hostname").is_empty());
-    }
-
-    // Test 168 — hostname: invalid
-    #[test]
-    fn format_hostname_invalid() {
-        assert_eq!(run_format("-invalid.com", "hostname").len(), 1);
-        assert_eq!(run_format("invalid-.com", "hostname").len(), 1);
-        assert_eq!(run_format("invalid..com", "hostname").len(), 1);
-    }
-
-    // Test 169 — uri: valid
-    #[test]
-    fn format_uri_valid() {
-        assert!(run_format("https://example.com/path", "uri").is_empty());
-        assert!(run_format("http://example.com", "uri").is_empty());
-        assert!(run_format("urn:isbn:0451450523", "uri").is_empty());
-    }
-
-    // Test 170 — uri: invalid
-    #[test]
-    fn format_uri_invalid() {
-        assert_eq!(run_format("not-a-uri", "uri").len(), 1);
-        assert_eq!(run_format("//no-scheme", "uri").len(), 1);
-    }
-
-    // Test 171 — uuid: valid
-    #[test]
-    fn format_uuid_valid() {
-        assert!(run_format("550e8400-e29b-41d4-a716-446655440000", "uuid").is_empty());
-        assert!(run_format("550E8400-E29B-41D4-A716-446655440000", "uuid").is_empty());
-    }
-
-    // Test 172 — uuid: invalid
-    #[test]
-    fn format_uuid_invalid() {
-        assert_eq!(run_format("not-a-uuid", "uuid").len(), 1);
-        assert_eq!(
-            run_format("550e8400-e29b-41d4-a716-44665544000g", "uuid").len(),
-            1
-        );
-        assert_eq!(
-            run_format("550e8400e29b41d4a716446655440000", "uuid").len(),
-            1
-        );
-    }
-
-    // Test 173 — json-pointer: valid
-    #[test]
-    fn format_json_pointer_valid() {
-        assert!(run_format("", "json-pointer").is_empty()); // empty is valid
-        assert!(run_format("/foo/bar", "json-pointer").is_empty());
-        assert!(run_format("/foo/0", "json-pointer").is_empty());
-        assert!(run_format("/a~0b", "json-pointer").is_empty()); // ~0 escape
-        assert!(run_format("/a~1b", "json-pointer").is_empty()); // ~1 escape
-    }
-
-    // Test 174 — json-pointer: invalid
-    #[test]
-    fn format_json_pointer_invalid() {
-        assert_eq!(run_format("foo", "json-pointer").len(), 1); // no leading /
-        assert_eq!(run_format("/foo~2bar", "json-pointer").len(), 1); // invalid escape
-        assert_eq!(run_format("/foo~", "json-pointer").len(), 1); // trailing ~
-    }
-
-    // Test 175 — unknown format: silently ignored
-    #[test]
-    fn format_unknown_is_ignored() {
-        let result = run_format("anything", "some-unknown-format");
-        assert!(result.is_empty());
+        assert!(result[0].message.contains(fmt));
     }
 
     // Test 176 — format_validation disabled: no diagnostics emitted
+    // Uses validate_schema(..., false) directly — tests the feature flag, not a format value.
     #[test]
     fn format_validation_disabled_produces_no_format_diagnostics() {
         let schema = format_schema("date");
         let docs = parse_docs("not-a-date");
         let result = validate_schema("not-a-date", &docs, &schema, false);
         assert!(result.is_empty());
-    }
-
-    // Test 177 — regex: valid ECMAScript regex
-    #[test]
-    fn format_regex_valid() {
-        assert!(run_format("^[a-z]+$", "regex").is_empty());
-        assert!(run_format(".*", "regex").is_empty());
-    }
-
-    // Test 178 — regex: invalid pattern
-    // Note: use patterns that don't start with YAML reserved chars ([ { @)
-    #[test]
-    fn format_regex_invalid() {
-        // Unmatched parenthesis — invalid regex, YAML-safe string
-        assert_eq!(run_format("(unclosed-paren", "regex").len(), 1);
-    }
-
-    // Test 179 — idn-hostname: valid ASCII and internationalized hostnames
-    #[test]
-    fn format_idn_hostname_valid() {
-        assert!(run_format("example.com", "idn-hostname").is_empty());
-        assert!(run_format("xn--nxasmq6b.com", "idn-hostname").is_empty());
-        assert!(run_format("sub.example.org", "idn-hostname").is_empty());
-    }
-
-    // Test 180 — idn-hostname: invalid hostname
-    #[test]
-    fn format_idn_hostname_invalid() {
-        assert_eq!(run_format("not a hostname", "idn-hostname").len(), 1);
-        assert_eq!(run_format("-bad-start.com", "idn-hostname").len(), 1);
-    }
-
-    // Test 181 — idn-email: valid ASCII and internationalized email
-    #[test]
-    fn format_idn_email_valid() {
-        assert!(run_format("user@example.com", "idn-email").is_empty());
-        assert!(run_format("user@xn--nxasmq6b.com", "idn-email").is_empty());
-    }
-
-    // Test 182 — idn-email: invalid (missing @, empty local, bad domain)
-    #[test]
-    fn format_idn_email_invalid() {
-        assert_eq!(run_format("no-at-sign", "idn-email").len(), 1);
-        // Domain with leading hyphen is invalid per IDNA strict processing
-        assert_eq!(run_format("user@-bad-domain.com", "idn-email").len(), 1);
-    }
-
-    // Test 183 — iri: valid IRI
-    #[test]
-    fn format_iri_valid() {
-        assert!(run_format("https://example.com/path", "iri").is_empty());
-        assert!(run_format("http://example.com", "iri").is_empty());
-        assert!(run_format("urn:isbn:0451450523", "iri").is_empty());
-    }
-
-    // Test 184 — iri: invalid (relative reference is not an absolute IRI)
-    #[test]
-    fn format_iri_invalid() {
-        assert_eq!(run_format("not an iri", "iri").len(), 1);
-        assert_eq!(run_format("://missing-scheme", "iri").len(), 1);
-    }
-
-    // Test 185 — iri-reference: valid (absolute IRI and relative refs)
-    #[test]
-    fn format_iri_reference_valid() {
-        assert!(run_format("https://example.com/path", "iri-reference").is_empty());
-        assert!(run_format("/relative/path", "iri-reference").is_empty());
-        assert!(run_format("relative/path", "iri-reference").is_empty());
-    }
-
-    // Test 186 — iri-reference: invalid
-    #[test]
-    fn format_iri_reference_invalid() {
-        assert_eq!(run_format("not valid iri ref", "iri-reference").len(), 1);
     }
 
     fn content_schema(encoding: Option<&str>, media_type: Option<&str>) -> JsonSchema {
@@ -5132,66 +4862,26 @@ mod tests {
         validate_schema(text, &docs, &schema, true)
     }
 
-    // Test 187 — contentEncoding base64: valid
-    #[test]
-    fn content_encoding_base64_valid() {
-        // "hello" in base64
-        assert!(run_content("aGVsbG8=", Some("base64"), None).is_empty());
-        assert!(run_content("", Some("base64"), None).is_empty());
+    // Tests 187, 189, 191, 193: valid contentEncoding → no diagnostics
+    #[rstest]
+    #[case::base64_valid("aGVsbG8=", "base64")]
+    #[case::base64_empty_valid("", "base64")]
+    #[case::base64url_valid("aGVsbG8=", "base64url")]
+    #[case::base32_valid("NBSWY3DPEB3W64TMMQ======", "base32")]
+    #[case::base16_uppercase_valid("48656C6C6F", "base16")]
+    #[case::base16_lowercase_valid("48656c6c6f", "base16")]
+    fn content_encoding_valid_produces_no_diagnostics(#[case] value: &str, #[case] encoding: &str) {
+        assert!(run_content(value, Some(encoding), None).is_empty());
     }
 
-    // Test 188 — contentEncoding base64: invalid
-    #[test]
-    fn content_encoding_base64_invalid() {
-        assert_eq!(
-            run_content("not-valid-base64!!!", Some("base64"), None).len(),
-            1
-        );
-    }
-
-    // Test 189 — contentEncoding base64url: valid
-    #[test]
-    fn content_encoding_base64url_valid() {
-        // "hello" in base64url
-        assert!(run_content("aGVsbG8=", Some("base64url"), None).is_empty());
-    }
-
-    // Test 190 — contentEncoding base64url: invalid
-    #[test]
-    fn content_encoding_base64url_invalid() {
-        assert_eq!(
-            run_content("not+valid/base64url!!!", Some("base64url"), None).len(),
-            1
-        );
-    }
-
-    // Test 191 — contentEncoding base32: valid
-    #[test]
-    fn content_encoding_base32_valid() {
-        // "hello" in base32
-        assert!(run_content("NBSWY3DPEB3W64TMMQ======", Some("base32"), None).is_empty());
-    }
-
-    // Test 192 — contentEncoding base32: invalid
-    #[test]
-    fn content_encoding_base32_invalid() {
-        assert_eq!(
-            run_content("not-valid-base32!!!", Some("base32"), None).len(),
-            1
-        );
-    }
-
-    // Test 193 — contentEncoding base16: valid
-    #[test]
-    fn content_encoding_base16_valid() {
-        assert!(run_content("48656C6C6F", Some("base16"), None).is_empty());
-        assert!(run_content("48656c6c6f", Some("base16"), None).is_empty());
-    }
-
-    // Test 194 — contentEncoding base16: invalid
-    #[test]
-    fn content_encoding_base16_invalid() {
-        assert_eq!(run_content("ZZZZ", Some("base16"), None).len(), 1);
+    // Tests 188, 190, 192, 194: invalid contentEncoding → one diagnostic
+    #[rstest]
+    #[case::base64_invalid("not-valid-base64!!!", "base64")]
+    #[case::base64url_invalid("not+valid/base64url!!!", "base64url")]
+    #[case::base32_invalid("not-valid-base32!!!", "base32")]
+    #[case::base16_invalid("ZZZZ", "base16")]
+    fn content_encoding_invalid_produces_error(#[case] value: &str, #[case] encoding: &str) {
+        assert_eq!(run_content(value, Some(encoding), None).len(), 1);
     }
 
     // Test 195 — contentEncoding unknown: silently ignored
@@ -5796,151 +5486,82 @@ mod tests {
     // Message consistency — numeric min/max unified format
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 217
-    #[test]
-    fn minimum_inclusive_draft04_message_uses_below_minimum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                minimum: Some(5.0),
-                exclusive_minimum_draft04: Some(false),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 4");
-        let result = validate_schema("val: 4", &docs, &schema, true);
+    #[rstest]
+    #[case::inclusive_minimum_draft04(
+        object_schema_with_props(vec![("val", JsonSchema {
+            minimum: Some(5.0),
+            exclusive_minimum_draft04: Some(false),
+            ..JsonSchema::default()
+        })]),
+        "val: 4",
+        "is below minimum 5",
+        "(inclusive)"
+    )]
+    #[case::exclusive_minimum_draft04(
+        object_schema_with_props(vec![("val", JsonSchema {
+            minimum: Some(5.0),
+            exclusive_minimum_draft04: Some(true),
+            ..JsonSchema::default()
+        })]),
+        "val: 5",
+        "is below exclusive minimum 5",
+        "(exclusive)"
+    )]
+    #[case::inclusive_maximum_draft04(
+        object_schema_with_props(vec![("val", JsonSchema {
+            maximum: Some(10.0),
+            exclusive_maximum_draft04: Some(false),
+            ..JsonSchema::default()
+        })]),
+        "val: 11",
+        "is above maximum 10",
+        "(inclusive)"
+    )]
+    #[case::exclusive_maximum_draft04(
+        object_schema_with_props(vec![("val", JsonSchema {
+            maximum: Some(10.0),
+            exclusive_maximum_draft04: Some(true),
+            ..JsonSchema::default()
+        })]),
+        "val: 10",
+        "is above exclusive maximum 10",
+        "(exclusive)"
+    )]
+    #[case::exclusive_minimum_draft06(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_minimum: Some(5.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 5",
+        "is below exclusive minimum 5",
+        "must be greater than"
+    )]
+    #[case::exclusive_maximum_draft06(
+        object_schema_with_props(vec![("val", JsonSchema {
+            exclusive_maximum: Some(10.0),
+            ..JsonSchema::default()
+        })]),
+        "val: 10",
+        "is above exclusive maximum 10",
+        "must be less than"
+    )]
+    fn numeric_bound_message_uses_correct_phrase(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_phrase: &str,
+        #[case] excluded_phrase: &str,
+    ) {
+        let docs = parse_docs(text);
+        let result = validate_schema(text, &docs, &schema, true);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
-            msg.contains("is below minimum 5"),
-            "message should contain 'is below minimum 5', got: {msg}"
+            msg.contains(expected_phrase),
+            "message should contain '{expected_phrase}', got: {msg}"
         );
         assert!(
-            !msg.contains("(inclusive)"),
-            "message should not contain '(inclusive)', got: {msg}"
-        );
-    }
-
-    // Test 218
-    #[test]
-    fn minimum_exclusive_draft04_message_uses_below_exclusive_minimum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                minimum: Some(5.0),
-                exclusive_minimum_draft04: Some(true),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        let msg = &result[0].message;
-        assert!(
-            msg.contains("is below exclusive minimum 5"),
-            "message should contain 'is below exclusive minimum 5', got: {msg}"
-        );
-        assert!(
-            !msg.contains("(exclusive)"),
-            "message should not contain '(exclusive)', got: {msg}"
-        );
-    }
-
-    // Test 219
-    #[test]
-    fn maximum_inclusive_draft04_message_uses_above_maximum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                maximum: Some(10.0),
-                exclusive_maximum_draft04: Some(false),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 11");
-        let result = validate_schema("val: 11", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        let msg = &result[0].message;
-        assert!(
-            msg.contains("is above maximum 10"),
-            "message should contain 'is above maximum 10', got: {msg}"
-        );
-        assert!(
-            !msg.contains("(inclusive)"),
-            "message should not contain '(inclusive)', got: {msg}"
-        );
-    }
-
-    // Test 220
-    #[test]
-    fn maximum_exclusive_draft04_message_uses_above_exclusive_maximum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                maximum: Some(10.0),
-                exclusive_maximum_draft04: Some(true),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        let msg = &result[0].message;
-        assert!(
-            msg.contains("is above exclusive maximum 10"),
-            "message should contain 'is above exclusive maximum 10', got: {msg}"
-        );
-        assert!(
-            !msg.contains("(exclusive)"),
-            "message should not contain '(exclusive)', got: {msg}"
-        );
-    }
-
-    // Test 221
-    #[test]
-    fn exclusive_minimum_draft06_message_uses_below_exclusive_minimum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_minimum: Some(5.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        let msg = &result[0].message;
-        assert!(
-            msg.contains("is below exclusive minimum 5"),
-            "message should contain 'is below exclusive minimum 5', got: {msg}"
-        );
-        assert!(
-            !msg.contains("must be greater than"),
-            "message should not contain old phrasing 'must be greater than', got: {msg}"
-        );
-    }
-
-    // Test 222
-    #[test]
-    fn exclusive_maximum_draft06_message_uses_above_exclusive_maximum_phrase() {
-        let schema = object_schema_with_props(vec![(
-            "val",
-            JsonSchema {
-                exclusive_maximum: Some(10.0),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("val: 10");
-        let result = validate_schema("val: 10", &docs, &schema, true);
-        assert_eq!(result.len(), 1);
-        let msg = &result[0].message;
-        assert!(
-            msg.contains("is above exclusive maximum 10"),
-            "message should contain 'is above exclusive maximum 10', got: {msg}"
-        );
-        assert!(
-            !msg.contains("must be less than"),
-            "message should not contain old phrasing 'must be less than', got: {msg}"
+            !msg.contains(excluded_phrase),
+            "message should not contain '{excluded_phrase}', got: {msg}"
         );
     }
 
