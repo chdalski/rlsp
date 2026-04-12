@@ -723,13 +723,6 @@ const fn empty_scalar() -> Node<Span> {
 mod tests {
     use super::*;
 
-    #[allow(dead_code)]
-    fn load_one(input: &str) -> Node<Span> {
-        let docs = load(input).expect("load failed");
-        assert_eq!(docs.len(), 1, "expected 1 document, got {}", docs.len());
-        docs.into_iter().next().unwrap().root
-    }
-
     // UT-1: loader_state_resets_anchor_map_between_documents
     #[test]
     fn loader_state_resets_anchor_map_between_documents() {
