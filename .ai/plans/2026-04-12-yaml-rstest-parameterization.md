@@ -63,7 +63,8 @@ be preserved in a `#[case]`.
 
 - [x] Add rstest + parameterize scalar_helpers.rs +
       suppression.rs (74df89b)
-- [ ] Parameterize schema.rs modeline extraction groups
+- [x] Parameterize schema.rs modeline extraction groups
+      (d608e6f)
 - [ ] Parameterize schema_validation.rs groups
 - [ ] Parameterize validators.rs
 - [ ] Parameterize formatter.rs
@@ -138,14 +139,14 @@ Convert the modeline extraction test groups in `schema.rs`
 - Draft-04 dependencies parsing
 - Remote $ref functional tests (tiny_http server setup)
 
-- [ ] Parameterize extract_schema_url tests
-- [ ] Parameterize extract_yaml_version tests
-- [ ] Parameterize extract_custom_tags if uniform
-- [ ] Parameterize match_schema_by_filename if uniform
-- [ ] Parameterize detect_kubernetes tests if uniform
-- [ ] Leave complex groups standalone
-- [ ] Verify: `cargo test -p rlsp-yaml`
-- [ ] Verify: `cargo clippy -p rlsp-yaml --all-targets`
+- [x] Parameterize extract_schema_url tests
+- [x] Parameterize extract_yaml_version tests
+- [x] Parameterize extract_custom_tags if uniform
+- [x] Parameterize match_schema_by_filename if uniform
+- [x] Parameterize detect_kubernetes tests if uniform
+- [x] Leave complex groups standalone
+- [x] Verify: `cargo test -p rlsp-yaml`
+- [x] Verify: `cargo clippy -p rlsp-yaml --all-targets`
 
 ### Task 3: Parameterize `schema_validation.rs` groups
 
