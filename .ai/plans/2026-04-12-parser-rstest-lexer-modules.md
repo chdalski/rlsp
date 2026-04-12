@@ -86,9 +86,9 @@ in a `#[case]`.
 - [x] Parameterize `src/lexer/comment.rs` + `src/lines.rs` (baa2ee5)
 - [x] Parameterize `src/chars.rs` + `src/encoding.rs` +
       `src/pos.rs` + `src/lexer.rs` (5e80a5d)
-- [ ] Parameterize integration tests: `unicode_positions.rs`
+- [x] Parameterize integration tests: `unicode_positions.rs`
       + `encoding.rs` + `error_reporting.rs` +
-      `loader_spans.rs` + `loader.rs`
+      `loader_spans.rs` + `loader.rs` (c8437c1)
 - [ ] Parameterize `tests/smoke.rs`
 
 ## Tasks
@@ -312,14 +312,14 @@ on span fields. Uniform shape.
 assert_matches on Node variant. Tests with complex
 multi-step validation left standalone.
 
-- [ ] Parameterize unicode_positions.rs span tests
-- [ ] Parameterize tests/encoding.rs decode tests
-- [ ] Parameterize error_reporting.rs message tests
-- [ ] Parameterize loader_spans.rs span tests
-- [ ] Parameterize loader.rs uniform Node-matching tests
-- [ ] Leave standalone: heterogeneous tests in each file
-- [ ] Verify: `cargo test -p rlsp-yaml-parser`
-- [ ] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
+- [x] Parameterize unicode_positions.rs span tests
+- [x] Parameterize tests/encoding.rs decode tests
+- [x] Parameterize error_reporting.rs message tests
+- [x] Parameterize loader_spans.rs span tests
+- [x] Parameterize loader.rs uniform Node-matching tests
+- [x] Leave standalone: heterogeneous tests in each file
+- [x] Verify: `cargo test -p rlsp-yaml-parser`
+- [x] Verify: `cargo clippy -p rlsp-yaml-parser --all-targets`
 
 ### Task 7: Parameterize `tests/smoke.rs`
 
