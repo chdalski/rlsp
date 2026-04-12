@@ -1,6 +1,17 @@
 # Changelog
 
 
+## Refactoring
+
+- Parameterize schema.rs modeline extraction tests with rstest (d608e6f)
+- Parameterize schema_validation.rs tests with rstest (f969e21)
+- Parameterize validators.rs tests with rstest (f3b8444)
+- Parameterize formatter.rs tests with rstest (77b2033)
+- Parameterize completion.rs + hover.rs tests with rstest (6a918bc)
+- Parameterize document_links, rename, references tests with rstest (deffa03)
+- Parameterize code_actions, semantic_tokens, symbols tests with rstest (71c5c2f)
+- Parameterize remaining small test modules with rstest (930cf21)
+
 ## Bug Fixes
 
 - Add binary existence check and skip test when binary present (bb1179b)
