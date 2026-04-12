@@ -9,6 +9,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![allow(clippy::panic)]
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::loader::load;
 use rlsp_yaml_parser::node::Node;
 
@@ -72,42 +74,24 @@ fn nested_mapping_outer_span_covers_inner() {
     );
 }
 
-/// Test 5 — flow mapping span is non-zero.
-#[test]
-fn flow_mapping_span_is_non_zero() {
-    let docs = load("{a: 1, b: 2}\n").unwrap();
-    let Node::Mapping { loc, .. } = &docs[0].root else {
-        panic!("expected Mapping");
-    };
-    assert_ne!(loc.start, loc.end, "flow mapping span must not be zero");
-}
+// ---------------------------------------------------------------------------
+// Mapping span is non-zero — flow and empty variants
+// ---------------------------------------------------------------------------
 
-/// Test 6 — empty flow mapping span is non-zero.
-#[test]
-fn empty_mapping_span_is_non_zero() {
-    let docs = load("{}\n").unwrap();
+#[rstest]
+#[case::flow_mapping("{a: 1, b: 2}\n")]
+#[case::empty_flow_mapping("{}\n")]
+fn mapping_span_is_non_zero(#[case] input: &str) {
+    let docs = load(input).unwrap();
     let Node::Mapping { loc, .. } = &docs[0].root else {
         panic!("expected Mapping");
     };
-    assert_ne!(
-        loc.start, loc.end,
-        "empty mapping `{{}}` span must not be zero"
-    );
+    assert_ne!(loc.start, loc.end, "mapping span must not be zero");
 }
 
 // ---------------------------------------------------------------------------
 // Group: Sequence container spans
 // ---------------------------------------------------------------------------
-
-/// Test 7 — block sequence span is non-zero.
-#[test]
-fn block_sequence_span_covers_full_extent() {
-    let docs = load("- a\n- b\n").unwrap();
-    let Node::Sequence { loc, .. } = &docs[0].root else {
-        panic!("expected Sequence");
-    };
-    assert_ne!(loc.start, loc.end, "sequence span must not be zero");
-}
 
 /// Test 8 — block sequence span start is on the first item's line.
 #[test]
@@ -133,27 +117,20 @@ fn block_sequence_span_end_is_last_item_line() {
     );
 }
 
-/// Test 10 — flow sequence span is non-zero.
-#[test]
-fn flow_sequence_span_is_non_zero() {
-    let docs = load("[a, b, c]\n").unwrap();
-    let Node::Sequence { loc, .. } = &docs[0].root else {
-        panic!("expected Sequence");
-    };
-    assert_ne!(loc.start, loc.end, "flow sequence span must not be zero");
-}
+// ---------------------------------------------------------------------------
+// Sequence span is non-zero — block, flow and empty variants
+// ---------------------------------------------------------------------------
 
-/// Test 11 — empty flow sequence span is non-zero.
-#[test]
-fn empty_sequence_span_is_non_zero() {
-    let docs = load("[]\n").unwrap();
+#[rstest]
+#[case::block_sequence("- a\n- b\n")]
+#[case::flow_sequence("[a, b, c]\n")]
+#[case::empty_flow_sequence("[]\n")]
+fn sequence_span_is_non_zero(#[case] input: &str) {
+    let docs = load(input).unwrap();
     let Node::Sequence { loc, .. } = &docs[0].root else {
         panic!("expected Sequence");
     };
-    assert_ne!(
-        loc.start, loc.end,
-        "empty sequence `[]` span must not be zero"
-    );
+    assert_ne!(loc.start, loc.end, "sequence span must not be zero");
 }
 
 /// Test 12 — sequence-of-mappings outer span covers all items.

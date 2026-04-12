@@ -11,6 +11,8 @@
 //!
 //! Exercises `load()` and `LoaderBuilder` through the public API.
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
 use rlsp_yaml_parser::node::Node;
 
@@ -62,20 +64,13 @@ fn spike_plain_scalar_loads() {
 // Group A — Basic node types
 // ---------------------------------------------------------------------------
 
-#[test]
-fn it_1_plain_scalar_value_is_correct() {
-    let node = load_one("hello\n");
+#[rstest]
+#[case::plain_scalar("hello\n", "hello")]
+#[case::integer_scalar("42\n", "42")]
+fn plain_scalar_value_is_correct(#[case] input: &str, #[case] expected: &str) {
+    let node = load_one(input);
     assert!(
-        matches!(&node, Node::Scalar { value, .. } if value == "hello"),
-        "got: {node:?}"
-    );
-}
-
-#[test]
-fn it_2_integer_scalar_value_is_correct() {
-    let node = load_one("42\n");
-    assert!(
-        matches!(&node, Node::Scalar { value, .. } if value == "42"),
+        matches!(&node, Node::Scalar { value, .. } if value == expected),
         "got: {node:?}"
     );
 }

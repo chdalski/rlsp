@@ -13,6 +13,8 @@
     clippy::indexing_slicing
 )]
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::{Event, Pos, ScalarStyle, Span, parse_events};
 
 fn collect_events(input: &str) -> Vec<(Event<'_>, Span)> {
@@ -57,50 +59,39 @@ fn mapping_key_ascii_byte_offset_correct() {
 }
 
 // ---------------------------------------------------------------------------
-// Group 2: Mapping with multi-byte key — value position (lib.rs Site 6)
+// Groups 2–9: Uniform plain-find start+end assertions
+//
+// All cases: collect_events(input), find Scalar by plain value match,
+// assert_pos on both start and end.
 // ---------------------------------------------------------------------------
 
-/// Mapping key `日本語` (9 bytes / 3 chars): the key scalar span is built via
-/// `Pos::advance` iteration, so both byte offset and column are correct.
-#[test]
-fn multibyte_mapping_key_span_correct() {
-    // "日本語: value\n": 日=3B, 本=3B, 語=3B → key ends at byte9/col3
-    let events = collect_events("日本語: value\n");
+// (start_byte, start_line, start_col), (end_byte, end_line, end_col)
+#[rstest]
+#[case::multibyte_key("日本語: value\n", "日本語", (0, 1, 0), (9, 1, 3))]
+#[case::multibyte_value("日本語: val\n", "val", (11, 1, 5), (14, 1, 8))]
+#[case::two_byte_char_value("ñ: ok\n", "ok", (4, 1, 3), (6, 1, 5))]
+#[case::anchor_ascii_scalar("&foo bar\n", "bar", (5, 1, 5), (8, 1, 8))]
+#[case::anchor_multibyte_scalar("&名前 hello\n", "hello", (8, 1, 4), (13, 1, 9))]
+#[case::sequence_second_item("- 日本\n- 語文\n", "語文", (11, 2, 2), (17, 2, 4))]
+#[case::doc_marker_inline("--- 中文\n", "中文", (4, 1, 4), (10, 1, 6))]
+fn scalar_span_start_and_end(
+    #[case] input: &str,
+    #[case] find_value: &str,
+    #[case] start: (usize, usize, usize),
+    #[case] end: (usize, usize, usize),
+) {
+    let events = collect_events(input);
     let (_, span) = events
         .iter()
-        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == "日本語"))
-        .expect("Scalar(日本語) not found");
-    assert_pos("start", &span.start, 0, 1, 0);
-    assert_pos("end", &span.end, 9, 1, 3);
+        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == find_value))
+        .unwrap_or_else(|| panic!("Scalar({find_value}) not found"));
+    assert_pos("start", &span.start, start.0, start.1, start.2);
+    assert_pos("end", &span.end, end.0, end.1, end.2);
 }
 
-/// Mapping value `val` after a 3-char multi-byte key.
-///
-/// Input: `"日本語: val\n"` — `日本語`=9B/3C, `:`=1B, ` `=1B → `val` at byte11/col5.
-#[test]
-fn multibyte_mapping_value_column_correct() {
-    let events = collect_events("日本語: val\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == "val"))
-        .expect("Scalar(val) not found");
-    assert_pos("start", &span.start, 11, 1, 5);
-    assert_pos("end", &span.end, 14, 1, 8);
-}
-
-/// Mapping value `ok` after a 2-byte single-character key `ñ`.
-///
-/// Input: `"ñ: ok\n"` — `ñ`=2B/1C, `:`=1B, ` `=1B → `ok` at byte4/col3.
-#[test]
-fn two_byte_char_mapping_value_column_correct() {
-    let events = collect_events("ñ: ok\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == "ok"))
-        .expect("Scalar(ok) not found");
-    assert_pos("start", &span.start, 4, 1, 3);
-    assert_pos("end", &span.end, 6, 1, 5);
-}
+// ---------------------------------------------------------------------------
+// Group 2: Mapping with multi-byte key — byte_offset only assertions
+// ---------------------------------------------------------------------------
 
 /// `byte_offset` for the mapping value is correct — regression guard.
 #[test]
@@ -273,23 +264,6 @@ fn block_folded_after_multibyte_key_span_start_column() {
 // Group 6: Anchor with multi-byte name (lib.rs Sites 15-17)
 // ---------------------------------------------------------------------------
 
-/// Anchor with ASCII name: scalar positions are correct.
-///
-/// Input: `"&foo bar\n"` — `&foo`=4B/4C; ` `=1B; `bar` at byte5/col5.
-#[test]
-fn anchor_ascii_name_scalar_all_fields_correct() {
-    let events = collect_events("&foo bar\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| {
-            matches!(ev, Event::Scalar { value, anchor: Some(a), .. }
-            if value == "bar" && *a == "foo")
-        })
-        .expect("Scalar(bar) with anchor(foo) not found");
-    assert_pos("start", &span.start, 5, 1, 5);
-    assert_pos("end", &span.end, 8, 1, 8);
-}
-
 /// `byte_offset` of scalar after multi-byte anchor name is correct.
 ///
 /// Input: `"&名前 hello\n"` — `&`=1B, `名前`=6B/2C, ` `=1B → `hello` at byte8/col4.
@@ -304,23 +278,6 @@ fn anchor_multibyte_name_scalar_byte_offset_correct() {
         span.start.byte_offset, 8,
         "byte_offset after multi-byte anchor name must be 8"
     );
-}
-
-/// Scalar `column` after multi-byte anchor name.
-///
-/// Input: `"&名前 hello\n"` — `hello` at byte8/col4.
-#[test]
-fn anchor_multibyte_name_scalar_column_correct() {
-    let events = collect_events("&名前 hello\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| {
-            matches!(ev, Event::Scalar { value, anchor: Some(a), .. }
-            if value == "hello" && *a == "名前")
-        })
-        .expect("Scalar(hello) with anchor(名前) not found");
-    assert_pos("start", &span.start, 8, 1, 4);
-    assert_pos("end", &span.end, 13, 1, 9);
 }
 
 // ---------------------------------------------------------------------------
@@ -380,39 +337,4 @@ fn multibyte_key_value_and_comment_positions() {
         .expect("Comment( note) not found");
     assert_pos("comment.start", &comment_span.start, 15, 1, 9);
     assert_pos("comment.end", &comment_span.end, 21, 1, 15);
-}
-
-// ---------------------------------------------------------------------------
-// Group 9: Multi-line documents and document markers
-// ---------------------------------------------------------------------------
-
-/// Second sequence item in a multi-line document with CJK scalars.
-///
-/// Input: `"- 日本\n- 語文\n"`:
-/// - Line 1: `- 日本\n` = 9 bytes
-/// - `語文` scalar: byte11/col2, line2 → end byte17/col4
-#[test]
-fn sequence_multibyte_items_line_column_correct() {
-    let events = collect_events("- 日本\n- 語文\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == "語文"))
-        .expect("Scalar(語文) not found");
-    assert_pos("start", &span.start, 11, 2, 2);
-    assert_pos("end", &span.end, 17, 2, 4);
-}
-
-/// Inline scalar after `---` document marker.
-///
-/// Input: `"--- 中文\n"`: `--- ` = 4 bytes/4 chars (all ASCII); `中文` at
-/// byte4/col4.
-#[test]
-fn document_marker_inline_multibyte_scalar_correct() {
-    let events = collect_events("--- 中文\n");
-    let (_, span) = events
-        .iter()
-        .find(|(ev, _)| matches!(ev, Event::Scalar { value, .. } if value == "中文"))
-        .expect("Scalar(中文) not found");
-    assert_pos("start", &span.start, 4, 1, 4);
-    assert_pos("end", &span.end, 10, 1, 6);
 }

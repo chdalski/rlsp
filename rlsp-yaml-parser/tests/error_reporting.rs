@@ -12,6 +12,8 @@
     clippy::missing_const_for_fn
 )]
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::loader::LoadError;
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{Error, Event, load, parse_events};
@@ -67,15 +69,23 @@ fn duplicate_keys_both_entries_present_in_mapping() {
 }
 
 // ===========================================================================
-// Group A: Duplicate keys — parser accepts silently
+// Group A: Duplicate keys — two entries present (uniform shape)
+//
+// input → mapping_key_values → assert len==2 + contains both pairs
 // ===========================================================================
 
-#[test]
-fn duplicate_plain_scalar_keys_both_entries_present() {
-    let kvs = mapping_key_values("name: Alice\nname: Bob\n");
+#[rstest]
+#[case::plain_scalar("name: Alice\nname: Bob\n", ("name", "Alice"), ("name", "Bob"))]
+#[case::flow_mapping("{a: 1, a: 2}\n", ("a", "1"), ("a", "2"))]
+fn duplicate_keys_two_entries(
+    #[case] input: &str,
+    #[case] pair_a: (&str, &str),
+    #[case] pair_b: (&str, &str),
+) {
+    let kvs = mapping_key_values(input);
     assert_eq!(kvs.len(), 2);
-    assert!(kvs.contains(&("name".into(), "Alice".into())));
-    assert!(kvs.contains(&("name".into(), "Bob".into())));
+    assert!(kvs.contains(&(pair_a.0.into(), pair_a.1.into())));
+    assert!(kvs.contains(&(pair_b.0.into(), pair_b.1.into())));
 }
 
 #[test]
@@ -86,15 +96,6 @@ fn duplicate_quoted_and_unquoted_keys_both_entries_present() {
     assert!(kvs.iter().any(|(_, v)| v == "unquoted"));
     assert!(kvs.iter().any(|(_, v)| v == "single-quoted"));
     assert!(kvs.iter().any(|(_, v)| v == "double-quoted"));
-}
-
-#[test]
-fn duplicate_keys_in_flow_mapping_both_entries_present() {
-    let input = "{a: 1, a: 2}\n";
-    let kvs = mapping_key_values(input);
-    assert_eq!(kvs.len(), 2);
-    assert!(kvs.contains(&("a".into(), "1".into())));
-    assert!(kvs.contains(&("a".into(), "2".into())));
 }
 
 #[test]
@@ -150,12 +151,15 @@ fn duplicate_keys_with_numeric_and_string_representations_both_present() {
 }
 
 // ===========================================================================
-// Group B: Error detection — parse errors occur
+// Group B: Error detection — unterminated quoted scalars (uniform shape)
+//
+// input → first_error().is_some() + load() is Err(LoadError::Parse)
 // ===========================================================================
 
-#[test]
-fn unterminated_single_quoted_scalar_produces_error() {
-    let input = "key: 'unterminated\n";
+#[rstest]
+#[case::single_quoted("key: 'unterminated\n")]
+#[case::double_quoted("key: \"unterminated\n")]
+fn unterminated_quoted_scalar_produces_parse_error(#[case] input: &str) {
     assert!(first_error(input).is_some(), "expected parse error");
     assert!(
         matches!(load(input), Err(LoadError::Parse { .. })),
@@ -163,31 +167,19 @@ fn unterminated_single_quoted_scalar_produces_error() {
     );
 }
 
-#[test]
-fn unterminated_double_quoted_scalar_produces_error() {
-    let input = "key: \"unterminated\n";
-    assert!(first_error(input).is_some(), "expected parse error");
-    assert!(
-        matches!(load(input), Err(LoadError::Parse { .. })),
-        "expected LoadError::Parse"
-    );
-}
+// ===========================================================================
+// Group C: Error detection — unterminated flow collections (uniform shape)
+//
+// input → first_error().is_some()
+// ===========================================================================
 
-#[test]
-fn unterminated_flow_sequence_produces_error() {
-    let input = "[a, b, c\n";
+#[rstest]
+#[case::sequence("[a, b, c\n")]
+#[case::mapping("{a: 1, b: 2\n")]
+fn unterminated_flow_collection_produces_error(#[case] input: &str) {
     assert!(
         first_error(input).is_some(),
-        "expected parse error for unterminated flow sequence"
-    );
-}
-
-#[test]
-fn unterminated_flow_mapping_produces_error() {
-    let input = "{a: 1, b: 2\n";
-    assert!(
-        first_error(input).is_some(),
-        "expected parse error for unterminated flow mapping"
+        "expected parse error for unterminated flow collection"
     );
 }
 

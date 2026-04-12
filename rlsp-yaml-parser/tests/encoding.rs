@@ -11,6 +11,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::encoding::{EncodingError, decode};
 use rlsp_yaml_parser::{Event, parse_events};
 
@@ -47,132 +49,45 @@ fn scalar_values(input: &str) -> Vec<String> {
 // decode() — malformed UTF-8 input
 // ===========================================================================
 
-#[test]
-fn decode_rejects_lone_continuation_byte() {
-    assert_eq!(decode(&[0x80]), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_high_continuation_byte() {
-    assert_eq!(decode(&[0xBF]), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_incomplete_two_byte_sequence() {
-    // Two-byte lead 0xC3 without its continuation byte.
-    assert_eq!(decode(&[0xC3]), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_incomplete_three_byte_sequence() {
-    // Three-byte lead 0xE2 with only one continuation byte (needs two).
-    assert_eq!(decode(&[0xE2, 0x82]), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_incomplete_four_byte_sequence() {
-    // Four-byte lead 0xF0 with two continuations (needs three).
-    assert_eq!(
-        decode(&[0xF0, 0x9F, 0x98]),
-        Err(EncodingError::InvalidBytes)
-    );
-}
-
-#[test]
-fn decode_rejects_overlong_encoding() {
-    // 0xC0 0x80 is an overlong encoding of NUL — forbidden in UTF-8.
-    assert_eq!(decode(&[0xC0, 0x80]), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_byte_0xfe() {
-    // 0xFE followed by a non-BOM byte, so detect_encoding falls through to
-    // UTF-8 and decode_utf8 rejects the invalid lead byte.
-    assert_eq!(decode(&[0xFE, b'x']), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_byte_0xff_without_bom_context() {
-    // 0xFF followed by a non-BOM byte avoids UTF-16 LE BOM detection,
-    // landing in the UTF-8 path which rejects 0xFF.
-    assert_eq!(decode(&[0xFF, b'x']), Err(EncodingError::InvalidBytes));
-}
-
-#[test]
-fn decode_rejects_truncated_utf8_at_eof() {
-    // Valid ASCII followed by a truncated two-byte sequence at EOF.
-    assert_eq!(decode(b"hello\xC3"), Err(EncodingError::InvalidBytes));
+#[rstest]
+#[case::lone_continuation(&[0x80u8] as &[u8])]
+#[case::high_continuation(&[0xBFu8] as &[u8])]
+#[case::incomplete_two_byte(&[0xC3u8] as &[u8])]
+#[case::incomplete_three_byte(&[0xE2u8, 0x82] as &[u8])]
+#[case::incomplete_four_byte(&[0xF0u8, 0x9F, 0x98] as &[u8])]
+#[case::overlong_nul(&[0xC0u8, 0x80] as &[u8])]
+#[case::invalid_0xfe(&[0xFEu8, b'x'] as &[u8])]
+#[case::invalid_0xff(&[0xFFu8, b'x'] as &[u8])]
+#[case::truncated_at_eof(b"hello\xC3" as &[u8])]
+fn decode_invalid_bytes_returns_error(#[case] input: &[u8]) {
+    assert_eq!(decode(input), Err(EncodingError::InvalidBytes));
 }
 
 // ===========================================================================
 // decode() — valid multibyte UTF-8
 // ===========================================================================
 
-#[test]
-fn decode_accepts_two_byte_utf8_sequence() {
-    // U+00E9 LATIN SMALL LETTER E WITH ACUTE — 2-byte UTF-8.
-    assert_eq!(decode("café".as_bytes()).unwrap(), "café");
-}
-
-#[test]
-fn decode_accepts_three_byte_utf8_sequence() {
-    // CJK characters — 3-byte UTF-8 each.
-    assert_eq!(decode("中文".as_bytes()).unwrap(), "中文");
-}
-
-#[test]
-fn decode_accepts_four_byte_utf8_sequence() {
-    // U+1F600 GRINNING FACE emoji — 4-byte UTF-8.
-    assert_eq!(decode("\u{1F600}".as_bytes()).unwrap(), "😀");
-}
-
-#[test]
-fn decode_accepts_arabic_script() {
-    let arabic = "\u{0639}\u{0631}\u{0628}\u{064A}";
-    let result = decode(arabic.as_bytes()).unwrap();
-    assert_eq!(result, arabic);
+#[rstest]
+#[case::two_byte("café", "café")]
+#[case::three_byte("中文", "中文")]
+#[case::four_byte("\u{1F600}", "😀")]
+#[case::arabic("\u{0639}\u{0631}\u{0628}\u{064A}", "\u{0639}\u{0631}\u{0628}\u{064A}")]
+fn decode_valid_multibyte_roundtrip(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(decode(input.as_bytes()).unwrap(), expected);
 }
 
 // ===========================================================================
 // decode() — BOM handling
 // ===========================================================================
 
-#[test]
-fn decode_strips_utf8_bom() {
-    assert_eq!(
-        decode(&[0xEF, 0xBB, 0xBF, b'k', b'e', b'y']).unwrap(),
-        "key"
-    );
-}
-
-#[test]
-fn decode_strips_utf16_le_bom() {
-    // UTF-16 LE BOM + "hi" in UTF-16 LE.
-    assert_eq!(decode(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]).unwrap(), "hi");
-}
-
-#[test]
-fn decode_strips_utf16_be_bom() {
-    // UTF-16 BE BOM + "hi" in UTF-16 BE.
-    assert_eq!(decode(&[0xFE, 0xFF, 0x00, 0x68, 0x00, 0x69]).unwrap(), "hi");
-}
-
-#[test]
-fn decode_strips_utf32_le_bom() {
-    // UTF-32 LE BOM + "A" in UTF-32 LE.
-    assert_eq!(
-        decode(&[0xFF, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00]).unwrap(),
-        "A"
-    );
-}
-
-#[test]
-fn decode_strips_utf32_be_bom() {
-    // UTF-32 BE BOM + "A" in UTF-32 BE.
-    assert_eq!(
-        decode(&[0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x41]).unwrap(),
-        "A"
-    );
+#[rstest]
+#[case::utf8_bom(&[0xEFu8, 0xBB, 0xBF, b'k', b'e', b'y'] as &[u8], "key")]
+#[case::utf16_le_bom(&[0xFFu8, 0xFE, 0x68, 0x00, 0x69, 0x00] as &[u8], "hi")]
+#[case::utf16_be_bom(&[0xFEu8, 0xFF, 0x00, 0x68, 0x00, 0x69] as &[u8], "hi")]
+#[case::utf32_le_bom(&[0xFFu8, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00] as &[u8], "A")]
+#[case::utf32_be_bom(&[0x00u8, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x41] as &[u8], "A")]
+fn decode_bom_stripping(#[case] input: &[u8], #[case] expected: &str) {
+    assert_eq!(decode(input).unwrap(), expected);
 }
 
 // ===========================================================================
@@ -222,9 +137,12 @@ fn decode_rejects_utf32_out_of_range_codepoint() {
 // NUL (U+0000) is valid UTF-8 but excluded from YAML 1.2 c-printable [1],
 // so the parser should reject it in all content positions.
 
-#[test]
-fn parse_events_rejects_nul_in_plain_scalar() {
-    assert!(has_parse_error("key: val\0ue\n"));
+#[rstest]
+#[case::plain_scalar("key: val\0ue\n")]
+#[case::comment("key: value  # comment\0here\n")]
+#[case::standalone("\0\n")]
+fn parse_events_nul_produces_error(#[case] input: &str) {
+    assert!(has_parse_error(input));
 }
 
 #[test]
@@ -234,16 +152,6 @@ fn parse_events_accepts_nul_in_double_quoted_scalar() {
     // that is not '"' or '\'. NUL passes that filter, so it is accepted inside
     // double-quoted scalars. Assert actual behavior.
     assert!(!has_parse_error("key: \"val\0ue\"\n"));
-}
-
-#[test]
-fn parse_events_rejects_nul_in_comment() {
-    assert!(has_parse_error("key: value  # comment\0here\n"));
-}
-
-#[test]
-fn parse_events_rejects_nul_as_standalone() {
-    assert!(has_parse_error("\0\n"));
 }
 
 // ===========================================================================
