@@ -69,7 +69,20 @@ impl<'input> EventIter<'input> {
             self.state = IterState::Done;
             return StepResult::Continue;
         }
-        if self.lexer.is_document_end() {
+
+        // Cache the trimmed content and first byte of the next line once, so
+        // the alias/tag/anchor/flow probes below don't each re-trim.
+        // `trimmed` borrows from the original input (`'input` lifetime), so it
+        // stays valid across `&mut self` calls that follow.
+        let (peeked_indent, trimmed, first_byte): (usize, &'input str, Option<u8>) =
+            self.lexer.peek_next_line().map_or((0, "", None), |line| {
+                let t: &'input str = line.content.trim_start_matches(' ');
+                (line.indent, t, t.as_bytes().first().copied())
+            });
+
+        // Document markers (`---`/`...`) must be at column 0 (YAML 1.2 §9.1).
+        // Any line with indent > 0 cannot be a marker — skip the function call.
+        if peeked_indent == 0 && self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(true);
@@ -88,7 +101,7 @@ impl<'input> EventIter<'input> {
             self.drain_trailing_comment();
             return StepResult::Continue;
         }
-        if self.lexer.is_directives_end() {
+        if peeked_indent == 0 && self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
@@ -192,7 +205,6 @@ impl<'input> EventIter<'input> {
             let content: &'input str = peek.content;
             let line_pos = peek.pos;
             let line_break_type = peek.break_type;
-            let trimmed = content.trim_start_matches(' ');
             if let Some(after_star) = trimmed.strip_prefix('*') {
                 let leading = content.len() - trimmed.len();
                 let star_pos = Pos {
@@ -273,7 +285,6 @@ impl<'input> EventIter<'input> {
             let line_pos = peek.pos;
             let line_indent = peek.indent;
             let line_break_type = peek.break_type;
-            let trimmed = content.trim_start_matches(' ');
             if trimmed.starts_with('!') {
                 let leading = content.len() - trimmed.len();
                 let bang_pos = Pos {
@@ -410,7 +421,6 @@ impl<'input> EventIter<'input> {
             let line_pos = peek.pos;
             let line_indent = peek.indent;
             let line_break_type = peek.break_type;
-            let trimmed = content.trim_start_matches(' ');
             if let Some(after_amp) = trimmed.strip_prefix('&') {
                 // We only look for `&` at the start of the trimmed line.
                 // Tags (`!`) before `&` are handled in Task 17.
@@ -571,11 +581,10 @@ impl<'input> EventIter<'input> {
         // ---- Flow collection detection: `[` or `{` starts a flow collection ----
         // Stray closing flow indicators (`]`, `}`) in block context are errors.
 
+        if first_byte == Some(b'[') || first_byte == Some(b'{') {
+            return self.handle_flow_collection();
+        }
         if let Some(line) = self.lexer.peek_next_line() {
-            let trimmed = line.content.trim_start_matches(' ');
-            if trimmed.starts_with('[') || trimmed.starts_with('{') {
-                return self.handle_flow_collection();
-            }
             if trimmed.starts_with(']') || trimmed.starts_with('}') {
                 let err_pos = line.pos;
                 let ch = trimmed.chars().next().unwrap_or(']');

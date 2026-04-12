@@ -659,6 +659,34 @@ mod documents {
         );
     }
 
+    #[test]
+    fn indented_dots_is_not_a_document_end_marker() {
+        // "  ..." has indent=2; it is a plain scalar (not a doc-end marker).
+        // Verifies that `peeked_indent == 0` guard in Change B does not suppress
+        // the line — it reaches `is_document_end()` (which also returns false for
+        // indented content) and then falls through to scalar parsing.
+        let events = event_variants("---\n  ...\n");
+        assert_eq!(
+            events,
+            [
+                Event::StreamStart,
+                Event::DocumentStart {
+                    explicit: true,
+                    version: None,
+                    tag_directives: vec![]
+                },
+                Event::Scalar {
+                    value: "...".into(),
+                    style: rlsp_yaml_parser::ScalarStyle::Plain,
+                    anchor: None,
+                    tag: None,
+                },
+                Event::DocumentEnd { explicit: false },
+                Event::StreamEnd,
+            ]
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Group J — Span assertions
     // -----------------------------------------------------------------------
