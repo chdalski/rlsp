@@ -329,9 +329,7 @@ impl<'input> Lexer<'input> {
             if !line_continuation {
                 if pending_blanks > 0 {
                     // Blank lines → literal newlines (N blank lines → N newlines).
-                    for _ in 0..pending_blanks {
-                        owned.push('\n');
-                    }
+                    owned.extend(std::iter::repeat_n('\n', pending_blanks));
                 } else {
                     // Normal fold: single newline between non-blank lines → space.
                     owned.push(' ');

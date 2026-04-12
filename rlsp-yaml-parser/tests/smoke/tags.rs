@@ -504,9 +504,10 @@ fn tagged_sequence_span_is_at_dash_indicator() {
 
 #[test]
 fn tag_prefix_line_not_silently_dropped() {
-    // `!str value\n` was previously silently consumed by the fallback
-    // `consume_line` at lib.rs:1124 (the "unrecognised content" path).
-    // This test ensures a Scalar event is produced.
+    // `!str value\n` was previously silently consumed by the fallback path
+    // in `StepState::step` (`event_iter/step.rs`) that calls `consume_line`
+    // for unrecognised content lines. This test ensures a Scalar event is
+    // produced.
     let events = evs("!str value\n");
     assert!(
         events.iter().any(|e| matches!(e, Event::Scalar { .. })),

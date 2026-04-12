@@ -200,9 +200,7 @@ impl<'input> Lexer<'input> {
                 }
 
                 // Content line. Flush any pending blank lines first.
-                for _ in 0..trailing_newlines {
-                    out.push('\n');
-                }
+                out.extend(std::iter::repeat_n('\n', trailing_newlines));
                 trailing_newlines = 0;
 
                 // SAFETY: peek succeeded on this loop iteration; LineBuffer invariant.
@@ -381,9 +379,7 @@ impl<'input> Lexer<'input> {
                 if has_content {
                     if trailing_newlines > 0 {
                         // N blank lines → N newlines (first break discarded).
-                        for _ in 0..trailing_newlines {
-                            out.push('\n');
-                        }
+                        out.extend(std::iter::repeat_n('\n', trailing_newlines));
                     } else if prev_more_indented || is_more_indented {
                         // Break surrounding a more-indented line is preserved.
                         out.push('\n');
@@ -493,74 +489,72 @@ pub(super) fn parse_block_header(
                     }),
                 );
             }
-            Some(ch) => {
-                if ch == '+' {
-                    if chomp.is_some() {
-                        return (
-                            Chomp::Clip,
-                            None,
-                            Some(Error {
-                                pos,
-                                message: "duplicate chomp indicator in block scalar header"
-                                    .to_owned(),
-                            }),
-                        );
-                    }
-                    chomp = Some(Chomp::Keep);
-                    byte_offset += ch.len_utf8();
-                    pos = pos.advance(ch);
-                } else if ch == '-' {
-                    if chomp.is_some() {
-                        return (
-                            Chomp::Clip,
-                            None,
-                            Some(Error {
-                                pos,
-                                message: "duplicate chomp indicator in block scalar header"
-                                    .to_owned(),
-                            }),
-                        );
-                    }
-                    chomp = Some(Chomp::Strip);
-                    byte_offset += ch.len_utf8();
-                    pos = pos.advance(ch);
-                } else if ch.is_ascii_digit() {
-                    if ch == '0' {
-                        return (
-                            Chomp::Clip,
-                            None,
-                            Some(Error {
-                                pos,
-                                message: "indent indicator '0' is not valid in block scalar header"
-                                    .to_owned(),
-                            }),
-                        );
-                    }
-                    if explicit_indent.is_some() {
-                        return (
-                            Chomp::Clip,
-                            None,
-                            Some(Error {
-                                pos,
-                                message: "duplicate indent indicator in block scalar header"
-                                    .to_owned(),
-                            }),
-                        );
-                    }
-                    explicit_indent = Some(ch as usize - '0' as usize);
-                    byte_offset += ch.len_utf8();
-                    pos = pos.advance(ch);
-                } else {
-                    // Invalid indicator character.
+            Some('+') => {
+                if chomp.is_some() {
                     return (
                         Chomp::Clip,
                         None,
                         Some(Error {
                             pos,
-                            message: format!("invalid block scalar indicator character '{ch}'"),
+                            message: "duplicate chomp indicator in block scalar header".to_owned(),
                         }),
                     );
                 }
+                chomp = Some(Chomp::Keep);
+                byte_offset += '+'.len_utf8();
+                pos = pos.advance('+');
+            }
+            Some('-') => {
+                if chomp.is_some() {
+                    return (
+                        Chomp::Clip,
+                        None,
+                        Some(Error {
+                            pos,
+                            message: "duplicate chomp indicator in block scalar header".to_owned(),
+                        }),
+                    );
+                }
+                chomp = Some(Chomp::Strip);
+                byte_offset += '-'.len_utf8();
+                pos = pos.advance('-');
+            }
+            Some('0') => {
+                return (
+                    Chomp::Clip,
+                    None,
+                    Some(Error {
+                        pos,
+                        message: "indent indicator '0' is not valid in block scalar header"
+                            .to_owned(),
+                    }),
+                );
+            }
+            Some(ch @ '1'..='9') => {
+                if explicit_indent.is_some() {
+                    return (
+                        Chomp::Clip,
+                        None,
+                        Some(Error {
+                            pos,
+                            message: "duplicate indent indicator in block scalar header".to_owned(),
+                        }),
+                    );
+                }
+                explicit_indent = Some(ch as usize - '0' as usize);
+                byte_offset += ch.len_utf8();
+                pos = pos.advance(ch);
+            }
+            Some(ch) => {
+                // Invalid indicator character.
+                return (
+                    Chomp::Clip,
+                    None,
+                    Some(Error {
+                        pos,
+                        message: format!("invalid block scalar indicator character '{ch}'"),
+                    }),
+                );
             }
         }
     }
@@ -618,9 +612,7 @@ pub(super) fn apply_chomping(
         }
         Chomp::Keep => {
             // Keep the trailing `\n` from the last content line plus all blank lines.
-            for _ in 0..trailing_blank_count {
-                content.push('\n');
-            }
+            content.extend(std::iter::repeat_n('\n', trailing_blank_count));
         }
     }
     content

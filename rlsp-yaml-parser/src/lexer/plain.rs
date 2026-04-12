@@ -222,9 +222,7 @@ impl<'input> Lexer<'input> {
 
             let buf = result.get_or_insert_with(|| String::from(first_value_ref));
             if pending_blanks > 0 {
-                for _ in 0..pending_blanks {
-                    buf.push('\n');
-                }
+                buf.extend(std::iter::repeat_n('\n', pending_blanks));
                 pending_blanks = 0;
             } else {
                 buf.push(' ');

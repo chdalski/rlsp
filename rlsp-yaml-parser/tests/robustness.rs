@@ -60,9 +60,10 @@ d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]
 #[test]
 fn circular_alias_cross_reference_returns_undefined() {
     // Depth-2 cross-reference: anchor a contains *b, anchor b contains *a.
-    // The loader registers mapping/sequence anchors AFTER parsing their
-    // content (loader.rs:399). When expanding anchor a's value, *b is
-    // encountered before b is registered, producing UndefinedAlias.
+    // The loader calls `register_anchor` for mappings and sequences only
+    // after all their content has been parsed (post-MappingEnd /
+    // SequenceEnd). When expanding anchor a's value, *b is encountered
+    // before b is registered, producing UndefinedAlias.
     // CircularAlias requires both anchors to be registered before expansion
     // begins, which sequential event processing prevents.
     let input = "\
@@ -95,7 +96,7 @@ fn circular_alias_via_scalar_redefine_returns_error() {
     // Define &a as a scalar first, then &b as a sequence containing *a and *b.
     // *a resolves to the scalar (no cycle). *b is encountered while b's
     // content is being parsed — b is not yet registered, producing UndefinedAlias.
-    // The CircularAlias code path (loader.rs:528) is defensive — it guards
+    // The `CircularAlias` guard inside `expand_node` is defensive — it guards
     // against future loader changes that might enable pre-registration. The
     // expansion limit (AliasExpansionLimitExceeded) is the primary defense.
     let input = "\
