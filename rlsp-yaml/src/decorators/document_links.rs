@@ -28,7 +28,7 @@ static URL_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
 /// # Examples
 ///
 /// ```
-/// use rlsp_yaml::document_links::find_document_links;
+/// use rlsp_yaml::decorators::document_links::find_document_links;
 ///
 /// let text = "homepage: https://example.com\n# See https://docs.example.com\n";
 /// let links = find_document_links(text, None);

@@ -368,9 +368,9 @@ impl Backend {
         let mut diagnostics = result.diagnostics.clone();
 
         // Run validators and combine diagnostics
-        diagnostics.extend(crate::validators::validate_unused_anchors(text));
-        diagnostics.extend(crate::validators::validate_flow_style(text));
-        diagnostics.extend(crate::validators::validate_duplicate_keys(
+        diagnostics.extend(crate::validation::validators::validate_unused_anchors(text));
+        diagnostics.extend(crate::validation::validators::validate_flow_style(text));
+        diagnostics.extend(crate::validation::validators::validate_duplicate_keys(
             &result.documents,
         ));
 
@@ -379,7 +379,7 @@ impl Backend {
         // any other lock below.
         let key_ordering = self.get_key_ordering();
         if key_ordering {
-            diagnostics.extend(crate::validators::validate_key_ordering(
+            diagnostics.extend(crate::validation::validators::validate_key_ordering(
                 text,
                 &result.documents,
             ));
@@ -387,7 +387,7 @@ impl Backend {
 
         let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
         allowed_tags.extend(crate::schema::extract_custom_tags(text));
-        diagnostics.extend(crate::validators::validate_custom_tags(
+        diagnostics.extend(crate::validation::validators::validate_custom_tags(
             text,
             &result.documents,
             &allowed_tags,
@@ -456,7 +456,7 @@ impl Backend {
         }
 
         // Filter out suppressed diagnostics before storing and publishing.
-        let suppressions = crate::suppression::build_suppression_map(text);
+        let suppressions = crate::validation::suppression::build_suppression_map(text);
         diagnostics.retain(|diag| {
             let code = diag.code.as_ref().and_then(|c| match c {
                 NumberOrString::String(s) => Some(s.as_str()),
@@ -510,7 +510,7 @@ impl Backend {
             }),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
-                    legend: crate::semantic_tokens::legend(),
+                    legend: crate::analysis::semantic_tokens::legend(),
                     full: Some(SemanticTokensFullOptions::Bool(true)),
                     ..SemanticTokensOptions::default()
                 }),
@@ -767,7 +767,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let location = crate::references::goto_definition(&text, &uri, position);
+        let location = crate::navigation::references::goto_definition(&text, &uri, position);
         Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
@@ -786,8 +786,12 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let locations =
-            crate::references::find_references(&text, &uri, position, include_declaration);
+        let locations = crate::navigation::references::find_references(
+            &text,
+            &uri,
+            position,
+            include_declaration,
+        );
         if locations.is_empty() {
             return Ok(None);
         }
@@ -808,7 +812,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let mut ranges = crate::folding::folding_ranges(&text);
+        let mut ranges = crate::analysis::folding::folding_ranges(&text);
         let limit = self.get_max_items_computed();
         ranges.truncate(limit);
 
@@ -832,7 +836,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let links = crate::document_links::find_document_links(&text, Some(&uri));
+        let links = crate::decorators::document_links::find_document_links(&text, Some(&uri));
         if links.is_empty() {
             return Ok(None);
         }
@@ -858,7 +862,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let result = crate::selection::selection_ranges(&text, docs.as_ref(), &params.positions);
+        let result =
+            crate::analysis::selection::selection_ranges(&text, docs.as_ref(), &params.positions);
         if result.is_empty() {
             return Ok(None);
         }
@@ -882,7 +887,7 @@ impl LanguageServer for Backend {
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
-        let actions = crate::code_actions::code_actions(&text, range, &diagnostics, &uri);
+        let actions = crate::editing::code_actions::code_actions(&text, range, &diagnostics, &uri);
         if actions.is_empty() {
             return Ok(None);
         }
@@ -910,7 +915,7 @@ impl LanguageServer for Backend {
             .ok()
             .and_then(|cache| cache.get(&url).cloned());
 
-        let lenses = crate::code_lens::code_lenses(&url, schema.as_ref());
+        let lenses = crate::decorators::code_lens::code_lenses(&url, schema.as_ref());
         if lenses.is_empty() {
             return Ok(None);
         }
@@ -936,7 +941,7 @@ impl LanguageServer for Backend {
         let insert_spaces = params.options.insert_spaces;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
-        let options = crate::formatter::YamlFormatOptions {
+        let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
                 .and_then(|s| s.format_print_width)
@@ -952,7 +957,7 @@ impl LanguageServer for Backend {
         };
         drop(settings);
 
-        let formatted = crate::formatter::format_yaml(&text, &options);
+        let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
         // No changes — return None.
         if formatted == text {
@@ -1009,7 +1014,7 @@ impl LanguageServer for Backend {
         let insert_spaces = params.options.insert_spaces;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
-        let options = crate::formatter::YamlFormatOptions {
+        let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
                 .and_then(|s| s.format_print_width)
@@ -1025,7 +1030,7 @@ impl LanguageServer for Backend {
         };
         drop(settings);
 
-        let formatted = crate::formatter::format_yaml(&text, &options);
+        let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
         // Extract the lines within the requested range from both the original
         // and the formatted output. The range end is exclusive at character 0
@@ -1099,7 +1104,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let edits = crate::on_type_formatting::format_on_type(&text, position, ch, tab_size);
+        let edits =
+            crate::editing::on_type_formatting::format_on_type(&text, position, ch, tab_size);
         if edits.is_empty() {
             return Ok(None);
         }
@@ -1120,7 +1126,7 @@ impl LanguageServer for Backend {
         let Some(text) = text else {
             return Ok(None);
         };
-        let tokens = crate::semantic_tokens::semantic_tokens(&text);
+        let tokens = crate::analysis::semantic_tokens::semantic_tokens(&text);
         if tokens.is_empty() {
             return Ok(None);
         }
@@ -1148,7 +1154,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let mut symbols = crate::symbols::document_symbols(&text, docs.as_ref());
+        let mut symbols = crate::analysis::symbols::document_symbols(&text, docs.as_ref());
         let limit = self.get_max_items_computed();
         symbols.truncate(limit);
 
@@ -1176,7 +1182,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let range = crate::rename::prepare_rename(&text, position);
+        let range = crate::navigation::rename::prepare_rename(&text, position);
         Ok(range.map(PrepareRenameResponse::Range))
     }
 
@@ -1195,7 +1201,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        Ok(crate::rename::rename(&text, &uri, position, &new_name))
+        Ok(crate::navigation::rename::rename(
+            &text, &uri, position, &new_name,
+        ))
     }
 
     async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
@@ -1214,7 +1222,7 @@ impl LanguageServer for Backend {
             return Ok(Vec::new());
         };
 
-        let colors = crate::color::find_colors(&text)
+        let colors = crate::decorators::color::find_colors(&text)
             .into_iter()
             .map(|m| ColorInformation {
                 range: m.range,
@@ -1229,7 +1237,7 @@ impl LanguageServer for Backend {
         &self,
         params: ColorPresentationParams,
     ) -> Result<Vec<ColorPresentation>> {
-        Ok(crate::color::color_presentations(params.color))
+        Ok(crate::decorators::color::color_presentations(params.color))
     }
 }
 

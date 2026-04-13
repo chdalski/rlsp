@@ -6,25 +6,16 @@
 //! This crate provides the library modules used by the `rlsp-yaml` binary.
 //! See the [repository](https://github.com/chdalski/rlsp) for usage and configuration.
 
-pub mod code_actions;
-pub mod code_lens;
-pub mod color;
+pub mod analysis;
 pub mod completion;
-pub mod document_links;
+pub mod decorators;
 pub mod document_store;
-pub mod folding;
-pub mod formatter;
+pub mod editing;
 pub mod hover;
-pub mod on_type_formatting;
+pub mod navigation;
 pub mod parser;
-pub mod references;
-pub mod rename;
 pub mod scalar_helpers;
 pub mod schema;
 pub mod schema_validation;
-pub mod selection;
-pub mod semantic_tokens;
 pub mod server;
-pub mod suppression;
-pub mod symbols;
-pub mod validators;
+pub mod validation;

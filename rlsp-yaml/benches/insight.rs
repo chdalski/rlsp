@@ -5,10 +5,10 @@
 mod fixtures;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use rlsp_yaml::analysis::selection::selection_ranges;
 use rlsp_yaml::hover::hover_at;
-use rlsp_yaml::references::find_references;
-use rlsp_yaml::selection::selection_ranges;
-use rlsp_yaml::validators::{
+use rlsp_yaml::navigation::references::find_references;
+use rlsp_yaml::validation::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
     validate_unused_anchors,
 };

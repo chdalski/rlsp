@@ -5,9 +5,9 @@
 mod fixtures;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use rlsp_yaml::analysis::semantic_tokens::semantic_tokens;
 use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::document_store::DocumentStore;
-use rlsp_yaml::semantic_tokens::semantic_tokens;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Position, Url};

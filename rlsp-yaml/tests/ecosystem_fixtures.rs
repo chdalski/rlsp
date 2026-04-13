@@ -12,9 +12,9 @@
 
 #![expect(clippy::indexing_slicing, clippy::expect_used, reason = "test code")]
 
-use rlsp_yaml::formatter::{YamlFormatOptions, format_yaml};
+use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
-use rlsp_yaml::validators::{validate_duplicate_keys, validate_flow_style};
+use rlsp_yaml::validation::validators::{validate_duplicate_keys, validate_flow_style};
 // ---- Helpers ----------------------------------------------------------------
 
 fn default_opts() -> YamlFormatOptions {

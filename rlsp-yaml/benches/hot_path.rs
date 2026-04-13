@@ -5,10 +5,10 @@ mod fixtures;
 use std::collections::HashSet;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use rlsp_yaml::formatter::{YamlFormatOptions, format_yaml};
+use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::schema_validation::validate_schema;
-use rlsp_yaml::validators::{
+use rlsp_yaml::validation::validators::{
     validate_duplicate_keys, validate_flow_style, validate_key_ordering, validate_unused_anchors,
 };
 use rlsp_yaml_parser::Span;
@@ -38,7 +38,7 @@ fn bench_parse_and_validate(c: &mut Criterion) {
                 let result = parse_yaml(text);
                 let _ = validate_unused_anchors(text);
                 let _ = validate_flow_style(text);
-                let _ = rlsp_yaml::validators::validate_custom_tags(
+                let _ = rlsp_yaml::validation::validators::validate_custom_tags(
                     text,
                     &result.documents,
                     &allowed_tags,
