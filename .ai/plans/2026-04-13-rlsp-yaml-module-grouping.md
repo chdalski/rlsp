@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -92,7 +92,7 @@ Doc comment in `document_links.rs` references `rlsp_yaml::document_links` — up
 ## Steps
 
 - [x] Clarify grouping style and module file convention with user
-- [ ] Create module groups, move files, update all paths
+- [x] Create module groups, move files, update all paths (52f0ce1)
 - [ ] Convert schema/ and schema_validation/ to named-file style
 - [ ] Verify: cargo fmt, clippy, build, test, bench compile
 
@@ -103,16 +103,16 @@ Doc comment in `document_links.rs` references `rlsp_yaml::document_links` — up
 Move files into 5 new module groups and update every
 import path.
 
-- [ ] Create 5 group directories: `navigation/`, `editing/`, `analysis/`, `validation/`, `decorators/`
-- [ ] Create 5 group module files with `pub mod` declarations
-- [ ] Move 14 source files to their groups via `git mv`
-- [ ] Update `lib.rs`: replace 14 flat module declarations with 5 group modules
-- [ ] Update `server.rs`: insert group prefix in all ~30 `crate::` paths
-- [ ] Update `schema_validation/mod.rs`: `crate::scalar_helpers` path is unchanged (stays at root)
-- [ ] Update doc comment in `document_links.rs` referencing `rlsp_yaml::document_links`
-- [ ] Update test imports in `tests/ecosystem_fixtures.rs`
-- [ ] Update bench imports in `benches/latency.rs`, `benches/insight.rs`, `benches/hot_path.rs`
-- [ ] Verify: `cargo fmt && cargo clippy --all-targets && cargo test && cargo build`
+- [x] Create 5 group directories: `navigation/`, `editing/`, `analysis/`, `validation/`, `decorators/`
+- [x] Create 5 group module files with `pub mod` declarations
+- [x] Move 14 source files to their groups via `git mv`
+- [x] Update `lib.rs`: replace 14 flat module declarations with 5 group modules
+- [x] Update `server.rs`: insert group prefix in all ~30 `crate::` paths
+- [x] Update `schema_validation/mod.rs`: `crate::scalar_helpers` path is unchanged (stays at root)
+- [x] Update doc comment in `document_links.rs` referencing `rlsp_yaml::document_links`
+- [x] Update test imports in `tests/ecosystem_fixtures.rs`
+- [x] Update bench imports in `benches/latency.rs`, `benches/insight.rs`, `benches/hot_path.rs`
+- [x] Verify: `cargo fmt && cargo clippy --all-targets && cargo test && cargo build`
 
 ### Task 2: Convert schema and schema_validation to named-file style
 
