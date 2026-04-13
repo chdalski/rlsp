@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -77,7 +77,7 @@ stress-focused variants. `loader.rs` Group F is redundant.
 
 ## Steps
 
-- [ ] Delete 7 duplicate tests from `conformance.rs`
+- [x] Delete 7 duplicate tests from `conformance.rs` (09d2550)
 - [ ] Move 10 quoted-key tests from `conformance.rs` to
       their correct homes
 - [ ] Delete 5 duplicate DoS-limit tests from `loader.rs`
@@ -113,11 +113,11 @@ tests. After deletion, `conformance.rs` should contain only
 the yaml-test-suite driver (`yaml_test_suite` function) and
 the quoted-key tests (moved in Task 2).
 
-- [ ] Delete 4 anchor/tag duplicate tests and their section
+- [x] Delete 4 anchor/tag duplicate tests and their section
       comment
-- [ ] Delete 3 comment attachment duplicate tests and their
+- [x] Delete 3 comment attachment duplicate tests and their
       section comment
-- [ ] Run `cargo test` to verify nothing broke
+- [x] Run `cargo test` to verify nothing broke
 
 ### Task 2: Move quoted-key tests to correct homes
 
