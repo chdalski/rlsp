@@ -12,7 +12,6 @@ type: project
 
 ## Open: rlsp-yaml
 
-- **Duplicate key enforcement levels** — Same pattern as flow style: add `duplicateKeys` severity setting (`"off"`/`"warning"`/`"error"`) and `formatRemoveDuplicateKeys` auto-fix toggle (keeps last occurrence per YAML spec).
 - **Custom tag type annotations** — RedHat's customTags supports `!include scalar`, `!ref mapping` type annotations. Ours is a plain string allowlist — add type annotation support.
 
 ## Open: rlsp-yaml-parser
