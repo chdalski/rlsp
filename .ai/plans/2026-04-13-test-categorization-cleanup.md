@@ -80,7 +80,7 @@ stress-focused variants. `loader.rs` Group F is redundant.
 - [x] Delete 7 duplicate tests from `conformance.rs` (09d2550)
 - [x] Move 10 quoted-key tests from `conformance.rs` to
       their correct homes (59715f3)
-- [ ] Delete 5 duplicate DoS-limit tests from `loader.rs`
+- [x] Delete 5 duplicate DoS-limit tests from `loader.rs` (95c0b5b)
 - [ ] Verify all tests pass after changes
 
 ## Tasks
@@ -171,9 +171,9 @@ Delete `loader.rs` Group F (5 tests) that duplicate
 Also delete the Group F section comment. After deletion,
 `loader.rs` Groups A–E and G–J remain.
 
-- [ ] Delete 5 DoS-limit tests and their section comment
-- [ ] Remove stale `use` imports if any become unused
-- [ ] Run `cargo test` to verify nothing broke
+- [x] Delete 5 DoS-limit tests and their section comment
+- [x] Remove stale `use` imports if any become unused
+- [x] Run `cargo test` to verify nothing broke
 
 ### Task 4: Final verification
 
