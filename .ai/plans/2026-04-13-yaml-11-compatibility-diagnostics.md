@@ -104,7 +104,7 @@ migration assistance. Their issue #532 (open since Aug
   boolean-typed field
 - [x] Wire `yamlVersion` setting to suppress/adjust
   diagnostics
-- [ ] Update VS Code extension settings
+- [x] Update VS Code extension settings
 - [ ] Update documentation (feature-log, configuration)
 
 ## Tasks
@@ -270,13 +270,15 @@ Wire both through `ServerSettings` in `config.ts` and
 Run `pnpm run build`, `pnpm run lint`, `pnpm run test`
 to verify the extension builds cleanly.
 
-- [ ] Add `rlsp-yaml.yamlVersion` to `package.json`
-- [ ] Add `rlsp-yaml.validate` to `package.json`
-- [ ] Update `ServerSettings` interface in `config.ts`
-- [ ] Update `getConfig()` in `config.ts`
-- [ ] `pnpm run build` passes
-- [ ] `pnpm run lint` passes
-- [ ] `pnpm run test` passes
+- [x] Add `rlsp-yaml.yamlVersion` to `package.json`
+- [x] Add `rlsp-yaml.validate` to `package.json`
+- [x] Update `ServerSettings` interface in `config.ts`
+- [x] Update `getConfig()` in `config.ts`
+- [x] `pnpm run build` passes
+- [x] `pnpm run lint` passes
+- [x] `pnpm run test` passes
+
+Commit: 15b92fa
 
 ### Task 5: Update documentation
 
