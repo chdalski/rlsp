@@ -53,8 +53,8 @@ The parser emits `CollectionStyle::Flow` / `CollectionStyle::Block` on `Event::S
 - [x] Add `style: CollectionStyle` to `Node::Mapping` and `Node::Sequence` in the parser AST
 - [x] Thread `CollectionStyle` from events through the loader into AST nodes
 - [x] Fix all compilation errors from the new field across the workspace
-- [ ] Add flow-style rendering to the formatter (sequences and mappings)
-- [ ] Make the formatter branch on `CollectionStyle` — preserve original style by default
+- [x] Add flow-style rendering to the formatter (sequences and mappings)
+- [x] Make the formatter branch on `CollectionStyle` — preserve original style by default
 - [ ] Add `flowStyle` severity setting and `formatEnforceBlockStyle` setting to the server
 - [ ] Wire severity setting into `validate_flow_style()` (skip when `"off"`, set severity from setting)
 - [ ] Wire `formatEnforceBlockStyle` into the formatter to override style when enabled
@@ -74,7 +74,7 @@ Add a `style: CollectionStyle` field to `Node::Mapping` and `Node::Sequence` in 
 - [x] Add unit tests verifying that flow-style and block-style collections carry the correct `CollectionStyle` through load → AST
 - [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
-### Task 2: Flow-style rendering in the formatter
+### Task 2: Flow-style rendering in the formatter — `20004bb`
 
 Add flow-style output paths in the formatter for sequences and mappings. Make the formatter branch on the node's `CollectionStyle`: emit flow output (`[a, b, c]` / `{a: 1, b: 2}`) for `Flow`, emit block output (current behavior) for `Block`. The `bracket_spacing` option already exists in `YamlFormatOptions` — use it for flow mappings.
 
@@ -89,14 +89,14 @@ The `group(concat([text("["), indent(concat([line(), items...])), line(), text("
 
 Add a `format_enforce_block_style: bool` field to `YamlFormatOptions`. When `true`, the formatter ignores the node's style and always emits block (current behavior). When `false` (default), the formatter respects the node's style.
 
-- [ ] Add `format_enforce_block_style` field to `YamlFormatOptions` (default `false`)
-- [ ] Implement flow sequence rendering (comma-separated items in `[...]`)
-- [ ] Implement flow mapping rendering (comma-separated key-value pairs in `{...}` / `{ ... }`)
-- [ ] Branch `sequence_to_doc()` and `mapping_to_doc()` on style (or add parallel flow functions)
-- [ ] When `format_enforce_block_style` is `true`, override style to block
-- [ ] Add unit tests: round-trip flow sequences, flow mappings, mixed flow/block, empty collections, nested flow, enforce-block-style override, multiline flow (exceeds print_width)
-- [ ] Integration test: format a document with flow collections, verify they are preserved
-- [ ] `cargo test` passes, `cargo clippy --all-targets` clean
+- [x] Add `format_enforce_block_style` field to `YamlFormatOptions` (default `false`)
+- [x] Implement flow sequence rendering (comma-separated items in `[...]`)
+- [x] Implement flow mapping rendering (comma-separated key-value pairs in `{...}` / `{ ... }`)
+- [x] Branch `sequence_to_doc()` and `mapping_to_doc()` on style (or add parallel flow functions)
+- [x] When `format_enforce_block_style` is `true`, override style to block
+- [x] Add unit tests: round-trip flow sequences, flow mappings, mixed flow/block, empty collections, nested flow, enforce-block-style override, multiline flow (exceeds print_width)
+- [x] Integration test: format a document with flow collections, verify they are preserved
+- [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
 ### Task 3: Settings and server wiring
 
