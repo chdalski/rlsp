@@ -235,6 +235,10 @@ mod tests {
     #[rstest]
     #[case::utf16_le_without_bom(&[b'a', 0x00, b'b', 0x00], Encoding::Utf16Le)]
     #[case::utf16_be_without_bom(&[0x00, b'a', 0x00, b'b'], Encoding::Utf16Be)]
+    // Test 63/64: 2-byte slices — covers the [a, 0x00, ..] and [0x00, a, ..] arms
+    // that also match when only two bytes are present.
+    #[case::utf16_le_two_byte_heuristic(&[b'a', 0x00], Encoding::Utf16Le)]
+    #[case::utf16_be_two_byte_heuristic(&[0x00, b'a'], Encoding::Utf16Be)]
     fn detect_encoding_null_byte_heuristic(#[case] bytes: &[u8], #[case] expected: Encoding) {
         assert_eq!(detect_encoding(bytes), expected);
     }
@@ -250,8 +254,21 @@ mod tests {
     #[case::utf16_be_no_bom(&[0x00, 0x68, 0x00, 0x69], "hi")]
     #[case::utf16_le_strips_bom(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00], "hi")]
     #[case::empty_input(b"", "")]
+    // Test 65: UTF-32 LE with BOM — covers the Endian::Little branch in decode_utf32.
+    // BOM (FF FE 00 00) + 'A' in UTF-32 LE (41 00 00 00).
+    #[case::utf32_le_with_bom(&[0xFF, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00], "A")]
     fn decode_ok(#[case] bytes: &[u8], #[case] expected: &str) {
         assert_eq!(decode(bytes).unwrap(), expected);
+    }
+
+    // Test 67: decode_utf32 BOM-skip flag — first chunk is BOM (stripped), second
+    // chunk is U+FEFF again (not skipped because skip_bom is false after first chunk).
+    #[test]
+    fn decode_utf32_be_second_bom_codepoint_kept_as_content() {
+        // UTF-32 BE BOM (first 4 bytes) + U+FEFF as content (next 4 bytes).
+        // Expected: first BOM stripped, second U+FEFF preserved as content.
+        let input: &[u8] = &[0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0xFE, 0xFF];
+        assert_eq!(decode(input).unwrap(), "\u{FEFF}");
     }
 
     #[test]

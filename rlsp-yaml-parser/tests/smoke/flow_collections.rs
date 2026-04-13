@@ -807,6 +807,273 @@ fn control_character_in_flow_collection_returns_error() {
 }
 
 // -----------------------------------------------------------------------
+// Group Q: Coverage gap tests — error paths and edge cases
+// -----------------------------------------------------------------------
+
+// Test 48: tab indentation in flow continuation
+#[test]
+fn tab_indent_in_flow_continuation_returns_error() {
+    // `[\n\ta\n]\n` — tab at start of non-blank continuation line inside flow
+    // collection: YAML 1.2 §6.2 — indentation uses spaces only.
+    let result: Vec<_> = parse_events("[\n\ta\n]\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "tab as indentation in flow continuation must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("tab") || err.message.contains("indentation"),
+            "error message should mention tab or indentation; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 49: flow continuation line not indented enough when inside block context
+#[test]
+fn flow_continuation_not_indented_enough_returns_error() {
+    // Flow sequence as value of a block mapping key; continuation line at column 0
+    // regresses to the block indent level, which is forbidden.
+    // "key:\n  [\n  a,\nb\n  ]\n" — `b` is at column 0, below the block indent of 2.
+    let input = "key:\n  [\n  a,\nb\n  ]\n";
+    let result: Vec<_> = parse_events(input).collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "flow continuation line at block indent level must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("not indented") || err.message.contains("continuation"),
+            "error message should mention indent or continuation; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 50: `]` used to close a flow mapping
+#[test]
+fn closing_bracket_on_flow_mapping_returns_error() {
+    let result: Vec<_> = parse_events("{a: b]\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(has_error, "']' closing a flow mapping must return an error");
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("'}'"),
+            "error message should mention expected '}}'; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 51: `}` used to close a flow sequence
+#[test]
+fn closing_brace_on_flow_sequence_returns_error() {
+    let result: Vec<_> = parse_events("[a, b}\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "'}}' closing a flow sequence must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("']'"),
+            "error message should mention expected ']'; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 52: `#` immediately after closing bracket without preceding space
+#[test]
+fn hash_immediately_after_close_bracket_returns_error() {
+    // `[a]#comment` — no space between `]` and `#`; not a valid comment.
+    let result: Vec<_> = parse_events("[a]#comment\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "'#' immediately after ']' without space must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("space") && err.message.contains('#'),
+            "error message should mention space and '#'; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 53: comment on its own line after flow collection is valid
+#[test]
+fn comment_on_own_line_after_flow_collection_is_valid() {
+    // `[a]\n# comment\n` — the comment on a separate line after the flow
+    // collection closes is processed by the block-context comment handler,
+    // not the flow-collection hash check.
+    let events = evs("[a]\n# a comment\n");
+    let scalars = scalar_values(&events);
+    assert_eq!(
+        scalars,
+        ["a"],
+        "scalar must be 'a'; comment on next line must not affect it"
+    );
+}
+
+// Test 54: block sequence entry `- ` (dash-space) inside flow sequence
+#[test]
+fn block_sequence_entry_dash_space_in_flow_sequence_returns_error() {
+    let result: Vec<_> = parse_events("[- a]\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "block sequence entry '-' followed by space inside flow must return an error"
+    );
+}
+
+// Test 55: block sequence entry `- ` (dash-tab) inside flow sequence
+#[test]
+fn block_sequence_entry_dash_tab_in_flow_sequence_returns_error() {
+    let result: Vec<_> = parse_events("[-\ta]\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "block sequence entry '-' followed by tab inside flow must return an error"
+    );
+}
+
+// Test 56: `-` at end of content (none after) inside flow sequence
+#[test]
+fn dash_at_end_of_flow_line_returns_error() {
+    // `[- ]` — dash followed by space, no value: treated as block sequence entry.
+    let result: Vec<_> = parse_events("[- ]\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "bare '-' followed by space inside flow must return an error"
+    );
+}
+
+// Test 57: `-` followed by digit is a valid plain scalar in flow context
+#[test]
+fn dash_followed_by_non_separator_is_plain_scalar() {
+    // `-1` is a legal plain scalar in flow context.
+    let events = evs("[-1]\n");
+    let scalars = scalar_values(&events);
+    assert_eq!(scalars, ["-1"], "'-1' is a plain scalar in flow context");
+}
+
+// Test 58: anchor before comma in mapping value position emits empty scalar with anchor
+#[test]
+fn anchor_before_comma_emits_empty_scalar_with_anchor() {
+    // `{a: &x , b: c}` — after emitting key `a`, parser is in Value phase
+    // (has_value=true).  `&x` sets pending_anchor.  When `,` appears with
+    // pending_anchor but no value scalar yet, the parser emits an empty scalar
+    // carrying the anchor, then resets the frame.
+    let events = evs("{a: &x , b: c}\n");
+    let has_anchored_empty = events.iter().any(|e| {
+        matches!(
+            e,
+            Event::Scalar {
+                anchor: Some("x"),
+                value,
+                ..
+            } if value.as_ref().is_empty()
+        )
+    });
+    assert!(
+        has_anchored_empty,
+        "anchor before comma in value position must produce an empty scalar with anchor 'x'; events: {events:?}"
+    );
+    let scalars = scalar_values(&events);
+    assert!(scalars.contains(&"b"), "scalar 'b' must be present");
+    assert!(scalars.contains(&"c"), "scalar 'c' must be present");
+}
+
+// Test 59: tag before comma in mapping value position emits empty scalar with tag
+#[test]
+fn tag_before_comma_emits_empty_scalar_with_tag() {
+    // `{a: !!str , b: c}` — after emitting key `a`, parser is in Value phase
+    // (has_value=true).  `!!str` sets pending_tag.  When `,` appears with
+    // pending_tag but no value scalar yet, the parser emits an empty scalar
+    // carrying the tag.
+    let events = evs("{a: !!str , b: c}\n");
+    let has_tagged_empty = events.iter().any(|e| {
+        matches!(
+            e,
+            Event::Scalar {
+                tag: Some(_),
+                value,
+                ..
+            } if value.as_ref().is_empty()
+        )
+    });
+    assert!(
+        has_tagged_empty,
+        "tag before comma in value position must produce an empty scalar with a tag; events: {events:?}"
+    );
+    let scalars = scalar_values(&events);
+    assert!(scalars.contains(&"b"), "scalar 'b' must be present");
+    assert!(scalars.contains(&"c"), "scalar 'c' must be present");
+}
+
+// Test 60: flow collection spanning multiple lines used as implicit mapping key
+#[test]
+fn multiline_flow_collection_as_implicit_key_returns_error() {
+    // `[\na\n]: value` — flow sequence closes on a different line than it opened,
+    // then is used as an implicit block-mapping key (followed by `:`). Illegal.
+    let input = "[\na\n]: value\n";
+    let result: Vec<_> = parse_events(input).collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "multiline flow collection used as implicit mapping key must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message.contains("multi-line") || err.message.contains("implicit mapping key"),
+            "error message should mention multi-line or implicit mapping key; got: {}",
+            err.message
+        );
+    }
+}
+
+// Test 61: explicit key `?` in flow sequence suppresses multiline key error
+#[test]
+fn explicit_key_in_flow_sequence_suppresses_multiline_key_error() {
+    // `[? a\n: b]` — `?` explicit-key indicator allows the key to span lines
+    // inside a flow sequence (YAML 1.2 §7.4.2).
+    let input = "[? a\n: b]\n";
+    let events = evs(input);
+    let scalars = scalar_values(&events);
+    assert!(
+        scalars.contains(&"a"),
+        "key scalar 'a' must be present; got {scalars:?}"
+    );
+    assert!(
+        scalars.contains(&"b"),
+        "value scalar 'b' must be present; got {scalars:?}"
+    );
+}
+
+// Test 62: `after_colon` flag — implicit single-pair mapping value on next line
+#[test]
+fn implicit_single_pair_mapping_value_after_colon_on_next_line() {
+    // `[a:\n  b]` — key `a`, colon separator, value `b` on the next line.
+    // The `after_colon` flag prevents the missing-comma check from firing.
+    let input = "[a:\n  b]\n";
+    let events = evs(input);
+    let scalars = scalar_values(&events);
+    assert!(
+        scalars.contains(&"a"),
+        "key scalar 'a' must be present; got {scalars:?}"
+    );
+    assert!(
+        scalars.contains(&"b"),
+        "value scalar 'b' must be present; got {scalars:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
 // Group P: Multi-line flow collection span correctness
 // -----------------------------------------------------------------------
 

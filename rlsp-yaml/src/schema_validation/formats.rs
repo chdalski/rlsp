@@ -517,6 +517,45 @@ mod tests {
     #[case::iri_reference_root_relative("/relative/path", "iri-reference")]
     #[case::iri_reference_relative("relative/path", "iri-reference")]
     #[case::unknown_format_silently_ignored("anything", "some-unknown-format")]
+    // duration — Group A valid cases
+    #[case::duration_week_form("P3W", "duration")]
+    #[case::duration_years_only("P1Y", "duration")]
+    #[case::duration_months_only("P6M", "duration")]
+    #[case::duration_date_and_time("P1Y2M3DT4H5M6S", "duration")]
+    #[case::duration_time_only("PT30S", "duration")]
+    #[case::duration_hours_minutes("PT2H30M", "duration")]
+    #[case::duration_date_only_multi("P1Y2M10D", "duration")]
+    // uri-template — Group B valid cases
+    #[case::uri_template_simple("https://example.com/{path}", "uri-template")]
+    #[case::uri_template_no_braces("https://example.com/path", "uri-template")]
+    #[case::uri_template_multiple_expressions("{base}/{path}", "uri-template")]
+    // relative-json-pointer — Group C valid cases
+    // Note: "0#" and "100#" contain `#` which starts a YAML comment — use
+    // quoted YAML via the direct-function tests below. "2/foo/bar" is safe.
+    #[case::relative_json_pointer_multi_step_path("2/foo/bar", "relative-json-pointer")]
+    // time — Group D valid cases (via date-time prefix for those with offsets)
+    #[case::date_time_with_fractional_seconds("2023-01-15T12:30:00.999Z", "date-time")]
+    #[case::date_time_with_positive_offset("2023-01-15T08:00:00+05:30", "date-time")]
+    #[case::date_time_with_negative_offset("2023-01-15T20:00:00-08:00", "date-time")]
+    #[case::date_time_leap_second("2023-06-30T23:59:60Z", "date-time")]
+    // time format directly
+    #[case::time_utc("12:30:00Z", "time")]
+    #[case::time_with_offset("08:00:00+05:30", "time")]
+    #[case::time_with_negative_offset("20:00:00-08:00", "time")]
+    #[case::time_with_fractional_seconds("12:30:00.999Z", "time")]
+    #[case::time_leap_second("23:59:60Z", "time")]
+    // ipv6 — Group E valid cases
+    #[case::ipv6_with_zone_id("fe80::1%eth0", "ipv6")]
+    #[case::ipv6_ipv4_mapped("::ffff:192.168.1.1", "ipv6")]
+    // ipv4 — Group F valid cases
+    #[case::ipv4_single_digit_octets("1.2.3.4", "ipv4")]
+    // hostname — Group G valid cases
+    #[case::hostname_trailing_dot_fqdn("example.com.", "hostname")]
+    // uri-reference — Group H valid cases
+    #[case::uri_reference_starts_with_query("?query=1", "uri-reference")]
+    #[case::uri_reference_starts_with_fragment("#section", "uri-reference")]
+    #[case::uri_reference_double_slash("//authority/path", "uri-reference")]
+    #[case::uri_reference_empty("", "uri-reference")]
     fn format_valid_produces_no_diagnostics(#[case] value: &str, #[case] fmt: &str) {
         assert!(run_format(value, fmt).is_empty());
     }
@@ -557,12 +596,100 @@ mod tests {
     #[case::iri_with_space("not an iri", "iri")]
     #[case::iri_missing_scheme("://missing-scheme", "iri")]
     #[case::iri_reference_with_space("not valid iri ref", "iri-reference")]
+    // duration — Group A invalid cases
+    #[case::duration_missing_p("1Y", "duration")]
+    #[case::duration_empty("P", "duration")]
+    #[case::duration_week_form_empty_digits("PW", "duration")]
+    #[case::duration_t_with_nothing_after("P1YT", "duration")]
+    #[case::duration_designators_out_of_order("P1M1Y", "duration")]
+    #[case::duration_repeated_designator("P1Y1Y", "duration")]
+    #[case::duration_designator_without_digits("PY1M", "duration")]
+    #[case::duration_digits_without_designator("P123", "duration")]
+    // uri-template — `extra}` (unmatched close brace) — Group B invalid case.
+    // `{{nested}}` and `{unclosed` are tested directly below (YAML parsing issues).
+    #[case::uri_template_unmatched_close("extra}", "uri-template")]
+    // relative-json-pointer — Group C invalid cases
+    // `/foo` and `0foo` are safe YAML plain scalars.
+    // Empty string and `0` require direct testing (see below).
+    #[case::relative_json_pointer_no_digit("/foo", "relative-json-pointer")]
+    #[case::relative_json_pointer_bad_pointer_part("0foo", "relative-json-pointer")]
+    // time — Group D invalid cases
+    #[case::time_invalid_fractional_missing_digits("12:30:00.", "time")]
+    #[case::time_invalid_offset_missing_colon("12:30:00+0530", "time")]
+    // ipv6 — Group E invalid cases
+    #[case::ipv6_ipv4_mapped_invalid_ipv4("::ffff:999.0.0.1", "ipv6")]
+    // ipv4 — Group F invalid cases
+    #[case::ipv4_empty_octet("192..1.1", "ipv4")]
+    // hostname — Group G invalid cases
+    #[case::hostname_double_dot_empty_label("a..b.com", "hostname")]
     fn format_invalid_produces_schemaformat_warning(#[case] value: &str, #[case] fmt: &str) {
         let result = run_format(value, fmt);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaFormat");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
         assert!(result[0].message.contains(fmt));
+    }
+
+    // uri-template — direct unit tests for cases that conflict with YAML parsing.
+    // `{{nested}}` parses as a YAML flow mapping; `{unclosed` is unterminated.
+    // Control chars are rejected by YAML before reaching format validation.
+    #[test]
+    fn uri_template_direct_invalid_cases() {
+        assert!(
+            !super::is_valid_uri_template("{{nested}}"),
+            "nested braces invalid"
+        );
+        assert!(
+            !super::is_valid_uri_template("{unclosed"),
+            "unmatched open brace invalid"
+        );
+        assert!(
+            !super::is_valid_uri_template("\x01"),
+            "C0 control char invalid"
+        );
+        assert!(
+            !super::is_valid_uri_template("\x1F"),
+            "C0 control char invalid"
+        );
+        assert!(
+            !super::is_valid_uri_template("\x7F"),
+            "DEL control char invalid"
+        );
+    }
+
+    // uri-template empty string — valid (no expressions, no control chars).
+    #[test]
+    fn uri_template_empty_is_valid() {
+        assert!(super::is_valid_uri_template(""));
+    }
+
+    // relative-json-pointer — direct unit tests for values that YAML misparses.
+    // "0#" — the `#` starts a YAML comment, so `parse_docs("0#")` yields empty doc.
+    // "0"  — YAML type coercion: the schema validator may emit schemaType for integer.
+    // "0#" and "100#" must be tested by calling is_valid_relative_json_pointer directly.
+    #[test]
+    fn relative_json_pointer_direct_valid_cases() {
+        assert!(
+            super::is_valid_relative_json_pointer("0#"),
+            "zero steps + hash valid"
+        );
+        assert!(
+            super::is_valid_relative_json_pointer("0"),
+            "zero steps + empty pointer valid"
+        );
+        assert!(
+            super::is_valid_relative_json_pointer("100#"),
+            "100 steps + hash valid"
+        );
+    }
+
+    // relative-json-pointer — empty string is invalid (must start with a digit).
+    #[test]
+    fn relative_json_pointer_empty_is_invalid() {
+        assert!(
+            !super::is_valid_relative_json_pointer(""),
+            "empty string invalid"
+        );
     }
 
     // Test 176 — format_validation disabled: no diagnostics emitted
