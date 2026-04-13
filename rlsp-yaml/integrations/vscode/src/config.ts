@@ -13,6 +13,8 @@ export interface ServerSettings {
   schemas: Record<string, string>;
   yamlVersion: string;
   validate: boolean;
+  flowStyle: string;
+  formatEnforceBlockStyle: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -30,5 +32,7 @@ export function getConfig(): ServerSettings {
     schemas: cfg.get<Record<string, string>>('schemas', {}),
     yamlVersion: cfg.get<string>('yamlVersion', '1.2'),
     validate: cfg.get<boolean>('validate', true),
+    flowStyle: cfg.get<string>('flowStyle', 'warning'),
+    formatEnforceBlockStyle: cfg.get<boolean>('formatEnforceBlockStyle', false),
   };
 }

@@ -79,6 +79,21 @@
           "default": false,
           "description": "Use single quotes in formatted output"
         },
+        "rlsp-yaml.formatEnforceBlockStyle": {
+          "type": "boolean",
+          "default": false,
+          "description": "Convert all flow-style collections ([...], {...}) to block style when formatting. When false (default), the formatter preserves the original style."
+        },
+        "rlsp-yaml.flowStyle": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ],
+          "default": "warning",
+          "description": "Severity of flow-style diagnostics (flowMap/flowSeq). 'off' disables them, 'warning' shows a warning squiggle, 'error' marks them as errors."
+        },
         "rlsp-yaml.httpProxy": {
           "type": "string",
           "default": "",

@@ -105,6 +105,19 @@ Maximum line width for the full-document formatter. The formatter tries to fit c
 
 When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
 
+### `formatEnforceBlockStyle`
+
+- **Type:** `boolean`
+- **Default:** `false`
+
+When `true`, the formatter converts all flow-style collections to block style during formatting. Flow mappings (`{a: 1, b: 2}`) become block mappings and flow sequences (`[a, b]`) become block sequences.
+
+When `false` (the default), the formatter preserves the original style — block collections stay block and flow collections stay flow.
+
+```json
+{ "formatEnforceBlockStyle": true }
+```
+
 ### `yamlVersion`
 
 - **Type:** `string` (optional)
@@ -201,6 +214,26 @@ To disable format and content validation:
 
 ```json
 { "formatValidation": false }
+```
+
+### `flowStyle`
+
+- **Type:** `string`
+- **Values:** `"off"`, `"warning"`, `"error"`
+- **Default:** `"warning"`
+
+Controls the severity of `flowMap` and `flowSeq` diagnostics, which are emitted when the document uses flow-style collections (`{...}` or `[...]`) where block style is preferred.
+
+| Value | Behavior |
+|-------|----------|
+| `"off"` | `flowMap` and `flowSeq` diagnostics are disabled |
+| `"warning"` | Flow-style collections are flagged with a warning squiggle (default) |
+| `"error"` | Flow-style collections are flagged as errors |
+
+When `formatEnforceBlockStyle` is `true`, the formatter will rewrite flow-style collections to block style on save, which pairs well with `"error"` to enforce block style as a hard rule.
+
+```json
+{ "flowStyle": "error" }
 ```
 
 ### `httpProxy`
@@ -364,8 +397,8 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 | Code | Emitted by |
 |------|-----------|
 | `duplicateKey` | Duplicate mapping key in the same scope |
-| `flowMap` | Flow mapping (`{a: 1}`) where block style is preferred |
-| `flowSeq` | Flow sequence (`[a, b]`) where block style is preferred |
+| `flowMap` | Flow mapping (`{a: 1}`) where block style is preferred (severity controlled by `flowStyle`) |
+| `flowSeq` | Flow sequence (`[a, b]`) where block style is preferred (severity controlled by `flowStyle`) |
 | `unusedAnchor` | Anchor defined but never aliased |
 | `unresolvedAlias` | Alias references an undefined anchor |
 | `unknownTag` | Tag not in the allowed `customTags` list |
@@ -395,7 +428,7 @@ Some validators are always active; others depend on settings.
 | YAML syntax errors | `validate` | on |
 | Duplicate key detection | `validate` | on |
 | Unused anchor warnings | `validate` | on |
-| Flow style warnings | `validate` | on |
+| Flow style warnings | `flowStyle` | warning |
 | Key ordering | `keyOrdering` | off |
 | Custom tag validation | `customTags` | off (empty = disabled) |
 | JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
