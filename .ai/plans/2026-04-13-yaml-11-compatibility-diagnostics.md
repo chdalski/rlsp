@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -94,15 +94,15 @@ migration assistance. Their issue #532 (open since Aug
 - [x] Analyze Red Hat yaml-language-server approach
 - [x] Analyze existing codebase infrastructure
 - [x] Design feature set and defaults
-- [ ] Add YAML 1.1 boolean detection helpers
-- [ ] Add `yaml11Boolean` validator and diagnostic
-- [ ] Add `yaml11Octal` validator and diagnostic
+- [x] Add YAML 1.1 boolean detection helpers
+- [x] Add `yaml11Boolean` validator and diagnostic
+- [x] Add `yaml11Octal` validator and diagnostic
 - [ ] Add quick fixes for 1.1 booleans (quote + convert)
 - [ ] Add quick fixes for 1.1 octals (quote + convert)
 - [ ] Add schema-aware severity escalation for 1.1 values
 - [ ] Enhance `schemaType` message for 1.1 boolean in
   boolean-typed field
-- [ ] Wire `yamlVersion` setting to suppress/adjust
+- [x] Wire `yamlVersion` setting to suppress/adjust
   diagnostics
 - [ ] Update VS Code extension settings
 - [ ] Update documentation (feature-log, configuration)
@@ -139,18 +139,20 @@ Diagnostic messages should explain the 1.1/1.2 difference:
 Include unit tests and integration tests exercising
 diagnostics through the server handler.
 
-- [ ] `is_yaml11_bool(value) -> bool` in `scalar_helpers.rs`
-- [ ] `is_yaml11_octal(value) -> bool` in `scalar_helpers.rs`
-- [ ] `yaml11_bool_canonical(value) -> &str` mapping
+- [x] `is_yaml11_bool(value) -> bool` in `scalar_helpers.rs`
+- [x] `is_yaml11_octal(value) -> bool` in `scalar_helpers.rs`
+- [x] `yaml11_bool_canonical(value) -> &str` mapping
   (`yes`→`true`, `no`→`false`, etc.)
-- [ ] New validator: `validate_yaml11_compat()` in
+- [x] New validator: `validate_yaml11_compat()` in
   `validators.rs`
-- [ ] Wire into `server.rs` diagnostic pipeline with
+- [x] Wire into `server.rs` diagnostic pipeline with
   `yamlVersion` gating
-- [ ] Unit tests for detection helpers
-- [ ] Unit tests for validator (plain vs quoted, 1.1 vs
+- [x] Unit tests for detection helpers
+- [x] Unit tests for validator (plain vs quoted, 1.1 vs
   1.2 mode)
-- [ ] Integration test through server handler
+- [x] Integration test through server handler
+
+Commit: a7a47a6
 
 ### Task 2: Add quick fixes for YAML 1.1 booleans and octals
 
