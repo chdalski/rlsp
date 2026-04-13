@@ -159,12 +159,3 @@ These came up during the analysis but were not pursued:
    them. This would eliminate the `column_at` calls that
    `advance_within_line` still does. Significant API change
    to `Span`/`Pos` — would need a new plan.
-
-4. **`block_sequence` specific optimization.** The worst
-   remaining fixture. Each `- item` line goes through: peek
-   → trim → sequence probe → consume dash → prepend
-   synthetic → re-enter step → peek → trim → scalar
-   dispatch → consume plain. The "prepend synthetic +
-   re-enter" round-trip could potentially be short-circuited
-   for the common case of `- plain_scalar` on one line.
-   Moderate complexity; changes the EventIter control flow.
