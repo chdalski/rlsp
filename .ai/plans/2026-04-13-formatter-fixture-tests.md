@@ -128,7 +128,7 @@ expected: output here
 - [x] Finalize fixture format based on spike learnings
 - [x] Build complete test harness with all assertion modes
 - [ ] Migrate formatter.rs unit tests to fixture files
-- [ ] Migrate ecosystem round-trip tests to fixture files
+- [x] Migrate ecosystem round-trip tests to fixture files (f532bc7)
 - [ ] Remove migrated inline tests from Rust source
 - [ ] Verify coverage: all existing test behaviors preserved
 
@@ -213,29 +213,29 @@ document, nested sequences, and idempotency (Group G) tests.
 - [x] Remove migrated tests from `formatter.rs`
 - [x] `cargo test` passes, no regressions
 
-### Task 5: Migrate ecosystem round-trip tests (~11 tests)
+### Task 5: Migrate ecosystem round-trip tests (~11 tests) — `f532bc7`
 
 Convert the `assert_round_trip` tests from
 `ecosystem_fixtures.rs` to fixture files. Diagnostic tests
 (`assert_no_false_positives` and specific validator calls)
 stay as Rust.
 
-- [ ] Create fixture files for each ecosystem round-trip:
+- [x] Create fixture files for each ecosystem round-trip:
       K8s LimitRange, Deployment, ConfigMap, Service;
       GHA Workflow, Matrix; Ansible Playbook
-- [ ] Also migrate the specific formatter assertions:
+- [x] Also migrate the specific formatter assertions:
       `gha_on_key_stays_unquoted_after_format`,
       `gha_blank_lines_preserved_after_format`,
       `flow_sequence_command_items_indented_correctly`,
       `flow_collections_preserved_after_format`,
       `gha_workflow_flow_sequences_preserved`,
       `gha_matrix_flow_sequences_preserved`
-- [ ] Naming convention: `ecosystem-*.md`
-- [ ] Use `idempotent: true` for pure round-trip tests
-- [ ] Remove migrated tests from `ecosystem_fixtures.rs`
-- [ ] Remaining `ecosystem_fixtures.rs` tests (diagnostic
+- [x] Naming convention: `ecosystem-*.md`
+- [x] Use `idempotent: true` for pure round-trip tests
+- [x] Remove migrated tests from `ecosystem_fixtures.rs`
+- [x] Remaining `ecosystem_fixtures.rs` tests (diagnostic
       assertions) still compile and pass
-- [ ] `cargo test` passes, no regressions
+- [x] `cargo test` passes, no regressions
 
 ### Task 6: Final cleanup and verification
 
