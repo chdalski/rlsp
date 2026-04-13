@@ -105,7 +105,7 @@ migration assistance. Their issue #532 (open since Aug
 - [x] Wire `yamlVersion` setting to suppress/adjust
   diagnostics
 - [x] Update VS Code extension settings
-- [ ] Update documentation (feature-log, configuration)
+- [x] Update documentation (feature-log, configuration)
 
 ## Tasks
 
@@ -285,15 +285,17 @@ Commit: 15b92fa
 Update the project documentation to reflect the new
 features.
 
-- [ ] `docs/feature-log.md` — add entries for
+- [x] `docs/feature-log.md` — add entries for
   `yaml11Boolean`, `yaml11Octal`, schema-aware severity
   escalation, and the new quick fixes
-- [ ] `docs/configuration.md` — document `yamlVersion`
+- [x] `docs/configuration.md` — document `yamlVersion`
   effect on diagnostics (currently only documents
   formatting effect); document new diagnostic codes and
   suppression
-- [ ] `README.md` — add YAML 1.1 compatibility diagnostics
+- [x] `README.md` — add YAML 1.1 compatibility diagnostics
   to the features list if appropriate
+
+Commit: b7357cc
 
 ## Decisions
 
