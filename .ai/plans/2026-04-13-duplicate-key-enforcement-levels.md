@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 # Duplicate key enforcement levels
@@ -50,8 +50,8 @@ The duplicate key feature follows this exactly.
 
 ## Steps
 
-- [ ] Add `duplicateKeys` severity setting to the server (off/warning/error, default error)
-- [ ] Wire severity into `parse_and_publish()` — skip when off, patch severity level
+- [x] Add `duplicateKeys` severity setting to the server (off/warning/error, default error)
+- [x] Wire severity into `parse_and_publish()` — skip when off, patch severity level
 - [ ] Add `formatRemoveDuplicateKeys` setting to the server (bool, default false)
 - [ ] Implement duplicate-key removal pre-pass in the formatter
 - [ ] Wire `formatRemoveDuplicateKeys` into `formatting()` and `range_formatting()`
@@ -61,15 +61,15 @@ The duplicate key feature follows this exactly.
 
 ## Tasks
 
-### Task 1: Severity setting and server wiring
+### Task 1: Severity setting and server wiring ✅ `efb3ab4`
 
 Add the `duplicateKeys` severity setting and wire it into the diagnostics pipeline. This is pure settings plumbing — identical pattern to `flowStyle`.
 
-- [ ] Add `duplicate_keys: Option<String>` to `Settings` struct
-- [ ] Add getter method `get_duplicate_keys()` returning the severity string
-- [ ] Update `parse_and_publish()`: respect severity — skip `validate_duplicate_keys()` when `"off"`, keep as ERROR when `"error"` or absent (default), patch to WARNING when `"warning"`
-- [ ] Add integration tests: verify diagnostics respect all three severity levels
-- [ ] `cargo test` passes, `cargo clippy --all-targets` clean
+- [x] Add `duplicate_keys: Option<String>` to `Settings` struct
+- [x] Add getter method `get_duplicate_keys()` returning the severity string
+- [x] Update `parse_and_publish()`: respect severity — skip `validate_duplicate_keys()` when `"off"`, keep as ERROR when `"error"` or absent (default), patch to WARNING when `"warning"`
+- [x] Add integration tests: verify diagnostics respect all three severity levels
+- [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
 ### Task 2: Auto-remove duplicate keys in the formatter
 
