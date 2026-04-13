@@ -871,3 +871,248 @@ fn multiline_indented_sequence_second_entry_scalar_span() {
         assert_eq!(bar_span.start.line, 2, "bar on line 2");
     }
 }
+
+// -----------------------------------------------------------------------
+// Group K: Plain scalar fast path
+// -----------------------------------------------------------------------
+
+#[test]
+fn fast_path_plain_scalar_emits_scalar_event() {
+    // Canonical fast-path input: single plain scalar inline after dash.
+    let events = event_variants("- hello\n");
+    let has_scalar = events.iter().any(|e| {
+        matches!(
+            e,
+            Event::Scalar {
+                value,
+                style: ScalarStyle::Plain,
+                anchor: None,
+                tag: None,
+            } if value.as_ref() == "hello"
+        )
+    });
+    assert!(has_scalar, "expected Scalar(hello, Plain, None, None)");
+}
+
+#[test]
+fn fast_path_plain_scalar_value_is_borrowed() {
+    // Fast path must return Cow::Borrowed — zero allocation.
+    let results = parse_to_vec("- hello\n");
+    let value = results.iter().find_map(|r| match r {
+        Ok((Event::Scalar { value, .. }, _)) if value.as_ref() == "hello" => Some(value.clone()),
+        _ => None,
+    });
+    let value = value.unwrap_or_else(|| unreachable!("scalar must exist"));
+    assert!(
+        matches!(value, std::borrow::Cow::Borrowed(_)),
+        "fast path must return Cow::Borrowed"
+    );
+}
+
+#[test]
+fn fast_path_plain_scalar_with_trailing_comment() {
+    // Comment after scalar: the fast path must strip the comment from the value.
+    let events = event_variants("- value # comment\n");
+    let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+    assert!(scalar.is_some(), "scalar must be emitted");
+    if let Some(Event::Scalar {
+        value,
+        style,
+        anchor,
+        tag,
+    }) = scalar
+    {
+        assert_eq!(value.as_ref(), "value");
+        assert!(matches!(style, ScalarStyle::Plain));
+        assert!(anchor.is_none());
+        assert!(tag.is_none());
+    }
+}
+
+#[test]
+fn fast_path_plain_scalar_colon_no_space() {
+    // Colon without following space must not trip guard 4 and must be in value.
+    let events = event_variants("- value_with:colon_no_space\n");
+    let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+    assert!(scalar.is_some(), "scalar must be emitted");
+    if let Some(Event::Scalar { value, style, .. }) = scalar {
+        assert_eq!(value.as_ref(), "value_with:colon_no_space");
+        assert!(matches!(style, ScalarStyle::Plain));
+    }
+}
+
+#[test]
+fn fast_path_plain_scalar_span_points_at_value() {
+    // "- foo\n": scalar starts at byte 2, column 2 (same as slow path).
+    let results = parse_to_vec("- foo\n");
+    let span = results.iter().find_map(|r| match r {
+        Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "foo" => Some(*span),
+        _ => None,
+    });
+    let span = span.unwrap_or_else(|| unreachable!("scalar must exist"));
+    assert_eq!(span.start.byte_offset, 2, "scalar must start at byte 2");
+    assert_eq!(span.start.column, 2, "scalar must start at column 2");
+}
+
+#[test]
+fn fast_path_plain_scalar_indented_span() {
+    // "  - bar\n": scalar starts at byte 4, column 4.
+    let results = parse_to_vec("  - bar\n");
+    let span = results.iter().find_map(|r| match r {
+        Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "bar" => Some(*span),
+        _ => None,
+    });
+    let span = span.unwrap_or_else(|| unreachable!("scalar must exist"));
+    assert_eq!(span.start.byte_offset, 4, "scalar must start at byte 4");
+    assert_eq!(span.start.column, 4, "scalar must start at column 4");
+}
+
+#[test]
+fn fast_path_multiple_entries_in_sequence() {
+    // Three consecutive plain scalar entries — verify state resets between entries.
+    let events = event_variants("- a\n- b\n- c\n");
+    let values: Vec<&str> = scalar_values(&events);
+    assert_eq!(values, ["a", "b", "c"]);
+    for e in events.iter().filter(|e| matches!(e, Event::Scalar { .. })) {
+        if let Event::Scalar {
+            style, anchor, tag, ..
+        } = e
+        {
+            assert!(matches!(style, ScalarStyle::Plain));
+            assert!(anchor.is_none());
+            assert!(tag.is_none());
+        }
+    }
+}
+
+#[test]
+fn fast_path_skipped_anchor_prefix() {
+    // Guard 1: pending_anchor triggers fallthrough — anchor must appear on scalar.
+    let events = event_variants("- &anchor value\n");
+    let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+    assert!(scalar.is_some(), "scalar must be emitted");
+    if let Some(Event::Scalar { value, anchor, .. }) = scalar {
+        assert_eq!(value.as_ref(), "value");
+        assert_eq!(anchor.as_deref(), Some("anchor"));
+    }
+}
+
+#[test]
+fn fast_path_skipped_tag_prefix() {
+    // Guard 2: pending_tag triggers fallthrough — tag must appear on scalar.
+    let events = event_variants("- !!str value\n");
+    let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+    assert!(scalar.is_some(), "scalar must be emitted");
+    if let Some(Event::Scalar { value, tag, .. }) = scalar {
+        assert_eq!(value.as_ref(), "value");
+        assert!(tag.is_some(), "tag must be present");
+    }
+}
+
+/// Guard 3: leading indicator characters — cases that still emit a Scalar with correct value/style.
+#[rstest]
+#[case::single_quoted("- 'quoted'\n", "quoted", ScalarStyle::SingleQuoted)]
+#[case::double_quoted("- \"quoted\"\n", "quoted", ScalarStyle::DoubleQuoted)]
+#[case::anchor_sigil("- &anc val\n", "val", ScalarStyle::Plain)]
+#[case::tag_sigil("- !tag val\n", "val", ScalarStyle::Plain)]
+fn fast_path_skipped_indicator_emits_correct_scalar(
+    #[case] input: &str,
+    #[case] expected_value: &str,
+    #[case] expected_style: ScalarStyle,
+) {
+    let events = event_variants(input);
+    let scalar = events
+        .iter()
+        .find(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == expected_value));
+    assert!(
+        scalar.is_some(),
+        "expected Scalar({expected_value}) in {input:?}"
+    );
+    if let Some(Event::Scalar { style, .. }) = scalar {
+        assert_eq!(*style, expected_style);
+    }
+}
+
+/// Guard 3: leading indicator characters — cases that do NOT emit a plain scalar at the item position.
+#[rstest]
+#[case::pipe_block_scalar("- |\n  hello\n")]
+#[case::gt_folded_scalar("- >\n  hello\n")]
+#[case::flow_sequence("- [a, b]\n")]
+#[case::flow_mapping("- {a: b}\n")]
+#[case::alias_sigil("- *ref\n")]
+#[case::explicit_dash_seq("- - item\n")]
+fn fast_path_skipped_indicator_emits_noscalar(#[case] input: &str) {
+    // Parsing must not fail for these inputs (fallthrough must work correctly).
+    let results = parse_to_vec(input);
+    let has_err = results.iter().any(Result::is_err);
+    assert!(!has_err, "no parse error expected for {input:?}");
+}
+
+#[test]
+fn fast_path_skipped_value_indicator_colon_space() {
+    // Guard 4: colon-space triggers fallthrough — inline mapping must be parsed.
+    let events = event_variants("- key: value\n");
+    let has_mapping_start = events
+        .iter()
+        .any(|e| matches!(e, Event::MappingStart { .. }));
+    assert!(
+        has_mapping_start,
+        "MappingStart must be emitted for inline mapping"
+    );
+    let scalars = scalar_values(&events);
+    assert!(scalars.contains(&"key"), "key scalar must be present");
+    assert!(scalars.contains(&"value"), "value scalar must be present");
+}
+
+#[test]
+fn fast_path_skipped_bare_dash() {
+    // No inline content: consume_sequence_dash returns had_inline=false,
+    // the fast path is not entered, and an empty plain scalar is emitted.
+    let events = event_variants("-\n");
+    let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
+    assert!(
+        scalar.is_some(),
+        "empty scalar must be emitted for bare dash"
+    );
+    if let Some(Event::Scalar { value, style, .. }) = scalar {
+        assert_eq!(value.as_ref(), "", "value must be empty");
+        assert!(matches!(style, ScalarStyle::Plain));
+    }
+}
+
+#[test]
+fn fast_path_suffix_nul_error_propagated() {
+    // NUL in trailing comment must produce an error (not silently accepted).
+    let input = "- value # comment\x00\n";
+    assert!(
+        has_error(input),
+        "NUL in trailing comment must produce an error"
+    );
+}
+
+#[test]
+fn fast_path_span_matches_slow_path_for_all_plain_cases() {
+    // Regression guard: fast-path span must equal slow-path span.
+    // For "- X..." the scalar always starts at byte (leading_spaces + 2), col same.
+    for (input, expected_byte_offset, expected_col) in [
+        ("- a\n", 2usize, 2usize),
+        ("- foo\n", 2, 2),
+        ("  - bar\n", 4, 4),
+        ("- hello world\n", 2, 2),
+    ] {
+        let results = parse_to_vec(input);
+        let span = results.iter().find_map(|r| match r {
+            Ok((Event::Scalar { .. }, span)) => Some(*span),
+            _ => None,
+        });
+        let span = span.unwrap_or_else(|| unreachable!("scalar must exist in {input:?}"));
+        assert_eq!(
+            span.start.byte_offset, expected_byte_offset,
+            "byte_offset mismatch for {input:?}"
+        );
+        assert_eq!(
+            span.start.column, expected_col,
+            "column mismatch for {input:?}"
+        );
+    }
+}

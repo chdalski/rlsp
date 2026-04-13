@@ -5,7 +5,7 @@ pub mod encoding;
 mod error;
 mod event;
 mod event_iter;
-mod lexer;
+pub(crate) mod lexer;
 pub mod limits;
 mod lines;
 pub mod loader;

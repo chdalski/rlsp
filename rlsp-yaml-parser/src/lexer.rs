@@ -14,7 +14,7 @@ use crate::pos::{Pos, Span};
 
 mod block;
 mod comment;
-mod plain;
+pub mod plain;
 mod quoted;
 
 pub use crate::chars::is_ns_char;

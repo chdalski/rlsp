@@ -298,7 +298,7 @@ pub(super) fn peek_plain_scalar_first_line(buf: &LineBuffer<'_>) -> Option<(usiz
 ///
 /// YAML 1.2 spec [126]: `ns-plain-first(c) ::= (ns-char – c-indicator) |
 ///   ((? | : | -) Followed by ns-plain-safe(c))`
-fn ns_plain_first_block(ch: char, rest: &str) -> bool {
+pub fn ns_plain_first_block(ch: char, rest: &str) -> bool {
     if is_c_indicator(ch) {
         // Special case: `?`, `:`, `-` are allowed if followed by a safe char.
         if matches!(ch, '?' | ':' | '-') {
@@ -351,7 +351,7 @@ fn ns_plain_char_block(prev_was_ws: bool, ch: char, next: Option<char>) -> bool 
 ///
 /// This implements `nb-ns-plain-in-line(c)` applied to the full line content
 /// starting at the first non-space character position.
-pub(super) fn scan_plain_line_block(content: &str) -> &str {
+pub fn scan_plain_line_block(content: &str) -> &str {
     let bytes = content.as_bytes();
     let len = bytes.len();
     let mut pos = 0;

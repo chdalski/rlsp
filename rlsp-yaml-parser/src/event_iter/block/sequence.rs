@@ -5,15 +5,21 @@
 //! Contains `peek_sequence_entry`, `consume_sequence_dash`, and
 //! `handle_sequence_entry`.
 
+use memchr::memchr;
+use std::borrow::Cow;
+
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
-use crate::event_iter::line_mapping::is_tab_indented_block_indicator;
+use crate::event_iter::line_mapping::{
+    find_value_indicator_offset, is_tab_indented_block_indicator,
+};
 use crate::event_iter::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
+use crate::lexer::plain::{extract_trailing_comment, ns_plain_first_block, scan_plain_line_block};
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::lines::Line;
-use crate::pos::Pos;
+use crate::pos::{Pos, Span};
 use crate::{EventIter, zero_span};
 
 impl<'input> EventIter<'input> {
@@ -237,6 +243,192 @@ impl<'input> EventIter<'input> {
             }
         }
         let had_inline = self.consume_sequence_dash(dash_indent);
+        if had_inline {
+            // Fast path: detect "simple plain scalar after `-`" and emit the
+            // Scalar event directly, bypassing the synthetic-line prepend and
+            // full `step_in_document` re-entry.
+            //
+            // All five guard conditions must hold; any failure falls through to
+            // the existing `StepResult::Continue` path — zero behaviour change.
+            //
+            // Guard 1 & 2: no pending anchor or tag (they need the full path).
+            // Guard 3: first byte is not a special YAML indicator.
+            // Guard 4: not a mapping-key line (no `: ` in content).
+            // Guard 5: content passes `ns_plain_first_block`.
+            //
+            // Security note: suffix validation (NUL/BOM) is implemented fully
+            // inline here — we do NOT read `self.lexer.plain_scalar_suffix_error`
+            // because that field is written by `try_consume_plain_scalar`, which
+            // is not called on the fast path.  Reading it here would risk
+            // dequeuing a stale error from a prior call (security finding 1).
+            //
+            // Similarly, `self.lexer.trailing_comment` must be `None` on entry;
+            // we assert this in debug builds and populate it directly (finding 2).
+            if self.pending_anchor.is_none()
+                && self.pending_tag.is_none()
+                && self
+                    .lexer
+                    .peek_next_line()
+                    .and_then(|l| l.content.as_bytes().first().copied())
+                    .is_some_and(|b| {
+                        !matches!(
+                            b,
+                            b'|' | b'>'
+                                | b'\''
+                                | b'"'
+                                | b'['
+                                | b'{'
+                                | b'&'
+                                | b'*'
+                                | b'!'
+                                | b'?'
+                                | b'-'
+                                | b'#'
+                                | b'%'
+                                | b'@'
+                                | b'`'
+                        )
+                    })
+            {
+                // Peek the synthetic line (already prepended by consume_sequence_dash).
+                if let Some(line) = self.lexer.peek_next_line() {
+                    let content = line.content;
+                    // Guard 4: not a mapping-key line.
+                    // Guard 5: valid plain scalar start.
+                    // Guard 6: the line following the synthetic line must not be a
+                    // plain-scalar continuation.  If the second upcoming line has
+                    // indent > dash_indent and is non-blank, the slow path would
+                    // call `collect_plain_continuations` and fold the lines into a
+                    // multi-line scalar — the fast path cannot handle that.
+                    let next_line_indent = self.lexer.peek_second_line().map_or(0, |l| l.indent);
+                    let has_continuation = next_line_indent > dash_indent
+                        && self
+                            .lexer
+                            .peek_second_line()
+                            .is_some_and(|l| !l.content.trim_start_matches([' ', '\t']).is_empty());
+                    let first_char = content.chars().next();
+                    if !has_continuation
+                        && find_value_indicator_offset(content).is_none()
+                        && first_char.is_some_and(|ch| ns_plain_first_block(ch, content))
+                    {
+                        let value: &'input str = scan_plain_line_block(content);
+                        if !value.is_empty() {
+                            // Compute the suffix after the scalar value.
+                            let after_scalar_start = value.len();
+                            let scalar_start_pos = line.pos;
+                            let value_end_pos =
+                                crate::pos::advance_within_line(scalar_start_pos, value);
+                            let span = Span {
+                                start: scalar_start_pos,
+                                end: value_end_pos,
+                            };
+
+                            // Inline suffix validation: NUL/BOM detection.
+                            // We do NOT use self.lexer.plain_scalar_suffix_error
+                            // (stale-field hazard — security finding 1).
+                            let suffix = &content[after_scalar_start..];
+                            let suffix_error: Option<Error>;
+                            if let Some(comment_text) = extract_trailing_comment(suffix) {
+                                // Comment present: check for NUL in comment body.
+                                if let Some(bad_i) = memchr(b'\0', comment_text.as_bytes()) {
+                                    let bad_char_i = comment_text[..bad_i].chars().count();
+                                    // Offset of `#` within the line: suffix start + (suffix.len() - comment_text.len() - 1)
+                                    let hash_byte_in_line =
+                                        after_scalar_start + suffix.len() - comment_text.len() - 1;
+                                    let hash_col_in_line =
+                                        crate::pos::column_at(content, hash_byte_in_line);
+                                    let hash_pos = Pos {
+                                        byte_offset: scalar_start_pos.byte_offset
+                                            + hash_byte_in_line,
+                                        line: scalar_start_pos.line,
+                                        column: scalar_start_pos.column + hash_col_in_line,
+                                    };
+                                    let bad_pos = Pos {
+                                        byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                                        line: hash_pos.line,
+                                        column: hash_pos.column + 1 + bad_char_i,
+                                    };
+                                    suffix_error = Some(Error {
+                                        pos: bad_pos,
+                                        message: "invalid character U+0000 in comment".to_owned(),
+                                    });
+                                } else {
+                                    // Valid comment: stash for drain_trailing_comment.
+                                    // Assert no stale comment from prior call (security finding 2).
+                                    debug_assert!(
+                                        self.lexer.trailing_comment.is_none(),
+                                        "trailing_comment must be None before fast-path use"
+                                    );
+                                    let hash_byte_in_line =
+                                        after_scalar_start + suffix.len() - comment_text.len() - 1;
+                                    let hash_col_in_line =
+                                        crate::pos::column_at(content, hash_byte_in_line);
+                                    let hash_pos = Pos {
+                                        byte_offset: scalar_start_pos.byte_offset
+                                            + hash_byte_in_line,
+                                        line: scalar_start_pos.line,
+                                        column: scalar_start_pos.column + hash_col_in_line,
+                                    };
+                                    let span_end = crate::pos::advance_within_line(
+                                        hash_pos.advance('#'),
+                                        comment_text,
+                                    );
+                                    self.lexer.trailing_comment = Some((
+                                        comment_text,
+                                        Span {
+                                            start: hash_pos,
+                                            end: span_end,
+                                        },
+                                    ));
+                                    suffix_error = None;
+                                }
+                            } else if let Some((bad_i, bad_ch)) = suffix
+                                .char_indices()
+                                .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
+                            {
+                                // NUL or mid-stream BOM in suffix.
+                                let bad_col_offset =
+                                    crate::pos::column_at(content, after_scalar_start + bad_i);
+                                let bad_pos = Pos {
+                                    byte_offset: scalar_start_pos.byte_offset
+                                        + after_scalar_start
+                                        + bad_i,
+                                    line: scalar_start_pos.line,
+                                    column: scalar_start_pos.column + bad_col_offset,
+                                };
+                                suffix_error = Some(Error {
+                                    pos: bad_pos,
+                                    message: format!(
+                                        "invalid character U+{:04X} in plain scalar",
+                                        bad_ch as u32
+                                    ),
+                                });
+                            } else {
+                                suffix_error = None;
+                            }
+
+                            // Consume the synthetic line and emit the scalar event.
+                            self.lexer.consume_line();
+                            self.queue.push_back((
+                                Event::Scalar {
+                                    value: Cow::Borrowed(value),
+                                    style: ScalarStyle::Plain,
+                                    anchor: None,
+                                    tag: None,
+                                },
+                                span,
+                            ));
+                            self.tick_mapping_phase_after_scalar();
+                            self.drain_trailing_comment();
+                            if let Some(e) = suffix_error {
+                                return StepResult::Yield(Err(e));
+                            }
+                            return StepResult::Continue;
+                        }
+                    }
+                }
+            }
+        }
         if !had_inline {
             // Only emit an empty scalar for a bare `-` when there is no
             // following indented content that could be the item's value.
