@@ -63,8 +63,10 @@ into Codecov if the effort is small.
       (5aa4b8b)
 - [x] Add `docs/feature-log.md` for rlsp-fmt
       (5aa4b8b)
-- [ ] Check Codecov coverage for each crate, identify gaps
-- [ ] Add tests to close coverage gaps
+- [x] Check Codecov coverage for each crate, identify gaps
+      (668a75b)
+- [x] Add tests to close coverage gaps
+      (668a75b)
 - [ ] Wire VS Code extension unit test coverage into
       Codecov
 - [ ] Cross-link new docs from crate READMEs
@@ -173,7 +175,7 @@ git history for content.
 - Format matches `rlsp-yaml/docs/feature-log.md` style
 - Content is accurate and reflects current capabilities
 
-### Task 4: Identify and close Rust code coverage gaps
+### Task 4: Identify and close Rust code coverage gaps ✅ (668a75b)
 
 Check current Codecov coverage for each crate, identify
 the largest gaps, and add tests to close them.
