@@ -69,7 +69,7 @@ into Codecov if the effort is small.
       (668a75b)
 - [x] Wire VS Code extension unit test coverage into
       Codecov (b6f8a5d)
-- [ ] Cross-link new docs from crate READMEs
+- [x] Cross-link new docs from crate READMEs (a806dca)
 
 ## Tasks
 
@@ -241,7 +241,7 @@ alongside the existing Rust coverage.
 - Coverage workflow includes vscode extension upload
 - Codecov config tracks vscode as a separate component
 
-### Task 6: Cross-link new docs from crate READMEs
+### Task 6: Cross-link new docs from crate READMEs ✅ (a806dca)
 
 Update `rlsp-yaml-parser/README.md` and `rlsp-fmt/README.md`
 to link to the new `docs/` files (architecture.md,
