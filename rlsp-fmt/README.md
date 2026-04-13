@@ -57,6 +57,10 @@ assert_eq!(format(&doc, &narrow), "[\n  a,\n  b\n]");
 | `tab_width` | 2 | Spaces per indentation level (ignored when `use_tabs` is true) |
 | `use_tabs` | false | Use tab characters instead of spaces |
 
+## Documentation
+
+- [Feature Log](docs/feature-log.md) — implemented capabilities and design decisions
+
 ## Building
 
 ```sh

@@ -101,6 +101,12 @@ The streaming architecture delivers sub-microsecond first-event latency on
 realistic YAML inputs, competitive with libfyaml.
 [See docs/benchmarks.md](docs/benchmarks.md) for detailed measurements.
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — streaming state-machine design, O(1) latency, comment attachment, security limits
+- [Feature Log](docs/feature-log.md) — implemented capabilities and design decisions
+- [Benchmarks](docs/benchmarks.md) — performance measurements and methodology
+
 ## Building
 
 ```sh
