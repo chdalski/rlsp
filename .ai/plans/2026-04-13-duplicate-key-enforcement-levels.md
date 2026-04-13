@@ -55,9 +55,9 @@ The duplicate key feature follows this exactly.
 - [x] Add `formatRemoveDuplicateKeys` setting to the server (bool, default false)
 - [x] Implement duplicate-key removal pre-pass in the formatter
 - [x] Wire `formatRemoveDuplicateKeys` into `formatting()` and `range_formatting()`
-- [ ] Expose both settings in VS Code extension
-- [ ] Update `docs/configuration.md`
-- [ ] Add tests at each layer
+- [x] Expose both settings in VS Code extension
+- [x] Update `docs/configuration.md`
+- [x] Add tests at each layer
 
 ## Tasks
 
@@ -88,15 +88,15 @@ Implementation approach: add a `dedup_keys(docs: &mut Vec<Document<Span>>)` func
 - [x] Integration test: format a document with duplicate keys and verify removal
 - [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
-### Task 3: VS Code extension and documentation
+### Task 3: VS Code extension and documentation ✅ `4a24e16`
 
 Expose the new settings in the VS Code extension and update documentation.
 
-- [ ] Add `rlsp-yaml.duplicateKeys` (enum: `"off"`, `"warning"`, `"error"`, default `"error"`) to `package.json`
-- [ ] Add `rlsp-yaml.formatRemoveDuplicateKeys` (boolean, default `false`) to `package.json`
-- [ ] Update `ServerSettings` interface and `getConfig()` in `config.ts`
-- [ ] Update `docs/configuration.md` with both new settings
-- [ ] `pnpm run lint` and `pnpm run build` pass in the VS Code extension directory
+- [x] Add `rlsp-yaml.duplicateKeys` (enum: `"off"`, `"warning"`, `"error"`, default `"error"`) to `package.json`
+- [x] Add `rlsp-yaml.formatRemoveDuplicateKeys` (boolean, default `false`) to `package.json`
+- [x] Update `ServerSettings` interface and `getConfig()` in `config.ts`
+- [x] Update `docs/configuration.md` with both new settings
+- [x] `pnpm run lint` and `pnpm run build` pass in the VS Code extension directory
 
 ## Decisions
 
