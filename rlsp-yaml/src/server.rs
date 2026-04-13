@@ -393,6 +393,16 @@ impl Backend {
             &allowed_tags,
         ));
 
+        // YAML 1.1 compatibility: only warn when the document is being treated
+        // as YAML 1.2 (the default). Users who opt into 1.1 semantics via
+        // `yamlVersion: "1.1"` or the `# $yamlVersion=1.1` modeline already
+        // expect 1.1 behaviour and should not receive these diagnostics.
+        if self.get_yaml_version(text) == YamlVersion::V1_2 {
+            diagnostics.extend(crate::validation::validators::validate_yaml11_compat(
+                &result.documents,
+            ));
+        }
+
         // Schema validation: extract URL from modeline, fetch/cache schema,
         // then run schema validation against the parsed documents.
         //

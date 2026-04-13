@@ -107,6 +107,66 @@ pub fn parse_integer(value: &str) -> Option<i64> {
     Some(if neg { -magnitude } else { magnitude })
 }
 
+/// Returns `true` if the value is a YAML 1.1 boolean form that is NOT a boolean in YAML 1.2.
+///
+/// The 16 forms: `yes`, `Yes`, `YES`, `no`, `No`, `NO`, `on`, `On`, `ON`,
+/// `off`, `Off`, `OFF`, `y`, `Y`, `n`, `N`.
+#[must_use]
+pub fn is_yaml11_bool(value: &str) -> bool {
+    matches!(
+        value,
+        "yes"
+            | "Yes"
+            | "YES"
+            | "no"
+            | "No"
+            | "NO"
+            | "on"
+            | "On"
+            | "ON"
+            | "off"
+            | "Off"
+            | "OFF"
+            | "y"
+            | "Y"
+            | "n"
+            | "N"
+    )
+}
+
+/// Returns `true` if the value is a C-style octal literal as parsed by YAML 1.1.
+///
+/// Matches strings that start with `0`, have length > 1, and contain only
+/// digits `0`–`7`. The single character `"0"` is a valid YAML 1.2 integer and
+/// is excluded.
+#[must_use]
+pub fn is_yaml11_octal(value: &str) -> bool {
+    if value.len() <= 1 {
+        return false;
+    }
+    let mut chars = value.chars();
+    if chars.next() != Some('0') {
+        return false;
+    }
+    chars.all(|c| matches!(c, '0'..='7'))
+}
+
+/// Map a YAML 1.1 boolean form to its canonical YAML 1.2 equivalent.
+///
+/// Returns `"true"` for the true-canonical forms (`yes`, `Yes`, `YES`, `on`,
+/// `On`, `ON`, `y`, `Y`) and `"false"` for the false-canonical forms (`no`,
+/// `No`, `NO`, `off`, `Off`, `OFF`, `n`, `N`).
+///
+/// The caller is responsible for ensuring `value` is a valid YAML 1.1 boolean
+/// (i.e. `is_yaml11_bool(value)` returns `true`).
+#[must_use]
+pub fn yaml11_bool_canonical(value: &str) -> &'static str {
+    match value {
+        "yes" | "Yes" | "YES" | "on" | "On" | "ON" | "y" | "Y" => "true",
+        _ => "false",
+    }
+}
+
 /// Parse a YAML Core schema float from a string value.
 ///
 /// Supports decimal with `.`, exponent notation (`e`/`E`), and special values
@@ -263,5 +323,103 @@ mod tests {
     #[case::bare_nan("nan", false)]
     fn is_float_bool_cases(#[case] input: &str, #[case] expected: bool) {
         assert_eq!(is_float(input), expected);
+    }
+
+    // ── is_yaml11_bool ────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::yes_lowercase("yes")]
+    #[case::yes_titlecase("Yes")]
+    #[case::yes_uppercase("YES")]
+    #[case::no_lowercase("no")]
+    #[case::no_titlecase("No")]
+    #[case::no_uppercase("NO")]
+    #[case::on_lowercase("on")]
+    #[case::on_titlecase("On")]
+    #[case::on_uppercase("ON")]
+    #[case::off_lowercase("off")]
+    #[case::off_titlecase("Off")]
+    #[case::off_uppercase("OFF")]
+    #[case::y_lowercase("y")]
+    #[case::y_uppercase("Y")]
+    #[case::n_lowercase("n")]
+    #[case::n_uppercase("N")]
+    fn is_yaml11_bool_returns_true(#[case] input: &str) {
+        assert!(is_yaml11_bool(input));
+    }
+
+    #[rstest]
+    #[case::yaml12_true_lowercase("true")]
+    #[case::yaml12_true_titlecase("True")]
+    #[case::yaml12_true_uppercase("TRUE")]
+    #[case::yaml12_false_lowercase("false")]
+    #[case::yaml12_false_titlecase("False")]
+    #[case::yaml12_false_uppercase("FALSE")]
+    #[case::empty("")]
+    #[case::mixed_case_yes("yEs")]
+    #[case::mixed_case_no("nO")]
+    #[case::prefix_yes("yess")]
+    #[case::suffix_no("noo")]
+    #[case::space_padded(" yes")]
+    #[case::number_zero("0")]
+    #[case::number_one("1")]
+    fn is_yaml11_bool_returns_false(#[case] input: &str) {
+        assert!(!is_yaml11_bool(input));
+    }
+
+    // ── is_yaml11_octal ───────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::two_digits_leading_zero("01")]
+    #[case::three_digits("007")]
+    #[case::max_octal_digit("077")]
+    #[case::longer_value("0755")]
+    #[case::larger_value("01234567")]
+    fn is_yaml11_octal_returns_true(#[case] input: &str) {
+        assert!(is_yaml11_octal(input));
+    }
+
+    #[rstest]
+    #[case::zero_alone("0")]
+    #[case::yaml12_octal("0o17")]
+    #[case::decimal_no_leading_zero("42")]
+    #[case::has_digit_eight("08")]
+    #[case::has_digit_nine("09")]
+    #[case::leading_zero_with_alpha("0x10")]
+    #[case::signed_octal("-07")]
+    #[case::empty("")]
+    #[case::just_letters("abc")]
+    #[case::embedded_space("0 7")]
+    #[case::leading_whitespace(" 07")]
+    fn is_yaml11_octal_returns_false(#[case] input: &str) {
+        assert!(!is_yaml11_octal(input));
+    }
+
+    // ── yaml11_bool_canonical ─────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::yes_lowercase("yes")]
+    #[case::yes_titlecase("Yes")]
+    #[case::yes_uppercase("YES")]
+    #[case::on_lowercase("on")]
+    #[case::on_titlecase("On")]
+    #[case::on_uppercase("ON")]
+    #[case::y_lowercase("y")]
+    #[case::y_uppercase("Y")]
+    fn yaml11_bool_canonical_returns_true(#[case] input: &str) {
+        assert_eq!(yaml11_bool_canonical(input), "true");
+    }
+
+    #[rstest]
+    #[case::no_lowercase("no")]
+    #[case::no_titlecase("No")]
+    #[case::no_uppercase("NO")]
+    #[case::off_lowercase("off")]
+    #[case::off_titlecase("Off")]
+    #[case::off_uppercase("OFF")]
+    #[case::n_lowercase("n")]
+    #[case::n_uppercase("N")]
+    fn yaml11_bool_canonical_returns_false(#[case] input: &str) {
+        assert_eq!(yaml11_bool_canonical(input), "false");
     }
 }
