@@ -78,8 +78,8 @@ stress-focused variants. `loader.rs` Group F is redundant.
 ## Steps
 
 - [x] Delete 7 duplicate tests from `conformance.rs` (09d2550)
-- [ ] Move 10 quoted-key tests from `conformance.rs` to
-      their correct homes
+- [x] Move 10 quoted-key tests from `conformance.rs` to
+      their correct homes (59715f3)
 - [ ] Delete 5 duplicate DoS-limit tests from `loader.rs`
 - [ ] Verify all tests pass after changes
 
@@ -151,11 +151,11 @@ test property placement on mapping keys.
 After this task, `conformance.rs` should contain only the
 yaml-test-suite driver — no hand-written tests.
 
-- [ ] Move 2 event-layer tests to `smoke/quoted_scalars.rs`
-- [ ] Move 8 loader-layer tests to `loader.rs`
-- [ ] Remove the section comment block from `conformance.rs`
-- [ ] Remove stale `use` imports from `conformance.rs`
-- [ ] Run `cargo test` to verify nothing broke
+- [x] Move 2 event-layer tests to `smoke/quoted_scalars.rs`
+- [x] Move 8 loader-layer tests to `loader.rs`
+- [x] Remove the section comment block from `conformance.rs`
+- [x] Remove stale `use` imports from `conformance.rs`
+- [x] Run `cargo test` to verify nothing broke
 
 ### Task 3: Remove duplicate DoS-limit tests from `loader.rs`
 
