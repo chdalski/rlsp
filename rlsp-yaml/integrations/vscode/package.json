@@ -93,6 +93,17 @@
           "type": "object",
           "default": {},
           "description": "Maps schema URLs to glob patterns for schema assignment"
+        },
+        "rlsp-yaml.yamlVersion": {
+          "type": "string",
+          "enum": ["1.1", "1.2"],
+          "default": "1.2",
+          "description": "YAML specification version. Affects formatting quoting rules and YAML 1.1 compatibility diagnostics. When set to 1.1, diagnostics for YAML 1.1 boolean and octal values are suppressed."
+        },
+        "rlsp-yaml.validate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable all YAML diagnostics."
         }
       }
     },

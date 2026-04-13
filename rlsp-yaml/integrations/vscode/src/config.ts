@@ -11,6 +11,8 @@ export interface ServerSettings {
   httpProxy: string;
   colorDecorators: boolean;
   schemas: Record<string, string>;
+  yamlVersion: string;
+  validate: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -26,5 +28,7 @@ export function getConfig(): ServerSettings {
     httpProxy: cfg.get('httpProxy', ''),
     colorDecorators: cfg.get('colorDecorators', true),
     schemas: cfg.get<Record<string, string>>('schemas', {}),
+    yamlVersion: cfg.get<string>('yamlVersion', '1.2'),
+    validate: cfg.get<boolean>('validate', true),
   };
 }
