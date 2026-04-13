@@ -1,6 +1,10 @@
 # Changelog
 
 
+## Refactoring
+
+- Replace #[allow] with #[expect(reason)] and enforce via workspace lints (b248fca)
+
 ## Documentation
 
 - Retrofit AI Note across all crate READMEs and list all crates in root (0bf9706)
