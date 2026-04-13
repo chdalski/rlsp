@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 # Flow style preservation and enforcement levels
@@ -50,9 +50,9 @@ The parser emits `CollectionStyle::Flow` / `CollectionStyle::Block` on `Event::S
 
 ## Steps
 
-- [ ] Add `style: CollectionStyle` to `Node::Mapping` and `Node::Sequence` in the parser AST
-- [ ] Thread `CollectionStyle` from events through the loader into AST nodes
-- [ ] Fix all compilation errors from the new field across the workspace
+- [x] Add `style: CollectionStyle` to `Node::Mapping` and `Node::Sequence` in the parser AST
+- [x] Thread `CollectionStyle` from events through the loader into AST nodes
+- [x] Fix all compilation errors from the new field across the workspace
 - [ ] Add flow-style rendering to the formatter (sequences and mappings)
 - [ ] Make the formatter branch on `CollectionStyle` — preserve original style by default
 - [ ] Add `flowStyle` severity setting and `formatEnforceBlockStyle` setting to the server
@@ -64,15 +64,15 @@ The parser emits `CollectionStyle::Flow` / `CollectionStyle::Block` on `Event::S
 
 ## Tasks
 
-### Task 1: Add `CollectionStyle` to parser AST and loader
+### Task 1: Add `CollectionStyle` to parser AST and loader — `728d182`
 
 Add a `style: CollectionStyle` field to `Node::Mapping` and `Node::Sequence` in `rlsp-yaml-parser/src/node.rs`. Update the loader (`loader.rs`) to capture the `style` from `Event::MappingStart` / `Event::SequenceStart` and pass it through to the constructed nodes. Fix all match arms and construction sites across the workspace that destructure or build these node variants — this includes the formatter, validators, code actions, and any test code that constructs nodes.
 
-- [ ] Add `style: CollectionStyle` field to `Node::Mapping` and `Node::Sequence` in `node.rs`
-- [ ] Update loader to capture style from events and populate the new field
-- [ ] Fix all compilation errors across the workspace (formatter, validators, code actions, tests)
-- [ ] Add unit tests verifying that flow-style and block-style collections carry the correct `CollectionStyle` through load → AST
-- [ ] `cargo test` passes, `cargo clippy --all-targets` clean
+- [x] Add `style: CollectionStyle` field to `Node::Mapping` and `Node::Sequence` in `node.rs`
+- [x] Update loader to capture style from events and populate the new field
+- [x] Fix all compilation errors across the workspace (formatter, validators, code actions, tests)
+- [x] Add unit tests verifying that flow-style and block-style collections carry the correct `CollectionStyle` through load → AST
+- [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
 ### Task 2: Flow-style rendering in the formatter
 
