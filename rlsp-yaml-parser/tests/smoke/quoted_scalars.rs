@@ -118,6 +118,44 @@ fn double_quoted_span_covers_including_delimiters() {
     assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
 }
 
+// IT-15: double-quoted mapping key emits DoubleQuoted style at event layer.
+#[test]
+fn quoted_key_parse_events_style_double() {
+    let events = event_variants("\"key\": value\n");
+    let key_event = events.iter().find_map(|ev| {
+        if let Event::Scalar { value, style, .. } = ev {
+            if value == "key" {
+                return Some(*style);
+            }
+        }
+        None
+    });
+    assert_eq!(
+        key_event,
+        Some(ScalarStyle::DoubleQuoted),
+        "key scalar must have DoubleQuoted style at event layer"
+    );
+}
+
+// IT-16: single-quoted mapping key emits SingleQuoted style at event layer.
+#[test]
+fn quoted_key_parse_events_style_single() {
+    let events = event_variants("'key': value\n");
+    let key_event = events.iter().find_map(|ev| {
+        if let Event::Scalar { value, style, .. } = ev {
+            if value == "key" {
+                return Some(*style);
+            }
+        }
+        None
+    });
+    assert_eq!(
+        key_event,
+        Some(ScalarStyle::SingleQuoted),
+        "key scalar must have SingleQuoted style at event layer"
+    );
+}
+
 // IT-14: plain scalar regression guard — adding quoted paths must not break plain.
 #[test]
 fn single_quoted_follows_plain_scalar_fallback() {

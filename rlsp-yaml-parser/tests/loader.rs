@@ -13,6 +13,7 @@
 
 use rstest::rstest;
 
+use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
 use rlsp_yaml_parser::node::Node;
 
@@ -944,6 +945,169 @@ fn it_j2_trailing_comment_text_includes_hash() {
     assert!(
         tc.starts_with('#'),
         "trailing comment must start with '#'; got: {tc:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Group K — Quoted mapping keys (style preservation)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn quoted_key_double_quoted_simple() {
+    let docs = load("\"key\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "key" && *style == ScalarStyle::DoubleQuoted),
+        "key must be decoded with DoubleQuoted style, got: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+#[test]
+fn quoted_key_single_quoted_simple() {
+    let docs = load("'key': value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "key" && *style == ScalarStyle::SingleQuoted),
+        "key must be decoded with SingleQuoted style, got: {k:?}"
+    );
+    assert!(
+        matches!(v, Node::Scalar { value, .. } if value == "value"),
+        "val: {v:?}"
+    );
+}
+
+#[test]
+fn quoted_key_double_quoted_with_escape_sequence() {
+    // \t in double-quoted YAML is a literal tab character
+    let docs = load("\"ke\\ty\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "ke\ty" && *style == ScalarStyle::DoubleQuoted),
+        "key escape must be decoded and style DoubleQuoted, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_single_quoted_with_escaped_quote() {
+    // In single-quoted scalars, '' is the escape for a literal '
+    let docs = load("'it''s': value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "it's" && *style == ScalarStyle::SingleQuoted),
+        "single-quoted key escape must be decoded and style SingleQuoted, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_with_spaces_inside() {
+    let docs = load("\"hello world\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value == "hello world" && *style == ScalarStyle::DoubleQuoted),
+        "spaces inside quoted key must be preserved, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_double_quoted_empty() {
+    let docs = load("\"\": value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, _) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, style, .. }
+            if value.is_empty() && *style == ScalarStyle::DoubleQuoted),
+        "empty quoted key must decode to empty string with DoubleQuoted style, got: {k:?}"
+    );
+}
+
+#[test]
+fn quoted_key_in_nested_mapping() {
+    let docs = load("outer:\n  \"inner key\": inner value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert!(
+        matches!(k, Node::Scalar { value, .. } if value == "outer"),
+        "outer key: {k:?}"
+    );
+    let Node::Mapping { entries: inner, .. } = v else {
+        panic!("expected nested Mapping, got: {v:?}");
+    };
+    assert_eq!(inner.len(), 1);
+    let (ik, _) = &inner[0];
+    assert!(
+        matches!(ik, Node::Scalar { value, style, .. }
+            if value == "inner key" && *style == ScalarStyle::DoubleQuoted),
+        "nested quoted key must be decoded, got: {ik:?}"
+    );
+}
+
+#[test]
+fn quoted_key_multiple_entries_mixed() {
+    let docs = load("plain_key: 1\n\"quoted_key\": 2\n'another': 3\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping, got: {:?}", docs[0].root);
+    };
+    assert_eq!(entries.len(), 3);
+    let (k0, _) = &entries[0];
+    assert!(
+        matches!(k0, Node::Scalar { value, style, .. }
+            if value == "plain_key" && *style == ScalarStyle::Plain),
+        "entry 0 key: {k0:?}"
+    );
+    let (k1, _) = &entries[1];
+    assert!(
+        matches!(k1, Node::Scalar { value, style, .. }
+            if value == "quoted_key" && *style == ScalarStyle::DoubleQuoted),
+        "entry 1 key: {k1:?}"
+    );
+    let (k2, _) = &entries[2];
+    assert!(
+        matches!(k2, Node::Scalar { value, style, .. }
+            if value == "another" && *style == ScalarStyle::SingleQuoted),
+        "entry 2 key: {k2:?}"
     );
 }
 
