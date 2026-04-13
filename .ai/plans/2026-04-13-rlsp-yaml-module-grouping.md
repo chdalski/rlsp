@@ -93,8 +93,8 @@ Doc comment in `document_links.rs` references `rlsp_yaml::document_links` — up
 
 - [x] Clarify grouping style and module file convention with user
 - [x] Create module groups, move files, update all paths (52f0ce1)
-- [ ] Convert schema/ and schema_validation/ to named-file style
-- [ ] Verify: cargo fmt, clippy, build, test, bench compile
+- [x] Convert schema/ and schema_validation/ to named-file style (722405d)
+- [x] Verify: cargo fmt, clippy, build, test, bench compile
 
 ## Tasks
 
@@ -120,9 +120,9 @@ Convert the two existing subdirectory modules from
 `mod.rs` to named module files for consistency with the
 new groups.
 
-- [ ] `git mv schema/mod.rs` → `schema.rs` (as the parent module file)
-- [ ] `git mv schema_validation/mod.rs` → `schema_validation.rs`
-- [ ] Verify: `cargo fmt && cargo clippy --all-targets && cargo test`
+- [x] `git mv schema/mod.rs` → `schema.rs` (as the parent module file)
+- [x] `git mv schema_validation/mod.rs` → `schema_validation.rs`
+- [x] Verify: `cargo fmt && cargo clippy --all-targets && cargo test`
 
 ## Decisions
 
