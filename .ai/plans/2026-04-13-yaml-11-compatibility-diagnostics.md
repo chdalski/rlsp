@@ -99,8 +99,8 @@ migration assistance. Their issue #532 (open since Aug
 - [x] Add `yaml11Octal` validator and diagnostic
 - [x] Add quick fixes for 1.1 booleans (quote + convert)
 - [x] Add quick fixes for 1.1 octals (quote + convert)
-- [ ] Add schema-aware severity escalation for 1.1 values
-- [ ] Enhance `schemaType` message for 1.1 boolean in
+- [x] Add schema-aware severity escalation for 1.1 values
+- [x] Enhance `schemaType` message for 1.1 boolean in
   boolean-typed field
 - [x] Wire `yamlVersion` setting to suppress/adjust
   diagnostics
@@ -229,17 +229,19 @@ the value matches `is_yaml11_bool()`.
 
 Gate both on `yamlVersion != V1_1`.
 
-- [ ] Post-type-check scan for 1.1 values in string-typed
+- [x] Post-type-check scan for 1.1 values in string-typed
   fields
-- [ ] `schemaYaml11Boolean` diagnostic with warning severity
-- [ ] `schemaYaml11Octal` diagnostic with warning severity
-- [ ] Enhanced `schemaType` message for 1.1 bool in
+- [x] `schemaYaml11Boolean` diagnostic with warning severity
+- [x] `schemaYaml11Octal` diagnostic with warning severity
+- [x] Enhanced `schemaType` message for 1.1 bool in
   boolean-typed field
-- [ ] Quick fixes on `schemaYaml11Boolean`,
+- [x] Quick fixes on `schemaYaml11Boolean`,
   `schemaYaml11Octal`, and enhanced `schemaType`
-- [ ] Unit tests for schema-aware diagnostics
-- [ ] Integration tests with K8s-style schemas (ConfigMap
+- [x] Unit tests for schema-aware diagnostics
+- [x] Integration tests with K8s-style schemas (ConfigMap
   `.data` string field, boolean field)
+
+Commit: ac0716d
 
 ### Task 4: Update VS Code extension settings
 
