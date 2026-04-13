@@ -57,7 +57,8 @@ into Codecov if the effort is small.
       (8757a28)
 - [x] Fix all 41 lint errors (4 in rlsp-fmt, 37 in
       rlsp-yaml-parser) (8757a28)
-- [ ] Add `docs/architecture.md` for rlsp-yaml-parser
+- [x] Add `docs/architecture.md` for rlsp-yaml-parser
+      (3955b2a)
 - [ ] Add `docs/feature-log.md` for rlsp-yaml-parser
 - [ ] Add `docs/feature-log.md` for rlsp-fmt
 - [ ] Check Codecov coverage for each crate, identify gaps
@@ -113,7 +114,7 @@ missing_panics_doc = "warn"
 - All three lints are present in `[workspace.lints]`
 - Doc comments are meaningful (not "The X field" stubs)
 
-### Task 2: Add docs/architecture.md for rlsp-yaml-parser
+### Task 2: Add docs/architecture.md for rlsp-yaml-parser ✅ (3955b2a)
 
 Write a design document explaining the parser's internal
 architecture. This is a reference document for contributors
