@@ -46,9 +46,7 @@ Choose clarity. Duplication is acceptable when:
 
 ### Single Responsibility (SRP)
 
-A module should have one, and only one, reason to change —
-multiple responsibilities create coupling between unrelated
-concerns, so a change in one area forces changes in another.
+A module should have one, and only one, reason to change.
 
 ### Open-Closed (OCP)
 
@@ -127,9 +125,6 @@ the library persists failing seeds automatically (most do)
 so a CI failure is always replayable locally.
 
 ## Red Flags
-
-These patterns often signal design problems — investigate
-before they compound:
 
 - Code that's hard to name (unclear responsibility)
 - Copy-paste programming (unextracted duplication)

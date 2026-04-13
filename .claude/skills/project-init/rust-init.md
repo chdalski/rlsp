@@ -27,9 +27,12 @@ expect_used = "deny"                         # panics with a message — use pro
 unwrap_used = "deny"                         # panics on None/Err — use proper error handling
 allow_attributes = "deny"                    # forces #[expect] over #[allow] — self-cleaning suppressions
 allow_attributes_without_reason = "deny"     # every lint suppression must document why
+missing_errors_doc = "warn"                  # document Errors section for fallible public functions
+missing_panics_doc = "warn"                  # document Panics section when a function can panic
 
 [lints.rust]
-warnings = "deny" # -D warnings
+missing_docs = "warn"                        # encourage doc comments on public items
+warnings = "deny"                            # -D warnings
 ```
 
 ## Workspace `Cargo.toml` (has `[workspace]`)
@@ -51,8 +54,11 @@ expect_used = "deny"
 unwrap_used = "deny"
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
 
 [workspace.lints.rust]
+missing_docs = "warn"
 warnings = "deny" # -D warnings
 ```
 

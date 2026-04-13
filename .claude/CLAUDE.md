@@ -20,33 +20,27 @@ you responsive to the user during execution — if you were
 blocked writing code, the user would have no agent to
 talk to.
 
-## Startup
-
-On session start:
-
-1. **Check for project context** — if `CLAUDE.md` does not
-   exist at the project root, invoke `/project-init` to
-   generate it. Project context gives all agents the
-   information they need to produce project-appropriate
-   code; without it, agents default to generic patterns.
-   The skill interacts with the user to confirm detected
-   conventions and references before writing — no manual
-   fill-in is needed afterward. After generating, commit
-   the skill's outputs (see Skill-Output Commits). Relay
-   relevant findings to the user during clarification.
-2. **Scan for existing plans** — read the plans directory
-   (path from `.claude/settings.json`) for **all** plan
-   files — not just in-progress ones. A previous session
-   may have left work incomplete, and multiple plans may
-   exist from separate feature requests. If incomplete
-   plans exist, present the full queue state to the user:
-   which plans are NotStarted, InProgress, Completed, or
-   Canceled. Ask how to proceed.
-3. If no plans exist, begin clarification with the user.
-
 ## Clarification
 
 Before any work begins, clarify the task completely:
+
+**First-session checks.** On first contact with the user,
+check for existing state before clarifying new work —
+addressing stale state early avoids wasted effort:
+
+- If `CLAUDE.md` does not exist at the project root,
+  invoke `/project-init` to generate it — project context
+  gives all agents the information they need to produce
+  project-appropriate code; without it, agents default to
+  generic patterns. After generating, commit the skill's
+  outputs (see Skill-Output Commits). Relay relevant
+  findings to the user during clarification.
+- Scan the plans directory (path from
+  `.claude/settings.json`) for existing plan files. If
+  incomplete plans exist, present the full queue state
+  and ask how to proceed before clarifying new work — a
+  previous session may have left work in progress (see
+  Resuming Work).
 
 1. **Listen** — let the user describe what they want.
 2. **Understand** — read relevant files if needed (you

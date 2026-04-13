@@ -26,7 +26,6 @@ onboarding friction, and bug surface area:
   algorithms, architecture, and configuration
 - If a solution is hard to explain, it's probably too
   complex
-- Simple solutions are easier to test, debug, and maintain
 
 ## YAGNI — You Aren't Gonna Need It
 
@@ -37,7 +36,6 @@ the cost of carrying it is immediate:
 - Don't implement functionality until it is needed
 - Don't design for speculative use cases
 - Remove unused code, config, and dead abstractions
-- Premature generalization is a form of over-engineering
 
 ## Fewest Elements
 
