@@ -97,8 +97,8 @@ migration assistance. Their issue #532 (open since Aug
 - [x] Add YAML 1.1 boolean detection helpers
 - [x] Add `yaml11Boolean` validator and diagnostic
 - [x] Add `yaml11Octal` validator and diagnostic
-- [ ] Add quick fixes for 1.1 booleans (quote + convert)
-- [ ] Add quick fixes for 1.1 octals (quote + convert)
+- [x] Add quick fixes for 1.1 booleans (quote + convert)
+- [x] Add quick fixes for 1.1 octals (quote + convert)
 - [ ] Add schema-aware severity escalation for 1.1 values
 - [ ] Enhance `schemaType` message for 1.1 boolean in
   boolean-typed field
@@ -181,13 +181,15 @@ Follow the existing pattern in `code_actions.rs`:
 diagnostic-driven actions matched via `diagnostic_code()`
 in the `diag_actions` iterator.
 
-- [ ] `yaml11Boolean` → "Quote value" code action
-- [ ] `yaml11Boolean` → "Convert to boolean" code action
-- [ ] `yaml11Octal` → "Quote as string" code action
-- [ ] `yaml11Octal` → "Convert to YAML 1.2 octal" code
+- [x] `yaml11Boolean` → "Quote value" code action
+- [x] `yaml11Boolean` → "Convert to boolean" code action
+- [x] `yaml11Octal` → "Quote as string" code action
+- [x] `yaml11Octal` → "Convert to YAML 1.2 octal" code
   action
-- [ ] Unit tests for all four code actions
-- [ ] Integration test through server handler
+- [x] Unit tests for all four code actions
+- [x] Integration test through server handler
+
+Commit: 2a0130d
 
 ### Task 3: Schema-aware severity escalation for YAML 1.1 values
 
