@@ -22,7 +22,12 @@ pub enum Doc {
     Concat(Vec<Self>),
     /// Different content depending on mode: `flat` in flat mode, `break_` in
     /// break mode.
-    FlatAlt { flat: Box<Self>, break_: Box<Self> },
+    FlatAlt {
+        /// Document rendered when the enclosing group is in flat mode.
+        flat: Box<Self>,
+        /// Document rendered when the enclosing group is in break mode.
+        break_: Box<Self>,
+    },
 }
 
 /// Construct a `Doc::Text` node.

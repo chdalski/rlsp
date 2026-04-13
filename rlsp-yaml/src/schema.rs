@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 use tower_lsp::lsp_types::Url;
 
+/// Schema association management: glob-pattern-to-schema-URL mappings.
 pub mod association;
 pub use association::*;
 
@@ -75,14 +76,18 @@ impl std::fmt::Display for SchemaError {
 /// The JSON Schema type keyword — a single type string or an array of types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaType {
+    /// A single type string (e.g. `"string"`).
     Single(String),
+    /// An array of type strings (e.g. `["string", "null"]`).
     Multiple(Vec<String>),
 }
 
 /// Whether `additionalProperties` is `false` or a sub-schema.
 #[derive(Debug, Clone)]
 pub enum AdditionalProperties {
+    /// `additionalProperties: false` — no undeclared properties are allowed.
     Denied,
+    /// `additionalProperties` is a sub-schema that additional properties must match.
     Schema(Box<JsonSchema>),
 }
 
@@ -90,80 +95,138 @@ pub enum AdditionalProperties {
 /// completion, and hover support.
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
+    /// Schema identifier (`$id` in Draft-07, `id` in Draft-04).
     pub id: Option<String>,
+    /// Value of the `type` keyword.
     pub schema_type: Option<SchemaType>,
+    /// Short human-readable label for the schema.
     pub title: Option<String>,
+    /// Longer human-readable description for the schema.
     pub description: Option<String>,
+    /// `format` annotation (e.g. `"date-time"`, `"uri"`).
     pub format: Option<String>,
+    /// `contentEncoding` annotation (e.g. `"base64"`).
     pub content_encoding: Option<String>,
+    /// `contentMediaType` annotation (e.g. `"application/json"`).
     pub content_media_type: Option<String>,
+    /// `contentSchema` sub-schema describing the decoded content.
     pub content_schema: Option<Box<Self>>,
+    /// Named property sub-schemas from the `properties` keyword.
     pub properties: Option<HashMap<String, Self>>,
+    /// List of property names that must be present (`required` keyword).
     pub required: Option<Vec<String>>,
+    /// Allowed values from the `enum` keyword.
     pub enum_values: Option<Vec<Value>>,
+    /// Default value annotation.
     pub default: Option<Value>,
+    /// Example values annotation.
     pub examples: Option<Vec<Value>>,
+    /// Sub-schema for array items (`items` keyword, Draft-07 and earlier).
     pub items: Option<Box<Self>>,
+    /// Positional item sub-schemas (`prefixItems` keyword, Draft-2020-12).
     pub prefix_items: Option<Vec<Self>>,
+    /// Sub-schema that at least one array item must match (`contains` keyword).
     pub contains: Option<Box<Self>>,
+    /// Minimum number of array items.
     pub min_items: Option<u64>,
+    /// Maximum number of array items.
     pub max_items: Option<u64>,
+    /// Maximum number of items matching `contains`.
     pub max_contains: Option<u64>,
+    /// Minimum number of items matching `contains`.
     pub min_contains: Option<u64>,
+    /// Whether all array items must be unique (`uniqueItems` keyword).
     pub unique_items: Option<bool>,
+    /// Schema or denial for properties not listed in `properties`.
     pub additional_properties: Option<AdditionalProperties>,
+    /// Schema or denial for items beyond `items`/`prefixItems` (`additionalItems`).
     pub additional_items: Option<AdditionalProperties>,
+    /// Minimum number of object properties.
     pub min_properties: Option<u64>,
+    /// Maximum number of object properties.
     pub max_properties: Option<u64>,
+    /// Sub-schemas matched by property name regex (`patternProperties`).
     pub pattern_properties: Option<Vec<(String, Self)>>,
+    /// Sub-schema that each property name must match (`propertyNames`).
     pub property_names: Option<Box<Self>>,
+    /// All sub-schemas must be satisfied (`allOf`).
     pub all_of: Option<Vec<Self>>,
+    /// At least one sub-schema must be satisfied (`anyOf`).
     pub any_of: Option<Vec<Self>>,
+    /// Exactly one sub-schema must be satisfied (`oneOf`).
     pub one_of: Option<Vec<Self>>,
+    /// Sub-schema that the value must NOT satisfy (`not`).
     pub not: Option<Box<Self>>,
+    /// Condition sub-schema for `if`/`then`/`else`.
     pub if_schema: Option<Box<Self>>,
+    /// Applied when `if_schema` is satisfied.
     pub then_schema: Option<Box<Self>>,
+    /// Applied when `if_schema` is not satisfied.
     pub else_schema: Option<Box<Self>>,
+    /// `$ref` target (resolved to an absolute URI or JSON-pointer fragment).
     pub ref_path: Option<String>,
+    /// `$anchor` value for fragment-based `$ref` resolution.
     pub anchor: Option<String>,
+    /// `$dynamicAnchor` value for dynamic `$ref` resolution.
     pub dynamic_anchor: Option<String>,
+    /// Regular-expression pattern the string value must match.
     pub pattern: Option<String>,
+    /// Inclusive minimum for numeric values.
     pub minimum: Option<f64>,
+    /// Inclusive maximum for numeric values.
     pub maximum: Option<f64>,
+    /// Minimum number of Unicode characters in a string.
     pub min_length: Option<u64>,
+    /// Maximum number of Unicode characters in a string.
     pub max_length: Option<u64>,
+    /// Exclusive minimum for numeric values (Draft-07+).
     pub exclusive_minimum: Option<f64>,
+    /// Exclusive maximum for numeric values (Draft-07+).
     pub exclusive_maximum: Option<f64>,
+    /// `exclusiveMinimum: true` flag (Draft-04 boolean form).
     pub exclusive_minimum_draft04: Option<bool>,
+    /// `exclusiveMaximum: true` flag (Draft-04 boolean form).
     pub exclusive_maximum_draft04: Option<bool>,
+    /// Value must be a multiple of this number.
     pub multiple_of: Option<f64>,
+    /// Value must be exactly equal to this constant (`const` keyword).
     pub const_value: Option<serde_json::Value>,
+    /// Property dependency requirements (`dependentRequired`).
     pub dependent_required: Option<HashMap<String, Vec<String>>>,
+    /// Property dependency sub-schemas (`dependentSchemas`).
     pub dependent_schemas: Option<HashMap<String, Self>>,
     /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
     pub definitions: Option<HashMap<String, Self>>,
+    /// Whether the schema is deprecated.
     pub deprecated: Option<bool>,
+    /// Schema or denial for unevaluated properties (`unevaluatedProperties`).
     pub unevaluated_properties: Option<AdditionalProperties>,
+    /// Sub-schema for unevaluated array items (`unevaluatedItems`).
     pub unevaluated_items: Option<Box<Self>>,
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
 #[derive(Debug, Clone)]
 pub struct SchemaAssociation {
+    /// Glob pattern matched against the document file path.
     pub pattern: String,
+    /// URL of the JSON Schema to apply to matching documents.
     pub url: String,
 }
 
 /// A single entry from the `SchemaStore` catalog.
 #[derive(Debug, Clone)]
 pub struct SchemaStoreEntry {
+    /// URL of the JSON Schema.
     pub url: String,
+    /// Glob patterns for files this schema applies to.
     pub file_match: Vec<String>,
 }
 
 /// The parsed `SchemaStore` catalog, filtered to YAML-relevant entries.
 #[derive(Debug, Clone, Default)]
 pub struct SchemaStoreCatalog {
+    /// All YAML-relevant schema entries from the catalog.
     pub entries: Vec<SchemaStoreEntry>,
 }
 
@@ -185,6 +248,7 @@ pub struct SchemaCache {
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl SchemaCache {
+    /// Create a new empty schema cache.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -608,6 +672,7 @@ pub struct ParseContext<'a> {
 }
 
 impl<'a> ParseContext<'a> {
+    /// Create a new parse context with the given cache and optional proxy URL.
     pub fn new(cache: &'a mut SchemaCache, proxy: Option<&'a str>) -> Self {
         Self {
             cache,

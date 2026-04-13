@@ -31,7 +31,9 @@
 //!
 //! See [`FormatOptions`] for all rendering controls.
 
+/// Intermediate representation types for the pretty-printing engine.
 pub mod ir;
+/// The Wadler-Lindig line-breaking printer.
 pub mod printer;
 
 pub use ir::{Doc, concat, flat_alt, group, hard_line, indent, join, line, text};

@@ -56,7 +56,12 @@ use crate::pos::{Pos, Span};
 pub enum LoadError {
     /// The event stream contained a parse error.
     #[error("parse error at {pos:?}: {message}")]
-    Parse { pos: Pos, message: String },
+    Parse {
+        /// Source position where the parse error was detected.
+        pos: Pos,
+        /// Human-readable description of the error.
+        message: String,
+    },
 
     /// The event stream ended unexpectedly mid-document.
     #[error("unexpected end of event stream")]
@@ -64,23 +69,38 @@ pub enum LoadError {
 
     /// Nesting depth exceeded the configured limit.
     #[error("nesting depth limit exceeded (max: {limit})")]
-    NestingDepthLimitExceeded { limit: usize },
+    NestingDepthLimitExceeded {
+        /// The configured nesting depth limit that was exceeded.
+        limit: usize,
+    },
 
     /// Too many distinct anchor names were defined.
     #[error("anchor count limit exceeded (max: {limit})")]
-    AnchorCountLimitExceeded { limit: usize },
+    AnchorCountLimitExceeded {
+        /// The configured anchor count limit that was exceeded.
+        limit: usize,
+    },
 
     /// Alias expansion produced more nodes than the configured limit.
     #[error("alias expansion node limit exceeded (max: {limit})")]
-    AliasExpansionLimitExceeded { limit: usize },
+    AliasExpansionLimitExceeded {
+        /// The configured expansion node limit that was exceeded.
+        limit: usize,
+    },
 
     /// A circular alias reference was detected.
     #[error("circular alias reference: '{name}'")]
-    CircularAlias { name: String },
+    CircularAlias {
+        /// The anchor name involved in the cycle.
+        name: String,
+    },
 
     /// An alias referred to an anchor that was never defined.
     #[error("undefined alias: '{name}'")]
-    UndefinedAlias { name: String },
+    UndefinedAlias {
+        /// The alias name that had no corresponding anchor definition.
+        name: String,
+    },
 }
 
 // Convenience alias used inside the module.
@@ -106,14 +126,16 @@ pub enum LoadMode {
 /// Security and behaviour options for the loader.
 #[derive(Debug, Clone)]
 pub struct LoaderOptions {
-    /// Maximum mapping/sequence nesting depth (default: 512).
+    /// Maximum mapping/sequence nesting depth before returning
+    /// [`LoadError::NestingDepthLimitExceeded`] (default: 512).
     pub max_nesting_depth: usize,
-    /// Maximum number of distinct anchor names per document (default: 10 000).
+    /// Maximum number of distinct anchor names per document before returning
+    /// [`LoadError::AnchorCountLimitExceeded`] (default: 10 000).
     pub max_anchors: usize,
-    /// Maximum total nodes produced by alias expansion, resolved mode only
-    /// (default: 1 000 000).
+    /// Maximum total nodes produced by alias expansion in resolved mode before
+    /// returning [`LoadError::AliasExpansionLimitExceeded`] (default: 1 000 000).
     pub max_expanded_nodes: usize,
-    /// Loader mode.
+    /// Controls how alias references are handled during loading.
     pub mode: LoadMode,
 }
 

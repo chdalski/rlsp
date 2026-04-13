@@ -4,6 +4,7 @@ use tower_lsp::lsp_types::{CodeLens, Command, Position, Range};
 
 use crate::schema::JsonSchema;
 
+/// Produce code lenses for a document associated with `schema_url`.
 #[must_use]
 pub fn code_lenses(schema_url: &str, schema: Option<&JsonSchema>) -> Vec<CodeLens> {
     let title = schema

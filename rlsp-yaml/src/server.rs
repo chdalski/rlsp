@@ -34,7 +34,9 @@ use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
 /// regardless of this setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum YamlVersion {
+    /// YAML 1.1 (allows implicit boolean values such as `yes`/`no`).
     V1_1,
+    /// YAML 1.2 (strict; recommended for Kubernetes and modern tooling).
     V1_2,
 }
 
@@ -43,7 +45,9 @@ pub enum YamlVersion {
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    /// Custom YAML tag names to treat as valid (suppresses unknown-tag diagnostics).
     pub custom_tags: Vec<String>,
+    /// Whether to enforce alphabetical key ordering in mappings.
     pub key_ordering: bool,
     /// Maps schema URL → glob pattern (upstream yaml-language-server convention).
     pub schemas: HashMap<String, String>,
@@ -95,6 +99,7 @@ const DEFAULT_KUBERNETES_VERSION: &str = "master";
 //
 // No std::sync::Mutex guard may be held across an .await point. Extract the
 // needed data as owned values, drop the guard, then call async operations.
+/// The LSP server backend holding shared state for all document handlers.
 pub struct Backend {
     client: Client,
     document_store: Mutex<DocumentStore>,
@@ -109,6 +114,7 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// Create a new backend with the given LSP client handle.
     #[must_use]
     pub fn new(client: Client) -> Self {
         Self {
@@ -252,12 +258,14 @@ impl Backend {
         }
     }
 
+    /// Return the raw text of the document at `uri`, or `None` if not open.
     pub fn get_document_text(&self, uri: &str) -> Option<String> {
         let parsed = Url::parse(uri).ok()?;
         let store = self.document_store.lock().ok()?;
         store.get(&parsed).map(str::to_string)
     }
 
+    /// Return the most recently published diagnostics for `uri`, or `None`.
     pub fn get_diagnostics(&self, uri: &str) -> Option<Vec<Diagnostic>> {
         let parsed = Url::parse(uri).ok()?;
         let diags = self.diagnostics.lock().ok()?;
@@ -518,6 +526,7 @@ impl Backend {
             .await;
     }
 
+    /// Return the static server capabilities advertised during initialization.
     #[must_use]
     pub fn capabilities() -> ServerCapabilities {
         ServerCapabilities {

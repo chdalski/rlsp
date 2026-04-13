@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: MIT
 
+//! A spec-faithful streaming YAML 1.2 parser.
+//!
+//! Use [`parse_events`] for a lazy event stream, or the [`loader`] module to
+//! build a full AST.
+
 mod chars;
+/// Encoding detection and UTF-8 decoding for YAML byte streams.
 pub mod encoding;
 mod error;
 mod event;
 mod event_iter;
 pub(crate) mod lexer;
+/// Security limit constants for the parser and loader.
 pub mod limits;
 mod lines;
+/// Event-to-AST loader that builds a `Vec<Document<Span>>`.
 pub mod loader;
 pub mod node;
 mod pos;

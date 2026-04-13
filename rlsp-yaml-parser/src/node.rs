@@ -18,9 +18,9 @@ use crate::pos::Span;
 pub struct Document<Loc = Span> {
     /// The root node of the document.
     pub root: Node<Loc>,
-    /// YAML version from `%YAML` directive, if present.
+    /// YAML version declared by a `%YAML` directive, if present (e.g. `(1, 2)`).
     pub version: Option<(u8, u8)>,
-    /// Tag handle/prefix pairs from `%TAG` directives.
+    /// Tag handle/prefix pairs declared by `%TAG` directives (handle, prefix).
     pub tags: Vec<(String, String)>,
     /// Comments that appear at document level (before or between nodes).
     pub comments: Vec<String>,
@@ -31,10 +31,15 @@ pub struct Document<Loc = Span> {
 pub enum Node<Loc = Span> {
     /// A scalar value.
     Scalar {
+        /// The scalar content as a UTF-8 string (after block/flow unfolding).
         value: String,
+        /// The presentation style used in the source (plain, single-quoted, etc.).
         style: ScalarStyle,
+        /// Anchor name defined on this node (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Tag applied to this node (e.g. `!!str`), if any.
         tag: Option<String>,
+        /// Source span covering this scalar in the input.
         loc: Loc,
         /// Comment lines that appear before this node (e.g. `# note`).
         /// Populated only for non-first entries in a mapping or sequence.
@@ -46,9 +51,13 @@ pub enum Node<Loc = Span> {
     },
     /// A mapping (sequence of key–value pairs preserving declaration order).
     Mapping {
+        /// Key–value pairs in declaration order.
         entries: Vec<(Self, Self)>,
+        /// Anchor name defined on this mapping (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Tag applied to this mapping (e.g. `!!map`), if any.
         tag: Option<String>,
+        /// Source span from the opening indicator to the last entry.
         loc: Loc,
         /// Comment lines that appear before this node.
         leading_comments: Vec<String>,
@@ -57,9 +66,13 @@ pub enum Node<Loc = Span> {
     },
     /// A sequence (ordered list of nodes).
     Sequence {
+        /// Ordered list of child nodes.
         items: Vec<Self>,
+        /// Anchor name defined on this sequence (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Tag applied to this sequence (e.g. `!!seq`), if any.
         tag: Option<String>,
+        /// Source span from the opening indicator to the last item.
         loc: Loc,
         /// Comment lines that appear before this node.
         leading_comments: Vec<String>,
@@ -68,7 +81,9 @@ pub enum Node<Loc = Span> {
     },
     /// An alias reference (lossless mode only — resolved mode expands these).
     Alias {
+        /// The anchor name this alias refers to (without the `*` sigil).
         name: String,
+        /// Source span covering the `*name` alias token.
         loc: Loc,
         /// Comment lines that appear before this node.
         leading_comments: Vec<String>,

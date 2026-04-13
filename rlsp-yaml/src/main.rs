@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+//! Entry point for the `rlsp-yaml` language server binary.
+
 use rlsp_yaml::server::Backend;
 use tokio::io::{stdin, stdout};
 use tower_lsp::{LspService, Server};

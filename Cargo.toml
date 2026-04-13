@@ -24,6 +24,9 @@ expect_used = "deny"
 unwrap_used = "deny"
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
 
 [workspace.lints.rust]
 warnings = "deny"
+missing_docs = "warn"

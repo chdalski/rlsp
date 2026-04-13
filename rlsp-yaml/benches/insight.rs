@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-#![expect(clippy::expect_used, reason = "bench setup panics are acceptable")]
+#![expect(
+    clippy::expect_used,
+    missing_docs,
+    reason = "bench setup panics are acceptable"
+)]
 
 mod fixtures;
 

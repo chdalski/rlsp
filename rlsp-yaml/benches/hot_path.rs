@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+#![expect(missing_docs, reason = "bench code")]
+
 mod fixtures;
 
 use std::collections::HashSet;

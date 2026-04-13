@@ -9,7 +9,7 @@
 // NUL (0x00) is valid UTF-8 but excluded from YAML's c-printable production,
 // so it is tested via `parse_events` at the semantic level.
 
-#![expect(clippy::unwrap_used, reason = "test code")]
+#![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
 
 use rstest::rstest;
 

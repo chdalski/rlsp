@@ -10,11 +10,15 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Posit
 /// the default thread stack size.
 const MAX_NESTING_DEPTH: usize = 256;
 
+/// The result of parsing a YAML text buffer.
 pub struct ParseResult {
+    /// Successfully parsed YAML documents.
     pub documents: Vec<Document<Span>>,
+    /// Diagnostics (parse errors) produced during parsing.
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Parse YAML text, returning documents and any parse diagnostics.
 #[must_use]
 pub fn parse_yaml(text: &str) -> ParseResult {
     match LoaderBuilder::new()

@@ -13,17 +13,20 @@ struct StoredDocument {
     documents: Option<Vec<Document<Span>>>,
 }
 
+/// In-memory store for open YAML documents and their parsed ASTs.
 #[derive(Default)]
 pub struct DocumentStore {
     documents: HashMap<Url, StoredDocument>,
 }
 
 impl DocumentStore {
+    /// Create a new empty document store.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Open a document, parsing it immediately.
     pub fn open(&mut self, uri: Url, text: String) {
         let parsed = parser::parse_yaml(&text);
         let docs = if parsed.documents.is_empty() {
@@ -40,6 +43,7 @@ impl DocumentStore {
         );
     }
 
+    /// Update an open document's text and reparse.
     pub fn change(&mut self, uri: &Url, text: String) {
         if let Some(doc) = self.documents.get_mut(uri) {
             let parsed = parser::parse_yaml(&text);
@@ -52,10 +56,12 @@ impl DocumentStore {
         }
     }
 
+    /// Remove a document from the store when it is closed.
     pub fn close(&mut self, uri: &Url) {
         self.documents.remove(uri);
     }
 
+    /// Return the raw text of an open document.
     #[must_use]
     pub fn get(&self, uri: &Url) -> Option<&str> {
         self.documents.get(uri).map(|doc| doc.text.as_str())
@@ -67,6 +73,7 @@ impl DocumentStore {
         self.documents.get(uri)?.documents.as_ref()
     }
 
+    /// Return all open document URIs and their raw text.
     #[must_use]
     pub fn all_documents(&self) -> Vec<(Url, String)> {
         self.documents

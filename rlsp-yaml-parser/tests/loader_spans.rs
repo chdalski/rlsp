@@ -11,6 +11,7 @@
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
+    missing_docs,
     reason = "test code"
 )]
 

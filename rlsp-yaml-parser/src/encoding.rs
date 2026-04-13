@@ -3,10 +3,15 @@
 /// The encoding detected from the input byte stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
+    /// UTF-8 (default when no BOM or null-byte heuristic matches).
     Utf8,
+    /// UTF-16 little-endian (BOM `FF FE` or null-byte heuristic).
     Utf16Le,
+    /// UTF-16 big-endian (BOM `FE FF` or null-byte heuristic).
     Utf16Be,
+    /// UTF-32 little-endian (BOM `FF FE 00 00`).
     Utf32Le,
+    /// UTF-32 big-endian (BOM `00 00 FE FF`).
     Utf32Be,
 }
 

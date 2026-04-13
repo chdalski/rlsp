@@ -18,6 +18,7 @@
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
+    missing_docs,
     reason = "test code"
 )]
 

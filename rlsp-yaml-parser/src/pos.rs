@@ -5,8 +5,11 @@
 /// `line` is 1-based; `column` is 0-based (codepoints from the start of the line).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pos {
+    /// Byte offset from the start of the input (0-based).
     pub byte_offset: usize,
+    /// Line number (1-based).
     pub line: usize,
+    /// Codepoint column within the current line (0-based).
     pub column: usize,
 }
 
@@ -69,7 +72,9 @@ pub fn advance_within_line(pos: Pos, content: &str) -> Pos {
 /// A half-open span `[start, end)` within the input stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
+    /// Inclusive start position of the span.
     pub start: Pos,
+    /// Exclusive end position of the span.
     pub end: Pos,
 }
 

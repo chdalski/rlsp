@@ -4,7 +4,9 @@ use tower_lsp::lsp_types::{Color, ColorPresentation, Position, Range};
 
 /// A color found at a specific range in the document.
 pub struct ColorMatch {
+    /// Source range of the color value in the document.
     pub range: Range,
+    /// The parsed RGBA color value.
     pub color: Color,
 }
 
