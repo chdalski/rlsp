@@ -30,11 +30,19 @@ pub fn code_actions(
     let diag_actions = diagnostics
         .iter()
         .filter(|diag| ranges_overlap(&diag.range, &range))
-        .filter_map(|diag| match diagnostic_code(diag) {
-            Some("flowMap") => flow_map_to_block(&lines, diag, uri),
-            Some("flowSeq") => flow_seq_to_block(&lines, diag, uri),
-            Some("unusedAnchor") => delete_unused_anchor(&lines, diag, uri),
-            _ => None,
+        .flat_map(|diag| match diagnostic_code(diag) {
+            Some("flowMap") => flow_map_to_block(&lines, diag, uri)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            Some("flowSeq") => flow_seq_to_block(&lines, diag, uri)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            Some("unusedAnchor") => delete_unused_anchor(&lines, diag, uri)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            Some("yaml11Boolean") => yaml11_bool_actions(&lines, diag, uri),
+            Some("yaml11Octal") => yaml11_octal_actions(&lines, diag, uri),
+            _ => vec![],
         });
 
     // Context-driven actions (not tied to diagnostics)
@@ -552,6 +560,125 @@ fn string_to_block_scalar(
         CodeActionKind::REFACTOR_REWRITE,
         None,
     ))
+}
+
+// ---------- YAML 1.1 boolean quick fixes ----------
+
+fn yaml11_bool_actions(
+    lines: &[&str],
+    diag: &Diagnostic,
+    uri: &tower_lsp::lsp_types::Url,
+) -> Vec<CodeAction> {
+    let line_idx = diag.range.start.line as usize;
+    let Some(line) = lines.get(line_idx) else {
+        return vec![];
+    };
+    let start_col = diag.range.start.character as usize;
+    let end_col = diag.range.end.character as usize;
+
+    if start_col >= line.len() || end_col > line.len() {
+        return vec![];
+    }
+
+    let value = &line[start_col..end_col];
+    let before = &line[..start_col];
+    let after = &line[end_col..];
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
+    let edit_range = Range::new(
+        Position::new(diag.range.start.line, 0),
+        Position::new(diag.range.start.line, line.len() as u32),
+    );
+
+    let quoted_text = format!("{before}\"{value}\"{after}");
+    let canonical = crate::scalar_helpers::yaml11_bool_canonical(value);
+    let converted_text = format!("{before}{canonical}{after}");
+
+    vec![
+        make_action(
+            "Quote value".to_string(),
+            uri,
+            vec![TextEdit {
+                range: edit_range,
+                new_text: quoted_text,
+            }],
+            CodeActionKind::QUICKFIX,
+            Some(vec![diag.clone()]),
+        ),
+        make_action(
+            "Convert to boolean".to_string(),
+            uri,
+            vec![TextEdit {
+                range: edit_range,
+                new_text: converted_text,
+            }],
+            CodeActionKind::QUICKFIX,
+            Some(vec![diag.clone()]),
+        ),
+    ]
+}
+
+// ---------- YAML 1.1 octal quick fixes ----------
+
+fn yaml11_octal_actions(
+    lines: &[&str],
+    diag: &Diagnostic,
+    uri: &tower_lsp::lsp_types::Url,
+) -> Vec<CodeAction> {
+    let line_idx = diag.range.start.line as usize;
+    let Some(line) = lines.get(line_idx) else {
+        return vec![];
+    };
+    let start_col = diag.range.start.character as usize;
+    let end_col = diag.range.end.character as usize;
+
+    if start_col >= line.len() || end_col > line.len() {
+        return vec![];
+    }
+
+    let value = &line[start_col..end_col];
+    let before = &line[..start_col];
+    let after = &line[end_col..];
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
+    let edit_range = Range::new(
+        Position::new(diag.range.start.line, 0),
+        Position::new(diag.range.start.line, line.len() as u32),
+    );
+
+    let quoted_text = format!("{before}\"{value}\"{after}");
+    // Insert 'o' after the leading '0': "0755" → "0o755"
+    let yaml12_octal = format!("0o{}", &value[1..]);
+    let converted_text = format!("{before}{yaml12_octal}{after}");
+
+    vec![
+        make_action(
+            "Quote as string".to_string(),
+            uri,
+            vec![TextEdit {
+                range: edit_range,
+                new_text: quoted_text,
+            }],
+            CodeActionKind::QUICKFIX,
+            Some(vec![diag.clone()]),
+        ),
+        make_action(
+            "Convert to YAML 1.2 octal".to_string(),
+            uri,
+            vec![TextEdit {
+                range: edit_range,
+                new_text: converted_text,
+            }],
+            CodeActionKind::QUICKFIX,
+            Some(vec![diag.clone()]),
+        ),
+    ]
 }
 
 // ---------- Helpers ----------
@@ -1221,6 +1348,376 @@ mod tests {
             edits[0].new_text.contains("[\"true\", plain]"),
             "pre-quoted item preserved and plain item unquoted: {:?}",
             edits[0].new_text
+        );
+    }
+
+    // ---- yaml11Boolean quick fixes ----
+
+    #[test]
+    fn should_quote_yaml11_bool_yes_lowercase() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "enabled: \"yes\"");
+    }
+
+    #[test]
+    fn should_quote_yaml11_bool_uppercase_on() {
+        let text = "flag: ON\n";
+        let diag = make_diagnostic(0, 6, 8, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: \"ON\"");
+    }
+
+    #[test]
+    fn should_quote_yaml11_bool_with_indentation() {
+        let text = "  enabled: yes\n";
+        let diag = make_diagnostic(0, 11, 14, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "  enabled: \"yes\"");
+    }
+
+    #[test]
+    fn should_not_offer_yaml11_bool_quote_for_non_overlapping_diagnostic() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 100, 103, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert!(actions.iter().all(|a| a.title != "Quote value"));
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_yes_to_true() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "enabled: true");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_no_to_false() {
+        let text = "enabled: No\n";
+        let diag = make_diagnostic(0, 9, 11, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "enabled: false");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_on_to_true() {
+        let text = "flag: ON\n";
+        let diag = make_diagnostic(0, 6, 8, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: true");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_off_to_false() {
+        let text = "flag: OFF\n";
+        let diag = make_diagnostic(0, 6, 9, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: false");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_y_to_true() {
+        let text = "active: Y\n";
+        let diag = make_diagnostic(0, 8, 9, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "active: true");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_n_to_false() {
+        let text = "active: N\n";
+        let diag = make_diagnostic(0, 8, 9, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "active: false");
+    }
+
+    #[test]
+    fn should_convert_yaml11_bool_preserving_indentation() {
+        let text = "  active: yes\n";
+        let diag = make_diagnostic(0, 10, 13, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "  active: true");
+    }
+
+    #[test]
+    fn yaml11_bool_produces_exactly_two_actions() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| a.title == "Quote value" || a.title == "Convert to boolean")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_actions_attach_diagnostic() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
+        let actions = code_actions(
+            text,
+            line_range(0),
+            std::slice::from_ref(&diag),
+            &test_uri(),
+        );
+
+        for action in actions
+            .iter()
+            .filter(|a| a.title == "Quote value" || a.title == "Convert to boolean")
+        {
+            let attached = action.diagnostics.as_ref().unwrap();
+            assert_eq!(attached.len(), 1);
+            assert_eq!(
+                attached[0].code,
+                Some(NumberOrString::String("yaml11Boolean".to_string()))
+            );
+        }
+    }
+
+    // ---- yaml11Octal quick fixes ----
+
+    #[test]
+    fn should_quote_yaml11_octal_0755() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Quote as string")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "mode: \"0755\"");
+    }
+
+    #[test]
+    fn should_quote_yaml11_octal_007() {
+        let text = "file: 007\n";
+        let diag = make_diagnostic(0, 6, 9, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Quote as string")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "file: \"007\"");
+    }
+
+    #[test]
+    fn should_quote_yaml11_octal_with_indentation() {
+        let text = "  mode: 0755\n";
+        let diag = make_diagnostic(0, 8, 12, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Quote as string")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "  mode: \"0755\"");
+    }
+
+    #[test]
+    fn should_not_offer_yaml11_octal_quote_for_out_of_bounds_range() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 100, 104, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert!(actions.iter().all(|a| a.title != "Quote as string"));
+    }
+
+    #[test]
+    fn should_convert_yaml11_octal_0755_to_yaml12() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to YAML 1.2 octal")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "mode: 0o755");
+    }
+
+    #[test]
+    fn should_convert_yaml11_octal_007_to_yaml12() {
+        let text = "file: 007\n";
+        let diag = make_diagnostic(0, 6, 9, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to YAML 1.2 octal")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "file: 0o07");
+    }
+
+    #[test]
+    fn should_convert_yaml11_octal_with_indentation() {
+        let text = "  mode: 0755\n";
+        let diag = make_diagnostic(0, 8, 12, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to YAML 1.2 octal")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "  mode: 0o755");
+    }
+
+    #[test]
+    fn yaml11_octal_produces_exactly_two_actions() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| {
+                    a.title == "Quote as string" || a.title == "Convert to YAML 1.2 octal"
+                })
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_actions_attach_diagnostic() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
+        let actions = code_actions(
+            text,
+            line_range(0),
+            std::slice::from_ref(&diag),
+            &test_uri(),
+        );
+
+        for action in actions
+            .iter()
+            .filter(|a| a.title == "Quote as string" || a.title == "Convert to YAML 1.2 octal")
+        {
+            let attached = action.diagnostics.as_ref().unwrap();
+            assert_eq!(attached.len(), 1);
+            assert_eq!(
+                attached[0].code,
+                Some(NumberOrString::String("yaml11Octal".to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn yaml11_bool_on_line_other_than_zero() {
+        let text = "key: value\nflag: yes\n";
+        let diag = make_diagnostic(1, 6, 9, "yaml11Boolean");
+        let actions = code_actions(text, line_range(1), &[diag], &test_uri());
+
+        let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let edits = &edit.changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].range.start.line, 1, "edit must target line 1");
+        assert_eq!(edits[0].new_text, "flag: \"yes\"");
+    }
+
+    #[test]
+    fn yaml11_octal_on_line_other_than_zero() {
+        let text = "name: foo\nmode: 0755\n";
+        let diag = make_diagnostic(1, 6, 10, "yaml11Octal");
+        let actions = code_actions(text, line_range(1), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Quote as string")
+            .unwrap();
+        let edit = action.edit.as_ref().unwrap();
+        let edits = &edit.changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].range.start.line, 1, "edit must target line 1");
+        assert_eq!(edits[0].new_text, "mode: \"0755\"");
+    }
+
+    #[test]
+    fn yaml11_bool_diagnostic_not_triggered_by_other_codes() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 0, 12, "flowMap");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert!(actions.iter().all(|a| a.title != "Quote value"));
+        assert!(actions.iter().all(|a| a.title != "Convert to boolean"));
+    }
+
+    #[test]
+    fn yaml11_octal_diagnostic_not_triggered_by_other_codes() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 0, 10, "flowSeq");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+
+        assert!(actions.iter().all(|a| a.title != "Quote as string"));
+        assert!(
+            actions
+                .iter()
+                .all(|a| a.title != "Convert to YAML 1.2 octal")
         );
     }
 }
