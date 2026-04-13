@@ -185,21 +185,21 @@ version-aware quoting, plain scalar preservation.
 - [x] Remove migrated tests from `formatter.rs`
 - [x] `cargo test` passes, no regressions
 
-### Task 3: Migrate formatter.rs flow/block style tests (~25 tests)
+### Task 3: Migrate formatter.rs flow/block style tests (~25 tests) — `2b5ec93`
 
 Convert flow-style preservation, `enforce_block_style`,
 bracket spacing, empty collections, and mixed nesting
 tests.
 
-- [ ] Create fixture files for Groups B, C, D, E, F from
+- [x] Create fixture files for Groups B, C, D, E, F from
       `formatter.rs`
-- [ ] Naming convention: `flow-*.md`, `block-*.md`,
+- [x] Naming convention: `flow-*.md`, `block-*.md`,
       `empty-*.md`, `mixed-*.md`
-- [ ] Tests with `format_enforce_block_style: true` or
+- [x] Tests with `format_enforce_block_style: true` or
       custom `bracket_spacing`/`print_width` use frontmatter
       settings
-- [ ] Remove migrated tests from `formatter.rs`
-- [ ] `cargo test` passes, no regressions
+- [x] Remove migrated tests from `formatter.rs`
+- [x] `cargo test` passes, no regressions
 
 ### Task 4: Migrate formatter.rs comment, blank-line, and structure tests (~24 tests)
 
