@@ -59,12 +59,15 @@ into Codecov if the effort is small.
       rlsp-yaml-parser) (8757a28)
 - [x] Add `docs/architecture.md` for rlsp-yaml-parser
       (3955b2a)
-- [ ] Add `docs/feature-log.md` for rlsp-yaml-parser
-- [ ] Add `docs/feature-log.md` for rlsp-fmt
+- [x] Add `docs/feature-log.md` for rlsp-yaml-parser
+      (5aa4b8b)
+- [x] Add `docs/feature-log.md` for rlsp-fmt
+      (5aa4b8b)
 - [ ] Check Codecov coverage for each crate, identify gaps
 - [ ] Add tests to close coverage gaps
 - [ ] Wire VS Code extension unit test coverage into
       Codecov
+- [ ] Cross-link new docs from crate READMEs
 
 ## Tasks
 
@@ -142,7 +145,7 @@ and future agents working on the parser.
   by reading source)
 - Written for a technical audience (contributor or AI agent)
 
-### Task 3: Add docs/feature-log.md for both crates
+### Task 3: Add docs/feature-log.md for both crates ✅ (5aa4b8b)
 
 Add feature decision logs to both `rlsp-yaml-parser` and
 `rlsp-fmt`, following the format established by
@@ -235,6 +238,19 @@ alongside the existing Rust coverage.
 - `pnpm run test:coverage` generates LCOV report locally
 - Coverage workflow includes vscode extension upload
 - Codecov config tracks vscode as a separate component
+
+### Task 6: Cross-link new docs from crate READMEs
+
+Update `rlsp-yaml-parser/README.md` and `rlsp-fmt/README.md`
+to link to the new `docs/` files (architecture.md,
+feature-log.md) so users discover them from the README.
+
+**Acceptance criteria:**
+- Parser README links to `docs/architecture.md` and
+  `docs/feature-log.md`
+- Formatter README links to `docs/feature-log.md`
+- Links are in a natural location (e.g. a Documentation
+  section or inline where relevant)
 
 ## Decisions
 
