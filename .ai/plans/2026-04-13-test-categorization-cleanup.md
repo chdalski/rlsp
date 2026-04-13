@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-13)
 **Created:** 2026-04-13
 
 ## Goal
@@ -81,7 +81,7 @@ stress-focused variants. `loader.rs` Group F is redundant.
 - [x] Move 10 quoted-key tests from `conformance.rs` to
       their correct homes (59715f3)
 - [x] Delete 5 duplicate DoS-limit tests from `loader.rs` (95c0b5b)
-- [ ] Verify all tests pass after changes
+- [x] Verify all tests pass after changes
 
 ## Tasks
 
