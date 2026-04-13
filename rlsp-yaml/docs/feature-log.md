@@ -12,6 +12,13 @@ with existing infrastructure.
 
 ---
 
+### YAML 1.1 Compatibility Diagnostics [completed]
+
+**Description:** Warn when plain scalars would be interpreted differently by YAML 1.1 parsers (Kubernetes, Ansible, GitLab CI, etc.). `yaml11Boolean` (warning) fires for the 16 YAML 1.1 boolean forms not in YAML 1.2 (`yes`, `no`, `on`, `off`, `y`, `n`, and case variants); `yaml11Octal` (info) fires for C-style octal literals (`0777`). Schema-aware variants (`schemaYaml11Boolean`, `schemaYaml11Octal`) escalate severity when the field is schema-typed as `string` — the 1.2 parser accepts the value but downstream 1.1 tools will silently corrupt it; `schemaType` messages are enhanced when a boolean-typed field receives a 1.1 boolean form. Quick fixes: quote value (universally safe, listed first) or convert to canonical 1.2 form (`true`/`false`, `0o777`). All four diagnostics are suppressed when `yamlVersion` is `"1.1"`. The VS Code extension now exposes `rlsp-yaml.yamlVersion` and `rlsp-yaml.validate` settings.
+**Complexity:** Medium
+**Comment:** Novel approach — parse as YAML 1.2 but warn about 1.1 ambiguities rather than switching the parser. Red Hat's yaml-language-server (issue #532, open since Aug 2021) requests similar quick fixes but provides no cross-version diagnostics. Suppression via `# rlsp-yaml-disable-next-line yaml11Boolean` or `# rlsp-yaml-disable-file yaml11Boolean`.
+**Tier:** 1
+
 ### `$schema` Draft Detection [completed]
 
 **Description:** Parse the `$schema` keyword to detect which JSON Schema draft a schema targets. Surface the draft in hover/code lens.

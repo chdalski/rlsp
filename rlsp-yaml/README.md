@@ -118,7 +118,7 @@ Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.jso
 - Rename symbol (anchors/aliases)
 - Go-to-definition and find references (anchors/aliases)
 - Document links (URL detection + `!include` file paths)
-- Code actions (flow/block conversion, tab fix, unused anchor delete, quoted bool, block scalar)
+- Code actions (flow/block conversion, tab fix, unused anchor delete, quoted bool, block scalar, YAML 1.1 value quoting/conversion)
 - Code lens (schema title/URL at top of document)
 - Semantic highlighting (keys, values, anchors, aliases, tags, comments)
 
@@ -131,6 +131,7 @@ Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.jso
 - Key ordering enforcement (opt-in)
 - Custom tag validation (workspace settings + modeline)
 - JSON Schema validation (required properties, type checking, enum constraints)
+- YAML 1.1 compatibility diagnostics (warns when values like `yes`/`no`/`0777` would be interpreted differently by 1.1 parsers; quick fixes to quote or convert; suppressed when `yamlVersion: "1.1"`)
 
 **Schema support:**
 

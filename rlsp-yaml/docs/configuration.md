@@ -111,16 +111,42 @@ When `true`, string scalars are wrapped in single quotes instead of double quote
 - **Values:** `"1.1"` or `"1.2"`
 - **Default:** `"1.2"`
 
-Controls which YAML specification version the formatter uses for quoting decisions.
+Controls which YAML specification version the server uses for formatting quoting decisions and YAML 1.1 compatibility diagnostics.
+
+**Formatting:** in `"1.1"` mode the formatter quotes YAML 1.1 boolean keywords to prevent ambiguity — for example, `on: push` stays plain (it is a key), but a value like `enabled: "yes"` will have its quotes preserved rather than stripped.
 
 | Version | Keywords that require quoting |
 |---------|-------------------------------|
 | `"1.2"` | `true`, `false`, `null` (and case variants) |
 | `"1.1"` | All of the above, plus `on`, `off`, `yes`, `no` (and case variants) |
 
-In `"1.1"` mode the formatter quotes these words to prevent ambiguity — for example, `on: push` stays plain (it is a key, already in the AST as a plain scalar), but a value like `enabled: "yes"` will have its quotes preserved rather than stripped.
+**Diagnostics:** in `"1.2"` mode (the default) the server emits compatibility warnings for plain scalars that would be interpreted differently by YAML 1.1 parsers — the ~80% of YAML-consuming tools (Kubernetes, Ansible, GitLab CI) that use 1.1 parsers such as go-yaml v2, PyYAML, and SnakeYAML.
 
-> **Parser limitation:** the underlying parser (rlsp-yaml-parser) always processes documents as YAML 1.2 regardless of this setting. Octal literals (`0644`) and sexagesimal values (`1:30:00`) are therefore treated as plain strings, not integers. This setting affects formatter quoting only.
+| Diagnostic | Severity | Trigger |
+|---|---|---|
+| `yaml11Boolean` | Warning | Plain scalar matches a YAML 1.1 boolean form not in YAML 1.2 (`yes`, `no`, `on`, `off`, `y`, `n`, and case variants) |
+| `yaml11Octal` | Info | Plain scalar is a C-style octal literal (`0777`) — octal in YAML 1.1, a plain string in YAML 1.2 |
+| `schemaYaml11Boolean` | Warning | Field is schema-typed as `string` and value is a YAML 1.1 boolean — passes the 1.2 type check but downstream 1.1 tools will corrupt it silently |
+| `schemaYaml11Octal` | Warning | Field is schema-typed as `string` and value is a C-style octal — same cross-version risk |
+| `schemaYaml11BooleanType` | Error | Field is schema-typed as `boolean` and value is a YAML 1.1 boolean form — enhanced type-mismatch error explaining that `yes` is not a boolean in YAML 1.2 |
+
+In `"1.1"` mode all five diagnostics are suppressed — the user has explicitly opted into 1.1 semantics, so these values are intentional.
+
+**Quick fixes** are available for `yaml11Boolean`, `yaml11Octal`, `schemaYaml11Boolean`, `schemaYaml11Octal`, and `schemaYaml11BooleanType`:
+- **"Quote value"** — wraps the value in double quotes (`yes` → `"yes"`). Available for `yaml11Boolean`, `yaml11Octal`, `schemaYaml11Boolean`, and `schemaYaml11Octal`. Universally safe; listed first.
+- **"Convert to boolean"** — converts to the canonical 1.2 form (`yes` → `true`, `no` → `false`). Available for `yaml11Boolean`, `schemaYaml11Boolean`, and `schemaYaml11BooleanType`.
+- **"Convert to YAML 1.2 octal"** — converts `0777` → `0o777`. Available for `yaml11Octal` and `schemaYaml11Octal`. Appropriate only when downstream consumers use 1.2 parsers.
+
+These diagnostics can be suppressed per-line or per-file:
+
+```yaml
+# rlsp-yaml-disable-next-line yaml11Boolean
+enabled: yes
+
+# rlsp-yaml-disable-file yaml11Octal
+```
+
+> **Parser limitation:** the underlying parser (rlsp-yaml-parser) always processes documents as YAML 1.2 regardless of this setting. Octal literals (`0644`) and sexagesimal values (`1:30:00`) are treated as plain strings, not integers. The diagnostics above bridge this gap — the server parses as 1.2 but warns when values would be interpreted differently by 1.1 parsers.
 
 Override this setting for a single document with the `$yamlVersion` modeline (see below).
 
@@ -352,6 +378,11 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 | `schemaFormat` | Value does not match declared `format` (requires `formatValidation: true`) |
 | `schemaContentEncoding` | Value cannot be decoded with declared `contentEncoding` |
 | `schemaContentMediaType` | Decoded content does not match declared `contentMediaType` |
+| `yaml11Boolean` | Plain scalar matches a YAML 1.1 boolean form not in YAML 1.2 (suppressed when `yamlVersion: "1.1"`) |
+| `yaml11Octal` | Plain scalar is a C-style octal literal (`0777`) — octal in YAML 1.1, string in YAML 1.2 (suppressed when `yamlVersion: "1.1"`) |
+| `schemaYaml11Boolean` | Field is schema-typed as `string` and value is a YAML 1.1 boolean form (suppressed when `yamlVersion: "1.1"`) |
+| `schemaYaml11Octal` | Field is schema-typed as `string` and value is a C-style octal literal (suppressed when `yamlVersion: "1.1"`) |
+| `schemaYaml11BooleanType` | Boolean-typed field receives a YAML 1.1 boolean form; enhanced `schemaType` message explaining the 1.1/1.2 difference (suppressed when `yamlVersion: "1.1"`) |
 
 Codes not listed here (e.g. codes produced by future validators) can also be suppressed — the suppression comment accepts any string code.
 
@@ -369,6 +400,7 @@ Some validators are always active; others depend on settings.
 | Custom tag validation | `customTags` | off (empty = disabled) |
 | JSON Schema validation | `schemas` / modeline / K8s auto-detect / SchemaStore | off (no schema = disabled) |
 | Schema `format` keyword validation | `formatValidation` | on (when schema is active) |
+| YAML 1.1 compatibility diagnostics | `yamlVersion` | on (suppressed when `"1.1"`) |
 | SchemaStore auto-association | `schemaStore` | on |
 
 ## Formatting
