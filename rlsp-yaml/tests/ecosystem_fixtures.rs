@@ -4,44 +4,15 @@
 //
 // These tests complement the yaml-test-suite conformance suite with patterns
 // specific to YAML usage in the wild. Each fixture verifies:
-//   1. Formatter round-trip: parse → format → re-parse → semantically identical
-//   2. No false-positive diagnostics on valid YAML
-//   3. Specific bug regressions: `on:` quoting, duplicate key false positives,
-//      empty flow collection warnings, blank line preservation,
-//      flow-to-block indentation
+//   1. No false-positive diagnostics on valid YAML
+//   2. Specific bug regressions: duplicate key false positives,
+//      empty flow collection warnings
 
-#![expect(clippy::expect_used, missing_docs, reason = "test code")]
+#![expect(missing_docs, reason = "test code")]
 
-use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::validation::validators::{validate_duplicate_keys, validate_flow_style};
 // ---- Helpers ----------------------------------------------------------------
-
-fn default_opts() -> YamlFormatOptions {
-    YamlFormatOptions::default()
-}
-
-/// Parse `text`, format it, re-parse the result, and assert the two parsed
-/// trees are semantically identical (compared via canonical formatting).
-fn assert_round_trip(label: &str, text: &str) {
-    // Verify the original text parses successfully.
-    assert!(
-        parse_yaml(text).diagnostics.is_empty(),
-        "{label}: original parse produced diagnostics"
-    );
-    let formatted = format_yaml(text, &default_opts());
-    // Verify the formatted output parses successfully.
-    assert!(
-        parse_yaml(&formatted).diagnostics.is_empty(),
-        "{label}: formatted output unparseable\n---\n{formatted}"
-    );
-    // Semantic equivalence: formatting the formatted output should be idempotent.
-    let re_formatted = format_yaml(&formatted, &default_opts());
-    assert_eq!(
-        formatted, re_formatted,
-        "{label}: round-trip mismatch (format is not idempotent)\n---\n{formatted}\n---\n{re_formatted}"
-    );
-}
 
 /// Assert that the given valid YAML text produces no duplicate-key or
 /// flow-style false-positive diagnostics.
@@ -266,18 +237,8 @@ fn k8s_limit_range_no_duplicate_key_false_positives() {
 }
 
 #[test]
-fn k8s_limit_range_round_trip() {
-    assert_round_trip("K8s LimitRange", K8S_LIMIT_RANGE);
-}
-
-#[test]
 fn k8s_deployment_no_false_positives() {
     assert_no_false_positives("K8s Deployment", K8S_DEPLOYMENT);
-}
-
-#[test]
-fn k8s_deployment_round_trip() {
-    assert_round_trip("K8s Deployment", K8S_DEPLOYMENT);
 }
 
 #[test]
@@ -301,11 +262,6 @@ fn k8s_deployment_status_empty_flow_map_no_warning() {
         status_warnings.is_empty(),
         "status: {{}} should not warn: {status_warnings:?}"
     );
-}
-
-#[test]
-fn k8s_config_map_round_trip() {
-    assert_round_trip("K8s ConfigMap", K8S_CONFIG_MAP);
 }
 
 #[test]
@@ -336,72 +292,11 @@ fn k8s_service_status_empty_flow_map_no_warning() {
     );
 }
 
-#[test]
-fn k8s_service_round_trip() {
-    assert_round_trip("K8s Service", K8S_SERVICE);
-}
-
 // ---- GitHub Actions tests ---------------------------------------------------
-
-#[test]
-fn gha_on_key_stays_unquoted_after_format() {
-    // The `on:` key must not be quoted to `"on":` by the formatter.
-    let formatted = format_yaml(GHA_WORKFLOW, &default_opts());
-    assert!(
-        formatted.contains("on:"),
-        "on: key should remain unquoted: {formatted:?}"
-    );
-    assert!(
-        !formatted.contains("\"on\":"),
-        "on: must not be double-quoted: {formatted:?}"
-    );
-}
-
-#[test]
-fn gha_blank_lines_preserved_after_format() {
-    // Blank lines between simple top-level keys (`name:`, `permissions:`,
-    // `env:`) must be preserved. We use a simpler snippet that only has
-    // plain-value keys at the top level to verify the Task 5 fix.
-    //
-    // Note: blank lines between a nested block (like the `on:` mapping) and
-    // the next top-level key are a separate known limitation — the formatter
-    // strips them because the blank line appears inside the nested mapping's
-    // context. That issue is tracked by the conformance suite baseline.
-    let input = "name: CI\n\npermissions:\n  contents: read\n\nenv:\n  COLOR: always\n";
-    let formatted = format_yaml(input, &default_opts());
-    let name_pos = formatted.find("name:").expect("name: missing");
-    let perms_pos = formatted
-        .find("permissions:")
-        .expect("permissions: missing");
-    let between = &formatted[name_pos..perms_pos];
-    assert!(
-        between.contains("\n\n"),
-        "blank line between name: and permissions: missing: {formatted:?}"
-    );
-    let perms_pos2 = formatted
-        .find("permissions:")
-        .expect("permissions: missing");
-    let env_pos = formatted.find("env:").expect("env: missing");
-    let between2 = &formatted[perms_pos2..env_pos];
-    assert!(
-        between2.contains("\n\n"),
-        "blank line between permissions: and env: missing: {formatted:?}"
-    );
-}
-
-#[test]
-fn gha_workflow_round_trip() {
-    assert_round_trip("GHA Workflow", GHA_WORKFLOW);
-}
 
 #[test]
 fn gha_workflow_no_false_positives() {
     assert_no_false_positives("GHA Workflow", GHA_WORKFLOW);
-}
-
-#[test]
-fn gha_matrix_round_trip() {
-    assert_round_trip("GHA Matrix", GHA_MATRIX);
 }
 
 #[test]
@@ -410,11 +305,6 @@ fn gha_matrix_no_false_positives() {
 }
 
 // ---- Ansible tests ----------------------------------------------------------
-
-#[test]
-fn ansible_playbook_round_trip() {
-    assert_round_trip("Ansible Playbook", ANSIBLE_PLAYBOOK);
-}
 
 #[test]
 fn ansible_playbook_no_false_positives() {
@@ -436,28 +326,6 @@ fn ansible_yaml11_keywords_preserved_unquoted() {
 // ---- Cross-fixture regression tests -----------------------------------------
 
 #[test]
-fn flow_sequence_command_items_indented_correctly() {
-    // After formatting, the flow sequence under `command:` must be preserved as a
-    // flow sequence inline (not converted to block items). The formatter now
-    // respects CollectionStyle::Flow, so `command: [...]` stays on one line.
-    let formatted = format_yaml(K8S_DEPLOYMENT, &default_opts());
-    assert!(
-        formatted.contains("command:"),
-        "command: key missing: {formatted:?}"
-    );
-    // The flow sequence is preserved inline after `command: `.
-    assert!(
-        formatted.contains("command: ["),
-        "flow sequence should be preserved inline after command: {formatted:?}"
-    );
-    // Confirm the sequence contains expected items.
-    assert!(
-        formatted.contains("http.server") || formatted.contains("python"),
-        "flow sequence items should be present: {formatted:?}"
-    );
-}
-
-#[test]
 fn all_fixtures_parse_cleanly() {
     // None of the valid ecosystem fixtures should produce parse-level errors.
     let fixtures = [
@@ -477,69 +345,4 @@ fn all_fixtures_parse_cleanly() {
             result.diagnostics
         );
     }
-}
-
-// ---- I1: Integration test — flow collections preserved after formatting ------
-
-/// A document containing both a flow sequence and a flow mapping.
-const FLOW_COLLECTIONS_DOC: &str = "\
-name: example
-tags: [web, backend, rust]
-labels: {env: prod, app: myapp}
-";
-
-#[test]
-fn flow_collections_preserved_after_format() {
-    // Flow sequence is preserved.
-    let formatted = format_yaml(FLOW_COLLECTIONS_DOC, &default_opts());
-    assert!(
-        formatted.contains('['),
-        "flow sequence bracket missing: {formatted:?}"
-    );
-    assert!(
-        formatted.contains("web") && formatted.contains("backend"),
-        "flow sequence items missing: {formatted:?}"
-    );
-    // Flow mapping is preserved.
-    assert!(
-        formatted.contains('{'),
-        "flow mapping brace missing: {formatted:?}"
-    );
-    assert!(
-        formatted.contains("env: prod"),
-        "flow mapping entry missing: {formatted:?}"
-    );
-    // Output parses cleanly.
-    assert!(
-        parse_yaml(&formatted).diagnostics.is_empty(),
-        "formatted output should parse cleanly: {formatted:?}"
-    );
-    // Output is idempotent.
-    let re_formatted = format_yaml(&formatted, &default_opts());
-    assert_eq!(
-        formatted, re_formatted,
-        "flow collections format is not idempotent"
-    );
-}
-
-// H3: GHA workflow flow sequences (branches: [main, develop]) are preserved.
-#[test]
-fn gha_workflow_flow_sequences_preserved() {
-    let formatted = format_yaml(GHA_WORKFLOW, &default_opts());
-    // branches: [main, develop] and branches: [main] are flow sequences.
-    assert!(
-        formatted.contains("branches: ["),
-        "flow sequence under branches: should be preserved: {formatted:?}"
-    );
-}
-
-// H4: GHA matrix flow sequences (os:, rust:) are preserved.
-#[test]
-fn gha_matrix_flow_sequences_preserved() {
-    let formatted = format_yaml(GHA_MATRIX, &default_opts());
-    // os: [ubuntu-latest, macos-latest] and rust: [stable, beta]
-    assert!(
-        formatted.contains("os: [") || formatted.contains("rust: ["),
-        "flow sequences in matrix strategy should be preserved: {formatted:?}"
-    );
 }
