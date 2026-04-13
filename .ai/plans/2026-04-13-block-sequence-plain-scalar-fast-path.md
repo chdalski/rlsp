@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -73,11 +73,11 @@ suite + existing tests green).
 
 - [x] Clarify requirements with user
 - [x] Analyse code paths and assess scope
-- [ ] Implement fast path in `handle_sequence_entry`
-- [ ] Add targeted unit tests for the fast path
-- [ ] Run benchmarks and verify ≥10% improvement on
+- [x] Implement fast path in `handle_sequence_entry`
+- [x] Add targeted unit tests for the fast path
+- [x] Run benchmarks and verify ≥10% improvement on
       `block_sequence`
-- [ ] Verify full conformance suite + existing tests pass
+- [x] Verify full conformance suite + existing tests pass
 
 ## Tasks
 
@@ -151,18 +151,20 @@ detection) is `fn` in `lexer/plain.rs` — needs
 
 **Acceptance criteria:**
 
-- [ ] Fast path emits identical events and spans as the
+- [x] Fast path emits identical events and spans as the
       existing two-trip path for `- plain_scalar` lines
-- [ ] Trailing comments handled (`- value # comment`)
-- [ ] Suffix errors detected (`- value\0more`)
-- [ ] Falls through cleanly for: anchors, tags, block
+- [x] Trailing comments handled (`- value # comment`)
+- [x] Suffix errors detected (`- value\0more`)
+- [x] Falls through cleanly for: anchors, tags, block
       scalars, quoted scalars, mapping keys, flow
       collections, multi-byte first chars that are
       indicators
-- [ ] `cargo test` passes (all existing tests)
-- [ ] `cargo clippy --all-targets` zero warnings
-- [ ] Benchmark: ≥10% improvement on `block_sequence`
-- [ ] Benchmark: no regression (>2%) on other fixtures
+- [x] `cargo test` passes (all existing tests)
+- [x] `cargo clippy --all-targets` zero warnings
+- [x] Benchmark: ≥10% improvement on `block_sequence`
+- [x] Benchmark: no regression (>2%) on other fixtures
+
+**Commit:** `05d21fa`
 
 ## Decisions
 
