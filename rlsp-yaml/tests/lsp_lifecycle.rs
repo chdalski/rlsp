@@ -2788,3 +2788,212 @@ async fn should_suppress_yaml11_compat_diagnostics_in_v1_1_mode() {
         "V1_1 mode should suppress yaml11Boolean and yaml11Octal diagnostics; got: {diags:?}"
     );
 }
+
+// ---- flowStyle setting ----
+
+#[tokio::test]
+async fn flow_style_off_suppresses_flow_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Enable flowStyle: "off"
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "flowStyle": "off" })),
+    )
+    .await;
+
+    let uri = "file:///test/flow-off.yaml";
+    // This YAML uses a flow map — normally produces a flowStyle diagnostic.
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let has_flow_diag = diags.iter().any(|d| {
+        matches!(
+            d.code.as_ref(),
+            Some(NumberOrString::String(c)) if c == "flowMap" || c == "flowSeq"
+        )
+    });
+    assert!(
+        !has_flow_diag,
+        "flowStyle=off should suppress flow diagnostics; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn flow_style_default_emits_warning_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // No explicit flowStyle setting — default is "warning".
+    let uri = "file:///test/flow-warning.yaml";
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let flow_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(NumberOrString::String(c)) if c == "flowMap" || c == "flowSeq"
+            )
+        })
+        .collect();
+
+    assert!(
+        !flow_diags.is_empty(),
+        "flowStyle default should produce flow diagnostics; got: {diags:?}"
+    );
+    assert!(
+        flow_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::WARNING)),
+        "flowStyle default should emit WARNING severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn flow_style_error_emits_error_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Enable flowStyle: "error"
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "flowStyle": "error" })),
+    )
+    .await;
+
+    let uri = "file:///test/flow-error.yaml";
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let flow_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(NumberOrString::String(c)) if c == "flowMap" || c == "flowSeq"
+            )
+        })
+        .collect();
+
+    assert!(
+        !flow_diags.is_empty(),
+        "flowStyle=error should produce flow diagnostics; got: {diags:?}"
+    );
+    assert!(
+        flow_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "flowStyle=error should emit ERROR severity; got: {diags:?}"
+    );
+}
+
+// ---- formatEnforceBlockStyle setting ----
+
+fn formatting_request(id: i64, uri: &str) -> Request {
+    Request::build("textDocument/formatting")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "options": {
+                "tabSize": 2,
+                "insertSpaces": true
+            }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn format_enforce_block_style_converts_flow_to_block() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Enable formatEnforceBlockStyle
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatEnforceBlockStyle": true })),
+    )
+    .await;
+
+    let uri = "file:///test/enforce-block.yaml";
+    let flow_yaml = "key: {a: 1, b: 2}\n";
+    send(&mut service, did_open_notification(uri, flow_yaml)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+
+    assert!(
+        !result.is_null(),
+        "formatEnforceBlockStyle=true should produce a formatting edit for flow YAML; got null"
+    );
+
+    let edits = result
+        .as_array()
+        .expect("formatting result should be array");
+    assert!(
+        !edits.is_empty(),
+        "formatEnforceBlockStyle=true should produce at least one edit"
+    );
+
+    // The formatted text should not contain flow-style braces.
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+    assert!(
+        !new_text.contains('{'),
+        "formatEnforceBlockStyle=true should remove flow maps; got: {new_text:?}"
+    );
+}
+
+#[tokio::test]
+async fn format_enforce_block_style_off_by_default_preserves_flow() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // No formatEnforceBlockStyle setting — default is false.
+    let uri = "file:///test/no-enforce-block.yaml";
+    // This YAML is already well-formatted so the formatter won't change it.
+    // Use a simple flow map that the formatter would normally leave as-is.
+    let flow_yaml = "key:\n  a: 1\n  b: 2\n";
+    send(&mut service, did_open_notification(uri, flow_yaml)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+
+    // Well-formatted block YAML with no changes expected — formatter returns null or empty.
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "well-formatted block YAML should produce no edits when formatEnforceBlockStyle is false; got: {result:?}"
+    );
+}

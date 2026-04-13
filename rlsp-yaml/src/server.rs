@@ -79,6 +79,12 @@ pub struct Settings {
     /// Maximum number of items returned by document symbols and folding ranges.
     /// Defaults to 5000 when absent.
     pub max_items_computed: Option<usize>,
+    /// Controls severity of flow-style diagnostics: `"off"` disables them,
+    /// `"warning"` (default) emits warnings, `"error"` emits errors.
+    pub flow_style: Option<String>,
+    /// When `true`, the formatter converts all flow collections to block style.
+    /// Defaults to `false` when absent.
+    pub format_enforce_block_style: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -462,7 +468,16 @@ impl Backend {
 
         // Run validators and combine diagnostics
         diagnostics.extend(crate::validation::validators::validate_unused_anchors(text));
-        diagnostics.extend(crate::validation::validators::validate_flow_style(text));
+        let flow_style_setting = self.get_flow_style();
+        if flow_style_setting.as_deref() != Some("off") {
+            let mut flow_diags = crate::validation::validators::validate_flow_style(text);
+            if flow_style_setting.as_deref() == Some("error") {
+                for diag in &mut flow_diags {
+                    diag.severity = Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR);
+                }
+            }
+            diagnostics.extend(flow_diags);
+        }
         diagnostics.extend(crate::validation::validators::validate_duplicate_keys(
             &result.documents,
         ));
@@ -613,6 +628,11 @@ impl Backend {
             .ok()
             .and_then(|s| s.max_items_computed)
             .unwrap_or(5000)
+    }
+
+    /// Return the raw `flowStyle` string setting, or `None` if absent (meaning default).
+    pub(crate) fn get_flow_style(&self) -> Option<String> {
+        self.settings.lock().ok().and_then(|s| s.flow_style.clone())
     }
 }
 
@@ -1007,7 +1027,10 @@ impl LanguageServer for Backend {
                 .unwrap_or(false),
             bracket_spacing: true,
             yaml_version,
-            format_enforce_block_style: false,
+            format_enforce_block_style: settings
+                .as_ref()
+                .and_then(|s| s.format_enforce_block_style)
+                .unwrap_or(false),
         };
         drop(settings);
 
@@ -1081,7 +1104,10 @@ impl LanguageServer for Backend {
                 .unwrap_or(false),
             bracket_spacing: true,
             yaml_version,
-            format_enforce_block_style: false,
+            format_enforce_block_style: settings
+                .as_ref()
+                .and_then(|s| s.format_enforce_block_style)
+                .unwrap_or(false),
         };
         drop(settings);
 
