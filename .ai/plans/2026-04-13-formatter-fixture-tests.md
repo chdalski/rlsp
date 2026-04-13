@@ -125,8 +125,8 @@ expected: output here
 
 - [x] Spike: proof-of-concept with 3-5 fixture files and
       minimal harness (3aa8a95)
-- [ ] Finalize fixture format based on spike learnings
-- [ ] Build complete test harness with all assertion modes
+- [x] Finalize fixture format based on spike learnings
+- [x] Build complete test harness with all assertion modes
 - [ ] Migrate formatter.rs unit tests to fixture files
 - [ ] Migrate ecosystem round-trip tests to fixture files
 - [ ] Remove migrated inline tests from Rust source
@@ -168,22 +168,22 @@ to a full migration.
 - [x] Report findings: did the format work well? Any
       changes needed before full migration?
 
-### Task 2: Migrate formatter.rs quoting tests (~20 tests)
+### Task 2: Migrate formatter.rs quoting tests (~20 tests) — `eeefa0e`
 
 Convert the quoting-related unit tests from `formatter.rs`
 to fixture files. These include: `needs_quoting` output
 tests (not the function-level tests), quote stripping,
 version-aware quoting, plain scalar preservation.
 
-- [ ] Create fixture files for each quoting test that calls
+- [x] Create fixture files for each quoting test that calls
       `format_yaml` (skip `needs_quoting` and
       `escape_double_quoted` function tests — those stay
       as Rust unit tests since they test internal functions)
-- [ ] Naming convention: `quoting-*.md`
-- [ ] Tests with `YamlVersion` settings use frontmatter
+- [x] Naming convention: `quoting-*.md`
+- [x] Tests with `YamlVersion` settings use frontmatter
       `yaml_version: "1.1"` or `"1.2"`
-- [ ] Remove migrated tests from `formatter.rs`
-- [ ] `cargo test` passes, no regressions
+- [x] Remove migrated tests from `formatter.rs`
+- [x] `cargo test` passes, no regressions
 
 ### Task 3: Migrate formatter.rs flow/block style tests (~25 tests)
 
