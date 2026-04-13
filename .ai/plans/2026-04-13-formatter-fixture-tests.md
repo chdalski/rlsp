@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -123,8 +123,8 @@ expected: output here
 
 ## Steps
 
-- [ ] Spike: proof-of-concept with 3-5 fixture files and
-      minimal harness
+- [x] Spike: proof-of-concept with 3-5 fixture files and
+      minimal harness (3aa8a95)
 - [ ] Finalize fixture format based on spike learnings
 - [ ] Build complete test harness with all assertion modes
 - [ ] Migrate formatter.rs unit tests to fixture files
@@ -134,14 +134,14 @@ expected: output here
 
 ## Tasks
 
-### Task 1: Spike — proof-of-concept harness and fixtures
+### Task 1: Spike — proof-of-concept harness and fixtures (3aa8a95)
 
 Build a minimal end-to-end proof-of-concept to validate
 the fixture format and harness approach before committing
 to a full migration.
 
-- [ ] Create `rlsp-yaml/tests/fixtures/formatter/` directory
-- [ ] Write 3-5 representative fixture files covering
+- [x] Create `rlsp-yaml/tests/fixtures/formatter/` directory
+- [x] Write 3-5 representative fixture files covering
       different modes:
   - One simple exact-output test (e.g., simple key-value)
   - One with non-default settings (e.g., `single_quote: true`)
@@ -150,7 +150,7 @@ to a full migration.
     sequence breaks)
   - One with `Ref:` lines in prose (e.g., a version-aware
     quoting test referencing the YAML spec section)
-- [ ] Implement the test harness in
+- [x] Implement the test harness in
       `rlsp-yaml/tests/formatter_fixtures.rs`:
   - Parse markdown frontmatter (test-name, category,
     settings, idempotent flag)
@@ -161,11 +161,11 @@ to a full migration.
   - For idempotent tests: format twice, assert stability
   - Prose section (between heading and Test-Document) is
     informational — not parsed by the harness
-- [ ] rstest `#[files]` glob over
+- [x] rstest `#[files]` glob over
       `tests/fixtures/formatter/*.md`
-- [ ] `cargo test` passes with the new fixture tests
+- [x] `cargo test` passes with the new fixture tests
       alongside existing tests
-- [ ] Report findings: did the format work well? Any
+- [x] Report findings: did the format work well? Any
       changes needed before full migration?
 
 ### Task 2: Migrate formatter.rs quoting tests (~20 tests)
