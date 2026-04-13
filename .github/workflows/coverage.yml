@@ -33,3 +33,30 @@ jobs:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  coverage-vscode:
+    name: VS Code Extension Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: rlsp-yaml/integrations/vscode/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: rlsp-yaml/integrations/vscode
+      - name: Generate coverage report
+        run: pnpm run test:coverage
+        working-directory: rlsp-yaml/integrations/vscode
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: rlsp-yaml/integrations/vscode/coverage/lcov.info
+          flags: vscode
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

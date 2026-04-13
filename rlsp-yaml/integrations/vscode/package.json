@@ -96,7 +96,10 @@
         },
         "rlsp-yaml.yamlVersion": {
           "type": "string",
-          "enum": ["1.1", "1.2"],
+          "enum": [
+            "1.1",
+            "1.2"
+          ],
           "default": "1.2",
           "description": "YAML specification version. Affects formatting quoting rules and YAML 1.1 compatibility diagnostics. When set to 1.1, diagnostics for YAML 1.1 boolean and octal values are suppressed."
         },
@@ -134,6 +137,7 @@
     "watch": "esbuild src/main.ts --bundle --outdir=out --external:vscode --format=cjs --platform=node --watch",
     "package": "vsce package --no-dependencies",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:integration": "tsc && vscode-test",
     "lint": "eslint src/",
     "format": "prettier --check 'src/**/*.ts'",
@@ -152,6 +156,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.0",
     "@types/vscode": "^1.115.0",
+    "@vitest/coverage-v8": "^4.1.4",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",

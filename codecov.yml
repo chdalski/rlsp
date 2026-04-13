@@ -15,3 +15,6 @@ component_management:
     - component_id: rlsp-yaml
       paths:
         - rlsp-yaml/**
+    - component_id: vscode-extension
+      paths:
+        - rlsp-yaml/integrations/vscode/src/**
