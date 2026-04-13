@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -52,10 +52,11 @@ into Codecov if the effort is small.
 
 ## Steps
 
-- [ ] Enable `missing_docs`, `clippy::missing_errors_doc`,
+- [x] Enable `missing_docs`, `clippy::missing_errors_doc`,
       `clippy::missing_panics_doc` in workspace lints
-- [ ] Fix all 41 lint errors (4 in rlsp-fmt, 37 in
-      rlsp-yaml-parser)
+      (8757a28)
+- [x] Fix all 41 lint errors (4 in rlsp-fmt, 37 in
+      rlsp-yaml-parser) (8757a28)
 - [ ] Add `docs/architecture.md` for rlsp-yaml-parser
 - [ ] Add `docs/feature-log.md` for rlsp-yaml-parser
 - [ ] Add `docs/feature-log.md` for rlsp-fmt
@@ -66,7 +67,7 @@ into Codecov if the effort is small.
 
 ## Tasks
 
-### Task 1: Enable doc lints and fix all errors
+### Task 1: Enable doc lints and fix all errors ✅ (8757a28)
 
 Add three lints to root `Cargo.toml` `[workspace.lints]`
 and fix all resulting errors so the workspace compiles
