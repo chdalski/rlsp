@@ -2682,3 +2682,104 @@ async fn should_suppress_schema_yaml11_diagnostics_in_v1_1_mode() {
         "V1_1 mode should suppress all schema YAML 1.1 diagnostics; got: {diags:?}"
     );
 }
+
+#[tokio::test]
+async fn should_emit_yaml11_boolean_warning_for_plain_scalars() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/yaml11-bool-plain.yaml";
+    let yaml = "enabled: yes\nactive: on\nname: \"yes\"\n";
+    send(&mut service, did_open_notification(uri, yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let bool_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("yaml11Boolean".to_string())))
+        .collect();
+
+    assert_eq!(
+        bool_diags.len(),
+        2,
+        "expected exactly 2 yaml11Boolean diagnostics (quoted 'yes' must be excluded); got: {diags:?}"
+    );
+    assert!(
+        bool_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::WARNING)),
+        "yaml11Boolean diagnostics must have WARNING severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_emit_yaml11_octal_info_for_plain_scalars() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/yaml11-octal-plain.yaml";
+    let yaml = "mode: 0777\nperm: \"0644\"\n";
+    send(&mut service, did_open_notification(uri, yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let octal_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("yaml11Octal".to_string())))
+        .collect();
+
+    assert_eq!(
+        octal_diags.len(),
+        1,
+        "expected exactly 1 yaml11Octal diagnostic (quoted '0644' must be excluded); got: {diags:?}"
+    );
+    assert!(
+        octal_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::INFORMATION)),
+        "yaml11Octal diagnostics must have INFORMATION severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_yaml11_compat_diagnostics_in_v1_1_mode() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/yaml11-compat-v11-suppress.yaml";
+    let yaml = "# yaml-language-server: $yamlVersion=1.1\nenabled: yes\nmode: 0777\n";
+    send(&mut service, did_open_notification(uri, yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let has_yaml11_compat_diag = diags.iter().any(|d| {
+        matches!(
+            d.code.as_ref(),
+            Some(NumberOrString::String(c))
+                if c == "yaml11Boolean" || c == "yaml11Octal"
+        )
+    });
+
+    assert!(
+        !has_yaml11_compat_diag,
+        "V1_1 mode should suppress yaml11Boolean and yaml11Octal diagnostics; got: {diags:?}"
+    );
+}
