@@ -201,17 +201,17 @@ tests.
 - [x] Remove migrated tests from `formatter.rs`
 - [x] `cargo test` passes, no regressions
 
-### Task 4: Migrate formatter.rs comment, blank-line, and structure tests (~24 tests)
+### Task 4: Migrate formatter.rs comment, blank-line, and structure tests (~24 tests) — `27143a5`
 
 Convert comments (C1-C10), blank-line preservation, multi-
 document, nested sequences, and idempotency (Group G) tests.
 
-- [ ] Create fixture files for comments, blank-lines,
+- [x] Create fixture files for comments, blank-lines,
       structure, multi-document, and idempotency tests
-- [ ] Naming convention: `comment-*.md`, `blank-line-*.md`,
+- [x] Naming convention: `comment-*.md`, `blank-line-*.md`,
       `structure-*.md`, `multi-doc-*.md`, `idempotent-*.md`
-- [ ] Remove migrated tests from `formatter.rs`
-- [ ] `cargo test` passes, no regressions
+- [x] Remove migrated tests from `formatter.rs`
+- [x] `cargo test` passes, no regressions
 
 ### Task 5: Migrate ecosystem round-trip tests (~11 tests)
 
