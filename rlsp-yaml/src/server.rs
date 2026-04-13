@@ -82,6 +82,9 @@ pub struct Settings {
     /// Controls severity of flow-style diagnostics: `"off"` disables them,
     /// `"warning"` (default) emits warnings, `"error"` emits errors.
     pub flow_style: Option<String>,
+    /// Controls severity of duplicate-key diagnostics: `"off"` disables them,
+    /// `"warning"` emits warnings, `"error"` (default) emits errors.
+    pub duplicate_keys: Option<String>,
     /// When `true`, the formatter converts all flow collections to block style.
     /// Defaults to `false` when absent.
     pub format_enforce_block_style: Option<bool>,
@@ -478,9 +481,17 @@ impl Backend {
             }
             diagnostics.extend(flow_diags);
         }
-        diagnostics.extend(crate::validation::validators::validate_duplicate_keys(
-            &result.documents,
-        ));
+        let duplicate_keys_setting = self.get_duplicate_keys();
+        if duplicate_keys_setting.as_deref() != Some("off") {
+            let mut dup_diags =
+                crate::validation::validators::validate_duplicate_keys(&result.documents);
+            if duplicate_keys_setting.as_deref() == Some("warning") {
+                for diag in &mut dup_diags {
+                    diag.severity = Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING);
+                }
+            }
+            diagnostics.extend(dup_diags);
+        }
 
         // Custom tag validation: merge workspace settings tags with per-document modeline tags.
         // get_custom_tags() and get_key_ordering() acquire and release the settings lock before
@@ -633,6 +644,14 @@ impl Backend {
     /// Return the raw `flowStyle` string setting, or `None` if absent (meaning default).
     pub(crate) fn get_flow_style(&self) -> Option<String> {
         self.settings.lock().ok().and_then(|s| s.flow_style.clone())
+    }
+
+    /// Return the raw `duplicateKeys` string setting, or `None` if absent (meaning default).
+    pub(crate) fn get_duplicate_keys(&self) -> Option<String> {
+        self.settings
+            .lock()
+            .ok()
+            .and_then(|s| s.duplicate_keys.clone())
     }
 }
 
@@ -2312,5 +2331,54 @@ mod tests {
             *s = new_settings;
         }
         assert_eq!(backend.get_max_items_computed(), 0);
+    }
+
+    // ---- duplicateKeys setting ----
+
+    #[test]
+    fn settings_deserializes_duplicate_keys_off() {
+        let json = serde_json::json!({"duplicateKeys": "off"});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.duplicate_keys.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn settings_deserializes_duplicate_keys_warning() {
+        let json = serde_json::json!({"duplicateKeys": "warning"});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.duplicate_keys.as_deref(), Some("warning"));
+    }
+
+    #[test]
+    fn settings_deserializes_duplicate_keys_error() {
+        let json = serde_json::json!({"duplicateKeys": "error"});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.duplicate_keys.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn settings_defaults_duplicate_keys_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.duplicate_keys.is_none());
+    }
+
+    #[test]
+    fn get_duplicate_keys_returns_none_by_default() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        assert!(backend.get_duplicate_keys().is_none());
+    }
+
+    #[test]
+    fn get_duplicate_keys_returns_configured_value() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+        let new_settings: Settings =
+            serde_json::from_value(serde_json::json!({"duplicateKeys": "warning"})).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+        assert_eq!(backend.get_duplicate_keys().as_deref(), Some("warning"));
     }
 }

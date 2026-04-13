@@ -2911,6 +2911,172 @@ async fn flow_style_error_emits_error_diagnostics() {
     );
 }
 
+// ---- duplicateKeys setting ----
+
+#[tokio::test]
+async fn duplicate_keys_default_emits_error_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // No explicit duplicateKeys setting — default is "error".
+    let uri = "file:///test/dup-default.yaml";
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let dup_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(NumberOrString::String(c)) if c == "duplicateKey"
+            )
+        })
+        .collect();
+
+    assert!(
+        !dup_diags.is_empty(),
+        "duplicateKeys default should produce duplicate-key diagnostics; got: {diags:?}"
+    );
+    assert!(
+        dup_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "duplicateKeys default should emit ERROR severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn duplicate_keys_error_emits_error_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Explicit duplicateKeys: "error"
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "duplicateKeys": "error" })),
+    )
+    .await;
+
+    let uri = "file:///test/dup-error.yaml";
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let dup_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(NumberOrString::String(c)) if c == "duplicateKey"
+            )
+        })
+        .collect();
+
+    assert!(
+        !dup_diags.is_empty(),
+        "duplicateKeys=error should produce duplicate-key diagnostics; got: {diags:?}"
+    );
+    assert!(
+        dup_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "duplicateKeys=error should emit ERROR severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn duplicate_keys_warning_emits_warning_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Enable duplicateKeys: "warning"
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "duplicateKeys": "warning" })),
+    )
+    .await;
+
+    let uri = "file:///test/dup-warning.yaml";
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let dup_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(NumberOrString::String(c)) if c == "duplicateKey"
+            )
+        })
+        .collect();
+
+    assert!(
+        !dup_diags.is_empty(),
+        "duplicateKeys=warning should produce duplicate-key diagnostics; got: {diags:?}"
+    );
+    assert!(
+        dup_diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::WARNING)),
+        "duplicateKeys=warning should emit WARNING severity; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn duplicate_keys_off_suppresses_duplicate_key_diagnostics() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // Enable duplicateKeys: "off"
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "duplicateKeys": "off" })),
+    )
+    .await;
+
+    let uri = "file:///test/dup-off.yaml";
+    send(&mut service, did_open_notification(uri, "key: a\nkey: b\n")).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let has_dup_diag = diags.iter().any(|d| {
+        matches!(
+            d.code.as_ref(),
+            Some(NumberOrString::String(c)) if c == "duplicateKey"
+        )
+    });
+    assert!(
+        !has_dup_diag,
+        "duplicateKeys=off should suppress duplicate-key diagnostics; got: {diags:?}"
+    );
+}
+
 // ---- formatEnforceBlockStyle setting ----
 
 fn formatting_request(id: i64, uri: &str) -> Request {
