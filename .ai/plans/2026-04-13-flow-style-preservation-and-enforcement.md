@@ -58,9 +58,9 @@ The parser emits `CollectionStyle::Flow` / `CollectionStyle::Block` on `Event::S
 - [x] Add `flowStyle` severity setting and `formatEnforceBlockStyle` setting to the server
 - [x] Wire severity setting into `validate_flow_style()` (skip when `"off"`, set severity from setting)
 - [x] Wire `formatEnforceBlockStyle` into the formatter to override style when enabled
-- [ ] Expose new settings in VS Code extension
-- [ ] Update `docs/configuration.md`
-- [ ] Add/update tests at each layer
+- [x] Expose new settings in VS Code extension
+- [x] Update `docs/configuration.md`
+- [x] Add/update tests at each layer
 
 ## Tasks
 
@@ -115,15 +115,15 @@ Wire these into:
 - [x] Add integration tests: verify diagnostics respect severity setting (off/warning/error), verify formatter respects enforce setting
 - [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
-### Task 4: VS Code extension and documentation
+### Task 4: VS Code extension and documentation — `875e216`
 
 Expose the new settings in the VS Code extension and update user-facing documentation.
 
-- [ ] Add `rlsp-yaml.flowStyle` (enum: `"off"`, `"warning"`, `"error"`, default `"warning"`) to `package.json`
-- [ ] Add `rlsp-yaml.formatEnforceBlockStyle` (boolean, default `false`) to `package.json`
-- [ ] Update `ServerSettings` interface and `getConfig()` in `config.ts`
-- [ ] Update `docs/configuration.md` with both new settings — descriptions, defaults, examples
-- [ ] `pnpm run lint` and `pnpm run build` pass in the VS Code extension directory
+- [x] Add `rlsp-yaml.flowStyle` (enum: `"off"`, `"warning"`, `"error"`, default `"warning"`) to `package.json`
+- [x] Add `rlsp-yaml.formatEnforceBlockStyle` (boolean, default `false`) to `package.json`
+- [x] Update `ServerSettings` interface and `getConfig()` in `config.ts`
+- [x] Update `docs/configuration.md` with both new settings — descriptions, defaults, examples
+- [x] `pnpm run lint` and `pnpm run build` pass in the VS Code extension directory
 
 ## Decisions
 
