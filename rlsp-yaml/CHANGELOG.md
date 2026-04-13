@@ -3,6 +3,42 @@
 
 ## Bug Fixes
 
+- Update dev dependencies to resolve 3 high/medium Dependabot alerts (40d4678)
+- Align engines.vscode with @types/vscode ^1.115.0 (4032830)
+- Update major-version dev dependencies (dcaecc7)
+
+## Documentation
+
+- Document YAML 1.1 compatibility diagnostics (b7357cc)
+
+## Features
+
+- Declare workspace extension kind and untrusted workspace capabilities (f4a5786)
+- Add YAML 1.1 boolean/octal detection and compatibility diagnostics (a7a47a6)
+- Add quick fixes for YAML 1.1 booleans and octals (2a0130d)
+- Add schema-aware severity escalation for YAML 1.1 values (ac0716d)
+- Expose yamlVersion and validate settings (15b92fa)
+
+## Refactoring
+
+- Parameterize schema.rs modeline extraction tests with rstest (d608e6f)
+- Parameterize schema_validation.rs tests with rstest (f969e21)
+- Parameterize validators.rs tests with rstest (f3b8444)
+- Parameterize formatter.rs tests with rstest (77b2033)
+- Parameterize completion.rs + hover.rs tests with rstest (6a918bc)
+- Parameterize document_links, rename, references tests with rstest (deffa03)
+- Parameterize code_actions, semantic_tokens, symbols tests with rstest (71c5c2f)
+- Parameterize remaining small test modules with rstest (930cf21)
+- Extract format validators into schema_validation/formats.rs (dcdd239)
+- Extract association functions from schema.rs into schema/association.rs (f45b206)
+- Promote clippy::panic to workspace-level deny (37e66c0)
+- Replace #[allow] with #[expect(reason)] and enforce via workspace lints (b248fca)
+- Extract PlainScalarKind enum and classify_plain_scalar (6569e1c)
+- Group flat source files into domain-based modules (52f0ce1)
+- Convert schema modules from mod.rs to named files (722405d)
+
+## Bug Fixes
+
 - Add binary existence check and skip test when binary present (bb1179b)
 - Decode quoted block mapping keys and attach trailing comments (620720f)
 
