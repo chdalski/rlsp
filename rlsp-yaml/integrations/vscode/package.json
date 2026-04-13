@@ -94,6 +94,21 @@
           "default": "warning",
           "description": "Severity of flow-style diagnostics (flowMap/flowSeq). 'off' disables them, 'warning' shows a warning squiggle, 'error' marks them as errors."
         },
+        "rlsp-yaml.duplicateKeys": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ],
+          "default": "error",
+          "description": "Severity of duplicate key diagnostics. 'off' disables detection, 'warning' shows a warning, 'error' (default) marks as errors."
+        },
+        "rlsp-yaml.formatRemoveDuplicateKeys": {
+          "type": "boolean",
+          "default": false,
+          "description": "Remove duplicate mapping keys when formatting. Keeps the last occurrence (YAML spec behavior). When false (default), duplicate keys are preserved."
+        },
         "rlsp-yaml.httpProxy": {
           "type": "string",
           "default": "",

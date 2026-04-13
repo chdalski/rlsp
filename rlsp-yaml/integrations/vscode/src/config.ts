@@ -15,6 +15,8 @@ export interface ServerSettings {
   validate: boolean;
   flowStyle: string;
   formatEnforceBlockStyle: boolean;
+  duplicateKeys: string;
+  formatRemoveDuplicateKeys: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -34,5 +36,7 @@ export function getConfig(): ServerSettings {
     validate: cfg.get<boolean>('validate', true),
     flowStyle: cfg.get<string>('flowStyle', 'warning'),
     formatEnforceBlockStyle: cfg.get<boolean>('formatEnforceBlockStyle', false),
+    duplicateKeys: cfg.get<string>('duplicateKeys', 'error'),
+    formatRemoveDuplicateKeys: cfg.get<boolean>('formatRemoveDuplicateKeys', false),
   };
 }

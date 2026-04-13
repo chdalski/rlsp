@@ -236,6 +236,37 @@ When `formatEnforceBlockStyle` is `true`, the formatter will rewrite flow-style 
 { "flowStyle": "error" }
 ```
 
+### `duplicateKeys`
+
+- **Type:** `string`
+- **Values:** `"off"`, `"warning"`, `"error"`
+- **Default:** `"error"`
+
+Controls the severity of `duplicateKey` diagnostics, which are emitted when a mapping contains more than one entry with the same key.
+
+| Value | Behavior |
+|-------|----------|
+| `"off"` | Duplicate key detection is disabled |
+| `"warning"` | Duplicate keys are flagged with a warning squiggle |
+| `"error"` | Duplicate keys are flagged as errors (default) |
+
+```json
+{ "duplicateKeys": "warning" }
+```
+
+### `formatRemoveDuplicateKeys`
+
+- **Type:** `boolean`
+- **Default:** `false`
+
+When `true`, the formatter removes duplicate mapping keys during formatting. Only the last occurrence of each key is kept, which matches the YAML specification behavior (later definitions shadow earlier ones).
+
+When `false` (the default), duplicate keys are preserved as-is during formatting.
+
+```json
+{ "formatRemoveDuplicateKeys": true }
+```
+
 ### `httpProxy`
 
 - **Type:** `string` (optional)
@@ -396,7 +427,7 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 
 | Code | Emitted by |
 |------|-----------|
-| `duplicateKey` | Duplicate mapping key in the same scope |
+| `duplicateKey` | Duplicate mapping key in the same scope (severity controlled by `duplicateKeys`) |
 | `flowMap` | Flow mapping (`{a: 1}`) where block style is preferred (severity controlled by `flowStyle`) |
 | `flowSeq` | Flow sequence (`[a, b]`) where block style is preferred (severity controlled by `flowStyle`) |
 | `unusedAnchor` | Anchor defined but never aliased |
@@ -426,7 +457,7 @@ Some validators are always active; others depend on settings.
 | Validator | Controlled by | Default |
 |-----------|---------------|---------|
 | YAML syntax errors | `validate` | on |
-| Duplicate key detection | `validate` | on |
+| Duplicate key detection | `validate`, `duplicateKeys` | on (error severity) |
 | Unused anchor warnings | `validate` | on |
 | Flow style warnings | `flowStyle` | warning |
 | Key ordering | `keyOrdering` | off |
