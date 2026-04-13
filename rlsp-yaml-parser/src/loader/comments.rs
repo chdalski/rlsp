@@ -49,7 +49,7 @@ pub(super) fn attach_trailing_comment(node: &mut Node<Span>, comment: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::ScalarStyle;
+    use crate::event::{CollectionStyle, ScalarStyle};
     use crate::pos::{Pos, Span};
 
     fn zero_span() -> Span {
@@ -74,6 +74,7 @@ mod tests {
     fn mapping_node() -> Node<Span> {
         Node::Mapping {
             entries: Vec::new(),
+            style: CollectionStyle::Block,
             anchor: None,
             tag: None,
             loc: zero_span(),
@@ -85,6 +86,7 @@ mod tests {
     fn sequence_node() -> Node<Span> {
         Node::Sequence {
             items: Vec::new(),
+            style: CollectionStyle::Block,
             anchor: None,
             tag: None,
             loc: zero_span(),

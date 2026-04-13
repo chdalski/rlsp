@@ -6,7 +6,7 @@
 //! location type.  For most uses `Loc = Span`.  The loader produces
 //! `Vec<Document<Span>>`.
 
-use crate::event::ScalarStyle;
+use crate::event::{CollectionStyle, ScalarStyle};
 use crate::pos::Span;
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,8 @@ pub enum Node<Loc = Span> {
     Mapping {
         /// Key–value pairs in declaration order.
         entries: Vec<(Self, Self)>,
+        /// The presentation style used in the source (block or flow).
+        style: CollectionStyle,
         /// Anchor name defined on this mapping (e.g. `&anchor`), if any.
         anchor: Option<String>,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
@@ -68,6 +70,8 @@ pub enum Node<Loc = Span> {
     Sequence {
         /// Ordered list of child nodes.
         items: Vec<Self>,
+        /// The presentation style used in the source (block or flow).
+        style: CollectionStyle,
         /// Anchor name defined on this sequence (e.g. `&anchor`), if any.
         anchor: Option<String>,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.

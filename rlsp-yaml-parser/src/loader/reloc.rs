@@ -25,6 +25,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
         },
         Node::Mapping {
             entries,
+            style,
             anchor,
             tag,
             leading_comments,
@@ -32,6 +33,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             ..
         } => Node::Mapping {
             entries,
+            style,
             anchor,
             tag,
             loc,
@@ -40,6 +42,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
         },
         Node::Sequence {
             items,
+            style,
             anchor,
             tag,
             leading_comments,
@@ -47,6 +50,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             ..
         } => Node::Sequence {
             items,
+            style,
             anchor,
             tag,
             loc,
@@ -76,7 +80,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
 )]
 mod tests {
     use super::*;
-    use crate::event::ScalarStyle;
+    use crate::event::{CollectionStyle, ScalarStyle};
     use crate::pos::Pos;
 
     fn span(line: usize) -> Span {
@@ -138,6 +142,7 @@ mod tests {
     fn reloc_mapping_replaces_loc() {
         let node = Node::Mapping {
             entries: vec![],
+            style: CollectionStyle::Block,
             anchor: Some("m".to_owned()),
             tag: Some("!m".to_owned()),
             loc: span(1),
@@ -153,6 +158,7 @@ mod tests {
                 loc,
                 leading_comments,
                 trailing_comment,
+                ..
             } => {
                 assert_eq!(loc, span(3));
                 assert!(entries.is_empty());
@@ -169,6 +175,7 @@ mod tests {
     fn reloc_sequence_replaces_loc() {
         let node = Node::Sequence {
             items: vec![],
+            style: CollectionStyle::Block,
             anchor: None,
             tag: None,
             loc: span(1),
@@ -238,6 +245,7 @@ mod tests {
     fn reloc_mapping_with_entries_only_replaces_top_loc() {
         let node = Node::Mapping {
             entries: vec![(plain_scalar(span(10)), plain_scalar(span(10)))],
+            style: CollectionStyle::Block,
             anchor: None,
             tag: None,
             loc: span(1),

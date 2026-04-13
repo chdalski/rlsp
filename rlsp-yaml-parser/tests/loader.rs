@@ -13,6 +13,7 @@
 
 use rstest::rstest;
 
+use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
 use rlsp_yaml_parser::node::Node;
@@ -1141,4 +1142,87 @@ fn it_j8_no_trailing_comment_on_collection_node() {
         ),
         "multi-line mapping value must have no trailing comment; got: {v:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// CS: CollectionStyle is threaded from events through to AST nodes
+// ---------------------------------------------------------------------------
+
+// CS-1: block sequence carries CollectionStyle::Block
+#[test]
+fn cs_1_block_sequence_has_block_style() {
+    let node = load_one("- a\n- b\n");
+    let Node::Sequence { style, items, .. } = &node else {
+        panic!("expected Sequence; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Block);
+    assert_eq!(items.len(), 2);
+}
+
+// CS-2: flow sequence carries CollectionStyle::Flow
+#[test]
+fn cs_2_flow_sequence_has_flow_style() {
+    let node = load_one("[a, b]");
+    let Node::Sequence { style, items, .. } = &node else {
+        panic!("expected Sequence; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Flow);
+    assert_eq!(items.len(), 2);
+}
+
+// CS-3: block mapping carries CollectionStyle::Block
+#[test]
+fn cs_3_block_mapping_has_block_style() {
+    let node = load_one("a: 1\nb: 2\n");
+    let Node::Mapping { style, entries, .. } = &node else {
+        panic!("expected Mapping; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Block);
+    assert_eq!(entries.len(), 2);
+}
+
+// CS-4: flow mapping carries CollectionStyle::Flow
+#[test]
+fn cs_4_flow_mapping_has_flow_style() {
+    let node = load_one("{a: 1, b: 2}");
+    let Node::Mapping { style, entries, .. } = &node else {
+        panic!("expected Mapping; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Flow);
+    assert_eq!(entries.len(), 2);
+}
+
+// CS-5: nested flow sequence inside block mapping preserves per-node styles
+#[test]
+fn cs_5_nested_flow_sequence_inside_block_mapping() {
+    let node = load_one("items: [x, y]\n");
+    let Node::Mapping { style, entries, .. } = &node else {
+        panic!("expected Mapping; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Block);
+    let (_, val) = &entries[0];
+    let Node::Sequence {
+        style: seq_style, ..
+    } = val
+    else {
+        panic!("expected Sequence value; got: {val:?}");
+    };
+    assert_eq!(*seq_style, CollectionStyle::Flow);
+}
+
+// CS-6: nested block sequence inside flow mapping preserves per-node styles
+#[test]
+fn cs_6_nested_block_mapping_inside_flow_sequence() {
+    let node = load_one("[{a: 1}]");
+    let Node::Sequence { style, items, .. } = &node else {
+        panic!("expected Sequence; got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Flow);
+    let Node::Mapping {
+        style: map_style, ..
+    } = &items[0]
+    else {
+        panic!("expected Mapping item; got: {:?}", items[0]);
+    };
+    assert_eq!(*map_style, CollectionStyle::Flow);
 }

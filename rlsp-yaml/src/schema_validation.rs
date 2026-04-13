@@ -1375,6 +1375,7 @@ fn validate_dependencies(
                 // Reconstruct a mapping node to validate against the dep schema.
                 let mapping_node = Node::Mapping {
                     entries: entries.to_vec(),
+                    style: rlsp_yaml_parser::CollectionStyle::Block,
                     anchor: None,
                     tag: None,
                     loc: rlsp_yaml_parser::Span {

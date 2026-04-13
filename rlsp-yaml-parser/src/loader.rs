@@ -403,7 +403,7 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::MappingStart { anchor, tag, .. } => {
+            Event::MappingStart { anchor, tag, style } => {
                 let anchor = anchor.map(str::to_owned);
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
@@ -460,6 +460,7 @@ impl<'opt> LoadState<'opt> {
 
                 let node = Node::Mapping {
                     entries,
+                    style,
                     anchor: anchor.clone(),
                     tag,
                     loc: Span {
@@ -475,7 +476,7 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::SequenceStart { anchor, tag, .. } => {
+            Event::SequenceStart { anchor, tag, style } => {
                 let anchor = anchor.map(str::to_owned);
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
@@ -529,6 +530,7 @@ impl<'opt> LoadState<'opt> {
 
                 let node = Node::Sequence {
                     items,
+                    style,
                     anchor: anchor.clone(),
                     tag,
                     loc: Span {
@@ -645,6 +647,7 @@ impl<'opt> LoadState<'opt> {
             }
             Node::Mapping {
                 entries,
+                style,
                 anchor,
                 tag,
                 loc,
@@ -659,6 +662,7 @@ impl<'opt> LoadState<'opt> {
                 }
                 Ok(Node::Mapping {
                     entries: expanded_entries,
+                    style,
                     anchor,
                     tag,
                     loc,
@@ -668,6 +672,7 @@ impl<'opt> LoadState<'opt> {
             }
             Node::Sequence {
                 items,
+                style,
                 anchor,
                 tag,
                 loc,
@@ -680,6 +685,7 @@ impl<'opt> LoadState<'opt> {
                 }
                 Ok(Node::Sequence {
                     items: expanded_items,
+                    style,
                     anchor,
                     tag,
                     loc,
