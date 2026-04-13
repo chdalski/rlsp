@@ -67,8 +67,8 @@ into Codecov if the effort is small.
       (668a75b)
 - [x] Add tests to close coverage gaps
       (668a75b)
-- [ ] Wire VS Code extension unit test coverage into
-      Codecov
+- [x] Wire VS Code extension unit test coverage into
+      Codecov (b6f8a5d)
 - [ ] Cross-link new docs from crate READMEs
 
 ## Tasks
@@ -196,7 +196,7 @@ the largest gaps, and add tests to close them.
 - All new and existing tests pass
 - No decrease in overall coverage percentage
 
-### Task 5: Wire VS Code extension coverage into Codecov
+### Task 5: Wire VS Code extension coverage into Codecov ✅ (b6f8a5d)
 
 Add vitest coverage collection and upload it to Codecov
 alongside the existing Rust coverage.
