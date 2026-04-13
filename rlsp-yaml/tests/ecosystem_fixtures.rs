@@ -10,12 +10,7 @@
 //      empty flow collection warnings, blank line preservation,
 //      flow-to-block indentation
 
-#![expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(clippy::expect_used, missing_docs, reason = "test code")]
 
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
@@ -442,31 +437,24 @@ fn ansible_yaml11_keywords_preserved_unquoted() {
 
 #[test]
 fn flow_sequence_command_items_indented_correctly() {
-    // After formatting, `command:` items must be indented deeper than the key.
+    // After formatting, the flow sequence under `command:` must be preserved as a
+    // flow sequence inline (not converted to block items). The formatter now
+    // respects CollectionStyle::Flow, so `command: [...]` stays on one line.
     let formatted = format_yaml(K8S_DEPLOYMENT, &default_opts());
-    let command_pos = formatted.find("command:").expect("command: missing");
-    let command_line_idx = formatted[..command_pos].lines().count().saturating_sub(1);
-    let lines: Vec<&str> = formatted.lines().collect();
-    let command_indent = lines[command_line_idx].len() - lines[command_line_idx].trim_start().len();
-
-    let item_lines: Vec<&str> = lines[command_line_idx + 1..]
-        .iter()
-        .take_while(|l| l.trim_start().starts_with('-') || l.trim().is_empty())
-        .filter(|l| l.trim_start().starts_with('-'))
-        .copied()
-        .collect();
-
     assert!(
-        !item_lines.is_empty(),
-        "no sequence items found after command: in {formatted:?}"
+        formatted.contains("command:"),
+        "command: key missing: {formatted:?}"
     );
-    for item in &item_lines {
-        let item_indent = item.len() - item.trim_start().len();
-        assert!(
-            item_indent > command_indent,
-            "item {item:?} not indented deeper than command: (indent {command_indent}): {formatted:?}"
-        );
-    }
+    // The flow sequence is preserved inline after `command: `.
+    assert!(
+        formatted.contains("command: ["),
+        "flow sequence should be preserved inline after command: {formatted:?}"
+    );
+    // Confirm the sequence contains expected items.
+    assert!(
+        formatted.contains("http.server") || formatted.contains("python"),
+        "flow sequence items should be present: {formatted:?}"
+    );
 }
 
 #[test]
@@ -489,4 +477,69 @@ fn all_fixtures_parse_cleanly() {
             result.diagnostics
         );
     }
+}
+
+// ---- I1: Integration test — flow collections preserved after formatting ------
+
+/// A document containing both a flow sequence and a flow mapping.
+const FLOW_COLLECTIONS_DOC: &str = "\
+name: example
+tags: [web, backend, rust]
+labels: {env: prod, app: myapp}
+";
+
+#[test]
+fn flow_collections_preserved_after_format() {
+    // Flow sequence is preserved.
+    let formatted = format_yaml(FLOW_COLLECTIONS_DOC, &default_opts());
+    assert!(
+        formatted.contains('['),
+        "flow sequence bracket missing: {formatted:?}"
+    );
+    assert!(
+        formatted.contains("web") && formatted.contains("backend"),
+        "flow sequence items missing: {formatted:?}"
+    );
+    // Flow mapping is preserved.
+    assert!(
+        formatted.contains('{'),
+        "flow mapping brace missing: {formatted:?}"
+    );
+    assert!(
+        formatted.contains("env: prod"),
+        "flow mapping entry missing: {formatted:?}"
+    );
+    // Output parses cleanly.
+    assert!(
+        parse_yaml(&formatted).diagnostics.is_empty(),
+        "formatted output should parse cleanly: {formatted:?}"
+    );
+    // Output is idempotent.
+    let re_formatted = format_yaml(&formatted, &default_opts());
+    assert_eq!(
+        formatted, re_formatted,
+        "flow collections format is not idempotent"
+    );
+}
+
+// H3: GHA workflow flow sequences (branches: [main, develop]) are preserved.
+#[test]
+fn gha_workflow_flow_sequences_preserved() {
+    let formatted = format_yaml(GHA_WORKFLOW, &default_opts());
+    // branches: [main, develop] and branches: [main] are flow sequences.
+    assert!(
+        formatted.contains("branches: ["),
+        "flow sequence under branches: should be preserved: {formatted:?}"
+    );
+}
+
+// H4: GHA matrix flow sequences (os:, rust:) are preserved.
+#[test]
+fn gha_matrix_flow_sequences_preserved() {
+    let formatted = format_yaml(GHA_MATRIX, &default_opts());
+    // os: [ubuntu-latest, macos-latest] and rust: [stable, beta]
+    assert!(
+        formatted.contains("os: [") || formatted.contains("rust: ["),
+        "flow sequences in matrix strategy should be preserved: {formatted:?}"
+    );
 }

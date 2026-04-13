@@ -1007,6 +1007,7 @@ impl LanguageServer for Backend {
                 .unwrap_or(false),
             bracket_spacing: true,
             yaml_version,
+            format_enforce_block_style: false,
         };
         drop(settings);
 
@@ -1080,6 +1081,7 @@ impl LanguageServer for Backend {
                 .unwrap_or(false),
             bracket_spacing: true,
             yaml_version,
+            format_enforce_block_style: false,
         };
         drop(settings);
 
