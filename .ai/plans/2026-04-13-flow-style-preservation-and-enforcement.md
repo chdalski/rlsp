@@ -55,9 +55,9 @@ The parser emits `CollectionStyle::Flow` / `CollectionStyle::Block` on `Event::S
 - [x] Fix all compilation errors from the new field across the workspace
 - [x] Add flow-style rendering to the formatter (sequences and mappings)
 - [x] Make the formatter branch on `CollectionStyle` — preserve original style by default
-- [ ] Add `flowStyle` severity setting and `formatEnforceBlockStyle` setting to the server
-- [ ] Wire severity setting into `validate_flow_style()` (skip when `"off"`, set severity from setting)
-- [ ] Wire `formatEnforceBlockStyle` into the formatter to override style when enabled
+- [x] Add `flowStyle` severity setting and `formatEnforceBlockStyle` setting to the server
+- [x] Wire severity setting into `validate_flow_style()` (skip when `"off"`, set severity from setting)
+- [x] Wire `formatEnforceBlockStyle` into the formatter to override style when enabled
 - [ ] Expose new settings in VS Code extension
 - [ ] Update `docs/configuration.md`
 - [ ] Add/update tests at each layer
@@ -98,7 +98,7 @@ Add a `format_enforce_block_style: bool` field to `YamlFormatOptions`. When `tru
 - [x] Integration test: format a document with flow collections, verify they are preserved
 - [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
-### Task 3: Settings and server wiring
+### Task 3: Settings and server wiring — `73d38db`
 
 Add two new settings to the server:
 1. `flowStyle`: `"off"` | `"warning"` | `"error"` (default: `"warning"`) — controls the severity of `flowMap`/`flowSeq` diagnostics, or disables them entirely
@@ -108,12 +108,12 @@ Wire these into:
 - `parse_and_publish()` — respect severity from `flowStyle` setting; skip `validate_flow_style()` when `"off"`; set diagnostic severity to WARNING or ERROR based on the setting
 - `formatting()` — pass `formatEnforceBlockStyle` through to `YamlFormatOptions`
 
-- [ ] Add `flow_style` and `format_enforce_block_style` fields to `Settings` struct
-- [ ] Add getter methods for both settings
-- [ ] Update `parse_and_publish()`: skip flow style validation when `"off"`, set severity from setting
-- [ ] Update `formatting()`: pass `format_enforce_block_style` to `YamlFormatOptions`
-- [ ] Add integration tests: verify diagnostics respect severity setting (off/warning/error), verify formatter respects enforce setting
-- [ ] `cargo test` passes, `cargo clippy --all-targets` clean
+- [x] Add `flow_style` and `format_enforce_block_style` fields to `Settings` struct
+- [x] Add getter methods for both settings
+- [x] Update `parse_and_publish()`: skip flow style validation when `"off"`, set severity from setting
+- [x] Update `formatting()`: pass `format_enforce_block_style` to `YamlFormatOptions`
+- [x] Add integration tests: verify diagnostics respect severity setting (off/warning/error), verify formatter respects enforce setting
+- [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
 ### Task 4: VS Code extension and documentation
 
