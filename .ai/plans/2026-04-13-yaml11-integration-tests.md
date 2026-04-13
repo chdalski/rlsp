@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-13
 
 ## Goal
@@ -40,13 +40,13 @@ diagnostics through the server handler.
 
 ## Steps
 
-- [ ] Add integration test: `yaml11Boolean` diagnostic
+- [x] Add integration test: `yaml11Boolean` diagnostic
   emitted for plain `yes`/`no`/`on`/`off` values
-- [ ] Add integration test: `yaml11Octal` diagnostic
+- [x] Add integration test: `yaml11Octal` diagnostic
   emitted for plain `0777` values
-- [ ] Add integration test: both diagnostics suppressed
+- [x] Add integration test: both diagnostics suppressed
   when `$yamlVersion=1.1` modeline present
-- [ ] Verify no diagnostic on quoted values (`"yes"`,
+- [x] Verify no diagnostic on quoted values (`"yes"`,
   `"0777"`)
 
 ## Tasks
@@ -75,11 +75,11 @@ Three tests:
    — open with `$yamlVersion=1.1` modeline + `enabled: yes\nmode: 0777\n`, verify zero
    `yaml11Boolean` / `yaml11Octal` diagnostics
 
-- [ ] Test 1: yaml11Boolean emission
-- [ ] Test 2: yaml11Octal emission
-- [ ] Test 3: yamlVersion=1.1 suppression
-- [ ] `cargo test` passes
-- [ ] `cargo clippy --all-targets` zero warnings
+- [x] Test 1: yaml11Boolean emission (5d22db0)
+- [x] Test 2: yaml11Octal emission (5d22db0)
+- [x] Test 3: yamlVersion=1.1 suppression (5d22db0)
+- [x] `cargo test` passes
+- [x] `cargo clippy --all-targets` zero warnings
 
 ## Decisions
 
