@@ -52,9 +52,9 @@ The duplicate key feature follows this exactly.
 
 - [x] Add `duplicateKeys` severity setting to the server (off/warning/error, default error)
 - [x] Wire severity into `parse_and_publish()` — skip when off, patch severity level
-- [ ] Add `formatRemoveDuplicateKeys` setting to the server (bool, default false)
-- [ ] Implement duplicate-key removal pre-pass in the formatter
-- [ ] Wire `formatRemoveDuplicateKeys` into `formatting()` and `range_formatting()`
+- [x] Add `formatRemoveDuplicateKeys` setting to the server (bool, default false)
+- [x] Implement duplicate-key removal pre-pass in the formatter
+- [x] Wire `formatRemoveDuplicateKeys` into `formatting()` and `range_formatting()`
 - [ ] Expose both settings in VS Code extension
 - [ ] Update `docs/configuration.md`
 - [ ] Add tests at each layer
@@ -71,7 +71,7 @@ Add the `duplicateKeys` severity setting and wire it into the diagnostics pipeli
 - [x] Add integration tests: verify diagnostics respect all three severity levels
 - [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
-### Task 2: Auto-remove duplicate keys in the formatter
+### Task 2: Auto-remove duplicate keys in the formatter ✅ `b6f52b1`
 
 Add a `formatRemoveDuplicateKeys` setting and implement the duplicate-key removal pre-pass.
 
@@ -79,14 +79,14 @@ The pre-pass operates on the parsed `Vec<Document<Span>>` before it reaches the 
 
 Implementation approach: add a `dedup_keys(docs: &mut Vec<Document<Span>>)` function in `formatter.rs` (or a helper module) that recursively walks the AST and deduplicates in-place. Call it in `format_yaml()` when `format_remove_duplicate_keys` is `true`, before the `node_to_doc()` conversion.
 
-- [ ] Add `format_remove_duplicate_keys: bool` to `YamlFormatOptions` (default `false`)
-- [ ] Add `format_remove_duplicate_keys: Option<bool>` to `Settings` struct with getter
-- [ ] Implement `dedup_mapping_keys()` — walk AST, remove earlier duplicates, keep last
-- [ ] Call dedup pre-pass in `format_yaml()` when enabled
-- [ ] Wire setting into `formatting()` and `range_formatting()` in server.rs
-- [ ] Unit tests: dedup removes correct entries, keeps last, handles nested mappings, no-op when no duplicates, no-op when disabled
-- [ ] Integration test: format a document with duplicate keys and verify removal
-- [ ] `cargo test` passes, `cargo clippy --all-targets` clean
+- [x] Add `format_remove_duplicate_keys: bool` to `YamlFormatOptions` (default `false`)
+- [x] Add `format_remove_duplicate_keys: Option<bool>` to `Settings` struct with getter
+- [x] Implement `dedup_mapping_keys()` — walk AST, remove earlier duplicates, keep last
+- [x] Call dedup pre-pass in `format_yaml()` when enabled
+- [x] Wire setting into `formatting()` and `range_formatting()` in server.rs
+- [x] Unit tests: dedup removes correct entries, keeps last, handles nested mappings, no-op when no duplicates, no-op when disabled
+- [x] Integration test: format a document with duplicate keys and verify removal
+- [x] `cargo test` passes, `cargo clippy --all-targets` clean
 
 ### Task 3: VS Code extension and documentation
 
