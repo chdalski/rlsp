@@ -88,6 +88,9 @@ pub struct Settings {
     /// When `true`, the formatter converts all flow collections to block style.
     /// Defaults to `false` when absent.
     pub format_enforce_block_style: Option<bool>,
+    /// When `true`, the formatter removes duplicate mapping keys before
+    /// rendering, keeping the last occurrence. Defaults to `false` when absent.
+    pub format_remove_duplicate_keys: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -1050,6 +1053,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_enforce_block_style)
                 .unwrap_or(false),
+            format_remove_duplicate_keys: settings
+                .as_ref()
+                .and_then(|s| s.format_remove_duplicate_keys)
+                .unwrap_or(false),
         };
         drop(settings);
 
@@ -1126,6 +1133,10 @@ impl LanguageServer for Backend {
             format_enforce_block_style: settings
                 .as_ref()
                 .and_then(|s| s.format_enforce_block_style)
+                .unwrap_or(false),
+            format_remove_duplicate_keys: settings
+                .as_ref()
+                .and_then(|s| s.format_remove_duplicate_keys)
                 .unwrap_or(false),
         };
         drop(settings);
@@ -2380,5 +2391,31 @@ mod tests {
             *s = new_settings;
         }
         assert_eq!(backend.get_duplicate_keys().as_deref(), Some("warning"));
+    }
+
+    // ---- formatRemoveDuplicateKeys setting ----
+
+    // K1: formatRemoveDuplicateKeys: true deserializes correctly.
+    #[test]
+    fn settings_deserializes_format_remove_duplicate_keys_true() {
+        let json = serde_json::json!({"formatRemoveDuplicateKeys": true});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_remove_duplicate_keys, Some(true));
+    }
+
+    // K2: formatRemoveDuplicateKeys: false deserializes correctly.
+    #[test]
+    fn settings_deserializes_format_remove_duplicate_keys_false() {
+        let json = serde_json::json!({"formatRemoveDuplicateKeys": false});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_remove_duplicate_keys, Some(false));
+    }
+
+    // K3: field absent — defaults to None.
+    #[test]
+    fn settings_defaults_format_remove_duplicate_keys_to_none_when_absent() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert!(settings.format_remove_duplicate_keys.is_none());
     }
 }
