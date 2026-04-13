@@ -2531,3 +2531,154 @@ async fn folding_ranges_uses_default_5000_limit_when_setting_absent() {
         "should return folding ranges with default limit"
     );
 }
+
+// ---- schema-aware YAML 1.1 diagnostics (integration) ----
+//
+// These tests exercise the `schemaYaml11Boolean`, `schemaYaml11Octal`, and
+// `schemaYaml11BooleanType` diagnostics through the full LSP pipeline.
+// The schema is injected into the cache via `seed_schema_cache` so no network
+// fetch is required.  A `$schema=` modeline in the document causes
+// `process_schema` to find the cached schema and run validation.
+
+/// K8s ConfigMap-style schema: `data` is an object with string values;
+/// `enabled` is a boolean field.
+fn configmap_schema() -> rlsp_yaml::schema::JsonSchema {
+    let schema_json = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "data": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+            },
+            "enabled": {
+                "type": "boolean"
+            }
+        }
+    });
+    rlsp_yaml::schema::parse_schema(&schema_json).expect("configmap_schema: parse failed")
+}
+
+const CONFIGMAP_SCHEMA_URL: &str = "https://example.com/test-configmap.json";
+
+#[tokio::test]
+async fn should_emit_schema_yaml11_boolean_warning_in_string_typed_field() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    service
+        .inner()
+        .seed_schema_cache(CONFIGMAP_SCHEMA_URL, configmap_schema());
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/schema-yaml11-bool-string.yaml";
+    // `data.value: yes` — string-typed field gets a YAML 1.1 boolean warning.
+    let yaml =
+        format!("# yaml-language-server: $schema={CONFIGMAP_SCHEMA_URL}\ndata:\n  value: yes\n");
+    send(&mut service, did_open_notification(uri, &yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("schemaYaml11Boolean".to_string()))),
+        "expected schemaYaml11Boolean warning; got: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity != Some(DiagnosticSeverity::ERROR)
+                || d.code != Some(NumberOrString::String("schemaType".to_string()))),
+        "schemaType error should not be emitted alongside schemaYaml11Boolean; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_emit_schema_yaml11_boolean_type_error_in_boolean_typed_field() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    service
+        .inner()
+        .seed_schema_cache(CONFIGMAP_SCHEMA_URL, configmap_schema());
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/schema-yaml11-bool-type.yaml";
+    // `enabled: yes` — boolean-typed field with a YAML 1.1 value gets a
+    // schemaYaml11BooleanType error (not a generic schemaType error).
+    let yaml = format!("# yaml-language-server: $schema={CONFIGMAP_SCHEMA_URL}\nenabled: yes\n");
+    send(&mut service, did_open_notification(uri, &yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    assert!(
+        diags.iter().any(|d| {
+            d.code
+                == Some(NumberOrString::String(
+                    "schemaYaml11BooleanType".to_string(),
+                ))
+                && d.severity == Some(DiagnosticSeverity::ERROR)
+        }),
+        "expected schemaYaml11BooleanType error; got: {diags:?}"
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("schemaType".to_string()))),
+        "generic schemaType should not be emitted; got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_suppress_schema_yaml11_diagnostics_in_v1_1_mode() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    service
+        .inner()
+        .seed_schema_cache(CONFIGMAP_SCHEMA_URL, configmap_schema());
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/schema-yaml11-v11-suppress.yaml";
+    // In V1_1 mode: `yes` in a boolean field passes the type check (no
+    // diagnostics); `yes` in a string field gets no warning either.
+    let yaml = format!(
+        "# yaml-language-server: $schema={CONFIGMAP_SCHEMA_URL}\n\
+         # yaml-language-server: $yamlVersion=1.1\n\
+         enabled: yes\n\
+         data:\n  value: yes\n"
+    );
+    send(&mut service, did_open_notification(uri, &yaml)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+
+    let has_schema_yaml11_diag = diags.iter().any(|d| {
+        matches!(
+            d.code.as_ref(),
+            Some(NumberOrString::String(c))
+                if c == "schemaYaml11Boolean"
+                    || c == "schemaYaml11BooleanType"
+                    || c == "schemaYaml11Octal"
+        )
+    });
+
+    assert!(
+        !has_schema_yaml11_diag,
+        "V1_1 mode should suppress all schema YAML 1.1 diagnostics; got: {diags:?}"
+    );
+}

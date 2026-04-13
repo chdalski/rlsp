@@ -40,8 +40,9 @@ pub fn code_actions(
             Some("unusedAnchor") => delete_unused_anchor(&lines, diag, uri)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("yaml11Boolean") => yaml11_bool_actions(&lines, diag, uri),
-            Some("yaml11Octal") => yaml11_octal_actions(&lines, diag, uri),
+            Some("yaml11Boolean" | "schemaYaml11Boolean") => yaml11_bool_actions(&lines, diag, uri),
+            Some("yaml11Octal" | "schemaYaml11Octal") => yaml11_octal_actions(&lines, diag, uri),
+            Some("schemaYaml11BooleanType") => schema_yaml11_bool_type_actions(&lines, diag, uri),
             _ => vec![],
         });
 
@@ -679,6 +680,56 @@ fn yaml11_octal_actions(
             Some(vec![diag.clone()]),
         ),
     ]
+}
+
+// ---------- Schema YAML 1.1 boolean type mismatch quick fixes ----------
+
+fn schema_yaml11_bool_type_actions(
+    lines: &[&str],
+    diag: &Diagnostic,
+    uri: &tower_lsp::lsp_types::Url,
+) -> Vec<CodeAction> {
+    let line_idx = diag.range.start.line as usize;
+    let Some(line) = lines.get(line_idx) else {
+        return vec![];
+    };
+    let start_col = diag.range.start.character as usize;
+    let end_col = diag.range.end.character as usize;
+
+    if start_col >= line.len() || end_col > line.len() {
+        return vec![];
+    }
+
+    let value = &line[start_col..end_col];
+    let before = &line[..start_col];
+    let after = &line[end_col..];
+
+    if !crate::scalar_helpers::is_yaml11_bool(value) {
+        return vec![];
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
+    let edit_range = Range::new(
+        Position::new(diag.range.start.line, 0),
+        Position::new(diag.range.start.line, line.len() as u32),
+    );
+
+    let canonical = crate::scalar_helpers::yaml11_bool_canonical(value);
+    let converted_text = format!("{before}{canonical}{after}");
+
+    vec![make_action(
+        "Convert to boolean".to_string(),
+        uri,
+        vec![TextEdit {
+            range: edit_range,
+            new_text: converted_text,
+        }],
+        CodeActionKind::QUICKFIX,
+        Some(vec![diag.clone()]),
+    )]
 }
 
 // ---------- Helpers ----------
@@ -1718,6 +1769,204 @@ mod tests {
             actions
                 .iter()
                 .all(|a| a.title != "Convert to YAML 1.2 octal")
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Group E: schemaYaml11Boolean code actions
+    // ════════════════════════════════════════════════════════════════════
+
+    // E1: "Quote value" action replaces the plain value with a quoted string
+    #[test]
+    fn schema_yaml11_boolean_quote_value_action() {
+        let text = "flag: yes\n";
+        let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: \"yes\"");
+    }
+
+    // E2: "Convert to boolean" action replaces the value with canonical YAML 1.2 boolean
+    #[test]
+    fn schema_yaml11_boolean_convert_to_boolean_action() {
+        let text = "flag: yes\n";
+        let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: true");
+    }
+
+    // E3: exactly two actions offered for schemaYaml11Boolean
+    #[test]
+    fn schema_yaml11_boolean_offers_exactly_two_actions() {
+        let text = "flag: yes\n";
+        let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let count = actions
+            .iter()
+            .filter(|a| a.title == "Quote value" || a.title == "Convert to boolean")
+            .count();
+        assert_eq!(count, 2);
+    }
+
+    // E4: both actions attach the triggering schemaYaml11Boolean diagnostic
+    #[test]
+    fn schema_yaml11_boolean_actions_attach_diagnostic() {
+        let text = "flag: yes\n";
+        let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
+        let actions = code_actions(
+            text,
+            line_range(0),
+            std::slice::from_ref(&diag),
+            &test_uri(),
+        );
+        for action in actions
+            .iter()
+            .filter(|a| a.title == "Quote value" || a.title == "Convert to boolean")
+        {
+            let diags = action.diagnostics.as_ref().unwrap();
+            assert_eq!(diags.len(), 1);
+            assert_eq!(
+                diagnostic_code(&diags[0]),
+                Some("schemaYaml11Boolean"),
+                "action '{}' should attach schemaYaml11Boolean diagnostic",
+                action.title
+            );
+        }
+    }
+
+    // E5: "Convert to boolean" maps false-family values to false
+    #[test]
+    fn schema_yaml11_boolean_converts_false_family_to_false() {
+        let text = "flag: NO\n";
+        let diag = make_diagnostic(0, 6, 8, "schemaYaml11Boolean");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "flag: false");
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Group F: schemaYaml11Octal code actions
+    // ════════════════════════════════════════════════════════════════════
+
+    // F1: "Quote as string" wraps the value in double quotes
+    #[test]
+    fn schema_yaml11_octal_quote_as_string_action() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "schemaYaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Quote as string")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "mode: \"0755\"");
+    }
+
+    // F2: "Convert to YAML 1.2 octal" inserts 'o' after leading '0'
+    #[test]
+    fn schema_yaml11_octal_convert_to_yaml12_action() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "schemaYaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to YAML 1.2 octal")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "mode: 0o755");
+    }
+
+    // F3: exactly two actions offered for schemaYaml11Octal
+    #[test]
+    fn schema_yaml11_octal_offers_exactly_two_actions() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "schemaYaml11Octal");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let count = actions
+            .iter()
+            .filter(|a| a.title == "Quote as string" || a.title == "Convert to YAML 1.2 octal")
+            .count();
+        assert_eq!(count, 2);
+    }
+
+    // F4: both actions attach the triggering schemaYaml11Octal diagnostic
+    #[test]
+    fn schema_yaml11_octal_actions_attach_diagnostic() {
+        let text = "mode: 0755\n";
+        let diag = make_diagnostic(0, 6, 10, "schemaYaml11Octal");
+        let actions = code_actions(
+            text,
+            line_range(0),
+            std::slice::from_ref(&diag),
+            &test_uri(),
+        );
+        for action in actions
+            .iter()
+            .filter(|a| a.title == "Quote as string" || a.title == "Convert to YAML 1.2 octal")
+        {
+            let diags = action.diagnostics.as_ref().unwrap();
+            assert_eq!(diags.len(), 1);
+            assert_eq!(
+                diagnostic_code(&diags[0]),
+                Some("schemaYaml11Octal"),
+                "action '{}' should attach schemaYaml11Octal diagnostic",
+                action.title
+            );
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Group G: enhanced schemaYaml11BooleanType code action
+    // ════════════════════════════════════════════════════════════════════
+
+    // G1: "Convert to boolean" offered for schemaYaml11BooleanType diagnostic
+    #[test]
+    fn schema_yaml11_boolean_type_convert_to_boolean_action() {
+        let text = "enabled: yes\n";
+        let diag = make_diagnostic(0, 9, 12, "schemaYaml11BooleanType");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "enabled: true");
+    }
+
+    // G2: "Convert to boolean" maps false-family 1.1 values correctly
+    #[test]
+    fn schema_yaml11_boolean_type_converts_false_family_correctly() {
+        let text = "enabled: OFF\n";
+        let diag = make_diagnostic(0, 9, 12, "schemaYaml11BooleanType");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title == "Convert to boolean")
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "enabled: false");
+    }
+
+    // G3: generic schemaType diagnostic (non-1.1 mismatch) does NOT offer "Convert to boolean"
+    #[test]
+    fn schema_type_generic_no_convert_to_boolean_action() {
+        let text = "enabled: hello\n";
+        // Use schemaType code (not schemaYaml11BooleanType) — generic mismatch
+        let diag = make_diagnostic(0, 9, 14, "schemaType");
+        let actions = code_actions(text, line_range(0), &[diag], &test_uri());
+        assert!(
+            actions.iter().all(|a| a.title != "Convert to boolean"),
+            "generic schemaType should not offer 'Convert to boolean': {actions:?}"
         );
     }
 }

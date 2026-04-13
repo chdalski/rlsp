@@ -264,6 +264,21 @@ impl Backend {
         diags.get(&parsed).cloned()
     }
 
+    /// Pre-populate the schema cache so integration tests can exercise schema
+    /// validation without a network fetch.
+    ///
+    /// Use a `$schema=<schema_url>` modeline in the test document so that
+    /// `process_schema` picks up the URL, normalises it, and finds the schema
+    /// already in the cache — skipping the network call entirely.
+    /// `schema_url` must be a valid `https://` URL (the same value used in the
+    /// modeline), since `validate_and_normalize_url` only permits http/https.
+    #[doc(hidden)]
+    pub fn seed_schema_cache(&self, schema_url: &str, schema: crate::schema::JsonSchema) {
+        if let Ok(mut cache) = self.schema_cache.lock() {
+            cache.insert(schema_url.to_string(), serde_json::Value::Null, schema);
+        }
+    }
+
     /// Normalize `schema_url`, record the association, fetch/cache the schema,
     /// and append schema-validation diagnostics to `diagnostics`.
     ///
@@ -275,6 +290,7 @@ impl Backend {
         diagnostics: &mut Vec<Diagnostic>,
         documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
         text: &str,
+        yaml_version: YamlVersion,
     ) {
         let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();
 
@@ -350,7 +366,76 @@ impl Backend {
                     documents,
                     &s,
                     format_validation,
+                    yaml_version,
                 ));
+            }
+        }
+    }
+
+    /// Route schema validation for a document, trying modeline → workspace
+    /// associations → Kubernetes auto-detection → `SchemaStore` in that order.
+    ///
+    /// Lock ordering: `schema_associations` → `schema_cache` (`document_store`
+    /// is not held here; diagnostics is accumulated by the caller).
+    /// No Mutex guard is held across any `.await` point.
+    async fn run_schema_validation(
+        &self,
+        uri: &Url,
+        text: &str,
+        documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
+        diagnostics: &mut Vec<Diagnostic>,
+        yaml_version: YamlVersion,
+    ) {
+        if let Some(schema_url) = crate::schema::extract_schema_url(text) {
+            if schema_url.eq_ignore_ascii_case("none") {
+                // $schema=none disables schema processing for this document.
+                // Clear any previous association so stale schema info is not
+                // carried over from a prior save.
+                if let Ok(mut assoc) = self.schema_associations.lock() {
+                    assoc.remove(uri);
+                }
+                // Fall through: non-schema validators already ran above.
+            } else {
+                self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+                    .await;
+            }
+            return;
+        }
+        // No modeline — check workspace associations, then auto-detection.
+        // get_schema_associations(), get_kubernetes_version(), and
+        // get_schema_store_enabled() each acquire and release the settings
+        // lock before any schema_associations or schema_cache lock is taken.
+        let associations = self.get_schema_associations();
+        let k8s_version = self.get_kubernetes_version();
+        let schema_store_enabled = self.get_schema_store_enabled();
+        let filename = uri.path();
+        if let Some(schema_url) = crate::schema::match_schema_by_filename(filename, &associations) {
+            self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+                .await;
+        } else if let Some((api_version, kind)) =
+            crate::schema::detect_kubernetes_resource(documents)
+        {
+            // Third fallback: Kubernetes auto-detection.
+            let schema_url =
+                crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
+            self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+                .await;
+        } else if schema_store_enabled {
+            // Fourth fallback: SchemaStore catalog.
+            // get_or_fetch_schemastore_catalog() acquires and releases
+            // schemastore_catalog lock without holding any other lock.
+            if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await {
+                if let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog) {
+                    self.process_schema(
+                        uri,
+                        &schema_url,
+                        diagnostics,
+                        documents,
+                        text,
+                        yaml_version,
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -397,73 +482,22 @@ impl Backend {
         // as YAML 1.2 (the default). Users who opt into 1.1 semantics via
         // `yamlVersion: "1.1"` or the `# $yamlVersion=1.1` modeline already
         // expect 1.1 behaviour and should not receive these diagnostics.
-        if self.get_yaml_version(text) == YamlVersion::V1_2 {
+        let yaml_version = self.get_yaml_version(text);
+        if yaml_version == YamlVersion::V1_2 {
             diagnostics.extend(crate::validation::validators::validate_yaml11_compat(
                 &result.documents,
             ));
         }
 
-        // Schema validation: extract URL from modeline, fetch/cache schema,
-        // then run schema validation against the parsed documents.
-        //
-        // Lock ordering: schema_associations → schema_cache (document_store
-        // is not held here; diagnostics is acquired last, below).
-        // No Mutex guard is held across any .await point.
-        if let Some(schema_url) = crate::schema::extract_schema_url(text) {
-            if schema_url.eq_ignore_ascii_case("none") {
-                // $schema=none disables schema processing for this document.
-                // Clear any previous association so stale schema info is not
-                // carried over from a prior save.
-                if let Ok(mut assoc) = self.schema_associations.lock() {
-                    assoc.remove(&uri);
-                }
-                // Fall through: non-schema validators (anchors, flow style,
-                // key ordering, duplicate keys) already ran above and their
-                // diagnostics are retained.
-            } else {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
-                    .await;
-            }
-        } else {
-            // No modeline — check workspace associations.
-            // get_schema_associations(), get_kubernetes_version(), and
-            // get_schema_store_enabled() each acquire and release the settings
-            // lock before any schema_associations or schema_cache lock is taken.
-            let associations = self.get_schema_associations();
-            let k8s_version = self.get_kubernetes_version();
-            let schema_store_enabled = self.get_schema_store_enabled();
-            let filename = uri.path();
-            if let Some(schema_url) =
-                crate::schema::match_schema_by_filename(filename, &associations)
-            {
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
-                    .await;
-            } else if let Some((api_version, kind)) =
-                crate::schema::detect_kubernetes_resource(&result.documents)
-            {
-                // Third fallback: Kubernetes auto-detection.
-                let schema_url =
-                    crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
-                self.process_schema(&uri, &schema_url, &mut diagnostics, &result.documents, text)
-                    .await;
-            } else if schema_store_enabled {
-                // Fourth fallback: SchemaStore catalog.
-                // get_or_fetch_schemastore_catalog() acquires and releases
-                // schemastore_catalog lock without holding any other lock.
-                if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await {
-                    if let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog) {
-                        self.process_schema(
-                            &uri,
-                            &schema_url,
-                            &mut diagnostics,
-                            &result.documents,
-                            text,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
+        // Schema validation — see run_schema_validation for routing logic.
+        self.run_schema_validation(
+            &uri,
+            text,
+            &result.documents,
+            &mut diagnostics,
+            yaml_version,
+        )
+        .await;
 
         // Filter out suppressed diagnostics before storing and publishing.
         let suppressions = crate::validation::suppression::build_suppression_map(text);

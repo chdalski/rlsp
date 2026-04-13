@@ -8,6 +8,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::schema_validation::validate_schema;
+use rlsp_yaml::server::YamlVersion;
 use rlsp_yaml::validation::validators::{
     validate_duplicate_keys, validate_flow_style, validate_key_ordering, validate_unused_anchors,
 };
@@ -77,7 +78,7 @@ fn bench_schema_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("schema_validation");
     for (name, text, docs) in &parsed {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
-            b.iter(|| validate_schema(text, docs, &schema, false));
+            b.iter(|| validate_schema(text, docs, &schema, false, YamlVersion::V1_2));
         });
     }
     group.finish();
