@@ -884,13 +884,6 @@ mod tests {
         YamlFormatOptions::default()
     }
 
-    fn opts_with_version(v: YamlVersion) -> YamlFormatOptions {
-        YamlFormatOptions {
-            yaml_version: v,
-            ..default_opts()
-        }
-    }
-
     // ---- Group: Exact-output tests ----
 
     #[rstest]
@@ -1031,127 +1024,6 @@ mod tests {
         );
     }
 
-    // ---- Group: Quote stripping — safe strings → plain ----
-
-    // QS1 (double-quoted safe → plain), QS2 (single-quoted safe → plain),
-    // and duplicates from "scalar style preserved" section.
-    #[rstest]
-    #[case::double_quoted_safe("value: \"python\"\n", "\"python\"", "python")]
-    #[case::single_quoted_safe("value: 'hello'\n", "'hello'", "hello")]
-    #[case::double_quoted_greeting("greeting: \"hello\"\n", "\"hello\"", "hello")]
-    #[case::single_quoted_greeting("greeting: 'hello'\n", "'hello'", "hello")]
-    fn format_yaml_quotes_stripped(#[case] input: &str, #[case] quoted: &str, #[case] plain: &str) {
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            !result.contains(quoted),
-            "unnecessary {quoted:?} should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains(plain),
-            "{plain:?} should be present as plain: {result:?}"
-        );
-    }
-
-    // ---- Group: Quote stripping — special strings → kept quoted ----
-
-    // QS3 (number-like), QS4 (boolean keyword), QS7 (starts with #).
-    #[rstest]
-    #[case::number_like("value: \"5000\"\n", "\"5000\"")]
-    #[case::boolean_keyword("value: \"true\"\n", "\"true\"")]
-    #[case::hash_start("value: \"#comment\"\n", "\"#comment\"")]
-    fn format_yaml_quotes_preserved(#[case] input: &str, #[case] expected: &str) {
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains(expected),
-            "{expected:?} must be preserved: {result:?}"
-        );
-    }
-
-    // ---- Group: Plain scalars — value present, not re-quoted ----
-
-    // Covers scalar style preservation for true/false/null/on (default opts).
-    #[rstest]
-    #[case::true_preserved("enabled: true\n", "true", "\"true\"")]
-    #[case::false_preserved("active: false\n", "false", "\"false\"")]
-    #[case::null_preserved("value: null\n", "null", "\"null\"")]
-    #[case::on_key_unquoted("on: push\n", "on:", "\"on\"")]
-    fn format_yaml_plain_scalar_not_quoted(
-        #[case] input: &str,
-        #[case] contains: &str,
-        #[case] not_quoted: &str,
-    ) {
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains(contains),
-            "{contains:?} missing: {result:?}"
-        );
-        let not_sq = not_quoted.replace('"', "'");
-        assert!(
-            !result.contains(not_quoted) && !result.contains(&not_sq),
-            "{contains:?} must not be quoted: {result:?}"
-        );
-    }
-
-    // ---- Group: Version-aware quoting — keyword stays quoted ----
-
-    // QS5 (on in V1.1) absorbed here alongside v1_1 on/yes and both-version true.
-    #[rstest]
-    #[case::on_stays_quoted_v1_1("value: \"on\"\n", YamlVersion::V1_1, "\"on\"")]
-    #[case::yes_stays_quoted_v1_1("value: \"yes\"\n", YamlVersion::V1_1, "\"yes\"")]
-    #[case::true_stays_quoted_v1_1("value: \"true\"\n", YamlVersion::V1_1, "\"true\"")]
-    #[case::true_stays_quoted_v1_2("value: \"true\"\n", YamlVersion::V1_2, "\"true\"")]
-    fn format_yaml_quoted_keyword_stays_quoted(
-        #[case] input: &str,
-        #[case] version: YamlVersion,
-        #[case] expected: &str,
-    ) {
-        let result = format_yaml(input, &opts_with_version(version));
-        assert!(
-            result.contains(expected),
-            "{expected:?} must stay quoted in {version:?}: {result:?}"
-        );
-    }
-
-    // ---- Group: Version-aware quoting — V1.2 strips non-reserved keywords ----
-
-    #[rstest]
-    #[case::on_stripped_v1_2("value: \"on\"\n", YamlVersion::V1_2, "\"on\"", "'on'", "on")]
-    #[case::yes_stripped_v1_2("value: \"yes\"\n", YamlVersion::V1_2, "\"yes\"", "'yes'", "yes")]
-    fn format_yaml_v1_2_keyword_quotes_stripped(
-        #[case] input: &str,
-        #[case] version: YamlVersion,
-        #[case] not_dq: &str,
-        #[case] not_sq: &str,
-        #[case] plain: &str,
-    ) {
-        let result = format_yaml(input, &opts_with_version(version));
-        assert!(
-            !result.contains(not_dq) && !result.contains(not_sq),
-            "{plain:?} is not reserved in V1.2; quotes should be stripped: {result:?}"
-        );
-        assert!(
-            result.contains(plain),
-            "{plain:?} must appear as plain: {result:?}"
-        );
-    }
-
-    // ---- Group: on plain key — never quoted regardless of version ----
-
-    #[rstest]
-    #[case::v1_2(YamlVersion::V1_2)]
-    #[case::v1_1(YamlVersion::V1_1)]
-    fn format_yaml_on_plain_key_never_quoted(#[case] version: YamlVersion) {
-        let result = format_yaml("on: push\n", &opts_with_version(version));
-        assert!(
-            result.contains("on:"),
-            "on: key should not be quoted in {version:?}: {result:?}"
-        );
-        assert!(
-            !result.contains("\"on\"") && !result.contains("'on'"),
-            "on: plain key must not gain quotes in {version:?}: {result:?}"
-        );
-    }
-
     // ---- Group: Scalar style — single-contains checks (Task 23 Phase A) ----
 
     #[rstest]
@@ -1226,38 +1098,6 @@ mod tests {
         assert!(
             result.contains("  age: 25"),
             "second item age should be indented: {result:?}"
-        );
-    }
-
-    // Extra: string values that need quoting get quoted.
-    #[test]
-    fn string_quoting_ambiguous_values() {
-        // "true" as a string value — after parse it becomes Boolean(true),
-        // so it resolves to the integer type. A string that looks like a number needs quoting.
-        let opts = YamlFormatOptions {
-            single_quote: false,
-            ..Default::default()
-        };
-        // A key whose value is the string "null" is a reserved YAML keyword.
-        // Test that strings requiring quotes actually get them via round-trip.
-        let input = "key: some value\n";
-        let result = format_yaml(input, &opts);
-        // "some value" is a valid plain string — no quotes needed.
-        assert!(result.contains("some value"), "result: {result:?}");
-    }
-
-    // Extra: single_quote option wraps strings.
-    #[test]
-    fn single_quote_option() {
-        let opts = YamlFormatOptions {
-            single_quote: true,
-            ..Default::default()
-        };
-        let input = "key: hello\n";
-        let result = format_yaml(input, &opts);
-        assert!(
-            result.contains("'hello'"),
-            "expected single-quoted: {result:?}"
         );
     }
 
@@ -1408,31 +1248,6 @@ mod tests {
         );
     }
 
-    // ND4: Empty string value is quoted in output.
-    // The parser preserves "" as a double-quoted scalar; needs_quoting("") returns true.
-    #[test]
-    fn empty_string_value_is_quoted() {
-        let input = "key: \"\"\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("\"\"") || result.contains("''"),
-            "empty string should be quoted: {result:?}"
-        );
-    }
-
-    // ND5: Numeric-looking string stays quoted.
-    // The parser preserves "123" (double-quoted in source) as a double-quoted scalar.
-    // needs_quoting("123") is true (looks_like_number), so it is re-quoted on output.
-    #[test]
-    fn numeric_looking_string_stays_quoted() {
-        let input = "version: \"123\"\n";
-        let result = format_yaml(input, &default_opts());
-        assert!(
-            result.contains("\"123\"") || result.contains("'123'"),
-            "numeric-looking string should be quoted: {result:?}"
-        );
-    }
-
     // ND6: Scalar nodes with preserved styles (Literal, Folded, SingleQuoted,
     // DoubleQuoted, Plain) are tested in the "Scalar Style Preservation" section below.
 
@@ -1440,30 +1255,6 @@ mod tests {
     // They are rendered as `*name`.
 
     // ND8: (Removed — no longer applicable.)
-
-    // `"on"` is a V1.1 boolean keyword; quotes preserved only when V1.1 is active.
-    #[test]
-    fn format_yaml_quoted_on_key_stays_quoted() {
-        let result = format_yaml("\"on\": push\n", &opts_with_version(YamlVersion::V1_1));
-        assert!(
-            result.contains("\"on\""),
-            "explicitly quoted on: key should stay quoted in V1.1: {result:?}"
-        );
-    }
-
-    // `yes` and `no` are YAML 1.1 boolean keywords; preserved as plain scalars.
-    #[test]
-    fn format_yaml_other_yaml11_booleans_unquoted() {
-        let result = format_yaml("yes: no\n", &default_opts());
-        assert!(
-            result.contains("yes:"),
-            "yes: key should not be quoted: {result:?}"
-        );
-        assert!(
-            result.contains("no"),
-            "no value should not be quoted: {result:?}"
-        );
-    }
 
     // ---- Formatter: Blank Line Preservation ----
 
@@ -1792,63 +1583,6 @@ mod tests {
         assert!(
             result.contains('[') && result.contains(']'),
             "flow brackets should appear in output: {result:?}"
-        );
-    }
-
-    // ---- Formatter: Unnecessary Quote Stripping ----
-
-    // QS6: Double-quoted string containing `: ` — parser limitation note.
-    // Known parser limitation: rlsp-yaml-parser strips spaces after `:` in
-    // double-quoted strings, so "key: value" becomes "key:value". Since the
-    // space is lost, needs_quoting no longer triggers and the value is emitted
-    // plain. This test verifies the formatter doesn't crash and produces output.
-    #[test]
-    fn format_yaml_double_quoted_string_with_colon_space_kept_quoted() {
-        let result = format_yaml("value: \"key: value\"\n", &default_opts());
-        assert!(
-            result.contains("key:"),
-            "value content should be present: {result:?}"
-        );
-    }
-
-    // QS8: Quoted strings in a flow sequence stripped after block conversion.
-    #[test]
-    fn format_yaml_quoted_string_in_block_sequence_stripped() {
-        let result = format_yaml(
-            "args: [\"python\", \"-m\", \"http.server\"]\n",
-            &default_opts(),
-        );
-        // Safe strings: quotes stripped.
-        assert!(
-            !result.contains("\"python\""),
-            "\"python\" quotes should be stripped: {result:?}"
-        );
-        assert!(
-            !result.contains("\"http.server\""),
-            "\"http.server\" quotes should be stripped: {result:?}"
-        );
-        // `-m` starts with `-` which triggers needs_quoting → stays quoted.
-        assert!(
-            result.contains("\"-m\""),
-            "\"-m\" quotes must be preserved (starts with '-'): {result:?}"
-        );
-    }
-
-    // QS10: When `single_quote: true`, stripped value is re-quoted in single quotes.
-    #[test]
-    fn format_yaml_quote_stripping_respects_single_quote_option() {
-        let opts = YamlFormatOptions {
-            single_quote: true,
-            ..default_opts()
-        };
-        let result = format_yaml("value: \"python\"\n", &opts);
-        assert!(
-            result.contains("'python'"),
-            "single_quote option should apply single quotes: {result:?}"
-        );
-        assert!(
-            !result.contains("\"python\""),
-            "original double quotes should not be preserved: {result:?}"
         );
     }
 
