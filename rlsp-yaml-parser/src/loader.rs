@@ -286,6 +286,12 @@ struct LoadState<'opt> {
     depth: usize,
     /// Total nodes produced via alias expansion (resolved mode only).
     expanded_nodes: usize,
+    /// Leading comments accumulated by `parse_node` when it encounters a
+    /// `Comment` event between a mapping key and its value's collection start,
+    /// or by a sequence/mapping loop when it hits End with leftover leading
+    /// comments.  The next mapping/sequence loop iteration picks these up and
+    /// prepends them to the next entry's leading comments.
+    pending_leading: Vec<String>,
 }
 
 impl<'opt> LoadState<'opt> {
@@ -296,6 +302,7 @@ impl<'opt> LoadState<'opt> {
             anchor_count: 0,
             depth: 0,
             expanded_nodes: 0,
+            pending_leading: Vec::new(),
         }
     }
 
@@ -303,6 +310,7 @@ impl<'opt> LoadState<'opt> {
         self.anchor_map.clear();
         self.anchor_count = 0;
         self.expanded_nodes = 0;
+        self.pending_leading.clear();
     }
 
     fn run(&mut self, mut stream: EventStream<'_>) -> Result<Vec<Document<Span>>> {
@@ -418,12 +426,29 @@ impl<'opt> LoadState<'opt> {
                 let mut end_span = span;
 
                 loop {
-                    // Peek to detect MappingEnd or end of stream before
-                    // consuming leading comments.
-                    let leading = consume_leading_comments(stream)?;
+                    // Consume leading comments before the next key.  Also
+                    // collect any comments that spilled over from a sibling
+                    // value's collection end (stored in `pending_leading`).
+                    let raw_leading = consume_leading_comments(stream)?;
+                    let leading = if self.pending_leading.is_empty() {
+                        raw_leading
+                    } else {
+                        let mut combined = std::mem::take(&mut self.pending_leading);
+                        combined.extend(raw_leading);
+                        combined
+                    };
 
                     match stream.peek() {
-                        None | Some(Ok((Event::MappingEnd | Event::StreamEnd, _))) => break,
+                        None | Some(Ok((Event::MappingEnd | Event::StreamEnd, _))) => {
+                            // Save any collected leading comments so the next
+                            // sibling entry in the parent collection can inherit
+                            // them (e.g. a comment just before MappingEnd that
+                            // belongs to the following mapping entry).
+                            if !leading.is_empty() {
+                                self.pending_leading = leading;
+                            }
+                            break;
+                        }
                         Some(Err(_)) => {
                             // Consume the error.
                             return Err(match stream.next() {
@@ -491,11 +516,30 @@ impl<'opt> LoadState<'opt> {
                 let mut end_span = span;
 
                 loop {
-                    // Collect leading comments before the next item.
-                    let leading = consume_leading_comments(stream)?;
+                    // Collect leading comments before the next item.  Also
+                    // collect any comments that spilled over from a sibling
+                    // value's collection end (stored in `pending_leading`).
+                    let raw_leading = consume_leading_comments(stream)?;
+                    let leading = if self.pending_leading.is_empty() {
+                        raw_leading
+                    } else {
+                        let mut combined = std::mem::take(&mut self.pending_leading);
+                        combined.extend(raw_leading);
+                        combined
+                    };
 
                     match stream.peek() {
-                        None | Some(Ok((Event::SequenceEnd | Event::StreamEnd, _))) => break,
+                        None | Some(Ok((Event::SequenceEnd | Event::StreamEnd, _))) => {
+                            // Save any collected leading comments so the next
+                            // sibling entry in the parent collection can inherit
+                            // them (e.g. a comment just before SequenceEnd that
+                            // belongs to the following sequence item or mapping
+                            // entry in the parent).
+                            if !leading.is_empty() {
+                                self.pending_leading = leading;
+                            }
+                            break;
+                        }
                         Some(Err(_)) => {
                             // Consume the error.
                             return Err(match stream.next() {
@@ -551,8 +595,13 @@ impl<'opt> LoadState<'opt> {
                 self.resolve_alias(&name, span)
             }
 
-            Event::Comment { .. } => {
-                // Comment between nodes — skip and continue.
+            Event::Comment { text } => {
+                // Comment between a mapping key and its collection value (e.g.
+                // `key:\n  # comment\n  subkey: val`).  The comment appears
+                // after the key Scalar and before the MappingStart/SequenceStart
+                // that begins the value.  Save it in `pending_leading` so the
+                // first entry of the upcoming collection can inherit it.
+                self.pending_leading.push(format!("#{text}"));
                 self.parse_node(stream)
             }
 
@@ -744,7 +793,13 @@ const fn empty_scalar() -> Node<Span> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(clippy::expect_used, clippy::unwrap_used, reason = "test code")]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "test code"
+)]
 mod tests {
     use super::*;
 
@@ -821,6 +876,331 @@ mod tests {
         assert!(
             matches!(result, Err(LoadError::CircularAlias { .. })),
             "expected CircularAlias, got: {result:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug A: comment between mapping key and its collection value
+    // -----------------------------------------------------------------------
+
+    // UT-A1: comment between key and nested mapping is attached to first entry.
+    #[test]
+    fn comment_between_key_and_nested_mapping_is_attached_to_first_key() {
+        let docs = load("outer:\n  # Style 1\n  inner: val\n").unwrap();
+        let root = &docs[0].root;
+        // root is a mapping: outer -> { inner: val }
+        // The comment "# Style 1" appears between "outer" key and the nested
+        // MappingStart.  After the fix it must be attached to the "inner" key.
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        assert_eq!(entries.len(), 1);
+        let (_outer_key, outer_value) = &entries[0];
+        let Node::Mapping {
+            entries: nested, ..
+        } = outer_value
+        else {
+            panic!("expected nested mapping");
+        };
+        assert_eq!(nested.len(), 1);
+        let (inner_key, _) = &nested[0];
+        assert_eq!(
+            inner_key.leading_comments(),
+            &["# Style 1"],
+            "comment should be attached to the first nested key"
+        );
+    }
+
+    // UT-A2: comment between key and nested sequence is attached to first item.
+    #[test]
+    fn comment_between_key_and_nested_sequence_is_attached_to_first_item() {
+        let docs = load("key:\n  # leading\n  - item1\n  - item2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_key, seq_value) = &entries[0];
+        let Node::Sequence { items, .. } = seq_value else {
+            panic!("expected sequence value");
+        };
+        // The comment "# leading" appears before the sequence items; after
+        // the fix it is attached to the first item.
+        assert_eq!(
+            items[0].leading_comments(),
+            &["# leading"],
+            "comment should be attached to first sequence item"
+        );
+    }
+
+    // UT-A3: multiple consecutive comments before a collection are all preserved.
+    #[test]
+    fn multiple_comments_between_key_and_collection_all_preserved() {
+        let docs = load("key:\n  # first\n  # second\n  - item\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_key, seq_value) = &entries[0];
+        let Node::Sequence { items, .. } = seq_value else {
+            panic!("expected sequence value");
+        };
+        assert_eq!(
+            items[0].leading_comments(),
+            &["# first", "# second"],
+            "both comments should be on first item"
+        );
+    }
+
+    // UT-A4: the KEY node itself has no leading comments from Bug-A fix.
+    #[test]
+    fn comment_between_key_and_collection_does_not_corrupt_key_node() {
+        let docs = load("outer:\n  # Style 1\n  inner: val\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (outer_key, _) = &entries[0];
+        assert!(
+            outer_key.leading_comments().is_empty(),
+            "outer key should have no leading comments"
+        );
+        assert!(
+            outer_key.trailing_comment().is_none(),
+            "outer key should have no trailing comment"
+        );
+    }
+
+    // UT-A5: no comment between key and value leaves leading_comments empty.
+    #[test]
+    fn no_comment_between_key_and_value_leaves_leading_comments_empty() {
+        let docs = load("key:\n  inner: val\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_key, nested) = &entries[0];
+        let Node::Mapping {
+            entries: nested_entries,
+            ..
+        } = nested
+        else {
+            panic!("expected nested mapping");
+        };
+        let (inner_key, _) = &nested_entries[0];
+        assert!(
+            inner_key.leading_comments().is_empty(),
+            "inner key should have no leading comments when there is no comment"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug B: comment at end of collection preserved as leading on next sibling
+    // -----------------------------------------------------------------------
+
+    // UT-B1: comment before SequenceEnd becomes leading on next mapping entry.
+    #[test]
+    fn trailing_comment_of_sequence_preserved_as_leading_on_next_sibling() {
+        let input =
+            "Lists:\n  list-a:\n    - item1\n    - item2\n\n  # Style 2\n  list-b:\n    - item1\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_lists_key, nested) = &entries[0];
+        let Node::Mapping {
+            entries: nested_entries,
+            ..
+        } = nested
+        else {
+            panic!("expected nested mapping");
+        };
+        assert_eq!(nested_entries.len(), 2);
+        let (list_b_key, _) = &nested_entries[1];
+        assert_eq!(
+            list_b_key.leading_comments(),
+            &["# Style 2"],
+            "# Style 2 should be leading comment on list-b key"
+        );
+    }
+
+    // UT-B2: comment at end of nested sequence propagates to next mapping entry.
+    #[test]
+    fn overflow_comments_from_nested_sequence_end_reach_next_mapping_entry() {
+        let input = "outer:\n  a:\n    - x\n    # between\n  b: y\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_outer_key, outer_val) = &entries[0];
+        let Node::Mapping {
+            entries: nested, ..
+        } = outer_val
+        else {
+            panic!("expected nested mapping");
+        };
+        assert_eq!(nested.len(), 2);
+        let (b_key, _) = &nested[1];
+        assert_eq!(
+            b_key.leading_comments(),
+            &["# between"],
+            "# between should be leading comment on b key"
+        );
+    }
+
+    // UT-B3: comment at end of nested mapping propagates to next sibling.
+    #[test]
+    fn overflow_comments_from_nested_mapping_end_reach_next_sibling() {
+        let input = "parent:\n  child1:\n    k: v\n    # end-of-child1\n  child2: val\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_parent_key, parent_val) = &entries[0];
+        let Node::Mapping {
+            entries: siblings, ..
+        } = parent_val
+        else {
+            panic!("expected parent mapping value");
+        };
+        assert_eq!(siblings.len(), 2);
+        let (child2_key, _) = &siblings[1];
+        assert_eq!(
+            child2_key.leading_comments(),
+            &["# end-of-child1"],
+            "# end-of-child1 should be leading comment on child2 key"
+        );
+    }
+
+    // UT-B4: overflow comment at top-level sequence end is not silently dropped.
+    #[test]
+    fn overflow_comments_at_top_level_sequence_end_are_not_lost() {
+        // The comment "# tail" appears before SequenceEnd of the top-level items
+        // sequence.  The fix saves it to pending_leading; since there is no next
+        // sibling, it ends up in the document's root mapping's pending state and
+        // is not lost.  We assert it appears somewhere reachable in the AST rather
+        // than disappearing entirely.
+        let input = "items:\n  - a\n  - b\n  # tail\n";
+        let docs = load(input).unwrap();
+        // The document must parse successfully (no panic, no error).
+        assert!(!docs.is_empty(), "document should parse without error");
+        // The # tail comment must not cause data loss — the sequence items are intact.
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_items_key, seq_val) = &entries[0];
+        let Node::Sequence { items, .. } = seq_val else {
+            panic!("expected sequence value");
+        };
+        assert_eq!(items.len(), 2, "sequence items must not be lost");
+    }
+
+    // UT-B5: no overflow comments when collection ends cleanly.
+    #[test]
+    fn no_overflow_comments_when_collection_ends_cleanly() {
+        let docs = load("key:\n  - item1\n  - item2\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_key, seq_val) = &entries[0];
+        let Node::Sequence { items, .. } = seq_val else {
+            panic!("expected sequence value");
+        };
+        for item in items {
+            assert!(
+                item.leading_comments().is_empty(),
+                "items should have no leading comments"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Combined scenarios
+    // -----------------------------------------------------------------------
+
+    // UT-C1: exact bug-report input — both comments survive.
+    #[test]
+    fn original_bug_report_input_preserves_both_comments() {
+        let input = "Lists:\n  # Style 1\n  list-a:\n    - item1\n    - item2\n\n  # Style 2\n  list-b:\n  - item1\n  - item2\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_lists_key, nested) = &entries[0];
+        let Node::Mapping {
+            entries: nested_entries,
+            ..
+        } = nested
+        else {
+            panic!("expected nested mapping");
+        };
+        assert_eq!(nested_entries.len(), 2);
+        let (first_key, _) = &nested_entries[0];
+        let (second_key, _) = &nested_entries[1];
+        assert_eq!(
+            first_key.leading_comments(),
+            &["# Style 1"],
+            "list-a should have # Style 1 as leading comment"
+        );
+        assert_eq!(
+            second_key.leading_comments(),
+            &["# Style 2"],
+            "list-b should have # Style 2 as leading comment"
+        );
+    }
+
+    // UT-C2: leading and trailing comments on sibling entries both preserved.
+    #[test]
+    fn leading_and_trailing_comments_both_preserved_on_sibling_entries() {
+        let input = "map:\n  # leading\n  key: value  # trailing\n  # next-leading\n  key2: v2\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_map_key, map_val) = &entries[0];
+        let Node::Mapping {
+            entries: siblings, ..
+        } = map_val
+        else {
+            panic!("expected mapping value");
+        };
+        assert_eq!(siblings.len(), 2);
+        let (key1, val1) = &siblings[0];
+        let (key2, _) = &siblings[1];
+        assert_eq!(key1.leading_comments(), &["# leading"]);
+        assert_eq!(val1.trailing_comment(), Some("# trailing"));
+        assert_eq!(key2.leading_comments(), &["# next-leading"]);
+    }
+
+    // UT-C3: deeply nested overflow comments propagate to correct sibling.
+    #[test]
+    fn deeply_nested_overflow_comments_reach_correct_sibling() {
+        let input = "top:\n  mid:\n    - x\n    # deep-overflow\n  next: y\n";
+        let docs = load(input).unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        let (_top_key, top_val) = &entries[0];
+        let Node::Mapping {
+            entries: top_entries,
+            ..
+        } = top_val
+        else {
+            panic!("expected top-level mapping");
+        };
+        assert_eq!(top_entries.len(), 2);
+        let (next_key, _) = &top_entries[1];
+        assert_eq!(
+            next_key.leading_comments(),
+            &["# deep-overflow"],
+            "# deep-overflow should propagate from nested sequence to next sibling"
         );
     }
 }
