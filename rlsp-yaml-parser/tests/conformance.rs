@@ -222,7 +222,7 @@ fn parses_clean(input: &str) -> bool {
 
 #[rstest]
 #[timeout(Duration::from_secs(5))]
-fn yaml_test_suite(#[files("tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
+fn yaml_test_suite(#[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
     let cases = load_cases_from_file(&path);
     if cases.is_empty() {
         // All entries are skipped (e.g., ZYU8). Nothing to test.
