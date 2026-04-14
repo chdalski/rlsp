@@ -129,7 +129,7 @@ No existing fixtures cover tags on collections.
 - [x] Fix anchor preservation (Bug 2)
 - [x] Fix single_quote key quoting (Bug 3)
 - [x] Fix tag preservation on collections (coverage gap)
-- [ ] Fix comment loss in nested mappings (Bug 5)
+- [x] Fix comment loss in nested mappings (Bug 5)
 - [x] Update existing fixtures that encoded buggy behavior
 - [ ] Add new fixtures for anchors, tags, block scalar
       real-world patterns
@@ -237,7 +237,7 @@ Sequence nodes, matching the existing Scalar tag handling.
   - `tag-custom-on-block-mapping.md` — `!custom\n  a: 1`
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 5: Fix comment loss in nested mappings (Bug 5)
+### Task 5: Fix comment loss in nested mappings (Bug 5) — `168c0e3`
 
 Fix `attach_comments` to preserve leading comments
 between entries in nested block mappings. User-reported
@@ -257,10 +257,10 @@ fails for leading comments indented inside nested block
 mappings. The comments are not matched to any content
 entry and are silently dropped.
 
-- [ ] Investigate `attach_comments` to identify why
+- [x] Investigate `attach_comments` to identify why
       leading comments inside nested mappings are lost
-- [ ] Fix the matching/reattachment logic
-- [ ] Add fixtures:
+- [x] Fix the matching/reattachment logic
+- [x] Add fixtures:
   - `comment-nested-mapping-leading.md` — leading comments
     between entries in a nested mapping preserved
   - `comment-nested-mapping-leading-and-trailing.md` —
@@ -268,7 +268,7 @@ entry and are silently dropped.
     preserved
   - `comment-with-colon-in-text.md` — inline comment
     containing `: ` does not break output
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 6: Add real-world ecosystem fixtures
 
