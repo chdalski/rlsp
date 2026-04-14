@@ -466,11 +466,13 @@ and verify 0 failures.
   requires adding a rendering mode that doesn't exist in
   the formatter yet. It should be tackled after the
   simpler escape/quoting fixes.
-- **Parser changes allowed in rlsp-yaml-parser** — some
-  fixes (block scalar indentation indicator, multiline
-  scalar metadata) may require the parser to expose
-  additional information in the AST. Parser changes are
-  in scope when they're necessary for correct formatting.
+- **No parser changes for formatter round-trips** — the
+  parser is 351/351 conformant. If formatted output doesn't
+  round-trip, the formatter must emit a different valid
+  form — not modify the parser. Parser changes are only
+  valid for genuine parser bugs (incorrect parse, loader
+  data loss) or surfacing info already in the event stream.
+  See Crate Boundaries in root `CLAUDE.md`.
 - **Reviewer actively bug-hunts** — same directive as the
   previous plan.
 - **Acceptance criterion is 0 failures** — no silent

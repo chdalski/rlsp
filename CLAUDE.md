@@ -53,6 +53,16 @@ pnpm run format    # check formatting (prettier)
 - Workspace path dependencies must include a `version` field — `cargo publish` rejects path-only deps
 - Use `#[expect(lint, reason = "...")]` instead of `#[allow(lint)]` — enforced by `allow_attributes = "deny"` and `allow_attributes_without_reason = "deny"` in workspace lints
 
+## Crate Boundaries
+
+The parser is the authority on valid YAML. The formatter must produce output the unmodified parser already handles. If formatted output doesn't round-trip, the formatter is wrong — not the parser.
+
+| Crate | Responsibility | Change allowed when |
+|-------|---------------|---------------------|
+| `rlsp-yaml-parser` | Lex, parse, load YAML → AST | Parser bug (incorrect parse, loader data loss), or AST needs to surface info already in the event stream. Never to accommodate formatter output. |
+| `rlsp-yaml` | Language server + formatter (AST → text) | Formatter output doesn't round-trip — fix the output form, not the parser. |
+| `rlsp-fmt` | Generic pretty-printer (Doc IR → text) | Must remain YAML-agnostic. |
+
 ## References
 
 <!-- Agents: add authoritative sources used to make implementation decisions. One line each. -->
