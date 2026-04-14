@@ -332,7 +332,9 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // Join multiple documents with `---` separators.
     let sep = text("---");
     let mut parts: Vec<Doc> = Vec::new();
-    let mut iter = documents.iter().map(|doc| node_to_doc(&doc.root, options));
+    let mut iter = documents
+        .iter()
+        .map(|doc| node_to_doc(&doc.root, options, false));
     if let Some(first) = iter.next() {
         parts.push(first);
     }
@@ -390,7 +392,10 @@ fn extract_doc_prefix_comments(text: &str) -> Vec<Comment> {
 }
 
 /// Convert a `Node<Span>` to a `Doc` IR node.
-fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
+///
+/// When `in_key` is `true`, the `single_quote` style option is suppressed for
+/// scalar strings — keys are never single-quoted by style preference alone.
+fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
     match node {
         Node::Scalar {
             value,
@@ -421,14 +426,14 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
                             text(format!("'{value}'"))
                         }
                     } else {
-                        string_to_doc(value, options)
+                        string_to_doc(value, options, in_key)
                     }
                 }
                 ScalarStyle::Plain => {
                     if needs_quoting(value, options.yaml_version) {
                         text(value.clone())
                     } else {
-                        string_to_doc(value, options)
+                        string_to_doc(value, options, in_key)
                     }
                 }
             };
@@ -484,7 +489,10 @@ fn is_core_schema_tag(tag: &str) -> bool {
 }
 
 /// Convert a string scalar to a Doc, quoting as necessary.
-fn string_to_doc(s: &str, options: &YamlFormatOptions) -> Doc {
+///
+/// When `in_key` is `true`, the `single_quote` option is ignored — keys are
+/// never wrapped in single quotes by style preference alone.
+fn string_to_doc(s: &str, options: &YamlFormatOptions, in_key: bool) -> Doc {
     if needs_quoting(s, options.yaml_version) {
         // Must quote — use the preferred style.
         if options.single_quote && !s.contains('\'') {
@@ -493,7 +501,7 @@ fn string_to_doc(s: &str, options: &YamlFormatOptions) -> Doc {
             // Double-quote and escape.
             text(format!("\"{}\"", escape_double_quoted(s)))
         }
-    } else if options.single_quote {
+    } else if options.single_quote && !in_key {
         text(format!("'{s}'"))
     } else {
         // Plain — no quotes needed.
@@ -662,8 +670,8 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
     let items: Vec<Doc> = entries
         .iter()
         .map(|(key, value)| {
-            let key_doc = node_to_doc(key, options);
-            let val_doc = node_to_doc(value, options);
+            let key_doc = node_to_doc(key, options, true);
+            let val_doc = node_to_doc(value, options, false);
             concat(vec![key_doc, text(": "), val_doc])
         })
         .collect();
@@ -681,7 +689,7 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
 
 /// Convert a single key-value pair to Doc, including any AST-attached comments.
 fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOptions) -> Doc {
-    let key_doc = node_to_doc(key, options);
+    let key_doc = node_to_doc(key, options, true);
 
     let effective_style = |style: CollectionStyle| {
         if options.format_enforce_block_style {
@@ -734,7 +742,7 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
         }
         // Flow collections, scalars, empty collections, aliases — all inline.
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            let value_doc = node_to_doc(value, options);
+            let value_doc = node_to_doc(value, options, false);
             concat(vec![key_doc, text(": "), value_doc])
         }
     };
@@ -789,7 +797,10 @@ fn sequence_to_doc(seq: &[Node<Span>], style: CollectionStyle, options: &YamlFor
 /// printer keeps it on one line when it fits within `print_width`, and breaks it
 /// across lines (one item per line, indented) when it does not.
 fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptions) -> Doc {
-    let items: Vec<Doc> = seq.iter().map(|item| node_to_doc(item, options)).collect();
+    let items: Vec<Doc> = seq
+        .iter()
+        .map(|item| node_to_doc(item, options, false))
+        .collect();
     let sep = concat(vec![text(","), line()]);
     let inner = join(&sep, items);
 
@@ -862,7 +873,7 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
         }
         // Flow collections, scalars, empty collections, aliases — inline under `- `.
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            concat(vec![text("- "), node_to_doc(item, options)])
+            concat(vec![text("- "), node_to_doc(item, options, false)])
         }
     };
 
