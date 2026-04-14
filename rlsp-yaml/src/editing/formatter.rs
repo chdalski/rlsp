@@ -445,7 +445,12 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                     }
                 }
                 ScalarStyle::Plain => {
-                    if needs_quoting(value, options.yaml_version) {
+                    // Values starting with a quote character cannot be emitted as plain —
+                    // they would look like an unterminated quoted scalar to a re-parser.
+                    // Emit these with proper escaping via string_to_doc instead.
+                    if value.starts_with('"') || value.starts_with('\'') {
+                        string_to_doc(value, options, in_key)
+                    } else if needs_quoting(value, options.yaml_version) {
                         text(value.clone())
                     } else {
                         string_to_doc(value, options, in_key)
@@ -558,6 +563,13 @@ fn needs_quoting(s: &str, version: YamlVersion) -> bool {
     // All-whitespace values would be trimmed to nothing by YAML's flow-scalar
     // trimming rules, so they must be quoted.
     if s.chars().all(char::is_whitespace) {
+        return true;
+    }
+
+    // Values with leading or trailing whitespace lose those spaces when emitted as
+    // a plain scalar and re-parsed — YAML trims leading and trailing whitespace from
+    // plain scalars, so the formatter output would not be idempotent.
+    if s.starts_with(char::is_whitespace) || s.ends_with(char::is_whitespace) {
         return true;
     }
 
