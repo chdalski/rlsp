@@ -131,7 +131,7 @@ No existing fixtures cover tags on collections.
 - [x] Fix tag preservation on collections (coverage gap)
 - [x] Fix comment loss in nested mappings (Bug 5)
 - [x] Update existing fixtures that encoded buggy behavior
-- [ ] Add new fixtures for anchors, tags, block scalar
+- [x] Add new fixtures for anchors, tags, block scalar
       real-world patterns
 - [ ] Verify conformance suite improvement
 
@@ -270,20 +270,20 @@ entry and are silently dropped.
     containing `: ` does not break output
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 6: Add real-world ecosystem fixtures
+### Task 6: Add real-world ecosystem fixtures — `7f81bd0`
 
 Add fixtures for real-world patterns that exercise the
 fixed behaviors, covering patterns from the audit that had
 no fixture coverage.
 
-- [ ] GHA workflow with `run: |` block scalar steps
-- [ ] GitLab CI with `script:` array and `variables:`
-- [ ] Docker Compose with `healthcheck.test` flow array
-- [ ] Ansible with handlers and `when` conditions
-- [ ] K8s Deployment with annotations (long quoted values)
-- [ ] Anchors + aliases real-world pattern (shared defaults)
-- [ ] All fixtures pass with exact or idempotent assertion
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] GHA workflow with `run: |` block scalar steps
+- [x] GitLab CI with `script:` array and `variables:`
+- [x] Docker Compose with `healthcheck.test` flow array
+- [x] Ansible with handlers and `when` conditions
+- [x] K8s Deployment with annotations (long quoted values)
+- [x] Anchors + aliases real-world pattern (shared defaults)
+- [x] All fixtures pass with exact or idempotent assertion
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 7: Conformance suite verification
 
