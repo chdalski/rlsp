@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use std::fmt::Write as _;
+
 use rlsp_fmt::{
     Doc, FormatOptions, concat, flat_alt, format as fmt_format, group, hard_line, indent, join,
     line, text,
@@ -421,11 +423,18 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                     repr_block_to_doc(value, *style)
                 }
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
-                    if needs_quoting(value, options.yaml_version) {
+                    if requires_double_quoting(value) {
+                        // Decoded value contains chars that cannot appear unquoted
+                        // or in single-quoted scalars (control chars, backslash,
+                        // etc.) — always re-emit as double-quoted with proper
+                        // escaping regardless of original style.
+                        text(format!("\"{}\"", escape_double_quoted(value)))
+                    } else if needs_quoting(value, options.yaml_version) {
                         if matches!(style, ScalarStyle::DoubleQuoted) {
                             text(format!("\"{}\"", escape_double_quoted(value)))
                         } else {
-                            text(format!("'{value}'"))
+                            // Single-quoted: escape embedded single quotes as ''.
+                            text(format!("'{}'", value.replace('\'', "''")))
                         }
                     } else {
                         string_to_doc(value, options, in_key)
@@ -542,6 +551,12 @@ fn needs_quoting(s: &str, version: YamlVersion) -> bool {
         return true;
     }
 
+    // All-whitespace values would be trimmed to nothing by YAML's flow-scalar
+    // trimming rules, so they must be quoted.
+    if s.chars().all(char::is_whitespace) {
+        return true;
+    }
+
     // Values that are reserved YAML keywords in all versions.
     let always_reserved = matches!(
         s,
@@ -578,6 +593,8 @@ fn needs_quoting(s: &str, version: YamlVersion) -> bool {
                     | '}'
                     | '['
                     | ']'
+                    | '"'
+                    | '\''
             )
         })
         || s.contains(": ")
@@ -598,16 +615,50 @@ fn looks_like_number(s: &str) -> bool {
         )
 }
 
+/// Returns `true` if the decoded string value contains characters that require
+/// double-quoting to represent in YAML — control characters, backslash, or any
+/// other C0 character (U+0000–U+001F).
+///
+/// This check must happen *before* `needs_quoting` in the `DoubleQuoted` branch
+/// so that decoded values with raw control bytes are never emitted as plain
+/// scalars (which would produce unparseable YAML).
+fn requires_double_quoting(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(c, '\\')
+            || (c as u32) <= 0x1F
+            || c == '\u{0085}' // NEL
+            || c == '\u{2028}' // line separator
+            || c == '\u{2029}' // paragraph separator
+    })
+}
+
 /// Escape a string for use in a double-quoted YAML scalar.
+///
+/// Handles all YAML 1.2 §5.7 named escapes and falls back to `\xNN` hex
+/// notation for remaining C0 control characters.
 fn escape_double_quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
+            '\x00' => out.push_str("\\0"),
+            '\x07' => out.push_str("\\a"),
+            '\x08' => out.push_str("\\b"),
             '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\x0B' => out.push_str("\\v"),
+            '\x0C' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            '\x1B' => out.push_str("\\e"),
+            '\u{0085}' => out.push_str("\\N"),
+            '\u{00A0}' => out.push_str("\\_"),
+            '\u{2028}' => out.push_str("\\L"),
+            '\u{2029}' => out.push_str("\\P"),
+            c if (c as u32) <= 0x1F => {
+                // Remaining C0 controls as \xNN
+                let _ = write!(out, "\\x{:02X}", c as u32);
+            }
             c => out.push(c),
         }
     }
