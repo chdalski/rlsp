@@ -455,28 +455,22 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             entries,
             style,
             anchor,
+            tag,
             ..
         } => {
             let doc = mapping_to_doc(entries, *style, options);
-            if let Some(name) = anchor {
-                concat(vec![text(format!("&{name} ")), doc])
-            } else {
-                doc
-            }
+            prepend_node_properties(doc, anchor.as_deref(), tag.as_deref())
         }
 
         Node::Sequence {
             items,
             style,
             anchor,
+            tag,
             ..
         } => {
             let doc = sequence_to_doc(items, *style, options);
-            if let Some(name) = anchor {
-                concat(vec![text(format!("&{name} ")), doc])
-            } else {
-                doc
-            }
+            prepend_node_properties(doc, anchor.as_deref(), tag.as_deref())
         }
 
         Node::Alias { name, .. } => text(format!("*{name}")),
@@ -486,6 +480,33 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
 /// Returns `true` if the tag string is a YAML Core Schema tag.
 fn is_core_schema_tag(tag: &str) -> bool {
     tag.starts_with("tag:yaml.org,2002:")
+}
+
+/// Prepend anchor and user-defined tag node properties to a collection Doc.
+///
+/// Order: tag first (inner), then anchor (outer) — matching the Scalar convention
+/// in `node_to_doc`, which wraps with tag then wraps with anchor, producing
+/// `&anchor !tag content`.
+/// Core schema tags (`tag:yaml.org,2002:*`) are silently dropped.
+fn prepend_node_properties(doc: Doc, anchor: Option<&str>, tag: Option<&str>) -> Doc {
+    let tag_prefix = tag.and_then(|t| {
+        if is_core_schema_tag(t) {
+            None
+        } else {
+            Some(format!("{t} "))
+        }
+    });
+    // Apply tag first (inner), then anchor (outer) — produces `&anchor !tag content`.
+    let doc = if let Some(prefix) = tag_prefix {
+        concat(vec![text(prefix), doc])
+    } else {
+        doc
+    };
+    if let Some(name) = anchor {
+        concat(vec![text(format!("&{name} ")), doc])
+    } else {
+        doc
+    }
 }
 
 /// Convert a string scalar to a Doc, quoting as necessary.
@@ -702,15 +723,21 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
     let pair_doc = match value {
         // Block mappings: `key:\n  child: val` — hard_line inside indent.
         // With anchor: `key: &anchor\n  child: val`.
+        // With tag: `key: !tag\n  child: val` (anchor before tag per formatter convention).
         Node::Mapping {
             entries,
             style,
             anchor,
+            tag,
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let colon = anchor
-                .as_ref()
-                .map_or_else(|| text(":"), |name| text(format!(": &{name}")));
+            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+            let colon = match (anchor.as_ref(), user_tag) {
+                (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                (Some(name), None) => text(format!(": &{name}")),
+                (None, Some(t)) => text(format!(": {t}")),
+                (None, None) => text(":"),
+            };
             concat(vec![
                 key_doc,
                 colon,
@@ -722,15 +749,21 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
         }
         // Block sequences: indented block items under key.
         // With anchor: `key: &anchor\n  - item`.
+        // With tag: `key: !tag\n  - item` (anchor before tag per formatter convention).
         Node::Sequence {
             items,
             style,
             anchor,
+            tag,
             ..
         } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let colon = anchor
-                .as_ref()
-                .map_or_else(|| text(":"), |name| text(format!(": &{name}")));
+            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+            let colon = match (anchor.as_ref(), user_tag) {
+                (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                (Some(name), None) => text(format!(": &{name}")),
+                (None, Some(t)) => text(format!(": {t}")),
+                (None, None) => text(":"),
+            };
             concat(vec![
                 key_doc,
                 colon,
@@ -825,10 +858,12 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     let item_doc = match item {
         // Block mapping item: `- key: val\n  key2: val2`.
         // With anchor: `- &anchor\n  key: val\n  key2: val2`.
+        // With tag: `- !tag\n  key: val` (anchor before tag per formatter convention).
         Node::Mapping {
             entries,
             style,
             anchor,
+            tag,
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             let pairs: Vec<Doc> = entries
@@ -836,35 +871,49 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
                 .map(|(k, v)| key_value_to_doc(k, v, options))
                 .collect();
             let inner = join(&hard_line(), pairs);
-            if let Some(name) = anchor {
-                // `- &anchor\n  key: val` — anchor on the dash line, content indented.
-                concat(vec![
-                    text("- "),
-                    text(format!("&{name}")),
-                    indent(concat(vec![hard_line(), inner])),
-                ])
-            } else {
+            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+            let prefix = match (anchor.as_ref(), user_tag) {
+                (Some(name), Some(t)) => format!("&{name} {t}"),
+                (Some(name), None) => format!("&{name}"),
+                (None, Some(t)) => t.clone(),
+                (None, None) => String::new(),
+            };
+            if prefix.is_empty() {
                 // `- key: val\n  key2: val2` — first pair on the dash line, remaining
                 // pairs indented one level so they align under the first key.
                 // indent() shifts all hard_line breaks inside `inner` by one level,
                 // placing continuation pairs 2 spaces right of `- `.
                 concat(vec![text("- "), indent(inner)])
+            } else {
+                // `- &anchor\n  key: val` or `- !tag\n  key: val` — prefix on the dash
+                // line, content indented.
+                concat(vec![
+                    text("- "),
+                    text(prefix),
+                    indent(concat(vec![hard_line(), inner])),
+                ])
             }
         }
         // Block sequence item: `- \n  - item`.
         // With anchor: `- &anchor\n  - item`.
+        // With tag: `- !tag\n  - item` (anchor before tag per formatter convention).
         Node::Sequence {
             items,
             style,
             anchor,
+            tag,
             ..
         } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let anchor_doc = anchor
-                .as_ref()
-                .map_or_else(|| text(""), |name| text(format!("&{name}")));
+            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+            let prefix_doc = match (anchor.as_ref(), user_tag) {
+                (Some(name), Some(t)) => text(format!("&{name} {t}")),
+                (Some(name), None) => text(format!("&{name}")),
+                (None, Some(t)) => text(t.clone()),
+                (None, None) => text(String::new()),
+            };
             concat(vec![
                 text("- "),
-                anchor_doc,
+                prefix_doc,
                 indent(concat(vec![
                     hard_line(),
                     sequence_to_doc(items, *style, options),
