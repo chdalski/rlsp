@@ -186,8 +186,11 @@ decision):
 - [ ] Handle empty-key mappings (Cat 6)
 - [ ] Handle multiline plain scalars with tabs (Cat 7)
 - [ ] Handle comment-only / doc-end documents (Cat 8)
+- [ ] Fix multi-document stream handling (Cat 9)
+- [ ] Fix flow mapping key edge cases (Cat 10)
+- [ ] Fix tags on complex structures (Cat 11)
 - [ ] Add interacting-settings fixture combinations
-- [ ] Verify 0 conformance failures
+- [ ] Verify 0 conformance failures (KNOWN_FAILURES empty)
 
 ## Tasks
 
@@ -243,7 +246,9 @@ YAML.
       `escape_double_quoted`
 - [ ] Extend `escape_double_quoted` if needed to handle
       all YAML 1.2 §5.7 escape sequences
-- [ ] Add fixtures for G4RS and 6SLA patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: G4RS, 6SLA, CPZ3, NAT4
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 3: Fix block scalar indentation indicators
@@ -259,7 +264,10 @@ spaces or tabs.
 - [ ] In `repr_block_to_doc`, emit the indentation
       indicator digit when content requires it (first
       content line starts with space or tab)
-- [ ] Add fixtures for F6MC and 5GBF patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: F6MC, 5GBF, P2AD, R4YG, 4QFQ, T26H, MJS9,
+      TS54, 2G84
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 4: Fix multiline double-quoted scalars
@@ -272,7 +280,10 @@ markers (`---`, `...`) are preserved as double-quoted.
       content or content containing document marker
       patterns
 - [ ] Preserve double-quoting with proper escaping
-- [ ] Add fixtures for 9MQT, KSS4, 6WPF/TL85 patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: 9MQT, KSS4, 6WPF, TL85, 7A4E, 9TFX, NP9H,
+      Q8AD, K527, PRH3, T4YY
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 5: Support explicit key syntax
@@ -288,7 +299,10 @@ ordered maps (`!!omap`), complex keys, and empty keys.
       `key: value`
 - [ ] Handle `!!set` (sequence of `?`-only entries)
 - [ ] Handle `!!omap` (sequence of single-entry mappings)
-- [ ] Add fixtures for 2XXW, 35KP, J7PZ, M2N8 patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: 2XXW, 35KP, J7PZ, M2N8, 5WE3, 6PBE, KK5P,
+      M5DY, S3PD, V9D5
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 6: Fix anchor placement on block collections
@@ -305,7 +319,9 @@ correctly before the first indicator.
       (PW8X)
 - [ ] Handle complex explicit block mapping structures
       (KK5P)
-- [ ] Add fixtures for 3R3P, PW8X, KK5P patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: 3R3P, PW8X, FTA2, FH7J, E76Z, 6M2F, X38W
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 7: Handle empty-key mappings
@@ -317,7 +333,9 @@ Support the empty mapping key pattern (`: value` in block,
       key form or proper empty-key syntax
 - [ ] Handle flow-context empty keys
 - [ ] Handle compact block mapping form (`? key: val`)
-- [ ] Add fixtures for NKF9, V9D5 patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: NKF9, WZ62
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 8: Handle multiline plain scalars with tabs
@@ -330,7 +348,10 @@ patterns.
 - [ ] Emit them preserving their multiline structure or
       convert to block scalar form when plain representation
       would be ambiguous
-- [ ] Add fixtures for NB6Z, RZP5/XW4D patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: NB6Z, RZP5, XW4D, DK95, J3BT, 6CA3, Q5MG,
+      Y79Y, 26DV
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 9: Handle comment-only and doc-end documents
@@ -343,10 +364,61 @@ markers produce non-empty output.
 - [ ] Emit standalone comments when no document content
       exists
 - [ ] Handle bare `...` document-end markers
-- [ ] Add fixtures for 98YD, HWV9, QT73 patterns
+- [ ] Add fixtures for affected patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Cases: 98YD, HWV9, QT73, MUS6, 6LVF, 6WLZ, W4TN
+      (6ZKB and 9DXL are Cat 9 — multi-document streams)
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 10: Add interacting-settings fixture combinations
+### Task 10: Fix multi-document stream handling (Cat 9)
+
+Fix formatter handling of multi-document streams with
+`---`/`...` separators, trailing comments between
+documents, and trailing whitespace in streams.
+
+Cases: JHB9, 6XDY, L383, JEF9, 6ZKB, 9DXL
+
+- [ ] Handle documents separated by `---` with content
+      on the same line (e.g., `--- scalar`)
+- [ ] Handle trailing comments between documents
+- [ ] Handle trailing whitespace in streams
+- [ ] Handle multi-document streams with `...` terminators
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Add fixtures for representative patterns
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 11: Fix flow mapping key edge cases (Cat 10)
+
+Fix formatter handling of multiline plain and quoted flow
+mapping keys without values, and syntax character edge
+cases in flow context.
+
+Cases: 8KB6, 9BXH, UKK6
+
+- [ ] Handle multiline plain flow mapping key without value
+- [ ] Handle multiline double-quoted flow mapping key
+      without value
+- [ ] Handle syntax character edge cases in flow mappings
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Add fixtures for representative patterns
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 12: Fix tags on complex structures (Cat 11)
+
+Fix formatter handling of global tags and tagged complex
+documents (e.g., `!foo` custom tags on multi-feature
+documents like the YAML spec Invoice example).
+
+Cases: C4HZ, UGM3
+
+- [ ] Handle global tag handles (`%TAG` + shorthand tags)
+- [ ] Handle complex tagged documents with anchors, aliases,
+      explicit keys, and block scalars (UGM3 Invoice)
+- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
+- [ ] Add fixtures for representative patterns
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 13: Add interacting-settings fixture combinations
 
 Add fixtures that test combinations of settings that
 interact (affect the same formatting decision).
@@ -365,7 +437,7 @@ interact (affect the same formatting decision).
       custom tab width
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 11: Final conformance verification
+### Task 14: Final conformance verification
 
 Run the full formatter round-trip conformance measurement
 and verify 0 failures.
