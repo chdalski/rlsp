@@ -55,6 +55,8 @@ pnpm run format    # check formatting (prettier)
 
 ## Crate Boundaries
 
+<!-- Agents: keep this section current when crates are added, removed, or responsibilities change. During implementation, watch for boundary violations — flag to the requester and fix. -->
+
 The parser is the authority on valid YAML. The formatter must produce output the unmodified parser already handles. If formatted output doesn't round-trip, the formatter is wrong — not the parser.
 
 | Crate | Responsibility | Change allowed when |
@@ -62,6 +64,16 @@ The parser is the authority on valid YAML. The formatter must produce output the
 | `rlsp-yaml-parser` | Lex, parse, load YAML → AST | Parser bug (incorrect parse, loader data loss), or AST needs to surface info already in the event stream. Never to accommodate formatter output. |
 | `rlsp-yaml` | Language server + formatter (AST → text) | Formatter output doesn't round-trip — fix the output form, not the parser. |
 | `rlsp-fmt` | Generic pretty-printer (Doc IR → text) | Must remain YAML-agnostic. |
+
+### Settings Sync
+
+<!-- Agents: update this table when new integrations or settings consumers are added. -->
+
+Formatter settings flow through three locations that must stay in sync:
+
+| Source of truth | Consumers | Sync when |
+|----------------|-----------|-----------|
+| `YamlFormatOptions` in `formatter.rs` | VS Code `package.json` + `config.ts`, fixture files in `tests/fixtures/formatter/` | Any setting added, renamed, or removed |
 
 ## References
 

@@ -189,6 +189,8 @@ decision):
       (04d3fc0)
 - [ ] Handle empty-key mappings (Cat 6)
 - [ ] Handle multiline plain scalars with tabs (Cat 7)
+- [ ] Surface document marker flags in AST (prerequisite
+      for Cat 8 and Cat 9)
 - [ ] Handle comment-only / doc-end documents (Cat 8)
 - [ ] Fix multi-document stream handling (Cat 9)
 - [ ] Fix flow mapping key edge cases (Cat 10)
@@ -365,6 +367,33 @@ patterns.
 - [ ] Cases: NB6Z, RZP5, XW4D, DK95, J3BT, 6CA3, Q5MG,
       Y79Y, 26DV
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 8b: Surface document marker flags in AST
+
+Add `explicit_start: bool` and `explicit_end: bool` fields
+to the `Document` struct in `rlsp-yaml-parser/src/node.rs`
+and populate them from the `DocumentStart.explicit` and
+`DocumentEnd.explicit` event fields in the loader.
+
+This is a valid parser change per Crate Boundaries — the
+event stream already carries this information, but the AST
+discards it. The formatter needs it to correctly handle
+document markers (`---`, `...`) for round-trip conformance.
+
+- [ ] Add `explicit_start: bool` to `Document` struct
+- [ ] Add `explicit_end: bool` to `Document` struct
+- [ ] Populate from `DocumentStart { explicit, .. }` in
+      `loader.rs`
+- [ ] Populate from `DocumentEnd { explicit, .. }` in
+      `loader.rs`
+- [ ] Update formatter `format_yaml` to use the flags:
+      emit `---` only when `explicit_start` is true,
+      emit `...` when `explicit_end` is true
+- [ ] Existing tests must still pass — this changes no
+      behavior for documents that already had explicit
+      markers
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [ ] Parser conformance remains 351/351
 
 ### Task 9: Handle comment-only and doc-end documents
 
