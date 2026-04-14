@@ -403,6 +403,10 @@ fn extract_doc_prefix_comments(text: &str) -> Vec<Comment> {
 ///
 /// When `in_key` is `true`, the `single_quote` style option is suppressed for
 /// scalar strings — keys are never single-quoted by style preference alone.
+#[expect(
+    clippy::too_many_lines,
+    reason = "comprehensive match over all node variants"
+)]
 fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
     match node {
         Node::Scalar {
@@ -412,13 +416,30 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             tag,
             ..
         } => {
-            // Prefix with a user-defined tag if present (e.g. `!mytag`).
-            // Core Schema tags (tag:yaml.org,2002:*) are not preserved — only user tags.
+            // Prefix with a tag if present.
+            //
+            // Core schema tags (`tag:yaml.org,2002:*`) are normally stripped —
+            // the type can be inferred from the value.  The exception: when the
+            // scalar is **empty**, the tag carries semantic meaning that cannot
+            // be inferred (`!!str` → empty string; `!!null` → null; etc.), so
+            // it must be preserved as its short form (e.g. `!!str`).
             let tag_prefix = tag.as_ref().and_then(|t| {
                 if is_core_schema_tag(t) {
-                    None
+                    if value.is_empty() {
+                        // Convert full URI to short form: `tag:yaml.org,2002:str` → `!!str`
+                        let suffix = t.trim_start_matches("tag:yaml.org,2002:");
+                        Some(format!("!!{suffix}"))
+                    } else {
+                        None
+                    }
                 } else {
-                    Some(format!("{t} "))
+                    // Non-empty scalar with user tag: include trailing space for separation.
+                    // Empty scalar with user tag: no trailing space (value is absent).
+                    if value.is_empty() {
+                        Some(t.clone())
+                    } else {
+                        Some(format!("{t} "))
+                    }
                 }
             });
 
@@ -458,14 +479,37 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                 }
             };
 
-            let doc = if let Some(prefix) = tag_prefix {
-                concat(vec![text(prefix), scalar_doc])
+            // `tag_present_on_empty` is true when a tag is being preserved for
+            // an empty scalar — the tag text itself is the entire output, so any
+            // anchor prefix must be separated from it by a space.
+            let tag_present_on_empty = tag_prefix.is_some() && value.is_empty();
+
+            let doc = if let Some(ref prefix) = tag_prefix {
+                // For non-empty scalars the prefix already ends with a space.
+                // For empty scalars the prefix has no trailing space (value is absent).
+                if value.is_empty() {
+                    text(prefix.clone())
+                } else {
+                    concat(vec![text(prefix.clone()), scalar_doc])
+                }
             } else {
                 scalar_doc
             };
 
             if let Some(name) = anchor {
-                concat(vec![text(format!("&{name} ")), doc])
+                // When the scalar is empty we still need a space between the
+                // anchor name and whatever follows (a tag or nothing).
+                if value.is_empty() {
+                    if tag_present_on_empty {
+                        // `&anchor !!tag` — space required between anchor and tag.
+                        concat(vec![text(format!("&{name} ")), doc])
+                    } else {
+                        // `&anchor` alone — no trailing space.
+                        concat(vec![text(format!("&{name}")), doc])
+                    }
+                } else {
+                    concat(vec![text(format!("&{name} ")), doc])
+                }
             } else {
                 doc
             }
@@ -479,7 +523,12 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             ..
         } => {
             let doc = mapping_to_doc(entries, *style, options);
-            prepend_node_properties(doc, anchor.as_deref(), tag.as_deref())
+            let effective_style = if options.format_enforce_block_style {
+                CollectionStyle::Block
+            } else {
+                *style
+            };
+            prepend_collection_properties(doc, anchor.as_deref(), tag.as_deref(), effective_style)
         }
 
         Node::Sequence {
@@ -490,7 +539,12 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             ..
         } => {
             let doc = sequence_to_doc(items, *style, options);
-            prepend_node_properties(doc, anchor.as_deref(), tag.as_deref())
+            let effective_style = if options.format_enforce_block_style {
+                CollectionStyle::Block
+            } else {
+                *style
+            };
+            prepend_collection_properties(doc, anchor.as_deref(), tag.as_deref(), effective_style)
         }
 
         Node::Alias { name, .. } => text(format!("*{name}")),
@@ -504,28 +558,50 @@ fn is_core_schema_tag(tag: &str) -> bool {
 
 /// Prepend anchor and user-defined tag node properties to a collection Doc.
 ///
-/// Order: tag first (inner), then anchor (outer) — matching the Scalar convention
-/// in `node_to_doc`, which wraps with tag then wraps with anchor, producing
-/// `&anchor !tag content`.
-/// Core schema tags (`tag:yaml.org,2002:*`) are silently dropped.
-fn prepend_node_properties(doc: Doc, anchor: Option<&str>, tag: Option<&str>) -> Doc {
+/// For **block** collections the properties must appear on their own line — emitting
+/// `&anchor ` as inline text before the first block indicator (`-` or `key:`) produces
+/// invalid YAML such as `&anchor - item`.  A `hard_line()` separates the properties
+/// from the collection content.
+///
+/// For **flow** collections the properties stay inline: `&anchor {key: val}`.
+///
+/// Order: tag first (inner), then anchor (outer) — producing `&anchor !tag content`.
+/// Core schema tags (`tag:yaml.org,2002:*`) are silently dropped for collections.
+fn prepend_collection_properties(
+    doc: Doc,
+    anchor: Option<&str>,
+    tag: Option<&str>,
+    style: CollectionStyle,
+) -> Doc {
     let tag_prefix = tag.and_then(|t| {
         if is_core_schema_tag(t) {
             None
         } else {
-            Some(format!("{t} "))
+            Some(t.to_string())
         }
     });
-    // Apply tag first (inner), then anchor (outer) — produces `&anchor !tag content`.
-    let doc = if let Some(prefix) = tag_prefix {
-        concat(vec![text(prefix), doc])
-    } else {
-        doc
+
+    // Build the properties string: `&anchor !tag` or just one of them.
+    let props = match (anchor, tag_prefix.as_deref()) {
+        (Some(name), Some(t)) => Some(format!("&{name} {t}")),
+        (Some(name), None) => Some(format!("&{name}")),
+        (None, Some(t)) => Some(t.to_string()),
+        (None, None) => None,
     };
-    if let Some(name) = anchor {
-        concat(vec![text(format!("&{name} ")), doc])
-    } else {
-        doc
+
+    let Some(props_str) = props else {
+        return doc;
+    };
+
+    match style {
+        CollectionStyle::Block => {
+            // Block collections: properties on own line, then hard-break to content.
+            concat(vec![text(props_str), hard_line(), doc])
+        }
+        CollectionStyle::Flow => {
+            // Flow collections: properties inline before the opening bracket.
+            concat(vec![text(format!("{props_str} ")), doc])
+        }
     }
 }
 
@@ -865,7 +941,15 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
         .map(|(key, value)| {
             let key_doc = node_to_doc(key, options, true);
             let val_doc = node_to_doc(value, options, false);
-            concat(vec![key_doc, text(": "), val_doc])
+            // Alias keys require a space before `:` to prevent the colon from
+            // being parsed as part of the alias name: `*a: v` → alias name `a:`.
+            // Use ` : ` (with leading space) for alias keys to produce `*a : v`.
+            let sep = if matches!(key, Node::Alias { .. }) {
+                text(" : ")
+            } else {
+                text(": ")
+            };
+            concat(vec![key_doc, sep, val_doc])
         })
         .collect();
 
@@ -906,9 +990,27 @@ const fn needs_explicit_key(key: &Node<Span>) -> bool {
     }
 }
 
-/// Returns `true` when a mapping key is an empty scalar (the implicit empty key).
+/// Returns `true` when a mapping key is an untagged empty scalar (the implicit empty key `:`).
+///
+/// A tagged empty scalar (e.g. `!!null :`) is **not** an empty key — the tag carries
+/// semantic meaning and must be emitted, so it routes through the normal key path.
 const fn is_empty_key(key: &Node<Span>) -> bool {
-    matches!(key, Node::Scalar { value, .. } if value.is_empty())
+    matches!(key, Node::Scalar { value, tag: None, .. } if value.is_empty())
+}
+
+/// Returns `true` when a mapping key requires a space before the `:` separator.
+///
+/// Two key forms need ` : ` rather than `: `:
+///
+/// 1. **Tagged empty scalar** (`!!null`, `!mytag`, etc.) — the rendered key ends
+///    with a tag; `:` is a valid URI character, so `!!null:` would be parsed as
+///    tag `tag:yaml.org,2002:null:` rather than key `!!null` + separator.
+///
+/// 2. **Alias** (`*name`) — `*name:` is parsed as alias name `name:`, breaking
+///    idempotency. A space before `:` keeps the alias name and separator distinct.
+const fn key_needs_space_before_colon(key: &Node<Span>) -> bool {
+    matches!(key, Node::Scalar { value, tag: Some(_), .. } if value.is_empty())
+        || matches!(key, Node::Alias { .. })
 }
 
 /// Render a mapping entry that uses explicit key form: `? key\n: value`.
@@ -1005,6 +1107,10 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
 }
 
 /// Convert a single key-value pair to Doc, including any AST-attached comments.
+#[expect(
+    clippy::too_many_lines,
+    reason = "comprehensive match over all value variants"
+)]
 fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     let effective_style = |style: CollectionStyle| {
         if options.format_enforce_block_style {
@@ -1040,11 +1146,16 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let bare_colon = if key_needs_space_before_colon(key) {
+                    " :"
+                } else {
+                    ":"
+                };
                 let colon = match (anchor.as_ref(), user_tag) {
                     (Some(name), Some(t)) => text(format!(": &{name} {t}")),
                     (Some(name), None) => text(format!(": &{name}")),
                     (None, Some(t)) => text(format!(": {t}")),
-                    (None, None) => text(":"),
+                    (None, None) => text(bare_colon),
                 };
                 concat(vec![
                     key_doc,
@@ -1066,11 +1177,16 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                 ..
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let bare_colon = if key_needs_space_before_colon(key) {
+                    " :"
+                } else {
+                    ":"
+                };
                 let colon = match (anchor.as_ref(), user_tag) {
                     (Some(name), Some(t)) => text(format!(": &{name} {t}")),
                     (Some(name), None) => text(format!(": &{name}")),
                     (None, Some(t)) => text(format!(": {t}")),
-                    (None, None) => text(":"),
+                    (None, None) => text(bare_colon),
                 };
                 concat(vec![
                     key_doc,
@@ -1087,7 +1203,14 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
             | Node::Sequence { .. }
             | Node::Alias { .. } => {
                 let value_doc = node_to_doc(value, options, false);
-                concat(vec![key_doc, text(": "), value_doc])
+                // When the key's rendered form ends with a tag, a space before `:` is
+                // required to prevent the colon from being parsed as part of the tag URI.
+                let sep = if key_needs_space_before_colon(key) {
+                    text(" : ")
+                } else {
+                    text(": ")
+                };
+                concat(vec![key_doc, sep, value_doc])
             }
         }
     };
