@@ -880,10 +880,132 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
     ]))
 }
 
+/// Returns `true` when a mapping key requires the explicit `? key` form.
+///
+/// Explicit key syntax is required when the key cannot appear as a plain scalar
+/// before `: ` — specifically when the key is:
+/// - a collection (mapping or sequence) of any style
+/// - a block scalar (literal `|` or folded `>`), whose multi-line representation
+///   cannot fit before a `: ` on the same line
+///
+/// An empty scalar key is handled separately (emitted as `: value` with no `?`).
+const fn needs_explicit_key(key: &Node<Span>) -> bool {
+    match key {
+        // Any collection as a key (empty or non-empty) requires explicit key form.
+        // Flow collections like `[]` or `{}` used as keys need `? [] : value` to
+        // avoid ambiguity with flow sequence/mapping indicators.
+        // Block scalar keys (literal or folded) span multiple lines and cannot
+        // appear before `: ` — they always require explicit key form.
+        Node::Mapping { .. }
+        | Node::Sequence { .. }
+        | Node::Scalar {
+            style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
+            ..
+        } => true,
+        Node::Scalar { .. } | Node::Alias { .. } => false,
+    }
+}
+
+/// Returns `true` when a mapping key is an empty scalar (the implicit empty key).
+const fn is_empty_key(key: &Node<Span>) -> bool {
+    matches!(key, Node::Scalar { value, .. } if value.is_empty())
+}
+
+/// Render a mapping entry that uses explicit key form: `? key\n: value`.
+///
+/// This form is required when the key is a block scalar, block sequence, or
+/// block mapping — types that cannot appear inline before `: `.
+fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOptions) -> Doc {
+    let key_doc = node_to_doc(key, options, true);
+    let value_is_empty = matches!(value, Node::Scalar { value, .. } if value.is_empty());
+
+    // `? key_doc` — the key part.
+    // For block scalars/collections as keys, the key_doc spans multiple lines.
+    // We render `?` + space + key indented by 2 spaces.
+    let question_line = concat(vec![text("? "), indent(key_doc)]);
+
+    // `: value_doc` — the value part.
+    let colon_line = if value_is_empty {
+        // Set-like entry or empty value: emit bare `:` with no trailing space.
+        text(":")
+    } else {
+        let effective_style = |style: CollectionStyle| {
+            if options.format_enforce_block_style {
+                CollectionStyle::Block
+            } else {
+                style
+            }
+        };
+        match value {
+            // Block mapping value: `: \n  child: val` — indent the mapping.
+            Node::Mapping {
+                entries,
+                style,
+                anchor,
+                tag,
+                ..
+            } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let colon_prefix = match (anchor.as_ref(), user_tag) {
+                    (Some(name), Some(t)) => format!(": &{name} {t}"),
+                    (Some(name), None) => format!(": &{name}"),
+                    (None, Some(t)) => format!(": {t}"),
+                    (None, None) => ":".to_string(),
+                };
+                concat(vec![
+                    text(colon_prefix),
+                    indent(concat(vec![
+                        hard_line(),
+                        mapping_to_doc(entries, *style, options),
+                    ])),
+                ])
+            }
+            // Block sequence value: `:\n  - item`.
+            Node::Sequence {
+                items,
+                style,
+                anchor,
+                tag,
+                ..
+            } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let colon_prefix = match (anchor.as_ref(), user_tag) {
+                    (Some(name), Some(t)) => format!(": &{name} {t}"),
+                    (Some(name), None) => format!(": &{name}"),
+                    (None, Some(t)) => format!(": {t}"),
+                    (None, None) => ":".to_string(),
+                };
+                concat(vec![
+                    text(colon_prefix),
+                    indent(concat(vec![
+                        hard_line(),
+                        sequence_to_doc(items, *style, options),
+                    ])),
+                ])
+            }
+            // Inline value (scalar, flow collection, empty collection, alias).
+            Node::Scalar { .. }
+            | Node::Mapping { .. }
+            | Node::Sequence { .. }
+            | Node::Alias { .. } => {
+                let value_doc = node_to_doc(value, options, false);
+                concat(vec![text(": "), value_doc])
+            }
+        }
+    };
+
+    // Append trailing comment from the value node.
+    let colon_line = if let Some(tc) = value.trailing_comment() {
+        concat(vec![colon_line, text(format!("  {tc}"))])
+    } else {
+        colon_line
+    };
+
+    concat(vec![question_line, hard_line(), colon_line])
+}
+
 /// Convert a single key-value pair to Doc, including any AST-attached comments.
 fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOptions) -> Doc {
-    let key_doc = node_to_doc(key, options, true);
-
     let effective_style = |style: CollectionStyle| {
         if options.format_enforce_block_style {
             CollectionStyle::Block
@@ -892,69 +1014,92 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
         }
     };
 
-    let pair_doc = match value {
-        // Block mappings: `key:\n  child: val` — hard_line inside indent.
-        // With anchor: `key: &anchor\n  child: val`.
-        // With tag: `key: !tag\n  child: val` (anchor before tag per formatter convention).
-        Node::Mapping {
-            entries,
-            style,
-            anchor,
-            tag,
-            ..
-        } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-            let colon = match (anchor.as_ref(), user_tag) {
-                (Some(name), Some(t)) => text(format!(": &{name} {t}")),
-                (Some(name), None) => text(format!(": &{name}")),
-                (None, Some(t)) => text(format!(": {t}")),
-                (None, None) => text(":"),
-            };
-            concat(vec![
-                key_doc,
-                colon,
-                indent(concat(vec![
-                    hard_line(),
-                    mapping_to_doc(entries, *style, options),
-                ])),
-            ])
+    // Dispatch to explicit key form when the key type requires it.
+    // Empty-key entries (`: value`) bypass both explicit-key and normal paths.
+    let pair_doc = if needs_explicit_key(key) {
+        explicit_key_to_doc(key, value, options)
+    } else if is_empty_key(key) {
+        // Empty key: emit `: value` (no `?` prefix).
+        let value_doc = node_to_doc(value, options, false);
+        if matches!(value, Node::Scalar { value, .. } if value.is_empty()) {
+            text(":")
+        } else {
+            concat(vec![text(": "), value_doc])
         }
-        // Block sequences: indented block items under key.
-        // With anchor: `key: &anchor\n  - item`.
-        // With tag: `key: !tag\n  - item` (anchor before tag per formatter convention).
-        Node::Sequence {
-            items,
-            style,
-            anchor,
-            tag,
-            ..
-        } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-            let colon = match (anchor.as_ref(), user_tag) {
-                (Some(name), Some(t)) => text(format!(": &{name} {t}")),
-                (Some(name), None) => text(format!(": &{name}")),
-                (None, Some(t)) => text(format!(": {t}")),
-                (None, None) => text(":"),
-            };
-            concat(vec![
-                key_doc,
-                colon,
-                indent(concat(vec![
-                    hard_line(),
-                    sequence_to_doc(items, *style, options),
-                ])),
-            ])
-        }
-        // Flow collections, scalars, empty collections, aliases — all inline.
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            let value_doc = node_to_doc(value, options, false);
-            concat(vec![key_doc, text(": "), value_doc])
+    } else {
+        let key_doc = node_to_doc(key, options, true);
+        match value {
+            // Block mappings: `key:\n  child: val` — hard_line inside indent.
+            // With anchor: `key: &anchor\n  child: val`.
+            // With tag: `key: !tag\n  child: val` (anchor before tag per formatter convention).
+            Node::Mapping {
+                entries,
+                style,
+                anchor,
+                tag,
+                ..
+            } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let colon = match (anchor.as_ref(), user_tag) {
+                    (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                    (Some(name), None) => text(format!(": &{name}")),
+                    (None, Some(t)) => text(format!(": {t}")),
+                    (None, None) => text(":"),
+                };
+                concat(vec![
+                    key_doc,
+                    colon,
+                    indent(concat(vec![
+                        hard_line(),
+                        mapping_to_doc(entries, *style, options),
+                    ])),
+                ])
+            }
+            // Block sequences: indented block items under key.
+            // With anchor: `key: &anchor\n  - item`.
+            // With tag: `key: !tag\n  - item` (anchor before tag per formatter convention).
+            Node::Sequence {
+                items,
+                style,
+                anchor,
+                tag,
+                ..
+            } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
+                let colon = match (anchor.as_ref(), user_tag) {
+                    (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                    (Some(name), None) => text(format!(": &{name}")),
+                    (None, Some(t)) => text(format!(": {t}")),
+                    (None, None) => text(":"),
+                };
+                concat(vec![
+                    key_doc,
+                    colon,
+                    indent(concat(vec![
+                        hard_line(),
+                        sequence_to_doc(items, *style, options),
+                    ])),
+                ])
+            }
+            // Flow collections, scalars, empty collections, aliases — all inline.
+            Node::Scalar { .. }
+            | Node::Mapping { .. }
+            | Node::Sequence { .. }
+            | Node::Alias { .. } => {
+                let value_doc = node_to_doc(value, options, false);
+                concat(vec![key_doc, text(": "), value_doc])
+            }
         }
     };
 
-    // Append trailing comment from the value node.
-    let pair_doc = if let Some(tc) = value.trailing_comment() {
-        concat(vec![pair_doc, text(format!("  {tc}"))])
+    // Append trailing comment from the value node (only for non-explicit-key paths —
+    // explicit_key_to_doc handles its own trailing comment).
+    let pair_doc = if !needs_explicit_key(key) && !is_empty_key(key) {
+        if let Some(tc) = value.trailing_comment() {
+            concat(vec![pair_doc, text(format!("  {tc}"))])
+        } else {
+            pair_doc
+        }
     } else {
         pair_doc
     };
