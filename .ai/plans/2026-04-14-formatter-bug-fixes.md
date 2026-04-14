@@ -127,8 +127,9 @@ No existing fixtures cover tags on collections.
 
 - [x] Fix block scalar indentation (Bug 1)
 - [x] Fix anchor preservation (Bug 2)
-- [ ] Fix single_quote key quoting (Bug 3)
+- [x] Fix single_quote key quoting (Bug 3)
 - [ ] Fix tag preservation on collections (coverage gap)
+- [ ] Fix comment loss in nested mappings (Bug 5)
 - [x] Update existing fixtures that encoded buggy behavior
 - [ ] Add new fixtures for anchors, tags, block scalar
       real-world patterns
@@ -197,27 +198,27 @@ Modify `node_to_doc` to emit anchor definitions when the
     anchor/alias document
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 3: Fix single_quote key quoting
+### Task 3: Fix single_quote key quoting — `7390155`
 
 Modify the formatter so `single_quote: true` only applies
 to values, not keys.
 
-- [ ] Add a `in_key_position: bool` parameter to
+- [x] Add a `in_key_position: bool` parameter to
       `string_to_doc` (or use a separate code path in
       `key_value_to_doc` for key rendering)
-- [ ] When in key position, skip the `single_quote` wrap
+- [x] When in key position, skip the `single_quote` wrap
       — keys use plain style unless `needs_quoting` is
       true
-- [ ] Update `single-quote-option.md` expected output
+- [x] Update `single-quote-option.md` expected output
       from `'key': 'hello'` to `key: 'hello'`
-- [ ] Add fixtures:
+- [x] Add fixtures:
   - `quoting-single-quote-key-not-quoted.md` — key stays
     plain when `single_quote: true`
   - `quoting-single-quote-key-needs-quoting.md` — key
     that genuinely needs quoting still gets quoted
   - `quoting-single-quote-multiple-keys.md` — multiple
     keys all stay plain, values all get single-quoted
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 4: Fix tag preservation on collections
 
@@ -236,7 +237,40 @@ Sequence nodes, matching the existing Scalar tag handling.
   - `tag-custom-on-block-mapping.md` — `!custom\n  a: 1`
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 5: Add real-world ecosystem fixtures
+### Task 5: Fix comment loss in nested mappings (Bug 5)
+
+Fix `attach_comments` to preserve leading comments
+between entries in nested block mappings. User-reported
+bug (`.ai/reports/user-bug-repot-comments.md`) with three
+variants:
+
+1. Leading comments (`# Style 1`, `# Style 2`) between
+   entries in a nested mapping are completely stripped
+2. When trailing inline comments exist, leading comments
+   are still stripped but inline comments survive (partial
+   loss)
+3. A colon inside an inline comment (`# another : bug`)
+   may break syntax highlighting downstream
+
+Root cause: `attach_comments` signature-based matching
+fails for leading comments indented inside nested block
+mappings. The comments are not matched to any content
+entry and are silently dropped.
+
+- [ ] Investigate `attach_comments` to identify why
+      leading comments inside nested mappings are lost
+- [ ] Fix the matching/reattachment logic
+- [ ] Add fixtures:
+  - `comment-nested-mapping-leading.md` — leading comments
+    between entries in a nested mapping preserved
+  - `comment-nested-mapping-leading-and-trailing.md` —
+    leading comments + trailing inline comment, both
+    preserved
+  - `comment-with-colon-in-text.md` — inline comment
+    containing `: ` does not break output
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 6: Add real-world ecosystem fixtures
 
 Add fixtures for real-world patterns that exercise the
 fixed behaviors, covering patterns from the audit that had
@@ -251,7 +285,7 @@ no fixture coverage.
 - [ ] All fixtures pass with exact or idempotent assertion
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 6: Conformance suite verification
+### Task 7: Conformance suite verification
 
 Run the conformance suite and compare results against the
 pre-fix baseline to measure improvement.
