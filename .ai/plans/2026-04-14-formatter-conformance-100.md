@@ -182,7 +182,8 @@ decision):
       (987aa89)
 - [x] Fix block scalar indentation indicators (Cat 2)
       (826d008)
-- [ ] Fix multiline double-quoted scalars (Cat 3)
+- [x] Fix multiline double-quoted scalars (Cat 3)
+      (25b1130)
 - [ ] Support explicit key syntax (Cat 4)
 - [ ] Fix anchor placement on block collections (Cat 5)
 - [ ] Handle empty-key mappings (Cat 6)
@@ -278,15 +279,15 @@ Ensure double-quoted scalars whose decoded content spans
 multiple lines (contains `\n`) or contains document
 markers (`---`, `...`) are preserved as double-quoted.
 
-- [ ] In the Scalar/DoubleQuoted branch, detect multiline
+- [x] In the Scalar/DoubleQuoted branch, detect multiline
       content or content containing document marker
       patterns
-- [ ] Preserve double-quoting with proper escaping
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: 9MQT, KSS4, 6WPF, TL85, 7A4E, 9TFX, NP9H,
+- [x] Preserve double-quoting with proper escaping
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: 9MQT, KSS4, 6WPF, TL85, 7A4E, 9TFX, NP9H,
       Q8AD, K527, PRH3, T4YY
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 5: Support explicit key syntax
 
