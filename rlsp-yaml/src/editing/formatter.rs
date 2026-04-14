@@ -205,7 +205,11 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
 
                 // Emit blank line before this entry if the original had one,
                 // or if a skipped empty-sig entry carried a blank count.
-                if entry.blank_lines_before > 0 || carried_blanks > 0 {
+                // Skip if the formatted output already ended with a blank line
+                // (e.g. emitted by repr_block_to_doc for folded scalar content)
+                // to prevent double blanks.
+                let last_is_blank = result_lines.last().is_some_and(String::is_empty);
+                if (entry.blank_lines_before > 0 || carried_blanks > 0) && !last_is_blank {
                     result_lines.push(String::new());
                 }
 
@@ -420,7 +424,7 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
 
             let scalar_doc = match style {
                 ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-                    repr_block_to_doc(value, *style)
+                    repr_block_to_doc(value, *style, options.tab_width)
                 }
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
                     if requires_double_quoting(value) {
@@ -673,12 +677,42 @@ fn escape_double_quoted(s: &str) -> String {
 /// Content lines are wrapped in `indent()` so the Wadler-Lindig printer
 /// indents them one level relative to the surrounding context.
 ///
-/// Blank lines (empty strings from `str::lines()`) are omitted from the Doc
-/// entirely — `attach_comments` re-inserts them from the original input when
-/// it matches content signatures. This avoids double-blanks that would result
-/// from both the Doc IR and `attach_comments` each contributing a blank line.
-fn repr_block_to_doc(s: &str, style: ScalarStyle) -> Doc {
-    let header = match style {
+/// When any content line begins with a space or tab, an explicit indentation
+/// indicator digit equal to `tab_width` is appended to the header (e.g. `|2`
+/// or `>2`).  Without it the YAML parser would auto-detect indentation from the
+/// first content line and misparse any line whose content starts with a leading
+/// space.
+///
+/// For literal scalars, blank lines (empty strings from `str::lines()`) are
+/// omitted here — `attach_comments` re-inserts them from the original input
+/// when it matches content signatures.
+///
+/// For folded scalars, blank lines must be emitted explicitly because folding
+/// semantics require them to represent embedded newlines in the decoded value.
+/// N blank lines between two content lines produces N newlines in the value;
+/// without them, adjacent content lines would fold into a single space on
+/// re-parse, making the output non-idempotent.
+fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -> Doc {
+    // Detect whether any non-empty content line starts with a space character.
+    // A leading space in the decoded value means the YAML parser would
+    // auto-detect a higher indentation level than intended (treating the extra
+    // space as indentation rather than content) — emitting an explicit indicator
+    // digit equal to tab_width prevents this misparse.
+    //
+    // Tabs at the start of content are NOT checked: in YAML, tabs cannot be
+    // used for indentation (YAML 1.2 §8.1.1), so a leading tab in the decoded
+    // value is content that sits at the base indentation level and does not
+    // cause the parser to auto-detect a higher indent level.
+    // Only the first non-empty content line matters for auto-detection:
+    // the YAML parser uses that line to determine the block scalar's
+    // indentation level.  Subsequent content lines with leading spaces are
+    // fine because the indent level is already fixed by the first line.
+    let needs_indent_indicator = s
+        .lines()
+        .find(|l| !l.is_empty())
+        .is_some_and(|l| l.starts_with(' '));
+
+    let base_header = match style {
         ScalarStyle::Literal(Chomp::Clip) => "|",
         ScalarStyle::Literal(Chomp::Strip) => "|-",
         ScalarStyle::Literal(Chomp::Keep) => "|+",
@@ -687,19 +721,92 @@ fn repr_block_to_doc(s: &str, style: ScalarStyle) -> Doc {
         ScalarStyle::Folded(Chomp::Keep) => ">+",
         ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => "",
     };
+
+    let header = if needs_indent_indicator && !base_header.is_empty() {
+        // Insert the digit between the block indicator character and any chomp
+        // indicator: `|` → `|2`, `|-` → `|2-`, `>+` → `>2+`.
+        let (block_char, chomp_char) = base_header.split_at(1);
+        format!("{block_char}{tab_width}{chomp_char}")
+    } else {
+        base_header.to_string()
+    };
+
     let mut parts = vec![text(header)];
-    for line_str in s.lines() {
-        if !line_str.is_empty() {
-            // Non-empty line: indent one level relative to the parent key.
-            parts.push(indent(concat(vec![
-                hard_line(),
-                text(line_str.to_string()),
-            ])));
+
+    if matches!(style, ScalarStyle::Folded(_)) {
+        // For folded scalars, blank lines encode the newline structure of the
+        // decoded value.  We split on `\n` (not `.lines()`) to count the empty
+        // segments that represent extra newlines in the decoded value.
+        //
+        // The number of blank lines to emit between two consecutive content
+        // segments depends on whether either segment is "more-indented" (starts
+        // with a space or tab, meaning it was at a greater indentation level in
+        // the original YAML):
+        //
+        //   - Both at base level (no leading whitespace): the line break between
+        //     them would be folded to a space on re-parse, so we need one blank
+        //     line per `\n` between them.  K empty segments → K+1 `\n`s → K+1
+        //     blanks.
+        //
+        //   - Either side is more-indented: the more-indented line's own line
+        //     break is "free" (the parser preserves it without needing a blank).
+        //     One blank is therefore "absorbed" by the free line break, so we
+        //     emit max(0, K) blanks for K empty segments (= K+1 `\n`s → K blanks).
+        //
+        // Trailing `\n` from Clip chomp is implicit — strip the trailing empty
+        // segment so it is not counted as an extra blank.
+        let mut segments: Vec<&str> = s.split('\n').collect();
+        if segments.last() == Some(&"") {
+            segments.pop();
         }
-        // Blank lines are skipped here; attach_comments re-inserts them from
-        // the original source, preserving blank-line semantics without
-        // producing trailing-whitespace lines or double blanks.
+
+        let mut pending_empty: usize = 0;
+        let mut prev_content: Option<&str> = None;
+
+        for seg in &segments {
+            if seg.is_empty() {
+                pending_empty += 1;
+            } else {
+                if let Some(prev) = prev_content {
+                    // Determine whether either the previous or the current
+                    // content line is "more-indented" (has a leading space
+                    // beyond the block scalar's base indentation level).
+                    // Only space characters count; a leading tab is content
+                    // at the base indent level, not extra indentation.
+                    let prev_more = prev.starts_with(' ');
+                    let curr_more = seg.starts_with(' ');
+                    let either_more = prev_more || curr_more;
+
+                    let blank_count = if either_more {
+                        // Free line-break absorbed; only emit extra blanks.
+                        pending_empty
+                    } else {
+                        // Both at base level: each `\n` needs a blank.
+                        pending_empty + 1
+                    };
+                    for _ in 0..blank_count {
+                        parts.push(hard_line());
+                    }
+                }
+                pending_empty = 0;
+                parts.push(indent(concat(vec![hard_line(), text(seg.to_string())])));
+                prev_content = Some(seg);
+            }
+        }
+    } else {
+        // For literal scalars, blank lines are omitted here; attach_comments
+        // re-inserts them from the original source, preserving blank-line
+        // semantics without producing trailing-whitespace lines or double blanks.
+        for line_str in s.lines() {
+            if !line_str.is_empty() {
+                parts.push(indent(concat(vec![
+                    hard_line(),
+                    text(line_str.to_string()),
+                ])));
+            }
+        }
     }
+
     concat(parts)
 }
 
