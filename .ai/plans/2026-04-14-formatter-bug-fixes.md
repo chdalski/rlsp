@@ -128,7 +128,7 @@ No existing fixtures cover tags on collections.
 - [x] Fix block scalar indentation (Bug 1)
 - [x] Fix anchor preservation (Bug 2)
 - [x] Fix single_quote key quoting (Bug 3)
-- [ ] Fix tag preservation on collections (coverage gap)
+- [x] Fix tag preservation on collections (coverage gap)
 - [ ] Fix comment loss in nested mappings (Bug 5)
 - [x] Update existing fixtures that encoded buggy behavior
 - [ ] Add new fixtures for anchors, tags, block scalar
@@ -220,22 +220,22 @@ to values, not keys.
     keys all stay plain, values all get single-quoted
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 4: Fix tag preservation on collections
+### Task 4: Fix tag preservation on collections — `c45d048`
 
 Extend `node_to_doc` to preserve tags on Mapping and
 Sequence nodes, matching the existing Scalar tag handling.
 
-- [ ] Extract `tag` from Mapping and Sequence variants in
+- [x] Extract `tag` from Mapping and Sequence variants in
       `node_to_doc` (currently skipped via `..`)
-- [ ] Prepend `tag ` prefix for non-core-schema tags,
+- [x] Prepend `tag ` prefix for non-core-schema tags,
       same logic as Scalar (lines 398-406)
-- [ ] Add fixtures:
+- [x] Add fixtures:
   - `tag-custom-on-mapping.md` — `!custom {a: 1}`
   - `tag-custom-on-sequence.md` — `!custom [a, b]`
   - `tag-core-schema-stripped.md` — `!!map` / `!!seq`
     core tags not preserved (matching scalar behavior)
   - `tag-custom-on-block-mapping.md` — `!custom\n  a: 1`
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 5: Fix comment loss in nested mappings (Bug 5)
 
