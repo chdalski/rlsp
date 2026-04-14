@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-14
 
 ## Goal
@@ -10,16 +10,25 @@ combinations. After this plan, every non-fail case in the
 yaml-test-suite should round-trip through the formatter
 without producing unparseable or empty output.
 
-Acceptance criterion: 0 formatter round-trip failures
-(currently 24 unparseable + 3 empty = 27 total failures
-out of 308 non-fail cases).
+Acceptance criterion: 0 formatter round-trip failures.
+The formatter conformance test
+(`rlsp-yaml/tests/formatter_conformance.rs`) has 80
+known-failure entries across 70 unique test case stems
+(see `KNOWN_FAILURES` allowlist). All must be resolved
+— the allowlist must be empty when the plan completes.
 
 ## Context
 
 ### Current conformance state
 
-Parser: 351/351 (100%). Formatter round-trip: 281/308
-(91.2%), with 24 unparseable and 3 empty-output failures.
+Parser: 351/351 (100%). The formatter conformance test
+(`rlsp-yaml/tests/formatter_conformance.rs`) has **80
+known-failure entries** across 70 unique test case stems.
+This is the authoritative list — earlier audit estimates
+of 24-27 were based on a temporary measurement that
+missed cases. The `KNOWN_FAILURES` allowlist in
+`formatter_conformance.rs` is the source of truth.
+
 Measured after the `2026-04-14-formatter-bug-fixes.md`
 plan which fixed block scalar indentation, anchors,
 single_quote key quoting, tags, and comment loss.
@@ -167,8 +176,8 @@ decision):
 
 ## Steps
 
-- [ ] Move yaml-test-suite to shared location and add
-      formatter conformance test to rlsp-yaml
+- [x] Move yaml-test-suite to shared location and add
+      formatter conformance test to rlsp-yaml (fb5e904)
 - [ ] Fix double-quoted escape sequence handling (Cat 1)
 - [ ] Fix block scalar indentation indicators (Cat 2)
 - [ ] Fix multiline double-quoted scalars (Cat 3)
@@ -193,14 +202,14 @@ data without symlinks or duplication.
 Add a permanent formatter conformance test to `rlsp-yaml`
 that runs alongside the fixture tests in CI.
 
-- [ ] Create `tests/yaml-test-suite/` at workspace root
-- [ ] Move (not copy) the vendored data from
+- [x] Create `tests/yaml-test-suite/` at workspace root
+- [x] Move (not copy) the vendored data from
       `rlsp-yaml-parser/tests/yaml-test-suite/` to
       `tests/yaml-test-suite/`
-- [ ] Update `rlsp-yaml-parser/tests/conformance.rs`
+- [x] Update `rlsp-yaml-parser/tests/conformance.rs`
       `#[files]` path to reference `../tests/yaml-test-suite/src/*.yaml`
-- [ ] Verify parser conformance still passes (351/351)
-- [ ] Create `rlsp-yaml/tests/formatter_conformance.rs`:
+- [x] Verify parser conformance still passes (351/351)
+- [x] Create `rlsp-yaml/tests/formatter_conformance.rs`:
   - rstest `#[files]` over `../tests/yaml-test-suite/src/*.yaml`
   - For each non-fail case: `format_yaml(input)` must
     parse cleanly via `parse_yaml`, and formatting must
@@ -213,10 +222,10 @@ that runs alongside the fixture tests in CI.
     (regression) or an allowlisted case passes (remove
     it from the list — the test enforces shrinking the
     allowlist)
-- [ ] Populate the allowlist with the 27 currently-failing
+- [x] Populate the allowlist with the 27 currently-failing
       case IDs
-- [ ] `cargo test` passes for both crates
-- [ ] `cargo clippy --all-targets` clean
+- [x] `cargo test` passes for both crates
+- [x] `cargo clippy --all-targets` clean
 
 ### Task 2: Fix double-quoted escape sequence handling (Cat 1)
 
@@ -366,7 +375,13 @@ and verify 0 failures.
 - [ ] If any failures remain, document root cause and
       determine if they require parser changes (genuine
       blockers) vs formatter changes
+- [ ] Update VS Code extension `package.json` and
+      `config.ts` to reflect any new or changed settings
+      in `YamlFormatOptions` — ensure all user-facing
+      formatter settings are exposed in the extension
 - [ ] `cargo test` passes
+- [ ] `pnpm run build && pnpm run test && pnpm run lint`
+      passes in `rlsp-yaml/integrations/vscode/`
 
 ## Decisions
 
