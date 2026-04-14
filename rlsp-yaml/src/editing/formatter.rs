@@ -445,7 +445,29 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
 
             let scalar_doc = match style {
                 ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-                    repr_block_to_doc(value, *style, options.tab_width)
+                    // YAML treats a content line consisting of only space characters as a
+                    // "blank line" in the block scalar.  A blank line cannot have more
+                    // indentation than the block's declared indent level.  When the
+                    // formatter emits such a line through indent(), it gains extra spaces
+                    // and the re-parser rejects it with "blank line has more indentation
+                    // than the content".
+                    //
+                    // Tab characters do not cause this problem: a line like `  \t` is
+                    // treated as a content line (the tab is content past the indent strip),
+                    // not a blank line, so it round-trips correctly.
+                    //
+                    // When every non-empty decoded line consists solely of spaces, fall
+                    // back to double-quoted output to preserve the value faithfully.
+                    let all_content_spaces_only = !value.is_empty()
+                        && value
+                            .lines()
+                            .filter(|l| !l.is_empty())
+                            .all(|l| l.chars().all(|c| c == ' '));
+                    if all_content_spaces_only {
+                        text(format!("\"{}\"", escape_double_quoted(value)))
+                    } else {
+                        repr_block_to_doc(value, *style, options.tab_width)
+                    }
                 }
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
                     if requires_double_quoting(value) {
