@@ -248,7 +248,7 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
     reason = "each bool is a distinct, well-named formatting option; a flags enum would add complexity for no benefit"
 )]
 // When adding or changing settings, check fixture coverage for setting
-// interactions — see rlsp-yaml/tests/fixtures/formatter/CLAUDE.md.
+// interactions — see rlsp-yaml/tests/fixtures/CLAUDE.md.
 pub struct YamlFormatOptions {
     /// Maximum line width. Default: 80.
     pub print_width: usize,
