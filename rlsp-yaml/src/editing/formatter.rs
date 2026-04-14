@@ -553,6 +553,14 @@ fn escape_double_quoted(s: &str) -> String {
 ///
 /// The parser preserves the original chomping indicator, so we emit it
 /// faithfully (`|`, `|-`, `|+`, `>`, `>-`, `>+`).
+///
+/// Content lines are wrapped in `indent()` so the Wadler-Lindig printer
+/// indents them one level relative to the surrounding context.
+///
+/// Blank lines (empty strings from `str::lines()`) are omitted from the Doc
+/// entirely — `attach_comments` re-inserts them from the original input when
+/// it matches content signatures. This avoids double-blanks that would result
+/// from both the Doc IR and `attach_comments` each contributing a blank line.
 fn repr_block_to_doc(s: &str, style: ScalarStyle) -> Doc {
     let header = match style {
         ScalarStyle::Literal(Chomp::Clip) => "|",
@@ -565,8 +573,16 @@ fn repr_block_to_doc(s: &str, style: ScalarStyle) -> Doc {
     };
     let mut parts = vec![text(header)];
     for line_str in s.lines() {
-        parts.push(hard_line());
-        parts.push(text(line_str.to_string()));
+        if !line_str.is_empty() {
+            // Non-empty line: indent one level relative to the parent key.
+            parts.push(indent(concat(vec![
+                hard_line(),
+                text(line_str.to_string()),
+            ])));
+        }
+        // Blank lines are skipped here; attach_comments re-inserts them from
+        // the original source, preserving blank-line semantics without
+        // producing trailing-whitespace lines or double blanks.
     }
     concat(parts)
 }

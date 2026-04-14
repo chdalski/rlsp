@@ -6,10 +6,9 @@ category: blank-lines
 # Test: Blank Lines Inside Block Scalar Are Not Collapsed
 
 A blank line inside a literal block scalar (`|`) is part of the scalar content
-and is preserved as-is by the formatter.
-
-Note: the formatter does not re-indent block scalar content; it is emitted
-verbatim. The output indentation is normalised by the block scalar renderer.
+and is preserved by the formatter. Content lines are indented one level
+relative to the parent key. Blank lines within the scalar remain truly empty
+(no trailing spaces are added).
 
 ## Test-Document
 
@@ -24,8 +23,7 @@ body: |
 
 ```yaml
 body: |
-line one
+  line one
 
-
-line three
+  line three
 ```

@@ -6,7 +6,7 @@ category: structure
 # Test: Literal Block Scalar Style Preserved
 
 A literal block scalar (`|`) retains its style indicator. The block scalar
-content is emitted verbatim without re-indentation.
+content is indented one level relative to the parent key.
 
 ## Test-Document
 
@@ -20,6 +20,6 @@ key: |
 
 ```yaml
 key: |
-line one
-line two
+  line one
+  line two
 ```
