@@ -133,7 +133,7 @@ No existing fixtures cover tags on collections.
 - [x] Update existing fixtures that encoded buggy behavior
 - [x] Add new fixtures for anchors, tags, block scalar
       real-world patterns
-- [ ] Verify conformance suite improvement
+- [x] Verify conformance suite improvement
 
 ## Tasks
 
@@ -285,17 +285,23 @@ no fixture coverage.
 - [x] All fixtures pass with exact or idempotent assertion
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 7: Conformance suite verification
+### Task 7: Conformance suite verification — measurement only, no code commit
 
 Run the conformance suite and compare results against the
 pre-fix baseline to measure improvement.
 
-- [ ] Run conformance suite, record pass/fail counts
-- [ ] Compare to baseline (51 "formatted output
+- [x] Run conformance suite, record pass/fail counts
+      — Parser: 351/351 (100%). Formatter round-trip:
+      268/307 (87.3%), 31 unparseable, 8 empty.
+- [x] Compare to baseline (51 "formatted output
       unparseable" failures expected to decrease after
-      Bug 1 fix)
-- [ ] Document any remaining failures and their root cause
-- [ ] `cargo test` passes (no regressions)
+      Bug 1 fix) — decreased from 51 to 31 (20 fewer)
+- [x] Document any remaining failures and their root cause
+      — 31 failures categorized: tab handling (~8), explicit
+      keys (~6), escape sequences (~3), folded scalar edge
+      cases (~3), trailing comments (~2), tab indentation
+      (~2), anchor edge cases (~2), other (~4)
+- [x] `cargo test` passes (no regressions)
 
 ## Decisions
 
