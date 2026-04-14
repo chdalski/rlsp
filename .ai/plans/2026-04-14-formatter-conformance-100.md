@@ -185,7 +185,8 @@ decision):
 - [x] Fix multiline double-quoted scalars (Cat 3)
       (25b1130)
 - [x] Support explicit key syntax (Cat 4) (459f43a)
-- [ ] Fix anchor placement on block collections (Cat 5)
+- [x] Fix anchor placement on block collections (Cat 5)
+      (04d3fc0)
 - [ ] Handle empty-key mappings (Cat 6)
 - [ ] Handle multiline plain scalars with tabs (Cat 7)
 - [ ] Handle comment-only / doc-end documents (Cat 8)
@@ -320,18 +321,20 @@ Fix anchor/tag property placement for block sequences and
 block mappings so properties appear on a separate line or
 correctly before the first indicator.
 
-- [ ] For block sequences with anchors, emit
+- [x] For block sequences with anchors, emit
       `&anchor\n- first` instead of `&anchor - first`
-- [ ] For block mappings with anchors, emit
+- [x] For block mappings with anchors, emit
       `&anchor\nkey: value` instead of `&anchor key: value`
-- [ ] Handle the edge case of anchors on empty scalars
-      (PW8X)
-- [ ] Handle complex explicit block mapping structures
-      (KK5P)
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: 3R3P, PW8X, FTA2, FH7J, E76Z, 6M2F, X38W
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Handle the edge case of anchors on empty scalars
+      (PW8X) — partially; remaining entries blocked by
+      loader bugs (Task 14a)
+- [x] Handle complex explicit block mapping structures
+      (KK5P) — blocked by loader bugs (Task 14a)
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: 3R3P, X38W fixed; PW8X, FTA2, FH7J, E76Z,
+      6M2F blocked by loader bugs (Task 14a)
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 7: Handle empty-key mappings
 
