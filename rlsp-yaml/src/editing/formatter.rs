@@ -132,7 +132,7 @@ fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> Str
             }
             pending_blanks = 0;
             pending_leading.push(comment.text.clone());
-        } else if line.trim().is_empty() {
+        } else if line.is_empty() {
             pending_blanks += 1;
         } else if line.trim_start().starts_with('#')
             && last_content_idx.is_some_and(|last| idx > last)
@@ -466,12 +466,18 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                     }
                 }
                 ScalarStyle::Plain => {
-                    // Values starting with a quote character cannot be emitted as plain —
-                    // they would look like an unterminated quoted scalar to a re-parser.
-                    // Emit these with proper escaping via string_to_doc instead.
-                    if value.starts_with('"') || value.starts_with('\'') {
+                    // Values that contain characters which cannot appear in a plain scalar
+                    // at all — control characters, backslashes, or embedded newlines —
+                    // must be emitted as double-quoted with proper escaping.
+                    if requires_double_quoting(value) {
+                        text(format!("\"{}\"", escape_double_quoted(value)))
+                    } else if value.starts_with('"') || value.starts_with('\'') {
+                        // Values starting with a quote character cannot be emitted as plain —
+                        // they would look like an unterminated quoted scalar to a re-parser.
                         string_to_doc(value, options, in_key)
                     } else if needs_quoting(value, options.yaml_version) {
+                        // Value needs quoting (reserved keyword, special char, etc.) but
+                        // was originally plain — preserve plain style so round-trip matches.
                         text(value.clone())
                     } else {
                         string_to_doc(value, options, in_key)
@@ -662,6 +668,16 @@ fn needs_quoting(s: &str, version: YamlVersion) -> bool {
             "yes" | "no" | "on" | "off" | "Yes" | "No" | "On" | "Off" | "YES" | "NO" | "ON" | "OFF"
         );
 
+    // A string with an embedded newline cannot be emitted as a plain scalar.
+    // In YAML, plain scalars that span multiple lines fold line breaks to spaces
+    // (unless a blank line separates them, in which case a `\n` is preserved).
+    // However the formatter emits scalars as single-line plain text, so a value
+    // containing `\n` would be split across lines and misinterpreted (the second
+    // line would be parsed as a new key or value at the wrong indentation level).
+    if s.contains('\n') {
+        return true;
+    }
+
     always_reserved
         || v1_1_reserved
         || looks_like_number(s)
@@ -781,24 +797,25 @@ fn escape_double_quoted(s: &str) -> String {
 /// without them, adjacent content lines would fold into a single space on
 /// re-parse, making the output non-idempotent.
 fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -> Doc {
-    // Detect whether any non-empty content line starts with a space character.
-    // A leading space in the decoded value means the YAML parser would
-    // auto-detect a higher indentation level than intended (treating the extra
-    // space as indentation rather than content) — emitting an explicit indicator
-    // digit equal to tab_width prevents this misparse.
+    // Detect whether the first non-empty content line requires an explicit
+    // indentation indicator digit.
     //
-    // Tabs at the start of content are NOT checked: in YAML, tabs cannot be
-    // used for indentation (YAML 1.2 §8.1.1), so a leading tab in the decoded
-    // value is content that sits at the base indentation level and does not
-    // cause the parser to auto-detect a higher indent level.
-    // Only the first non-empty content line matters for auto-detection:
-    // the YAML parser uses that line to determine the block scalar's
-    // indentation level.  Subsequent content lines with leading spaces are
-    // fine because the indent level is already fixed by the first line.
+    // Case 1 — leading space: a leading space in the decoded value means the
+    // YAML parser would auto-detect a higher indentation level than intended
+    // (treating the extra space as indentation rather than content).
+    //
+    // Case 2 — whitespace-only line: when the first non-empty content line
+    // consists entirely of whitespace characters (spaces and/or tabs), YAML
+    // auto-detection is unreliable.  The parser sees the indentation byte count
+    // as only one level (e.g. 1 space) rather than the formatter's `tab_width`,
+    // causing the re-parsed value to have an extra leading space prepended.
+    // An explicit indicator digit forces the correct indent level on re-parse.
+    //
+    // Only the first non-empty content line matters for auto-detection.
     let needs_indent_indicator = s
         .lines()
         .find(|l| !l.is_empty())
-        .is_some_and(|l| l.starts_with(' '));
+        .is_some_and(|l| l.starts_with(' ') || l.chars().all(char::is_whitespace));
 
     let base_header = match style {
         ScalarStyle::Literal(Chomp::Clip) => "|",
