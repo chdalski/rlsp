@@ -941,10 +941,12 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
         .map(|(key, value)| {
             let key_doc = node_to_doc(key, options, true);
             let val_doc = node_to_doc(value, options, false);
-            // Alias keys require a space before `:` to prevent the colon from
-            // being parsed as part of the alias name: `*a: v` → alias name `a:`.
-            // Use ` : ` (with leading space) for alias keys to produce `*a : v`.
-            let sep = if matches!(key, Node::Alias { .. }) {
+            // Alias keys and tagged empty scalar keys require a space before `:`
+            // to prevent ambiguous re-parsing:
+            //   - `*a: v` → alias name `a:` (alias consumes the colon)
+            //   - `!!str: v` → tag `tag:yaml.org,2002:str:` (`:` is a valid URI char)
+            // Use ` : ` (with leading space) for both to produce `*a : v` / `!!str : v`.
+            let sep = if key_needs_space_before_colon(key) {
                 text(" : ")
             } else {
                 text(": ")
