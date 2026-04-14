@@ -126,7 +126,7 @@ No existing fixtures cover tags on collections.
 ## Steps
 
 - [x] Fix block scalar indentation (Bug 1)
-- [ ] Fix anchor preservation (Bug 2)
+- [x] Fix anchor preservation (Bug 2)
 - [ ] Fix single_quote key quoting (Bug 3)
 - [ ] Fix tag preservation on collections (coverage gap)
 - [x] Update existing fixtures that encoded buggy behavior
@@ -173,18 +173,18 @@ handles this when content is wrapped in an indent block.
       pass rate vs baseline
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 2: Fix anchor preservation
+### Task 2: Fix anchor preservation — `5309f84`
 
 Modify `node_to_doc` to emit anchor definitions when the
 `anchor` field is present on any Node variant.
 
-- [ ] In `node_to_doc`, extract `anchor` from Scalar,
+- [x] In `node_to_doc`, extract `anchor` from Scalar,
       Mapping, and Sequence variants
-- [ ] When `anchor` is `Some(name)`, prepend `&name ` to
+- [x] When `anchor` is `Some(name)`, prepend `&name ` to
       the node's Doc output
-- [ ] Handle anchor on alias nodes (edge case — an alias
+- [x] Handle anchor on alias nodes (edge case — an alias
       with an anchor: `&new_name *old_name`)
-- [ ] Add fixtures:
+- [x] Add fixtures:
   - `anchor-scalar-definition.md` — `key: &val value`
   - `anchor-mapping-definition.md` —
     `defaults: &defaults\n  timeout: 30`
@@ -195,7 +195,7 @@ Modify `node_to_doc` to emit anchor definitions when the
     node
   - `anchor-idempotent.md` — idempotent round-trip of
     anchor/alias document
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 3: Fix single_quote key quoting
 
