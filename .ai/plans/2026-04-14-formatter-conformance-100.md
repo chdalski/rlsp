@@ -187,7 +187,7 @@ decision):
 - [x] Support explicit key syntax (Cat 4) (459f43a)
 - [x] Fix anchor placement on block collections (Cat 5)
       (04d3fc0)
-- [ ] Handle empty-key mappings (Cat 6)
+- [x] Handle empty-key mappings (Cat 6) (c2ea92d)
 - [ ] Handle multiline plain scalars with tabs (Cat 7)
 - [ ] Surface document marker flags in AST (prerequisite
       for Cat 8 and Cat 9)
@@ -343,14 +343,17 @@ correctly before the first indicator.
 Support the empty mapping key pattern (`: value` in block,
 `{ : value }` in flow) and compact block mappings.
 
-- [ ] Detect empty-key entries and render with explicit
+- [x] Detect empty-key entries and render with explicit
       key form or proper empty-key syntax
-- [ ] Handle flow-context empty keys
-- [ ] Handle compact block mapping form (`? key: val`)
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: NKF9, WZ62
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Handle flow-context empty keys — WZ62[0] fixed;
+      NKF9[0] blocked by loader bug (Task 14a)
+- [x] Handle compact block mapping form (`? key: val`)
+      — already fixed in Task 5 (V9D5)
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: WZ62 fixed; NKF9 blocked by loader bug
+      (Task 14a)
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 8: Handle multiline plain scalars with tabs
 
