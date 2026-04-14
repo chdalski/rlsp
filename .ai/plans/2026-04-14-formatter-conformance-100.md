@@ -192,6 +192,8 @@ decision):
 - [ ] Fix multi-document stream handling (Cat 9)
 - [ ] Fix flow mapping key edge cases (Cat 10)
 - [ ] Fix tags on complex structures (Cat 11)
+- [ ] Fix loader bugs blocking explicit key cases (Cat 4b)
+- [ ] Fix remaining explicit key conformance cases (Cat 4c)
 - [ ] Add interacting-settings fixture combinations
 - [ ] Verify 0 conformance failures (KNOWN_FAILURES empty)
 
@@ -444,7 +446,40 @@ interact (affect the same formatting decision).
       custom tab width
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 14: Final conformance verification
+### Task 14a: Fix loader bugs blocking explicit key cases
+
+Fix genuine loader bugs in `rlsp-yaml-parser/src/loader.rs`
+that produce incorrect ASTs for explicit key constructs.
+These are parser bugs (not formatter accommodations) — the
+loader produces ASTs that don't match the YAML event tree.
+
+- [ ] Document tags on `---` line (`--- !!set`, `--- !!map`)
+      loaded as scalar keys instead of mapping tag field
+      (blocks 2XXW, 35KP)
+- [ ] `!!omap` tag garbled into scalar value (blocks J7PZ)
+- [ ] `- ? : x` nested explicit key produces garbled
+      mapping with spurious entries (blocks M2N8[0])
+- [ ] Sequence-as-key mapping produces wrong entry count
+      (blocks 6PBE)
+- [ ] Nested explicit keys produce spurious empty entries
+      (blocks KK5P)
+- [ ] Empty key with comment absorbs next key into value
+      (blocks S3PD)
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [ ] Parser conformance remains 351/351
+
+### Task 14b: Fix remaining explicit key conformance cases
+
+With loader bugs fixed, the explicit key infrastructure
+from Task 5 should handle the remaining 7 cases. Remove
+them from KNOWN_FAILURES.
+
+- [ ] Cases: 2XXW, 35KP, J7PZ, M2N8[0], 6PBE, KK5P, S3PD
+- [ ] Add fixture tests for newly-working patterns
+- [ ] Remove fixed entries from KNOWN_FAILURES
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 14c: Final conformance verification
 
 Run the full formatter round-trip conformance measurement
 and verify 0 failures.
