@@ -180,7 +180,8 @@ decision):
       formatter conformance test to rlsp-yaml (fb5e904)
 - [x] Fix double-quoted escape sequence handling (Cat 1)
       (987aa89)
-- [ ] Fix block scalar indentation indicators (Cat 2)
+- [x] Fix block scalar indentation indicators (Cat 2)
+      (826d008)
 - [ ] Fix multiline double-quoted scalars (Cat 3)
 - [ ] Support explicit key syntax (Cat 4)
 - [ ] Fix anchor placement on block collections (Cat 5)
@@ -252,24 +253,24 @@ YAML.
 - [x] Cases: G4RS, 6SLA, CPZ3, NAT4
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 3: Fix block scalar indentation indicators
+### Task 3: Fix block scalar indentation indicators — `826d008`
 
 Preserve or compute the explicit indentation indicator
 digit on block scalars whose content starts with leading
 spaces or tabs.
 
-- [ ] Check if the parser's `ScalarStyle` carries the
+- [x] Check if the parser's `ScalarStyle` carries the
       indentation indicator — if not, compute it from the
       scalar content (minimum leading whitespace of
       non-empty lines)
-- [ ] In `repr_block_to_doc`, emit the indentation
+- [x] In `repr_block_to_doc`, emit the indentation
       indicator digit when content requires it (first
       content line starts with space or tab)
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: F6MC, 5GBF, P2AD, R4YG, 4QFQ, T26H, MJS9,
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: F6MC, 5GBF, P2AD, R4YG, 4QFQ, T26H, MJS9,
       TS54, 2G84
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 4: Fix multiline double-quoted scalars
 
