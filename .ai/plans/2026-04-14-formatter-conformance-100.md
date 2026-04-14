@@ -178,7 +178,8 @@ decision):
 
 - [x] Move yaml-test-suite to shared location and add
       formatter conformance test to rlsp-yaml (fb5e904)
-- [ ] Fix double-quoted escape sequence handling (Cat 1)
+- [x] Fix double-quoted escape sequence handling (Cat 1)
+      (987aa89)
 - [ ] Fix block scalar indentation indicators (Cat 2)
 - [ ] Fix multiline double-quoted scalars (Cat 3)
 - [ ] Support explicit key syntax (Cat 4)
@@ -230,26 +231,26 @@ that runs alongside the fixture tests in CI.
 - [x] `cargo test` passes for both crates
 - [x] `cargo clippy --all-targets` clean
 
-### Task 2: Fix double-quoted escape sequence handling (Cat 1)
+### Task 2: Fix double-quoted escape sequence handling (Cat 1) — `987aa89`
 
 Preserve double-quoting on scalars whose decoded content
 contains non-printable characters, structural characters,
 or escape sequences that cannot be represented in plain
 YAML.
 
-- [ ] In `node_to_doc` Scalar/DoubleQuoted branch, check
+- [x] In `node_to_doc` Scalar/DoubleQuoted branch, check
       if the decoded value contains characters that require
       double-quoting beyond what `needs_quoting` catches
       (control chars, newlines, tabs, backslashes, etc.)
-- [ ] When such characters are present, always emit as
+- [x] When such characters are present, always emit as
       double-quoted with proper escaping via
       `escape_double_quoted`
-- [ ] Extend `escape_double_quoted` if needed to handle
+- [x] Extend `escape_double_quoted` if needed to handle
       all YAML 1.2 §5.7 escape sequences
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: G4RS, 6SLA, CPZ3, NAT4
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: G4RS, 6SLA, CPZ3, NAT4
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 3: Fix block scalar indentation indicators
 
