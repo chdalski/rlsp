@@ -184,7 +184,7 @@ decision):
       (826d008)
 - [x] Fix multiline double-quoted scalars (Cat 3)
       (25b1130)
-- [ ] Support explicit key syntax (Cat 4)
+- [x] Support explicit key syntax (Cat 4) (459f43a)
 - [ ] Fix anchor placement on block collections (Cat 5)
 - [ ] Handle empty-key mappings (Cat 6)
 - [ ] Handle multiline plain scalars with tabs (Cat 7)
@@ -295,18 +295,22 @@ Add support for rendering mappings that use `? key` /
 `: value` explicit key form — needed for sets (`!!set`),
 ordered maps (`!!omap`), complex keys, and empty keys.
 
-- [ ] Detect when a mapping entry requires explicit key
+- [x] Detect when a mapping entry requires explicit key
       form: complex key (mapping/sequence as key), empty
       key, or tagged root mapping with `?`-only entries
-- [ ] Render explicit keys as `? key\n: value` instead of
+- [x] Render explicit keys as `? key\n: value` instead of
       `key: value`
 - [ ] Handle `!!set` (sequence of `?`-only entries)
+      — blocked by loader bug (document tags loaded as
+      scalar keys, not tag field)
 - [ ] Handle `!!omap` (sequence of single-entry mappings)
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: 2XXW, 35KP, J7PZ, M2N8, 5WE3, 6PBE, KK5P,
-      M5DY, S3PD, V9D5
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+      — blocked by loader bug (tag garbled into scalar)
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases fixed: 5WE3, M5DY, V9D5, M2N8[1]
+      Cases blocked by loader bugs: 2XXW, 35KP, J7PZ,
+      M2N8[0], 6PBE, KK5P, S3PD
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 6: Fix anchor placement on block collections
 
