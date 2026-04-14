@@ -393,7 +393,11 @@ fn extract_doc_prefix_comments(text: &str) -> Vec<Comment> {
 fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     match node {
         Node::Scalar {
-            value, style, tag, ..
+            value,
+            style,
+            anchor,
+            tag,
+            ..
         } => {
             // Prefix with a user-defined tag if present (e.g. `!mytag`).
             // Core Schema tags (tag:yaml.org,2002:*) are not preserved — only user tags.
@@ -429,16 +433,46 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
                 }
             };
 
-            if let Some(prefix) = tag_prefix {
+            let doc = if let Some(prefix) = tag_prefix {
                 concat(vec![text(prefix), scalar_doc])
             } else {
                 scalar_doc
+            };
+
+            if let Some(name) = anchor {
+                concat(vec![text(format!("&{name} ")), doc])
+            } else {
+                doc
             }
         }
 
-        Node::Mapping { entries, style, .. } => mapping_to_doc(entries, *style, options),
+        Node::Mapping {
+            entries,
+            style,
+            anchor,
+            ..
+        } => {
+            let doc = mapping_to_doc(entries, *style, options);
+            if let Some(name) = anchor {
+                concat(vec![text(format!("&{name} ")), doc])
+            } else {
+                doc
+            }
+        }
 
-        Node::Sequence { items, style, .. } => sequence_to_doc(items, *style, options),
+        Node::Sequence {
+            items,
+            style,
+            anchor,
+            ..
+        } => {
+            let doc = sequence_to_doc(items, *style, options);
+            if let Some(name) = anchor {
+                concat(vec![text(format!("&{name} ")), doc])
+            } else {
+                doc
+            }
+        }
 
         Node::Alias { name, .. } => text(format!("*{name}")),
     }
@@ -659,12 +693,19 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
 
     let pair_doc = match value {
         // Block mappings: `key:\n  child: val` — hard_line inside indent.
-        Node::Mapping { entries, style, .. }
-            if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block =>
-        {
+        // With anchor: `key: &anchor\n  child: val`.
+        Node::Mapping {
+            entries,
+            style,
+            anchor,
+            ..
+        } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+            let colon = anchor
+                .as_ref()
+                .map_or_else(|| text(":"), |name| text(format!(": &{name}")));
             concat(vec![
                 key_doc,
-                text(":"),
+                colon,
                 indent(concat(vec![
                     hard_line(),
                     mapping_to_doc(entries, *style, options),
@@ -672,12 +713,19 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
             ])
         }
         // Block sequences: indented block items under key.
-        Node::Sequence { items, style, .. }
-            if !items.is_empty() && effective_style(*style) == CollectionStyle::Block =>
-        {
+        // With anchor: `key: &anchor\n  - item`.
+        Node::Sequence {
+            items,
+            style,
+            anchor,
+            ..
+        } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+            let colon = anchor
+                .as_ref()
+                .map_or_else(|| text(":"), |name| text(format!(": &{name}")));
             concat(vec![
                 key_doc,
-                text(":"),
+                colon,
                 indent(concat(vec![
                     hard_line(),
                     sequence_to_doc(items, *style, options),
@@ -764,25 +812,48 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     };
 
     let item_doc = match item {
-        Node::Mapping { entries, style, .. }
-            if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block =>
-        {
-            // `- key: val\n  key2: val2` — first pair on the dash line, remaining
-            // pairs indented one level so they align under the first key.
+        // Block mapping item: `- key: val\n  key2: val2`.
+        // With anchor: `- &anchor\n  key: val\n  key2: val2`.
+        Node::Mapping {
+            entries,
+            style,
+            anchor,
+            ..
+        } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             let pairs: Vec<Doc> = entries
                 .iter()
                 .map(|(k, v)| key_value_to_doc(k, v, options))
                 .collect();
             let inner = join(&hard_line(), pairs);
-            // indent() shifts all hard_line breaks inside `inner` by one level,
-            // placing continuation pairs 2 spaces right of `- `.
-            concat(vec![text("- "), indent(inner)])
+            if let Some(name) = anchor {
+                // `- &anchor\n  key: val` — anchor on the dash line, content indented.
+                concat(vec![
+                    text("- "),
+                    text(format!("&{name}")),
+                    indent(concat(vec![hard_line(), inner])),
+                ])
+            } else {
+                // `- key: val\n  key2: val2` — first pair on the dash line, remaining
+                // pairs indented one level so they align under the first key.
+                // indent() shifts all hard_line breaks inside `inner` by one level,
+                // placing continuation pairs 2 spaces right of `- `.
+                concat(vec![text("- "), indent(inner)])
+            }
         }
-        Node::Sequence { items, style, .. }
-            if !items.is_empty() && effective_style(*style) == CollectionStyle::Block =>
-        {
+        // Block sequence item: `- \n  - item`.
+        // With anchor: `- &anchor\n  - item`.
+        Node::Sequence {
+            items,
+            style,
+            anchor,
+            ..
+        } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+            let anchor_doc = anchor
+                .as_ref()
+                .map_or_else(|| text(""), |name| text(format!("&{name}")));
             concat(vec![
                 text("- "),
+                anchor_doc,
                 indent(concat(vec![
                     hard_line(),
                     sequence_to_doc(items, *style, options),
@@ -1290,5 +1361,140 @@ mod tests {
         let first = format_yaml(input, &dedup_opts());
         let second = format_yaml(&first, &dedup_opts());
         assert_eq!(first, second, "dedup not idempotent: {first:?}");
+    }
+
+    // ---- Group K: Anchor preservation ----
+
+    // K1: Anchor on a scalar value is preserved.
+    #[test]
+    fn anchor_scalar_preserved() {
+        let result = format_yaml("key: &anchor value\n", &default_opts());
+        assert_eq!(result, "key: &anchor value\n");
+    }
+
+    // K2: Anchor on a block mapping value is preserved.
+    #[test]
+    fn anchor_block_mapping_preserved() {
+        let result = format_yaml("defaults: &defaults\n  timeout: 30\n", &default_opts());
+        assert_eq!(result, "defaults: &defaults\n  timeout: 30\n");
+    }
+
+    // K3: Anchor on a block sequence value is preserved.
+    #[test]
+    fn anchor_block_sequence_preserved() {
+        let result = format_yaml("items: &mylist\n  - a\n  - b\n", &default_opts());
+        assert_eq!(result, "items: &mylist\n  - a\n  - b\n");
+    }
+
+    // K4: Anchor on a flow mapping value is preserved.
+    #[test]
+    fn anchor_flow_mapping_preserved() {
+        let result = format_yaml("key: &anchor {a: 1}\n", &default_opts());
+        assert!(result.contains("&anchor"), "anchor missing: {result:?}");
+    }
+
+    // K5: Anchor on a flow sequence value is preserved.
+    #[test]
+    fn anchor_flow_sequence_preserved() {
+        let result = format_yaml("key: &anchor [a, b]\n", &default_opts());
+        assert_eq!(result, "key: &anchor [a, b]\n");
+    }
+
+    // K6: Anchor on a block-mapping sequence item is preserved.
+    #[test]
+    fn anchor_sequence_item_block_mapping_preserved() {
+        let result = format_yaml("items:\n  - &item\n    key: val\n", &default_opts());
+        assert_eq!(result, "items:\n  - &item\n    key: val\n");
+    }
+
+    // K7: Alias reference (`*name`) is preserved (regression guard).
+    #[test]
+    fn alias_reference_preserved() {
+        let result = format_yaml(
+            "defaults: &defaults\n  timeout: 30\nservice:\n  <<: *defaults\n",
+            &default_opts(),
+        );
+        assert!(result.contains("&defaults"), "anchor missing: {result:?}");
+        assert!(result.contains("*defaults"), "alias missing: {result:?}");
+    }
+
+    // K8: Anchor+alias round-trip is idempotent.
+    #[test]
+    fn anchor_alias_idempotent() {
+        let input = "defaults: &defaults\n  timeout: 30\nservice:\n  <<: *defaults\n";
+        let first = format_yaml(input, &default_opts());
+        let second = format_yaml(&first, &default_opts());
+        assert_eq!(first, second, "anchor/alias not idempotent: {first:?}");
+    }
+
+    // AP-2: Anchor on a top-level plain scalar is preserved.
+    #[test]
+    fn anchor_on_top_level_scalar_preserved() {
+        let result = format_yaml("&doc hello\n", &default_opts());
+        assert_eq!(result, "&doc hello\n");
+    }
+
+    // AP-10: Anchor and alias round-trip on a sequence value.
+    #[test]
+    fn anchor_and_alias_round_trip_sequence() {
+        let input = "base: &base\n  - x\n  - y\nextended:\n  - *base\n";
+        let result = format_yaml(input, &default_opts());
+        assert!(result.contains("&base"), "anchor missing: {result:?}");
+        assert!(result.contains("- x"), "sequence item missing: {result:?}");
+        assert!(result.contains("*base"), "alias missing: {result:?}");
+    }
+
+    // AP-12: Anchor and user tag on same scalar — anchor precedes tag (YAML spec §6.8.1).
+    #[test]
+    fn anchor_before_tag_on_scalar() {
+        let result = format_yaml("item: &myanchor !mytag value\n", &default_opts());
+        assert!(result.contains("&myanchor"), "anchor missing: {result:?}");
+        assert!(result.contains("!mytag"), "tag missing: {result:?}");
+        assert!(result.contains("value"), "value missing: {result:?}");
+        // Anchor must precede tag in the output string (YAML spec §6.8.1).
+        // Split on the tag: the prefix must contain the anchor.
+        let before_tag = result.split("!mytag").next().unwrap_or("");
+        assert!(
+            before_tag.contains("&myanchor"),
+            "anchor must precede tag per YAML spec §6.8.1: {result:?}"
+        );
+    }
+
+    // AP-13: Anchor coexists with trailing inline comment.
+    #[test]
+    fn anchor_with_trailing_comment_preserved() {
+        let result = format_yaml("key: &anchor value  # inline comment\n", &default_opts());
+        assert!(
+            result.contains("&anchor value"),
+            "anchor+value missing: {result:?}"
+        );
+        assert!(
+            result.contains("# inline comment"),
+            "comment missing: {result:?}"
+        );
+    }
+
+    // AP-14: Anchor on an empty flow mapping is preserved.
+    #[test]
+    fn anchor_on_empty_flow_mapping_preserved() {
+        let result = format_yaml("empty: &empty {}\n", &default_opts());
+        assert_eq!(result, "empty: &empty {}\n");
+    }
+
+    // AP-15: Anchor on an empty flow sequence is preserved.
+    #[test]
+    fn anchor_on_empty_flow_sequence_preserved() {
+        let result = format_yaml("empty: &empty []\n", &default_opts());
+        assert_eq!(result, "empty: &empty []\n");
+    }
+
+    // AP-16: No spurious `&` sigil is injected when no anchor is defined.
+    #[test]
+    fn no_spurious_anchor_when_none() {
+        let result = format_yaml("key: value\n", &default_opts());
+        assert!(
+            !result.contains('&'),
+            "spurious anchor in output: {result:?}"
+        );
     }
 }
