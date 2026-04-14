@@ -188,7 +188,8 @@ decision):
 - [x] Fix anchor placement on block collections (Cat 5)
       (04d3fc0)
 - [x] Handle empty-key mappings (Cat 6) (c2ea92d)
-- [ ] Handle multiline plain scalars with tabs (Cat 7)
+- [x] Handle multiline plain scalars with tabs (Cat 7)
+      (fe9fe80)
 - [ ] Surface document marker flags in AST (prerequisite
       for Cat 8 and Cat 9)
 - [ ] Handle comment-only / doc-end documents (Cat 8)
@@ -355,21 +356,28 @@ Support the empty mapping key pattern (`: value` in block,
       (Task 14a)
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 8: Handle multiline plain scalars with tabs
+### Task 8: Handle multiline plain scalars with tabs — `fe9fe80`, `67d3087`
 
 Preserve or correctly re-emit multiline plain scalars
 that contain tab-only blank lines or complex whitespace
 patterns.
 
-- [ ] Detect multiline plain scalars from the AST
-- [ ] Emit them preserving their multiline structure or
+- [x] Detect multiline plain scalars from the AST
+- [x] Emit them preserving their multiline structure or
       convert to block scalar form when plain representation
       would be ambiguous
-- [ ] Add fixtures for affected patterns
-- [ ] Remove fixed entries from KNOWN_FAILURES allowlist
-- [ ] Cases: NB6Z, RZP5, XW4D, DK95, J3BT, 6CA3, Q5MG,
+- [x] Add fixtures for affected patterns
+- [x] Remove fixed entries from KNOWN_FAILURES allowlist
+- [x] Cases: NB6Z, RZP5, XW4D, DK95, J3BT, 6CA3, Q5MG,
       Y79Y, 26DV
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+      Fixed: NB6Z[0], Y79Y[1]
+      Already passing: J3BT
+      Blocked by parser/loader bugs (Task 14a): 6CA3[0],
+      Q5MG[0], DK95[7], RZP5[0], XW4D[0], 26DV[0]
+- [x] Additional fixes: JEF9[1], JEF9[2] (spaces-only
+      block scalars fall back to double-quoted), MUS6[0]
+      removed as dead allowlist entry (67d3087)
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 8b: Surface document marker flags in AST
 
