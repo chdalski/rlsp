@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-14
 
 ## Goal
@@ -125,38 +125,38 @@ No existing fixtures cover tags on collections.
 
 ## Steps
 
-- [ ] Fix block scalar indentation (Bug 1)
+- [x] Fix block scalar indentation (Bug 1)
 - [ ] Fix anchor preservation (Bug 2)
 - [ ] Fix single_quote key quoting (Bug 3)
 - [ ] Fix tag preservation on collections (coverage gap)
-- [ ] Update existing fixtures that encoded buggy behavior
+- [x] Update existing fixtures that encoded buggy behavior
 - [ ] Add new fixtures for anchors, tags, block scalar
       real-world patterns
 - [ ] Verify conformance suite improvement
 
 ## Tasks
 
-### Task 1: Fix block scalar indentation
+### Task 1: Fix block scalar indentation — `0b31477`
 
 Fix `repr_block_to_doc` to emit indented content lines.
 The content lines of a block scalar must be indented
 relative to the key — the pretty-printer's `indent()`
 handles this when content is wrapped in an indent block.
 
-- [ ] Modify `repr_block_to_doc` to wrap content lines
+- [x] Modify `repr_block_to_doc` to wrap content lines
       in `indent()` so they are indented relative to the
       parent key
-- [ ] Handle all six block scalar styles: `|`, `|-`, `|+`,
+- [x] Handle all six block scalar styles: `|`, `|-`, `|+`,
       `>`, `>-`, `>+`
-- [ ] Handle empty lines within block scalars (they must
+- [x] Handle empty lines within block scalars (they must
       remain empty, not gain indentation)
-- [ ] Update `structure-literal-block-scalar.md` expected
+- [x] Update `structure-literal-block-scalar.md` expected
       output to show correct indentation
-- [ ] Update `structure-folded-block-scalar.md` expected
+- [x] Update `structure-folded-block-scalar.md` expected
       output
-- [ ] Update `blank-line-inside-block-scalar-unaffected.md`
+- [x] Update `blank-line-inside-block-scalar-unaffected.md`
       expected output
-- [ ] Add new fixtures:
+- [x] Add new fixtures:
   - `block-scalar-literal-multiline.md` — multi-line `|`
     with 3+ lines
   - `block-scalar-gha-run-step.md` — GHA `run: |` with
@@ -169,9 +169,9 @@ handles this when content is wrapped in an indent block.
     behavior
   - `block-scalar-chomp-keep.md` — `|+` trailing newline
     behavior
-- [ ] Run conformance suite, report improvement in
+- [x] Run conformance suite, report improvement in
       pass rate vs baseline
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 2: Fix anchor preservation
 
