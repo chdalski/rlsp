@@ -416,6 +416,8 @@ Document<Span>
   version: Option<(u8, u8)>       -- from %YAML directive
   tags: Vec<(String, String)>     -- from %TAG directives (handle, prefix)
   comments: Vec<String>           -- document-level leading comments
+  explicit_start: bool            -- true when document was introduced with `---`
+  explicit_end: bool              -- true when document was closed with `...`
 
 Node<Span>  =  Scalar { value, style, anchor, tag, loc, leading_comments, trailing_comment }
              | Mapping { entries: Vec<(Node, Node)>, anchor, tag, loc, … }

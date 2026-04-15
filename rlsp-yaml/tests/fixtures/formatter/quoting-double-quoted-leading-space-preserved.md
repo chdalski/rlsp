@@ -19,5 +19,6 @@ if emitted as a plain scalar.
 ## Expected-Document
 
 ```yaml
+---
 " value with leading space"
 ```

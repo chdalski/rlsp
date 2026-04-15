@@ -5,10 +5,10 @@ category: structure
 
 # Test: Document-End Terminator (`...`) Content Preserved
 
-The `...` document-end terminator is parsed as a document boundary, same as
-`---`. The formatter always emits `---` separators between documents, so `...`
-terminators are not preserved in the output — but the content of both documents
-is preserved.
+The `...` document-end terminator is parsed as a document boundary. The
+formatter preserves `...` when `explicit_end` is true on the document.
+The `---` separator for the second document is also preserved because
+`explicit_start` is true on that document.
 
 ## Test-Document
 
@@ -23,6 +23,7 @@ key2: value2
 
 ```yaml
 key1: value1
+...
 ---
 key2: value2
 ```

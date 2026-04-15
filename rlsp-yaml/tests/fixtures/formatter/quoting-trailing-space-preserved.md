@@ -19,5 +19,6 @@ emitting unquoted would drop the trailing space and break idempotency.
 ## Expected-Document
 
 ```yaml
+---
 'value with trailing space '
 ```

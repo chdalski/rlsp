@@ -333,12 +333,13 @@ impl<'opt> LoadState<'opt> {
                 None | Some((Event::StreamEnd, _)) => break,
                 Some((
                     Event::DocumentStart {
+                        explicit,
                         version,
                         tag_directives,
-                        ..
                     },
                     _,
                 )) => {
+                    let doc_explicit_start = explicit;
                     let doc_version = version;
                     let doc_tags = tag_directives;
                     self.reset_for_document();
@@ -356,16 +357,23 @@ impl<'opt> LoadState<'opt> {
                         self.parse_node(&mut stream)?
                     };
 
-                    // Consume DocumentEnd if present.
-                    if matches!(stream.peek(), Some(Ok((Event::DocumentEnd { .. }, _)))) {
-                        let _ = stream.next();
-                    }
+                    // Consume DocumentEnd if present and capture its explicit flag.
+                    let doc_explicit_end =
+                        if let Some(Ok((Event::DocumentEnd { explicit }, _))) = stream.peek() {
+                            let end_explicit = *explicit;
+                            let _ = stream.next();
+                            end_explicit
+                        } else {
+                            false
+                        };
 
                     docs.push(Document {
                         root,
                         version: doc_version,
                         tags: doc_tags,
                         comments: doc_comments,
+                        explicit_start: doc_explicit_start,
+                        explicit_end: doc_explicit_end,
                     });
                 }
                 Some(_) => {
@@ -1202,5 +1210,70 @@ mod tests {
             &["# deep-overflow"],
             "# deep-overflow should propagate from nested sequence to next sibling"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // UT-D: Document marker flags (explicit_start / explicit_end)
+    // -----------------------------------------------------------------------
+
+    // UT-D1: Bare document (no markers) → both flags false
+    #[test]
+    fn bare_document_has_both_flags_false() {
+        let docs = load("key: value\n").expect("load failed");
+        assert_eq!(docs.len(), 1);
+        assert!(!docs[0].explicit_start, "expected explicit_start=false");
+        assert!(!docs[0].explicit_end, "expected explicit_end=false");
+    }
+
+    // UT-D2: Document with `---` start marker → explicit_start true, explicit_end false
+    #[test]
+    fn document_with_start_marker_has_explicit_start_true() {
+        let docs = load("---\nkey: value\n").expect("load failed");
+        assert_eq!(docs.len(), 1);
+        assert!(docs[0].explicit_start, "expected explicit_start=true");
+        assert!(!docs[0].explicit_end, "expected explicit_end=false");
+    }
+
+    // UT-D3: Document with `...` end marker → explicit_start false, explicit_end true
+    #[test]
+    fn document_with_end_marker_has_explicit_end_true() {
+        let docs = load("key: value\n...\n").expect("load failed");
+        assert_eq!(docs.len(), 1);
+        assert!(!docs[0].explicit_start, "expected explicit_start=false");
+        assert!(docs[0].explicit_end, "expected explicit_end=true");
+    }
+
+    // UT-D4: Document with both `---` and `...` → both flags true
+    #[test]
+    fn document_with_both_markers_has_both_flags_true() {
+        let docs = load("---\nkey: value\n...\n").expect("load failed");
+        assert_eq!(docs.len(), 1);
+        assert!(docs[0].explicit_start, "expected explicit_start=true");
+        assert!(docs[0].explicit_end, "expected explicit_end=true");
+    }
+
+    // UT-D5: Multi-document — each document's flags are independent
+    #[test]
+    fn multi_document_flags_are_independent() {
+        // doc1: no explicit start/end (bare)
+        // doc2: explicit start (---), explicit end (...)
+        // doc3: explicit start (---), no explicit end
+        let docs = load("doc1: a\n---\ndoc2: b\n...\n---\ndoc3: c\n").expect("load failed");
+        assert_eq!(docs.len(), 3);
+        assert!(!docs[0].explicit_start, "doc1 explicit_start");
+        assert!(!docs[0].explicit_end, "doc1 explicit_end");
+        assert!(docs[1].explicit_start, "doc2 explicit_start");
+        assert!(docs[1].explicit_end, "doc2 explicit_end");
+        assert!(docs[2].explicit_start, "doc3 explicit_start");
+        assert!(!docs[2].explicit_end, "doc3 explicit_end");
+    }
+
+    // UT-D6: Empty document with explicit markers → flags are set
+    #[test]
+    fn empty_document_with_explicit_markers_has_both_flags_true() {
+        let docs = load("---\n...\n").expect("load failed");
+        assert_eq!(docs.len(), 1);
+        assert!(docs[0].explicit_start, "expected explicit_start=true");
+        assert!(docs[0].explicit_end, "expected explicit_end=true");
     }
 }

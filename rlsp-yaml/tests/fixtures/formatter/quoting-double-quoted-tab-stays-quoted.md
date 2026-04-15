@@ -21,5 +21,6 @@ tab: "\tstring"
 ## Expected-Document
 
 ```yaml
+---
 tab: "\tstring"
 ```

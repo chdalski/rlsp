@@ -117,7 +117,7 @@ UGM3, UKK6[2], W4TN, XW4D
 
 - [x] Restructure conformance tests into module
 - [x] Add loader conformance test against yaml-test-suite
-- [ ] Surface document marker flags in AST
+- [x] Surface document marker flags in AST
 - [ ] Fix loader bugs (document tags, explicit keys,
       empty keys, anchors)
 - [ ] Remove formatter quote-char workaround
@@ -160,24 +160,24 @@ from each test case.
 - [x] Measure baseline: 351 cases, 155 known failures
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 3: Surface document marker flags in AST
+### Task 3: Surface document marker flags in AST — c3216d7
 
 Add `explicit_start: bool` and `explicit_end: bool` to
 the `Document` struct and populate from events.
 
-- [ ] Add fields to `Document` in `node.rs`
-- [ ] Populate from `DocumentStart { explicit, .. }` in
+- [x] Add fields to `Document` in `node.rs`
+- [x] Populate from `DocumentStart { explicit, .. }` in
       loader
-- [ ] Populate from `DocumentEnd { explicit, .. }` in
+- [x] Populate from `DocumentEnd { explicit, .. }` in
       loader
-- [ ] Update formatter to use flags: emit `---` only when
+- [x] Update formatter to use flags: emit `---` only when
       `explicit_start` is true, emit `...` when
       `explicit_end` is true
-- [ ] Update `Document<Span>` struct diagram in
+- [x] Update `Document<Span>` struct diagram in
       `rlsp-yaml-parser/docs/architecture.md` to include
       `explicit_start` and `explicit_end`
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
-- [ ] Parser conformance remains 351/351
+- [x] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Parser conformance remains 351/351
 
 ### Task 4: Fix loader bugs — document tags and inline scalars
 

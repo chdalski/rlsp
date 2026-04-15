@@ -22,6 +22,7 @@ h: "\n\n"
 ## Expected-Document
 
 ```yaml
+---
 f: "\n"
 h: "\n\n"
 ```

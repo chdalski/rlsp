@@ -20,5 +20,6 @@ leading space and break idempotency.
 ## Expected-Document
 
 ```yaml
+---
 ' value with leading space'
 ```

@@ -24,6 +24,10 @@ pub struct Document<Loc = Span> {
     pub tags: Vec<(String, String)>,
     /// Comments that appear at document level (before or between nodes).
     pub comments: Vec<String>,
+    /// Whether the document was introduced with an explicit `---` marker.
+    pub explicit_start: bool,
+    /// Whether the document was closed with an explicit `...` marker.
+    pub explicit_end: bool,
 }
 
 /// A YAML node parameterized by its location type.
@@ -233,5 +237,50 @@ mod tests {
         let n = plain_scalar("hello");
         assert!(n.leading_comments().is_empty());
         assert!(n.trailing_comment().is_none());
+    }
+
+    fn bare_document(explicit_start: bool, explicit_end: bool) -> Document<Span> {
+        Document {
+            root: plain_scalar("val"),
+            version: None,
+            tags: Vec::new(),
+            comments: Vec::new(),
+            explicit_start,
+            explicit_end,
+        }
+    }
+
+    // NF-DOC-1: explicit_start and explicit_end default to false
+    #[test]
+    fn document_explicit_flags_in_equality() {
+        let a = bare_document(false, false);
+        let b = bare_document(false, false);
+        assert_eq!(a, b);
+    }
+
+    // NF-DOC-2: PartialEq distinguishes differing explicit_start
+    #[test]
+    fn document_partial_eq_distinguishes_explicit_start() {
+        let a = bare_document(true, false);
+        let b = bare_document(false, false);
+        assert_ne!(a, b);
+    }
+
+    // NF-DOC-3: PartialEq distinguishes differing explicit_end
+    #[test]
+    fn document_partial_eq_distinguishes_explicit_end() {
+        let a = bare_document(false, true);
+        let b = bare_document(false, false);
+        assert_ne!(a, b);
+    }
+
+    // NF-DOC-4: Clone preserves both flags
+    #[test]
+    fn document_clone_preserves_explicit_flags() {
+        let doc = bare_document(true, true);
+        let cloned = doc.clone();
+        assert_eq!(doc, cloned);
+        assert!(cloned.explicit_start);
+        assert!(cloned.explicit_end);
     }
 }

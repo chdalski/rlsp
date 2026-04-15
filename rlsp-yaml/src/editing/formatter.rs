@@ -337,20 +337,30 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         documents
     };
 
-    // Join multiple documents with `---` separators.
-    let sep = text("---");
+    // Build document parts respecting explicit_start and explicit_end markers.
+    //
+    // Rules:
+    // - Emit `---` before a document when it has `explicit_start: true` (first
+    //   doc) or when it is not the first document (separator always required).
+    // - Emit `...` after a document when it has `explicit_end: true`.
+    let doc_marker = text("---");
+    let end_marker = text("...");
     let mut parts: Vec<Doc> = Vec::new();
-    let mut iter = documents
-        .iter()
-        .map(|doc| node_to_doc(&doc.root, options, false));
-    if let Some(first) = iter.next() {
-        parts.push(first);
-    }
-    for doc in iter {
-        parts.push(hard_line());
-        parts.push(sep.clone());
-        parts.push(hard_line());
-        parts.push(doc);
+    for (i, doc) in documents.iter().enumerate() {
+        let is_first = i == 0;
+        let needs_start_marker = !is_first || doc.explicit_start;
+        if needs_start_marker {
+            if !parts.is_empty() {
+                parts.push(hard_line());
+            }
+            parts.push(doc_marker.clone());
+            parts.push(hard_line());
+        }
+        parts.push(node_to_doc(&doc.root, options, false));
+        if doc.explicit_end {
+            parts.push(hard_line());
+            parts.push(end_marker.clone());
+        }
     }
     let joined = concat(parts);
 
@@ -2045,6 +2055,113 @@ mod tests {
         assert!(
             !result.contains('&'),
             "spurious anchor in output: {result:?}"
+        );
+    }
+
+    // ---- Group L: Document marker flag emission ----
+
+    // FM-1 (spike): Single bare document — no `---` or `...` emitted
+    #[test]
+    fn bare_document_emits_no_markers() {
+        let result = format_yaml("key: value\n", &default_opts());
+        assert!(result.contains("key: value"), "content missing: {result:?}");
+        assert!(
+            !result.contains("---"),
+            "unexpected `---` in output: {result:?}"
+        );
+        assert!(
+            !result.contains("..."),
+            "unexpected `...` in output: {result:?}"
+        );
+    }
+
+    // FM-2: Single document with explicit `---` start → `---` preserved in output
+    #[test]
+    fn explicit_start_marker_preserved() {
+        let result = format_yaml("---\nkey: value\n", &default_opts());
+        assert!(
+            result.contains("---"),
+            "`---` missing from output: {result:?}"
+        );
+    }
+
+    // FM-3: Single document with explicit `...` end → `...` preserved in output
+    #[test]
+    fn explicit_end_marker_preserved() {
+        let result = format_yaml("key: value\n...\n", &default_opts());
+        assert!(
+            result.contains("..."),
+            "`...` missing from output: {result:?}"
+        );
+    }
+
+    // FM-4: Single document with both `---` and `...` → both preserved
+    #[test]
+    fn both_markers_preserved() {
+        let result = format_yaml("---\nkey: value\n...\n", &default_opts());
+        assert!(
+            result.contains("---"),
+            "`---` missing from output: {result:?}"
+        );
+        assert!(
+            result.contains("..."),
+            "`...` missing from output: {result:?}"
+        );
+    }
+
+    // FM-5: Multi-document — `---` separator always emitted between docs
+    #[test]
+    fn multi_document_separator_always_emitted() {
+        let result = format_yaml("doc1: a\n---\ndoc2: b\n", &default_opts());
+        assert!(
+            result.contains("---"),
+            "`---` separator missing: {result:?}"
+        );
+        assert!(
+            result.contains("doc1: a"),
+            "doc1 content missing: {result:?}"
+        );
+        assert!(
+            result.contains("doc2: b"),
+            "doc2 content missing: {result:?}"
+        );
+    }
+
+    // FM-6: Multi-document — `...` terminator on first doc only, not second
+    #[test]
+    fn explicit_end_only_on_first_document() {
+        let result = format_yaml("doc1: a\n...\n---\ndoc2: b\n", &default_opts());
+        assert!(
+            result.contains("---"),
+            "`---` separator missing: {result:?}"
+        );
+        // The full output should be exactly: doc1 content, ..., ---, doc2 content.
+        // The `...` appears before `doc2: b`, not after it.
+        assert!(
+            result.contains("..."),
+            "`...` missing from output: {result:?}"
+        );
+        assert!(
+            result.find("...") < result.find("doc2: b"),
+            "`...` should appear before doc2, got: {result:?}"
+        );
+        // The portion after `doc2: b` must not contain `...`.
+        let after_doc2 = result.find("doc2: b").map_or("", |pos| &result[pos..]);
+        assert!(
+            !after_doc2.contains("..."),
+            "unexpected `...` after doc2: {result:?}"
+        );
+    }
+
+    // FM-7: Multi-document — `...` on all documents → all preserved
+    #[test]
+    fn explicit_end_on_all_documents_preserved() {
+        let result = format_yaml("doc1: a\n...\n---\ndoc2: b\n...\n", &default_opts());
+        // Both `...` markers should be present
+        let count = result.matches("...").count();
+        assert_eq!(
+            count, 2,
+            "expected 2 `...` markers, got {count}: {result:?}"
         );
     }
 }
