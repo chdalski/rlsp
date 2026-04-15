@@ -149,13 +149,11 @@ After clarification is complete:
 
 8. **Hand the plan to the reviewer.** Message the
    `reviewer` via `SendMessage` with the plan file path.
-   The reviewer reads the plan and owns it during
-   execution — verifying scope completeness on each task,
-   marking tasks done, recording commit SHAs, and
-   committing plan updates. Sending the plan before any
-   task starts gives the reviewer the full context needed
-   to verify that each deliverable matches what was
-   planned.
+   The reviewer reads the plan and uses it for scope
+   verification — checking that each deliverable matches
+   what was planned. Sending the plan before any task
+   starts gives the reviewer the full context needed for
+   scope verification throughout execution.
 
 9. **Add the plan to the queue.** After the plan is
    committed, it enters the queue. If other plans are
@@ -309,22 +307,60 @@ sends the work to the reviewer. The developer handles the
 rejection loop with the reviewer directly — this is opaque
 to you. You do not need to monitor or relay these messages.
 
-The reviewer messages you on approval with the code commit
-SHA. The reviewer also updates the plan file (marks the task
-done, records the SHA) and commits the plan update — you do
-not touch the plan file during task execution.
+The reviewer messages you on approval with:
+- The composed commit message
+- The baseline commit SHA (from the developer's handoff)
+- The verified file list
+- A review summary confirming build and tests pass
 
 ### After Reviewer Approval
 
-Steps 1–3 below execute after every task approval — do not
-skip step 2 based on task complexity or developer
+Steps 1–8 below execute after every task approval — do not
+skip any step based on task complexity or developer
 performance.
 
 When the reviewer reports approval:
 
 1. **Check for supersession** — verify the current plan is
    still valid before proceeding.
-2. **Cycle the team** if more tasks remain. Delete the
+
+2. **Squash WIP commits.** Run
+   `git reset <baseline-sha>` using the baseline SHA from
+   the reviewer's approval message. This moves HEAD back
+   to the baseline and unstages all WIP-committed changes
+   into the working tree — all changes are now unstaged,
+   and step 5 controls exactly what gets committed. Do not
+   use `--soft` — it leaves WIP changes staged, and
+   `git commit` would include all of them regardless of
+   the file list in step 5. If the approval message
+   indicates no baseline SHA (no WIP commits were made),
+   skip this step.
+
+3. **Verify the file list.** Run `git status --porcelain`
+   and confirm it matches the verified file list from the
+   reviewer's approval message. The reviewer already
+   cross-referenced the developer's reported files — this
+   is a final consistency check after the squash.
+
+4. **Update the plan.** Mark all checkboxes for the
+   completed task — both the step-level checkbox and every
+   sub-task checkbox within the task description.
+
+5. **Stage and commit.** Stage every file from the verified
+   file list AND the plan file using `git add` with
+   specific paths. Never use `git add .` or `git add -A`.
+   Commit with the reviewer's composed commit message.
+   This produces a single commit covering both code
+   changes and plan progress.
+
+6. **Record the commit SHA in the plan.** Run
+   `git rev-parse HEAD` to get the commit SHA. Edit the
+   plan file to record it in the completed task section,
+   then amend: `git commit --amend --no-edit`. This keeps
+   full traceability — each task in the plan links to its
+   commit — without adding a separate plan-update commit.
+
+7. **Cycle the team** if more tasks remain. Delete the
    current team via `TeamDelete`, then recreate it via
    `TeamCreate` with all four agents. This gives every
    agent — especially the developer — a clean context
@@ -344,7 +380,8 @@ When the reviewer reports approval:
    planning step 8. The reviewer reads the plan file
    (which carries checkboxes and SHAs from prior tasks)
    to resume scope tracking.
-3. **Send the next task** to the developer, or proceed to
+
+8. **Send the next task** to the developer, or proceed to
    plan completion if all tasks are done. Include relevant
    cross-task context (patterns established, decisions
    made, constraints discovered) — you are the only agent
@@ -357,14 +394,17 @@ When the reviewer reports approval:
 - Codebase analysis and planning
 - Plan queue management (ordering, supersession)
 - Sending tasks to the developer
+- Committing approved work with plan updates (single commit
+  per task) — squash WIP, update plan, stage, commit
+- Plan progress tracking (marking checkboxes, recording
+  commit SHAs)
 - Plan status changes (Completed, Canceled)
 
 **You delegate:**
 - All implementation (developer) — source code and tests
-- Code review, scope verification, plan tracking, and
-  commits (reviewer) — the reviewer verifies each
-  deliverable against the plan and owns plan-file updates
-  during execution
+- Code review and scope verification (reviewer) — the
+  reviewer verifies each deliverable against the plan and
+  composes the commit message
 - Test design specification (test-engineer) — you direct
   consultation at dispatch time; the developer communicates
   with the advisor and may add consultations but not remove
@@ -451,9 +491,9 @@ When all tasks in a plan are committed:
 
 2. **Update the plan status** to "Completed" and commit:
    `docs(<scope>): mark plan complete`. Task-level progress
-   (checkboxes, SHAs) was committed by the reviewer during
-   execution — this final status update is a plan-level
-   decision that you own.
+   (checkboxes, SHAs) was recorded in each task's commit
+   during execution — this final status update is the
+   plan-level closure.
 3. Report to the user:
    - Summary of what was implemented
    - List of commits (SHAs and messages)
@@ -477,8 +517,9 @@ feature or task. When the user requests a new task:
 
 ## Skill-Output Commits
 
-The reviewer makes all code commits. The one exception:
-**you commit files that a skill's `SKILL.md` explicitly
+You make all commits — code commits (after reviewer
+approval) and skill infrastructure outputs. For skill
+outputs, **commit files that a skill's `SKILL.md` explicitly
 names as outputs — immediately after the skill completes.**
 
 The skill procedure determines what is written; you execute

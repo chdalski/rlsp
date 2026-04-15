@@ -11,9 +11,11 @@ description: >
 Prepare the `.ai/` directories before writing any plan
 files or storing memories. The lead writes plans to the
 configured plans directory and consults its `CLAUDE.md`
-for the required format — without both, the planning flow
-breaks. The memory directory must exist for Claude Code's
-auto-memory system to persist memories across sessions.
+for the required format — without the directory, the
+CLAUDE.md pointer, and the format guide, the planning
+flow breaks. The memory directory must exist for Claude
+Code's auto-memory system to persist memories across
+sessions.
 
 **All steps below are mandatory — execute every step,
 every time.** Do not skip step 2 because the directory
@@ -48,25 +50,35 @@ skip step 3 because the memory directory already exists.
    Claude Code merges both files at startup, so the
    settings take effect immediately.
 
-2. **Sync the plan format guide** — always read both files
+2. **Sync the plans directory files** — sync two files
+   from `.claude/skills/ensure-ai-dirs/` to
+   `<plansDirectory>`. Always read both source and target
    and compare them:
 
-   a. Read the canonical template from
-      `.claude/skills/ensure-ai-dirs/plan-format.md`.
-   b. Read `<plansDirectory>/CLAUDE.md` if it exists.
-   c. If the file does not exist or its content differs
+   a. **Plan format guide** — read the canonical template
+      from `.claude/skills/ensure-ai-dirs/plan-format.md`.
+      Read `<plansDirectory>/plan-format.md` if it exists.
+      If the file does not exist or its content differs
       from the template, write the template to
+      `<plansDirectory>/plan-format.md` using Write.
+
+   b. **Plans CLAUDE.md** — read the template from
+      `.claude/skills/ensure-ai-dirs/claude-md-template.md`.
+      Read `<plansDirectory>/CLAUDE.md` if it exists. If
+      the file does not exist or its content differs from
+      the template, write the template to
       `<plansDirectory>/CLAUDE.md` using Write.
-   d. Report whether an update was written or the files
+
+   c. Report whether updates were written or the files
       were already identical.
 
    This step is unconditional — execute it every time,
-   even if the format guide appears current. A previous
-   session may have written the guide from a stale
-   template, and the only way to detect drift is to
-   compare against the canonical source. Plans must follow
-   this format so future sessions can parse them without
-   guessing at conventions.
+   even if the files appear current. The CLAUDE.md is
+   intentionally slim — it points agents to plan-format.md
+   rather than embedding the full format guide, so agents
+   reading plans do not load the format guide into their
+   context unnecessarily. Only the agent writing plans
+   reads plan-format.md on demand.
 
 3. **Ensure the memory directory exists** — create
    `<autoMemoryDirectory>` if it does not exist. No format

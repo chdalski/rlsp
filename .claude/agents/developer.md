@@ -87,11 +87,12 @@ When you receive a task:
    `git diff --name-only` and
    `git ls-files --others --exclude-standard` to record
    which files are already modified or untracked before you
-   start. The `HEAD` SHA is your baseline commit — the
-   review agent uses it to squash WIP commits into a single
+   start. The `HEAD` SHA is your baseline commit — it is
+   used downstream to squash your WIP commits into a single
    clean commit via `git reset <baseline-sha>`. Without it,
-   the review agent cannot identify which commits belong to
-   this task. The file snapshot lets you identify exactly which
+   the downstream agents cannot identify which commits
+   belong to this task. The file snapshot lets you identify
+   exactly which
    files your work changed, excluding pre-existing
    modifications that belong to other work.
 5. **Independently assess risk and uncertainty** using the
@@ -171,9 +172,8 @@ entire pipeline.
   destructive git operations — work that exists only in
   the working tree is a single point of failure. Never
   use `git add -A` — stage specific files to avoid
-  committing secrets or build artifacts. The review agent
-  squashes WIP commits into a single clean commit at
-  approval time.
+  committing secrets or build artifacts. WIP commits are
+  squashed into a single clean commit after approval.
 - Keep changes focused. Only modify what is necessary.
 - **Deliver every target in the task.** Do not skip, defer,
   or deprioritize targets because they are hard. Do not
@@ -261,13 +261,13 @@ entire pipeline.
    `SendMessage` with:
    - Which task slice this covers
    - **Baseline commit SHA** — the `HEAD` SHA from task
-     start. The review agent uses this to squash WIP
-     commits into a single clean commit.
+     start, used downstream to squash WIP commits into a
+     single clean commit.
    - **Every file you changed** (the delta from step 3
      above) — not just the files listed in the task
      description. Omitting incidental formatter changes
-     causes the review agent to commit a subset, leaving
-     a dirty tree after a "clean" commit.
+     causes a subset to be committed, leaving a dirty
+     tree after a "clean" commit.
    - What tests were added or modified
    - Advisor sign-off status (which advisors signed off,
      or "no advisors consulted" if skipped)
@@ -288,10 +288,10 @@ and all tests. No ignored or skipped tests. All must pass.
 
 ## What You Do Not Do
 
-- **Do not make the final commit.** The review agent
-  handles the final staging and commit. WIP commits
-  during implementation are expected — the review agent
-  squashes them at approval time.
+- **Do not make the final commit.** The requester handles
+  the final staging and commit after review approval. WIP
+  commits during implementation are expected — they are
+  squashed into a single clean commit after approval.
 - **Do not communicate with the user.** The requester is
   the interface to the user. If you need user input,
   message the requester.
