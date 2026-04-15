@@ -297,40 +297,51 @@ impl<'input> Lexer<'input> {
                     // (The body on subsequent lines is handled by the normal scalar
                     // dispatch path after DocumentStart is emitted.)
                 }
-                // TODO(architecture): scan_plain_line_block only tokenizes plain scalars.
-                // Inline content after `---` that starts with `'` or `"` (Task 7) is
-                // currently emitted as a Plain scalar with the quotes as literal chars.
-                // Same gap exists for `|` and `>` (Tasks 8/9) and flow collections
-                // (Task 13). Fix candidate: restructure to dispatch via the normal
-                // scalar try-chain instead of pre-extracting. Deferred because it
-                // requires re-running the security review for escape handling.
-                let scanned = scan_plain_line_block(inline);
-                if scanned.is_empty() {
-                    // First character cannot start a plain scalar (e.g. `&`, `!`,
-                    // `*`, `%`, `{`, `[`) — invalid inline content after `---`.
-                    self.marker_inline_error = Some(Error {
+                // For inline content starting with `!` (tag), `"` (double-quoted
+                // scalar), or `'` (single-quoted scalar), prepend it as a synthetic
+                // line so the normal event dispatch handles it correctly.
+                // Plain-scalar scanning would mis-tokenize these: `!` is a YAML
+                // indicator, and quotes are literal characters to `scan_plain_line_block`.
+                let first_inline_byte = inline.as_bytes().first().copied();
+                if matches!(first_inline_byte, Some(b'!' | b'"' | b'\'')) {
+                    // inline is a borrowed slice of the original input (zero-copy).
+                    let synthetic = Line {
+                        content: inline,
+                        offset: inline_start.byte_offset,
+                        indent: inline_start.column,
+                        break_type: line.break_type,
                         pos: inline_start,
-                        message: "invalid content after document-start marker '---'".into(),
-                    });
+                    };
+                    self.buf.prepend_line(synthetic);
                 } else {
-                    // Check for residual content after the plain scalar (e.g.
-                    // `--- key: value` where `: value` is left over).  Any
-                    // non-whitespace residual that is not a comment is invalid.
-                    let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
-                    if !residual.is_empty() && !residual.starts_with('#') {
+                    let scanned = scan_plain_line_block(inline);
+                    if scanned.is_empty() {
+                        // First character cannot start a plain scalar (e.g. `&`,
+                        // `*`, `%`, `{`, `[`) — invalid inline content after `---`.
                         self.marker_inline_error = Some(Error {
                             pos: inline_start,
                             message: "invalid content after document-start marker '---'".into(),
                         });
                     } else {
-                        let inline_end = crate::pos::advance_within_line(inline_start, scanned);
-                        self.inline_scalar = Some((
-                            Cow::Borrowed(scanned),
-                            Span {
-                                start: inline_start,
-                                end: inline_end,
-                            },
-                        ));
+                        // Check for residual content after the plain scalar (e.g.
+                        // `--- key: value` where `: value` is left over).  Any
+                        // non-whitespace residual that is not a comment is invalid.
+                        let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
+                        if !residual.is_empty() && !residual.starts_with('#') {
+                            self.marker_inline_error = Some(Error {
+                                pos: inline_start,
+                                message: "invalid content after document-start marker '---'".into(),
+                            });
+                        } else {
+                            let inline_end = crate::pos::advance_within_line(inline_start, scanned);
+                            self.inline_scalar = Some((
+                                Cow::Borrowed(scanned),
+                                Span {
+                                    start: inline_start,
+                                    end: inline_end,
+                                },
+                            ));
+                        }
                     }
                 }
             }

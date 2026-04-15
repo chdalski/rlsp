@@ -18,9 +18,11 @@ formatter KNOWN_FAILURES to 0.
 Acceptance criteria:
 1. Loader conformance test exists and runs against the
    full yaml-test-suite
-2. All loader bugs listed in this plan are fixed
+2. All loader bugs are fixed — 0 loader KNOWN_FAILURES,
+   constant deleted
 3. Formatter workarounds for loader bugs are removed
-4. Formatter conformance KNOWN_FAILURES reaches 0
+4. All formatter bugs are fixed — 0 formatter
+   KNOWN_FAILURES, constant deleted
 5. Document marker flags (`explicit_start`, `explicit_end`)
    surfaced in AST
 
@@ -118,12 +120,14 @@ UGM3, UKK6[2], W4TN, XW4D
 - [x] Restructure conformance tests into module
 - [x] Add loader conformance test against yaml-test-suite
 - [x] Surface document marker flags in AST
-- [ ] Fix loader bugs (document tags, explicit keys,
-      empty keys, anchors)
+- [x] Fix identified loader bugs (document tags, explicit
+      keys, empty keys, anchors)
+- [ ] Fix all remaining loader KNOWN_FAILURES
 - [ ] Remove formatter quote-char workaround
-- [ ] Verify formatter KNOWN_FAILURES reduction
+- [ ] Fix all remaining formatter KNOWN_FAILURES
 - [ ] Add interacting-settings fixture combinations
-- [ ] Final verification — 0 KNOWN_FAILURES
+- [ ] Final verification — 0 KNOWN_FAILURES in both
+      loader and formatter
 
 ## Tasks
 
@@ -179,19 +183,19 @@ the `Document` struct and populate from events.
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 - [x] Parser conformance remains 351/351
 
-### Task 4: Fix loader bugs — document tags and inline scalars
+### Task 4: Fix document tags and inline scalars — ac07843
 
-Fix loader handling of document-level tags and inline
-quoted scalars on `---` lines.
+Fix lexer handling of inline content after `---` starting
+with tags or quotes — these were mis-scanned as plain
+scalars by `scan_plain_line_block`.
 
-- [ ] `--- !!set` / `--- !!map` — document tag must go on
-      the mapping's tag field, not become a scalar key
-- [ ] `--- !!omap` — same pattern
-- [ ] `--- "quoted"` inline scalars — loader must produce
-      correct DoubleQuoted scalar (not garbled Plain)
-- [ ] Remove KNOWN_FAILURES entries for fixed cases
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
-- [ ] Loader conformance: 2XXW, 35KP, J7PZ now pass
+- [x] `--- !!set` / `--- !!map` — fixed (2XXW, 35KP)
+- [x] `--- !!omap` — fixed (J7PZ)
+- [x] `--- "quoted"` inline scalars — fixed (C4HZ)
+- [x] Remove KNOWN_FAILURES entries for fixed cases
+- [x] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Loader conformance: 2XXW, 35KP, J7PZ + 6LVF, 9MQT
+      now pass (155 → 150)
 
 ### Task 5: Fix loader bugs — explicit keys and empty keys
 
@@ -221,7 +225,24 @@ Fix loader handling of anchors in complex contexts.
 - [ ] Loader conformance: E76Z, PW8X, FTA2, FH7J, 6M2F
       now pass
 
-### Task 7: Remove formatter quote-char workaround
+### Task 7: Fix all remaining loader KNOWN_FAILURES
+
+Tasks 4-6 fix the 13 loader bugs identified during the
+previous plan. The loader conformance test (Task 2) found
+155 total failures. Fix every remaining failure and delete
+the KNOWN_FAILURES constant.
+
+- [ ] Run loader conformance, record remaining failures
+      after Tasks 4-6
+- [ ] Categorize remaining failures by root cause
+- [ ] Fix all remaining loader bugs
+- [ ] Loader KNOWN_FAILURES list is empty after this task
+- [ ] Delete the KNOWN_FAILURES constant and its skip logic
+      from `conformance/loader.rs` — every test-suite case
+      must pass unconditionally
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
+
+### Task 8: Remove formatter quote-char workaround
 
 With the loader fixed, remove the Plain branch quote-char
 guard from `formatter.rs` (commit `25b1130`).
@@ -237,7 +258,7 @@ guard from `formatter.rs` (commit `25b1130`).
       loader-bug rationale, describe the general case
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 8: Verify formatter KNOWN_FAILURES reduction
+### Task 9: Fix all remaining formatter KNOWN_FAILURES
 
 After loader fixes, re-run formatter conformance and fix
 all remaining failures. The formatter already has
@@ -255,7 +276,7 @@ should now pass or need only formatter-side adjustments.
       from `formatter_conformance.rs` — every test-suite
       case must pass unconditionally
 
-### Task 9: Add interacting-settings fixture combinations
+### Task 10: Add interacting-settings fixture combinations
 
 Test formatter behavior when multiple settings interact.
 
@@ -267,10 +288,10 @@ Test formatter behavior when multiple settings interact.
 - [ ] `use_tabs` + `tab_width`
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 10: Final verification
+### Task 11: Final verification
 
-- [ ] Formatter KNOWN_FAILURES is 0
-- [ ] Loader conformance passes
+- [ ] Formatter KNOWN_FAILURES constant deleted
+- [ ] Loader KNOWN_FAILURES constant deleted
 - [ ] Stream conformance remains 351/351
 - [ ] Update VS Code extension `package.json` and
       `config.ts` if any settings changed
@@ -291,6 +312,7 @@ Test formatter behavior when multiple settings interact.
 - **Loader changes ARE valid** — the loader has genuine
   bugs producing incorrect ASTs from correct event streams.
   These are not formatter accommodations.
-- **Acceptance criterion is 0 KNOWN_FAILURES** — but only
-  after the loader is conformant, so the metric measures
-  what it claims to measure
+- **Acceptance criterion is 0 KNOWN_FAILURES in BOTH
+  loader and formatter** — both constants deleted after
+  reaching 0, so future agents cannot use them as escape
+  hatches
