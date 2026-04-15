@@ -79,6 +79,11 @@
           "default": false,
           "description": "Use single quotes in formatted output"
         },
+        "rlsp-yaml.formatBracketSpacing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add spaces inside flow braces: { a: 1 } vs {a: 1}. Default true."
+        },
         "rlsp-yaml.formatEnforceBlockStyle": {
           "type": "boolean",
           "default": false,

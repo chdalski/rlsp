@@ -91,6 +91,8 @@ pub struct Settings {
     /// When `true`, the formatter removes duplicate mapping keys before
     /// rendering, keeping the last occurrence. Defaults to `false` when absent.
     pub format_remove_duplicate_keys: Option<bool>,
+    /// Add spaces inside flow braces: `{ a: 1 }` vs `{a: 1}`. Defaults to `true` when absent.
+    pub format_bracket_spacing: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -1047,7 +1049,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
-            bracket_spacing: true,
+            bracket_spacing: settings
+                .as_ref()
+                .and_then(|s| s.format_bracket_spacing)
+                .unwrap_or(true),
             yaml_version,
             format_enforce_block_style: settings
                 .as_ref()
@@ -1128,7 +1133,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
-            bracket_spacing: true,
+            bracket_spacing: settings
+                .as_ref()
+                .and_then(|s| s.format_bracket_spacing)
+                .unwrap_or(true),
             yaml_version,
             format_enforce_block_style: settings
                 .as_ref()

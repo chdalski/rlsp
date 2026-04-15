@@ -191,6 +191,35 @@ with existing infrastructure.
 **Comment:** Depends on full document formatting infrastructure. Full document formatted internally, requested range lines returned as edits.
 **Tier:** 3
 
+### Formatter Conformance — 100% Round-Trip [completed]
+
+**Description:** The formatter achieves 100% conformance on the
+YAML Test Suite: all 351 stream cases and all 375 loader cases pass
+after a format-then-parse round-trip. Formatted output re-parses to
+an AST identical to the original.
+**Complexity:** High
+**Comment:** Conformance required fixing document marker handling,
+block scalar edge cases, and quoting decisions for reserved keywords.
+The `rlsp-yaml-parser` loader was extended with `explicit_start` and
+`explicit_end` fields so the formatter can faithfully preserve `---`
+and `...` markers.
+**Tier:** 1
+
+### Document Marker Handling in Formatter [completed]
+
+**Description:** The formatter preserves explicit `---` document-start
+and `...` document-end markers from the source. When the original
+document used explicit markers, formatted output includes them; when
+no markers were present, none are added. The `Document<Span>` AST
+exposes `explicit_start` and `explicit_end` boolean fields populated
+by the loader.
+**Complexity:** Low
+**Comment:** Required for formatter round-trip conformance — stripping
+or adding markers changes the YAML document structure as observed by
+strict parsers. Sourced from the parser AST rather than scanning raw
+text.
+**Tier:** 1
+
 ### Full Document Formatting [completed]
 
 **Description:** Implement `textDocument/formatting` to reformat entire YAML documents using Wadler-Lindig pretty-printing engine.

@@ -8,6 +8,7 @@ export interface ServerSettings {
   formatValidation: boolean;
   formatPrintWidth: number;
   formatSingleQuote: boolean;
+  formatBracketSpacing: boolean;
   httpProxy: string;
   colorDecorators: boolean;
   schemas: Record<string, string>;
@@ -29,6 +30,7 @@ export function getConfig(): ServerSettings {
     formatValidation: cfg.get('formatValidation', true),
     formatPrintWidth: cfg.get('formatPrintWidth', 80),
     formatSingleQuote: cfg.get('formatSingleQuote', false),
+    formatBracketSpacing: cfg.get('formatBracketSpacing', true),
     httpProxy: cfg.get('httpProxy', ''),
     colorDecorators: cfg.get('colorDecorators', true),
     schemas: cfg.get<Record<string, string>>('schemas', {}),

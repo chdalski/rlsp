@@ -178,6 +178,35 @@ loader returns a `Vec<Document<Span>>`.
 anchors do not cross document boundaries.
 **Tier:** 1
 
+### Loader Conformance — Full AST Fidelity [completed]
+
+**Description:** The `load()` API passes 375/375 loader conformance
+cases derived from the YAML Test Suite. Every valid input that the
+event stream accepts is correctly materialized into a `Vec<Document>`,
+preserving scalars, collections, anchors, tags, multi-document
+streams, and empty documents.
+**Complexity:** High
+**Comment:** A correct event stream does not automatically imply a
+correct AST — the loader is a separate conformance surface that must
+be tested independently. Gaps found and fixed include empty-document
+handling and anchor/alias resolution edge cases.
+**Tier:** 1
+
+### Document Marker Flags in AST [completed]
+
+**Description:** `Document<Loc>` exposes two new boolean fields:
+`explicit_start` (set when the document begins with a `---` marker)
+and `explicit_end` (set when the document ends with a `...` marker).
+The flags are populated by the loader from `DocumentStart`/
+`DocumentEnd` events and preserved in the AST for downstream consumers
+(e.g. the formatter round-trips these markers faithfully).
+**Complexity:** Low
+**Comment:** Required for formatter conformance — documents with
+explicit `---`/`...` markers must have them preserved in formatted
+output. The flags are sourced from the event stream, so no extra
+parsing is needed; the loader already consumed both events.
+**Tier:** 1
+
 ### YAML 1.2 Conformance [completed]
 
 **Description:** The parser passes 368/368 cases in the YAML Test
