@@ -24,6 +24,7 @@ impl<'input> EventIter<'input> {
             directive_scope: DirectiveScope::default(),
             root_node_emitted: false,
             explicit_key_pending: false,
+            complex_key_inline: None,
             property_origin_indent: None,
         }
     }
@@ -43,13 +44,25 @@ impl<'input> EventIter<'input> {
                     CollectionEntry::Mapping(_, _, _) => Event::MappingEnd,
                 };
                 self.queue.push_back((ev, zero_span(pos)));
-                // After closing a collection, the parent mapping (if any)
-                // transitions from Value phase to Key phase.  The parent
-                // sequence (if any) marks its current item as completed.
+                // After closing a collection, update the parent:
+                // - Mapping in Value phase: transition to Key (closed collection
+                //   was the value).
+                // - Mapping in Key phase with complex_key_inline set at this
+                //   indent: transition to Value (closed collection was the key).
+                // - Sequence: mark current item as completed.
                 match self.coll_stack.last_mut() {
-                    Some(CollectionEntry::Mapping(_, phase, _)) => {
+                    Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) => {
                         if *phase == MappingPhase::Value {
                             *phase = MappingPhase::Key;
+                        } else if *phase == MappingPhase::Key
+                            && self.complex_key_inline == Some(*parent_col)
+                        {
+                            // The closed collection was the key of this mapping
+                            // (e.g. `? {a: b}\n: val` or `?\n- a\n: val`).
+                            // Transition to Value phase and clear the flag.
+                            *phase = MappingPhase::Value;
+                            *has_had_value = true;
+                            self.complex_key_inline = None;
                         }
                     }
                     Some(CollectionEntry::Sequence(_, has_had_item)) => {

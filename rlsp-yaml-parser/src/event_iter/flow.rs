@@ -559,11 +559,21 @@ impl<'input> EventIter<'input> {
                     }));
                 }
 
-                // If a tag or anchor is pending but no scalar was emitted yet,
-                // the comma terminates an implicit empty-scalar node.  Emit it
-                // so the pending properties are attached to the correct node
-                // rather than carried forward to the next entry.
-                if pending_flow_tag.is_some() || pending_flow_anchor.is_some() {
+                // Emit an implicit empty-scalar node when the comma terminates
+                // an entry with no scalar yet: either a pending tag/anchor needs
+                // attachment, or a flow mapping is in Value phase (key was emitted
+                // but no value scalar followed before the comma).
+                let in_mapping_value_phase = matches!(
+                    flow_stack.last(),
+                    Some(FlowFrame::Mapping {
+                        phase: FlowMappingPhase::Value,
+                        ..
+                    })
+                );
+                if pending_flow_tag.is_some()
+                    || pending_flow_anchor.is_some()
+                    || in_mapping_value_phase
+                {
                     let empty_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     events.push((
                         Event::Scalar {
@@ -886,11 +896,11 @@ impl<'input> EventIter<'input> {
                             } => {
                                 *last_was_plain = false;
                                 if *phase == FlowMappingPhase::Key {
-                                    // If a tag or anchor is pending but no key scalar was
-                                    // emitted yet, the `:` terminates an implicit empty key.
-                                    // Emit the empty key scalar now so the pending properties
-                                    // are attached to the key, not carried to the value.
-                                    if pending_flow_tag.is_some() || pending_flow_anchor.is_some() {
+                                    // When `:` arrives in Key phase and no key scalar has
+                                    // been emitted yet (`has_value = false`), emit an
+                                    // implicit empty key scalar (possibly with a pending
+                                    // tag/anchor attached).
+                                    if !*has_value {
                                         let key_pos =
                                             abs_pos(cur_base_pos, cur_content, pos_in_line);
                                         events.push((

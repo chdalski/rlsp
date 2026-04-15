@@ -120,6 +120,15 @@ struct EventIter<'input> {
     /// treated as the explicit key's content rather than triggering the
     /// "invalid block sequence entry" guard.
     explicit_key_pending: bool,
+    /// When `Some(indent)`, a `? inline-content` explicit key was consumed for the
+    /// mapping at column `indent`.  The inline content opens (or is) a complex node
+    /// (sub-mapping or sub-sequence), so the outer mapping stays in Key phase after
+    /// the complex node closes.  The stored indent distinguishes the outer mapping
+    /// from any inner mappings that advance to Value phase while the flag is active.
+    /// Used to allow the subsequent `:` value-indicator line to be recognised as
+    /// the explicit value indicator (rather than as an implicit empty-key entry).
+    /// Cleared when the outer mapping at `indent` advances to Value phase.
+    complex_key_inline: Option<usize>,
     /// When a tag or anchor appears inline on a physical line (e.g. `!!str &a key:`),
     /// the key content is prepended as a synthetic line with the key's column as its
     /// indent.  This field records the indent of the ORIGINAL physical line so that

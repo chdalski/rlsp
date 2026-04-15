@@ -94,6 +94,13 @@ than to maintain the standard.
   future agent to regress than to fix?
 - Are "temporary" constructs given explicit removal
   criteria and removal tasks?
+- If the plan uses an allowlist or skip list (e.g.,
+  `KNOWN_FAILURES`), does it state that entries may only
+  be removed, never added? Without this, an implementor
+  can allowlist regressions instead of fixing them —
+  the `no-silent-target-weakening` rule prohibits this
+  at runtime, but stating it in the plan makes the
+  constraint visible to all agents.
 
 ## 6. Cross-Reference Staleness
 
@@ -125,16 +132,18 @@ done."
 
 ## 8. Goal Covers User Request
 
-The Goal must cover the full scope of the User Request.
+The Goal must cover the full scope of the user's original
+request. The user request is provided in the launch prompt
+— compare it against the Goal section.
+
 A goal that sounds comprehensive but is narrower than what
 the user asked for is the most damaging plan defect — it
 passes every other check while silently reducing scope.
 
-- Does the plan include a User Request section?
-- Compare the User Request to the Goal. Does the Goal
-  cover everything the user asked for?
-- If the Goal is intentionally narrower than the User
-  Request, is the narrowing explained in the Decisions
+- Compare the user request (from the launch prompt) to the
+  Goal. Does the Goal cover everything the user asked for?
+- If the Goal is intentionally narrower than the user
+  request, is the narrowing explained in the Decisions
   section? Unexplained narrowing is silent scope
   reduction.
 - Watch for subtle narrowing: the user says "all tests
@@ -170,8 +179,8 @@ plan-format.md.
 
 - Does the plan include all required header fields
   (Repository, Status, Created)?
-- Does the plan include all required sections (User
-  Request, Goal, Context, Steps, Tasks, Decisions)?
+- Does the plan include all required sections (Goal,
+  Context, Steps, Tasks, Decisions)?
 - Are Steps written as checkboxes (`- [ ]` / `- [x]`)?
 - Are Tasks ordered by dependency (foundational first)?
 - Does the filename follow the `YYYY-MM-DD-slug.md`

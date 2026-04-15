@@ -1226,3 +1226,477 @@ fn cs_6_nested_block_mapping_inside_flow_sequence() {
     };
     assert_eq!(*map_style, CollectionStyle::Flow);
 }
+
+// ---------------------------------------------------------------------------
+// Group A — M2N8: explicit key (`?`) inside a block sequence item
+// ---------------------------------------------------------------------------
+
+// A-1 (spike): sequence item `- ? : x` — per YAML spec, `? : x` is a mapping
+// with empty key and value "x", used as the complex key; the outer mapping
+// entry has that inner mapping as its key and an empty scalar as its value.
+#[test]
+fn explicit_key_sequence_item_correct_entry_count() {
+    // `- ? : x` → Sequence[ Mapping{ key=Mapping{""->x}, value="" } ]
+    let node = load_one("- ? : x\n");
+    let Node::Sequence { items, .. } = &node else {
+        panic!("expected Sequence root; got: {node:?}");
+    };
+    assert_eq!(items.len(), 1, "expected 1 item; got {}", items.len());
+    let Node::Mapping { entries, .. } = &items[0] else {
+        panic!("expected Mapping item; got: {:?}", items[0]);
+    };
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected 1 mapping entry; got {}",
+        entries.len()
+    );
+    // The key is the inner mapping representing `? : x`
+    let (k, _v) = &entries[0];
+    let Node::Mapping { entries: inner, .. } = k else {
+        panic!("key must be inner Mapping (complex key); got: {k:?}");
+    };
+    assert_eq!(inner.len(), 1, "inner mapping must have 1 entry");
+    let (ik, iv) = &inner[0];
+    assert_eq!(
+        scalar_value(ik),
+        "",
+        "inner key must be empty string; got: {ik:?}"
+    );
+    assert_eq!(
+        scalar_value(iv),
+        "x",
+        "inner value must be 'x'; got: {iv:?}"
+    );
+}
+
+// A-2: sequence item with explicit scalar key — `- ? k\n  : v`
+// Key is a plain scalar "k", value is a plain scalar "v".
+#[test]
+fn explicit_key_sequence_item_inline_key_content() {
+    let node = load_one("- ? k\n  : v\n");
+    let Node::Sequence { items, .. } = &node else {
+        panic!("expected Sequence root; got: {node:?}");
+    };
+    assert_eq!(items.len(), 1);
+    let Node::Mapping { entries, .. } = &items[0] else {
+        panic!("expected Mapping item; got: {:?}", items[0]);
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert_eq!(scalar_value(k), "k");
+    assert_eq!(scalar_value(v), "v");
+}
+
+// A-3: two sequence items, each with explicit scalar key — item count is 2
+#[test]
+fn explicit_key_two_sequence_items_correct_count() {
+    let node = load_one("- ? a\n  : 1\n- ? b\n  : 2\n");
+    let Node::Sequence { items, .. } = &node else {
+        panic!("expected Sequence root; got: {node:?}");
+    };
+    assert_eq!(
+        items.len(),
+        2,
+        "expected 2 sequence items; got {}",
+        items.len()
+    );
+    for (idx, item) in items.iter().enumerate() {
+        let Node::Mapping { entries, .. } = item else {
+            panic!("item {idx} must be Mapping; got: {item:?}");
+        };
+        assert_eq!(
+            entries.len(),
+            1,
+            "item {idx} mapping must have 1 entry; got {}",
+            entries.len()
+        );
+    }
+}
+
+// A-4: sequence item, bare `?` with no key content and no value
+// → Sequence[ Mapping{entries:[]} ] (empty mapping, no entry emitted for bare ?)
+#[test]
+fn explicit_key_sequence_item_no_value() {
+    let node = load_one("- ?\n");
+    let Node::Sequence { items, .. } = &node else {
+        panic!("expected Sequence root; got: {node:?}");
+    };
+    assert_eq!(items.len(), 1, "expected 1 sequence item");
+    // The parser currently emits an empty Mapping for `- ?` (0 entries).
+    // The key invariant: no crash, and the item is a Mapping (not a Scalar).
+    assert!(
+        matches!(&items[0], Node::Mapping { .. }),
+        "bare ? sequence item must be a Mapping; got: {:?}",
+        items[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Group B — 6PBE: zero-indented block sequences as explicit-key content
+// ---------------------------------------------------------------------------
+
+// B-1: 6PBE — zero-indented block sequences as both key and value of an explicit mapping entry.
+// `?\n- a\n- b\n:\n- c\n- d\n` → Mapping{ key=Sequence["a","b"], value=Sequence["c","d"] }
+#[test]
+fn explicit_key_zero_indented_sequence_as_value() {
+    let node = load_one("?\n- a\n- b\n:\n- c\n- d\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected 1 mapping entry; got {}",
+        entries.len()
+    );
+    let (k, v) = &entries[0];
+    let Node::Sequence { items: k_items, .. } = k else {
+        panic!("key must be Sequence; got: {k:?}");
+    };
+    assert_eq!(
+        k_items.len(),
+        2,
+        "key sequence must have 2 items; got {}",
+        k_items.len()
+    );
+    assert_eq!(scalar_value(&k_items[0]), "a");
+    assert_eq!(scalar_value(&k_items[1]), "b");
+    let Node::Sequence { items: v_items, .. } = v else {
+        panic!("value must be Sequence; got: {v:?}");
+    };
+    assert_eq!(
+        v_items.len(),
+        2,
+        "value sequence must have 2 items; got {}",
+        v_items.len()
+    );
+    assert_eq!(scalar_value(&v_items[0]), "c");
+    assert_eq!(scalar_value(&v_items[1]), "d");
+}
+
+// B-2: bare `?` then block sequence at col 0 is the complex key — no phantom empty key scalar
+// `?\n- seq1\n:\n` → Mapping{ key=Sequence["seq1"], value=Scalar"" }
+// The critical invariant: exactly 1 entry (no spurious empty-key entry before it).
+#[test]
+fn explicit_key_zero_indented_sequence_as_key_no_phantom_empty_key() {
+    let node = load_one("?\n- seq1\n:\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        1,
+        "must be exactly 1 entry — no phantom empty key; got {}",
+        entries.len()
+    );
+    let (k, _) = &entries[0];
+    let Node::Sequence { items, .. } = k else {
+        panic!("key must be Sequence; got: {k:?}");
+    };
+    assert_eq!(
+        items.len(),
+        1,
+        "key sequence must have 1 item; got {}",
+        items.len()
+    );
+}
+
+// B-3: second plain mapping entry following a zero-indented sequence key is parsed correctly
+// `?\n- seq1\n: v1\nnext: v2\n` → Mapping{ (Seq["seq1"], "v1"), ("next", "v2") }
+#[test]
+fn mapping_entry_following_zero_indented_sequence_key() {
+    let node = load_one("?\n- seq1\n: v1\nnext: v2\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 entries; got {}",
+        entries.len()
+    );
+    let (_, v0) = &entries[0];
+    assert_eq!(
+        scalar_value(v0),
+        "v1",
+        "first value must be 'v1'; got: {v0:?}"
+    );
+    let (k1, v1) = &entries[1];
+    assert_eq!(scalar_value(k1), "next");
+    assert_eq!(scalar_value(v1), "v2");
+}
+
+// ---------------------------------------------------------------------------
+// Group C — KK5P: multiple explicit key entries in the same mapping
+// ---------------------------------------------------------------------------
+
+// C-1: two consecutive explicit key entries at root level
+#[test]
+fn explicit_key_two_entries_root_mapping() {
+    let node = load_one("? a\n: 1\n? b\n: 2\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 entries; got {}",
+        entries.len()
+    );
+    let (k0, v0) = &entries[0];
+    assert_eq!(scalar_value(k0), "a");
+    assert_eq!(scalar_value(v0), "1");
+    let (k1, v1) = &entries[1];
+    assert_eq!(scalar_value(k1), "b");
+    assert_eq!(scalar_value(v1), "2");
+}
+
+// C-2: three explicit key entries — no phantom entries
+#[test]
+fn explicit_key_three_entries_no_phantom() {
+    let node = load_one("? x\n: 10\n? y\n: 20\n? z\n: 30\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        3,
+        "expected 3 entries; got {}",
+        entries.len()
+    );
+}
+
+// C-3: explicit key mixed with implicit keys — correct entry count and values
+#[test]
+fn explicit_key_mixed_with_implicit_keys() {
+    let node = load_one("plain: 0\n? expl\n: 1\nplain2: 2\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        3,
+        "expected 3 entries; got {}",
+        entries.len()
+    );
+    let (k0, v0) = &entries[0];
+    assert_eq!(scalar_value(k0), "plain");
+    assert_eq!(scalar_value(v0), "0");
+    let (k1, v1) = &entries[1];
+    assert_eq!(scalar_value(k1), "expl");
+    assert_eq!(scalar_value(v1), "1");
+    let (k2, v2) = &entries[2];
+    assert_eq!(scalar_value(k2), "plain2");
+    assert_eq!(scalar_value(v2), "2");
+}
+
+// ---------------------------------------------------------------------------
+// Group D — S3PD: empty key with comment on the indicator line
+// ---------------------------------------------------------------------------
+
+// D-1: bare `?` followed by comment — empty string key, scalar value
+#[test]
+fn empty_key_with_comment_on_indicator_line() {
+    let node = load_one("? # this is a comment\n: value\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1, "expected 1 entry; got {}", entries.len());
+    let (k, v) = &entries[0];
+    assert_eq!(scalar_value(k), "", "key must be empty string; got: {k:?}");
+    assert_eq!(
+        scalar_value(v),
+        "value",
+        "value must be 'value'; got: {v:?}"
+    );
+}
+
+// D-2: bare `?` with comment and no following `:` — parser emits empty Mapping (0 entries)
+#[test]
+fn empty_key_with_comment_no_value() {
+    let docs = load("? # comment\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    // The parser emits an empty Mapping for `? # comment` with no `:` line.
+    // Key invariant: no crash, root is a Mapping.
+    assert!(
+        matches!(&docs[0].root, Node::Mapping { .. }),
+        "bare ? with comment must produce a Mapping root; got: {:?}",
+        docs[0].root
+    );
+}
+
+// D-3: multiple empty keys with comments — all entries present
+#[test]
+fn multiple_empty_keys_with_comments() {
+    let node = load_one("? # first\n: a\n? # second\n: b\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 entries; got {}",
+        entries.len()
+    );
+    let (k0, v0) = &entries[0];
+    assert_eq!(scalar_value(k0), "");
+    assert_eq!(scalar_value(v0), "a");
+    let (k1, v1) = &entries[1];
+    assert_eq!(scalar_value(k1), "");
+    assert_eq!(scalar_value(v1), "b");
+}
+
+// D-4: implicit empty key via `: value` at root level
+#[test]
+fn implicit_empty_key_colon_value() {
+    let node = load_one(": value\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1, "expected 1 entry; got {}", entries.len());
+    let (k, v) = &entries[0];
+    assert_eq!(scalar_value(k), "", "key must be empty string; got: {k:?}");
+    assert_eq!(scalar_value(v), "value");
+}
+
+// ---------------------------------------------------------------------------
+// Group E — NKF9: multiple documents with empty/explicit keys
+// ---------------------------------------------------------------------------
+
+// E-1: two documents, each containing a bare explicit key
+#[test]
+fn multi_doc_explicit_key_each_doc_has_one_entry() {
+    let docs = load("? a\n: 1\n---\n? b\n: 2\n").expect("load failed");
+    assert_eq!(docs.len(), 2, "expected 2 documents; got {}", docs.len());
+    let Node::Mapping { entries: e0, .. } = &docs[0].root else {
+        panic!("doc 0 root must be Mapping; got: {:?}", docs[0].root);
+    };
+    assert_eq!(e0.len(), 1);
+    assert_eq!(scalar_value(&e0[0].0), "a");
+    assert_eq!(scalar_value(&e0[0].1), "1");
+    let Node::Mapping { entries: e1, .. } = &docs[1].root else {
+        panic!("doc 1 root must be Mapping; got: {:?}", docs[1].root);
+    };
+    assert_eq!(e1.len(), 1);
+    assert_eq!(scalar_value(&e1[0].0), "b");
+    assert_eq!(scalar_value(&e1[0].1), "2");
+}
+
+// E-2: two documents — first has empty key with comment, second is plain mapping
+#[test]
+fn multi_doc_empty_key_first_doc_parses_correctly() {
+    let docs = load("? # comment\n: x\n---\nplain: y\n").expect("load failed");
+    assert_eq!(docs.len(), 2);
+    let Node::Mapping { entries: e0, .. } = &docs[0].root else {
+        panic!("doc 0 root must be Mapping; got: {:?}", docs[0].root);
+    };
+    assert_eq!(e0.len(), 1);
+    assert_eq!(scalar_value(&e0[0].0), "");
+    assert_eq!(scalar_value(&e0[0].1), "x");
+    let Node::Mapping { entries: e1, .. } = &docs[1].root else {
+        panic!("doc 1 root must be Mapping; got: {:?}", docs[1].root);
+    };
+    assert_eq!(e1.len(), 1);
+    assert_eq!(scalar_value(&e1[0].0), "plain");
+}
+
+// E-3: three documents all with explicit keys — no cross-document state leakage
+#[test]
+fn multi_doc_no_cross_document_state_leakage() {
+    let docs = load("? p\n: 1\n---\n? q\n: 2\n---\n? r\n: 3\n").expect("load failed");
+    assert_eq!(docs.len(), 3, "expected 3 documents; got {}", docs.len());
+    let keys = ["p", "q", "r"];
+    let vals = ["1", "2", "3"];
+    for (i, doc) in docs.iter().enumerate() {
+        let Node::Mapping { entries, .. } = &doc.root else {
+            panic!("doc {i} root must be Mapping; got: {:?}", doc.root);
+        };
+        assert_eq!(
+            entries.len(),
+            1,
+            "doc {i} must have 1 entry; got {}",
+            entries.len()
+        );
+        assert_eq!(scalar_value(&entries[0].0), keys[i], "doc {i} key");
+        assert_eq!(scalar_value(&entries[0].1), vals[i], "doc {i} value");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Group F — Cross-cutting regression guards
+// ---------------------------------------------------------------------------
+
+// F-1: plain implicit key still works after explicit-key fix
+#[test]
+fn plain_block_mapping_unaffected_by_explicit_key_changes() {
+    let node = load_one("key: value\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!(scalar_value(&entries[0].0), "key");
+    assert_eq!(scalar_value(&entries[0].1), "value");
+}
+
+// F-2: block sequence of plain scalars at indented level is not misidentified
+#[test]
+fn sequence_of_plain_scalars_unaffected_by_explicit_key_changes() {
+    let node = load_one("items:\n  - a\n  - b\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (k, v) = &entries[0];
+    assert_eq!(scalar_value(k), "items");
+    let Node::Sequence { items, .. } = v else {
+        panic!("value must be Sequence; got: {v:?}");
+    };
+    assert_eq!(items.len(), 2);
+}
+
+// F-3: explicit key followed by implicit key — both entries present, correct values
+#[test]
+fn explicit_key_followed_by_implicit_key_both_entries_correct() {
+    let node = load_one("? expl_key\n: expl_val\nimpl_key: impl_val\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 entries; got {}",
+        entries.len()
+    );
+    assert_eq!(scalar_value(&entries[0].0), "expl_key");
+    assert_eq!(scalar_value(&entries[0].1), "expl_val");
+    assert_eq!(scalar_value(&entries[1].0), "impl_key");
+    assert_eq!(scalar_value(&entries[1].1), "impl_val");
+}
+
+// F-4: deeply nested explicit key — no phantom entries at any level
+#[test]
+fn explicit_key_nested_inside_mapping_value_no_phantom_entries() {
+    let node = load_one("outer:\n  ? inner_key\n  : inner_val\n");
+    let Node::Mapping { entries, .. } = &node else {
+        panic!("expected Mapping root; got: {node:?}");
+    };
+    assert_eq!(entries.len(), 1);
+    let (k_outer, v_outer) = &entries[0];
+    assert_eq!(scalar_value(k_outer), "outer");
+    let Node::Mapping {
+        entries: inner_entries,
+        ..
+    } = v_outer
+    else {
+        panic!("outer value must be Mapping; got: {v_outer:?}");
+    };
+    assert_eq!(
+        inner_entries.len(),
+        1,
+        "inner mapping must have 1 entry; got {}",
+        inner_entries.len()
+    );
+    assert_eq!(scalar_value(&inner_entries[0].0), "inner_key");
+    assert_eq!(scalar_value(&inner_entries[0].1), "inner_val");
+}

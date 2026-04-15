@@ -126,10 +126,17 @@ impl<'input> EventIter<'input> {
         //     seq-spaces case: the sequence is the value of the current key).
         let opens_new = match self.coll_stack.last() {
             None => true,
-            Some(
-                &(CollectionEntry::Sequence(col, _)
-                | CollectionEntry::Mapping(col, MappingPhase::Key, _)),
-            ) => dash_indent > col,
+            Some(&CollectionEntry::Sequence(col, _)) => dash_indent > col,
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, _)) => {
+                // When an explicit key is pending (bare `?` followed by block
+                // sequence content), allow the sequence to open at the same
+                // column as the mapping — the sequence IS the key content.
+                if self.explicit_key_pending {
+                    dash_indent >= col
+                } else {
+                    dash_indent > col
+                }
+            }
             Some(&CollectionEntry::Mapping(col, MappingPhase::Value, _)) => dash_indent >= col,
         };
         if opens_new {

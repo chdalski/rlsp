@@ -36,36 +36,17 @@ progresses — stale status misleads the next session:
 
 ## Required Sections
 
-### User Request
-
-<!-- agent: Copy the user's words, not your interpretation.
-     The plan reviewer compares this against the Goal to
-     verify the goal captures the full scope of what was
-     asked. If you paraphrase or summarize, the reviewer
-     has no ground truth to check against. -->
-
-What the user asked for, in their own words. Quote or
-closely paraphrase the original request as stated during
-clarification. This is the ground truth that the Goal
-must fully cover — if the Goal is narrower than the User
-Request without a Decisions entry explaining why, the
-plan has silently reduced scope.
-
 ### Goal
 
 <!-- agent: The goal must be self-contained — readable
      without opening any other plan file. If this plan
      supersedes another, note that in Decisions as a
-     single line, not here. The goal must cover the full
-     scope of the User Request — if it is narrower, record
-     the reason in Decisions. -->
+     single line, not here. -->
 
-What the plan will deliver and why. One to three sentences
-that capture the intent, not just the action — an agent
-that understands intent can make better decisions when
-unexpected situations arise. The goal must cover
-everything in the User Request; any intentional narrowing
-must be recorded in Decisions.
+What was requested and why. One to three sentences that
+capture the intent, not just the action — an agent that
+understands intent can make better decisions when
+unexpected situations arise.
 
 Bad: "Add a login page."
 Good: "Users need to authenticate before accessing the

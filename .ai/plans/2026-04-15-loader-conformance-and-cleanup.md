@@ -340,6 +340,12 @@ Test formatter behavior when multiple settings interact.
 - **Loader changes ARE valid** — the loader has genuine
   bugs producing incorrect ASTs from correct event streams.
   These are not formatter accommodations.
+- **KNOWN_FAILURES only shrinks, never grows** — entries
+  may only be removed (bug fixed), never added. If a
+  change causes a previously-passing case to fail, that
+  is a regression — fix it before submitting, do not
+  allowlist it. The reviewer rejects any submission that
+  increases the entry count.
 - **Acceptance criterion is 0 KNOWN_FAILURES in BOTH
   loader and formatter** — both constants deleted after
   reaching 0, so future agents cannot use them as escape

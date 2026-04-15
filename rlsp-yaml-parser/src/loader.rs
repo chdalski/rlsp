@@ -393,6 +393,19 @@ impl<'opt> LoadState<'opt> {
         reason = "match-on-event-type; splitting would obscure flow"
     )]
     fn parse_node(&mut self, stream: &mut EventStream<'_>) -> Result<Node<Span>> {
+        // Structural end events close the caller's collection loop — do NOT
+        // consume them here.  Return an empty scalar and leave the event in
+        // the stream so the outer mapping/sequence loop can see and consume it.
+        if matches!(
+            stream.peek(),
+            Some(Ok((
+                Event::MappingEnd | Event::SequenceEnd | Event::DocumentEnd { .. },
+                _
+            )))
+        ) {
+            return Ok(empty_scalar());
+        }
+
         let Some((event, span)) = next_from(stream)? else {
             return Ok(empty_scalar());
         };

@@ -45,25 +45,18 @@ use super::{ConformanceCase, load_cases_from_file};
 //
 // Keep sorted and duplicate-free.
 const KNOWN_FAILURES: &[&str] = &[
-    "26DV[0]", "2AUY[0]", "2EBW[0]", "2G84[2]", "2G84[3]", "2JQS[0]", "36F6[0]", "3RLN[0]",
-    "3RLN[1]", "3RLN[3]", "3RLN[4]", "4ABK[0]", "4CQQ[0]", "4FJ6[0]", "4Q9F[0]", "4QFQ[0]",
-    "4RWC[0]", "4V8U[0]", "4WA9[0]", "4ZYM[0]", "565N[0]", "5BVJ[0]", "5GBF[0]", "5MUD[0]",
-    "5T43[0]", "5WE3[0]", "6BFJ[0]", "6CA3[0]", "6CK3[0]", "6FWR[0]", "6H3V[0]", "6HB6[0]",
-    "6JQW[0]", "6M2F[0]", "6PBE[0]", "6SLA[0]", "6VJK[0]", "6WLZ[0]", "6WPF[0]", "735Y[0]",
-    "753E[0]", "7A4E[0]", "7BMT[0]", "7T8X[0]", "87E4[0]", "8G76[0]", "8KB6[0]", "8UDB[0]",
-    "93JH[0]", "93WF[0]", "96L6[0]", "96NN[0]", "9BXH[0]", "9KAX[0]", "9MMW[0]", "9TFX[0]",
-    "9WXW[0]", "9YRD[0]", "A6F9[0]", "B3HG[0]", "C2DT[0]", "C4HZ[0]", "CFD4[0]", "CN3R[0]",
-    "CPZ3[0]", "CT4Q[0]", "DE56[0]", "DE56[1]", "DE56[2]", "DE56[3]", "DFF7[0]", "DK3J[0]",
-    "DK95[3]", "DK95[8]", "DWX9[0]", "E76Z[0]", "EX5H[0]", "F2C7[0]", "F6MC[0]", "F8F9[0]",
-    "FBC9[0]", "FH7J[0]", "FP8R[0]", "FRK4[0]", "FTA2[0]", "G4RS[0]", "G992[0]", "H2RW[0]",
-    "HMK4[0]", "HS5T[0]", "J3BT[0]", "JEF9[0]", "JEF9[1]", "K3WX[0]", "K527[0]", "K858[0]",
-    "KH5V[0]", "KH5V[1]", "KH5V[2]", "KK5P[0]", "KSS4[0]", "L24T[0]", "L24T[1]", "L383[0]",
-    "L9U5[0]", "LE5A[0]", "LQZ7[0]", "LX3P[0]", "M29M[0]", "M2N8[0]", "M2N8[1]", "M5C3[0]",
-    "M6YH[0]", "M7A3[0]", "M9B4[0]", "MJS9[0]", "MZX3[0]", "NAT4[0]", "NB6Z[0]", "NHX8[0]",
-    "NKF9[0]", "NP9H[0]", "P2AD[0]", "PRH3[0]", "PW8X[0]", "Q5MG[0]", "Q8AD[0]", "Q9WF[0]",
-    "QF4Y[0]", "R4YG[0]", "RZP5[0]", "RZT7[0]", "S3PD[0]", "SM9W[1]", "T26H[0]", "T4YY[0]",
-    "T5N4[0]", "TL85[0]", "TS54[0]", "U3XV[0]", "UGM3[0]", "UKK6[0]", "UKK6[2]", "W42U[0]",
-    "W4TN[0]", "XV9V[0]", "XW4D[0]", "Y79Y[1]", "Z67P[0]", "ZWK4[0]",
+    "26DV[0]", "2AUY[0]", "2G84[2]", "2G84[3]", "36F6[0]", "4FJ6[0]", "4Q9F[0]", "4RWC[0]",
+    "5MUD[0]", "5T43[0]", "6BFJ[0]", "6CA3[0]", "6CK3[0]", "6FWR[0]", "6HB6[0]", "6JQW[0]",
+    "6VJK[0]", "6WLZ[0]", "6WPF[0]", "735Y[0]", "753E[0]", "7A4E[0]", "7BMT[0]", "7T8X[0]",
+    "87E4[0]", "8G76[0]", "8KB6[0]", "8UDB[0]", "93JH[0]", "93WF[0]", "96L6[0]", "9KAX[0]",
+    "9MMW[0]", "9TFX[0]", "9WXW[0]", "9YRD[0]", "B3HG[0]", "C2DT[0]", "C4HZ[0]", "CFD4[0]",
+    "CN3R[0]", "CT4Q[0]", "DE56[0]", "DE56[1]", "DE56[2]", "DE56[3]", "DFF7[0]", "DK3J[0]",
+    "DK95[3]", "DK95[8]", "E76Z[0]", "EX5H[0]", "F2C7[0]", "F6MC[0]", "F8F9[0]", "FH7J[0]",
+    "FP8R[0]", "FTA2[0]", "G4RS[0]", "H2RW[0]", "HS5T[0]", "JEF9[1]", "K3WX[0]", "K527[0]",
+    "KSS4[0]", "L24T[1]", "L383[0]", "L9U5[0]", "LE5A[0]", "LQZ7[0]", "LX3P[0]", "M2N8[1]",
+    "MJS9[0]", "NAT4[0]", "P2AD[0]", "PRH3[0]", "PW8X[0]", "Q5MG[0]", "Q9WF[0]", "QF4Y[0]",
+    "R4YG[0]", "T26H[0]", "T4YY[0]", "T5N4[0]", "TL85[0]", "TS54[0]", "U3XV[0]", "UKK6[2]",
+    "W42U[0]", "W4TN[0]", "XV9V[0]", "ZWK4[0]",
 ];
 
 // ---- Allowlist helper -------------------------------------------------------
@@ -139,6 +132,33 @@ struct ExpectedDocument {
 //
 // Tokens from the yaml-test-suite event tree are parsed line by line.
 // The leading whitespace (indent) is stripped; only the content matters.
+
+/// Decode yaml-test-suite escape sequences in a tree scalar value.
+///
+/// The tree format uses `\n`, `\t`, `\r`, and `\\` to represent the
+/// corresponding control characters. This mirrors the encoding used in the
+/// yaml-test-suite repository's event-tree files.
+fn unescape_tree_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('\\') | None => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 
 /// A single token parsed from one tree line.
 #[derive(Debug)]
@@ -235,15 +255,18 @@ fn parse_tree_line(line: &str) -> Option<TreeToken> {
     if let Some(rest) = line.strip_prefix("=VAL") {
         let rest = rest.trim();
         let (anchor, tag, rest) = parse_optional_anchor_tag(rest);
-        // First character of `rest` is the style prefix
-        let (style, value) = match rest.chars().next() {
-            Some(':') => (StyleVariant::Plain, rest[1..].to_string()),
-            Some('\'') => (StyleVariant::SingleQuoted, rest[1..].to_string()),
-            Some('"') => (StyleVariant::DoubleQuoted, rest[1..].to_string()),
-            Some('|') => (StyleVariant::Literal, rest[1..].to_string()),
-            Some('>') => (StyleVariant::Folded, rest[1..].to_string()),
+        // First character of `rest` is the style prefix.
+        // The value portion uses yaml-test-suite escape notation:
+        // `\n` → newline, `\t` → tab, `\r` → CR, `\\` → backslash.
+        let (style, raw_value) = match rest.chars().next() {
+            Some(':') => (StyleVariant::Plain, &rest[1..]),
+            Some('\'') => (StyleVariant::SingleQuoted, &rest[1..]),
+            Some('"') => (StyleVariant::DoubleQuoted, &rest[1..]),
+            Some('|') => (StyleVariant::Literal, &rest[1..]),
+            Some('>') => (StyleVariant::Folded, &rest[1..]),
             _ => return None,
         };
+        let value = unescape_tree_value(raw_value);
         return Some(TreeToken::Scalar {
             anchor,
             tag,
