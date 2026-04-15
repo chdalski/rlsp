@@ -3,33 +3,28 @@
 // Conformance test suite using yaml-test-suite data symlinked at
 // `tests/yaml-test-suite/src/` (commit recorded in `src/.commit`).
 //
-// Each `.yaml` file in that directory contains one or more test cases.
-// For each case:
-//   - If `fail: true` — the YAML is intentionally invalid.  We verify that
-//     `parse_events` produces at least one `Err` item.
-//   - Otherwise — we verify that `parse_events` produces no `Err` items
-//     (the entire event stream is successfully parsed).
-//
-// rstest `#[files]` generates one independent test per matched file,
-// giving per-file pass/fail visibility in test output.
+// Sub-modules:
+//   stream  — event-stream API (`parse_events`) conformance, 351/351
+//   loader  — loader AST (`load`) conformance (Task 2)
 
-#![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
+#![expect(
+    clippy::unwrap_used,
+    clippy::missing_panics_doc,
+    missing_docs,
+    reason = "test code"
+)]
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use rlsp_yaml_parser::parse_events;
-use rstest::rstest;
+pub mod stream;
 
 // ---- Test-case data model ---------------------------------------------------
 
 #[derive(Debug)]
-struct ConformanceCase {
-    file: String,
-    index: usize,
-    name: String,
-    yaml: String,
-    fail: bool,
+pub struct ConformanceCase {
+    pub file: String,
+    pub index: usize,
+    pub name: String,
+    pub yaml: String,
+    pub fail: bool,
 }
 
 // ---- Visual-representation helpers (from yaml-test-suite convention) --------
@@ -39,7 +34,8 @@ struct ConformanceCase {
 /// The test suite uses Unicode markers to represent whitespace characters that
 /// would be invisible in plain text:
 ///   `␣` → space, `»` → tab, `←` → CR, `⇔` → BOM, `↵` → (nothing), `∎\n` → (nothing)
-fn visual_to_raw(s: &str) -> String {
+#[must_use]
+pub fn visual_to_raw(s: &str) -> String {
     s.replace('␣', " ")
         .replace('»', "\t")
         .replace('—', "")
@@ -88,7 +84,8 @@ impl EntryFields {
 /// Parse the yaml-test-suite metadata format without a YAML library.
 ///
 /// Returns `(name, yaml, fail)` tuples. Entries with `skip` are omitted.
-fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
+#[must_use]
+pub fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
     let mut results: Vec<(String, String, bool)> = Vec::new();
     let mut inherited = EntryFields::default();
     let mut current = EntryFields::default();
@@ -175,7 +172,8 @@ fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
     results
 }
 
-fn load_cases_from_file(path: &Path) -> Vec<ConformanceCase> {
+#[must_use]
+pub fn load_cases_from_file(path: &std::path::Path) -> Vec<ConformanceCase> {
     let file_name = path
         .file_name()
         .unwrap_or_default()
@@ -204,50 +202,4 @@ fn load_cases_from_file(path: &Path) -> Vec<ConformanceCase> {
             }
         })
         .collect()
-}
-
-// ---- Helpers ----------------------------------------------------------------
-
-/// Returns `true` if `parse_events` produces at least one `Err` for `input`.
-fn has_parse_error(input: &str) -> bool {
-    parse_events(input).any(|r| r.is_err())
-}
-
-/// Returns `true` if `parse_events` produces no `Err` for `input`.
-fn parses_clean(input: &str) -> bool {
-    parse_events(input).all(|r| r.is_ok())
-}
-
-// ---- Parameterized conformance test -----------------------------------------
-
-#[rstest]
-#[timeout(Duration::from_secs(5))]
-fn yaml_test_suite(#[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
-    let cases = load_cases_from_file(&path);
-    if cases.is_empty() {
-        // All entries are skipped (e.g., ZYU8). Nothing to test.
-        return;
-    }
-
-    for case in &cases {
-        let tag = format!("{}[{}] {}", case.file, case.index, case.name);
-
-        if case.fail {
-            assert!(
-                has_parse_error(&case.yaml),
-                "expected parse error but got clean parse: {tag}\n  yaml: {:?}",
-                &case.yaml[..case.yaml.len().min(120)]
-            );
-        } else {
-            let first_err = parse_events(&case.yaml)
-                .find_map(std::result::Result::err)
-                .map(|e| e.to_string());
-            assert!(
-                parses_clean(&case.yaml),
-                "unexpected parse error: {tag}\n  error: {}\n  yaml: {:?}",
-                first_err.unwrap_or_default(),
-                &case.yaml[..case.yaml.len().min(120)]
-            );
-        }
-    }
 }

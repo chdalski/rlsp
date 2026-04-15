@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-15
 
 ## Goal
@@ -115,7 +115,7 @@ UGM3, UKK6[2], W4TN, XW4D
 
 ## Steps
 
-- [ ] Restructure conformance tests into module
+- [x] Restructure conformance tests into module
 - [ ] Add loader conformance test against yaml-test-suite
 - [ ] Surface document marker flags in AST
 - [ ] Fix loader bugs (document tags, explicit keys,
@@ -127,21 +127,21 @@ UGM3, UKK6[2], W4TN, XW4D
 
 ## Tasks
 
-### Task 1: Restructure conformance tests into module
+### Task 1: Restructure conformance tests into module — bf6425b
 
 Move the conformance test from a standalone file into a
 module structure that supports both stream and loader
 testing.
 
-- [ ] Create `rlsp-yaml-parser/tests/conformance/` directory
-- [ ] Move `conformance.rs` → `conformance/stream.rs`
-- [ ] Add `conformance/mod.rs` with shared helpers
+- [x] Create `rlsp-yaml-parser/tests/conformance/` directory
+- [x] Move `conformance.rs` → `conformance/stream.rs`
+- [x] Add `conformance/main.rs` with shared helpers
       (`visual_to_raw`, case parsing, etc.)
-- [ ] Verify existing stream conformance still passes
+- [x] Verify existing stream conformance still passes
       (351/351)
-- [ ] Check if `smoke/conformance.rs` has cases that should
+- [x] Check if `smoke/conformance.rs` has cases that should
       be in the conformance module
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 2: Add loader conformance test
 
