@@ -116,7 +116,7 @@ UGM3, UKK6[2], W4TN, XW4D
 ## Steps
 
 - [x] Restructure conformance tests into module
-- [ ] Add loader conformance test against yaml-test-suite
+- [x] Add loader conformance test against yaml-test-suite
 - [ ] Surface document marker flags in AST
 - [ ] Fix loader bugs (document tags, explicit keys,
       empty keys, anchors)
@@ -143,22 +143,22 @@ testing.
       be in the conformance module
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 2: Add loader conformance test
+### Task 2: Add loader conformance test — ad9c83e
 
 Add a loader conformance test that runs `load()` against
 the yaml-test-suite and verifies AST correctness by
 comparing the AST structure against the expected event tree
 from each test case.
 
-- [ ] Create `conformance/loader.rs`
-- [ ] For each non-fail case: `load(input)` must succeed
-- [ ] Verify AST structure matches expected event tree
+- [x] Create `conformance/loader.rs`
+- [x] For each non-fail case: `load(input)` must succeed
+- [x] Verify AST structure matches expected event tree
       (correct number of documents, correct node types,
       correct scalar values, correct styles, correct
       anchors/tags)
-- [ ] Populate KNOWN_FAILURES allowlist for loader
-- [ ] Measure baseline: how many cases pass vs fail
-- [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [x] Populate KNOWN_FAILURES allowlist for loader
+- [x] Measure baseline: 351 cases, 155 known failures
+- [x] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 3: Surface document marker flags in AST
 

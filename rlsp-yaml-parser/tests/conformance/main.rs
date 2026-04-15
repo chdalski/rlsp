@@ -14,6 +14,7 @@
     reason = "test code"
 )]
 
+pub mod loader;
 pub mod stream;
 
 // ---- Test-case data model ---------------------------------------------------
@@ -25,6 +26,9 @@ pub struct ConformanceCase {
     pub name: String,
     pub yaml: String,
     pub fail: bool,
+    /// Raw event-tree string from the `tree:` field, after `visual_to_raw`.
+    /// `None` when the test-suite entry has no `tree:` field.
+    pub tree: Option<String>,
 }
 
 // ---- Visual-representation helpers (from yaml-test-suite convention) --------
@@ -53,6 +57,7 @@ pub fn visual_to_raw(s: &str) -> String {
 struct EntryFields {
     name: Option<String>,
     yaml: Option<String>,
+    tree: Option<String>,
     fail: Option<bool>,
     skip: bool,
 }
@@ -74,6 +79,7 @@ impl EntryFields {
         match key {
             "name" => self.name = Some(block),
             "yaml" => self.yaml = Some(block),
+            "tree" => self.tree = Some(block),
             "fail" => self.fail = Some(block.trim() == "true"),
             "skip" => self.skip = true,
             _ => {}
@@ -81,12 +87,20 @@ impl EntryFields {
     }
 }
 
+/// One parsed entry from `parse_test_metadata`.
+pub struct TestEntry {
+    pub name: String,
+    pub yaml: String,
+    pub tree: Option<String>,
+    pub fail: bool,
+}
+
 /// Parse the yaml-test-suite metadata format without a YAML library.
 ///
-/// Returns `(name, yaml, fail)` tuples. Entries with `skip` are omitted.
+/// Returns [`TestEntry`] values. Entries with `skip` are omitted.
 #[must_use]
-pub fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
-    let mut results: Vec<(String, String, bool)> = Vec::new();
+pub fn parse_test_metadata(content: &str) -> Vec<TestEntry> {
+    let mut results: Vec<TestEntry> = Vec::new();
     let mut inherited = EntryFields::default();
     let mut current = EntryFields::default();
     let mut block_key: Option<String> = None;
@@ -110,6 +124,9 @@ pub fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
             if let Some(y) = current.yaml.take() {
                 inherited.yaml = Some(y);
             }
+            if let Some(t) = current.tree.take() {
+                inherited.tree = Some(t);
+            }
             if current.skip {
                 inherited.skip = true;
             }
@@ -117,9 +134,16 @@ pub fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
             if !inherited.skip {
                 if let Some(ref yaml) = inherited.yaml {
                     let name = inherited.name.clone().unwrap_or_default();
-                    results.push((name, yaml.clone(), fail));
+                    results.push(TestEntry {
+                        name,
+                        yaml: yaml.clone(),
+                        tree: inherited.tree.clone(),
+                        fail,
+                    });
                 }
             }
+            // Reset tree per-entry (it is not inherited like yaml/name).
+            inherited.tree = None;
         };
 
     let parse_field = |line: &str,
@@ -187,18 +211,19 @@ pub fn load_cases_from_file(path: &std::path::Path) -> Vec<ConformanceCase> {
     parse_test_metadata(&content)
         .into_iter()
         .enumerate()
-        .map(|(idx, (name, yaml, fail))| {
-            let name = if name.is_empty() {
+        .map(|(idx, entry)| {
+            let name = if entry.name.is_empty() {
                 format!("{file_name}-{idx:02}")
             } else {
-                name
+                entry.name
             };
             ConformanceCase {
                 file: file_name.clone(),
                 index: idx,
                 name,
-                yaml: visual_to_raw(&yaml),
-                fail,
+                yaml: visual_to_raw(&entry.yaml),
+                tree: entry.tree.map(|t| visual_to_raw(&t)),
+                fail: entry.fail,
             }
         })
         .collect()
