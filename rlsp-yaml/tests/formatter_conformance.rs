@@ -32,8 +32,8 @@ use rstest::rstest;
 //
 // Keep sorted and duplicate-free.
 const KNOWN_FAILURES: &[&str] = &[
-    "26DV[0]", "2G84[2]", "2G84[3]", "6CA3[0]", "98YD[0]", "E76Z[0]", "FTA2[0]", "HWV9[0]",
-    "Q5MG[0]", "QT73[0]", "RZP5[0]", "T26H[0]", "UGM3[0]", "UKK6[2]", "W4TN[0]", "XW4D[0]",
+    "26DV[0]", "2G84[2]", "2G84[3]", "6CA3[0]", "98YD[0]", "HWV9[0]", "Q5MG[0]", "QT73[0]",
+    "RZP5[0]", "T26H[0]", "UGM3[0]", "UKK6[2]", "W4TN[0]", "XW4D[0]",
 ];
 
 // ---- Allowlist helper -------------------------------------------------------

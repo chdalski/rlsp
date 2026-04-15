@@ -8,9 +8,9 @@ category: explicit-key
 When the key is a flow sequence (including empty `[]`), the entry uses `? key\n: value` form.
 Corresponds to conformance case M2N8[1].
 
-Note: the parser currently treats `? []: x` as outer-mapping{key=[], value={"": "x"}} rather
-than the spec-correct outer-mapping{key={"[]": "x"}, value=""} (M2N8[1] is in KNOWN_FAILURES).
-The expected output reflects what the formatter produces from the current (non-conformant) AST.
+Note: the parser currently treats `? []: x` as outer-mapping{key=[], value=x} rather than
+the spec-correct outer-mapping{key=inner-mapping{key=[], value=x}, value=""} (M2N8[1] is in
+KNOWN_FAILURES). The expected output reflects what the formatter produces from the current AST.
 
 ## Test-Document
 
@@ -22,6 +22,5 @@ The expected output reflects what the formatter produces from the current (non-c
 
 ```yaml
 ? []
-:
-  : x
+: x
 ```

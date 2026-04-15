@@ -303,16 +303,34 @@ impl<'input> Lexer<'input> {
                 // Plain-scalar scanning would mis-tokenize these: `!` is a YAML
                 // indicator, and quotes are literal characters to `scan_plain_line_block`.
                 let first_inline_byte = inline.as_bytes().first().copied();
-                if matches!(first_inline_byte, Some(b'!' | b'"' | b'\'')) {
+                if first_inline_byte == Some(b'&') {
+                    // Anchor inline after `---`.  Validate that any content after
+                    // the anchor name is not a block mapping entry — `--- &a key:
+                    // val` is invalid because block mapping entries cannot appear
+                    // inline on the document-start line (CXX2).
+                    if anchor_followed_by_block_mapping(inline) {
+                        self.marker_inline_error = Some(Error {
+                            pos: inline_start,
+                            message: "invalid content after document-start marker '---'".into(),
+                        });
+                    } else {
+                        self.buf.prepend_line(Line {
+                            content: inline,
+                            offset: inline_start.byte_offset,
+                            indent: inline_start.column,
+                            break_type: line.break_type,
+                            pos: inline_start,
+                        });
+                    }
+                } else if matches!(first_inline_byte, Some(b'!' | b'"' | b'\'')) {
                     // inline is a borrowed slice of the original input (zero-copy).
-                    let synthetic = Line {
+                    self.buf.prepend_line(Line {
                         content: inline,
                         offset: inline_start.byte_offset,
                         indent: inline_start.column,
                         break_type: line.break_type,
                         pos: inline_start,
-                    };
-                    self.buf.prepend_line(synthetic);
+                    });
                 } else {
                     let scanned = scan_plain_line_block(inline);
                     if scanned.is_empty() {
@@ -451,6 +469,39 @@ impl<'input> Lexer<'input> {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Returns `true` when `inline` starts with `&<anchor-name>` followed (after
+/// optional spaces/tabs) by non-comment content that contains a block mapping
+/// value indicator (`: `, `:\t`, or trailing `:`).
+///
+/// Used by [`Lexer::consume_marker_line`] to reject `--- &anchor key: val`
+/// (block mapping entries cannot appear inline on the document-start line).
+fn anchor_followed_by_block_mapping(inline: &str) -> bool {
+    use crate::chars::is_ns_anchor_char;
+    let after_amp = &inline[1..]; // caller ensures inline starts with '&'
+    let name_end = after_amp
+        .char_indices()
+        .take_while(|&(_, ch)| is_ns_anchor_char(ch))
+        .last()
+        .map_or(0, |(i, ch)| i + ch.len_utf8());
+    let after_name = after_amp[name_end..].trim_start_matches([' ', '\t']);
+    !after_name.is_empty()
+        && !after_name.starts_with('#')
+        && contains_block_mapping_indicator(after_name)
+}
+
+fn contains_block_mapping_indicator(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b':' {
+            let next = bytes.get(i + 1).copied();
+            if matches!(next, None | Some(b' ' | b'\t' | b'\n' | b'\r')) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// True when `line` is blank (empty or whitespace-only) but NOT a comment.
 ///

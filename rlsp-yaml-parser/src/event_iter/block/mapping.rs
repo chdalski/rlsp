@@ -465,6 +465,22 @@ impl<'input> EventIter<'input> {
                 }
                 _ => {}
             }
+            // When the next line is a value indicator (`: value`) and an
+            // enclosing mapping is already in Value phase, the synthetic
+            // `: value` line is the value for THAT mapping — not the start
+            // of a new nested mapping.  Route directly to
+            // `consume_explicit_value_line` so we don't open a spurious
+            // inner mapping (E76Z: `*alias : value` where alias was the key).
+            if self.is_value_indicator_line() {
+                if let Some(&CollectionEntry::Mapping(val_col, MappingPhase::Value, _)) =
+                    self.coll_stack.last()
+                {
+                    if val_col <= effective_key_indent {
+                        self.consume_explicit_value_line(val_col);
+                        return StepResult::Continue;
+                    }
+                }
+            }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
                 return StepResult::Yield(Err(Error {
@@ -585,6 +601,27 @@ impl<'input> EventIter<'input> {
                 }
             }
             self.consume_explicit_value_line(key_indent);
+            return StepResult::Continue;
+        }
+
+        // When `complex_key_inline` is set and the mapping is in Key phase (meaning
+        // a `? inline-content` entry was processed but no `:` value indicator has
+        // arrived), a new key entry means the explicit key had no value.  Emit the
+        // empty key scalar (consuming any pending anchor/tag from the inline property
+        // that was part of the key content) and advance to Value phase.  The next
+        // iteration will detect Value phase + new key and emit the empty value scalar.
+        if has_complex_key_inline {
+            let pos = self.lexer.current_pos();
+            self.queue.push_back((
+                Event::Scalar {
+                    value: std::borrow::Cow::Borrowed(""),
+                    style: ScalarStyle::Plain,
+                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                },
+                zero_span(pos),
+            ));
+            self.advance_mapping_to_value();
             return StepResult::Continue;
         }
 

@@ -12,10 +12,10 @@ sequence, the key is converted to block `- item` form. The explicit key
 prefix `?` is preserved. Exercises the interaction between
 `format_enforce_block_style` and `needs_explicit_key`.
 
-Note: the parser currently treats `? [a]: x` as outer-mapping{key=[a], value={"": "x"}}
-rather than the spec-correct outer-mapping{key={"[a]": "x"}, value=""} (M2N8[1] is in
-KNOWN_FAILURES). The expected output reflects what the formatter produces from the
-current (non-conformant) AST.
+Note: the parser currently treats `? [a]: x` as outer-mapping{key=[a], value=x} rather
+than the spec-correct outer-mapping{key=inner-mapping{key=[a], value=x}, value=""} (M2N8[1]
+is in KNOWN_FAILURES). The expected output reflects what the formatter produces from the
+current AST.
 
 ## Test-Document
 
@@ -27,6 +27,5 @@ current (non-conformant) AST.
 
 ```yaml
 ? - a
-:
-  : x
+: x
 ```

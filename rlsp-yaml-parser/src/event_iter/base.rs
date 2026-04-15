@@ -41,7 +41,49 @@ impl<'input> EventIter<'input> {
                 self.coll_stack.pop();
                 let ev = match top {
                     CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
-                    CollectionEntry::Mapping(_, _, _) => Event::MappingEnd,
+                    CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
+                        // Mapping closed via dedent while waiting for a value —
+                        // emit empty value scalar first (consumes any pending
+                        // anchor/tag that was on a standalone property line).
+                        self.queue.push_back((
+                            Event::Scalar {
+                                value: std::borrow::Cow::Borrowed(""),
+                                style: ScalarStyle::Plain,
+                                anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                            },
+                            zero_span(pos),
+                        ));
+                        Event::MappingEnd
+                    }
+                    CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
+                        // If an explicit key (`? anchor`, `? inline-scalar`) was
+                        // consumed but neither its key scalar nor its value scalar
+                        // was emitted before the mapping closed via dedent, emit
+                        // both empty scalars now so the mapping is well-formed.
+                        if self.complex_key_inline == Some(col) {
+                            self.queue.push_back((
+                                Event::Scalar {
+                                    value: std::borrow::Cow::Borrowed(""),
+                                    style: ScalarStyle::Plain,
+                                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                },
+                                zero_span(pos),
+                            ));
+                            self.queue.push_back((
+                                Event::Scalar {
+                                    value: std::borrow::Cow::Borrowed(""),
+                                    style: ScalarStyle::Plain,
+                                    anchor: None,
+                                    tag: None,
+                                },
+                                zero_span(pos),
+                            ));
+                            self.complex_key_inline = None;
+                        }
+                        Event::MappingEnd
+                    }
                 };
                 self.queue.push_back((ev, zero_span(pos)));
                 // After closing a collection, update the parent:
@@ -89,27 +131,66 @@ impl<'input> EventIter<'input> {
                 CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
                 CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
                     // Mapping closed while waiting for a value — emit empty value.
-                    // Consume any pending anchor so `&anchor\n` at end of doc
-                    // is properly attached to the empty value.
+                    // Consume any pending anchor/tag so standalone properties
+                    // at end of doc are properly attached to the empty value.
                     self.queue.push_back((
                         Event::Scalar {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
                             anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                            tag: None,
+                            tag: self.pending_tag.take().map(PendingTag::into_cow),
                         },
                         zero_span(pos),
                     ));
                     Event::MappingEnd
                 }
-                CollectionEntry::Mapping(_, MappingPhase::Key, _) => Event::MappingEnd,
+                CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
+                    // If an explicit key (`? anchor`, `? inline-scalar`) was
+                    // consumed but neither its key scalar nor its value scalar
+                    // was emitted before the mapping closed at document end,
+                    // emit both empty scalars so the mapping is well-formed.
+                    if self.complex_key_inline == Some(col) {
+                        self.queue.push_back((
+                            Event::Scalar {
+                                value: std::borrow::Cow::Borrowed(""),
+                                style: ScalarStyle::Plain,
+                                anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                            },
+                            zero_span(pos),
+                        ));
+                        self.queue.push_back((
+                            Event::Scalar {
+                                value: std::borrow::Cow::Borrowed(""),
+                                style: ScalarStyle::Plain,
+                                anchor: None,
+                                tag: None,
+                            },
+                            zero_span(pos),
+                        ));
+                        self.complex_key_inline = None;
+                    }
+                    Event::MappingEnd
+                }
             };
             self.queue.push_back((ev, zero_span(pos)));
-            // After closing any collection, advance the parent mapping (if in
-            // Value phase) to Key phase — the just-closed collection was its value.
-            if let Some(CollectionEntry::Mapping(_, phase, _)) = self.coll_stack.last_mut() {
+            // After closing any collection, update the parent mapping phase:
+            // - Value phase → Key phase: the closed collection was the value.
+            // - Key phase with complex_key_inline: the closed collection was
+            //   the key (e.g. `? {a: b}` or `?\n- a\n`); advance to Value
+            //   phase and clear the flag so the pending `:` (or close) emits
+            //   the empty value correctly.
+            if let Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) =
+                self.coll_stack.last_mut()
+            {
                 if *phase == MappingPhase::Value {
                     *phase = MappingPhase::Key;
+                } else if *phase == MappingPhase::Key
+                    && self.complex_key_inline == Some(*parent_col)
+                {
+                    *phase = MappingPhase::Value;
+                    *has_had_value = true;
+                    self.complex_key_inline = None;
                 }
             }
         }
