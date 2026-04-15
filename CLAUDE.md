@@ -59,6 +59,13 @@ pnpm run format    # check formatting (prettier)
 
 The parser is the authority on valid YAML. The formatter must produce output the unmodified parser already handles. If formatted output doesn't round-trip, the formatter is wrong — not the parser.
 
+`rlsp-yaml-parser` exposes two distinct APIs that must each be conformance-tested independently:
+
+| API | Function | What it produces | Conformance |
+|-----|----------|-----------------|-------------|
+| Event stream | `parse_events()` | Flat event sequence from YAML text | Tested against yaml-test-suite (351/351) |
+| Loader | `load()` | AST (`Vec<Document>`) built from events | Must be tested with the same rigour as the event stream — a correct event stream does NOT guarantee a correct AST |
+
 | Crate | Responsibility | Change allowed when |
 |-------|---------------|---------------------|
 | `rlsp-yaml-parser` | Lex, parse, load YAML → AST | Parser bug (incorrect parse, loader data loss), or AST needs to surface info already in the event stream. Never to accommodate formatter output. |

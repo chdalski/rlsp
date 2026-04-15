@@ -1,6 +1,15 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Canceled
 **Created:** 2026-04-14
+
+**Canceled:** 2026-04-15. Tasks 1-8 completed and committed
+(genuine formatter fixes). Remaining work migrated to
+`2026-04-15-loader-conformance-and-cleanup.md` — the root
+cause of most remaining KNOWN_FAILURES is loader bugs, not
+formatter bugs. The formatter conformance test conflated
+both failure sources. The new plan addresses this by adding
+loader conformance testing first, then fixing loader bugs,
+then cleaning up any remaining formatter issues.
 
 ## Goal
 
