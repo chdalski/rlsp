@@ -445,25 +445,34 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
 
             let scalar_doc = match style {
                 ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-                    // YAML treats a content line consisting of only space characters as a
-                    // "blank line" in the block scalar.  A blank line cannot have more
-                    // indentation than the block's declared indent level.  When the
-                    // formatter emits such a line through indent(), it gains extra spaces
-                    // and the re-parser rejects it with "blank line has more indentation
-                    // than the content".
+                    // YAML treats a content line as a "blank line" when it consists
+                    // solely of whitespace characters.  A blank line in a block scalar
+                    // cannot carry more indentation than the declared indent level — if
+                    // it does, re-parsers reject the output with "blank line has more
+                    // indentation than the content".
                     //
-                    // Tab characters do not cause this problem: a line like `  \t` is
-                    // treated as a content line (the tab is content past the indent strip),
-                    // not a blank line, so it round-trips correctly.
+                    // When the formatter emits a block scalar the indent() call adds the
+                    // mapping/sequence indent to every line, including content lines that
+                    // are entirely whitespace.  This pushes those lines beyond the
+                    // declared indent, triggering the re-parse error.
                     //
-                    // When every non-empty decoded line consists solely of spaces, fall
-                    // back to double-quoted output to preserve the value faithfully.
-                    let all_content_spaces_only = !value.is_empty()
-                        && value
-                            .lines()
-                            .filter(|l| !l.is_empty())
-                            .all(|l| l.chars().all(|c| c == ' '));
-                    if all_content_spaces_only {
+                    // A line starting with a space character is problematic: after the
+                    // indent strip the remaining content still starts with a space, so
+                    // some parsers count it as a blank line.  A line starting with a tab
+                    // is safe: the tab is treated as a non-blank content character even
+                    // when the rest of the line is whitespace (e.g. `\t  ` round-trips
+                    // correctly).
+                    //
+                    // Fall back to double-quoted output when any non-empty decoded line
+                    // is entirely whitespace and starts with a space.  Such lines become
+                    // over-indented blank lines after the formatter's indent() call and
+                    // the re-parser rejects them.  A tab-first whitespace-only line (e.g.
+                    // `\t  `) is safe and must not trigger the fallback.
+                    let has_problematic_whitespace_line = !value.is_empty()
+                        && value.lines().filter(|l| !l.is_empty()).any(|l| {
+                            l.starts_with(' ') && l.chars().all(|c| c == ' ' || c == '\t')
+                        });
+                    if has_problematic_whitespace_line {
                         text(format!("\"{}\"", escape_double_quoted(value)))
                     } else {
                         repr_block_to_doc(value, *style, options.tab_width)
