@@ -71,7 +71,9 @@ impl<'input> EventIter<'input> {
         );
         let rest_of_line = &after_spaces[1..];
         let inline = rest_of_line.trim_start_matches([' ', '\t']);
-        let had_inline = !inline.is_empty();
+        // A line that starts with `#` after the dash is a comment, not node
+        // content.  The sequence item is empty (null) — treat it as no inline.
+        let had_inline = !inline.is_empty() && !inline.starts_with('#');
 
         if had_inline {
             let leading_spaces = content.len() - after_spaces.len();
@@ -188,10 +190,18 @@ impl<'input> EventIter<'input> {
             }
             self.coll_stack
                 .push(CollectionEntry::Sequence(dash_indent, false));
+            let seq_anchor = self
+                .pending_collection_anchor
+                .take()
+                .or_else(|| self.pending_anchor.take().map(PendingAnchor::name));
+            let seq_tag = self
+                .pending_collection_tag
+                .take()
+                .or_else(|| self.pending_tag.take().map(PendingTag::into_cow));
             self.queue.push_back((
                 Event::SequenceStart {
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    anchor: seq_anchor,
+                    tag: seq_tag,
                     style: CollectionStyle::Block,
                 },
                 zero_span(dash_pos),

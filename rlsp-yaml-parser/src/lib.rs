@@ -99,6 +99,21 @@ struct EventIter<'input> {
     /// whether it was standalone (applies to the next node of any type) or
     /// inline (applies to the key scalar, not the enclosing mapping).
     pending_tag: Option<PendingTag<'input>>,
+    /// When a `Standalone` anchor is displaced by an `Inline` anchor for a
+    /// mapping key on the same physical line (e.g. `&node1\n&k1 key: v`), the
+    /// standalone anchor is saved here and consumed by the next
+    /// `MappingStart`/`SequenceStart` event.
+    ///
+    /// Normal anchor delivery uses `pending_anchor`; this field only holds the
+    /// collection-level anchor when both a collection property and a key
+    /// property must be delivered simultaneously.
+    pending_collection_anchor: Option<&'input str>,
+    /// Parallel to `pending_collection_anchor` but for tags.
+    ///
+    /// When a `Standalone` tag is displaced by an `Inline` tag for a mapping
+    /// key (e.g. `!!map\n!!str key: v`), the standalone tag is saved here and
+    /// consumed by the next `MappingStart`/`SequenceStart` event.
+    pending_collection_tag: Option<std::borrow::Cow<'input, str>>,
     /// Directive scope for the current document.
     ///
     /// Accumulated from `%YAML` and `%TAG` directives seen in `BetweenDocs`

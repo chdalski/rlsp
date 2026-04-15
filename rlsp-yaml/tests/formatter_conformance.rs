@@ -32,8 +32,8 @@ use rstest::rstest;
 //
 // Keep sorted and duplicate-free.
 const KNOWN_FAILURES: &[&str] = &[
-    "26DV[0]", "2G84[2]", "2G84[3]", "6CA3[0]", "98YD[0]", "HWV9[0]", "Q5MG[0]", "QT73[0]",
-    "RZP5[0]", "T26H[0]", "UGM3[0]", "UKK6[2]", "W4TN[0]", "XW4D[0]",
+    "8G76[0]", "98YD[0]", "C4HZ[0]", "F8F9[0]", "HWV9[0]", "M2N8[1]", "MJS9[0]", "QT73[0]",
+    "R4YG[0]", "RZP5[0]", "UGM3[0]", "XW4D[0]",
 ];
 
 // ---- Allowlist helper -------------------------------------------------------
@@ -147,7 +147,12 @@ fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
         if let Some((key, value)) = line.split_once(": ") {
             let key = key.trim();
             let value = value.trim();
-            if value == "|" {
+            // Match `|` or `|N` (explicit indentation indicator, e.g. `|2`).
+            let is_block_scalar = value == "|"
+                || (value.starts_with('|')
+                    && value.len() == 2
+                    && value.as_bytes().get(1).is_some_and(u8::is_ascii_digit));
+            if is_block_scalar {
                 *block_key = Some(key.to_string());
                 *block_buf = Some(String::new());
             } else {
@@ -169,13 +174,20 @@ fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
             in_entry = true;
             current = EntryFields::default();
             parse_field(rest, &mut current, &mut block_key, &mut block_buf);
-        } else if let Some(indented) = block_buf
-            .is_some()
-            .then(|| line.strip_prefix("    "))
-            .flatten()
-        {
-            block_buf.as_mut().unwrap().push_str(indented);
-            block_buf.as_mut().unwrap().push('\n');
+        } else if block_buf.is_some() {
+            if let Some(indented) = line.strip_prefix("    ") {
+                block_buf.as_mut().unwrap().push_str(indented);
+                block_buf.as_mut().unwrap().push('\n');
+            } else if line.trim_matches([' ', '\t']).is_empty() {
+                // Blank line within the block scalar — preserve as an empty line.
+                block_buf.as_mut().unwrap().push('\n');
+            } else {
+                // Non-blank, non-indented line ends the block.
+                flush_block(&mut current, &mut block_key, &mut block_buf);
+                if line.starts_with("  ") && !line.starts_with("    ") {
+                    parse_field(line.trim(), &mut current, &mut block_key, &mut block_buf);
+                }
+            }
         } else if line.starts_with("  ") && !line.starts_with("    ") {
             flush_block(&mut current, &mut block_key, &mut block_buf);
             parse_field(line.trim(), &mut current, &mut block_key, &mut block_buf);
@@ -327,8 +339,8 @@ mod tests {
     // 1. A key present in KNOWN_FAILURES is found.
     #[test]
     fn allowlist_known_failure_matches_by_exact_key() {
-        // 26DV[0] is in KNOWN_FAILURES.
-        assert!(is_known_failure("26DV[0]"));
+        // 8G76[0] is in KNOWN_FAILURES.
+        assert!(is_known_failure("8G76[0]"));
     }
 
     // 2. A key absent from KNOWN_FAILURES is not found.

@@ -504,26 +504,34 @@ impl<'input> EventIter<'input> {
                 MappingPhase::Key,
                 false,
             ));
-            // Consume pending anchor/tag for the mapping only for standalone
-            // properties (e.g. `&a\nkey: v`) where `pending_*_for_collection`
-            // is true.
+            // Consume pending anchor/tag for the mapping.
             //
-            // Inline properties (e.g. `&a key: v`) leave `pending_*_for_collection`
-            // false — they annotate the key scalar, not the mapping (YAML test
-            // suite 9KAX: inline property → key scalar).  The pending anchor/tag
-            // is left on `self.pending_anchor`/`self.pending_tag` and will be
-            // consumed by `consume_mapping_entry` when it emits the key scalar.
-            let mapping_anchor =
+            // Two cases:
+            // 1. Standalone property on its own line (`&a\nkey: v`) — stored in
+            //    `pending_anchor`/`pending_tag` as `Standalone`.
+            // 2. Standalone collection property displaced by an inline key
+            //    property (`&node\n&k key: v`) — the standalone is saved to
+            //    `pending_collection_anchor`/`pending_collection_tag` while the
+            //    inline property is stored in `pending_anchor`/`pending_tag`.
+            //
+            // Inline properties (`&a key: v`) annotate the key scalar, not the
+            // mapping (YAML test suite 9KAX).  The pending anchor/tag stays on
+            // `self.pending_anchor`/`self.pending_tag` and is consumed by
+            // `consume_mapping_entry` when it emits the key scalar.
+            let mapping_anchor = self.pending_collection_anchor.take().or_else(|| {
                 if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
                     self.pending_anchor.take().map(PendingAnchor::name)
                 } else {
                     None
-                };
-            let mapping_tag = if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
-                self.pending_tag.take().map(PendingTag::into_cow)
-            } else {
-                None
-            };
+                }
+            });
+            let mapping_tag = self.pending_collection_tag.take().or_else(|| {
+                if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
+                    self.pending_tag.take().map(PendingTag::into_cow)
+                } else {
+                    None
+                }
+            });
             self.queue.push_back((
                 Event::MappingStart {
                     anchor: mapping_anchor,
@@ -631,11 +639,19 @@ impl<'input> EventIter<'input> {
             matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == effective_key_indent)
         }) {
             let pos = self.lexer.current_pos();
+            // Only consume a Standalone anchor as the null value's anchor.
+            // An Inline anchor (e.g. `&anchor c: 3`) belongs to the next key
+            // scalar, not to this null value.
+            let null_anchor = if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
+                self.pending_anchor.take().map(PendingAnchor::name)
+            } else {
+                None
+            };
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                    anchor: null_anchor,
                     tag: None,
                 },
                 zero_span(pos),

@@ -247,125 +247,138 @@ impl<'input> Lexer<'input> {
             .get(4..)
             .unwrap_or("")
             .trim_start_matches([' ', '\t']);
-        if !inline.is_empty() {
-            // Compute the start position of the inline content.
-            // marker_pos is at column 0 of the line; inline content starts at
-            // byte_offset = marker_pos.byte_offset + (content.len() - inline.len()).
-            let prefix_bytes = line.content.len() - inline.len();
-            let prefix_chars = crate::pos::column_at(line.content, prefix_bytes);
-            let inline_start = Pos {
-                byte_offset: marker_pos.byte_offset + prefix_bytes,
-                line: marker_pos.line,
-                column: marker_pos.column + prefix_chars,
-            };
+        if inline.is_empty() {
+            return (marker_pos, after);
+        }
 
-            // If the inline content is a comment (`# ...`), store it as a
-            // trailing comment on the marker line rather than as a scalar.
-            if let Some(comment_text) = inline.strip_prefix('#') {
-                let comment_end =
-                    crate::pos::advance_within_line(inline_start.advance('#'), comment_text);
-                self.trailing_comment = Some((
-                    comment_text,
-                    Span {
-                        start: inline_start,
-                        end: comment_end,
-                    },
-                ));
-            } else if reject_all_inline {
-                // `...` markers must not have non-comment inline content.
-                self.marker_inline_error = Some(Error {
-                    pos: inline_start,
-                    message: "invalid content after document-end marker '...'".into(),
-                });
-            } else {
-                // Detect block scalar indicators (`|` / `>`) in inline position.
-                // `scan_plain_line_block` below would mis-scan `|0` or `|10` as
-                // plain scalars; instead validate the block header eagerly so that
-                // invalid indicators (indent 0, double-digit, duplicate markers)
-                // produce the correct parse error.
-                if let Some(after_pipe) = inline
-                    .strip_prefix('|')
-                    .or_else(|| inline.strip_prefix('>'))
-                {
-                    let (_, _, header_err) = parse_block_header(after_pipe, inline_start);
-                    if let Some(e) = header_err {
-                        self.marker_inline_error = Some(e);
-                        return (marker_pos, after);
-                    }
-                    // Valid block scalar header — fall through to the plain-scalar path
-                    // so it is stashed as inline_scalar for the event emitter.
-                    // (The body on subsequent lines is handled by the normal scalar
-                    // dispatch path after DocumentStart is emitted.)
-                }
-                // For inline content starting with `!` (tag), `"` (double-quoted
-                // scalar), or `'` (single-quoted scalar), prepend it as a synthetic
-                // line so the normal event dispatch handles it correctly.
-                // Plain-scalar scanning would mis-tokenize these: `!` is a YAML
-                // indicator, and quotes are literal characters to `scan_plain_line_block`.
-                let first_inline_byte = inline.as_bytes().first().copied();
-                if first_inline_byte == Some(b'&') {
-                    // Anchor inline after `---`.  Validate that any content after
-                    // the anchor name is not a block mapping entry — `--- &a key:
-                    // val` is invalid because block mapping entries cannot appear
-                    // inline on the document-start line (CXX2).
-                    if anchor_followed_by_block_mapping(inline) {
-                        self.marker_inline_error = Some(Error {
-                            pos: inline_start,
-                            message: "invalid content after document-start marker '---'".into(),
-                        });
-                    } else {
-                        self.buf.prepend_line(Line {
-                            content: inline,
-                            offset: inline_start.byte_offset,
-                            indent: inline_start.column,
-                            break_type: line.break_type,
-                            pos: inline_start,
-                        });
-                    }
-                } else if matches!(first_inline_byte, Some(b'!' | b'"' | b'\'')) {
-                    // inline is a borrowed slice of the original input (zero-copy).
-                    self.buf.prepend_line(Line {
-                        content: inline,
-                        offset: inline_start.byte_offset,
-                        indent: inline_start.column,
-                        break_type: line.break_type,
-                        pos: inline_start,
-                    });
-                } else {
-                    let scanned = scan_plain_line_block(inline);
-                    if scanned.is_empty() {
-                        // First character cannot start a plain scalar (e.g. `&`,
-                        // `*`, `%`, `{`, `[`) — invalid inline content after `---`.
-                        self.marker_inline_error = Some(Error {
-                            pos: inline_start,
-                            message: "invalid content after document-start marker '---'".into(),
-                        });
-                    } else {
-                        // Check for residual content after the plain scalar (e.g.
-                        // `--- key: value` where `: value` is left over).  Any
-                        // non-whitespace residual that is not a comment is invalid.
-                        let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
-                        if !residual.is_empty() && !residual.starts_with('#') {
-                            self.marker_inline_error = Some(Error {
-                                pos: inline_start,
-                                message: "invalid content after document-start marker '---'".into(),
-                            });
-                        } else {
-                            let inline_end = crate::pos::advance_within_line(inline_start, scanned);
-                            self.inline_scalar = Some((
-                                Cow::Borrowed(scanned),
-                                Span {
-                                    start: inline_start,
-                                    end: inline_end,
-                                },
-                            ));
-                        }
-                    }
-                }
-            }
+        // Compute the start position of the inline content.
+        // marker_pos is at column 0 of the line; inline content starts at
+        // byte_offset = marker_pos.byte_offset + (content.len() - inline.len()).
+        let prefix_bytes = line.content.len() - inline.len();
+        let prefix_chars = crate::pos::column_at(line.content, prefix_bytes);
+        let inline_start = Pos {
+            byte_offset: marker_pos.byte_offset + prefix_bytes,
+            line: marker_pos.line,
+            column: marker_pos.column + prefix_chars,
+        };
+
+        // If the inline content is a comment (`# ...`), store it as a
+        // trailing comment on the marker line rather than as a scalar.
+        if let Some(comment_text) = inline.strip_prefix('#') {
+            let comment_end =
+                crate::pos::advance_within_line(inline_start.advance('#'), comment_text);
+            self.trailing_comment = Some((
+                comment_text,
+                Span {
+                    start: inline_start,
+                    end: comment_end,
+                },
+            ));
+        } else if reject_all_inline {
+            // `...` markers must not have non-comment inline content.
+            self.marker_inline_error = Some(Error {
+                pos: inline_start,
+                message: "invalid content after document-end marker '...'".into(),
+            });
+        } else if let Some(early) =
+            self.handle_marker_inline(inline, inline_start, &line, marker_pos, after)
+        {
+            return early;
         }
 
         (marker_pos, after)
+    }
+
+    /// Handle non-comment inline content on a `---` marker line.
+    ///
+    /// Returns `Some((marker_pos, after))` when processing must terminate
+    /// early (invalid block-scalar header).  Returns `None` on success or
+    /// when a non-fatal error is stored in [`Self::marker_inline_error`].
+    fn handle_marker_inline(
+        &mut self,
+        inline: &'input str,
+        inline_start: Pos,
+        line: &Line<'input>,
+        marker_pos: Pos,
+        after: Pos,
+    ) -> Option<(Pos, Pos)> {
+        let first_byte = inline.as_bytes().first().copied();
+        if matches!(first_byte, Some(b'|' | b'>')) {
+            // Block scalar (`|`/`>`) — validate header eagerly; prepend as a
+            // synthetic line so the normal dispatch handles parsing.
+            let (_, _, header_err) = parse_block_header(&inline[1..], inline_start);
+            if let Some(e) = header_err {
+                self.marker_inline_error = Some(e);
+                return Some((marker_pos, after));
+            }
+            self.buf.prepend_line(Line {
+                content: inline,
+                offset: inline_start.byte_offset,
+                indent: inline_start.column,
+                break_type: line.break_type,
+                pos: inline_start,
+            });
+        } else if first_byte == Some(b'&') {
+            // Anchor — reject if a block mapping entry follows (CXX2).
+            if anchor_followed_by_block_mapping(inline) {
+                self.marker_inline_error = Some(Error {
+                    pos: inline_start,
+                    message: "invalid content after document-start marker '---'".into(),
+                });
+            } else {
+                self.buf.prepend_line(Line {
+                    content: inline,
+                    offset: inline_start.byte_offset,
+                    indent: inline_start.column,
+                    break_type: line.break_type,
+                    pos: inline_start,
+                });
+            }
+        } else if matches!(first_byte, Some(b'!' | b'"' | b'\'')) {
+            // Tag or quoted scalar — prepend for normal dispatch.
+            self.buf.prepend_line(Line {
+                content: inline,
+                offset: inline_start.byte_offset,
+                indent: inline_start.column,
+                break_type: line.break_type,
+                pos: inline_start,
+            });
+        } else {
+            self.handle_plain_scalar_inline(inline, inline_start);
+        }
+        None
+    }
+
+    /// Handle plain-scalar inline content on a `---` marker line.
+    fn handle_plain_scalar_inline(&mut self, inline: &'input str, inline_start: Pos) {
+        let scanned = scan_plain_line_block(inline);
+        if scanned.is_empty() {
+            // First character cannot start a plain scalar (e.g. `*`, `%`,
+            // `{`, `[`) — invalid inline content after `---`.
+            self.marker_inline_error = Some(Error {
+                pos: inline_start,
+                message: "invalid content after document-start marker '---'".into(),
+            });
+            return;
+        }
+        // Any non-whitespace residual that is not a comment is invalid
+        // (e.g. `--- key: value` where `: value` is left after scanning `key`).
+        let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
+        if !residual.is_empty() && !residual.starts_with('#') {
+            self.marker_inline_error = Some(Error {
+                pos: inline_start,
+                message: "invalid content after document-start marker '---'".into(),
+            });
+        } else {
+            let inline_end = crate::pos::advance_within_line(inline_start, scanned);
+            self.inline_scalar = Some((
+                Cow::Borrowed(scanned),
+                Span {
+                    start: inline_start,
+                    end: inline_end,
+                },
+            ));
+        }
     }
 
     /// Peek at the next line without consuming it.

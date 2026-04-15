@@ -9,7 +9,10 @@
 //! the function body for the rationale.
 
 use super::properties::{scan_anchor_name, scan_tag};
-use super::state::{FlowMappingPhase, IterState, PendingAnchor, PendingTag, StepResult};
+use super::state::{
+    CollectionEntry, FlowMappingPhase, IterState, MappingPhase, PendingAnchor, PendingTag,
+    StepResult,
+};
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
 use crate::limits::MAX_COLLECTION_DEPTH;
@@ -68,24 +71,55 @@ impl<'input> EventIter<'input> {
             /// a plain scalar.  Plain scalars may span multiple lines in flow
             /// context, so the missing-comma check must not fire after a plain
             /// scalar (the next line's content may be a continuation).
+            ///
+            /// `in_implicit_map` is `true` when a `:` value separator has been
+            /// consumed inside this sequence entry — meaning a `MappingStart`
+            /// was inserted before the key scalar and a `MappingEnd` must be
+            /// emitted before the next `,` or `]`.
+            ///
+            /// `key_start_idx` records the index in `events` where the current
+            /// key scalar/collection starts. When `:` arrives, `MappingStart`
+            /// is inserted at this position.
             Sequence {
                 has_value: bool,
                 after_colon: bool,
                 last_was_plain: bool,
+                in_implicit_map: bool,
+                key_start_idx: usize,
             },
             /// An open `{...}` mapping.
             ///
             /// `has_value` tracks the same invariant as in `Sequence` but for
             /// the mapping as a whole (not per key/value pair).
             ///
+            /// `after_colon` is `true` after the `:` value separator has been
+            /// consumed in Value phase.  It prevents a plain-scalar value that
+            /// starts with `:` (e.g. `{x: :x}`) from being mis-parsed as a
+            /// second value separator.  Reset to `false` when transitioning back
+            /// to Key phase (comma or value-scalar emission).
+            ///
             /// `last_was_plain` mirrors the same concept as in `Sequence`: when
             /// the most recent emitted item was a plain scalar, the next line
             /// may be a multi-line continuation, so indicator-start validation
             /// must be deferred until we know whether it is a continuation.
+            ///
+            /// `key_continuation` is `true` when a multi-line plain key was
+            /// extended across a line break and the phase was reverted to Key
+            /// (from Value) to recognise the `:` separator.  When a `,` arrives
+            /// in this state the key is complete but has no value — a null value
+            /// must be emitted before the comma resets the frame.
+            ///
+            /// `explicit_key_pending` is `true` after a `?` explicit-key
+            /// indicator is consumed but before any key content arrives.  When
+            /// `}` arrives in Key phase with this flag set, a null key and null
+            /// value must be emitted (e.g. `{? explicit: entry, ?}`).
             Mapping {
                 phase: FlowMappingPhase,
                 has_value: bool,
+                after_colon: bool,
                 last_was_plain: bool,
+                key_continuation: bool,
+                explicit_key_pending: bool,
             },
         }
 
@@ -126,7 +160,15 @@ impl<'input> EventIter<'input> {
             unreachable!("handle_flow_collection called without a pending line")
         };
 
-        let leading = first_line.content.len() - first_line.content.trim_start_matches(' ').len();
+        // Strip both leading spaces and tabs so that tab-indented flow collections
+        // (e.g. `\t[...]`) position pos_in_line directly at the `[` or `{`,
+        // bypassing the tab-indent error check in the main loop (YAML test
+        // suite 6CA3, Q5MG).
+        let leading = first_line.content.len()
+            - first_line
+                .content
+                .trim_start_matches(|c| c == ' ' || c == '\t')
+                .len();
         // The physical line number where the outermost flow collection opened.
         // Used to detect multi-line flow keys (C2SP).
         let start_line = first_line.pos.line;
@@ -134,6 +176,10 @@ impl<'input> EventIter<'input> {
         // inner-collection close).  Used to detect multi-line implicit keys (DK4H):
         // a `:` value separator on a different line than the preceding key is invalid.
         let mut last_token_line = first_line.pos.line;
+        // Saved from `first_line` for use after the loop (where `first_line` is
+        // no longer accessible due to mutable borrow of `self.lexer` in the loop).
+        let first_line_indent = first_line.indent;
+        let first_line_pos = first_line.pos;
         // Set when a `?` explicit-key indicator is consumed inside a flow sequence.
         // Suppresses the DK4H single-line check for the corresponding `:` separator —
         // explicit keys in flow sequences may span multiple lines (YAML 1.2 §7.4.2).
@@ -144,6 +190,10 @@ impl<'input> EventIter<'input> {
         let mut flow_stack: Vec<FlowFrame> = Vec::new();
         // All events assembled during this call (pushed to self.queue at end).
         let mut events: Vec<(Event<'input>, Span)> = Vec::new();
+        // Set to the indent of the enclosing block mapping to open when this
+        // flow collection is used as an implicit complex mapping key
+        // (`[flow]: value` or `{ flow }: value`).  `None` means not a key.
+        let mut implicit_key_mapping_indent: Option<usize> = None;
         // Current byte offset within `cur_content`.
         let mut pos_in_line: usize = leading;
         // Pending anchor for the next node in this flow collection.
@@ -218,9 +268,16 @@ impl<'input> EventIter<'input> {
             // start of a continuation line (before the first non-whitespace
             // character) is a tab used as indentation.  Blank lines (tab only,
             // no content) are exempt — they are treated as empty separator lines.
+            //
+            // Exception: a line whose first non-tab character is a flow
+            // collection delimiter (`[`, `{`, `]`, `}`) is allowed — the tab
+            // is serving as visual indentation before the delimiter, not as a
+            // structural indent (YAML test suite 6CA3, Q5MG).
             if pos_in_line == 0 {
-                let has_tab_indent =
-                    cur_content.starts_with('\t') && !cur_content.trim().is_empty();
+                let first_non_tab = cur_content.trim_start_matches('\t').chars().next();
+                let has_tab_indent = cur_content.starts_with('\t')
+                    && !cur_content.trim().is_empty()
+                    && !matches!(first_non_tab, Some('[' | '{' | ']' | '}'));
                 if has_tab_indent {
                     let err_pos = abs_pos(cur_base_pos, cur_content, 0);
                     self.state = IterState::Done;
@@ -344,12 +401,24 @@ impl<'input> EventIter<'input> {
                 let open_span = zero_span(open_pos);
                 pos_in_line += 1;
 
+                // Before pushing this new nested collection, update the parent
+                // sequence frame's key_start_idx to point here (the nested
+                // collection's start event) — so that if `:` arrives after this
+                // collection closes, MappingStart is inserted at the right place.
+                let new_start_idx = events.len();
+                if let Some(FlowFrame::Sequence {
+                    has_value: false,
+                    in_implicit_map: false,
+                    key_start_idx,
+                    ..
+                }) = flow_stack.last_mut()
+                {
+                    *key_start_idx = new_start_idx;
+                }
+
                 if ch == '[' {
-                    flow_stack.push(FlowFrame::Sequence {
-                        has_value: false,
-                        after_colon: false,
-                        last_was_plain: false,
-                    });
+                    // Push SequenceStart first, then record key_start_idx as the
+                    // index AFTER SequenceStart (where the first item will appear).
                     events.push((
                         Event::SequenceStart {
                             anchor: pending_flow_anchor.take(),
@@ -358,11 +427,21 @@ impl<'input> EventIter<'input> {
                         },
                         open_span,
                     ));
+                    flow_stack.push(FlowFrame::Sequence {
+                        has_value: false,
+                        after_colon: false,
+                        last_was_plain: false,
+                        in_implicit_map: false,
+                        key_start_idx: events.len(),
+                    });
                 } else {
                     flow_stack.push(FlowFrame::Mapping {
                         phase: FlowMappingPhase::Key,
                         has_value: false,
+                        after_colon: false,
                         last_was_plain: false,
+                        key_continuation: false,
+                        explicit_key_pending: false,
                     });
                     events.push((
                         Event::MappingStart {
@@ -394,13 +473,33 @@ impl<'input> EventIter<'input> {
                 };
 
                 match (ch, top) {
-                    (']', FlowFrame::Sequence { .. }) => {
+                    (
+                        ']',
+                        FlowFrame::Sequence {
+                            in_implicit_map, ..
+                        },
+                    ) => {
+                        if in_implicit_map {
+                            events.push((Event::MappingEnd, close_span));
+                        }
                         events.push((Event::SequenceEnd, close_span));
                     }
-                    ('}', FlowFrame::Mapping { phase, .. }) => {
-                        // If mapping is in Value phase (key emitted, no value yet),
-                        // emit empty value before closing.
-                        if phase == FlowMappingPhase::Value {
+                    (
+                        '}',
+                        FlowFrame::Mapping {
+                            phase,
+                            explicit_key_pending,
+                            ..
+                        },
+                    ) => {
+                        // If a `?` was consumed but no key content followed,
+                        // emit a null key and null value before closing.
+                        if phase == FlowMappingPhase::Key && explicit_key_pending {
+                            events.push((empty_scalar_event(), close_span));
+                            events.push((empty_scalar_event(), close_span));
+                        } else if phase == FlowMappingPhase::Value {
+                            // If mapping is in Value phase (key emitted, no value yet),
+                            // emit empty value before closing.
                             events.push((empty_scalar_event(), close_span));
                         }
                         events.push((Event::MappingEnd, close_span));
@@ -434,6 +533,7 @@ impl<'input> EventIter<'input> {
                             has_value,
                             after_colon,
                             last_was_plain,
+                            ..
                         } => {
                             *has_value = true;
                             *after_colon = false;
@@ -442,10 +542,16 @@ impl<'input> EventIter<'input> {
                         FlowFrame::Mapping {
                             phase,
                             has_value,
+                            after_colon,
                             last_was_plain,
+                            key_continuation,
+                            explicit_key_pending,
                         } => {
                             *has_value = true;
+                            *after_colon = false;
                             *last_was_plain = false;
+                            *key_continuation = false;
+                            *explicit_key_pending = false;
                             if *phase == FlowMappingPhase::Value {
                                 *phase = FlowMappingPhase::Key;
                             }
@@ -463,12 +569,13 @@ impl<'input> EventIter<'input> {
                     // closing bracket is immediately followed by `#` (no space),
                     // that is not a valid comment — it is a syntax error.
                     if tail_trimmed.starts_with('#') {
-                        let prev_was_ws = pos_in_line == 0
-                            || cur_content[..pos_in_line]
-                                .chars()
-                                .next_back()
-                                .is_some_and(|c| c == ' ' || c == '\t');
-                        if !prev_was_ws {
+                        // Check that at least one space or tab separates the
+                        // closing bracket from the `#`.  `tail_content` is the
+                        // raw suffix after the bracket; `tail_trimmed` has leading
+                        // whitespace stripped.  If they differ in length, whitespace
+                        // was present between the bracket and `#`.
+                        let has_space_before_hash = tail_content.len() > tail_trimmed.len();
+                        if !has_space_before_hash {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
                             return StepResult::Yield(Err(Error {
@@ -489,6 +596,26 @@ impl<'input> EventIter<'input> {
                             pos: err_pos,
                             message: "multi-line flow collection cannot be used as an implicit mapping key".into(),
                         }));
+                    }
+                    // If the tail starts with `:` and there is not already an
+                    // explicit-key mapping opened at this indent, this flow
+                    // collection is an implicit complex mapping key.  Record the
+                    // indent so we can prepend a MappingStart after the loop.
+                    //
+                    // Skip when `complex_key_inline` matches the flow collection's
+                    // indent — that means a `?`-opened mapping is already in place.
+                    if tail_trimmed.starts_with(':') {
+                        let flow_col = self.property_origin_indent.unwrap_or(first_line_indent);
+                        let already_in_explicit_key = self.complex_key_inline == Some(flow_col)
+                            && self.coll_stack.last().is_some_and(|e| {
+                                matches!(e,
+                                    CollectionEntry::Mapping(col, MappingPhase::Key, _)
+                                    if *col == flow_col
+                                )
+                            });
+                        if !already_in_explicit_key {
+                            implicit_key_mapping_indent = Some(flow_col);
+                        }
                     }
                     // If the block collection stack is empty AND the tail does not
                     // start with `:` (which would indicate this flow collection is a
@@ -562,7 +689,9 @@ impl<'input> EventIter<'input> {
                 // Emit an implicit empty-scalar node when the comma terminates
                 // an entry with no scalar yet: either a pending tag/anchor needs
                 // attachment, or a flow mapping is in Value phase (key was emitted
-                // but no value scalar followed before the comma).
+                // but no value scalar followed before the comma), or a multiline
+                // plain key just completed (phase reverted to Key for `:` recognition
+                // but no `:` arrived — the comma ends the key with a null value).
                 let in_mapping_value_phase = matches!(
                     flow_stack.last(),
                     Some(FlowFrame::Mapping {
@@ -570,9 +699,17 @@ impl<'input> EventIter<'input> {
                         ..
                     })
                 );
+                let in_mapping_key_continuation = matches!(
+                    flow_stack.last(),
+                    Some(FlowFrame::Mapping {
+                        key_continuation: true,
+                        ..
+                    })
+                );
                 if pending_flow_tag.is_some()
                     || pending_flow_anchor.is_some()
                     || in_mapping_value_phase
+                    || in_mapping_key_continuation
                 {
                     let empty_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     events.push((
@@ -591,6 +728,7 @@ impl<'input> EventIter<'input> {
                                 has_value,
                                 after_colon,
                                 last_was_plain,
+                                ..
                             } => {
                                 *has_value = true;
                                 *after_colon = false;
@@ -599,10 +737,16 @@ impl<'input> EventIter<'input> {
                             FlowFrame::Mapping {
                                 phase,
                                 has_value,
+                                after_colon,
                                 last_was_plain,
+                                key_continuation,
+                                explicit_key_pending,
                             } => {
                                 *has_value = true;
+                                *after_colon = false;
                                 *last_was_plain = false;
+                                *key_continuation = false;
+                                *explicit_key_pending = false;
                                 *phase = match *phase {
                                     FlowMappingPhase::Key => FlowMappingPhase::Value,
                                     FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -612,6 +756,17 @@ impl<'input> EventIter<'input> {
                     }
                 }
 
+                // If we were inside an implicit mapping entry in a sequence,
+                // emit MappingEnd before the comma resets the frame.
+                if let Some(FlowFrame::Sequence {
+                    in_implicit_map: true,
+                    ..
+                }) = flow_stack.last()
+                {
+                    let sep_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                    events.push((Event::MappingEnd, zero_span(sep_pos)));
+                }
+
                 // Reset has_value and (for mappings) go back to Key phase.
                 if let Some(frame) = flow_stack.last_mut() {
                     match frame {
@@ -619,18 +774,28 @@ impl<'input> EventIter<'input> {
                             has_value,
                             after_colon,
                             last_was_plain,
+                            in_implicit_map,
+                            key_start_idx,
                         } => {
                             *has_value = false;
                             *after_colon = false;
                             *last_was_plain = false;
+                            *in_implicit_map = false;
+                            *key_start_idx = events.len();
                         }
                         FlowFrame::Mapping {
                             phase,
                             has_value,
+                            after_colon,
                             last_was_plain,
+                            key_continuation,
+                            explicit_key_pending,
                         } => {
                             *has_value = false;
+                            *after_colon = false;
                             *last_was_plain = false;
+                            *key_continuation = false;
+                            *explicit_key_pending = false;
                             if *phase == FlowMappingPhase::Value {
                                 *phase = FlowMappingPhase::Key;
                             }
@@ -807,6 +972,7 @@ impl<'input> EventIter<'input> {
                             has_value,
                             after_colon,
                             last_was_plain,
+                            ..
                         } => {
                             *has_value = true;
                             *after_colon = false;
@@ -815,10 +981,16 @@ impl<'input> EventIter<'input> {
                         FlowFrame::Mapping {
                             phase,
                             has_value,
+                            after_colon,
                             last_was_plain,
+                            key_continuation,
+                            explicit_key_pending,
                         } => {
                             *has_value = true;
+                            *after_colon = false;
                             *last_was_plain = false;
+                            *key_continuation = false;
+                            *explicit_key_pending = false;
                             *phase = match *phase {
                                 FlowMappingPhase::Key => FlowMappingPhase::Value,
                                 FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -842,6 +1014,16 @@ impl<'input> EventIter<'input> {
                     if matches!(flow_stack.last(), Some(FlowFrame::Sequence { .. })) {
                         explicit_key_in_seq = true;
                     }
+                    // In a flow mapping, record that an explicit-key indicator was
+                    // seen so that a trailing `?` with no content (e.g. `{..., ?}`)
+                    // emits a null-null pair at `}`.
+                    if let Some(FlowFrame::Mapping {
+                        explicit_key_pending,
+                        ..
+                    }) = flow_stack.last_mut()
+                    {
+                        *explicit_key_pending = true;
+                    }
                     pos_in_line += 1;
                     continue 'outer;
                 }
@@ -853,11 +1035,14 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             if ch == ':' {
                 let next_ch = cur_content[pos_in_line + 1..].chars().next();
-                // `:` is a value separator when followed by whitespace/delimiter
-                // (standard case) OR when in a flow sequence with a synthetic
-                // current line (adjacent `:` from JSON-like key — YAML 1.2
-                // §7.4.2).  A synthetic line means the `:` is on the same
-                // physical line as the preceding quoted scalar / collection.
+                // `:` is a value separator when:
+                //   (a) followed by whitespace, delimiter, or EOL (standard case)
+                //   (b) in a flow sequence with a synthetic current line (adjacent
+                //       `:` from JSON-like key — YAML 1.2 §7.4.2)
+                //   (c) in a flow mapping in Value phase — the key was already
+                //       emitted, so `:` can be adjacent to the value (YAML 1.2
+                //       §7.4.2 `c-ns-flow-map-separator` allows non-whitespace after
+                //       the separator colon)
                 let is_standard_sep =
                     next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | ',' | ']' | '}' | '\n' | '\r'));
                 let is_adjacent_json_sep = !is_standard_sep
@@ -869,7 +1054,17 @@ impl<'input> EventIter<'input> {
                         })
                     )
                     && self.lexer.is_next_line_synthetic();
-                let is_value_sep = is_standard_sep || is_adjacent_json_sep;
+                let is_mapping_value_phase = !is_standard_sep
+                    && matches!(
+                        flow_stack.last(),
+                        Some(FlowFrame::Mapping {
+                            phase: FlowMappingPhase::Value,
+                            after_colon: false,
+                            ..
+                        })
+                    );
+                let is_value_sep =
+                    is_standard_sep || is_adjacent_json_sep || is_mapping_value_phase;
                 if is_value_sep {
                     // Multi-line implicit single-pair mapping key check (YAML 1.2 §7.4.1):
                     // inside a flow sequence `[...]`, a single-pair mapping entry's key must
@@ -892,9 +1087,14 @@ impl<'input> EventIter<'input> {
                             FlowFrame::Mapping {
                                 phase,
                                 has_value,
+                                after_colon,
                                 last_was_plain,
+                                key_continuation,
+                                explicit_key_pending,
                             } => {
                                 *last_was_plain = false;
+                                *key_continuation = false;
+                                *explicit_key_pending = false;
                                 if *phase == FlowMappingPhase::Key {
                                     // When `:` arrives in Key phase and no key scalar has
                                     // been emitted yet (`has_value = false`), emit an
@@ -915,17 +1115,47 @@ impl<'input> EventIter<'input> {
                                         *has_value = true;
                                     }
                                     *phase = FlowMappingPhase::Value;
+                                } else {
+                                    // `:` arriving in Value phase: the key was already
+                                    // emitted; this `:` is the value separator.  Mark
+                                    // `after_colon = true` so that a value scalar starting
+                                    // with `:` (e.g. `{x: :x}`) is not confused with a
+                                    // second separator.
+                                    *after_colon = true;
                                 }
                             }
                             FlowFrame::Sequence {
+                                has_value,
                                 after_colon,
                                 last_was_plain,
-                                ..
+                                in_implicit_map,
+                                key_start_idx,
                             } => {
-                                // `:` as value separator in a sequence means we are
-                                // entering the value part of a single-pair implicit
-                                // mapping.  Mark `after_colon` so the next scalar or
-                                // collection is not rejected for missing a comma.
+                                // `:` as value separator in a sequence: this is a
+                                // single-pair implicit mapping entry (YAML 1.2 §7.4.1).
+                                // Insert MappingStart at key_start_idx so the key is
+                                // wrapped: MappingStart, key, value, MappingEnd.
+                                let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                                // If no key was emitted yet (empty key case like `: val`),
+                                // push an empty scalar first, then insert MappingStart before it.
+                                if !*has_value {
+                                    events.push((empty_scalar_event(), zero_span(colon_pos)));
+                                    *has_value = true;
+                                }
+                                events.insert(
+                                    *key_start_idx,
+                                    (
+                                        Event::MappingStart {
+                                            anchor: None,
+                                            tag: None,
+                                            style: CollectionStyle::Flow,
+                                        },
+                                        zero_span(colon_pos),
+                                    ),
+                                );
+                                *in_implicit_map = true;
+                                // Mark `after_colon` so the next scalar or collection is
+                                // not rejected for missing a comma.
                                 *after_colon = true;
                                 // Reset last_was_plain so the value scalar on the next
                                 // line is not appended to the key via multi-line
@@ -1068,6 +1298,7 @@ impl<'input> EventIter<'input> {
                                     has_value,
                                     after_colon,
                                     last_was_plain,
+                                    ..
                                 } => {
                                     *has_value = true;
                                     *after_colon = false;
@@ -1076,10 +1307,16 @@ impl<'input> EventIter<'input> {
                                 FlowFrame::Mapping {
                                     phase,
                                     has_value,
+                                    after_colon,
                                     last_was_plain,
+                                    key_continuation,
+                                    explicit_key_pending,
                                 } => {
                                     *has_value = true;
+                                    *after_colon = false;
                                     *last_was_plain = false;
+                                    *key_continuation = false;
+                                    *explicit_key_pending = false;
                                     *phase = match *phase {
                                         FlowMappingPhase::Key => FlowMappingPhase::Value,
                                         FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -1177,12 +1414,16 @@ impl<'input> EventIter<'input> {
                                 FlowFrame::Mapping {
                                     phase,
                                     last_was_plain,
+                                    key_continuation,
                                     ..
                                 } => {
                                     // Undo the premature Key→Value advance: the key is not
                                     // yet complete until `: ` is seen.
                                     *phase = FlowMappingPhase::Key;
                                     *last_was_plain = true;
+                                    // Mark that a key is in continuation so a `,` can emit
+                                    // an implicit null value for this key.
+                                    *key_continuation = true;
                                 }
                                 FlowFrame::Sequence { last_was_plain, .. } => {
                                     *last_was_plain = true;
@@ -1248,6 +1489,7 @@ impl<'input> EventIter<'input> {
                             has_value: true,
                             after_colon: false,
                             last_was_plain: false,
+                            ..
                         }) => {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
@@ -1290,6 +1532,7 @@ impl<'input> EventIter<'input> {
                                     has_value,
                                     after_colon,
                                     last_was_plain,
+                                    ..
                                 } => {
                                     *has_value = true;
                                     *after_colon = false;
@@ -1298,10 +1541,16 @@ impl<'input> EventIter<'input> {
                                 FlowFrame::Mapping {
                                     phase,
                                     has_value,
+                                    after_colon,
                                     last_was_plain,
+                                    key_continuation,
+                                    explicit_key_pending,
                                 } => {
                                     *has_value = true;
+                                    *after_colon = false;
                                     *last_was_plain = true; // plain scalars may continue on next line
+                                    *key_continuation = false;
+                                    *explicit_key_pending = false;
                                     *phase = match *phase {
                                         FlowMappingPhase::Key => FlowMappingPhase::Value,
                                         FlowMappingPhase::Value => FlowMappingPhase::Key,
@@ -1340,6 +1589,35 @@ impl<'input> EventIter<'input> {
                 }));
             }
         }
+
+        // When this flow collection is an implicit complex mapping key
+        // (`[flow]: value` or `{ flow }: value`), prepend a block MappingStart
+        // event before the flow collection's events and push a Mapping entry
+        // onto the collection stack so the subsequent `: value` synthetic is
+        // handled correctly.
+        //
+        // `property_origin_indent` carries the original physical line's indent
+        // when an anchor or tag appeared before the `[`/`{` — use it so the
+        // mapping opens at the right document column.  Always clear it here
+        // (consumed if a key, unused otherwise).
+        if let Some(map_col) = implicit_key_mapping_indent {
+            let mapping_anchor = self.pending_collection_anchor.take();
+            let mapping_tag = self.pending_collection_tag.take();
+            events.insert(
+                0,
+                (
+                    Event::MappingStart {
+                        anchor: mapping_anchor,
+                        tag: mapping_tag,
+                        style: crate::event::CollectionStyle::Block,
+                    },
+                    zero_span(first_line_pos),
+                ),
+            );
+            self.coll_stack
+                .push(CollectionEntry::Mapping(map_col, MappingPhase::Key, false));
+        }
+        self.property_origin_indent = None;
 
         // Tick the parent block mapping phase (if any) after completing a flow
         // collection that was a key or value in a block mapping.

@@ -7,6 +7,34 @@ use crate::error::Error;
 use crate::limits::MAX_RESOLVED_TAG_LEN;
 use crate::pos::Pos;
 
+/// Percent-decode a tag suffix per YAML 1.2 §6.8.1.
+///
+/// Only `%XX` sequences where both hex digits are valid are decoded.
+/// Invalid sequences (non-hex digits, truncated `%`) are passed through
+/// unchanged — the caller has already validated the tag token.
+fn percent_decode(s: &str) -> Cow<'_, str> {
+    if !s.contains('%') {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push(char::from(((h << 4) | l) as u8));
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    Cow::Owned(out)
+}
+
 /// Per-document directive state accumulated from `%YAML` and `%TAG` directives.
 ///
 /// Cleared at the start of each new document (on `---` in `BetweenDocs`, on
@@ -50,13 +78,14 @@ impl DirectiveScope {
 
         let after_first_bang = &raw[1..];
 
-        // `!!suffix` — primary handle.
+        // `!!suffix` — secondary handle.
         if let Some(suffix) = after_first_bang.strip_prefix('!') {
             let prefix = self
                 .tag_handles
                 .get("!!")
                 .map_or("tag:yaml.org,2002:", String::as_str);
-            let resolved = format!("{prefix}{suffix}");
+            let decoded_suffix = percent_decode(suffix);
+            let resolved = format!("{prefix}{decoded_suffix}");
             if resolved.len() > MAX_RESOLVED_TAG_LEN {
                 return Err(Error {
                     pos: indicator_pos,
@@ -73,7 +102,8 @@ impl DirectiveScope {
             let handle = &raw[..inner_bang + 2]; // `!handle!`
             let suffix = &after_first_bang[inner_bang + 1..];
             if let Some(prefix) = self.tag_handles.get(handle) {
-                let resolved = format!("{prefix}{suffix}");
+                let decoded_suffix = percent_decode(suffix);
+                let resolved = format!("{prefix}{decoded_suffix}");
                 if resolved.len() > MAX_RESOLVED_TAG_LEN {
                     return Err(Error {
                         pos: indicator_pos,
@@ -90,7 +120,26 @@ impl DirectiveScope {
             });
         }
 
-        // `!suffix` (local tag) or bare `!` — no expansion.
+        // `!suffix` — check for a registered primary `!` handle (set via `%TAG ! prefix`).
+        // If present, expand; otherwise return as local tag.  A bare `!` (after_first_bang
+        // is empty) is a non-specific tag and is never expanded.
+        if !after_first_bang.is_empty() {
+            if let Some(prefix) = self.tag_handles.get("!") {
+                let decoded_suffix = percent_decode(after_first_bang);
+                let resolved = format!("{prefix}{decoded_suffix}");
+                if resolved.len() > MAX_RESOLVED_TAG_LEN {
+                    return Err(Error {
+                        pos: indicator_pos,
+                        message: format!(
+                            "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
+                        ),
+                    });
+                }
+                return Ok(Cow::Owned(resolved));
+            }
+        }
+
+        // `!suffix` with no registered `!` handle (local tag) or bare `!` — no expansion.
         Ok(Cow::Borrowed(raw))
     }
 

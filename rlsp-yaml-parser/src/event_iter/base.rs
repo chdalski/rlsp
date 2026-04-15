@@ -21,6 +21,8 @@ impl<'input> EventIter<'input> {
             coll_stack: Vec::new(),
             pending_anchor: None,
             pending_tag: None,
+            pending_collection_anchor: None,
+            pending_collection_tag: None,
             directive_scope: DirectiveScope::default(),
             root_node_emitted: false,
             explicit_key_pending: false,
@@ -40,7 +42,23 @@ impl<'input> EventIter<'input> {
             if top.indent() >= threshold {
                 self.coll_stack.pop();
                 let ev = match top {
-                    CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
+                    CollectionEntry::Sequence(_, _) => {
+                        // If a standalone tag or anchor was set for a sequence item but
+                        // no scalar followed before the sequence closed, emit a null
+                        // scalar now (e.g. `- !!str` at end of document).
+                        if self.pending_tag.is_some() || self.pending_anchor.is_some() {
+                            self.queue.push_back((
+                                Event::Scalar {
+                                    value: std::borrow::Cow::Borrowed(""),
+                                    style: ScalarStyle::Plain,
+                                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                },
+                                zero_span(pos),
+                            ));
+                        }
+                        Event::SequenceEnd
+                    }
                     CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
                         // Mapping closed via dedent while waiting for a value —
                         // emit empty value scalar first (consumes any pending
@@ -128,7 +146,23 @@ impl<'input> EventIter<'input> {
     pub(crate) fn close_all_collections(&mut self, pos: Pos) {
         while let Some(top) = self.coll_stack.pop() {
             let ev = match top {
-                CollectionEntry::Sequence(_, _) => Event::SequenceEnd,
+                CollectionEntry::Sequence(_, _) => {
+                    // If a standalone tag or anchor was set for a sequence item but
+                    // no scalar followed before the sequence closed at document end,
+                    // emit a null scalar now (e.g. `- !!str` as the last item).
+                    if self.pending_tag.is_some() || self.pending_anchor.is_some() {
+                        self.queue.push_back((
+                            Event::Scalar {
+                                value: std::borrow::Cow::Borrowed(""),
+                                style: ScalarStyle::Plain,
+                                anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                            },
+                            zero_span(pos),
+                        ));
+                    }
+                    Event::SequenceEnd
+                }
                 CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
                     // Mapping closed while waiting for a value — emit empty value.
                     // Consume any pending anchor/tag so standalone properties

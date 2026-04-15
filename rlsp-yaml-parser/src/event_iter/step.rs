@@ -12,7 +12,7 @@ use super::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
 use crate::error::Error;
-use crate::event::Event;
+use crate::event::{CollectionStyle, Event};
 use crate::pos::{Pos, Span};
 use crate::{EventIter, marker_span, zero_span};
 
@@ -66,6 +66,20 @@ impl<'input> EventIter<'input> {
         if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
             let end = self.lexer.drain_to_end();
             self.close_all_collections(end);
+            // If a standalone tag or anchor remains after closing all collections
+            // (e.g. a bare `!` tag on its own line with no following node), emit
+            // a null scalar so the property is properly attached.
+            if self.pending_tag.is_some() || self.pending_anchor.is_some() {
+                self.queue.push_back((
+                    Event::Scalar {
+                        value: std::borrow::Cow::Borrowed(""),
+                        style: crate::event::ScalarStyle::Plain,
+                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    },
+                    zero_span(end),
+                ));
+            }
             self.queue
                 .push_back((Event::DocumentEnd { explicit: false }, zero_span(end)));
             self.queue.push_back((Event::StreamEnd, zero_span(end)));
@@ -80,12 +94,24 @@ impl<'input> EventIter<'input> {
         let (peeked_indent, trimmed, first_byte): (usize, &'input str, Option<u8>) =
             self.lexer.peek_next_line().map_or((0, "", None), |line| {
                 let t: &'input str = line.content.trim_start_matches(' ');
-                (line.indent, t, t.as_bytes().first().copied())
+                // first_byte skips leading tabs as well: a line like `\t[...]` is a
+                // tab-indented flow collection (YAML test suite 6CA3, Q5MG) — the tab
+                // is not indentation in the space-count sense (line.indent == 0), but
+                // we must look past it to find the `[` or `{` that dispatches to the
+                // flow-collection handler.
+                let first_byte_val = t.trim_start_matches('\t').as_bytes().first().copied();
+                (line.indent, t, first_byte_val)
             });
 
         // Document markers (`---`/`...`) must be at column 0 (YAML 1.2 §9.1).
         // Any line with indent > 0 cannot be a marker — skip the function call.
-        if peeked_indent == 0 && self.lexer.is_document_end() {
+        //
+        // If an inline scalar from the previous `---` marker is still pending,
+        // defer document-boundary checks: the inline content belongs to the
+        // current document and must be emitted before the boundary fires.
+        // Example: `--- foo\n---` — `foo` is the first document's root node;
+        // the second `---` ends the first document only after `foo` is emitted.
+        if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(true);
@@ -104,7 +130,7 @@ impl<'input> EventIter<'input> {
             self.drain_trailing_comment();
             return StepResult::Continue;
         }
-        if peeked_indent == 0 && self.lexer.is_directives_end() {
+        if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
@@ -250,6 +276,7 @@ impl<'input> EventIter<'input> {
         if let Some(peek) = self.lexer.peek_next_line() {
             let content: &'input str = peek.content;
             let line_pos = peek.pos;
+            let line_indent = peek.indent;
             let line_break_type = peek.break_type;
             if let Some(after_star) = trimmed.strip_prefix('*') {
                 let leading = content.len() - trimmed.len();
@@ -301,6 +328,52 @@ impl<'input> EventIter<'input> {
                         let had_remaining = !remaining.is_empty();
                         let rem_byte_offset = star_pos.byte_offset + 1 + name.len() + spaces;
                         let rem_col = star_pos.column + 1 + name_char_count + spaces;
+
+                        // When the alias is followed by a value indicator (`: ` or `:`
+                        // at EOL), it is acting as an implicit mapping key.  If there
+                        // is no block mapping open at `line_indent` yet, open one now
+                        // (consuming any pending Standalone anchor as the mapping
+                        // anchor) and let the next iteration emit the alias as the key.
+                        // This handles `*alias : value` where the alias is the first
+                        // key of a block mapping (e.g. 26DV).
+                        let is_value_indicator = remaining
+                            .strip_prefix(':')
+                            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']));
+                        let already_in_mapping_here =
+                            self.coll_stack.last().is_some_and(|e| {
+                                matches!(e, CollectionEntry::Mapping(col, _, _) if *col == line_indent)
+                            });
+                        if is_value_indicator && !already_in_mapping_here {
+                            let map_anchor = if matches!(
+                                self.pending_anchor,
+                                Some(PendingAnchor::Standalone(_))
+                            ) {
+                                self.pending_anchor.take().map(PendingAnchor::name)
+                            } else {
+                                self.pending_collection_anchor.take()
+                            };
+                            let map_tag =
+                                if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
+                                    self.pending_tag.take().map(PendingTag::into_cow)
+                                } else {
+                                    self.pending_collection_tag.take()
+                                };
+                            self.queue.push_back((
+                                Event::MappingStart {
+                                    anchor: map_anchor,
+                                    tag: map_tag,
+                                    style: CollectionStyle::Block,
+                                },
+                                zero_span(star_pos),
+                            ));
+                            self.coll_stack.push(CollectionEntry::Mapping(
+                                line_indent,
+                                MappingPhase::Key,
+                                false,
+                            ));
+                            return StepResult::Continue;
+                        }
+
                         self.lexer.consume_line();
                         if had_remaining {
                             let rem_pos = Pos {
@@ -352,7 +425,10 @@ impl<'input> EventIter<'input> {
                         let after_tag = &trimmed[tag_token_bytes..];
                         let inline: &'input str = after_tag.trim_start_matches([' ', '\t']);
                         let spaces = after_tag.len() - inline.len();
-                        let had_inline = !inline.is_empty();
+                        // A trailing comment (`# …`) is not node content.  Treat
+                        // the tag as standalone when the only thing following it
+                        // is a comment.
+                        let had_inline = !inline.is_empty() && !inline.starts_with('#');
                         // YAML 1.2 §6.8.1: a tag property must be separated from
                         // the following node content by `s-separate` when the first
                         // character after the tag could be confused with a tag
@@ -413,16 +489,24 @@ impl<'input> EventIter<'input> {
                             };
                         self.lexer.consume_line();
                         if had_inline {
+                            // If a standalone tag is already pending (for the
+                            // upcoming collection), save it to the collection slot
+                            // so both properties can be delivered simultaneously.
+                            if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
+                                self.pending_collection_tag =
+                                    self.pending_tag.take().map(PendingTag::into_cow);
+                            }
                             self.pending_tag = Some(PendingTag::Inline(resolved_tag));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
-                            // Only set when the inline content is (or leads to) a
-                            // mapping key — if it's a plain value, there is no
-                            // handle_mapping_entry call to consume this, and leaving
-                            // it set would corrupt the next unrelated mapping entry.
+                            // Also set when inline starts a flow collection that may
+                            // be a complex key (e.g. `!!tag [a, b]: value`).
+                            // Cleared by `handle_flow_collection` if not a key.
                             if self.property_origin_indent.is_none()
-                                && inline_contains_mapping_key(inline)
+                                && (inline_contains_mapping_key(inline)
+                                    || inline.starts_with('[')
+                                    || inline.starts_with('{'))
                             {
                                 self.property_origin_indent = Some(line_indent);
                             }
@@ -495,7 +579,11 @@ impl<'input> EventIter<'input> {
                         let after_name = &after_amp[name.len()..];
                         let inline: &'input str = after_name.trim_start_matches([' ', '\t']);
                         let spaces = after_name.len() - inline.len();
-                        let had_inline = !inline.is_empty();
+                        // A trailing comment (`# …`) is not node content.  Treat
+                        // the anchor as standalone when the only thing following it
+                        // is a comment — the anchor annotates the next node on the
+                        // following line, not the comment.
+                        let had_inline = !inline.is_empty() && !inline.starts_with('#');
                         let name_char_count = name.chars().count();
                         let inline_offset =
                             line_pos.byte_offset + leading + 1 + name.len() + spaces;
@@ -576,14 +664,39 @@ impl<'input> EventIter<'input> {
                             // Inline content after anchor — anchor applies to the
                             // inline node (scalar or key), not to any enclosing
                             // collection opened on this same line.
+                            //
+                            // If a standalone anchor is already pending (for the
+                            // upcoming collection), save it to the collection slot
+                            // so both properties can be delivered: the standalone
+                            // anchor goes to MappingStart/SequenceStart and the
+                            // new inline anchor goes to the key/value scalar.
+                            //
+                            // Similarly, if an inline anchor is pending alongside a
+                            // standalone tag (`&a4 !!map` + `&a5 key: v`), the
+                            // inline anchor was paired with the collection tag — save
+                            // it to the collection slot so it reaches MappingStart.
+                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
+                                self.pending_collection_anchor =
+                                    self.pending_anchor.take().map(PendingAnchor::name);
+                            } else if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
+                                && has_standalone_tag
+                            {
+                                self.pending_collection_anchor =
+                                    self.pending_anchor.take().map(PendingAnchor::name);
+                            }
                             self.pending_anchor = Some(PendingAnchor::Inline(name));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
-                            // Only set when the inline content leads to a mapping key;
-                            // value-context anchors must not corrupt the next entry.
+                            // Only set when the inline content leads to a mapping key
+                            // or starts a flow collection (which may be a complex key
+                            // on the same line — e.g. `&key [a, b]: value`).
+                            // In the flow-collection case the indent is cleared by
+                            // `handle_flow_collection` once it knows if it is a key.
                             if self.property_origin_indent.is_none()
-                                && inline_contains_mapping_key(inline)
+                                && (inline_contains_mapping_key(inline)
+                                    || inline.starts_with('[')
+                                    || inline.starts_with('{'))
                             {
                                 self.property_origin_indent = Some(line_indent);
                             }

@@ -153,7 +153,12 @@ pub fn parse_test_metadata(content: &str) -> Vec<TestEntry> {
         if let Some((key, value)) = line.split_once(": ") {
             let key = key.trim();
             let value = value.trim();
-            if value == "|" {
+            // Match `|` or `|N` (explicit indentation indicator, e.g. `|2`).
+            let is_block_scalar = value == "|"
+                || (value.starts_with('|')
+                    && value.len() == 2
+                    && value.as_bytes().get(1).is_some_and(u8::is_ascii_digit));
+            if is_block_scalar {
                 *block_key = Some(key.to_string());
                 *block_buf = Some(String::new());
             } else {
@@ -175,13 +180,20 @@ pub fn parse_test_metadata(content: &str) -> Vec<TestEntry> {
             in_entry = true;
             current = EntryFields::default();
             parse_field(rest, &mut current, &mut block_key, &mut block_buf);
-        } else if let Some(indented) = block_buf
-            .is_some()
-            .then(|| line.strip_prefix("    "))
-            .flatten()
-        {
-            block_buf.as_mut().unwrap().push_str(indented);
-            block_buf.as_mut().unwrap().push('\n');
+        } else if block_buf.is_some() {
+            if let Some(indented) = line.strip_prefix("    ") {
+                block_buf.as_mut().unwrap().push_str(indented);
+                block_buf.as_mut().unwrap().push('\n');
+            } else if line.trim_matches([' ', '\t']).is_empty() {
+                // Blank line within the block scalar — preserve as an empty line.
+                block_buf.as_mut().unwrap().push('\n');
+            } else {
+                // Non-blank, non-indented line ends the block.
+                flush_block(&mut current, &mut block_key, &mut block_buf);
+                if line.starts_with("  ") && !line.starts_with("    ") {
+                    parse_field(line.trim(), &mut current, &mut block_key, &mut block_buf);
+                }
+            }
         } else if line.starts_with("  ") && !line.starts_with("    ") {
             flush_block(&mut current, &mut block_key, &mut block_buf);
             parse_field(line.trim(), &mut current, &mut block_key, &mut block_buf);

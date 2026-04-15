@@ -75,8 +75,9 @@ impl<'input> Lexer<'input> {
             )));
         }
 
-        // Multi-line: must collect continuation lines.
+        // Multi-line: YAML §7.3.3 trims trailing whitespace from each line.
         let mut owned = value.as_owned_string(body_start);
+        owned.truncate(owned.trim_end_matches([' ', '\t']).len());
 
         loop {
             let Some(next) = self.buf.peek_next() else {
@@ -114,15 +115,9 @@ impl<'input> Lexer<'input> {
                 continue;
             }
 
-            // Non-blank continuation line: fold the preceding content.
-            // The fold already has any newlines from blank lines above.
-            // If last char is '\n' (blank lines were counted), no extra space.
-            // If last char is something else, add a space.
-            let last = owned.chars().next_back();
-            if last != Some('\n') {
-                // Remove trailing space/newline we may have appended for a
-                // previous non-blank fold, then add the single-fold space.
-                // Actually: the owned string ends with real content; just add space.
+            // Fold: if the preceding content ends with a newline (from blank
+            // lines), no extra space; otherwise add a fold space.
+            if !owned.ends_with('\n') {
                 owned.push(' ');
             }
 
@@ -157,11 +152,13 @@ impl<'input> Lexer<'input> {
                     },
                 )));
             }
-            if cont_value.has_escape {
-                owned.push_str(&unescape_single_quoted(trimmed, cont_value.quoted_len));
+            // Non-closing continuation: trim trailing whitespace per YAML §7.3.3.
+            let line_str = if cont_value.has_escape {
+                unescape_single_quoted(trimmed, cont_value.quoted_len)
             } else {
-                owned.push_str(&trimmed[..cont_value.quoted_len]);
-            }
+                trimmed[..cont_value.quoted_len].to_owned()
+            };
+            owned.push_str(line_str.trim_end_matches([' ', '\t']));
         }
     }
 
@@ -646,6 +643,10 @@ pub(super) fn scan_double_quoted_line(
     let mut owned: Option<String> = None;
     // Byte length of the borrow-safe prefix (updated only while owned is None).
     let mut borrow_end: usize = 0;
+    // Length of `owned` after the last non-literal-whitespace source character.
+    // Used to trim only literal trailing spaces/tabs, not escape-decoded chars.
+    // `None` means no escape sequences have been seen (borrow path still valid).
+    let mut owned_non_ws_len: Option<usize> = None;
 
     while let Some(rel) = memchr2(b'"', b'\\', bytes.get(i..).unwrap_or_default()) {
         let hit = i + rel;
@@ -661,6 +662,9 @@ pub(super) fn scan_double_quoted_line(
                     message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
                 });
             }
+            // owned_non_ws_len is updated after each escape decode; see below.
+            // If the next hit is `"` (return) or `\` (escape decode updates it),
+            // we do not need to update the checkpoint here.
         } else {
             borrow_end = hit;
         }
@@ -689,6 +693,11 @@ pub(super) fn scan_double_quoted_line(
 
             if after_backslash.is_empty() {
                 // `\` at end of line — line continuation.
+                // Per YAML 1.2 §7.3.1, the `\` just before EOL is a line-
+                // continuation escape that suppresses the following line break and
+                // strips leading whitespace from the next line.  Content preceding
+                // the `\` (including literal tabs and spaces) is NOT trimmed — the
+                // author explicitly wrote `\<newline>` to signal continuation.
                 let prefix =
                     owned.unwrap_or_else(|| body.get(..borrow_end).unwrap_or_default().to_owned());
                 return Ok(DoubleQuotedLine::Incomplete {
@@ -703,6 +712,9 @@ pub(super) fn scan_double_quoted_line(
                 &mut owned,
                 body.get(..borrow_end).unwrap_or_default(),
             )?;
+            // After decoding an escape, `owned` has new non-literal-whitespace
+            // content (the decoded character is not a trailing literal space/tab).
+            owned_non_ws_len = Some(owned.as_ref().map_or(0, String::len));
             i = hit + 1 + consumed; // skip `\` + escape body
         }
     }
@@ -710,18 +722,32 @@ pub(super) fn scan_double_quoted_line(
     // No more `"` or `\` — consume the rest of the line as plain content.
     let rest = body.get(i..).unwrap_or_default();
     if let Some(buf) = owned.as_mut() {
-        buf.push_str(rest);
-        if buf.len() > 1_048_576 {
-            return Err(Error {
-                pos: start_pos,
-                message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-            });
+        if !rest.is_empty() {
+            buf.push_str(rest);
+            if buf.len() > 1_048_576 {
+                return Err(Error {
+                    pos: start_pos,
+                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                });
+            }
+            // Update non-ws checkpoint for the remaining literal span.
+            if let Some(last_non_ws) = rest.rfind(|c: char| c != ' ' && c != '\t') {
+                owned_non_ws_len = Some(
+                    buf.len() - rest.len()
+                        + last_non_ws
+                        + rest[last_non_ws..].chars().next().map_or(0, char::len_utf8),
+                );
+            }
+            // else: rest is all-whitespace, checkpoint unchanged.
         }
     } else {
         borrow_end = body.len();
     }
 
-    // End of line without closing `"` — trim trailing whitespace before fold.
+    // End of line without closing `"` — trim trailing LITERAL whitespace before fold.
+    // For the borrow path (no escape sequences), trim the source slice directly.
+    // For the owned path, truncate to the non-ws checkpoint to avoid trimming
+    // characters that were produced by escape sequences (e.g. `\t` → tab).
     let value = owned.map_or_else(
         || {
             let s = body
@@ -730,7 +756,10 @@ pub(super) fn scan_double_quoted_line(
                 .trim_end_matches([' ', '\t']);
             DoubleQuotedValue::Borrowed(s)
         },
-        |buf| DoubleQuotedValue::Owned(buf.trim_end_matches([' ', '\t']).to_owned()),
+        |buf| {
+            let trim_to = owned_non_ws_len.unwrap_or(0);
+            DoubleQuotedValue::Owned(buf[..trim_to].to_owned())
+        },
     );
 
     Ok(DoubleQuotedLine::Incomplete {

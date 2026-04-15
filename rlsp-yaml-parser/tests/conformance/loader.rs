@@ -10,11 +10,8 @@
 // the `Chomp` sub-variant is not encoded in the event tree and is not
 // asserted.
 //
-// Known failures are listed in `KNOWN_FAILURES` (key format `"STEM[index]"`).
-// The allowlist is self-enforcing:
-//   - Allowlisted entry that still fails → passes (expected failure).
-//   - Allowlisted entry that now passes → fails (remove from list).
-//   - Non-allowlisted entry that fails   → fails (regression).
+// All cases are expected to pass structural verification; a failure is a
+// regression.
 
 // These lints are expected in test code and suppressed module-wide.
 #![expect(
@@ -36,39 +33,6 @@ use rlsp_yaml_parser::{CollectionStyle, ScalarStyle, Span};
 use rstest::rstest;
 
 use super::{ConformanceCase, load_cases_from_file};
-
-// ---- Known failures (keyed as "STEM[index]") --------------------------------
-//
-// Each entry is one case that is expected to fail structural verification.
-// These represent loader bugs to be fixed in later tasks. When a case is fixed
-// the test will fail with "unexpected pass" — remove the entry from the list.
-//
-// Keep sorted and duplicate-free.
-const KNOWN_FAILURES: &[&str] = &[
-    "26DV[0]", "2AUY[0]", "2G84[2]", "2G84[3]", "36F6[0]", "4FJ6[0]", "4Q9F[0]", "4RWC[0]",
-    "5MUD[0]", "5T43[0]", "6BFJ[0]", "6CA3[0]", "6CK3[0]", "6FWR[0]", "6HB6[0]", "6JQW[0]",
-    "6VJK[0]", "6WLZ[0]", "6WPF[0]", "735Y[0]", "753E[0]", "7A4E[0]", "7BMT[0]", "7T8X[0]",
-    "87E4[0]", "8G76[0]", "8KB6[0]", "8UDB[0]", "93JH[0]", "93WF[0]", "96L6[0]", "9KAX[0]",
-    "9MMW[0]", "9TFX[0]", "9WXW[0]", "9YRD[0]", "B3HG[0]", "C2DT[0]", "C4HZ[0]", "CFD4[0]",
-    "CN3R[0]", "CT4Q[0]", "DE56[0]", "DE56[1]", "DE56[2]", "DE56[3]", "DFF7[0]", "DK3J[0]",
-    "DK95[3]", "DK95[8]", "EX5H[0]", "F2C7[0]", "F6MC[0]", "F8F9[0]", "FP8R[0]", "G4RS[0]",
-    "H2RW[0]", "HS5T[0]", "JEF9[1]", "K3WX[0]", "K527[0]", "L24T[1]", "L383[0]", "L9U5[0]",
-    "LE5A[0]", "LQZ7[0]", "LX3P[0]", "M2N8[1]", "MJS9[0]", "NAT4[0]", "P2AD[0]", "PRH3[0]",
-    "Q5MG[0]", "Q9WF[0]", "QF4Y[0]", "R4YG[0]", "T26H[0]", "T4YY[0]", "T5N4[0]", "TL85[0]",
-    "TS54[0]", "U3XV[0]", "UKK6[2]", "W42U[0]", "W4TN[0]", "XV9V[0]", "ZWK4[0]",
-];
-
-// ---- Allowlist helper -------------------------------------------------------
-
-fn is_known_failure(key: &str) -> bool {
-    KNOWN_FAILURES.binary_search(&key).is_ok()
-}
-
-/// The KNOWN_FAILURES key for a case: `"STEM[index]"`.
-fn allowlist_key(case: &ConformanceCase) -> String {
-    let stem = case.file.strip_suffix(".yaml").unwrap_or(&case.file);
-    format!("{stem}[{}]", case.index)
-}
 
 // ---- Expected AST model (parsed from event tree) ----------------------------
 
@@ -143,8 +107,14 @@ fn unescape_tree_value(s: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch == '\\' {
             match chars.next() {
+                Some('0') => out.push('\0'),
+                Some('a') => out.push('\x07'),
+                Some('b') => out.push('\x08'),
+                Some('e') => out.push('\x1B'),
+                Some('f') => out.push('\x0C'),
                 Some('n') => out.push('\n'),
                 Some('t') => out.push('\t'),
+                Some('v') => out.push('\x0B'),
                 Some('r') => out.push('\r'),
                 Some('\\') | None => out.push('\\'),
                 Some(other) => {
@@ -193,31 +163,36 @@ enum TreeToken {
 ///
 /// Returns `None` for unrecognized or empty lines.
 fn parse_tree_line(line: &str) -> Option<TreeToken> {
-    let line = line.trim();
-    if line.is_empty() {
+    // Strip only leading whitespace so that trailing spaces in scalar values
+    // (e.g. `=VAL 'foo ` where ` ` is part of the value) are preserved.
+    let line = line.trim_start();
+    if line.trim_end().is_empty() {
         return None;
     }
+    // For token-type comparisons that have no trailing content, also trim the
+    // right so that accidental trailing whitespace in the tree file is ignored.
+    let line_trimmed = line.trim_end();
 
-    if line == "+STR" {
+    if line_trimmed == "+STR" {
         return Some(TreeToken::StreamStart);
     }
-    if line == "-STR" {
+    if line_trimmed == "-STR" {
         return Some(TreeToken::StreamEnd);
     }
-    if line.starts_with("+DOC") {
+    if line_trimmed.starts_with("+DOC") {
         return Some(TreeToken::DocStart);
     }
-    if line.starts_with("-DOC") {
+    if line_trimmed.starts_with("-DOC") {
         return Some(TreeToken::DocEnd);
     }
-    if line.starts_with("-SEQ") {
+    if line_trimmed.starts_with("-SEQ") {
         return Some(TreeToken::SeqEnd);
     }
-    if line.starts_with("-MAP") {
+    if line_trimmed.starts_with("-MAP") {
         return Some(TreeToken::MapEnd);
     }
 
-    if let Some(rest) = line.strip_prefix("+SEQ") {
+    if let Some(rest) = line_trimmed.strip_prefix("+SEQ") {
         let rest = rest.trim();
         let style = if rest.starts_with("[]") {
             CollectionStyle::Flow
@@ -230,7 +205,7 @@ fn parse_tree_line(line: &str) -> Option<TreeToken> {
         return Some(TreeToken::SeqStart { anchor, tag, style });
     }
 
-    if let Some(rest) = line.strip_prefix("+MAP") {
+    if let Some(rest) = line_trimmed.strip_prefix("+MAP") {
         let rest = rest.trim();
         let style = if rest.starts_with("{}") {
             CollectionStyle::Flow
@@ -242,7 +217,7 @@ fn parse_tree_line(line: &str) -> Option<TreeToken> {
         return Some(TreeToken::MapStart { anchor, tag, style });
     }
 
-    if let Some(rest) = line.strip_prefix("=ALI") {
+    if let Some(rest) = line_trimmed.strip_prefix("=ALI") {
         let name = rest
             .trim()
             .strip_prefix('*')
@@ -251,8 +226,11 @@ fn parse_tree_line(line: &str) -> Option<TreeToken> {
         return Some(TreeToken::Alias { name });
     }
 
+    // For =VAL, use the leading-space-trimmed line (not right-trimmed) so that
+    // trailing spaces in the scalar value are preserved (e.g. `=VAL 'foo ` where
+    // the trailing space is part of the value).
     if let Some(rest) = line.strip_prefix("=VAL") {
-        let rest = rest.trim();
+        let rest = rest.trim_start();
         let (anchor, tag, rest) = parse_optional_anchor_tag(rest);
         // First character of `rest` is the style prefix.
         // The value portion uses yaml-test-suite escape notation:
@@ -646,77 +624,19 @@ pub fn yaml_test_suite(#[files("../tests/yaml-test-suite/src/*.yaml")] path: Pat
 
 fn assert_case(case: &ConformanceCase) {
     let tag = format!("{}[{}] {}", case.file, case.index, case.name);
-    let key = allowlist_key(case);
 
-    // Fail cases: assert load() returns Err, skip tree check.
+    // Fail cases: skip tree check (stream test is the authority on fail cases).
     if case.fail {
-        let result = load(&case.yaml);
-        // Fail cases might actually load fine in some implementations — we only
-        // check that load returns Err for cases the suite marks as fail.
-        // Some parsers are more lenient; don't enforce this strictly in
-        // KNOWN_FAILURES as the stream test is the authority on fail cases.
-        let _ = result;
         return;
     }
 
-    let result = load(&case.yaml);
+    // LC-2: non-fail cases must load without error.
+    let docs = load(&case.yaml).unwrap_or_else(|e| panic!("{tag}: load() returned error: {e}"));
 
-    // Check whether this case is expected to pass the tree verification.
-    let tree_expected = case.tree.as_deref().and_then(parse_expected_documents);
-
-    let failed = check_case(&result, tree_expected.as_deref(), &tag);
-
-    if is_known_failure(&key) {
-        assert!(
-            failed,
-            "loader_conformance: {tag} unexpectedly passed — \
-             remove \"{key}\" from KNOWN_FAILURES in \
-             rlsp-yaml-parser/tests/conformance/loader.rs",
-        );
-    } else {
-        assert!(
-            !failed,
-            "loader_conformance: {tag} failed — see assertion output above"
-        );
+    // LC-3 / LC-4 / LC-5..LC-14: verify against event tree if available.
+    if let Some(tree_expected) = case.tree.as_deref().and_then(parse_expected_documents) {
+        assert_documents(&docs, &tree_expected, &tag);
     }
-}
-
-/// Run the case assertions and return `true` if any assertion failed.
-///
-/// Uses `std::panic::catch_unwind` to capture assertion panics so the
-/// KNOWN_FAILURES self-enforcement loop works correctly.
-fn check_case(
-    result: &Result<Vec<Document<Span>>, LoadError>,
-    tree_expected: Option<&[ExpectedDocument]>,
-    tag: &str,
-) -> bool {
-    use std::panic;
-
-    // Clone/capture what we need for the closure (catch_unwind requires Send).
-    let result_clone: Result<(), String> = match result {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    };
-
-    let failed = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // LC-2: non-fail cases must load without error.
-        let docs = match result {
-            Ok(docs) => docs,
-            Err(e) => panic!("{tag}: load() returned error: {e}"),
-        };
-
-        // LC-3 / LC-4 / LC-5..LC-14: verify against event tree if available.
-        if let Some(expected_docs) = tree_expected {
-            assert_documents(docs, expected_docs, tag);
-        }
-    }))
-    .is_err();
-
-    // Suppress the "unused variable" warning for result_clone — it's used
-    // only to satisfy the Send bound via catch_unwind, not for logic.
-    let _ = result_clone;
-
-    failed
 }
 
 // ---- Edge-case integration tests --------------------------------------------
@@ -1084,32 +1004,5 @@ mod tree_parser_tests {
             ),
             "got: {token:?}"
         );
-    }
-
-    /// KNOWN_FAILURES allowlist: a present key matches.
-    #[test]
-    fn allowlist_known_failure_matches_by_exact_key() {
-        // 26DV[0] is in KNOWN_FAILURES.
-        assert!(is_known_failure("26DV[0]"));
-    }
-
-    /// KNOWN_FAILURES allowlist: an absent key does not match.
-    #[test]
-    fn allowlist_unknown_case_id_not_in_list() {
-        assert!(!is_known_failure("YYYY[0]"));
-    }
-
-    /// KNOWN_FAILURES is sorted and duplicate-free.
-    #[test]
-    fn allowlist_is_sorted_and_has_no_duplicates() {
-        for pair in KNOWN_FAILURES.windows(2) {
-            match pair {
-                [a, b] => assert!(
-                    a < b,
-                    "KNOWN_FAILURES is not sorted or has duplicates: {a:?} >= {b:?}"
-                ),
-                _ => unreachable!(),
-            }
-        }
     }
 }

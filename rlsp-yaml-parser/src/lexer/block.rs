@@ -148,6 +148,24 @@ impl<'input> Lexer<'input> {
                 }));
             }
 
+            // Document markers (`---` / `...`) at column 0 always terminate a
+            // block scalar, even if the scalar's content_indent is 0.
+            // YAML 1.2 §8.1: "The content of a block scalar excludes all
+            // indentation … If the content indentation level is not greater than
+            // the current indentation level, the block scalar is empty."  More
+            // directly, `c-directives-end` and `c-document-end` are reserved
+            // at the stream level and are never scalar content.
+            if next.indent == 0
+                && (line_content == "---"
+                    || line_content.starts_with("--- ")
+                    || line_content.starts_with("---\t")
+                    || line_content == "..."
+                    || line_content.starts_with("... ")
+                    || line_content.starts_with("...\t"))
+            {
+                break;
+            }
+
             // Classify this line:
             // - If indent >= content_indent: content line (may be spaces-only
             //   after the indent prefix, but that's still content).
@@ -170,7 +188,20 @@ impl<'input> Lexer<'input> {
                 ""
             };
 
-            let is_content_line = next.indent >= content_indent && !after_indent.is_empty();
+            // A line has "real" content if it contains characters that are not
+            // spaces (in block scalars, tabs are content chars, not blank indicators).
+            let has_real_content =
+                next.indent >= content_indent && !after_indent.trim_end_matches(' ').is_empty();
+
+            // A whitespace-only line whose indent >= content_indent is classified
+            // as a content line only when content_indent was derived from actual
+            // content (content_indent_known = true) OR we have already seen at
+            // least one real content line (!before_first_real_content).
+            // Before the first real content line with an auto-detected indent, a
+            // whitespace-only line is an l-empty (blank) line per spec §8.1.1.1.
+            let is_content_line = next.indent >= content_indent
+                && !after_indent.is_empty()
+                && (has_real_content || content_indent_known || !before_first_real_content);
 
             if is_content_line {
                 // Leading all-whitespace lines with indent > content_indent are
@@ -178,7 +209,6 @@ impl<'input> Lexer<'input> {
                 // first non-empty line's indentation).  Only applies when
                 // content_indent was derived from an actual non-blank line or an
                 // explicit indicator (content_indent_known = true).
-                let has_real_content = !after_indent.trim_end_matches([' ', '\t']).is_empty();
                 if content_indent_known
                     && before_first_real_content
                     && !has_real_content
@@ -365,23 +395,47 @@ impl<'input> Lexer<'input> {
                 );
             }
 
+            // Document markers at column 0 always terminate a block scalar.
+            if next.indent == 0
+                && (line_content == "---"
+                    || line_content.starts_with("--- ")
+                    || line_content.starts_with("---\t")
+                    || line_content == "..."
+                    || line_content.starts_with("... ")
+                    || line_content.starts_with("...\t"))
+            {
+                break;
+            }
+
             let after_indent = if next.indent >= content_indent {
                 line_content.get(content_indent..).unwrap_or("")
             } else {
                 ""
             };
-            // A content line must have a non-whitespace character after the indent.
-            let is_content_line = next.indent >= content_indent
-                && !after_indent.trim_end_matches([' ', '\t']).is_empty();
+            // A line is a content line when it has any character after the
+            // content-indent prefix that is not a trailing space.  Tabs count
+            // as content (they are non-space characters per YAML §8.1.1).
+            // Only trailing *spaces* are excluded; a tab-only `after_indent`
+            // such as `\t` is non-empty content, not a blank line.
+            let is_content_line =
+                next.indent >= content_indent && !after_indent.trim_end_matches(' ').is_empty();
 
             if is_content_line {
-                let is_more_indented = next.indent > content_indent;
+                // A "spaced" (more-indented) line is one where the content after
+                // stripping the content-indent prefix begins with whitespace
+                // (space or tab).  Per YAML 1.2 §8.1.3, line breaks adjacent to
+                // spaced lines are preserved as `\n` rather than folded to a space.
+                let is_more_indented =
+                    next.indent > content_indent || after_indent.starts_with([' ', '\t']);
                 if has_content {
                     if trailing_newlines > 0 {
-                        // N blank lines → N newlines (first break discarded).
-                        out.extend(std::iter::repeat_n('\n', trailing_newlines));
+                        // N blank lines → N newlines, plus one more if the
+                        // preceding or current line is spaced (its break is
+                        // preserved, not folded).
+                        let extra = usize::from(prev_more_indented || is_more_indented);
+                        out.extend(std::iter::repeat_n('\n', trailing_newlines + extra));
                     } else if prev_more_indented || is_more_indented {
-                        // Break surrounding a more-indented line is preserved.
+                        // Break surrounding a more-indented (spaced) line is preserved.
                         out.push('\n');
                     } else {
                         // Single break between equally-indented lines → space.
@@ -606,9 +660,14 @@ pub(super) fn apply_chomping(
             // content already has no trailing blanks (they were counted separately).
         }
         Chomp::Clip => {
-            // Keep exactly one trailing `\n`.  The content already ends with `\n`
-            // (if non-empty) from the last content line — that's the one to keep.
-            // Blank lines are discarded.
+            // Keep exactly one trailing `\n`.  Normally content already ends
+            // with `\n` from the last content line.  When the last content line
+            // was at EOF (no trailing newline in the input), the `\n` was not
+            // appended — add it here so Clip always produces a newline-terminated
+            // result for non-empty scalars.  Blank lines are discarded.
+            if !content.ends_with('\n') && !content.is_empty() {
+                content.push('\n');
+            }
         }
         Chomp::Keep => {
             // Keep the trailing `\n` from the last content line plus all blank lines.
