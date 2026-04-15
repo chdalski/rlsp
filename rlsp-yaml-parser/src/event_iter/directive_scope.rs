@@ -20,16 +20,27 @@ fn percent_decode(s: &str) -> Cow<'_, str> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hi = (bytes[i + 1] as char).to_digit(16);
-            let lo = (bytes[i + 2] as char).to_digit(16);
-            if let (Some(h), Some(l)) = (hi, lo) {
-                out.push(char::from(((h << 4) | l) as u8));
-                i += 3;
-                continue;
+        if bytes.get(i) == Some(&b'%') {
+            if let (Some(&hi_byte), Some(&lo_byte)) = (bytes.get(i + 1), bytes.get(i + 2)) {
+                let hi = (hi_byte as char).to_digit(16);
+                let lo = (lo_byte as char).to_digit(16);
+                if let (Some(h), Some(l)) = (hi, lo) {
+                    // h and l are each 0..=15 from to_digit(16); the combined
+                    // value is 0..=255 and always fits in u8.
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "nibble-pair h<<4|l is 0..=255, always fits in u8"
+                    )]
+                    let decoded = ((h << 4) | l) as u8;
+                    out.push(char::from(decoded));
+                    i += 3;
+                    continue;
+                }
             }
         }
-        out.push(bytes[i] as char);
+        if let Some(&b) = bytes.get(i) {
+            out.push(b as char);
+        }
         i += 1;
     }
     Cow::Owned(out)

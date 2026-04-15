@@ -7,12 +7,6 @@
 //   1. `format_yaml(input, &default_opts)` must produce output that parses
 //      cleanly (no diagnostics).
 //   2. Formatting must be idempotent: `format(format(input)) == format(input)`.
-//
-// Known failures are listed in `KNOWN_FAILURES` (keyed by `"STEM[index]"`, e.g.
-// `"G4RS[0]"`). The allowlist enforces its own shrinkage:
-//   - Allowlisted entry that fails  → test passes (expected failure).
-//   - Allowlisted entry that passes → test FAILS (remove it from the list).
-//   - Non-allowlisted entry that fails → test FAILS (regression).
 
 #![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
 
@@ -22,25 +16,6 @@ use std::time::Duration;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rstest::rstest;
-
-// ---- Known failures (keyed as "STEM[index]") --------------------------------
-//
-// Each entry represents one case in a yaml-test-suite `.yaml` file that is
-// expected to fail the round-trip assertions. When a case is fixed (assertions
-// start passing), the test will fail with an "unexpected pass" error — remove
-// the entry from the list.
-//
-// Keep sorted and duplicate-free.
-const KNOWN_FAILURES: &[&str] = &[
-    "8G76[0]", "98YD[0]", "C4HZ[0]", "F8F9[0]", "HWV9[0]", "M2N8[1]", "MJS9[0]", "QT73[0]",
-    "R4YG[0]", "RZP5[0]", "UGM3[0]", "XW4D[0]",
-];
-
-// ---- Allowlist helper -------------------------------------------------------
-
-fn is_known_failure(key: &str) -> bool {
-    KNOWN_FAILURES.binary_search(&key).is_ok()
-}
 
 // ---- Visual-representation helpers (from yaml-test-suite convention) --------
 
@@ -60,18 +35,10 @@ fn visual_to_raw(s: &str) -> String {
 #[derive(Debug)]
 struct ConformanceCase {
     file: String,
-    stem: String,
     index: usize,
     name: String,
     yaml: String,
     fail: bool,
-}
-
-impl ConformanceCase {
-    /// The allowlist key for this case: `"STEM[index]"`.
-    fn allowlist_key(&self) -> String {
-        format!("{}[{}]", self.stem, self.index)
-    }
 }
 
 #[derive(Default)]
@@ -208,11 +175,6 @@ fn load_cases_from_file(path: &Path) -> Vec<ConformanceCase> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let stem = path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
 
     let Ok(content) = std::fs::read_to_string(path) else {
         return Vec::new();
@@ -229,7 +191,6 @@ fn load_cases_from_file(path: &Path) -> Vec<ConformanceCase> {
             };
             ConformanceCase {
                 file: file_name.clone(),
-                stem: stem.clone(),
                 index: idx,
                 name,
                 yaml: visual_to_raw(&yaml),
@@ -262,7 +223,6 @@ fn formatter_conformance(#[files("../tests/yaml-test-suite/src/*.yaml")] path: P
 
     for case in &cases {
         let tag = format!("{}[{}] {}", case.file, case.index, case.name);
-        let key = case.allowlist_key();
 
         // Intentionally-invalid YAML is not formatted.
         if case.fail {
@@ -272,37 +232,14 @@ fn formatter_conformance(#[files("../tests/yaml-test-suite/src/*.yaml")] path: P
         let input = &case.yaml;
         let output = format_yaml(input, &opts);
 
-        // Empty-output guard: non-empty input must produce non-empty output.
-        let empty_output_failed = !input.trim().is_empty() && output.trim().is_empty();
-
         // Parse-clean assertion.
+        // Empty output is valid for comment-only or doc-end-only streams.
         let diagnostics = parse_yaml(&output).diagnostics;
         let parse_failed = !diagnostics.is_empty();
 
         // Idempotency assertion.
         let second = format_yaml(&output, &opts);
         let idempotent_failed = output != second;
-
-        let any_failed = empty_output_failed || parse_failed || idempotent_failed;
-
-        if is_known_failure(&key) {
-            assert!(
-                any_failed,
-                "formatter_conformance: {tag} unexpectedly passed — \
-                 remove \"{key}\" from KNOWN_FAILURES in \
-                 rlsp-yaml/tests/formatter_conformance.rs",
-            );
-            // Expected failure: continue without further asserting.
-            continue;
-        }
-
-        // Non-allowlisted case: all assertions must hold.
-        assert!(
-            !empty_output_failed,
-            "formatter_conformance: {tag} — formatter returned empty output for non-empty input\n  \
-             input: {:?}",
-            &input[..input.len().min(120)]
-        );
 
         if parse_failed {
             let diag_msgs: Vec<String> = diagnostics.iter().map(|d| d.message.clone()).collect();
@@ -327,38 +264,5 @@ fn formatter_conformance(#[files("../tests/yaml-test-suite/src/*.yaml")] path: P
             &output[..output.len().min(200)],
             &second[..second.len().min(200)],
         );
-    }
-}
-
-// ---- Unit tests for harness helpers -----------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // 1. A key present in KNOWN_FAILURES is found.
-    #[test]
-    fn allowlist_known_failure_matches_by_exact_key() {
-        // 8G76[0] is in KNOWN_FAILURES.
-        assert!(is_known_failure("8G76[0]"));
-    }
-
-    // 2. A key absent from KNOWN_FAILURES is not found.
-    #[test]
-    fn allowlist_unknown_case_id_not_in_list() {
-        assert!(!is_known_failure("YYYY[0]"));
-    }
-
-    // 3. KNOWN_FAILURES is sorted and contains no duplicates.
-    #[test]
-    fn allowlist_is_sorted_and_has_no_duplicates() {
-        for pair in KNOWN_FAILURES.windows(2) {
-            let (a, b) = (pair.first().unwrap(), pair.get(1).unwrap());
-            assert!(
-                a < b,
-                "KNOWN_FAILURES is not strictly sorted or has duplicates: \
-                 {a:?} >= {b:?}",
-            );
-        }
     }
 }

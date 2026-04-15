@@ -77,6 +77,55 @@ struct ContentEntry {
     leading: Vec<String>,
 }
 
+/// Compute the last "YAML content" line index from the AST.
+///
+/// Block scalar values (literal `|` or folded `>`) can contain lines that start with
+/// `#`, which the text-scanning heuristic in `last_content_line_idx` misidentifies as
+/// standalone comments.  This function derives the last content line from AST span
+/// information, which is authoritative.
+///
+/// For each scalar node: `last_line = loc.start.line + lines_in_value - 1`.
+/// The `loc.start.line` is the first content line (not the header line for block scalars).
+/// `lines_in_value` counts the lines in the decoded value — for block scalars this
+/// includes any trailing blank lines consumed by the chomp indicator.
+fn last_content_line_from_ast(docs: &[Document<Span>]) -> Option<usize> {
+    fn node_last_content_line(node: &Node<Span>) -> Option<usize> {
+        match node {
+            // Block scalars occupy multiple source lines.  The decoded value
+            // includes trailing blank lines consumed by the chomp indicator,
+            // so `lines().count()` gives the exact number of occupied source
+            // lines (content + any trailing blanks consumed by keep/clip/strip).
+            Node::Scalar {
+                style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
+                loc,
+                value,
+                ..
+            } => {
+                // `loc.start.line` is 1-based; convert to 0-based first.
+                let start_0 = loc.start.line.saturating_sub(1);
+                let line_count = value.lines().count();
+                Some(start_0 + line_count.saturating_sub(1))
+            }
+            // Non-block scalars (plain, single-quoted, double-quoted) always
+            // occupy a single source line regardless of how many newlines are
+            // embedded in the decoded value.
+            // `loc.start.line` is 1-based; convert to 0-based.
+            Node::Scalar { loc, .. } | Node::Alias { loc, .. } => {
+                Some(loc.start.line.saturating_sub(1))
+            }
+            Node::Mapping { entries, .. } => entries
+                .iter()
+                .flat_map(|(k, v)| [node_last_content_line(k), node_last_content_line(v)])
+                .flatten()
+                .max(),
+            Node::Sequence { items, .. } => items.iter().filter_map(node_last_content_line).max(),
+        }
+    }
+    docs.iter()
+        .filter_map(|doc| node_last_content_line(&doc.root))
+        .max()
+}
+
 /// Attach document-prefix leading comments and blank lines back to the formatted output.
 ///
 /// Strategy:
@@ -90,8 +139,9 @@ struct ContentEntry {
 /// - Any unmatched leading comments (e.g. at end of file) are appended at the end.
 ///
 /// Always runs (even with no comments) so blank line reattachment is never skipped.
-/// Returns the index of the last line in `original` that is actual YAML
-/// content — neither blank nor a standalone comment outside `line_to_comment`.
+///
+/// `last_content_hint` is an AST-derived 0-based line index used to prevent
+/// block scalar `#`-prefixed content lines from being mistaken for EOF comments.
 fn last_content_line_idx(
     original: &str,
     line_to_comment: &std::collections::HashMap<usize, &Comment>,
@@ -107,16 +157,22 @@ fn last_content_line_idx(
         .last()
 }
 
-fn attach_comments(original: &str, formatted: &str, comments: &[Comment]) -> String {
+fn attach_comments(
+    original: &str,
+    formatted: &str,
+    comments: &[Comment],
+    last_content_hint: Option<usize>,
+) -> String {
     // Build a quick lookup: line index -> comment.
     let line_to_comment: std::collections::HashMap<usize, &Comment> =
         comments.iter().map(|c| (c.line, c)).collect();
 
-    // Standalone `#` lines after this index are EOF-trailing comments not
-    // embedded in the AST; collect them to append verbatim.  Lines before or
-    // at this index that start with `#` are inter-node comments already
-    // emitted by the AST formatter — skip them or they will be duplicated.
-    let last_content_idx = last_content_line_idx(original, &line_to_comment);
+    // `#` lines after `last_content_idx` are EOF-trailing comments; before it
+    // they are inter-node comments already emitted by the AST formatter.
+    // Combine text-scan and AST-derived hints to get the correct boundary.
+    let last_content_idx = last_content_line_idx(original, &line_to_comment)
+        .map(|t| last_content_hint.map_or(t, |h| t.max(h)))
+        .or(last_content_hint);
 
     let mut entries: Vec<ContentEntry> = Vec::new();
     let mut pending_leading: Vec<String> = Vec::new();
@@ -373,7 +429,8 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
 
     // Reattach document-prefix comments and blank lines to the formatted output.
     // Always runs — blank line preservation requires a pass even when there are no comments.
-    result = attach_comments(text_input, &result, &prefix_comments);
+    let last_content_hint = last_content_line_from_ast(&documents);
+    result = attach_comments(text_input, &result, &prefix_comments, last_content_hint);
 
     result
 }
@@ -445,10 +502,11 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                 } else {
                     // Non-empty scalar with user tag: include trailing space for separation.
                     // Empty scalar with user tag: no trailing space (value is absent).
+                    let formatted = format_tag(t);
                     if value.is_empty() {
-                        Some(t.clone())
+                        Some(formatted)
                     } else {
-                        Some(format!("{t} "))
+                        Some(format!("{formatted} "))
                     }
                 }
             });
@@ -512,10 +570,6 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                     // must be emitted as double-quoted with proper escaping.
                     if requires_double_quoting(value) {
                         text(format!("\"{}\"", escape_double_quoted(value)))
-                    } else if value.starts_with('"') || value.starts_with('\'') {
-                        // Values starting with a quote character cannot be emitted as plain —
-                        // they would look like an unterminated quoted scalar to a re-parser.
-                        string_to_doc(value, options, in_key)
                     } else if needs_quoting(value, options.yaml_version) {
                         // Value needs quoting (reserved keyword, special char, etc.) but
                         // was originally plain — preserve plain style so round-trip matches.
@@ -603,6 +657,20 @@ fn is_core_schema_tag(tag: &str) -> bool {
     tag.starts_with("tag:yaml.org,2002:")
 }
 
+/// Format a tag string for emission in YAML output.
+///
+/// Tags stored in the AST fall into two forms:
+/// - Handle-based: already start with `!` (e.g. `!circle`, `!!str`). Emit as-is.
+/// - URI-based: a bare URI without a `!` prefix (e.g. `tag:example.com:shape`).
+///   These must be wrapped as `!<uri>` — the verbatim tag form in YAML syntax.
+fn format_tag(tag: &str) -> String {
+    if tag.starts_with('!') {
+        tag.to_string()
+    } else {
+        format!("!<{tag}>")
+    }
+}
+
 /// Prepend anchor and user-defined tag node properties to a collection Doc.
 ///
 /// For **block** collections the properties must appear on their own line — emitting
@@ -624,7 +692,7 @@ fn prepend_collection_properties(
         if is_core_schema_tag(t) {
             None
         } else {
-            Some(t.to_string())
+            Some(format_tag(t))
         }
     });
 
@@ -915,12 +983,14 @@ fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -> Doc {
             } else {
                 if let Some(prev) = prev_content {
                     // Determine whether either the previous or the current
-                    // content line is "more-indented" (has a leading space
-                    // beyond the block scalar's base indentation level).
-                    // Only space characters count; a leading tab is content
-                    // at the base indent level, not extra indentation.
-                    let prev_more = prev.starts_with(' ');
-                    let curr_more = seg.starts_with(' ');
+                    // content line is "more-indented" (has a leading space or
+                    // tab beyond the block scalar's base indentation level).
+                    // YAML treats lines starting with a tab as more-indented
+                    // for folding purposes — their line break is preserved
+                    // (not folded to a space) and no extra blank line is needed
+                    // to represent the transition.
+                    let prev_more = prev.starts_with([' ', '\t']);
+                    let curr_more = seg.starts_with([' ', '\t']);
                     let either_more = prev_more || curr_more;
 
                     let blank_count = if either_more {
@@ -1028,25 +1098,37 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
 ///
 /// Explicit key syntax is required when the key cannot appear as a plain scalar
 /// before `: ` — specifically when the key is:
-/// - a collection (mapping or sequence) of any style
+/// - a non-empty collection (mapping or sequence) of any style
 /// - a block scalar (literal `|` or folded `>`), whose multi-line representation
 ///   cannot fit before a `: ` on the same line
+///
+/// Empty flow collections (`[]`, `{}`) are the one exception: they always render
+/// as single-character tokens and are safe as inline implicit keys.
+///
+/// Non-empty flow collections (`[a, b]`, `{k: v}`) require explicit key form even
+/// though they are single-line, because using them as implicit keys in a block
+/// mapping can cause re-parsing ambiguity (the YAML parser may confuse them with
+/// sequence or mapping indicators in the surrounding context).
 ///
 /// An empty scalar key is handled separately (emitted as `: value` with no `?`).
 const fn needs_explicit_key(key: &Node<Span>) -> bool {
     match key {
-        // Any collection as a key (empty or non-empty) requires explicit key form.
-        // Flow collections like `[]` or `{}` used as keys need `? [] : value` to
-        // avoid ambiguity with flow sequence/mapping indicators.
-        // Block scalar keys (literal or folded) span multiple lines and cannot
-        // appear before `: ` — they always require explicit key form.
+        // Empty flow collections are safe as inline implicit keys.
+        Node::Mapping { entries, .. } if entries.is_empty() => false,
+        Node::Sequence { items, .. } if items.is_empty() => false,
+        // Plain/quoted scalars and aliases are safe as inline implicit keys.
+        Node::Scalar {
+            style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+            ..
+        }
+        | Node::Alias { .. } => false,
+        // Non-empty collections and block scalars require explicit key form.
         Node::Mapping { .. }
         | Node::Sequence { .. }
         | Node::Scalar {
             style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
             ..
         } => true,
-        Node::Scalar { .. } | Node::Alias { .. } => false,
     }
 }
 
@@ -1109,9 +1191,9 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
                 let colon_prefix = match (anchor.as_ref(), user_tag) {
-                    (Some(name), Some(t)) => format!(": &{name} {t}"),
+                    (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
                     (Some(name), None) => format!(": &{name}"),
-                    (None, Some(t)) => format!(": {t}"),
+                    (None, Some(t)) => format!(": {}", format_tag(t)),
                     (None, None) => ":".to_string(),
                 };
                 concat(vec![
@@ -1132,9 +1214,9 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
                 let colon_prefix = match (anchor.as_ref(), user_tag) {
-                    (Some(name), Some(t)) => format!(": &{name} {t}"),
+                    (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
                     (Some(name), None) => format!(": &{name}"),
-                    (None, Some(t)) => format!(": {t}"),
+                    (None, Some(t)) => format!(": {}", format_tag(t)),
                     (None, None) => ":".to_string(),
                 };
                 concat(vec![
@@ -1212,9 +1294,9 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                     ":"
                 };
                 let colon = match (anchor.as_ref(), user_tag) {
-                    (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                    (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
                     (Some(name), None) => text(format!(": &{name}")),
-                    (None, Some(t)) => text(format!(": {t}")),
+                    (None, Some(t)) => text(format!(": {}", format_tag(t))),
                     (None, None) => text(bare_colon),
                 };
                 concat(vec![
@@ -1243,9 +1325,9 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                     ":"
                 };
                 let colon = match (anchor.as_ref(), user_tag) {
-                    (Some(name), Some(t)) => text(format!(": &{name} {t}")),
+                    (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
                     (Some(name), None) => text(format!(": &{name}")),
-                    (None, Some(t)) => text(format!(": {t}")),
+                    (None, Some(t)) => text(format!(": {}", format_tag(t))),
                     (None, None) => text(bare_colon),
                 };
                 concat(vec![
@@ -1373,9 +1455,9 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
             let inner = join(&hard_line(), pairs);
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
             let prefix = match (anchor.as_ref(), user_tag) {
-                (Some(name), Some(t)) => format!("&{name} {t}"),
+                (Some(name), Some(t)) => format!("&{name} {}", format_tag(t)),
                 (Some(name), None) => format!("&{name}"),
-                (None, Some(t)) => t.clone(),
+                (None, Some(t)) => format_tag(t),
                 (None, None) => String::new(),
             };
             if prefix.is_empty() {
@@ -1406,9 +1488,9 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
         } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
             let prefix_doc = match (anchor.as_ref(), user_tag) {
-                (Some(name), Some(t)) => text(format!("&{name} {t}")),
+                (Some(name), Some(t)) => text(format!("&{name} {}", format_tag(t))),
                 (Some(name), None) => text(format!("&{name}")),
-                (None, Some(t)) => text(t.clone()),
+                (None, Some(t)) => text(format_tag(t)),
                 (None, None) => text(String::new()),
             };
             concat(vec![

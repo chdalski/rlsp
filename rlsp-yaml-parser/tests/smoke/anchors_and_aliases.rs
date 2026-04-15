@@ -1015,21 +1015,24 @@ fn nested_anchors_outer_on_sequence_inner_on_item() {
     );
 }
 
-// A-9: When a standalone anchor is followed by a second inline key anchor,
-// the second anchor overwrites the first (pre-existing parser behaviour —
-// the standalone anchor is consumed and replaced).  The key scalar carries
-// the inline anchor; no error is produced.
+// A-9: When a standalone anchor is followed by an inline key anchor on the next
+// line, the standalone anchor anchors the mapping and the inline anchor anchors
+// the key scalar.  Per YAML spec, `&map` on its own line applies to the next
+// node (the mapping); `&k` inline before the key applies to that key scalar.
 #[test]
-fn standalone_anchor_overwritten_by_subsequent_inline_key_anchor() {
-    // "&map\n&k key: value\n" — &map is scanned as standalone, then &k is
-    // scanned as inline before the key.  The parser replaces &map with &k.
-    // MappingStart has no anchor; key scalar carries &k.
+fn standalone_anchor_applies_to_mapping_inline_anchor_applies_to_key() {
+    // "&map\n&k key: value\n" — &map is a standalone anchor for the mapping;
+    // &k is an inline anchor for the key scalar.
     let events = evs("&map\n&k key: value\n");
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
-        "MappingStart must have no anchor (standalone &map is replaced by inline &k)"
+        events.iter().any(|e| matches!(
+            e,
+            Event::MappingStart {
+                anchor: Some("map"),
+                ..
+            }
+        )),
+        "MappingStart must carry anchor &map"
     );
     assert!(
         events.iter().any(|e| matches!(

@@ -16,9 +16,8 @@ The parser produces: outer-mapping{key=inner-mapping{key=[a], value=x}, value=""
 The formatter outputs the inner mapping as a nested explicit key with the
 sequence converted to block form.
 
-Note: the formatter does not yet produce idempotent output for this case
-(M2N8[1] is in formatter KNOWN_FAILURES). This fixture verifies the formatter
-does not panic or corrupt the output on the first formatting pass.
+The formatter produces correct idempotent output. The key `[a]` is non-empty,
+so `needs_explicit_key` returns `true` and the explicit `?` prefix is used.
 
 ## Test-Document
 

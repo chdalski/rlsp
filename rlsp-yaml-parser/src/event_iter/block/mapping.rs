@@ -122,9 +122,9 @@ impl<'input> EventIter<'input> {
                 let inline = after_q.trim_start_matches([' ', '\t']);
                 // A trailing comment (`# ...`) is not key content — treat as
                 // if nothing followed the `?` indicator.
-                let had_key_inline = !inline.is_empty() && !inline.starts_with('#');
+                let has_inline_content = !inline.is_empty() && !inline.starts_with('#');
 
-                if had_key_inline {
+                if has_inline_content {
                     // Offset from line start to inline key content.
                     let spaces_after_q = after_q.len() - inline.len();
                     let total_offset = leading_spaces + 1 + spaces_after_q;
@@ -146,7 +146,7 @@ impl<'input> EventIter<'input> {
                 } else {
                     self.lexer.consume_line();
                 }
-                return ConsumedMapping::ExplicitKey { had_key_inline };
+                return ConsumedMapping::ExplicitKey;
             }
         }
 
@@ -689,18 +689,16 @@ impl<'input> EventIter<'input> {
         self.property_origin_indent = None;
         let consumed = self.consume_mapping_entry(key_indent);
         match consumed {
-            ConsumedMapping::ExplicitKey { had_key_inline } => {
+            ConsumedMapping::ExplicitKey => {
                 // Set complex_key_inline so the `:` value indicator is still
                 // recognised after the key collection closes (or immediately
                 // when no key collection is present).
                 self.complex_key_inline = Some(effective_key_indent);
-                if !had_key_inline {
-                    // Bare `?` — key content follows on subsequent line(s).
-                    // Set explicit_key_pending so the sequence handler allows
-                    // a block sequence key at the same indent as the outer
-                    // mapping (e.g. `?\n- a\n- b\n: value`).
-                    self.explicit_key_pending = true;
-                }
+                // Set explicit_key_pending so the sequence handler allows a
+                // block sequence key at the same indent as the outer mapping.
+                // This covers both `?\n- a` (bare `?`, key on next line) and
+                // `? - a` (inline sequence indicator after `?`).
+                self.explicit_key_pending = true;
             }
             ConsumedMapping::ImplicitKey {
                 key_value,

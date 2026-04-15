@@ -3,17 +3,14 @@ test-name: explicit-key-flow-sequence-as-key
 category: explicit-key
 ---
 
-# Test: Flow Sequence as Key Uses Explicit Key Form
+# Test: Empty Flow Sequence as Key Uses Inline Implicit Key Form
 
-When the key is a flow sequence (including empty `[]`), the explicit `?` form
-is used. Corresponds to conformance case M2N8[1].
+When the key is an empty flow sequence `[]`, the formatter uses inline implicit
+key form (no explicit `?` prefix). Corresponds to conformance case M2N8[1].
 
 The parser produces: outer-mapping{key=inner-mapping{key=[], value=x}, value=""}.
-The formatter outputs the inner mapping as a nested explicit key.
-
-Note: the formatter does not yet produce idempotent output for this case
-(M2N8[1] is in formatter KNOWN_FAILURES). This fixture verifies the formatter
-does not panic or corrupt the output on the first formatting pass.
+The inner mapping key is `[]` (empty flow sequence), which is safe as an inline
+implicit key — it renders as a single token and causes no re-parsing ambiguity.
 
 ## Test-Document
 
@@ -24,7 +21,6 @@ does not panic or corrupt the output on the first formatting pass.
 ## Expected-Document
 
 ```yaml
-? ? []
-  : x
+? []: x
 :
 ```

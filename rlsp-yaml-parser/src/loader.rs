@@ -489,9 +489,18 @@ impl<'opt> LoadState<'opt> {
                     let mut value = self.parse_node(stream)?;
 
                     // Trailing comment on the value — peek for inline comment.
-                    let value_end_line = node_end_line(&value);
-                    if let Some(trail) = peek_trailing_comment(stream, value_end_line)? {
-                        attach_trailing_comment(&mut value, trail);
+                    // Block scalars (literal `|` and folded `>`) consume trailing
+                    // blank lines as part of chomping; their span.end falls on the
+                    // first line after the scalar, which can coincide with the
+                    // next comment's line number.  That would falsely attach a
+                    // leading inter-node comment as a trailing inline comment.
+                    // Block scalars never have an inline comment on their content
+                    // lines, so skip trailing-comment detection for them.
+                    if !is_block_scalar(&value) {
+                        let value_end_line = node_end_line(&value);
+                        if let Some(trail) = peek_trailing_comment(stream, value_end_line)? {
+                            attach_trailing_comment(&mut value, trail);
+                        }
                     }
 
                     entries.push((key, value));
@@ -578,9 +587,15 @@ impl<'opt> LoadState<'opt> {
                     attach_leading_comments(&mut item, leading);
 
                     // Trailing comment on the item — peek for inline comment.
-                    let item_end_line = node_end_line(&item);
-                    if let Some(trail) = peek_trailing_comment(stream, item_end_line)? {
-                        attach_trailing_comment(&mut item, trail);
+                    // Block scalars are excluded for the same reason as in the
+                    // mapping path: their span.end can coincide with the next
+                    // comment's line, falsely turning a leading comment into a
+                    // trailing one.
+                    if !is_block_scalar(&item) {
+                        let item_end_line = node_end_line(&item);
+                        if let Some(trail) = peek_trailing_comment(stream, item_end_line)? {
+                            attach_trailing_comment(&mut item, trail);
+                        }
                     }
 
                     items.push(item);
@@ -788,6 +803,24 @@ const fn node_end_line(node: &Node<Span>) -> usize {
         | Node::Sequence { loc, .. }
         | Node::Alias { loc, .. } => loc.end.line,
     }
+}
+
+/// Return `true` if the node is a block scalar (literal `|` or folded `>`).
+///
+/// Block scalars consume trailing blank lines as part of chomping, so their
+/// `span.end` falls on the line *after* the last consumed line.  This means a
+/// comment on the immediately following line has the same line number as
+/// `span.end.line`, which would cause `peek_trailing_comment` to falsely
+/// classify it as an inline trailing comment.  The caller uses this predicate
+/// to skip trailing-comment detection for block scalars.
+const fn is_block_scalar(node: &Node<Span>) -> bool {
+    matches!(
+        node,
+        Node::Scalar {
+            style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
+            ..
+        }
+    )
 }
 
 // ---------------------------------------------------------------------------

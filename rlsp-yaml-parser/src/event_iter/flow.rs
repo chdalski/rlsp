@@ -164,11 +164,8 @@ impl<'input> EventIter<'input> {
         // (e.g. `\t[...]`) position pos_in_line directly at the `[` or `{`,
         // bypassing the tab-indent error check in the main loop (YAML test
         // suite 6CA3, Q5MG).
-        let leading = first_line.content.len()
-            - first_line
-                .content
-                .trim_start_matches(|c| c == ' ' || c == '\t')
-                .len();
+        let leading =
+            first_line.content.len() - first_line.content.trim_start_matches([' ', '\t']).len();
         // The physical line number where the outermost flow collection opened.
         // Used to detect multi-line flow keys (C2SP).
         let start_line = first_line.pos.line;

@@ -817,8 +817,8 @@ mod tests {
     #[case::two_trailing_blanks_dropped("|\n  foo\n\n\n", "foo\n")]
     // "|\n  foo\n   bar\n" with content_indent=2: bar has 1 extra space
     #[case::extra_indent_preserves_spaces("|\n  foo\n   bar\n", "foo\n bar\n")]
-    // "|\n  foo" — no final newline; no b-as-line-feed, so value is "foo".
-    #[case::eof_without_trailing_newline("|\n  foo", "foo")]
+    // "|\n  foo" — no final newline; clip adds a trailing newline so value is "foo\n".
+    #[case::eof_without_trailing_newline("|\n  foo", "foo\n")]
     fn literal_clip_content_val(#[case] input: &str, #[case] expected_val: &str) {
         let (val, _) = lit_ok(input);
         assert_eq!(val, expected_val);

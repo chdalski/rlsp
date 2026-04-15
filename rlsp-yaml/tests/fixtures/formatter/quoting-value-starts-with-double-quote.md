@@ -10,9 +10,8 @@ remain in a quoted form with the `"` properly escaped. Emitting it as a plain
 scalar would make it look like the start of an unterminated double-quoted string
 to a re-parser, producing a parse error.
 
-This can occur when the YAML parser encounters a multi-line double-quoted scalar
-containing `...` or `---` at a line boundary and loads a truncated plain value
-starting with `"`.
+`needs_quoting` returns `true` for values starting with `"`, so the formatter
+re-emits them in the appropriate quoted form rather than as plain scalars.
 
 ## Test-Document
 

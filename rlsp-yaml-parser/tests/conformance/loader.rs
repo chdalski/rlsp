@@ -20,7 +20,6 @@
     clippy::indexing_slicing,
     clippy::too_many_lines,
     clippy::wildcard_enum_match_arm,
-    clippy::doc_markdown,
     reason = "test code"
 )]
 

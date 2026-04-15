@@ -675,11 +675,9 @@ impl<'input> EventIter<'input> {
                             // standalone tag (`&a4 !!map` + `&a5 key: v`), the
                             // inline anchor was paired with the collection tag — save
                             // it to the collection slot so it reaches MappingStart.
-                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
-                                self.pending_collection_anchor =
-                                    self.pending_anchor.take().map(PendingAnchor::name);
-                            } else if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
-                                && has_standalone_tag
+                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_)))
+                                || (matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
+                                    && has_standalone_tag)
                             {
                                 self.pending_collection_anchor =
                                     self.pending_anchor.take().map(PendingAnchor::name);

@@ -129,10 +129,7 @@ impl<'input> PendingTag<'input> {
 /// Result of consuming a mapping-entry line.
 pub enum ConsumedMapping<'input> {
     /// Explicit key (`? key`).
-    ExplicitKey {
-        /// Whether there was key content on the same line as `?`.
-        had_key_inline: bool,
-    },
+    ExplicitKey,
     /// Implicit key (`key: value`).
     ///
     /// The key content and span are pre-extracted so the caller can push the
