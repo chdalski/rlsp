@@ -127,7 +127,7 @@ UGM3, UKK6[2], W4TN, XW4D
 
 ## Tasks
 
-### Task 1: Restructure conformance tests into module — bf6425b
+### Task 1: Restructure conformance tests into module — 3ca38ea
 
 Move the conformance test from a standalone file into a
 module structure that supports both stream and loader
@@ -143,7 +143,7 @@ testing.
       be in the conformance module
 - [x] `cargo test`, `cargo clippy --all-targets` pass
 
-### Task 2: Add loader conformance test — ad9c83e
+### Task 2: Add loader conformance test — e66ddad
 
 Add a loader conformance test that runs `load()` against
 the yaml-test-suite and verifies AST correctness by
