@@ -69,7 +69,17 @@ skip step 3 because the memory directory already exists.
       the template, write the template to
       `<plansDirectory>/CLAUDE.md` using Write.
 
-   c. Report whether updates were written or the files
+   c. **Plan review checklist** — read the template from
+      `.claude/skills/ensure-ai-dirs/plan-review-checklist.md`.
+      Read `<plansDirectory>/plan-review-checklist.md` if
+      it exists. If the file does not exist or its content
+      differs from the template, write the template to
+      `<plansDirectory>/plan-review-checklist.md` using
+      Write. The plan review subagent reads this checklist
+      at review time — syncing it here ensures the
+      checklist is current before any plan is written.
+
+   d. Report whether updates were written or the files
       were already identical.
 
    This step is unconditional — execute it every time,

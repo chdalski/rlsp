@@ -91,52 +91,54 @@ After clarification is complete:
    not. If the skill produced changes (check `git status`),
    commit them before proceeding (see Skill-Output Commits).
 
-2. **Create the team** via `TeamCreate` with all four
-   agents: `developer`, `reviewer`, `test-engineer`,
-   `security-engineer`. All four agents must be spawned —
-   the developer's risk-assessment rule directs it to
-   consult advisors for high-risk or high-uncertainty tasks,
-   and `SendMessage` to a non-existent advisor silently
-   fails, blocking the developer indefinitely. Idle advisors
-   have no cost beyond initial setup; missing advisors block
-   the pipeline.
-
-   **Spawn advisors task-agnostic.** Do not prime advisors
-   with task-specific hints at spawn time — no "your
-   primary consult will be Task N," no "read the plan to
-   prepare for upcoming work." Advisors are reactive; they
-   respond to explicit consults from the developer via
-   `SendMessage`. Priming them with upcoming-task context
-   can cause them to write unsolicited pre-assessments
-   into the developer's inbox, which the developer may
-   then interpret as task signals. A production incident
-   had a primed security advisor write a proactive
-   assessment of a deferred end-of-plan task, and the
-   developer self-dispatched implementation work from that
-   inbox message, bypassing dispatch-time scheduling. Keep
-   advisor spawn prompts limited to their role and the
-   project context they need regardless of task.
-
-3. **Read the codebase.** Use Read, Glob, and Grep to
+2. **Read the codebase.** Use Read, Glob, and Grep to
    understand the relevant code, patterns, and architecture.
    Deep codebase analysis is essential for good plans —
    surface-level understanding produces task slices that
    miss dependencies or conflict with existing patterns.
 
-4. **Write the plan** to the plans directory (read the path
+3. **Write the plan** to the plans directory (read the path
    from `.claude/settings.json`) following the format guide
    in `<plansDirectory>/CLAUDE.md`. Include the goal,
    context, steps, and task decomposition.
 
-5. **Decompose into vertical task slices.** Each slice
+4. **Decompose into vertical task slices.** Each slice
    should be independently committable and touch all layers
    needed for the feature. Order slices so later ones build
    on earlier ones. This enables incremental review — the
    reviewer can evaluate each slice in isolation.
 
+5. **Review the plan via subagent.** Launch the
+   `plan-reviewer` agent to review the plan before
+   presenting it to the user. Pass it:
+   - The plan file path
+   - The plans directory path (so it can find
+     `plan-format.md` and `plan-review-checklist.md`)
+   - The user's original request — what the user asked
+     for in their own words during clarification. The
+     plan-reviewer uses this as ground truth to verify
+     the goal captures the full scope of the request.
+
+   This is a cycle — not a one-shot check:
+   a. Launch the `plan-reviewer` with all three inputs.
+   b. If the subagent reports issues: revise the plan to
+      address each finding, then re-launch the subagent.
+   c. Repeat until the subagent returns "No issues found."
+
+   Each launch is stateless — every review pass gets fresh
+   eyes on the current plan state.
+
+   Do not skip this step for "simple" plans — the lead
+   wrote the plan and is poorly positioned to spot its
+   own escape hatches, ambiguous language, and missing
+   cleanup tasks. The same anti-pattern that justifies
+   independent code review applies to plans.
+
 6. **Present the plan to the user** for approval. Use
    `AskUserQuestion` to confirm. If the user requests
-   changes, revise and re-present.
+   changes, revise the plan and restart the review cycle
+   (step 5) — revisions based on user feedback can
+   reintroduce issues the subagent would catch.
 
 7. **Commit the plan.** After user approval, commit the
    plan file using conventional commit format:
@@ -147,15 +149,7 @@ After clarification is complete:
    session can resume from a committed plan rather than a
    dangling file.
 
-8. **Hand the plan to the reviewer.** Message the
-   `reviewer` via `SendMessage` with the plan file path.
-   The reviewer reads the plan and uses it for scope
-   verification — checking that each deliverable matches
-   what was planned. Sending the plan before any task
-   starts gives the reviewer the full context needed for
-   scope verification throughout execution.
-
-9. **Add the plan to the queue.** After the plan is
+8. **Add the plan to the queue.** After the plan is
    committed, it enters the queue. If other plans are
    already queued, decide optimal execution order based on
    dependencies and impact (see Plan Queue Management).
@@ -215,8 +209,8 @@ reorder as needed.
 
 ## Execution Pipeline
 
-After the user approves the plan and it reaches the front
-of the queue, execute tasks through the pipeline:
+After the plan is committed and reaches the front of the
+queue, execute tasks through the pipeline:
 
 ```
 Lead -> Developer -> Reviewer -> Lead
@@ -224,6 +218,44 @@ Lead -> Developer -> Reviewer -> Lead
 
 The user is not consulted again until all tasks in the
 plan are complete (or an unresolvable blocker occurs).
+
+### Starting Execution
+
+Before sending the first task:
+
+1. **Create the team** via `TeamCreate` with all four
+   agents: `developer`, `reviewer`, `test-engineer`,
+   `security-engineer`. All four agents must be spawned —
+   the developer's risk-assessment rule directs it to
+   consult advisors for high-risk or high-uncertainty
+   tasks, and `SendMessage` to a non-existent advisor
+   silently fails, blocking the developer indefinitely.
+   Idle advisors have no cost beyond initial setup; missing
+   advisors block the pipeline.
+
+   **Spawn advisors task-agnostic.** Do not prime advisors
+   with task-specific hints at spawn time — no "your
+   primary consult will be Task N," no "read the plan to
+   prepare for upcoming work." Advisors are reactive; they
+   respond to explicit consults from the developer via
+   `SendMessage`. Priming them with upcoming-task context
+   can cause them to write unsolicited pre-assessments
+   into the developer's inbox, which the developer may
+   then interpret as task signals. A production incident
+   had a primed security advisor write a proactive
+   assessment of a deferred end-of-plan task, and the
+   developer self-dispatched implementation work from that
+   inbox message, bypassing dispatch-time scheduling. Keep
+   advisor spawn prompts limited to their role and the
+   project context they need regardless of task.
+
+2. **Hand the plan to the reviewer.** Message the
+   `reviewer` via `SendMessage` with the plan file path.
+   The reviewer reads the plan and uses it for scope
+   verification — checking that each deliverable matches
+   what was planned. Sending the plan before any task
+   starts gives the reviewer the full context needed for
+   scope verification throughout execution.
 
 ### Sending Tasks to the Developer
 
@@ -371,13 +403,14 @@ When the reviewer reports approval:
    Cached content at levels 1–4 (system prompt, tools,
    CLAUDE.md, rules) is unaffected — only the per-teammate
    message history (level 5) resets. The "spawn advisors
-   task-agnostic" rule from Planning step 2 applies here
-   too — do not prime re-spawned advisors with upcoming
-   task hints.
+   task-agnostic" rule from Starting Execution step 1
+   applies here too — do not prime re-spawned advisors
+   with upcoming task hints.
 
    After recreating the team, re-send the plan file path
    to the `reviewer` via `SendMessage` — same handoff as
-   planning step 8. The reviewer reads the plan file
+   Starting Execution step 2. The reviewer reads the plan
+   file
    (which carries checkboxes and SHAs from prior tasks)
    to resume scope tracking.
 
@@ -466,8 +499,9 @@ When you find existing plans in the plans directory:
 5. Re-create the team before resuming execution — teams do
    not persist across sessions
 6. Send the plan file path to the `reviewer` via
-   `SendMessage` — same handoff as planning step 8, so the
-   reviewer can resume scope verification and plan tracking
+   `SendMessage` — same handoff as Starting Execution
+   step 2, so the reviewer can resume scope verification
+   and plan tracking
 
 ## Completion
 

@@ -4,27 +4,35 @@
 
 ## Goal
 
-Achieve 100% yaml-test-suite conformance for both the
-loader (`load()` API) and the formatter's round-trip test
-(`parse → format → reparse`), with every bug fixed in the
-crate that owns it. The loader has untested bugs that
-produce incorrect ASTs from correct event streams — the
-formatter cannot produce correct output from a wrong AST.
-This plan establishes loader conformance testing, fixes
-loader bugs in the parser crate, removes formatter
-workarounds that compensated for loader bugs, and drives
-formatter KNOWN_FAILURES to 0.
+Achieve 100% test pass rate across every component — parser,
+language server, formatter, and VS Code extension — with
+every bug fixed in the crate that owns it. This means:
+
+- 100% yaml-test-suite conformance for the stream API,
+  the loader API, and the formatter round-trip test
+- 100% pass rate on all other tests: smoke tests, fixture
+  tests, unit tests, integration tests
+- No KNOWN_FAILURES allowlists — constants deleted after
+  reaching 0
+- No workarounds that compensate for bugs in another crate
+
+The loader has untested bugs that produce incorrect ASTs
+from correct event streams — the formatter cannot produce
+correct output from a wrong AST. Bugs may be in the lexer,
+the loader, or the formatter — each is fixed where it
+actually lives, per the Crate Boundaries in root `CLAUDE.md`.
 
 Acceptance criteria:
 1. Loader conformance test exists and runs against the
    full yaml-test-suite
-2. All loader bugs are fixed — 0 loader KNOWN_FAILURES,
-   constant deleted
-3. Formatter workarounds for loader bugs are removed
-4. All formatter bugs are fixed — 0 formatter
-   KNOWN_FAILURES, constant deleted
+2. 0 loader KNOWN_FAILURES — constant deleted
+3. 0 formatter KNOWN_FAILURES — constant deleted
+4. Formatter workarounds for other-crate bugs are removed
 5. Document marker flags (`explicit_start`, `explicit_end`)
    surfaced in AST
+6. `cargo test` passes (all crates, all tests)
+7. VS Code extension: `pnpm run build && pnpm run test &&
+   pnpm run lint` passes
 
 ## Context
 
@@ -197,9 +205,11 @@ scalars by `scan_plain_line_block`.
 - [x] Loader conformance: 2XXW, 35KP, J7PZ + 6LVF, 9MQT
       now pass (155 → 150)
 
-### Task 5: Fix loader bugs — explicit keys and empty keys
+### Task 5: Fix bugs — explicit keys and empty keys
 
-Fix loader handling of complex mapping structures.
+Fix handling of complex mapping structures. Diagnose
+whether each bug is in the lexer, loader, or formatter
+and fix it where it belongs.
 
 - [ ] Nested explicit keys (`? ? :`) producing spurious
       entries
@@ -211,9 +221,11 @@ Fix loader handling of complex mapping structures.
 - [ ] Loader conformance: M2N8[0], 6PBE, KK5P, S3PD, NKF9
       now pass
 
-### Task 6: Fix loader bugs — anchors and aliases
+### Task 6: Fix bugs — anchors and aliases
 
-Fix loader handling of anchors in complex contexts.
+Fix handling of anchors in complex contexts. Diagnose
+whether each bug is in the lexer, loader, or formatter
+and fix it where it belongs.
 
 - [ ] Alias-as-key mapping structure (E76Z)
 - [ ] Explicit key + anchor combination (PW8X)
@@ -227,10 +239,10 @@ Fix loader handling of anchors in complex contexts.
 
 ### Task 7: Fix all remaining loader KNOWN_FAILURES
 
-Tasks 4-6 fix the 13 loader bugs identified during the
-previous plan. The loader conformance test (Task 2) found
-155 total failures. Fix every remaining failure and delete
-the KNOWN_FAILURES constant.
+Tasks 4-6 fix the identified bugs. Fix every remaining
+loader conformance failure — diagnose each as lexer,
+loader, or other root cause and fix it where it belongs.
+Delete the KNOWN_FAILURES constant when done.
 
 - [ ] Run loader conformance, record remaining failures
       after Tasks 4-6
@@ -260,21 +272,23 @@ guard from `formatter.rs` (commit `25b1130`).
 
 ### Task 9: Fix all remaining formatter KNOWN_FAILURES
 
-After loader fixes, re-run formatter conformance and fix
-all remaining failures. The formatter already has
-infrastructure for explicit keys, anchors, and empty-key
-mappings — failures that were blocked by loader bugs
-should now pass or need only formatter-side adjustments.
+Re-run formatter conformance and fix all remaining
+failures. Diagnose each as formatter bug, lexer bug,
+loader bug, or missing AST info — fix each where it
+belongs. Delete the KNOWN_FAILURES constant when done.
 
-- [ ] Run formatter conformance, record remaining failures
+- [ ] Run formatter conformance, record count of remaining
+      failures (target: 0)
 - [ ] For each remaining failure: identify root cause
-      (formatter bug, additional loader bug, or missing
-      AST info) and fix it
-- [ ] Remove fixed entries from KNOWN_FAILURES
-- [ ] KNOWN_FAILURES list is empty after this task
-- [ ] Delete the KNOWN_FAILURES constant and its skip logic
-      from `formatter_conformance.rs` — every test-suite
-      case must pass unconditionally
+      (formatter bug, lexer bug, loader bug, or missing
+      AST info) and fix it in the crate that owns the bug
+- [ ] Remove fixed entries from KNOWN_FAILURES after each
+      fix
+- [ ] KNOWN_FAILURES reaches 0 — no entries remain
+- [ ] Delete the `KNOWN_FAILURES` constant and all skip
+      logic from `formatter_conformance.rs` — every
+      test-suite case passes unconditionally
+- [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 10: Add interacting-settings fixture combinations
 
@@ -293,14 +307,28 @@ Test formatter behavior when multiple settings interact.
 - [ ] Formatter KNOWN_FAILURES constant deleted
 - [ ] Loader KNOWN_FAILURES constant deleted
 - [ ] Stream conformance remains 351/351
+- [ ] Update `rlsp-yaml-parser/docs/feature-log.md` to
+      reflect loader bug fixes and new AST fields
+      (`explicit_start`, `explicit_end`)
+- [ ] Update `rlsp-yaml/docs/feature-log.md` to reflect
+      formatter changes (document marker handling, removed
+      workaround)
 - [ ] Update VS Code extension `package.json` and
       `config.ts` if any settings changed
-- [ ] `cargo test` passes
+- [ ] `cargo test` passes (all crates, all test types)
 - [ ] `pnpm run build && pnpm run test && pnpm run lint`
       passes in `rlsp-yaml/integrations/vscode/`
 
 ## Decisions
 
+- **CLAUDE.md crate boundaries and plan audit completed
+  before this plan** — user asks (1) and (2) from the
+  request were done during clarification: CLAUDE.md Crate
+  Boundaries updated (commit `65c8125`) with two-API
+  distinction; Plans 2-3 audited by two independent
+  explorer agents, found 1 formatter workaround (Task 4
+  quote-char guard, removed in this plan's Task 8). These
+  are prerequisites, not plan tasks.
 - **Supersedes `2026-04-14-formatter-conformance-100.md`** —
   that plan's Tasks 1–8 are committed and valid; remaining
   work is restructured here with loader conformance as the
