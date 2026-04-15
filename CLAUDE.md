@@ -63,7 +63,7 @@ The parser is the authority on valid YAML. The formatter must produce output the
 
 | API | Function | What it produces | Conformance |
 |-----|----------|-----------------|-------------|
-| Event stream | `parse_events()` | Flat event sequence from YAML text | Tested against yaml-test-suite (351/351) |
+| Event stream | `parse_events()` | Flat event sequence from YAML text | Tested against yaml-test-suite |
 | Loader | `load()` | AST (`Vec<Document>`) built from events | Must be tested with the same rigour as the event stream — a correct event stream does NOT guarantee a correct AST |
 
 | Crate | Responsibility | Change allowed when |

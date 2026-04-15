@@ -4,38 +4,38 @@
 
 ## Goal
 
-Establish loader conformance testing, fix loader bugs, and
-clean up the formatter. The previous plan
-(`2026-04-14-formatter-conformance-100.md`) pursued "0
-KNOWN_FAILURES" in the formatter conformance test, but
-discovered that most remaining failures are loader bugs —
-the loader produces incorrect ASTs from correct event
-streams. This plan fixes the root cause.
+Achieve 100% yaml-test-suite conformance for both the
+loader (`load()` API) and the formatter's round-trip test
+(`parse → format → reparse`), with every bug fixed in the
+crate that owns it. The loader has untested bugs that
+produce incorrect ASTs from correct event streams — the
+formatter cannot produce correct output from a wrong AST.
+This plan establishes loader conformance testing, fixes
+loader bugs in the parser crate, removes formatter
+workarounds that compensated for loader bugs, and drives
+formatter KNOWN_FAILURES to 0.
 
 Acceptance criteria:
 1. Loader conformance test exists and runs against the
    full yaml-test-suite
-2. All loader bugs are fixed (or explicitly documented as
-   spec-edge-cases with user approval)
+2. All loader bugs listed in this plan are fixed
 3. Formatter workarounds for loader bugs are removed
-4. Formatter conformance KNOWN_FAILURES reaches 0 (or
-   user-approved residual)
+4. Formatter conformance KNOWN_FAILURES reaches 0
 5. Document marker flags (`explicit_start`, `explicit_end`)
    surfaced in AST
 
 ## Context
 
-### What the previous plan achieved
+### Current state
 
-Tasks 1-8 completed 39 genuine formatter fixes, reducing
-KNOWN_FAILURES from 79 to 40. These are committed and
-valid. The formatter now correctly handles: escape
-sequences, block scalar indentation indicators, multiline
-quoted scalars, explicit key syntax, anchor/tag placement
-on block collections, empty-key mappings, and multiline
-plain scalars.
+The formatter's round-trip conformance test has 40
+KNOWN_FAILURES remaining (down from 79). The formatter
+correctly handles: escape sequences, block scalar
+indentation indicators, multiline quoted scalars, explicit
+key syntax, anchor/tag placement on block collections,
+empty-key mappings, and multiline plain scalars.
 
-### What went wrong
+### The root cause
 
 The formatter conformance test (`formatter_conformance.rs`)
 checks round-trip correctness: `parse → format → reparse`.
@@ -48,26 +48,26 @@ Without a loader conformance test, these were conflated.
 bugs where the AST doesn't match the event tree. The
 formatter can't produce correct output from a wrong AST.
 
-### Known loader bugs (verified by reviewer)
+### Known loader bugs
 
-From Task 5 (explicit keys):
+Document tags and inline scalars:
 - 2XXW, 35KP: document tags (`--- !!set`, `--- !!map`)
   loaded as scalar keys instead of mapping tag field
 - J7PZ: `!!omap` tag garbled into scalar value
+
+Explicit keys and empty keys:
 - M2N8[0]: nested explicit key produces garbled mapping
 - 6PBE: sequence-as-key produces wrong entry count
 - KK5P: nested explicit keys produce spurious entries
 - S3PD: empty key with comment absorbs next entry
+- NKF9: empty-key entries have key/value swapped
 
-From Task 6 (anchors):
+Anchors and aliases:
 - E76Z: alias-as-key mapping misloaded
 - PW8X: explicit key + anchor combination
 - FTA2: document start marker + anchor
 - FH7J: value-tag `!!str` handling
 - 6M2F: explicit block mapping with aliases
-
-From Task 7 (empty keys):
-- NKF9: empty-key entries have key/value swapped
 
 ### Missing AST info (not a bug — info not surfaced)
 
@@ -76,13 +76,13 @@ From Task 7 (empty keys):
 - `DocumentEnd.explicit` — whether `...` was present
   (event carries it, loader discards it)
 
-These block Tasks 9-10 from the previous plan (comment-only
-documents, multi-document streams, bare `...` markers).
+These block formatter handling of comment-only documents,
+multi-document streams, and bare `...` markers.
 
 ### Formatter workaround to remove
 
-Task 4 (commit `25b1130`) added a quote-char guard in the
-Plain scalar branch: `value.starts_with('"') ||
+Commit `25b1130` added a quote-char guard in the Plain
+scalar branch of `node_to_doc`: `value.starts_with('"') ||
 value.starts_with('\'')`. A conformant loader never
 produces a Plain scalar starting with a quote character.
 This guard works around a loader bug where `--- "quoted"`
@@ -173,6 +173,9 @@ the `Document` struct and populate from events.
 - [ ] Update formatter to use flags: emit `---` only when
       `explicit_start` is true, emit `...` when
       `explicit_end` is true
+- [ ] Update `Document<Span>` struct diagram in
+      `rlsp-yaml-parser/docs/architecture.md` to include
+      `explicit_start` and `explicit_end`
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 - [ ] Parser conformance remains 351/351
 
@@ -188,7 +191,7 @@ quoted scalars on `---` lines.
       correct DoubleQuoted scalar (not garbled Plain)
 - [ ] Remove KNOWN_FAILURES entries for fixed cases
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
-- [ ] Loader conformance improves
+- [ ] Loader conformance: 2XXW, 35KP, J7PZ now pass
 
 ### Task 5: Fix loader bugs — explicit keys and empty keys
 
@@ -201,6 +204,8 @@ Fix loader handling of complex mapping structures.
 - [ ] Empty key key/value swap
 - [ ] Remove KNOWN_FAILURES entries for fixed cases
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [ ] Loader conformance: M2N8[0], 6PBE, KK5P, S3PD, NKF9
+      now pass
 
 ### Task 6: Fix loader bugs — anchors and aliases
 
@@ -213,35 +218,46 @@ Fix loader handling of anchors in complex contexts.
 - [ ] Explicit block mapping with aliases (6M2F)
 - [ ] Remove KNOWN_FAILURES entries for fixed cases
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
+- [ ] Loader conformance: E76Z, PW8X, FTA2, FH7J, 6M2F
+      now pass
 
 ### Task 7: Remove formatter quote-char workaround
 
 With the loader fixed, remove the Plain branch quote-char
-guard from `formatter.rs` that was added in the previous
-plan's Task 4 (commit `25b1130`).
+guard from `formatter.rs` (commit `25b1130`).
 
 - [ ] Remove the `value.starts_with('"') ||
       value.starts_with('\'')` guard in the Plain scalar
       branch of `node_to_doc`
 - [ ] Verify no regressions — the loader now produces
       correct ASTs, so the guard is dead code
+- [ ] Update fixture descriptions in
+      `quoting-value-starts-with-double-quote.md` and
+      `quoting-value-starts-with-single-quote.md` — remove
+      loader-bug rationale, describe the general case
 - [ ] `cargo test`, `cargo clippy --all-targets` pass
 
 ### Task 8: Verify formatter KNOWN_FAILURES reduction
 
-After loader fixes, many formatter KNOWN_FAILURES should
-resolve automatically (the explicit key, anchor, and
-empty-key infrastructure is already built).
+After loader fixes, re-run formatter conformance and fix
+all remaining failures. The formatter already has
+infrastructure for explicit keys, anchors, and empty-key
+mappings — failures that were blocked by loader bugs
+should now pass or need only formatter-side adjustments.
 
 - [ ] Run formatter conformance, record remaining failures
-- [ ] Categorize any remaining failures as genuine
-      formatter bugs vs other root causes
-- [ ] Fix any remaining genuine formatter bugs
+- [ ] For each remaining failure: identify root cause
+      (formatter bug, additional loader bug, or missing
+      AST info) and fix it
 - [ ] Remove fixed entries from KNOWN_FAILURES
+- [ ] KNOWN_FAILURES list is empty after this task
+- [ ] Delete the KNOWN_FAILURES constant and its skip logic
+      from `formatter_conformance.rs` — every test-suite
+      case must pass unconditionally
 
 ### Task 9: Add interacting-settings fixture combinations
 
-Migrated from previous plan Task 13.
+Test formatter behavior when multiple settings interact.
 
 - [ ] `single_quote` + `yaml_version`
 - [ ] `single_quote` + `format_enforce_block_style`
@@ -254,8 +270,7 @@ Migrated from previous plan Task 13.
 ### Task 10: Final verification
 
 - [ ] Formatter KNOWN_FAILURES is 0
-- [ ] Loader conformance passes (or known-failures
-      documented with user approval)
+- [ ] Loader conformance passes
 - [ ] Stream conformance remains 351/351
 - [ ] Update VS Code extension `package.json` and
       `config.ts` if any settings changed
@@ -265,6 +280,10 @@ Migrated from previous plan Task 13.
 
 ## Decisions
 
+- **Supersedes `2026-04-14-formatter-conformance-100.md`** —
+  that plan's Tasks 1–8 are committed and valid; remaining
+  work is restructured here with loader conformance as the
+  foundation
 - **Loader first, formatter second** — fix the foundation
   before chasing formatter conformance numbers
 - **No parser changes for formatter round-trips** — per
