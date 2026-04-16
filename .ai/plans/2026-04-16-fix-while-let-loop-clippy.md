@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -75,8 +75,8 @@ reports zero warnings and behaviour is unchanged.
 
 ## Steps
 
-- [ ] Rewrite the three flagged loops to `while let`
-- [ ] Confirm `cargo fmt`, `cargo clippy --all-targets`,
+- [x] Rewrite the three flagged loops to `while let`
+- [x] Confirm `cargo fmt`, `cargo clippy --all-targets`,
       and `cargo test` all succeed with zero warnings
 
 ## Tasks
@@ -92,25 +92,28 @@ to `self.buf.consume_next()` — is preserved verbatim; only
 the outer loop header and the opening `let ... else
 { break; };` block are removed.
 
-- [ ] `rlsp-yaml-parser/src/lexer/block.rs:129` (literal
+- [x] `rlsp-yaml-parser/src/lexer/block.rs:129` (literal
       block scalar) rewritten to `while let`; the `break`
       previously taken on `peek_next() == None` is now
       supplied by the `while let` itself
-- [ ] `rlsp-yaml-parser/src/lexer/block.rs:375` (folded
+- [x] `rlsp-yaml-parser/src/lexer/block.rs:375` (folded
       block scalar) rewritten to `while let` with the same
       preservation of body statements
-- [ ] `rlsp-yaml-parser/src/lexer/plain.rs:169`
+- [x] `rlsp-yaml-parser/src/lexer/plain.rs:169`
       (`collect_plain_continuations`) rewritten to `while
       let`; the `break` previously taken on `peek_next()
       == None` is now supplied by the `while let` itself
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets` exits 0 with zero
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets` exits 0 with zero
       warnings (the three `while_let_loop` errors are
       gone, no new warnings are introduced by the rewrite)
-- [ ] `cargo test` passes across the workspace — in
+- [x] `cargo test` passes across the workspace — in
       particular, the `rlsp-yaml-parser` yaml-test-suite
       conformance harness runs the same number of passing
       cases as before the change
+
+**Commit:** `28b0e3d` — fix(clippy): rewrite while_let_loop
+sites and remove trailing commas.
 
 ## Decisions
 
@@ -128,3 +131,13 @@ the outer loop header and the opening `let ... else
   lexer code with comprehensive existing conformance-test
   coverage for all three loops. No behaviour change, no
   trust-boundary change, no new test patterns introduced.
+- **Scope extension during implementation** — two
+  `clippy::unnecessary_trailing_comma` errors in
+  `rlsp-yaml/src/schema_validation.rs` (lines 1141 and
+  1168 on baseline) were masked on the pre-task tree by
+  the parser compilation failure and surfaced once the
+  parser was clean. Fixing them was required to satisfy
+  the task's stated acceptance criterion "`cargo clippy
+  --all-targets` exits 0, zero warnings," which covers
+  the full `--all-targets` clippy scope, not just the
+  three loops originally enumerated.

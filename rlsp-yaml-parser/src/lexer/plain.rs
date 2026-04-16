@@ -166,10 +166,7 @@ impl<'input> Lexer<'input> {
         let mut pending_blanks: usize = 0;
         let mut result: Option<String> = None;
 
-        loop {
-            let Some(next) = self.buf.peek_next() else {
-                break;
-            };
+        while let Some(next) = self.buf.peek_next() {
             let trimmed = next.content.trim_start_matches([' ', '\t']);
 
             if trimmed.is_empty() {

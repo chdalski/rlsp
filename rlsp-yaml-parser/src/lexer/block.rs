@@ -126,11 +126,7 @@ impl<'input> Lexer<'input> {
         // an error if it precedes any real content.
         let mut before_first_real_content = true;
 
-        loop {
-            let Some(next) = self.buf.peek_next() else {
-                break;
-            };
-
+        while let Some(next) = self.buf.peek_next() {
             let line_content = next.content;
 
             // Tab at the very start of a line means the line uses a tab as
@@ -372,11 +368,7 @@ impl<'input> Lexer<'input> {
         let mut prev_more_indented = false;
         let mut has_content = false;
 
-        loop {
-            let Some(next) = self.buf.peek_next() else {
-                break;
-            };
-
+        while let Some(next) = self.buf.peek_next() {
             let line_content = next.content;
 
             if line_content.starts_with('\t') {

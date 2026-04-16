@@ -1138,7 +1138,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
                     format_path(path),
                 )
             } else {
-                format!("Value at {} is below minimum {minimum}", format_path(path),)
+                format!("Value at {} is below minimum {minimum}", format_path(path))
             };
             ctx.diagnostics.push(make_diagnostic(
                 range,
@@ -1165,7 +1165,7 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
                     format_path(path),
                 )
             } else {
-                format!("Value at {} is above maximum {maximum}", format_path(path),)
+                format!("Value at {} is above maximum {maximum}", format_path(path))
             };
             ctx.diagnostics.push(make_diagnostic(
                 range,
