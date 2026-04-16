@@ -369,7 +369,17 @@ mod tests {
         assert_eq!(opts.print_width, YamlFormatOptions::default().print_width);
     }
 
-    // 4. print_width is parsed.
+    // 4. preserve_quotes: true is parsed.
+    #[test]
+    fn frontmatter_parses_preserve_quotes_setting() {
+        let fm = "test-name: foo\nsettings:\n  preserve_quotes: true\n";
+        let (_, _, opts) = parse_frontmatter(fm, "test.md");
+        assert!(opts.preserve_quotes);
+        // single_quote stays at its default.
+        assert!(!opts.single_quote);
+    }
+
+    // 5. print_width is parsed.
     #[test]
     fn frontmatter_parses_print_width_setting() {
         let fm = "test-name: foo\nsettings:\n  print_width: 40\n";
@@ -377,7 +387,7 @@ mod tests {
         assert_eq!(opts.print_width, 40);
     }
 
-    // 5. yaml_version "1.1" → YamlVersion::V1_1.
+    // 6. yaml_version "1.1" → YamlVersion::V1_1.
     #[test]
     fn frontmatter_parses_yaml_version_1_1() {
         let fm = "test-name: foo\nsettings:\n  yaml_version: \"1.1\"\n";
@@ -385,7 +395,7 @@ mod tests {
         assert_eq!(opts.yaml_version, YamlVersion::V1_1);
     }
 
-    // 6. yaml_version "1.2" → YamlVersion::V1_2.
+    // 7. yaml_version "1.2" → YamlVersion::V1_2.
     #[test]
     fn frontmatter_parses_yaml_version_1_2() {
         let fm = "test-name: foo\nsettings:\n  yaml_version: \"1.2\"\n";
@@ -393,7 +403,7 @@ mod tests {
         assert_eq!(opts.yaml_version, YamlVersion::V1_2);
     }
 
-    // 7. idempotent: true is parsed.
+    // 8. idempotent: true is parsed.
     #[test]
     fn frontmatter_parses_idempotent_true() {
         let fm = "test-name: foo\nidempotent: true\n";
@@ -401,7 +411,7 @@ mod tests {
         assert!(idempotent);
     }
 
-    // 8. Missing idempotent → defaults to false.
+    // 9. Missing idempotent → defaults to false.
     #[test]
     fn frontmatter_idempotent_defaults_to_false() {
         let fm = "test-name: foo\n";
@@ -409,7 +419,7 @@ mod tests {
         assert!(!idempotent);
     }
 
-    // 9. Unknown settings key is silently ignored.
+    // 10. Unknown settings key is silently ignored.
     #[test]
     fn frontmatter_unknown_setting_key_is_ignored() {
         let fm = "test-name: foo\nsettings:\n  nonexistent_field: 999\n";
@@ -422,7 +432,7 @@ mod tests {
 
     // ---- Section extraction -------------------------------------------------
 
-    // 10. Test-Document section content is extracted.
+    // 11. Test-Document section content is extracted.
     #[test]
     fn extract_test_document_returns_fenced_content() {
         let body = "## Test-Document\n\n```yaml\nfoo: bar\n```\n";
@@ -430,7 +440,7 @@ mod tests {
         assert_eq!(result, "foo: bar\n");
     }
 
-    // 11. Expected-Document section content is extracted.
+    // 12. Expected-Document section content is extracted.
     #[test]
     fn extract_expected_document_returns_fenced_content() {
         let body = "## Expected-Document\n\n```yaml\nfoo: bar\n```\n";
@@ -438,7 +448,7 @@ mod tests {
         assert_eq!(result, "foo: bar\n");
     }
 
-    // 12. Missing Test-Document section returns Err with a clear message.
+    // 13. Missing Test-Document section returns Err with a clear message.
     #[test]
     fn extract_test_document_missing_section_returns_err() {
         let body = "## Expected-Document\n\n```yaml\nfoo: bar\n```\n";
@@ -449,7 +459,7 @@ mod tests {
         );
     }
 
-    // 13. Missing Expected-Document returns Err with a clear message.
+    // 14. Missing Expected-Document returns Err with a clear message.
     #[test]
     fn extract_expected_document_missing_returns_err() {
         let body = "## Test-Document\n\n```yaml\nfoo: bar\n```\n";

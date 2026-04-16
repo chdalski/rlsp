@@ -563,6 +563,14 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                             // Single-quoted: escape embedded single quotes as ''.
                             text(format!("'{}'", value.replace('\'', "''")))
                         }
+                    } else if options.preserve_quotes {
+                        // Safe-plain scalar: reproduce the source quote style
+                        // instead of stripping to plain.
+                        if matches!(style, ScalarStyle::DoubleQuoted) {
+                            text(format!("\"{}\"", escape_double_quoted(value)))
+                        } else {
+                            text(format!("'{}'", value.replace('\'', "''")))
+                        }
                     } else {
                         string_to_doc(value, options, in_key)
                     }

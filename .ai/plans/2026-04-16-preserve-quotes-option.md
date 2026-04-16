@@ -188,7 +188,7 @@ understand the semantics.
 - [x] Add `preserve_quotes` field to `YamlFormatOptions`
       and wire through workspace settings and VS Code
       extension
-- [ ] Add the preserve branch to the scalar emission logic
+- [x] Add the preserve branch to the scalar emission logic
 - [ ] Add fixture coverage for the new option and its
       interactions with other formatter settings
 - [ ] Update documentation (`docs/configuration.md`,
@@ -242,7 +242,9 @@ Honor the preserve option in the formatter. This is the
 only task that changes output for existing users — and
 only users who explicitly set `preserveQuotes: true`.
 
-- [ ] In `formatter.rs`, inside the
+Completed in commit: `7877057`
+
+- [x] In `formatter.rs`, inside the
       `ScalarStyle::SingleQuoted | DoubleQuoted` match arm
       at lines 549-566, add a conditional branch between
       the existing `needs_quoting` and `string_to_doc`
@@ -252,26 +254,26 @@ only users who explicitly set `preserveQuotes: true`.
       original style (`'...'` for SingleQuoted with
       embedded-single-quote doubling; `"..."` for
       DoubleQuoted with `escape_double_quoted`)
-- [ ] Leave the `ScalarStyle::Plain` arm at
+- [x] Leave the `ScalarStyle::Plain` arm at
       `formatter.rs:567-580` untouched — plain scalars
       remain plain under preserve, which is already the
       behavior
-- [ ] Leave `string_to_doc` at `formatter.rs:727-742`
+- [x] Leave `string_to_doc` at `formatter.rs:727-742`
       untouched — `singleQuote` semantics are unchanged
-- [ ] Leave `requires_double_quoting` gate and the
+- [x] Leave `requires_double_quoting` gate and the
       `needs_quoting=true` preservation branch untouched
       — spec-forced double quoting and the
       already-quoted-stays-original-style behavior both
       continue to work
-- [ ] Consult the test-engineer before implementing for a
+- [x] Consult the test-engineer before implementing for a
       test list covering: `preserveQuotes: true` × all
       three source `ScalarStyle` variants (SingleQuoted,
       DoubleQuoted, Plain) × safe-plain × needs-quoting ×
       requires-double × keys vs values × flow vs block
       containers
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
       `cargo build`, `cargo test` all clean
-- [ ] Get test-engineer output-gate sign-off before
+- [x] Get test-engineer output-gate sign-off before
       submitting to the reviewer
 
 ### Task 3: Fixture coverage
