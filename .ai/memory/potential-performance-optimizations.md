@@ -17,10 +17,6 @@ advantage. Detail for each applied change lives in its
 plan file under `.ai/plans/2026-04-16-perf-*.md` and the
 matching git commit.
 
-The benchmarks.md doc refresh (reflecting the post-L7b
-state) is the separate follow-up plan at
-`.ai/plans/2026-04-16-docs-benchmarks-refresh.md`.
-
 ## Deferred candidates
 
 Four architectural candidates remain open. None has a

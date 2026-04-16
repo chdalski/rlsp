@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -101,7 +101,7 @@ log at `.ai/reports/bench-baremetal.log`.
 
 ## Steps
 
-- [ ] Rewrite the **Environment** table: replace
+- [x] Rewrite the **Environment** table: replace
       "Linux (container)" with "Linux (baremetal)",
       remove the "containerized noise" note beneath the
       table. Fill the CPU row and the rustc row with
@@ -109,7 +109,7 @@ log at `.ai/reports/bench-baremetal.log`.
       `rustc --version` and `cat /proc/cpuinfo | grep
       "model name" | head -1` on the measurement
       machine — do not fabricate values.
-- [ ] Replace the **Latency — time to first event**
+- [x] Replace the **Latency — time to first event**
       Criterion-output code block and the
       "rlsp vs libfyaml — first-event latency" table
       with the 2026-04-16 medians. Keep the
@@ -119,26 +119,26 @@ log at `.ai/reports/bench-baremetal.log`.
       sentence should state exactly **"~20× faster"**
       computed from huge_1MB medians (802.0 ns ÷ 38.91
       ns = 20.6×, rounds to 20×).
-- [ ] Replace the **Throughput — full event drain**
+- [x] Replace the **Throughput — full event drain**
       Criterion-output code block and the "Throughput
       by document size" table with the new numbers. The
       rlsp vs libfyaml ratios change for every row —
       compute each fresh from the listed medians.
       Update the raw-timings median table alongside.
-- [ ] Replace the **Throughput by YAML style**
+- [x] Replace the **Throughput by YAML style**
       Criterion-output code block and summary table.
       Remove the container-noise caveat note. Call out
       the libfyaml `block_sequence` +24% run-to-run
       spike inline so a future reader does not
       misinterpret the number as stable.
-- [ ] Replace the **Throughput — real-world** section
+- [x] Replace the **Throughput — real-world** section
       with the new kubernetes numbers.
-- [ ] Replace the **Latency — full event drain** table
+- [x] Replace the **Latency — full event drain** table
       with the new full-drain medians.
-- [ ] Replace the **Memory allocation profile**
+- [x] Replace the **Memory allocation profile**
       Criterion-output code block with the new memory
       timings.
-- [ ] Rewrite the **Analysis** section so the prose
+- [x] Rewrite the **Analysis** section so the prose
       matches the new numbers. Required claims,
       computed from the Context medians:
       - O(1) first-event latency at **~38.9 ns**
@@ -165,7 +165,7 @@ log at `.ai/reports/bench-baremetal.log`.
         regression and narrowed the libfyaml gap from
         "slower on 2–3 fixtures by 10%+" to "slightly
         behind on 2 fixtures by ≤5%".
-- [ ] Add a short **History** subsection pointing at
+- [x] Add a short **History** subsection pointing at
       the eight-commit campaign (L5 `9370579`, L2
       `d9afbdf`, L7 `3f493a8`, L1 `a506589`, L3
       `d586012`, L6 `8097aa5`, L4 scoped `e812232`,
@@ -173,7 +173,7 @@ log at `.ai/reports/bench-baremetal.log`.
       `.ai/plans/2026-04-16-perf-*.md` for the detailed
       plan files. This replaces the existing "history
       since …" remarks if any.
-- [ ] Verify the **Fixtures** table (currently at
+- [x] Verify the **Fixtures** table (currently at
       `benchmarks.md:30–46`) still matches the fixtures
       present in `rlsp-yaml-parser/benches/fixtures.rs`.
       The 8-commit campaign did not touch the benches/
@@ -181,7 +181,7 @@ log at `.ai/reports/bench-baremetal.log`.
       accurate — but the developer confirms by reading
       the bench source. If any fixture name/size/style
       differs, update the table.
-- [ ] Verify that `rlsp-yaml-parser/README.md`
+- [x] Verify that `rlsp-yaml-parser/README.md`
       contains no inline perf numbers that become
       stale. Current state (verified 2026-04-16):
       `README.md:100` says "The streaming architecture
@@ -189,26 +189,26 @@ log at `.ai/reports/bench-baremetal.log`.
       qualitative only, no stale numbers. Confirm this
       remains true; do NOT modify README.md unless new
       stale numbers are found.
-- [ ] Update
+- [x] Update
       `.ai/memory/potential-performance-optimizations.md`
       so the "doc refresh is the separate follow-up
       plan" sentence (currently at lines 20–22 of
       that file) is removed or retargeted — after
       this plan commits, the refresh is no longer a
       follow-up.
-- [ ] Verify Criterion-output code blocks use the
+- [x] Verify Criterion-output code blocks use the
       `time: [a b c] thrpt: [...]` pairs from the
       bench log directly (the log already contains both
       time and thrpt lines for throughput benches; the
       developer copies the relevant lines rather than
       deriving them).
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`,
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`,
       and `cargo test` — zero warnings, all tests pass
       (doc-only change; nothing else should move).
 
 ## Tasks
 
-### Task 1: Refresh benchmarks.md with 2026-04-16 baremetal data
+### Task 1: Refresh benchmarks.md with 2026-04-16 baremetal data (commit: `c653d63`)
 
 Rewrite the numeric tables and analysis prose in
 `rlsp-yaml-parser/docs/benchmarks.md` so the doc
@@ -218,33 +218,33 @@ commit `3bec2da`. Every number comes from
 CPU and rustc strings come from the developer's machine,
 not from this plan.
 
-- [ ] **Environment** section reflects baremetal (not
+- [x] **Environment** section reflects baremetal (not
       containerized). CPU row contains the exact
       `model name` string from `/proc/cpuinfo`. rustc
       row contains the exact `rustc --version` output.
       The containerized-noise caveat paragraph is
       removed.
-- [ ] **Latency — time to first event** section uses
+- [x] **Latency — time to first event** section uses
       the 2026-04-16 medians listed in the Context
       section above. Acceptance-criterion callout still
       reads "huge_1MB first-event latency < 1 ms" with
       an updated "target MET" ratio.
-- [ ] **Throughput by document size** section uses the
+- [x] **Throughput by document size** section uses the
       2026-04-16 medians for rlsp/load, rlsp/events,
       libfyaml/events, and computes each rlsp/events
       ÷ libfyaml ratio from those medians.
-- [ ] **Throughput by YAML style** section uses the
+- [x] **Throughput by YAML style** section uses the
       2026-04-16 medians. The libfyaml block_sequence
       noise spike is annotated inline. The
       containerized-variance caveat paragraph is
       removed.
-- [ ] **Throughput — real-world (Kubernetes)** section
+- [x] **Throughput — real-world (Kubernetes)** section
       uses the 2026-04-16 medians.
-- [ ] **Latency — full event drain** section uses the
+- [x] **Latency — full event drain** section uses the
       2026-04-16 medians.
-- [ ] **Memory allocation profile** section uses the
+- [x] **Memory allocation profile** section uses the
       2026-04-16 memory-bench timings.
-- [ ] **Analysis** section matches the numbers
+- [x] **Analysis** section matches the numbers
       enumerated in Steps: the O(1) story at **~38.9
       ns**, the **~20×** libfyaml latency ratio, the
       **5-of-10 faster / 3 parity / 2 slightly behind**
@@ -257,29 +257,29 @@ not from this plan.
       block_heavy 0.98×, mixed 0.95×), and the history
       line referencing the 2026-04-16 8-commit
       campaign.
-- [ ] A new **History** subsection (or equivalent)
+- [x] A new **History** subsection (or equivalent)
       points at the eight-commit 2026-04-16 campaign
       and at `.ai/plans/2026-04-16-perf-*.md` for
       traceability.
-- [ ] Fixtures table at `benchmarks.md:30–46`
+- [x] Fixtures table at `benchmarks.md:30–46`
       verified against `rlsp-yaml-parser/benches/fixtures.rs`
       and unchanged (or updated if the bench source
       differs).
-- [ ] `rlsp-yaml-parser/README.md` confirmed to contain
+- [x] `rlsp-yaml-parser/README.md` confirmed to contain
       no inline perf numbers that would become stale
       after this refresh. Not modified.
-- [ ] `.ai/memory/potential-performance-optimizations.md`
+- [x] `.ai/memory/potential-performance-optimizations.md`
       "doc refresh is the separate follow-up plan"
       sentence (at lines 20–22 of that file) removed
       or retargeted so the memory no longer describes
       this plan as pending.
-- [ ] No other files are modified. Only
+- [x] No other files are modified. Only
       `rlsp-yaml-parser/docs/benchmarks.md` and
       `.ai/memory/potential-performance-optimizations.md`
       appear in `git status --porcelain` against the
       baseline once the plan file checkboxes are
       marked at post-approval commit time.
-- [ ] `cargo fmt` produces zero diff; `cargo clippy
+- [x] `cargo fmt` produces zero diff; `cargo clippy
       --all-targets` produces zero warnings; `cargo
       test` passes (doc-only change — no test should
       flip).
