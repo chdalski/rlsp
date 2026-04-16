@@ -1,6 +1,11 @@
 # Changelog
 
 
+## Documentation
+
+- Add feature-log.md for rlsp-yaml-parser and rlsp-fmt (5aa4b8b)
+- Cross-link docs from crate READMEs (a806dca)
+
 ## Refactoring
 
 - Replace #[allow] with #[expect(reason)] and enforce via workspace lints (b248fca)

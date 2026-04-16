@@ -1,6 +1,34 @@
 # Changelog
 
 
+## Bug Fixes
+
+- Preserve leading comments in nested block mappings (168c0e3)
+- Handle tags and quoted scalars inline after document start marker (620bdd9)
+- Fix explicit key and empty key loader bugs (a8dff3b)
+- Fix anchor/alias loader bugs for conformance cases (9552340)
+- Eliminate all loader conformance failures (d4b6602)
+- Remove formatter workaround and fix all remaining conformance failures (96c0a57)
+
+## Documentation
+
+- Add architecture reference (3955b2a)
+- Add feature-log.md for rlsp-yaml-parser and rlsp-fmt (5aa4b8b)
+- Cross-link docs from crate READMEs (a806dca)
+
+## Features
+
+- Add CollectionStyle to AST mapping and sequence nodes (728d182)
+- Surface document marker flags in AST (4740d10)
+- Add interacting-settings fixtures, wire bracket_spacing, and update docs (1c2e974)
+
+## Refactoring
+
+- Remove 7 duplicate tests from conformance.rs (09d2550)
+- Move quoted-key tests to correct homes (59715f3)
+- Remove duplicate DoS-limit tests from loader.rs (95c0b5b)
+- Restructure conformance tests into module (3ca38ea)
+
 ## Features
 
 - Add block-sequence plain scalar fast path (05d21fa)
