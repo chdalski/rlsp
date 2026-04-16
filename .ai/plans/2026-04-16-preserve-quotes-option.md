@@ -189,7 +189,7 @@ understand the semantics.
       and wire through workspace settings and VS Code
       extension
 - [x] Add the preserve branch to the scalar emission logic
-- [ ] Add fixture coverage for the new option and its
+- [x] Add fixture coverage for the new option and its
       interactions with other formatter settings
 - [ ] Update documentation (`docs/configuration.md`,
       `docs/feature-log.md`, `README.md`, VS Code
@@ -283,52 +283,32 @@ interactions with other formatter settings. No existing
 fixture needs modification — `singleQuote` semantics are
 unchanged.
 
-- [ ] Add new fixtures under
-      `rlsp-yaml/tests/fixtures/formatter/`:
-      - `preserve-quotes-double-safe-plain-kept.md` —
-        `preserveQuotes: true`, source `key: "python"`,
-        expected `key: "python"` (not stripped)
-      - `preserve-quotes-single-safe-plain-kept.md` —
-        `preserveQuotes: true`, source `key: 'python'`,
-        expected `key: 'python'`
-      - `preserve-quotes-plain-stays-plain.md` —
-        `preserveQuotes: true`, source `key: python`,
-        expected `key: python` (not wrapped)
-      - `preserve-quotes-off-strips-as-before.md` —
-        `preserveQuotes: false` (default), source
-        `key: "python"`, expected `key: python` —
-        confirms default behavior unchanged
-      - `preserve-quotes-forced-double-still-wins.md` —
-        `preserveQuotes: true`, source value containing
-        `\n` as literal content, expected double-quoted
-        output regardless of source style (spec)
-      - `preserve-quotes-keys-kept-quoted.md` —
-        `preserveQuotes: true`, source `"key": value`,
-        expected `"key": value` (keys also preserved)
-      - `preserve-quotes-flow-sequence-kubernetes.md` —
-        the exact command-array case from the user
-        report: source
-        `command: ["python", "-m", "http.server", "5000"]`,
-        settings `preserveQuotes: true`, expected output
-        identical — demonstrates the fix
-- [ ] Add interaction fixtures (per
-      `rlsp-yaml/tests/fixtures/CLAUDE.md`):
-      - `interact-preserve-quotes-single-quote.md` —
-        `preserveQuotes: true` with `singleQuote: true`:
-        source mix of `"a"` and `'b'` and `c` all stay
-        as-is; `singleQuote` does not rewrite
-        already-styled scalars
-      - `interact-preserve-quotes-enforce-block-style.md`
-        — `preserveQuotes: true` with
-        `formatEnforceBlockStyle: true`: flow collections
-        convert to block, but scalar quote styles inside
-        them are preserved
-      - `interact-preserve-quotes-yaml-version-v1-1.md` —
-        YAML 1.1 reserved keywords (`yes`, `no`, etc.)
-        with explicit quotes stay quoted under preserve
-- [ ] `cargo test` passes all fixtures
-- [ ] Confirm idempotence — each new fixture's
-      Expected-Document formats back to itself unchanged
+Completed in commit: `5a6677a` (absorbed into Task 2 — the
+developer authored all 16 fixtures and the test-engineer
+validated them during Task 2's output gate. Keeping the
+task recorded here for traceability; no separate commit.)
+
+- [x] Add new fixtures under
+      `rlsp-yaml/tests/fixtures/formatter/` — delivered
+      in Task 2: core coverage fixtures for every source
+      `ScalarStyle`, backward-compat defaults for both
+      DoubleQuoted and SingleQuoted sources, spec-forced
+      override, key preservation, embedded-quote
+      doubling, block mapping context, idempotence, and
+      the Kubernetes motivating case
+- [x] Add interaction fixtures (per
+      `rlsp-yaml/tests/fixtures/CLAUDE.md`) — delivered
+      in Task 2: `singleQuote`, `enforceBlockStyle`,
+      `yaml_version: V1_1`
+- [x] `cargo test` passes all fixtures (verified in
+      Task 2 review)
+- [x] Confirm idempotence — `preserve-quotes-idempotent.md`
+      asserts this
+- [x] Confirm no fixture sets `single_quote: true` without
+      `preserve_quotes: true` while expecting wrapped
+      output — grep verified clean (`singleQuote`
+      semantics are unchanged by preserve; no existing
+      fixture needs migration)
 
 ### Task 4: Documentation updates
 
