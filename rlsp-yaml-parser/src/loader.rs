@@ -796,6 +796,7 @@ const fn is_document_end(peeked: Option<&std::result::Result<(Event<'_>, Span), 
 ///
 /// Used to determine whether the next `Comment` event is trailing (same line)
 /// or leading (different line).
+#[inline]
 const fn node_end_line(node: &Node<Span>) -> usize {
     match node {
         Node::Scalar { loc, .. }
@@ -813,6 +814,7 @@ const fn node_end_line(node: &Node<Span>) -> usize {
 /// `span.end.line`, which would cause `peek_trailing_comment` to falsely
 /// classify it as an inline trailing comment.  The caller uses this predicate
 /// to skip trailing-comment detection for block scalars.
+#[inline]
 const fn is_block_scalar(node: &Node<Span>) -> bool {
     matches!(
         node,

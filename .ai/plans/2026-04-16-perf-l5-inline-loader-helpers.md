@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -49,33 +49,33 @@ every mapping value and sequence item.
 
 ## Steps
 
-- [ ] Add `#[inline]` to `node_end_line` in `loader.rs`
-- [ ] Add `#[inline]` to `is_block_scalar` in `loader.rs`
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Add `#[inline]` to `node_end_line` in `loader.rs`
+- [x] Add `#[inline]` to `is_block_scalar` in `loader.rs`
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Confirm debug symbols build cleanly for a subsequent
+- [x] Confirm debug symbols build cleanly for a subsequent
       flamegraph run: `CARGO_PROFILE_BENCH_DEBUG=true
       cargo bench -p rlsp-yaml-parser --bench throughput
       --no-run`
 
 ## Tasks
 
-### Task 1: Inline loader helpers
+### Task 1: Inline loader helpers (commit: `114a757`)
 
 Add `#[inline]` attributes to both helper functions so the
 compiler stops emitting out-of-line calls for them at
 their two mapping and two sequence call sites in
 `parse_node`.
 
-- [ ] `#[inline]` on `node_end_line` at
+- [x] `#[inline]` on `node_end_line` at
       `rlsp-yaml-parser/src/loader.rs:799`
-- [ ] `#[inline]` on `is_block_scalar` at
+- [x] `#[inline]` on `is_block_scalar` at
       `rlsp-yaml-parser/src/loader.rs:816`
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass
-- [ ] `cargo test` — all workspace tests pass
-- [ ] Bench binary builds:
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass
+- [x] `cargo test` — all workspace tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0
