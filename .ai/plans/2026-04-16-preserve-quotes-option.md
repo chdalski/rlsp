@@ -194,7 +194,7 @@ understand the semantics.
 - [x] Update documentation (`docs/configuration.md`,
       `docs/feature-log.md`, `README.md`, VS Code
       extension README)
-- [ ] Verify formatter round-trip on the Kubernetes
+- [x] Verify formatter round-trip on the Kubernetes
       manifest example from the user's report
 
 ## Tasks
@@ -361,21 +361,23 @@ Kubernetes manifest; verify the fix applies end-to-end
 through the VS Code integration path, not just unit-level
 fixtures.
 
-- [ ] Add an integration test that takes the full
+Completed in commit: `edf745c`
+
+- [x] Add an integration test that takes the full
       Deployment YAML from the user's report as input,
       formats it with `preserveQuotes: true`
       (`singleQuote` left at default `false`), and
       asserts the `command` array comes out as
       `["python", "-m", "http.server", "5000"]` — no
       quote removal, no mixed styles
-- [ ] Confirm the rest of the Deployment (Namespace
+- [x] Confirm the rest of the Deployment (Namespace
       metadata, Deployment metadata, selector labels,
       probe fields) round-trips byte-for-byte identical
       when already correctly formatted — preserve must
       not regress unrelated output
-- [ ] Confirm idempotence — formatting the output a
+- [x] Confirm idempotence — formatting the output a
       second time produces the same text
-- [ ] `cargo test` and VS Code integration tests pass
+- [x] `cargo test` and VS Code integration tests pass
 
 ## Decisions
 

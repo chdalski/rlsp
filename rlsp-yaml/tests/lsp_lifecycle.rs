@@ -3163,3 +3163,228 @@ async fn format_enforce_block_style_off_by_default_preserves_flow() {
         "well-formatted block YAML should produce no edits when formatEnforceBlockStyle is false; got: {result:?}"
     );
 }
+
+// ---- formatPreserveQuotes setting ----
+
+const KUBERNETES_YAML: &str = "\
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: finance
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: finance
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+    spec:
+      containers:
+      - name: payment
+        image: python:3.12-slim
+        command: [\"python\", \"-m\", \"http.server\", \"5000\"]
+        ports:
+        - containerPort: 5000
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+";
+
+#[tokio::test]
+async fn preserve_quotes_retains_double_quoted_command_array() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatPreserveQuotes": true })),
+    )
+    .await;
+
+    let uri = "file:///test/k8s-preserve-command.yaml";
+    send(&mut service, did_open_notification(uri, KUBERNETES_YAML)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+
+    assert!(
+        !result.is_null(),
+        "formatPreserveQuotes=true should produce a formatting edit; got null"
+    );
+    let edits = result.as_array().expect("result should be array");
+    assert!(
+        !edits.is_empty(),
+        "formatting should produce at least one edit"
+    );
+
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+
+    assert!(
+        new_text.contains(r#"["python", "-m", "http.server", "5000"]"#),
+        "all four command elements must remain double-quoted; got: {new_text:?}"
+    );
+}
+
+#[tokio::test]
+async fn preserve_quotes_plain_scalars_remain_plain() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatPreserveQuotes": true })),
+    )
+    .await;
+
+    let uri = "file:///test/k8s-preserve-plain.yaml";
+    send(&mut service, did_open_notification(uri, KUBERNETES_YAML)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+
+    let new_text = if result.is_null() || result.as_array().is_some_and(Vec::is_empty) {
+        KUBERNETES_YAML.to_owned()
+    } else {
+        let edits = result.as_array().expect("result should be array");
+        edits[0]["newText"]
+            .as_str()
+            .expect("newText should be a string")
+            .to_owned()
+    };
+
+    for plain in ["payment-api", "finance", "python:3.12-slim"] {
+        assert!(
+            new_text.contains(plain),
+            "plain scalar {plain:?} should appear unquoted in output; got: {new_text:?}"
+        );
+        assert!(
+            !new_text.contains(&format!("\"{plain}\"")),
+            "plain scalar {plain:?} must not be double-quoted in output; got: {new_text:?}"
+        );
+        assert!(
+            !new_text.contains(&format!("'{plain}'")),
+            "plain scalar {plain:?} must not be single-quoted in output; got: {new_text:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn preserve_quotes_idempotent_on_second_format() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatPreserveQuotes": true })),
+    )
+    .await;
+
+    let uri = "file:///test/k8s-preserve-idempotent.yaml";
+    send(&mut service, did_open_notification(uri, KUBERNETES_YAML)).await;
+
+    // First format pass
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("first formatting should return a response");
+    let result = resp
+        .result()
+        .expect("first formatting should have a result");
+
+    let first_output = if result.is_null() || result.as_array().is_some_and(Vec::is_empty) {
+        KUBERNETES_YAML.to_owned()
+    } else {
+        let edits = result.as_array().expect("result should be array");
+        edits[0]["newText"]
+            .as_str()
+            .expect("newText should be a string")
+            .to_owned()
+    };
+
+    // Update document to first_output, then format again
+    send(&mut service, did_change_notification(uri, &first_output, 2)).await;
+
+    let resp2 = send(&mut service, formatting_request(3, uri)).await;
+    let resp2 = resp2.expect("second formatting should return a response");
+    let result2 = resp2
+        .result()
+        .expect("second formatting should have a result");
+
+    assert!(
+        result2.is_null() || result2.as_array().is_some_and(Vec::is_empty),
+        "second format pass should produce no edits (idempotent); got: {result2:?}"
+    );
+}
+
+#[tokio::test]
+async fn preserve_quotes_off_by_default_strips_safe_plain_scalars() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // No formatPreserveQuotes — defaults to false
+    let uri = "file:///test/k8s-default-strip.yaml";
+    send(&mut service, did_open_notification(uri, KUBERNETES_YAML)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+
+    assert!(
+        !result.is_null(),
+        "default formatting should produce edits for the flow command array; got null"
+    );
+    let edits = result.as_array().expect("result should be array");
+    assert!(
+        !edits.is_empty(),
+        "default formatting should produce at least one edit"
+    );
+
+    let new_text = edits[0]["newText"]
+        .as_str()
+        .expect("newText should be a string");
+
+    // Safe-plain scalars must have quotes stripped
+    assert!(
+        !new_text.contains("\"python\""),
+        "default mode must strip quotes from safe-plain 'python'; got: {new_text:?}"
+    );
+    assert!(
+        !new_text.contains("\"http.server\""),
+        "default mode must strip quotes from safe-plain 'http.server'; got: {new_text:?}"
+    );
+
+    // Scalars that require quoting must stay quoted
+    assert!(
+        new_text.contains("\"-m\""),
+        "default mode must keep quotes on '-m' (reserved leading dash); got: {new_text:?}"
+    );
+    assert!(
+        new_text.contains("\"5000\""),
+        "default mode must keep quotes on '5000' (looks like integer); got: {new_text:?}"
+    );
+}
