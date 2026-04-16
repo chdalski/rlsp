@@ -193,38 +193,39 @@ entirely proportional to `sizeof(Node)` and number of nodes.
 - `drop_in_place<Vec<String>>` at 2.9% is the
   `leading_comments` Vec drop on EVERY node, even though
   block_heavy has zero comments. Pure carried cost.
-- `node_end_line` at 3.0% confirms it isn't inlined
-  despite being `const fn` — direct evidence for L2/L5.
 - `consume_leading_comments` at 3.0% is all peek + empty
-  Vec return — validates the 168c0e3 bookkeeping cost.
-- L1 (`anchor_map` skip) and L3 (`format!` for comments)
-  do NOT appear in the flame — block_heavy has no anchors
-  or comments, so those candidates have zero impact on the
-  regressed fixture. Still valid for other fixtures.
+  Vec return — validates the 168c0e3 bookkeeping cost
+  (now mitigated by L7, applied).
 
-### Loader candidates, reprioritized by flamegraph
+### Applied optimizations
 
-**How to apply:** after the 2026-04-16 flamegraph, reorder
-by measured impact on `block_heavy` (the worst-hit fixture).
-L1 and L3 have zero impact here; keep them listed for
-anchor-heavy / comment-heavy fixtures but don't lead with
-them.
+- **L5** (commit `9370579`) — `#[inline]` on
+  `node_end_line` / `is_block_scalar`.
+- **L2** (commit `d9afbdf`) — peek-first guard for
+  trailing-comment detection.
+- **L7** (commit `3f493a8`) — `#[inline]` on
+  `consume_leading_comments` and `next_from`.
+- **L1** (commit `a506589`) — skip anchor-subtree clone
+  in Lossless mode.
+
+Combined measured effect on
+`throughput_style/rlsp/load/block_heavy` (2026-04-16
+baremetal pre-L5/L2 vs post-L5/L2): 51.4 → 54.7 MiB/s
+(+6.4%). L1 and L7 not re-measured individually.
+
+### Remaining candidates, reprioritized by flamegraph
 
 **Ranking for block_heavy:**
 
-1. **L6 (new)** — merge `find_value_indicator_offset` with
+1. **L6** — merge `find_value_indicator_offset` with
    plain-scalar scan. **Target: 7.3% self-time.** Highest
-   measured payoff.
+   measured payoff remaining.
 2. **L4** — shrink `Node` variant (box rarely-populated
    fields). **Target: up to ~6% of the 17.7% drop cost +
    cache-locality wins.** Architectural, needs a plan.
-3. **L2+L5** — inline `node_end_line` + peek-first reorder.
-   **Target: 3.0%.** Cheap, direct.
-4. **L7 (new)** — short-circuit `consume_leading_comments`
-   when stream peek is not a Comment event. **Target:
-   some of the 3.0% self-time.**
-5. L1, L3 — no impact on block_heavy; keep for
-   anchor/comment-heavy workloads.
+3. **L3** — replace `format!("#{text}")` with direct
+   `push`. No impact on block_heavy (zero comments);
+   targets comment-heavy workloads.
 
 #### L6 — Merge `find_value_indicator_offset` with plain scan
 
@@ -241,49 +242,6 @@ line_mapping.rs` + `lexer/plain.rs`). Moderate complexity.
 **Advisor needs:** test-engineer (scanner behavior covers
 many YAML grammar edge cases); no security gate needed for
 pure refactor.
-
-#### L1 — Skip `anchor_map` write in Lossless mode
-
-`loader.rs:676` — `register_anchor` unconditionally runs
-`self.anchor_map.insert(name, node)`. In Lossless (default)
-mode, `resolve_alias` returns `Node::Alias { name }` without
-ever reading `anchor_map`. Every anchored node's full
-subtree is cloned into the map only to be dropped at
-document end.
-
-**Why:** Lossless mode needs anchor **count** (for
-`max_anchors` limit) but not the cloned subtree. Gate the
-`insert` on `mode == Resolved`.
-
-**Impact:** zero for anchor-free documents (which current
-fixtures likely are); significant for anchor-heavy input.
-Worth doing regardless — eliminates a correctness
-footgun where large cloned trees inflate memory in the
-default mode.
-
-#### L2 — Reorder `peek_trailing_comment` to peek-first
-
-`loader.rs:499-504` and `:594-599` — every mapping value
-and sequence item runs:
-
-```
-if !is_block_scalar(&value) {
-    let value_end_line = node_end_line(&value);
-    if let Some(trail) = peek_trailing_comment(
-        stream, value_end_line,
-    )? { ... }
-}
-```
-
-The common case is "no trailing comment" — we compute
-`node_end_line` (match traversal + Span field access) for
-nothing. Inline or reorder so `stream.peek()` for
-`Event::Comment` fires first, and `node_end_line` is only
-computed when a Comment is actually present.
-
-**Why:** cost is one match + span read per mapping entry /
-sequence item. On a 100KB mapping-heavy fixture (thousands
-of entries), this is non-trivial.
 
 #### L3 — Avoid `format!("#{text}")` for comments
 
@@ -335,51 +293,6 @@ indirection. Not a drop-in.
 **Impact unclear without measurement** — could be a win
 for throughput (smaller Node, better cache) and memory,
 or a wash if the indirection cost dominates.
-
-#### L5 — Cache `node_end_line` per call site
-
-**Flame: 3.0% shows it is NOT inlined** despite being
-`const fn`. First step: add `#[inline]` (or `#[inline(always)]`)
-to `node_end_line` and `is_block_scalar` in `loader.rs:799`
-and `:816`. Measure before anything more invasive.
-
-If inlining alone doesn't help, store the value's
-`span.end.line` directly when pushing to `entries` or
-`items`.
-
-#### L7 — Short-circuit `consume_leading_comments`
-
-**Flame: 3.0% of total time**, mostly spent on documents
-with no comments. Current code unconditionally enters a
-loop + allocates a `Vec<String>` result even when the next
-peek is not `Event::Comment`.
-
-`loader/stream.rs:52`:
-
-```
-pub(super) fn consume_leading_comments(
-    stream: &mut EventStream<'_>,
-) -> Result<Vec<String>> {
-    let mut leading = Vec::new();
-    while matches!(
-        stream.peek(),
-        Some(Ok((Event::Comment { .. }, _))),
-    ) { ... }
-    Ok(leading)
-}
-```
-
-Guard the top of the function with the same peek check —
-return `Vec::new()` (stack-only, no heap) early if the
-first peek fails. Rust is probably already optimizing this
-but the flame shows 3% so verify. Also consider returning
-`Option<Vec<String>>` or `Cow<[String]>` to avoid creating
-a Vec sentinel at all.
-
-Combine with a static empty slice fast-path in the caller:
-the mapping/sequence loops could skip the
-`pending_leading.is_empty()` branch entirely when
-`consume_leading_comments` returned None.
 
 ### Methodology for verification
 
