@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -69,43 +69,43 @@ win.
 
 ## Steps
 
-- [ ] Change `register_anchor`'s `node` parameter from
+- [x] Change `register_anchor`'s `node` parameter from
       `Node<Span>` to `&Node<Span>` in `loader.rs:656`
-- [ ] In the Resolved branch of `register_anchor`, clone
+- [x] In the Resolved branch of `register_anchor`, clone
       the borrowed node when inserting into `anchor_map`
-- [ ] In the Lossless branch, insert `empty_scalar()` as
+- [x] In the Lossless branch, insert `empty_scalar()` as
       a placeholder so `anchor_map.contains_key` still
       detects re-definitions correctly
-- [ ] Update the three callers (`:429–431`, `:528–530`,
+- [x] Update the three callers (`:429–431`, `:528–530`,
       `:623–625`) to pass `&node` instead of
       `node.clone()`
-- [ ] Update unit test
+- [x] Update unit test
       `register_anchor_increments_count` at
       `loader.rs:884–913` to use the new signature
-- [ ] Update
+- [x] Update
       `rlsp-yaml-parser/docs/architecture.md` line 332
       (the `anchor_map` field description in
       `LoadState`) to reflect mode-dependent storage:
       Resolved holds full node clones, Lossless holds
       `empty_scalar()` placeholders for uniqueness
       tracking only
-- [ ] Update
+- [x] Update
       `rlsp-yaml-parser/docs/architecture.md` lines
       360–364 (the "Registration" paragraph) so the
       described behavior matches mode-dependent
       registration: Lossless stores a zero-cost
       `empty_scalar()` placeholder, Resolved stores the
       full node clone for expansion
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — anchor resolution must
       be unchanged
 
 ## Tasks
 
-### Task 1: Skip anchor-subtree clone in Lossless mode
+### Task 1: Skip anchor-subtree clone in Lossless mode (commit: `5606ccc`)
 
 Change `register_anchor` to borrow its node argument so
 callers no longer need to eagerly clone, and insert a
@@ -114,44 +114,44 @@ preserve `anchor_map.contains_key`-based uniqueness
 tracking. In Resolved mode, clone inside `register_anchor`
 so the full subtree remains available for expansion.
 
-- [ ] `register_anchor` signature now takes `node:
+- [x] `register_anchor` signature now takes `node:
       &Node<Span>` (not `Node<Span>`)
-- [ ] Body inserts `node.clone()` into `anchor_map` only
+- [x] Body inserts `node.clone()` into `anchor_map` only
       when `self.options.mode == LoadMode::Resolved`
-- [ ] Body inserts `empty_scalar()` into `anchor_map` in
+- [x] Body inserts `empty_scalar()` into `anchor_map` in
       the Lossless branch so `contains_key` and the
       `max_anchors` check work unchanged
-- [ ] `expanded_nodes` counter logic in
+- [x] `expanded_nodes` counter logic in
       `register_anchor` is unchanged (still increments
       only in Resolved mode, still checks
       `max_expanded_nodes`)
-- [ ] All three callers in `parse_node` pass `&node`
+- [x] All three callers in `parse_node` pass `&node`
       instead of `node.clone()`; the return statement
       that consumes `node` is preserved
-- [ ] `register_anchor_increments_count` test at
+- [x] `register_anchor_increments_count` test at
       `loader.rs:884–913` updated to pass `&node`
-- [ ] `rlsp-yaml-parser/docs/architecture.md` line 332
+- [x] `rlsp-yaml-parser/docs/architecture.md` line 332
       (the `anchor_map` field description in
       `LoadState`) rewritten to describe mode-dependent
       contents: Resolved holds full node clones,
       Lossless holds `empty_scalar()` placeholders
-- [ ] `rlsp-yaml-parser/docs/architecture.md` lines
+- [x] `rlsp-yaml-parser/docs/architecture.md` lines
       360–364 ("Registration" paragraph) rewritten to
       describe mode-dependent behavior: Lossless stores
       a zero-cost `empty_scalar()` placeholder (enabling
       `contains_key`-based uniqueness tracking without
       the subtree clone); Resolved stores a clone of the
       node for later expansion
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass,
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass,
       including the anchor smoke tests in
       `tests/smoke/anchors_and_aliases.rs`
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0

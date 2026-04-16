@@ -427,7 +427,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(name) = node.anchor() {
-                    self.register_anchor(name.to_owned(), node.clone())?;
+                    self.register_anchor(name.to_owned(), &node)?;
                 }
                 Ok(node)
             }
@@ -528,7 +528,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(name) = anchor {
-                    self.register_anchor(name, node.clone())?;
+                    self.register_anchor(name, &node)?;
                 }
                 Ok(node)
             }
@@ -625,7 +625,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(name) = anchor {
-                    self.register_anchor(name, node.clone())?;
+                    self.register_anchor(name, &node)?;
                 }
                 Ok(node)
             }
@@ -657,7 +657,7 @@ impl<'opt> LoadState<'opt> {
         }
     }
 
-    fn register_anchor(&mut self, name: String, node: Node<Span>) -> Result<()> {
+    fn register_anchor(&mut self, name: String, node: &Node<Span>) -> Result<()> {
         if !self.anchor_map.contains_key(&name) {
             self.anchor_count += 1;
             if self.anchor_count > self.options.max_anchors {
@@ -676,8 +676,12 @@ impl<'opt> LoadState<'opt> {
                     limit: self.options.max_expanded_nodes,
                 });
             }
+            self.anchor_map.insert(name, node.clone());
+        } else {
+            // Lossless mode never reads anchor_map for expansion; store a
+            // zero-cost placeholder so contains_key still detects re-definitions.
+            self.anchor_map.insert(name, empty_scalar());
         }
-        self.anchor_map.insert(name, node);
         Ok(())
     }
 
@@ -901,10 +905,10 @@ mod tests {
             leading_comments: Vec::new(),
             trailing_comment: None,
         };
-        assert!(state.register_anchor("a".to_owned(), node.clone()).is_ok());
-        assert!(state.register_anchor("b".to_owned(), node.clone()).is_ok());
+        assert!(state.register_anchor("a".to_owned(), &node).is_ok());
+        assert!(state.register_anchor("b".to_owned(), &node).is_ok());
         let err = state
-            .register_anchor("c".to_owned(), node)
+            .register_anchor("c".to_owned(), &node)
             .expect_err("expected AnchorCountLimitExceeded");
         assert!(matches!(
             err,

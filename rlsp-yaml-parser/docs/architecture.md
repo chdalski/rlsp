@@ -330,7 +330,9 @@ that need a fully materialised document.
 `LoadState` holds:
 
 - `anchor_map: HashMap<String, Node<Span>>` — registered anchors for the
-  current document (cleared between documents)
+  current document (cleared between documents); in Resolved mode holds full
+  node clones for expansion; in Lossless mode holds `empty_scalar()` placeholders
+  for uniqueness tracking only (Lossless `resolve_alias` never reads the map)
 - `anchor_count: usize` — count of distinct anchors (checked against
   `max_anchors`)
 - `depth: usize` — current nesting depth (incremented on Begin events,
@@ -358,10 +360,15 @@ each document. Inside each document it calls `parse_node` recursively.
 ### Anchor and alias resolution
 
 **Registration.** When a node with an anchor is fully parsed, `register_anchor`
-stores a clone of the node in `anchor_map`. If the anchor name was already
-present, it overwrites the previous entry without incrementing `anchor_count`
-(re-definition). Anchor counts are tracked per document; the map is cleared
-between documents so anchors from one document do not bleed into the next.
+is called with a borrow of the node. In Resolved mode it clones the node into
+`anchor_map` so it is available for alias expansion. In Lossless mode it inserts
+a zero-cost `empty_scalar()` placeholder instead — `resolve_alias` in Lossless
+mode never reads the map, so the full clone is unnecessary; the placeholder
+preserves `anchor_map.contains_key`-based uniqueness tracking. If the anchor
+name was already present, it overwrites the previous entry without incrementing
+`anchor_count` (re-definition). Anchor counts are tracked per document; the map
+is cleared between documents so anchors from one document do not bleed into the
+next.
 
 **Lossless resolution.** `resolve_alias` in lossless mode returns a
 `Node::Alias` node with the anchor name. No map lookup occurs.
