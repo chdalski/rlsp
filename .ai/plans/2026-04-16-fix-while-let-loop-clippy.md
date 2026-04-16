@@ -142,7 +142,7 @@ the two schema-validation sites listed in Context so the
       conformance harness runs the same number of passing
       cases as before the change
 
-**Commit:** `28b0e3d` — fix(clippy): rewrite while_let_loop
+**Commit:** `60202c2` — fix(clippy): rewrite while_let_loop
 sites and remove trailing commas.
 
 ## Decisions
@@ -178,4 +178,4 @@ sites and remove trailing commas.
   `cargo clippy --all-targets`," and this amendment
   aligns the Goal, Context, and Task 1 description with
   that criterion. The corresponding fix is commit
-  `28b0e3d` (see Task 1 above).
+  `60202c2` (see Task 1 above).
