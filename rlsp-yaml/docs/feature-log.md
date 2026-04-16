@@ -224,7 +224,7 @@ text.
 
 **Description:** Implement `textDocument/formatting` to reformat entire YAML documents using Wadler-Lindig pretty-printing engine.
 **Complexity:** High
-**Comment:** Built on `rlsp-fmt`, a workspace crate implementing the Wadler-Lindig algorithm. Configurable via `formatPrintWidth` and `formatSingleQuote` settings.
+**Comment:** Built on `rlsp-fmt`, a workspace crate implementing the Wadler-Lindig algorithm. Configurable via `formatPrintWidth`, `formatSingleQuote`, and `formatPreserveQuotes` settings.
 **Tier:** 3
 
 ### SchemaStore Integration [completed]

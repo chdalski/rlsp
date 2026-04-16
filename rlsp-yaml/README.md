@@ -37,6 +37,7 @@ vim.lsp.start({
     },
     formatPrintWidth = 80,
     formatSingleQuote = false,
+    formatPreserveQuotes = false,
     httpProxy = "http://proxy.corp:8080",
   },
 })
@@ -62,6 +63,7 @@ schemaStore = true
 formatValidation = true
 formatPrintWidth = 80
 formatSingleQuote = false
+formatPreserveQuotes = false
 # httpProxy = "http://proxy.corp:8080"
 
 [language-server.rlsp-yaml.config.schemas]
@@ -91,6 +93,7 @@ Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.jso
         "formatValidation": true,
         "formatPrintWidth": 80,
         "formatSingleQuote": false,
+        "formatPreserveQuotes": false,
         "schemas": {
           "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml"
         }

@@ -68,6 +68,7 @@ Key settings (configured under `rlsp-yaml.*` in VS Code settings):
 | `keyOrdering` | `false` | Enforce alphabetical key ordering |
 | `formatPrintWidth` | `80` | Line width for formatting |
 | `formatSingleQuote` | `false` | Use single quotes in formatted output |
+| `formatPreserveQuotes` | `false` | Reproduce source scalar quoting style verbatim (spec-forced double quoting still applies) |
 | `customTags` | `[]` | Custom YAML tags to recognize |
 | `httpProxy` | `""` | HTTP proxy URL for schema fetching |
 

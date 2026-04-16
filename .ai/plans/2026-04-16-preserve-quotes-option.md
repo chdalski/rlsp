@@ -191,7 +191,7 @@ understand the semantics.
 - [x] Add the preserve branch to the scalar emission logic
 - [x] Add fixture coverage for the new option and its
       interactions with other formatter settings
-- [ ] Update documentation (`docs/configuration.md`,
+- [x] Update documentation (`docs/configuration.md`,
       `docs/feature-log.md`, `README.md`, VS Code
       extension README)
 - [ ] Verify formatter round-trip on the Kubernetes
@@ -315,41 +315,43 @@ task recorded here for traceability; no separate commit.)
 Document the new option, its interaction with
 `singleQuote`, and the spec-forced override.
 
-- [ ] Add `### formatPreserveQuotes` section to
+Completed in commit: `5c97764`
+
+- [x] Add `### formatPreserveQuotes` section to
       `rlsp-yaml/docs/configuration.md` — type, default
       (`false`), description making clear that `true`
       reproduces the source scalar style (quoted stays
       quoted, plain stays plain) while spec-forced double
       quoting overrides
-- [ ] Include in the new section the "Source scalar →
+- [x] Include in the new section the "Source scalar →
       output" table from this plan's Context so users
       can see concrete expectations
-- [ ] Update the cross-reference summary at
+- [x] Update the cross-reference summary at
       `docs/configuration.md:477` — append
       `formatPreserveQuotes` to the settings list
-- [ ] Update `rlsp-yaml/docs/feature-log.md:227` — append
+- [x] Update `rlsp-yaml/docs/feature-log.md:227` — append
       `formatPreserveQuotes` to the configurable
       settings list
-- [ ] Update `rlsp-yaml/README.md` — three setup examples
+- [x] Update `rlsp-yaml/README.md` — three setup examples
       at lines 39 (Neovim/Lua), 64 (Helix), and 93 (VS
       Code `settings.json`) list `formatSingleQuote`; add
       `formatPreserveQuotes` with its default value
       (`false`) to each example
-- [ ] Update `rlsp-yaml/integrations/vscode/README.md`
+- [x] Update `rlsp-yaml/integrations/vscode/README.md`
       settings table — add `formatPreserveQuotes` row
-- [ ] Remove the `preserve_quotes` follow-up entry from
+- [x] Remove the `preserve_quotes` follow-up entry from
       `/workspace/.ai/memory/project_followup_plans.md`
       — the item is delivered by this plan (preserve
       semantics, values and keys both preserved by
       reproducing source style)
-- [ ] Remove the adjacent stale entry "Formatter:
+- [x] Remove the adjacent stale entry "Formatter:
       `single_quote` quotes keys unnecessarily — …Being
       fixed in current plan
       `2026-04-14-formatter-bug-fixes.md`" from the same
       memory file. That plan is now Completed
       (2026-04-14); cleaning both entries in one pass
       keeps the follow-up queue accurate
-- [ ] `cargo test` (keep the gate even though no doctests
+- [x] `cargo test` (keep the gate even though no doctests
       here)
 
 ### Task 5: Round-trip verification on user's example

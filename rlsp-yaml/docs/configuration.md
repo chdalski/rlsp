@@ -105,6 +105,24 @@ Maximum line width for the full-document formatter. The formatter tries to fit c
 
 When `true`, string scalars are wrapped in single quotes instead of double quotes. Strings that contain single quotes are always double-quoted regardless of this setting.
 
+### `formatPreserveQuotes`
+
+- **Type:** `boolean`
+- **Default:** `false`
+
+When `true`, each scalar's source quoting style is reproduced verbatim in the formatted output — double-quoted stays double-quoted, single-quoted stays single-quoted, plain stays plain. The formatter no longer strips quotes it considers unnecessary.
+
+Spec-forced cases still emit as double-quoted regardless of this setting: values that contain control characters, backslash escapes, or NEL/LS/PS characters require double quotes per YAML 1.2 §7.3 and cannot be expressed any other way. The `formatSingleQuote` setting is a quote-character preference for cases where the formatter has to *choose* a style; under `formatPreserveQuotes: true` the formatter reproduces the source rather than choosing, so `formatSingleQuote` rarely applies.
+
+| Source scalar | Style | Output under `formatPreserveQuotes: false` (default) | Output under `formatPreserveQuotes: true` |
+|---|---|---|---|
+| `"python"` | DoubleQuoted | `python` | `"python"` |
+| `'python'` | SingleQuoted | `python` | `'python'` |
+| `python` | Plain | `python` | `python` |
+| `"5000"` | DoubleQuoted | `"5000"` (forced) | `"5000"` (preserved, same) |
+| `'5000'` | SingleQuoted | `'5000'` (forced) | `'5000'` (preserved, same) |
+| `"foo\nbar"` | DoubleQuoted | `"foo\nbar"` (spec) | `"foo\nbar"` (spec overrides) |
+
 ### `formatEnforceBlockStyle`
 
 - **Type:** `boolean`
@@ -474,7 +492,7 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 **Behavior:**
 
 - **Indentation** (tab size, tabs vs spaces) is controlled by the editor — the LSP formatting requests carry `tab_size` and `insert_spaces` from the editor's own settings.
-- **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`).
+- **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`, `formatPreserveQuotes`).
 - **Comments** are preserved during formatting. The formatter extracts comments from the original text and reattaches them to the formatted output.
 - **Syntax errors** — if the document cannot be parsed, the original text is returned unchanged so no content is lost.
 
