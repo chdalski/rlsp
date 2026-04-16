@@ -185,7 +185,7 @@ understand the semantics.
 
 - [x] Clarify requirements with the user (feature shape,
       default, keys, scope) — done
-- [ ] Add `preserve_quotes` field to `YamlFormatOptions`
+- [x] Add `preserve_quotes` field to `YamlFormatOptions`
       and wire through workspace settings and VS Code
       extension
 - [ ] Add the preserve branch to the scalar emission logic
@@ -206,30 +206,32 @@ consumer so the setting is visible end-to-end before any
 behavior changes. Landing the plumbing first keeps the
 second task focused on the emission branch.
 
-- [ ] Add `pub preserve_quotes: bool` to `YamlFormatOptions`
+Completed in commit: `19dd9c2`
+
+- [x] Add `pub preserve_quotes: bool` to `YamlFormatOptions`
       in `rlsp-yaml/src/editing/formatter.rs`, default
       `false` in the `Default` impl and the doc comment
-- [ ] Add `pub format_preserve_quotes: Option<bool>` to
+- [x] Add `pub format_preserve_quotes: Option<bool>` to
       the workspace settings struct in
       `rlsp-yaml/src/server.rs` with a doc comment
-- [ ] Read `format_preserve_quotes` into
+- [x] Read `format_preserve_quotes` into
       `YamlFormatOptions` in both formatter entry points
       at `server.rs:1041-1050` and `server.rs:1125-1134`
-- [ ] Add `rlsp-yaml.formatPreserveQuotes` contribution
+- [x] Add `rlsp-yaml.formatPreserveQuotes` contribution
       (boolean, default `false`, description explaining
       it keeps the source scalar style) to
       `rlsp-yaml/integrations/vscode/package.json`
-- [ ] Add `formatPreserveQuotes: boolean` field and
+- [x] Add `formatPreserveQuotes: boolean` field and
       `cfg.get('formatPreserveQuotes', false)` reader to
       `rlsp-yaml/integrations/vscode/src/config.ts`
-- [ ] Add a `formatPreserveQuotes defaults to false`
+- [x] Add a `formatPreserveQuotes defaults to false`
       integration test to
       `rlsp-yaml/integrations/vscode/src/test/integration/configuration.test.ts`
-- [ ] Add settings deserialization test in `server.rs`
+- [x] Add settings deserialization test in `server.rs`
       (parallel to `settings_deserializes_format_single_quote`)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
       `cargo build`, `cargo test` all clean
-- [ ] VS Code extension `pnpm run lint`,
+- [x] VS Code extension `pnpm run lint`,
       `pnpm run format`, `pnpm run build`,
       `pnpm run test`, `pnpm run test:integration` all
       clean

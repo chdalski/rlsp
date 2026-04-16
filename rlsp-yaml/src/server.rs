@@ -60,6 +60,8 @@ pub struct Settings {
     pub format_print_width: Option<usize>,
     /// Prefer single-quoted strings. Defaults to false.
     pub format_single_quote: Option<bool>,
+    /// Preserve the source quote style of scalars. Defaults to false.
+    pub format_preserve_quotes: Option<bool>,
     /// HTTP proxy URL for schema fetching (e.g. `"http://proxy.corp:8080"`).
     /// When absent, no proxy is used.
     pub http_proxy: Option<String>,
@@ -1049,6 +1051,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
                 .unwrap_or(false),
+            preserve_quotes: settings
+                .as_ref()
+                .and_then(|s| s.format_preserve_quotes)
+                .unwrap_or(false),
             bracket_spacing: settings
                 .as_ref()
                 .and_then(|s| s.format_bracket_spacing)
@@ -1132,6 +1138,10 @@ impl LanguageServer for Backend {
             single_quote: settings
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
+                .unwrap_or(false),
+            preserve_quotes: settings
+                .as_ref()
+                .and_then(|s| s.format_preserve_quotes)
                 .unwrap_or(false),
             bracket_spacing: settings
                 .as_ref()
@@ -1834,6 +1844,13 @@ mod tests {
         let json = serde_json::json!({ "formatSingleQuote": true });
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.format_single_quote, Some(true));
+    }
+
+    #[test]
+    fn settings_deserializes_format_preserve_quotes() {
+        let json = serde_json::json!({ "formatPreserveQuotes": true });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_preserve_quotes, Some(true));
     }
 
     #[test]

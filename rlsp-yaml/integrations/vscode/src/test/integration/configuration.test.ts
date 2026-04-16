@@ -38,6 +38,10 @@ suite('configuration defaults', () => {
     assert.strictEqual(cfg().get('formatSingleQuote'), false);
   });
 
+  test('formatPreserveQuotes defaults to false', () => {
+    assert.strictEqual(cfg().get('formatPreserveQuotes'), false);
+  });
+
   test('httpProxy defaults to empty string', () => {
     assert.strictEqual(cfg().get('httpProxy'), '');
   });

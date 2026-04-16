@@ -320,6 +320,8 @@ pub struct YamlFormatOptions {
     pub use_tabs: bool,
     /// Prefer single-quoted strings. Default: false (double quotes).
     pub single_quote: bool,
+    /// Preserve the source quote style of scalars. Default: false.
+    pub preserve_quotes: bool,
     /// Add spaces inside flow braces: `{ a: 1 }` vs `{a: 1}`. Default: true.
     pub bracket_spacing: bool,
     /// YAML specification version for quoting decisions. Default: `V1_2`.
@@ -340,6 +342,7 @@ impl Default for YamlFormatOptions {
             tab_width: 2,
             use_tabs: false,
             single_quote: false,
+            preserve_quotes: false,
             bracket_spacing: true,
             yaml_version: YamlVersion::V1_2,
             format_enforce_block_style: false,

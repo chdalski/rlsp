@@ -79,6 +79,11 @@
           "default": false,
           "description": "Use single quotes in formatted output"
         },
+        "rlsp-yaml.formatPreserveQuotes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Preserve the source quote style of scalar values during formatting"
+        },
         "rlsp-yaml.formatBracketSpacing": {
           "type": "boolean",
           "default": true,

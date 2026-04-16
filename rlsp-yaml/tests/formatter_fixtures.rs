@@ -201,6 +201,9 @@ fn apply_setting(options: &mut YamlFormatOptions, key: &str, value: &str, path_s
         "single_quote" => {
             options.single_quote = value == "true";
         }
+        "preserve_quotes" => {
+            options.preserve_quotes = value == "true";
+        }
         "bracket_spacing" => {
             options.bracket_spacing = value == "true";
         }
