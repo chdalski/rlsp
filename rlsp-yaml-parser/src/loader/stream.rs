@@ -8,7 +8,11 @@ use crate::pos::Span;
 
 use super::{LoadError, Result};
 
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "rustc declined #[inline] for this 3-line allocating helper; #[inline(always)] forces inlining at 4 call sites with minimal code-size impact"
+)]
+#[inline(always)]
 pub(super) fn with_hash_prefix(text: &str) -> String {
     let mut s = String::with_capacity(text.len() + 1);
     s.push('#');
@@ -58,8 +62,19 @@ pub(super) fn consume_leading_doc_comments(
 /// `peek_trailing_comment` has already consumed any trailing comment that was
 /// on the same line as the preceding value — so every remaining `Comment` here
 /// is on its own line and belongs to the upcoming key/item as a leading comment.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "#[inline] was declined by rustc for this wrapper (confirmed via LLVM IR); #[inline(always)] forces inlining of the tiny peek+branch fast path at its 2 call sites"
+)]
+#[inline(always)]
 pub(super) fn consume_leading_comments(stream: &mut EventStream<'_>) -> Result<Vec<String>> {
+    if !matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
+        return Ok(Vec::new());
+    }
+    consume_leading_comments_slow(stream)
+}
+
+fn consume_leading_comments_slow(stream: &mut EventStream<'_>) -> Result<Vec<String>> {
     let mut leading = Vec::new();
     while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
         if let Some((Event::Comment { text }, _)) = next_from(stream)? {
@@ -97,7 +112,7 @@ pub(super) fn peek_trailing_comment(
 mod tests {
     use super::*;
     use crate::error::Error;
-    use crate::event::Event;
+    use crate::event::{Event, ScalarStyle};
     use crate::pos::{Pos, Span};
 
     fn make_stream<'a>(
@@ -222,7 +237,60 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // consume_leading_comments
+    // consume_leading_comments — fast path (new split behavior)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn consume_leading_comments_returns_empty_vec_on_empty_stream() {
+        let mut stream = make_stream(vec![]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec![]));
+        assert!(stream.peek().is_none());
+    }
+
+    #[test]
+    fn consume_leading_comments_returns_empty_vec_when_next_is_stream_start() {
+        let sp = span(1, 1);
+        let mut stream = make_stream(vec![Ok((Event::StreamStart, sp))]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec![]));
+        // fast path must not consume the non-Comment event
+        assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
+    }
+
+    #[test]
+    fn consume_leading_comments_returns_empty_vec_when_next_is_scalar() {
+        let sp = span(1, 1);
+        let mut stream = make_stream(vec![Ok((
+            Event::Scalar {
+                value: "x".into(),
+                style: ScalarStyle::Plain,
+                anchor: None,
+                tag: None,
+            },
+            sp,
+        ))]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec![]));
+        assert!(stream.peek().is_some());
+    }
+
+    #[test]
+    fn consume_leading_comments_returns_empty_vec_when_next_is_error_event() {
+        let p = pos(1);
+        let err = Error {
+            pos: p,
+            message: "bad".to_string(),
+        };
+        let mut stream = make_stream(vec![Err(err)]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec![]));
+        // error event must not be consumed by the fast-path wrapper
+        assert!(stream.peek().is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // consume_leading_comments — slow path delegation
     // -----------------------------------------------------------------------
 
     #[test]
@@ -233,6 +301,19 @@ mod tests {
         assert_eq!(result, Ok(vec![]));
         // stream untouched
         assert!(stream.peek().is_some());
+    }
+
+    #[test]
+    fn consume_leading_comments_single_comment_delegated_to_slow_path() {
+        let sp = span(1, 1);
+        let trailing_sp = span(2, 2);
+        let mut stream = make_stream(vec![
+            Ok((Event::Comment { text: " hi" }, sp)),
+            Ok((Event::StreamStart, trailing_sp)),
+        ]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec!["# hi".to_string()]));
+        assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
     }
 
     #[test]
@@ -247,6 +328,28 @@ mod tests {
         let result = consume_leading_comments(&mut stream);
         assert_eq!(result, Ok(vec!["# a".to_string(), "# b".to_string()]));
         // non-comment still peeked
+        assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
+    }
+
+    #[test]
+    fn consume_leading_comments_multiple_consecutive_comments_all_consumed() {
+        let sp = span(1, 1);
+        let trailing_sp = span(4, 4);
+        let mut stream = make_stream(vec![
+            Ok((Event::Comment { text: " a" }, sp)),
+            Ok((Event::Comment { text: " b" }, sp)),
+            Ok((Event::Comment { text: " c" }, sp)),
+            Ok((Event::StreamStart, trailing_sp)),
+        ]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(
+            result,
+            Ok(vec![
+                "# a".to_string(),
+                "# b".to_string(),
+                "# c".to_string()
+            ])
+        );
         assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
     }
 
@@ -269,6 +372,30 @@ mod tests {
         );
         // stream now empty
         assert!(stream.peek().is_none());
+    }
+
+    #[test]
+    fn consume_leading_comments_stops_after_last_comment_leaves_non_comment_unconsumed() {
+        let sp = span(1, 1);
+        let mut stream = make_stream(vec![Ok((Event::Comment { text: " only" }, sp))]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec!["# only".to_string()]));
+        assert!(stream.peek().is_none());
+    }
+
+    #[test]
+    fn consume_leading_comments_stops_before_error_event_in_stream() {
+        let sp = span(1, 1);
+        let p = pos(2);
+        let err = Error {
+            pos: p,
+            message: "oops".to_string(),
+        };
+        let mut stream = make_stream(vec![Ok((Event::Comment { text: " ok" }, sp)), Err(err)]);
+        let result = consume_leading_comments(&mut stream);
+        assert_eq!(result, Ok(vec!["# ok".to_string()]));
+        // Err left unconsumed for the caller
+        assert!(stream.peek().is_some());
     }
 
     // -----------------------------------------------------------------------
@@ -334,5 +461,24 @@ mod tests {
         assert_eq!(result, Ok(None));
         // stream NOT consumed
         assert!(stream.peek().is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // with_hash_prefix — behavior unchanged after #[inline(always)]
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn with_hash_prefix_prepends_hash_to_empty_str() {
+        assert_eq!(with_hash_prefix(""), "#");
+    }
+
+    #[test]
+    fn with_hash_prefix_prepends_hash_to_nonempty_text() {
+        assert_eq!(with_hash_prefix(" comment text"), "# comment text");
+    }
+
+    #[test]
+    fn with_hash_prefix_preserves_inner_hashes() {
+        assert_eq!(with_hash_prefix(" foo # bar"), "# foo # bar");
     }
 }

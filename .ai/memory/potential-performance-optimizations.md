@@ -249,21 +249,25 @@ baremetal):
 
 ### Follow-ups surfaced during execution
 
-- **`consume_leading_comments` L7 inlining may have been
-  declined.** Post-L3 flame still shows the function as
-  its own frame at 7.19% self-time. `#[inline]` is a
-  hint, not a directive. Investigation steps if pursued:
-  - Check `cargo rustc --release -- --emit=llvm-ir` for
-    the function symbol and see whether it survives
-    codegen.
-  - If not inlined, consider `#[inline(always)]` or
-    restructuring the function so rustc has fewer reasons
-    to decline (e.g., lift the `format!`-shaped work out
-    of the loop if still present — it isn't after L3 but
-    double-check).
-  - The rise from 3.0% to 7.19% is attribution shift
-    (other frames shrank after L5/L2), not a regression
-    — absolute per-call time is unchanged.
+- **`consume_leading_comments` and `with_hash_prefix` L7b
+  inlining — RESOLVED.** Both functions confirmed
+  non-inlined via LLVM IR at baseline (`define internal
+  fastcc` symbols with live `invoke` call sites). Applied
+  L7b (commit SHA recorded below):
+  - `consume_leading_comments` split into
+    `#[inline(always)]` wrapper (peek + early return on
+    non-Comment) + private `consume_leading_comments_slow`
+    helper (original while-loop, NOT `#[inline]`). The
+    slow helper is the intentional out-of-line cold path.
+  - `with_hash_prefix` promoted from `#[inline]` to
+    `#[inline(always)]`.
+  - LLVM IR verification after L7b:
+    `grep -c "define.*consume_leading_comments[^_]"` → 0
+    (wrapper inlined; slow path correctly has 1
+    standalone definition).
+    `grep -c "define.*with_hash_prefix"` → 0 (inlined).
+  - Both clippy `inline_always` lints suppressed with
+    `#[expect(..., reason = "...")]` per project rules.
 
 ### Applied: L4 (scoped variant)
 

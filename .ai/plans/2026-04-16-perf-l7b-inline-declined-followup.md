@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -95,7 +95,7 @@ conservative to inline.
 
 ## Steps
 
-- [ ] In `rlsp-yaml-parser/src/loader/stream.rs`, split
+- [x] In `rlsp-yaml-parser/src/loader/stream.rs`, split
       `consume_leading_comments` into two functions: a
       `#[inline]`-marked wrapper that peeks the next
       event and returns `Ok(Vec::new())` immediately when
@@ -104,16 +104,16 @@ conservative to inline.
       contains the existing `while` loop body. The
       wrapper delegates to the slow helper only when a
       Comment is confirmed present.
-- [ ] Change `with_hash_prefix` in
+- [x] Change `with_hash_prefix` in
       `rlsp-yaml-parser/src/loader/stream.rs` from
       `#[inline]` to `#[inline(always)]`.
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings.
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — comment handling must
       be unchanged.
-- [ ] Verify via LLVM IR that both functions are now
+- [x] Verify via LLVM IR that both functions are now
       fully inlined: rebuild with `cargo rustc -p
       rlsp-yaml-parser --release --lib -- --emit=llvm-ir
       -O` and confirm `grep -c "define.*consume_leading_comments"`
@@ -122,38 +122,40 @@ conservative to inline.
       `consume_leading_comments_slow` is allowed to
       appear as a standalone definition — that is the
       intended cold path.
-- [ ] Update the L7 follow-up note in
+- [x] Update the L7 follow-up note in
       `.ai/memory/potential-performance-optimizations.md`
       to record this resolution (link both functions to
       the L7b commit SHA and note the LLVM IR
       verification).
-- [ ] Update `.ai/memory/MEMORY.md` index to reflect the
+- [x] Update `.ai/memory/MEMORY.md` index to reflect the
       follow-up resolution.
 
 ## Tasks
 
-### Task 1: Complete inline work for stream helpers
+### Task 1: Complete inline work for stream helpers (commit: `043a321`)
+
+**Note on implementation deviation accepted by reviewer:** plan prose suggested `#[inline]` for the wrapper, but the developer used `#[inline(always)]` after confirming via LLVM IR that `#[inline]` was still being declined. The LLVM IR acceptance gate required the `define` line to disappear, so `#[inline(always)]` is the correct call. The `#[expect(clippy::inline_always, reason = "...")]` annotation documents this.
 
 Split the hot fast path out of `consume_leading_comments`
 and promote `with_hash_prefix` to `#[inline(always)]`.
 Behavior is byte-identical to the current release
 binary; only the compiler's inlining choices change.
 
-- [ ] `consume_leading_comments` is a short
+- [x] `consume_leading_comments` is a short
       `#[inline]`-marked wrapper containing exactly:
       peek check, early `Ok(Vec::new())` return on
       non-Comment, delegation to
       `consume_leading_comments_slow` on Comment
-- [ ] `consume_leading_comments_slow` is a private
+- [x] `consume_leading_comments_slow` is a private
       (non-`pub(super)`) helper carrying the original
       `while matches!` loop body. It is NOT marked
       `#[inline]` — the intent is that it stays out of
       line as the cold path
-- [ ] `with_hash_prefix` is now marked
+- [x] `with_hash_prefix` is now marked
       `#[inline(always)]`; signature and body are
       otherwise unchanged
-- [ ] No other signature changes anywhere
-- [ ] LLVM IR verification: after
+- [x] No other signature changes anywhere
+- [x] LLVM IR verification: after
       `cargo rustc -p rlsp-yaml-parser --release --lib
       -- --emit=llvm-ir -O`, running
       `grep -c "define.*consume_leading_comments[^_]"`
@@ -161,23 +163,23 @@ binary; only the compiler's inlining choices change.
       standalone wrapper definition survives), and
       `grep -c "define.*with_hash_prefix"` returns `0`
       (no standalone definition survives)
-- [ ] `.ai/memory/potential-performance-optimizations.md`
+- [x] `.ai/memory/potential-performance-optimizations.md`
       "Follow-ups surfaced during execution" section
       updated to record the resolution, including the
       new commit SHA, the LLVM IR verification, and the
       fact that `consume_leading_comments_slow` is the
       intentional out-of-line cold path
-- [ ] `.ai/memory/MEMORY.md` index line updated to
+- [x] `.ai/memory/MEMORY.md` index line updated to
       reflect L7b as applied
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero
       warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0
