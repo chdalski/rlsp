@@ -496,7 +496,9 @@ impl<'opt> LoadState<'opt> {
                     // leading inter-node comment as a trailing inline comment.
                     // Block scalars never have an inline comment on their content
                     // lines, so skip trailing-comment detection for them.
-                    if !is_block_scalar(&value) {
+                    if !is_block_scalar(&value)
+                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
+                    {
                         let value_end_line = node_end_line(&value);
                         if let Some(trail) = peek_trailing_comment(stream, value_end_line)? {
                             attach_trailing_comment(&mut value, trail);
@@ -591,7 +593,9 @@ impl<'opt> LoadState<'opt> {
                     // mapping path: their span.end can coincide with the next
                     // comment's line, falsely turning a leading comment into a
                     // trailing one.
-                    if !is_block_scalar(&item) {
+                    if !is_block_scalar(&item)
+                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
+                    {
                         let item_end_line = node_end_line(&item);
                         if let Some(trail) = peek_trailing_comment(stream, item_end_line)? {
                             attach_trailing_comment(&mut item, trail);

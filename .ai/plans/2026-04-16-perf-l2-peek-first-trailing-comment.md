@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -63,23 +63,23 @@ zero comments. This plan eliminates the unconditional
 
 ## Steps
 
-- [ ] Wrap the mapping value trailing-comment block at
+- [x] Wrap the mapping value trailing-comment block at
       `loader.rs:499–504` with a `stream.peek()` Comment
       guard so `node_end_line` and
       `peek_trailing_comment` are only called when the
       next event is a `Comment`
-- [ ] Apply the same wrap to the sequence item block at
+- [x] Apply the same wrap to the sequence item block at
       `loader.rs:594–599`
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — comment-attachment
       behavior must be unchanged
 
 ## Tasks
 
-### Task 1: Guard trailing-comment detection with a stream peek
+### Task 1: Guard trailing-comment detection with a stream peek (commit: `f53e5a0`)
 
 Add an outer `stream.peek()` check for
 `Event::Comment { .. }` so the `node_end_line` + inner
@@ -89,26 +89,26 @@ Comment is next in the stream. The behavior of
 check — is preserved: the outer peek only guards entry,
 the line match still happens inside the helper.
 
-- [ ] In `rlsp-yaml-parser/src/loader.rs` mapping path
+- [x] In `rlsp-yaml-parser/src/loader.rs` mapping path
       (`:499–504`), wrap the existing body with a
       `matches!(stream.peek(), Some(Ok((Event::Comment {
       .. }, _))))` guard before computing
       `node_end_line`
-- [ ] In the sequence path (`:594–599`), apply the same
+- [x] In the sequence path (`:594–599`), apply the same
       wrapping guard
-- [ ] No change to `peek_trailing_comment` itself; no
+- [x] No change to `peek_trailing_comment` itself; no
       change to `node_end_line`, `is_block_scalar`, or
       `attach_trailing_comment`
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass,
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass,
       including the loader smoke tests that cover
       trailing-comment attachment
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0
