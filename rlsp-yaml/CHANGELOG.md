@@ -1,6 +1,15 @@
 # Changelog
 
 
+## Documentation
+
+- Document formatPreserveQuotes option (e2ad316)
+
+## Features
+
+- Add preserve_quotes formatter option plumbing (b844105)
+- Honor preserveQuotes in scalar emission (5a6677a)
+
 ## Bug Fixes
 
 - Rewrite while_let_loop sites and remove trailing commas (60202c2)
