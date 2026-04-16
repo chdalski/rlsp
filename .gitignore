@@ -6,3 +6,6 @@ rust_out
 lcov.info
 .pnpm-store/
 TODO.md
+perf.data
+perf.data.old
+flamegraph.svg
