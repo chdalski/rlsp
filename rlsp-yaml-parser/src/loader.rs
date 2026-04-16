@@ -424,7 +424,7 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.map(str::to_owned),
                     tag: tag.map(std::borrow::Cow::into_owned),
                     loc: span,
-                    leading_comments: Vec::new(),
+                    leading_comments: None,
                     trailing_comment: None,
                 };
                 if let Some(name) = node.anchor() {
@@ -525,7 +525,7 @@ impl<'opt> LoadState<'opt> {
                         start: span.start,
                         end: end_span.end,
                     },
-                    leading_comments: Vec::new(),
+                    leading_comments: None,
                     trailing_comment: None,
                 };
                 if let Some(name) = anchor {
@@ -622,7 +622,7 @@ impl<'opt> LoadState<'opt> {
                         start: span.start,
                         end: end_span.end,
                     },
-                    leading_comments: Vec::new(),
+                    leading_comments: None,
                     trailing_comment: None,
                 };
                 if let Some(name) = anchor {
@@ -691,7 +691,7 @@ impl<'opt> LoadState<'opt> {
             LoadMode::Lossless => Ok(Node::Alias {
                 name: name.to_owned(),
                 loc,
-                leading_comments: Vec::new(),
+                leading_comments: None,
                 trailing_comment: None,
             }),
             LoadMode::Resolved => {
@@ -848,7 +848,7 @@ const fn empty_scalar() -> Node<Span> {
             start: Pos::ORIGIN,
             end: Pos::ORIGIN,
         },
-        leading_comments: Vec::new(),
+        leading_comments: None,
         trailing_comment: None,
     }
 }
@@ -903,7 +903,7 @@ mod tests {
                 start: Pos::ORIGIN,
                 end: Pos::ORIGIN,
             },
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         };
         assert!(state.register_anchor("a".to_owned(), &node).is_ok());
@@ -932,7 +932,7 @@ mod tests {
                 start: Pos::ORIGIN,
                 end: Pos::ORIGIN,
             },
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         };
         state.anchor_map.insert("a".to_owned(), alias_node.clone());

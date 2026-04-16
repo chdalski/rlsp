@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -93,58 +93,58 @@ this scoped change actually moves throughput.
 
 ## Steps
 
-- [ ] Change `leading_comments` field type from
+- [x] Change `leading_comments` field type from
       `Vec<String>` to `Option<Vec<String>>` in all four
       `Node<Loc>` variants at
       `rlsp-yaml-parser/src/node.rs:37–100`
-- [ ] Update
+- [x] Update
       `Node::leading_comments(&self) -> &[String]` at
       `rlsp-yaml-parser/src/node.rs:115–130` to return
       `leading_comments.as_deref().unwrap_or(&[])`
-- [ ] Update
+- [x] Update
       `attach_leading_comments` at
       `rlsp-yaml-parser/src/loader/comments.rs:7–27` —
       keep the existing empty-input early return; change
       the write from `*leading_comments = comments;` to
       `*leading_comments = Some(comments);`
-- [ ] Update all 4 production construction sites in
+- [x] Update all 4 production construction sites in
       `rlsp-yaml-parser/src/loader.rs` (Scalar at
       `:427`, Mapping at `:528`, Sequence at `:625`,
       Alias via `resolve_alias` at `:694`, plus
       `empty_scalar` at `:851`) from
       `leading_comments: Vec::new()` to
       `leading_comments: None`
-- [ ] Update the 1 production construction site in
+- [x] Update the 1 production construction site in
       `rlsp-yaml-parser/src/loader/reloc.rs:102`
-- [ ] Update all in-file test fixtures in `node.rs`,
+- [x] Update all in-file test fixtures in `node.rs`,
       `loader.rs`, `loader/reloc.rs`, `loader/comments.rs`:
       `leading_comments: Vec::new()` → `leading_comments:
       None`; `leading_comments: vec![…]` → `leading_comments:
       Some(vec![…])`
-- [ ] Update test fixtures in
+- [x] Update test fixtures in
       `rlsp-yaml/src/schema_validation.rs` (2 sites) and
       `rlsp-yaml-parser/tests/loader.rs` (2 sites)
-- [ ] Update `rlsp-yaml-parser/docs/architecture.md`
+- [x] Update `rlsp-yaml-parser/docs/architecture.md`
       "AST types" section (around lines 420–426) so the
       `Node::Scalar` field list shows
       `leading_comments: Option<Vec<String>>`
-- [ ] Update the Applied summary in
+- [x] Update the Applied summary in
       `.ai/memory/potential-performance-optimizations.md`
       to record this scoped variant and leave the full
       `Option<Box<NodeMeta>>` variant as a deferred
       follow-up
-- [ ] Update `.ai/memory/MEMORY.md` index line to reflect
+- [x] Update `.ai/memory/MEMORY.md` index line to reflect
       L4 (scoped) as applied and full L4 deferred
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — comment-attachment
       behavior must be preserved
 
 ## Tasks
 
-### Task 1: Wrap `leading_comments` in `Option` (no Box)
+### Task 1: Wrap `leading_comments` in `Option` (no Box) (commit: `704d5f8`)
 
 Change the four `Node<Loc>` variant fields from
 `Vec<String>` to `Option<Vec<String>>`, preserve the
@@ -152,45 +152,45 @@ public accessor contract, update the single write site,
 update all 27 construction sites, and keep conformance
 and tests green.
 
-- [ ] `Node::Scalar`, `Node::Mapping`, `Node::Sequence`,
+- [x] `Node::Scalar`, `Node::Mapping`, `Node::Sequence`,
       `Node::Alias` each have
       `leading_comments: Option<Vec<String>>`
-- [ ] `Node::leading_comments(&self) -> &[String]`
+- [x] `Node::leading_comments(&self) -> &[String]`
       returns `leading_comments.as_deref().unwrap_or(&[])`
       for all four variants (the pattern-match structure
       is unchanged; only the final expression changes)
-- [ ] `attach_leading_comments` in `loader/comments.rs`
+- [x] `attach_leading_comments` in `loader/comments.rs`
       still short-circuits on empty input; non-empty
       writes set `Some(comments)` on the correct variant
-- [ ] All 4 production Node construction sites in
+- [x] All 4 production Node construction sites in
       `loader.rs` and 1 in `loader/reloc.rs` use
       `leading_comments: None`
-- [ ] All ~22 test-fixture construction sites across
+- [x] All ~22 test-fixture construction sites across
       parser and `rlsp-yaml` crates use `None` for empty
       cases and `Some(vec![…])` for populated cases
-- [ ] `rlsp-yaml-parser/docs/architecture.md` "AST
+- [x] `rlsp-yaml-parser/docs/architecture.md` "AST
       types" section shows the new field type
-- [ ] `.ai/memory/potential-performance-optimizations.md`
+- [x] `.ai/memory/potential-performance-optimizations.md`
       L4 section records this scoped variant as applied
       and keeps the full `Option<Box<NodeMeta>>` refactor
       as a deferred follow-up with the rationale "scoped
       variant landed first to measure the drop-cost win
       without Box indirection cost"
-- [ ] `.ai/memory/MEMORY.md` index line updated
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass
+- [x] `.ai/memory/MEMORY.md` index line updated
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass
       (including NF-1..NF-4 in `node.rs`, the 10
       attach_leading_comments / attach_trailing_comment
       tests in `loader/comments.rs`, and the reloc
       tests in `loader/reloc.rs`)
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass,
+- [x] `cargo test` (full workspace) — all tests pass,
       including `rlsp-yaml` crate's schema_validation
       tests
-- [ ] Bench binary builds:
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0

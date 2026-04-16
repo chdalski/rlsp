@@ -49,7 +49,7 @@ pub enum Node<Loc = Span> {
         /// Populated only for non-first entries in a mapping or sequence.
         /// Document-prefix leading comments are discarded by the tokenizer
         /// per YAML §9.2 and cannot be recovered here.
-        leading_comments: Vec<String>,
+        leading_comments: Option<Vec<String>>,
         /// Inline comment on the same line as this node (e.g. `# note`).
         trailing_comment: Option<String>,
     },
@@ -66,7 +66,7 @@ pub enum Node<Loc = Span> {
         /// Source span from the opening indicator to the last entry.
         loc: Loc,
         /// Comment lines that appear before this node.
-        leading_comments: Vec<String>,
+        leading_comments: Option<Vec<String>>,
         /// Inline comment on the same line as this node.
         trailing_comment: Option<String>,
     },
@@ -83,7 +83,7 @@ pub enum Node<Loc = Span> {
         /// Source span from the opening indicator to the last item.
         loc: Loc,
         /// Comment lines that appear before this node.
-        leading_comments: Vec<String>,
+        leading_comments: Option<Vec<String>>,
         /// Inline comment on the same line as this node.
         trailing_comment: Option<String>,
     },
@@ -94,7 +94,7 @@ pub enum Node<Loc = Span> {
         /// Source span covering the `*name` alias token.
         loc: Loc,
         /// Comment lines that appear before this node.
-        leading_comments: Vec<String>,
+        leading_comments: Option<Vec<String>>,
         /// Inline comment on the same line as this node.
         trailing_comment: Option<String>,
     },
@@ -125,7 +125,7 @@ impl<Loc> Node<Loc> {
             }
             | Self::Alias {
                 leading_comments, ..
-            } => leading_comments,
+            } => leading_comments.as_deref().unwrap_or(&[]),
         }
     }
 
@@ -168,7 +168,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -182,7 +182,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: vec!["# note".to_owned()],
+            leading_comments: Some(vec!["# note".to_owned()]),
             trailing_comment: None,
         };
         let debug = format!("{node:?}");
@@ -198,7 +198,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: vec!["# a".to_owned()],
+            leading_comments: Some(vec!["# a".to_owned()]),
             trailing_comment: None,
         };
         let b = Node::Scalar {
@@ -207,7 +207,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: vec!["# b".to_owned()],
+            leading_comments: Some(vec!["# b".to_owned()]),
             trailing_comment: None,
         };
         assert_ne!(a, b);
@@ -222,7 +222,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: vec!["# x".to_owned()],
+            leading_comments: Some(vec!["# x".to_owned()]),
             trailing_comment: Some("# y".to_owned()),
         };
         let cloned = node.clone();
@@ -237,6 +237,34 @@ mod tests {
         let n = plain_scalar("hello");
         assert!(n.leading_comments().is_empty());
         assert!(n.trailing_comment().is_none());
+    }
+
+    #[test]
+    fn node_accessor_returns_empty_slice_for_none() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            tag: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.leading_comments(), &[] as &[String]);
+    }
+
+    #[test]
+    fn node_accessor_returns_slice_for_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            tag: None,
+            loc: zero_span(),
+            leading_comments: Some(vec!["# x".to_owned()]),
+            trailing_comment: None,
+        };
+        assert_eq!(node.leading_comments(), &["# x"]);
     }
 
     fn bare_document(explicit_start: bool, explicit_end: bool) -> Document<Span> {

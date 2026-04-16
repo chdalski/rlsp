@@ -265,24 +265,40 @@ baremetal):
     (other frames shrank after L5/L2), not a regression
     — absolute per-call time is unchanged.
 
-### Remaining candidate
+### Applied: L4 (scoped variant)
 
 After L5, L2, L7, L1, L3, and L6 were applied, one loader
-candidate remains:
+candidate remained:
 
-- **L4** — shrink `Node` variant (box rarely-populated
-  fields). **Target: up to ~6% of the 17.5% cumulative
-  `drop_in_place<Node>` cost + cache-locality wins for
-  any AST consumer.** Architectural; needs its own plan
-  before execution.
+- **L4 (scoped)** — wrap `leading_comments: Vec<String>` →
+  `Option<Vec<String>>` on all four `Node` variants.
+  **Applied** (commit recorded in plan
+  `2026-04-16-perf-l4-option-leading-comments.md`).
+  This eliminates the per-node empty-Vec drop cost
+  (~2.9% of bench time on `block_heavy`). `None` drops
+  at zero cost; `Some` drops only when comments are
+  actually present. The accessor signature is unchanged:
+  `node.leading_comments() -> &[String]` returns `&[]`
+  for `None` via `.as_deref().unwrap_or(&[])`.
 
-#### L4 — Shrink `Node` variant size by boxing rare fields
+  **Scoped variant landed first** to measure the
+  drop-cost win without Box indirection cost. Throughput
+  and flamegraph verification are run baremetal by the
+  user in a follow-up step. Expected outcome on
+  block_heavy rlsp/load: +1 to +4% (best estimate +2%).
 
-Each `Node::Scalar` carries:
+### Deferred: L4 (full `Option<Box<NodeMeta>>` variant)
+
+The broader boxing of all four rarely-populated fields into
+a single `Option<Box<NodeMeta>>` remains deferred:
+
+#### What it is
+
+Each `Node::Scalar` currently carries:
 
 - `anchor: Option<String>` — 24 B (usually None)
 - `tag: Option<String>` — 24 B (usually None)
-- `leading_comments: Vec<String>` — 24 B (usually empty)
+- `leading_comments: Option<Vec<String>>` — 24 B (usually None, after scoped L4)
 - `trailing_comment: Option<String>` — 24 B (usually None)
 - plus value + style + loc
 
@@ -290,17 +306,23 @@ The four rarely-populated fields account for ~96 B per Node
 on no-comment/no-anchor/no-tag input. Collection variants
 are larger. Cache lines hold 2–3 Nodes max.
 
-Boxing rarely-populated fields into a single
-`Option<Box<NodeMeta>>` would shrink the common Node to
-fit 4+ per cache line, improving tree-traversal locality
-for anything that reads the AST (formatter, LSP).
+Boxing them into a single `Option<Box<NodeMeta>>` would
+shrink the common Node to fit 4+ per cache line, improving
+tree-traversal locality for anything that reads the AST
+(formatter, LSP).
 
-**Why:** most documents have zero comments and zero
-anchors/tags. The fields exist in the layout regardless.
+**Why deferred:** the scoped L4 variant (above) was landed
+first to isolate the measured drop-cost win from the
+indirection cost that Box would introduce. If the scoped
+variant shows no improvement on baremetal, the full
+`Option<Box<NodeMeta>>` refactor should not be pursued
+without new evidence. If it does show improvement, the
+full variant becomes the next architectural candidate.
 
-**Cost:** API change — `node.leading_comments()` stays the
-same shape, but internal field access moves through a Box
-indirection. Not a drop-in.
+**Cost:** API change — `node.leading_comments()`,
+`node.anchor()`, etc. stay the same shape, but internal
+field access moves through a Box indirection. Not a
+drop-in.
 
 **Impact unclear without measurement** — could be a win
 for throughput (smaller Node, better cache) and memory,

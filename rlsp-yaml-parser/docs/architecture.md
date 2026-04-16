@@ -426,7 +426,7 @@ Document<Span>
   explicit_start: bool            -- true when document was introduced with `---`
   explicit_end: bool              -- true when document was closed with `...`
 
-Node<Span>  =  Scalar { value, style, anchor, tag, loc, leading_comments, trailing_comment }
+Node<Span>  =  Scalar { value, style, anchor, tag, loc, leading_comments: Option<Vec<String>>, trailing_comment }
              | Mapping { entries: Vec<(Node, Node)>, anchor, tag, loc, … }
              | Sequence { items: Vec<Node>, anchor, tag, loc, … }
              | Alias { name, loc, … }   -- lossless mode only

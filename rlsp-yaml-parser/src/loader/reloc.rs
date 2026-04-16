@@ -99,7 +99,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc,
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -112,7 +112,7 @@ mod tests {
             anchor: Some("a".to_owned()),
             tag: Some("!t".to_owned()),
             loc: span(1),
-            leading_comments: vec!["# lc".to_owned()],
+            leading_comments: Some(vec!["# lc".to_owned()]),
             trailing_comment: Some("# tc".to_owned()),
         };
         let result = reloc(node, span(2));
@@ -131,7 +131,7 @@ mod tests {
                 assert_eq!(style, ScalarStyle::Plain);
                 assert_eq!(anchor, Some("a".to_owned()));
                 assert_eq!(tag, Some("!t".to_owned()));
-                assert_eq!(leading_comments, vec!["# lc".to_owned()]);
+                assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
                 assert_eq!(trailing_comment, Some("# tc".to_owned()));
             }
             _ => panic!("expected Scalar"),
@@ -146,7 +146,7 @@ mod tests {
             anchor: Some("m".to_owned()),
             tag: Some("!m".to_owned()),
             loc: span(1),
-            leading_comments: vec!["# lc".to_owned()],
+            leading_comments: Some(vec!["# lc".to_owned()]),
             trailing_comment: Some("# tc".to_owned()),
         };
         let result = reloc(node, span(3));
@@ -164,7 +164,7 @@ mod tests {
                 assert!(entries.is_empty());
                 assert_eq!(anchor, Some("m".to_owned()));
                 assert_eq!(tag, Some("!m".to_owned()));
-                assert_eq!(leading_comments, vec!["# lc".to_owned()]);
+                assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
                 assert_eq!(trailing_comment, Some("# tc".to_owned()));
             }
             _ => panic!("expected Mapping"),
@@ -179,7 +179,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: span(1),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         };
         let result = reloc(node, span(4));
@@ -197,7 +197,7 @@ mod tests {
         let node = Node::Alias {
             name: "x".to_owned(),
             loc: span(1),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         };
         let result = reloc(node, span(5));
@@ -218,7 +218,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: span(1),
-            leading_comments: vec!["# hi".to_owned()],
+            leading_comments: Some(vec!["# hi".to_owned()]),
             trailing_comment: None,
         };
         let result = reloc(node, span(2));
@@ -233,7 +233,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: span(1),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: Some("# tail".to_owned()),
         };
         let result = reloc(node, span(2));
@@ -249,7 +249,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: span(1),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         };
         let result = reloc(node, span(99));

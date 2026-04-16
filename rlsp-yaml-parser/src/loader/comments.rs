@@ -21,7 +21,7 @@ pub(super) fn attach_leading_comments(node: &mut Node<Span>, comments: Vec<Strin
         | Node::Alias {
             leading_comments, ..
         } => {
-            *leading_comments = comments;
+            *leading_comments = Some(comments);
         }
     }
 }
@@ -66,7 +66,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -78,7 +78,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -90,7 +90,7 @@ mod tests {
             anchor: None,
             tag: None,
             loc: zero_span(),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -99,7 +99,7 @@ mod tests {
         Node::Alias {
             name: "anchor".to_owned(),
             loc: zero_span(),
-            leading_comments: Vec::new(),
+            leading_comments: None,
             trailing_comment: None,
         }
     }
@@ -114,7 +114,7 @@ mod tests {
             ..
         } = node
         {
-            *leading_comments = vec!["# existing".to_owned()];
+            *leading_comments = Some(vec!["# existing".to_owned()]);
         }
         attach_leading_comments(&mut node, vec![]);
         assert_eq!(node.leading_comments(), &["# existing"]);
@@ -135,7 +135,7 @@ mod tests {
             ..
         } = node
         {
-            *leading_comments = vec!["# old".to_owned()];
+            *leading_comments = Some(vec!["# old".to_owned()]);
         }
         attach_leading_comments(&mut node, vec!["# new".to_owned()]);
         assert_eq!(node.leading_comments(), &["# new"]);
@@ -160,6 +160,13 @@ mod tests {
         let mut node = alias_node();
         attach_leading_comments(&mut node, vec!["# a".to_owned(), "# b".to_owned()]);
         assert_eq!(node.leading_comments(), &["# a", "# b"]);
+    }
+
+    #[test]
+    fn attach_leading_comments_transitions_none_to_some() {
+        let mut node = scalar_node();
+        attach_leading_comments(&mut node, vec!["# new".to_owned()]);
+        assert_eq!(node.leading_comments(), &["# new"]);
     }
 
     // attach_trailing_comment tests
