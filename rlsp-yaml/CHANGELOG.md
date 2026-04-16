@@ -3,6 +3,14 @@
 
 ## Bug Fixes
 
+- Rewrite while_let_loop sites and remove trailing commas (60202c2)
+
+## Performance
+
+- Wrap leading_comments in Option<Vec<String>> (e812232)
+
+## Bug Fixes
+
 - Indent block scalar content lines in formatter (0b31477)
 - Preserve anchor definitions in formatter output (5309f84)
 - Restrict single_quote option to values only (7390155)

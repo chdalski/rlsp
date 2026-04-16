@@ -3,6 +3,25 @@
 
 ## Bug Fixes
 
+- Rewrite while_let_loop sites and remove trailing commas (60202c2)
+
+## Documentation
+
+- Refresh benchmarks.md with 2026-04-16 baremetal data (3b489b1)
+
+## Performance
+
+- Inline loader helpers node_end_line and is_block_scalar (9370579)
+- Short-circuit trailing-comment detection with peek guard (d9afbdf)
+- Inline loader stream helpers (3f493a8)
+- Skip anchor-subtree clone in Lossless mode (a506589)
+- Replace format! with direct push for comment prefix (d586012)
+- Use memchr2 for value-indicator scan (8097aa5)
+- Wrap leading_comments in Option<Vec<String>> (e812232)
+- Inline consume_leading_comments fast path and with_hash_prefix (3bec2da)
+
+## Bug Fixes
+
 - Preserve leading comments in nested block mappings (168c0e3)
 - Handle tags and quoted scalars inline after document start marker (620bdd9)
 - Fix explicit key and empty key loader bugs (a8dff3b)
