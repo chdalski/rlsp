@@ -8,6 +8,14 @@ use crate::pos::Span;
 
 use super::{LoadError, Result};
 
+#[inline]
+pub(super) fn with_hash_prefix(text: &str) -> String {
+    let mut s = String::with_capacity(text.len() + 1);
+    s.push('#');
+    s.push_str(text);
+    s
+}
+
 type EventStream<'a> =
     Peekable<Box<dyn Iterator<Item = std::result::Result<(Event<'a>, Span), Error>> + 'a>>;
 
@@ -35,7 +43,7 @@ pub(super) fn consume_leading_doc_comments(
     while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
         if let Some((Event::Comment { text }, span)) = next_from(stream)? {
             if span.end.line > span.start.line {
-                doc_comments.push(format!("#{text}"));
+                doc_comments.push(with_hash_prefix(text));
             }
         }
     }
@@ -55,7 +63,7 @@ pub(super) fn consume_leading_comments(stream: &mut EventStream<'_>) -> Result<V
     let mut leading = Vec::new();
     while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
         if let Some((Event::Comment { text }, _)) = next_from(stream)? {
-            leading.push(format!("#{text}"));
+            leading.push(with_hash_prefix(text));
         }
     }
     Ok(leading)
@@ -79,7 +87,7 @@ pub(super) fn peek_trailing_comment(
         Some(Ok((Event::Comment { .. }, span))) if span.start.line == preceding_end_line
     ) {
         if let Some((Event::Comment { text }, _)) = next_from(stream)? {
-            return Ok(Some(format!("#{text}")));
+            return Ok(Some(with_hash_prefix(text)));
         }
     }
     Ok(None)

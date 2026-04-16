@@ -207,6 +207,9 @@ entirely proportional to `sizeof(Node)` and number of nodes.
   `consume_leading_comments` and `next_from`.
 - **L1** (commit `a506589`) — skip anchor-subtree clone
   in Lossless mode.
+- **L3** — replace `format!("#{text}")` with direct
+  `with_hash_prefix` helper (4 call sites in loader +
+  loader/stream). Targets comment-heavy workloads.
 
 Combined measured effect on
 `throughput_style/rlsp/load/block_heavy` (2026-04-16
@@ -223,9 +226,6 @@ baremetal pre-L5/L2 vs post-L5/L2): 51.4 → 54.7 MiB/s
 2. **L4** — shrink `Node` variant (box rarely-populated
    fields). **Target: up to ~6% of the 17.7% drop cost +
    cache-locality wins.** Architectural, needs a plan.
-3. **L3** — replace `format!("#{text}")` with direct
-   `push`. No impact on block_heavy (zero comments);
-   targets comment-heavy workloads.
 
 #### L6 — Merge `find_value_indicator_offset` with plain scan
 
@@ -242,27 +242,6 @@ line_mapping.rs` + `lexer/plain.rs`). Moderate complexity.
 **Advisor needs:** test-engineer (scanner behavior covers
 many YAML grammar edge cases); no security gate needed for
 pure refactor.
-
-#### L3 — Avoid `format!("#{text}")` for comments
-
-`loader.rs:640`, `loader/stream.rs:37,56,80` — every
-Comment event allocates via `format!`. Replace with:
-
-```
-let mut s = String::with_capacity(text.len() + 1);
-s.push('#');
-s.push_str(text);
-```
-
-**Why:** `format!` goes through the `fmt::Write` machinery
-— more overhead than direct push. Minor per comment,
-adds up on comment-heavy documents.
-
-Better alternative: have the lexer/event iter emit
-`Event::Comment { text }` with `#` already included so the
-loader can just clone the `Cow` into a `String`. This
-changes the event-stream contract, so it's a bigger
-decision.
 
 #### L4 — Shrink `Node` variant size by boxing rare fields
 

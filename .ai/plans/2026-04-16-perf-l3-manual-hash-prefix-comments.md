@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -66,78 +66,78 @@ the win is on comment-heavy real-world workloads.
 
 ## Steps
 
-- [ ] Add a private helper
+- [x] Add a private helper
       `pub(super) fn with_hash_prefix(text: &str) ->
       String` in `rlsp-yaml-parser/src/loader/stream.rs`
       that builds the prefixed string directly, marked
       `#[inline]`
-- [ ] Replace the four `format!("#{text}")` call sites
+- [x] Replace the four `format!("#{text}")` call sites
       with `with_hash_prefix(text)` (or the path-qualified
       form from `loader.rs`, re-exported via the
       `loader::stream` module's existing `pub(super)`
       imports)
-- [ ] Remove the L3 subsection from
+- [x] Remove the L3 subsection from
       `.ai/memory/potential-performance-optimizations.md`
       (it documents the pre-change `format!` code
       pattern and line numbers that no longer exist
       after this change; per project memory convention
       completed items do not live in the follow-up queue)
-- [ ] Update `.ai/memory/MEMORY.md` — remove
+- [x] Update `.ai/memory/MEMORY.md` — remove
       "L3 format!-for-comments" from the remaining
       candidates list and add the L3 commit to the
       Applied summary (mirroring the L5/L2/L7/L1
       pattern already present)
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — comment-text
       preservation must be unchanged
 
 ## Tasks
 
-### Task 1: Replace `format!` with direct prefix concat
+### Task 1: Replace `format!` with direct prefix concat (commit: `1763787`)
 
 Extract the `#`-prefix-prepend pattern into a single
 helper, apply `#[inline]`, and replace all four call
 sites. The helper produces a byte-identical `String` so
 no behavior changes and no test fixtures need updating.
 
-- [ ] `pub(super) fn with_hash_prefix(text: &str) ->
+- [x] `pub(super) fn with_hash_prefix(text: &str) ->
       String` added to
       `rlsp-yaml-parser/src/loader/stream.rs`, marked
       `#[inline]`, with a body of:
       `let mut s = String::with_capacity(text.len() + 1);
       s.push('#'); s.push_str(text); s`
-- [ ] Call site at `loader/stream.rs:37` uses
+- [x] Call site at `loader/stream.rs:37` uses
       `with_hash_prefix(text)`
-- [ ] Call site at `loader/stream.rs:56` uses
+- [x] Call site at `loader/stream.rs:56` uses
       `with_hash_prefix(text)`
-- [ ] Call site at `loader/stream.rs:80` uses
+- [x] Call site at `loader/stream.rs:80` uses
       `with_hash_prefix(text)`
-- [ ] Call site at `loader.rs:640` imports and uses
+- [x] Call site at `loader.rs:640` imports and uses
       `with_hash_prefix` (add it to the existing
       `use stream::{…}` import group)
-- [ ] No other behavior or signature changes
-- [ ] `.ai/memory/potential-performance-optimizations.md`
+- [x] No other behavior or signature changes
+- [x] `.ai/memory/potential-performance-optimizations.md`
       no longer contains the L3 subsection (removed per
       the "No completed items in memory" convention)
-- [ ] `.ai/memory/MEMORY.md` description for
+- [x] `.ai/memory/MEMORY.md` description for
       `potential-performance-optimizations.md` updated:
       "L3 format!-for-comments" removed from the
       remaining-candidates list and L3 added to the
       Applied summary alongside L5/L2/L7/L1
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass,
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass,
       including tests in `loader/comments.rs` and
       `loader/stream.rs` that verify comment text is
       stored with the `#` prefix
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0

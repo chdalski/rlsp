@@ -37,6 +37,7 @@ use comments::{attach_leading_comments, attach_trailing_comment};
 use reloc::reloc;
 use stream::{
     consume_leading_comments, consume_leading_doc_comments, next_from, peek_trailing_comment,
+    with_hash_prefix,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -641,7 +642,7 @@ impl<'opt> LoadState<'opt> {
                 // after the key Scalar and before the MappingStart/SequenceStart
                 // that begins the value.  Save it in `pending_leading` so the
                 // first entry of the upcoming collection can inherit it.
-                self.pending_leading.push(format!("#{text}"));
+                self.pending_leading.push(with_hash_prefix(text));
                 self.parse_node(stream)
             }
 
