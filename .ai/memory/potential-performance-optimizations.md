@@ -197,6 +197,28 @@ entirely proportional to `sizeof(Node)` and number of nodes.
   Vec return — validates the 168c0e3 bookkeeping cost
   (now mitigated by L7, applied).
 
+### Flamegraph measurement (2026-04-16, post-L3)
+
+Same fixture, same command, after applying L5+L2+L7+L1+L3.
+SVG at `.ai/reports/flame-block_heavy-load.svg`. Selected
+frames:
+
+| Frame | % | Note |
+|-------|--:|------|
+| `LoadState::parse_node` (cumulative) | ~40% | Up from ~34% pre-L5/L2; likely attribution shift from inlined helpers, not a real regression |
+| `find_value_indicator_offset` (cumulative across 2 sites) | **~7.2%** | **Still the top remaining self-time frame; L6 target** |
+| `consume_leading_comments` | **7.19%** | **Anomaly: L7 added `#[inline]` but the frame is still visible. Likely rustc declined inlining (function body includes a loop + `format!`-shaped work pre-L3 and a conditional peek loop post-L3) or the flame is attributing drop costs from the returned `Vec<String>` to this frame. Not a regression — absolute time per call is unchanged; the percentage rose because other frames shrank. Worth investigating later: examine the `.ll`/LLVM-IR output to confirm whether `#[inline]` took effect, and if not whether `#[inline(always)]` or a manual call-site inline is warranted.** |
+| `drop_in_place<Node>` | 6.99% | Still dominant tree-destruction cost |
+| `drop_in_place<String>` | 3.53% | Scalar value drops |
+| `drop_in_place<Vec<(Node,Node)>>` | 3.46% | Mapping entries drop |
+| `handle_mapping_entry` | ~5.8% | Block mapping event path |
+| `step_in_document` (cumulative) | ~10% | Event dispatcher |
+
+**Cumulative drop cost** on Node-related types in the
+post-L3 flame: ~17.5% (essentially unchanged from
+pre-L5/L2). This confirms L4 (Node shrink) is still the
+biggest architectural lever.
+
 ### Applied optimizations
 
 - **L5** (commit `9370579`) — `#[inline]` on
@@ -213,18 +235,46 @@ entirely proportional to `sizeof(Node)` and number of nodes.
 
 Combined measured effect on
 `throughput_style/rlsp/load/block_heavy` (2026-04-16
-baremetal pre-L5/L2 vs post-L5/L2): 51.4 → 54.7 MiB/s
-(+6.4%). L1 and L7 not re-measured individually.
+baremetal):
+- Pre-any-change baseline: 51.4 MiB/s
+- Post L5+L2: 54.7 MiB/s (+6.4%)
+- Post L5+L2+L7+L1: 55.2 MiB/s (+7.4% cumulative; +0.9%
+  from L7+L1, consistent with expectation — L7 targeted
+  the 3% `consume_leading_comments` cost but the inline
+  hint appears to have been declined by rustc, see
+  Follow-ups below)
+- Post-L3: not yet re-measured (L3 targets
+  comment-heavy fixtures; no block_heavy impact
+  expected)
+
+### Follow-ups surfaced during execution
+
+- **`consume_leading_comments` L7 inlining may have been
+  declined.** Post-L3 flame still shows the function as
+  its own frame at 7.19% self-time. `#[inline]` is a
+  hint, not a directive. Investigation steps if pursued:
+  - Check `cargo rustc --release -- --emit=llvm-ir` for
+    the function symbol and see whether it survives
+    codegen.
+  - If not inlined, consider `#[inline(always)]` or
+    restructuring the function so rustc has fewer reasons
+    to decline (e.g., lift the `format!`-shaped work out
+    of the loop if still present — it isn't after L3 but
+    double-check).
+  - The rise from 3.0% to 7.19% is attribution shift
+    (other frames shrank after L5/L2), not a regression
+    — absolute per-call time is unchanged.
 
 ### Remaining candidates, reprioritized by flamegraph
 
 **Ranking for block_heavy:**
 
-1. **L6** — merge `find_value_indicator_offset` with
-   plain-scalar scan. **Target: 7.3% self-time.** Highest
-   measured payoff remaining.
+1. **L6** — memchr fast-path rewrite of
+   `find_value_indicator_offset`. **Target: ~7.2%
+   cumulative self-time across two call sites.** Plan at
+   `.ai/plans/2026-04-16-perf-l6-memchr-value-indicator-scan.md`.
 2. **L4** — shrink `Node` variant (box rarely-populated
-   fields). **Target: up to ~6% of the 17.7% drop cost +
+   fields). **Target: up to ~6% of the 17.5% drop cost +
    cache-locality wins.** Architectural, needs a plan.
 
 #### L6 — Merge `find_value_indicator_offset` with plain scan
