@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -59,22 +59,22 @@ call-site-folded code paths.
 
 ## Steps
 
-- [ ] Add `#[inline]` to `consume_leading_comments` in
+- [x] Add `#[inline]` to `consume_leading_comments` in
       `loader/stream.rs`
-- [ ] Add `#[inline]` to `next_from` in `loader/stream.rs`
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Add `#[inline]` to `next_from` in `loader/stream.rs`
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — comment handling must
       be unchanged
-- [ ] Confirm debug symbols build cleanly:
+- [x] Confirm debug symbols build cleanly:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
 
 ## Tasks
 
-### Task 1: Inline stream helpers
+### Task 1: Inline stream helpers (commit: `faa4f92`)
 
 Add `#[inline]` attributes to both helper functions so
 the compiler stops emitting out-of-line calls for them at
@@ -82,19 +82,19 @@ the per-entry and per-event call sites in `parse_node`,
 `consume_leading_doc_comments`, and
 `peek_trailing_comment`.
 
-- [ ] `#[inline]` on `consume_leading_comments` at
+- [x] `#[inline]` on `consume_leading_comments` at
       `rlsp-yaml-parser/src/loader/stream.rs:52`
-- [ ] `#[inline]` on `next_from` at
+- [x] `#[inline]` on `next_from` at
       `rlsp-yaml-parser/src/loader/stream.rs:15`
-- [ ] No other signature, body, or caller changes
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] No other signature, body, or caller changes
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero warnings
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0

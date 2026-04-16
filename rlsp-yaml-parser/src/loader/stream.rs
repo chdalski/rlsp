@@ -12,6 +12,7 @@ type EventStream<'a> =
     Peekable<Box<dyn Iterator<Item = std::result::Result<(Event<'a>, Span), Error>> + 'a>>;
 
 /// Pull the next event from the stream, converting parse errors to `LoadError`.
+#[inline]
 pub(super) fn next_from<'a>(stream: &mut EventStream<'a>) -> Result<Option<(Event<'a>, Span)>> {
     match stream.next() {
         None => Ok(None),
@@ -49,6 +50,7 @@ pub(super) fn consume_leading_doc_comments(
 /// `peek_trailing_comment` has already consumed any trailing comment that was
 /// on the same line as the preceding value — so every remaining `Comment` here
 /// is on its own line and belongs to the upcoming key/item as a leading comment.
+#[inline]
 pub(super) fn consume_leading_comments(stream: &mut EventStream<'_>) -> Result<Vec<String>> {
     let mut leading = Vec::new();
     while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
