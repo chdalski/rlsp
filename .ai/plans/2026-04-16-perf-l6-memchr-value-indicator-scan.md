@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-16)
 **Created:** 2026-04-16
 
 ## Goal
@@ -75,13 +75,13 @@ gate here.**
 
 ## Steps
 
-- [ ] Rewrite
+- [x] Rewrite
       `find_value_indicator_offset` in
       `rlsp-yaml-parser/src/event_iter/line_mapping.rs`
       to use `memchr2(b':', b'#', …)` for jumping to the
       next context-sensitive byte, matching the pattern
       in `scan_plain_line_block`
-- [ ] Preserve all three behavior cases exactly:
+- [x] Preserve all three behavior cases exactly:
       (a) indicator-prefix rejection at byte 0;
       (b) leading quoted-span skip at byte 0 for `"` and
       `'`;
@@ -90,25 +90,25 @@ gate here.**
       `ns-char` is skipped (not a value indicator);
       and stop at an unquoted `#` preceded by whitespace
       (comment boundary)
-- [ ] Keep the existing unit test
+- [x] Keep the existing unit test
       `find_value_indicator_agrees_with_is_implicit_mapping_line`
       at
       `event_iter/line_mapping.rs:189–230` unchanged —
       pass/fail unchanged is the primary behavior gate
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` — all pass with zero warnings
-- [ ] Run `cargo test -p rlsp-yaml-parser --test
+- [x] Run `cargo test -p rlsp-yaml-parser --test
       conformance` and confirm 726 passed, 0 failed (351
       stream + 375 loader cases) — mapping classification
       must be unchanged
-- [ ] Remove the L6 subsection from
+- [x] Remove the L6 subsection from
       `.ai/memory/potential-performance-optimizations.md`
       "Remaining candidates" section, **and** delete the
       duplicate "Merge `find_value_indicator_offset` with
       `scan_plain_line_block`" entry from the "Other
       potential optimizations (not investigated)" list
       (per the "No completed items in memory" convention)
-- [ ] Update `.ai/memory/MEMORY.md` — remove the "L6
+- [x] Update `.ai/memory/MEMORY.md` — remove the "L6
       merge-scan 7.3%" mention from the
       remaining-candidates list and add L6 to the
       Applied summary with a description matching the
@@ -118,7 +118,7 @@ gate here.**
 
 ## Tasks
 
-### Task 1: Rewrite `find_value_indicator_offset` with memchr
+### Task 1: Rewrite `find_value_indicator_offset` with memchr (commit: `b57e344`)
 
 Replace the per-byte `while let Some(&ch) = bytes.get(i)`
 loop with a memchr-jumping loop that scans only the
@@ -127,60 +127,60 @@ everything between hits as safe content. Preserve the
 existing behavior exactly — same return offsets, same
 rejections, same quoted-span handling.
 
-- [ ] Function signature unchanged:
+- [x] Function signature unchanged:
       `pub(in crate::event_iter) fn
       find_value_indicator_offset(trimmed: &str) ->
       Option<usize>`
-- [ ] Early rejection of indicator-prefix starts
+- [x] Early rejection of indicator-prefix starts
       (`\t`, `%`, `@`, `` ` ``, `,`, `[`, `]`, `{`, `}`,
       `#`, `&`, `*`, `!`, `|`, `>`) kept as the first
       check
-- [ ] Leading `"` / `'` quoted-span skip at byte 0 kept;
+- [x] Leading `"` / `'` quoted-span skip at byte 0 kept;
       both escape rules preserved (`\"` in double-quoted
       span; `''` in single-quoted span)
-- [ ] Main scan uses `memchr::memchr2(b':', b'#', &bytes[pos..])`
+- [x] Main scan uses `memchr::memchr2(b':', b'#', &bytes[pos..])`
       to locate the next candidate byte; returns `None`
       when memchr returns `None` and no earlier
       candidate has satisfied the value-indicator check
-- [ ] At each hit, check the byte immediately before
+- [x] At each hit, check the byte immediately before
       (`bytes[hit - 1]`, or treat position 0 as
       non-whitespace) to determine comment-boundary
       context for `#`; UTF-8 continuation bytes are not
       whitespace so this check is byte-level safe
-- [ ] For `:` hits, check `bytes.get(hit + 1)` for
+- [x] For `:` hits, check `bytes.get(hit + 1)` for
       `None | Some(b' ' | b'\t' | b'\n' | b'\r')` and
       return `Some(hit)`; otherwise advance past and
       continue
-- [ ] For `#` hits, return `None` when
+- [x] For `#` hits, return `None` when
       `hit == 0 || bytes[hit - 1] == b' ' || bytes[hit - 1] == b'\t'`;
       otherwise advance past and continue
-- [ ] The existing in-file unit test
+- [x] The existing in-file unit test
       `find_value_indicator_agrees_with_is_implicit_mapping_line`
       continues to pass unmodified (verifies accepted
       and rejected line tables, including multi-byte
       `unicode_\u{00e9}: v`, quoted-key forms, and
       comment-looking-not-a-key lines)
-- [ ] `.ai/memory/potential-performance-optimizations.md`
+- [x] `.ai/memory/potential-performance-optimizations.md`
       no longer contains the L6 "Remaining candidates"
       subsection **and** no longer contains the
       duplicate "Merge `find_value_indicator_offset`
       with `scan_plain_line_block`" entry in the "Other
       potential optimizations (not investigated)" list
-- [ ] `.ai/memory/MEMORY.md` description updated: L6
+- [x] `.ai/memory/MEMORY.md` description updated: L6
       removed from remaining-candidates list; Applied
       summary line includes L6 with a description that
       reflects the actual change (memchr fast-path in
       `find_value_indicator_offset`, not a merge of two
       scanners)
-- [ ] `cargo fmt` produces zero diff
-- [ ] `cargo clippy --all-targets` produces zero
+- [x] `cargo fmt` produces zero diff
+- [x] `cargo clippy --all-targets` produces zero
       warnings
-- [ ] `cargo test -p rlsp-yaml-parser` — all tests pass
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance`
+- [x] `cargo test -p rlsp-yaml-parser` — all tests pass
+- [x] `cargo test -p rlsp-yaml-parser --test conformance`
       — 726 passed, 0 failed (351 stream + 375 loader
       cases)
-- [ ] `cargo test` (full workspace) — all tests pass
-- [ ] Bench binary builds:
+- [x] `cargo test` (full workspace) — all tests pass
+- [x] Bench binary builds:
       `CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p
       rlsp-yaml-parser --bench throughput --no-run`
       exits 0

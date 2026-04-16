@@ -265,33 +265,16 @@ baremetal):
     (other frames shrank after L5/L2), not a regression
     — absolute per-call time is unchanged.
 
-### Remaining candidates, reprioritized by flamegraph
+### Remaining candidate
 
-**Ranking for block_heavy:**
+After L5, L2, L7, L1, L3, and L6 were applied, one loader
+candidate remains:
 
-1. **L6** — memchr fast-path rewrite of
-   `find_value_indicator_offset`. **Target: ~7.2%
-   cumulative self-time across two call sites.** Plan at
-   `.ai/plans/2026-04-16-perf-l6-memchr-value-indicator-scan.md`.
-2. **L4** — shrink `Node` variant (box rarely-populated
-   fields). **Target: up to ~6% of the 17.5% drop cost +
-   cache-locality wins.** Architectural, needs a plan.
-
-#### L6 — Merge `find_value_indicator_offset` with plain scan
-
-**Flame: 7.3% of total time.** Every candidate mapping-key
-line is scanned twice — once by
-`find_value_indicator_offset` (looking for `: `), once by
-`scan_plain_line_block` (looking for `:` and `#` via
-`memchr2`). A merged single-pass scanner could eliminate the
-redundant walk.
-
-**Prereqs:** touches two hot modules (`event_iter/
-line_mapping.rs` + `lexer/plain.rs`). Moderate complexity.
-
-**Advisor needs:** test-engineer (scanner behavior covers
-many YAML grammar edge cases); no security gate needed for
-pure refactor.
+- **L4** — shrink `Node` variant (box rarely-populated
+  fields). **Target: up to ~6% of the 17.5% cumulative
+  `drop_in_place<Node>` cost + cache-locality wins for
+  any AST consumer.** Architectural; needs its own plan
+  before execution.
 
 #### L4 — Shrink `Node` variant size by boxing rare fields
 
@@ -342,23 +325,14 @@ environment-only artifact):
 
 These came up during the analysis but were not pursued:
 
-1. **Merge `find_value_indicator_offset` with
-   `scan_plain_line_block`.** Both scan the same line
-   content — one looks for `: `, the other for `:` and `#`
-   via `memchr2`. A merged single-pass scanner could
-   eliminate one redundant scan per mapping-entry line.
-   Moderate complexity; touches two hot paths in different
-   modules (`event_iter/line_mapping.rs` and
-   `lexer/plain.rs`).
-
-2. **Arena allocation for `Event` queue.** The `VecDeque`
+1. **Arena allocation for `Event` queue.** The `VecDeque`
    used for multi-event steps allocates on the heap. An
    arena or small-vec optimization could reduce allocation
    pressure for steps that emit 2–4 events (common for
    collection open/close pairs). Low expected impact since
    Rust's allocator is already fast for small allocations.
 
-3. **Lazy `Span` construction.** Instead of computing
+2. **Lazy `Span` construction.** Instead of computing
    `Span { start, end }` eagerly for every event, store
    only `(start_byte_offset, end_byte_offset)` and compute
    `(line, column)` lazily when the consumer actually reads
