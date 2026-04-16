@@ -3,6 +3,46 @@
 
 ## Bug Fixes
 
+- Indent block scalar content lines in formatter (0b31477)
+- Preserve anchor definitions in formatter output (5309f84)
+- Restrict single_quote option to values only (7390155)
+- Preserve custom tags on mapping and sequence nodes (c45d048)
+- Preserve leading comments in nested block mappings (168c0e3)
+- Move fixture CLAUDE.md out of formatter glob path (a0e93aa)
+- Preserve double-quoting for scalars with control characters (987aa89)
+- Preserve quoting for whitespace-bounded and quote-starting scalars (25b1130)
+- Fix anchor and tag placement on block collections (04d3fc0)
+- Use key_needs_space_before_colon in flow mappings (WZ62) (c2ea92d)
+- Handle multiline plain scalars and whitespace-only block lines (fe9fe80)
+- Fall back to quoted for spaces-only block scalars (67d3087)
+- Broaden block scalar whitespace guard for mixed space+tab lines (7df1712)
+- Handle tags and quoted scalars inline after document start marker (620bdd9)
+- Fix explicit key and empty key loader bugs (a8dff3b)
+- Fix anchor/alias loader bugs for conformance cases (9552340)
+- Eliminate all loader conformance failures (d4b6602)
+- Remove formatter workaround and fix all remaining conformance failures (96c0a57)
+
+## Documentation
+
+- Add setting-interaction coverage guidance for fixtures (41bde3c)
+- Add idempotency-only fixture convention (3b62fb8)
+
+## Features
+
+- Add CollectionStyle to AST mapping and sequence nodes (728d182)
+- Add flow-style rendering to the formatter (20004bb)
+- Add flowStyle severity and formatEnforceBlockStyle settings (73d38db)
+- Expose flow-style settings in VS Code extension and docs (875e216)
+- Add configurable duplicateKeys severity setting (efb3ab4)
+- Add formatRemoveDuplicateKeys setting and dedup pre-pass (b6f52b1)
+- Expose duplicate key settings in VS Code extension (4a24e16)
+- Add block scalar indentation indicator and folded blank-line preservation (826d008)
+- Add explicit key syntax support to the formatter (459f43a)
+- Surface document marker flags in AST (4740d10)
+- Add interacting-settings fixtures, wire bracket_spacing, and update docs (1c2e974)
+
+## Bug Fixes
+
 - Update dev dependencies to resolve 3 high/medium Dependabot alerts (40d4678)
 - Align engines.vscode with @types/vscode ^1.115.0 (4032830)
 - Update major-version dev dependencies (dcaecc7)

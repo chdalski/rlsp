@@ -1,6 +1,6 @@
 [package]
 name = "rlsp-yaml"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.87"
 description = "A fast, lightweight YAML language server"
@@ -15,8 +15,8 @@ categories = ["development-tools", "text-editors"]
 workspace = true
 
 [dependencies]
-rlsp-fmt = { version = "0.1.6", path = "../rlsp-fmt" }
-rlsp-yaml-parser = { version = "0.3", path = "../rlsp-yaml-parser" }
+rlsp-fmt = { version = "0.1.7", path = "../rlsp-fmt" }
+rlsp-yaml-parser = { version = "0.4", path = "../rlsp-yaml-parser" }
 tower-lsp = { version = "0.20", features = ["proposed"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
