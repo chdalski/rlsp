@@ -353,7 +353,7 @@ all 4 files; `SKIP_LIST` is empty (both removed
 entries gone, no new entries added); `WORKLIST.md`'s
 "Current failures" table is empty.
 
-**Completed:** commit `b281f51` — AST-first
+**Completed:** commit `957c80f` — AST-first
 rewrite of both code actions lands with a
 `block_text_and_start_col` helper that prepends
 `"\n<indent>"` when the flow collection is a mapping
