@@ -59,6 +59,8 @@ pnpm run format    # check formatting (prettier)
 
 The parser is the authority on valid YAML. The formatter must produce output the unmodified parser already handles. If formatted output doesn't round-trip, the formatter is wrong — not the parser.
 
+**One parser, one AST.** No code in `rlsp-yaml/` may re-parse YAML structure from raw text. Validators, code actions, hover providers, and any other LSP feature that reads YAML structure must consume the `rlsp-yaml-parser` AST. Settings that change *interpretation* (severity, enable/disable, allowed alphabets) are fine; settings that change *parsing* belong as `rlsp-yaml-parser` options. Text-handling carve-outs: byte-range arithmetic on parser-provided spans, pre-parse lexical concerns (modelines, BOM), whitespace-preserving edits that don't touch structure.
+
 `rlsp-yaml-parser` exposes two distinct APIs that must each be conformance-tested independently:
 
 | API | Function | What it produces | Conformance |

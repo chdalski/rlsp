@@ -128,7 +128,7 @@ shape.
 
 ## Steps
 
-- [ ] Add "One parser, one AST" rule to root CLAUDE.md
+- [x] Add "One parser, one AST" rule to root CLAUDE.md
 - [ ] Retrofit `validate_flow_style` to consume the AST
 - [ ] Add regression coverage for GHA-style expressions
 - [ ] Add a boundary-audit `#[test]` that fails when new
@@ -144,11 +144,11 @@ Extend the existing "Crate Boundaries" section of root
 and the interpretation-vs-parse settings distinction. No
 code changes in this task — documentation only.
 
-- [ ] Add the rule to the Crate Boundaries section,
+- [x] Add the rule to the Crate Boundaries section,
       immediately after the existing "The parser is the
       authority on valid YAML" paragraph so the two read
       coherently
-- [ ] Rule text to include:
+- [x] Rule text to include:
   - No code in `rlsp-yaml/` may re-parse YAML structure
     from raw text; LSP features consume the
     `rlsp-yaml-parser` AST
@@ -160,12 +160,16 @@ code changes in this task — documentation only.
     enable/disable, allowed alphabets) are fine;
     settings that change *parsing* belong as
     `rlsp-yaml-parser` options
-- [ ] Verify the new text reads cleanly alongside the
+- [x] Verify the new text reads cleanly alongside the
       existing crate-boundary table
 
 Acceptance: root `CLAUDE.md` contains the rule; reading
 the Crate Boundaries section end-to-end gives a clear
 statement of the boundary.
+
+**Completed:** commit `3556fd5` — rule added to
+CLAUDE.md immediately after the "parser is the
+authority" paragraph, as planned.
 
 ### Task 2: Retrofit `validate_flow_style` to consume the AST
 
