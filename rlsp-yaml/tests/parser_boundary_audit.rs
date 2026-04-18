@@ -2,21 +2,34 @@
 //
 // Boundary audit: enforce the "One parser, one AST" rule from CLAUDE.md.
 //
-// Scans `rlsp-yaml/src/**/*.rs` for `pub fn validate_*` and `pub fn code_actions`
-// signatures whose first `&str` parameter is named `text`. Any match not on the
-// allow-list is a new violation of the rule and causes this test to fail.
+// Scans `rlsp-yaml/src/**/*.rs` for any `(pub )?fn` whose first positional
+// parameter is named `text`, `line`, `lines`, `content`, `source`, or `input`
+// with type `&str` or `&[&str]`. Any match not on the allow-list is a new
+// violation of the rule and causes this test to fail.
+//
+// # Marker taxonomy
+//
+// Every allow-list entry carries an `AllowMarker` that classifies it:
+//
+// - `TodoRetrofit { plan }` — violator that must consume the parser AST
+//   instead of raw text; "plan" identifies the follow-up retrofit plan.
+// - `HelperOf { root }` — private helper whose root entry point is already on
+//   the allow-list; disappears when the root is retrofitted (no independent
+//   retrofit needed).
+// - `CarveOut { reason }` — exempt from the rule: either the canonical parser
+//   entry point, a pre-parse lexical concern (modeline/BOM/comment extraction),
+//   whitespace-only edit, or a test fixture.
 //
 // # Allow-list discipline (SHRINK-ONLY)
 //
-// The allow-list carries the known remaining violators as a visible worklist.
 // Entries are REMOVED as violators are retrofitted in follow-up plans.
-// NEW entries are NEVER added for new violations.
-// The only exception is a genuine carve-out (modeline extraction, BOM detection,
-// whitespace-preserving edit that doesn't touch structure), which must include a
-// `// carve-out:` justification comment referencing the exception category.
+// NEW entries are NEVER added for new violations introduced after this audit.
+// The only acceptable additions are:
+//   a) a genuine `CarveOut` with a written justification, or
+//   b) a newly introduced feature root that requires a retrofit plan to be filed.
 //
-// If you find yourself wanting to add an entry here for a new function, that is
-// a signal that the function should consume the parser AST instead of raw text.
+// If you find yourself wanting to add an entry for a new function, that is a
+// signal the function should consume the parser AST instead of raw text.
 
 #![expect(missing_docs, reason = "test code")]
 #![expect(
@@ -36,7 +49,29 @@ use std::{fmt, fs};
 // Allow-list
 // ---------------------------------------------------------------------------
 
-/// A known remaining violator that has not yet been retrofitted.
+/// Classification of an allow-list entry.
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum AllowMarker {
+    /// Violator that must be retrofitted to consume the parser AST.
+    TodoRetrofit { plan: &'static str },
+    /// Private helper of a `TodoRetrofit` root entry; disappears with root.
+    HelperOf { root: &'static str },
+    /// Exempt: canonical parser entry point, pre-parse lexical concern,
+    /// whitespace-only edit, or test fixture.
+    CarveOut { reason: &'static str },
+}
+
+impl fmt::Display for AllowMarker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TodoRetrofit { plan } => write!(f, "TodoRetrofit(plan={plan})"),
+            Self::HelperOf { root } => write!(f, "HelperOf(root={root})"),
+            Self::CarveOut { reason } => write!(f, "CarveOut(reason={reason})"),
+        }
+    }
+}
+
+/// A known entry — either a violator pending retrofit, a helper-of, or a carve-out.
 ///
 /// `file` is relative to `rlsp-yaml/src/` (e.g., `"validation/validators.rs"`).
 /// `func` is the function name without generics or parameter list.
@@ -44,39 +79,770 @@ use std::{fmt, fs};
 struct AllowEntry {
     file: &'static str,
     func: &'static str,
-    note: &'static str,
+    marker: AllowMarker,
 }
 
 impl fmt::Display for AllowEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}::{} ({})", self.file, self.func, self.note)
+        write!(f, "{}::{} [{}]", self.file, self.func, self.marker)
     }
 }
 
-/// Each entry must have a TODO or carve-out justification.
-///
-/// Entries here are removed as violators are retrofitted. See allow-list
-/// discipline comment at the top of this file.
+/// Each entry must have an explicit marker. See allow-list discipline comment above.
 const ALLOW_LIST: &[AllowEntry] = &[
+    // -----------------------------------------------------------------------
+    // Existing violators (carried forward, now with typed marker)
+    // -----------------------------------------------------------------------
     AllowEntry {
         file: "validation/validators.rs",
         func: "validate_unused_anchors",
-        note: "TODO(retrofit-validate-unused-anchors): pure text-scan, follow-up plan not yet filed",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-validate-unused-anchors",
+        },
     },
     AllowEntry {
         file: "validation/validators.rs",
         func: "validate_custom_tags",
-        note: "TODO(retrofit-validate-custom-tags): hybrid text+docs, follow-up plan not yet filed",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-validate-custom-tags",
+        },
     },
     AllowEntry {
         file: "validation/validators.rs",
         func: "validate_key_ordering",
-        note: "TODO(retrofit-validate-key-ordering): hybrid text+docs, follow-up plan not yet filed",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-validate-key-ordering",
+        },
     },
     AllowEntry {
         file: "schema_validation.rs",
         func: "validate_schema",
-        note: "TODO(retrofit-validate-schema): hybrid text+docs, follow-up plan not yet filed",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-validate-schema",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // Queued code-action retrofits
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "delete_unused_anchor",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-delete-unused-anchor",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "quoted_bool_to_unquoted",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-quoted-bool-to-unquoted",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "yaml11_bool_actions",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-yaml11-bool-actions",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "yaml11_octal_actions",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-yaml11-octal-actions",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "schema_yaml11_bool_type_actions",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-schema-yaml11-bool-type-actions",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // Feature-level violators (original 5)
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "hover.rs",
+        func: "hover_at",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-hover-at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "complete_at",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-complete-at",
+        },
+    },
+    AllowEntry {
+        file: "editing/on_type_formatting.rs",
+        func: "format_on_type",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-format-on-type",
+        },
+    },
+    AllowEntry {
+        file: "decorators/document_links.rs",
+        func: "find_document_links",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-find-document-links",
+        },
+    },
+    AllowEntry {
+        file: "decorators/color.rs",
+        func: "find_colors",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-find-colors",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // Feature-level violators (surfaced during reconciliation)
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "folding_ranges",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-folding-ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/selection.rs",
+        func: "selection_ranges",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-selection-ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/semantic_tokens.rs",
+        func: "semantic_tokens",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-semantic-tokens",
+        },
+    },
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "document_symbols",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-document-symbols",
+        },
+    },
+    AllowEntry {
+        file: "navigation/references.rs",
+        func: "goto_definition",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-goto-definition",
+        },
+    },
+    AllowEntry {
+        file: "navigation/references.rs",
+        func: "find_references",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-find-references",
+        },
+    },
+    AllowEntry {
+        file: "navigation/rename.rs",
+        func: "prepare_rename",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-prepare-rename",
+        },
+    },
+    AllowEntry {
+        file: "navigation/rename.rs",
+        func: "rename",
+        marker: AllowMarker::TodoRetrofit {
+            plan: "retrofit-rename",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of validators
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "scan_tokens",
+        marker: AllowMarker::HelperOf {
+            root: "validate_unused_anchors",
+        },
+    },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "find_tag_occurrence",
+        marker: AllowMarker::HelperOf {
+            root: "validate_custom_tags",
+        },
+    },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "is_inside_quotes",
+        marker: AllowMarker::HelperOf {
+            root: "validate_custom_tags",
+        },
+    },
+    AllowEntry {
+        file: "schema_validation.rs",
+        func: "build_key_index",
+        marker: AllowMarker::HelperOf {
+            root: "validate_schema",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of hover_at
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "hover.rs",
+        func: "document_index_for_line",
+        marker: AllowMarker::HelperOf { root: "hover_at" },
+    },
+    AllowEntry {
+        file: "hover.rs",
+        func: "token_at_cursor",
+        marker: AllowMarker::HelperOf { root: "hover_at" },
+    },
+    AllowEntry {
+        file: "hover.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf { root: "hover_at" },
+    },
+    AllowEntry {
+        file: "hover.rs",
+        func: "indentation_level",
+        marker: AllowMarker::HelperOf { root: "hover_at" },
+    },
+    AllowEntry {
+        file: "hover.rs",
+        func: "sequence_index",
+        marker: AllowMarker::HelperOf { root: "hover_at" },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of find_document_links
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "decorators/document_links.rs",
+        func: "url_links",
+        marker: AllowMarker::HelperOf {
+            root: "find_document_links",
+        },
+    },
+    AllowEntry {
+        file: "decorators/document_links.rs",
+        func: "include_links",
+        marker: AllowMarker::HelperOf {
+            root: "find_document_links",
+        },
+    },
+    AllowEntry {
+        file: "decorators/document_links.rs",
+        func: "is_inside_quotes",
+        marker: AllowMarker::HelperOf {
+            root: "find_document_links",
+        },
+    },
+    AllowEntry {
+        file: "decorators/document_links.rs",
+        func: "trim_trailing_punctuation",
+        marker: AllowMarker::HelperOf {
+            root: "find_document_links",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of find_colors
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "decorators/color.rs",
+        func: "value_start_offset",
+        marker: AllowMarker::HelperOf {
+            root: "find_colors",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of format_on_type
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "editing/on_type_formatting.rs",
+        func: "leading_spaces",
+        marker: AllowMarker::HelperOf {
+            root: "format_on_type",
+        },
+    },
+    AllowEntry {
+        file: "editing/on_type_formatting.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf {
+            root: "format_on_type",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of complete_at
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "completion.rs",
+        func: "build_key_path",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "build_value_key_path",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "collect_present_keys_at_indent",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "classify_cursor",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "suggest_sibling_keys",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "is_in_sequence_item",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "suggest_keys_for_sequence_item",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "collect_current_sequence_item_keys",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "find_current_item_start",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "find_sequence_indent",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "collect_all_sequence_item_keys",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "collect_sibling_keys",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "indentation_level",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "document_range",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "suggest_values_for_key",
+        marker: AllowMarker::HelperOf {
+            root: "complete_at",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of folding_ranges
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "collect_indentation_folds",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "collect_document_section_folds",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "collect_comment_block_folds",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "find_last_content_line",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "find_last_content_line_in_range",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/folding.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf {
+            root: "folding_ranges",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of selection_ranges
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/selection.rs",
+        func: "selection_range_for_position",
+        marker: AllowMarker::HelperOf {
+            root: "selection_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/selection.rs",
+        func: "find_document_for_line",
+        marker: AllowMarker::HelperOf {
+            root: "selection_ranges",
+        },
+    },
+    AllowEntry {
+        file: "analysis/selection.rs",
+        func: "find_document_end",
+        marker: AllowMarker::HelperOf {
+            root: "selection_ranges",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of semantic_tokens
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/semantic_tokens.rs",
+        func: "collect_inline_markers",
+        marker: AllowMarker::HelperOf {
+            root: "semantic_tokens",
+        },
+    },
+    AllowEntry {
+        file: "analysis/semantic_tokens.rs",
+        func: "char_col_of",
+        marker: AllowMarker::HelperOf {
+            root: "semantic_tokens",
+        },
+    },
+    AllowEntry {
+        file: "analysis/semantic_tokens.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf {
+            root: "semantic_tokens",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of document_symbols
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "split_document_regions",
+        marker: AllowMarker::HelperOf {
+            root: "document_symbols",
+        },
+    },
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "find_sequence_item_line",
+        marker: AllowMarker::HelperOf {
+            root: "document_symbols",
+        },
+    },
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "find_value_end_line",
+        marker: AllowMarker::HelperOf {
+            root: "document_symbols",
+        },
+    },
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "find_mapping_colon",
+        marker: AllowMarker::HelperOf {
+            root: "document_symbols",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of goto_definition / find_references
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "navigation/references.rs",
+        func: "scan_tokens",
+        marker: AllowMarker::HelperOf {
+            root: "goto_definition",
+        },
+    },
+    AllowEntry {
+        file: "navigation/references.rs",
+        func: "document_range_for_line",
+        marker: AllowMarker::HelperOf {
+            root: "goto_definition",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // HelperOf — private helpers of prepare_rename / rename
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "navigation/rename.rs",
+        func: "scan_tokens",
+        marker: AllowMarker::HelperOf {
+            root: "prepare_rename",
+        },
+    },
+    AllowEntry {
+        file: "navigation/rename.rs",
+        func: "document_range_for_line",
+        marker: AllowMarker::HelperOf {
+            root: "prepare_rename",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // CarveOut — pre-parse lexical concerns and whitespace
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "parser.rs",
+        func: "parse_yaml",
+        marker: AllowMarker::CarveOut {
+            reason: "canonical parser entry point — this IS the one parser the rule references",
+        },
+    },
+    AllowEntry {
+        file: "validation/suppression.rs",
+        func: "build_suppression_map",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: scans rlsp-yaml-disable comments before YAML parsing",
+        },
+    },
+    AllowEntry {
+        file: "editing/formatter.rs",
+        func: "extract_doc_prefix_comments",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: document-prefix comment extraction",
+        },
+    },
+    AllowEntry {
+        file: "editing/formatter.rs",
+        func: "find_comment_on_line",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: comment-boundary scan helper for document-prefix extraction",
+        },
+    },
+    AllowEntry {
+        file: "editing/formatter.rs",
+        func: "content_signature",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: helper of find_comment_on_line",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "tab_to_spaces",
+        marker: AllowMarker::CarveOut {
+            reason: "whitespace normalization: tabs are YAML 1.2 §6.1 pre-parse lexical",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // CarveOut — schema association modeline extraction
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "schema/association.rs",
+        func: "extract_schema_url",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: schema URL modeline extraction",
+        },
+    },
+    AllowEntry {
+        file: "schema/association.rs",
+        func: "extract_yaml_version",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: YAML version modeline extraction",
+        },
+    },
+    AllowEntry {
+        file: "schema/association.rs",
+        func: "extract_custom_tags",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: custom tag modeline extraction",
+        },
+    },
+    // -----------------------------------------------------------------------
+    // CarveOut — test fixtures inside #[cfg(test)] blocks
+    // -----------------------------------------------------------------------
+    AllowEntry {
+        file: "analysis/selection.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "analysis/symbols.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "completion.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_map_action",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_seq_action",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "apply_block_to_flow_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "apply_block_scalar_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "docs_for",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_diags_for",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "hover.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "schema/association.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "schema_validation.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "schema_validation.rs",
+        func: "run_content",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "schema_validation/formats.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "schema_validation/formats.rs",
+        func: "run_format",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "parse_docs",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "parse_duplicate",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "parse_yaml11",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
     },
 ];
 
@@ -84,23 +850,25 @@ const ALLOW_LIST: &[AllowEntry] = &[
 // Detection helpers (also exercised by unit tests below)
 // ---------------------------------------------------------------------------
 
-/// Returns `true` if `line` starts a candidate function declaration:
-/// `pub fn validate_<name>` or `pub fn code_actions`.
+/// Returns `true` if `line` starts any function declaration: `(pub )?fn <name>`.
 fn is_candidate_fn_line(line: &str) -> bool {
     let trimmed = line.trim_start();
-    if !trimmed.starts_with("pub fn ") {
-        return false;
-    }
-    let after_pub_fn = &trimmed["pub fn ".len()..];
-    after_pub_fn.starts_with("validate_") || after_pub_fn.starts_with("code_actions")
+    Regex::new(r"^(?:pub\s+)?fn\s+\w")
+        .unwrap()
+        .is_match(trimmed)
 }
 
-/// Extracts the bare function name from a candidate function declaration line.
+/// Extracts the bare function name from a function declaration line.
 ///
 /// Handles generics: `pub fn validate_foo<S>(` → `"validate_foo"`.
+/// Works for both public and private functions.
 fn extract_fn_name(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("pub fn ")?;
+    // Strip optional `pub ` prefix
+    let rest = trimmed
+        .strip_prefix("pub ")
+        .map_or(trimmed, |r| r.trim_start());
+    let rest = rest.strip_prefix("fn ")?;
     // Name ends at `<`, `(`, or whitespace.
     let end = rest
         .find(|c: char| c == '<' || c == '(' || c.is_whitespace())
@@ -109,23 +877,26 @@ fn extract_fn_name(line: &str) -> Option<&str> {
     if name.is_empty() { None } else { Some(name) }
 }
 
-/// Returns `true` if the **first** named parameter of the function is `text: &str`.
+/// Returns `true` if the **first** named parameter of the function is one of
+/// `{text, line, lines, content, source, input}` with type `&str` or `&[&str]`.
 ///
-/// Uses a `^`-anchored regex on the extracted param block so that `text: &str`
-/// must appear at the start (after optional whitespace). An optional `&[mut ]self`
+/// Uses an anchored regex on the extracted param block. An optional `&[mut ]self`
 /// or `&'lt [mut ]self` method receiver is stripped first so that methods whose
-/// first real parameter is `text: &str` are still detected.
+/// first real parameter matches are still detected.
 ///
-/// This ensures `code_actions(docs: &[…], text: &str, …)` is NOT detected as a
-/// violation while `validate_foo(text: &str, …)` IS detected.
+/// This preserves the first-parameter anchor: `code_actions(docs: &[…], text: &str, …)`
+/// is NOT detected; `validate_foo(text: &str, …)` IS detected.
 fn has_text_str_param(param_block: &str) -> bool {
     let re_receiver = Regex::new(r"^\s*&(?:'[a-z_]+\s+)?(?:mut\s+)?self\s*,\s*").unwrap();
     let stripped = re_receiver.replace(param_block, "");
-    let re = Regex::new(r"^\s*text\s*:\s*&str\b").unwrap();
+    // Use &str\b for the scalar form to avoid matching &str_extra, and
+    // &\[&str\] (no word boundary needed after ]) for the slice form.
+    let re = Regex::new(r"^\s*(?:text|line|lines|content|source|input)\s*:\s*(?:&str\b|&\[&str\])")
+        .unwrap();
     re.is_match(stripped.as_ref())
 }
 
-/// A detected violation: a function whose signature contains `text: &str`.
+/// A detected violation: a function whose first parameter matches the text-handling shape.
 #[derive(Debug, PartialEq, Eq)]
 struct Violation {
     /// Relative path from `rlsp-yaml/src/`.
@@ -140,8 +911,6 @@ impl fmt::Display for Violation {
 }
 
 /// Scan a single source file for violations.
-///
-/// Returns all candidate functions whose parameter list includes `text: &str`.
 fn scan_file(rel_path: &str, source: &str) -> Vec<Violation> {
     let lines: Vec<&str> = source.lines().collect();
 
@@ -240,7 +1009,8 @@ fn parser_boundary_audit() {
 
     if !new_violations.is_empty() {
         messages.push(format!(
-            "BOUNDARY VIOLATION: {} new function(s) take `text: &str` outside the allow-list.\n\
+            "BOUNDARY VIOLATION: {} new function(s) take a text-handling first parameter \
+             outside the allow-list.\n\
              These functions must consume the parser AST instead of raw text (CLAUDE.md rule).\n\
              Violations:\n{}",
             new_violations.len(),
@@ -289,54 +1059,92 @@ fn collect_violations(base: &PathBuf, dir: &PathBuf, out: &mut Vec<Violation>) {
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests for detection helpers (Groups A and B)
+// Unit tests for detection helpers
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod detection_tests {
     use super::*;
 
-    // --- Group A: detection regex correctness ---
+    // --- Group A: is_candidate_fn_line broadening ---
 
     #[test]
-    fn validate_foo_text_str_detected() {
-        // text: &str as first parameter — must be detected as a violation.
-        let line = "pub fn validate_foo(text: &str, docs: &[Document]) -> Vec<Diagnostic> {";
+    fn private_fn_any_name_detected() {
+        let line = "fn validate_foo(text: &str) {";
         assert!(is_candidate_fn_line(line));
-        let params = extract_param_block(line);
-        assert!(has_text_str_param(&params));
     }
 
     #[test]
-    fn second_param_text_str_not_detected() {
-        // text: &str as second parameter — must NOT be detected.
-        let line = "pub fn validate_foo(docs: &[Document<Span>], text: &str) -> Vec<Diagnostic> {";
+    fn private_fn_arbitrary_name_detected() {
+        let line = "fn apply_fix(text: &str) {";
         assert!(is_candidate_fn_line(line));
-        let params = extract_param_block(line);
-        assert!(!has_text_str_param(&params));
     }
 
     #[test]
-    fn self_receiver_then_text_str_detected() {
-        // &self receiver then text: &str as first real param — must be detected.
-        let line = "pub fn validate_foo(&self, text: &str) -> Vec<Diagnostic> {";
+    fn pub_fn_arbitrary_name_detected() {
+        let line = "pub fn apply_fix(text: &str) {";
         assert!(is_candidate_fn_line(line));
-        let params = extract_param_block(line);
-        assert!(has_text_str_param(&params));
     }
 
     #[test]
-    fn validate_foo_no_text_str_not_detected() {
-        let line = "pub fn validate_foo(docs: &[Document<Span>]) -> Vec<Diagnostic> {";
+    fn generic_private_fn_detected() {
+        let line = "fn foo<T>(";
         assert!(is_candidate_fn_line(line));
-        let params = extract_param_block(line);
-        assert!(!has_text_str_param(&params));
+        assert_eq!(extract_fn_name(line), Some("foo"));
     }
 
     #[test]
-    fn private_validate_not_detected() {
-        let line = "fn validate_foo(text: &str) -> Vec<Diagnostic> {";
+    fn comment_line_not_detected() {
+        let line = "// pub fn validate_foo(text: &str) {";
         assert!(!is_candidate_fn_line(line));
+    }
+
+    #[test]
+    fn struct_def_not_detected() {
+        let line = "pub struct Foo {";
+        assert!(!is_candidate_fn_line(line));
+    }
+
+    #[test]
+    fn let_binding_not_detected() {
+        let line = r#"let fn_name = "validate_foo";"#;
+        assert!(!is_candidate_fn_line(line));
+    }
+
+    // --- Group B: has_text_str_param — 6×2 positive matrix ---
+
+    #[rstest::rstest]
+    #[case::text_str("fn foo(text: &str, x: i32)")]
+    #[case::line_str("fn foo(line: &str, x: i32)")]
+    #[case::lines_str("fn foo(lines: &str, x: i32)")]
+    #[case::content_str("fn foo(content: &str, x: i32)")]
+    #[case::source_str("fn foo(source: &str, x: i32)")]
+    #[case::input_str("fn foo(input: &str, x: i32)")]
+    #[case::text_slice_str("fn foo(text: &[&str], x: i32)")]
+    #[case::line_slice_str("fn foo(line: &[&str], x: i32)")]
+    #[case::lines_slice_str("fn foo(lines: &[&str], x: i32)")]
+    #[case::content_slice_str("fn foo(content: &[&str], x: i32)")]
+    #[case::source_slice_str("fn foo(source: &[&str], x: i32)")]
+    #[case::input_slice_str("fn foo(input: &[&str], x: i32)")]
+    fn first_param_name_and_type_detected(#[case] sig: &str) {
+        let params = extract_param_block(sig);
+        assert!(has_text_str_param(&params), "expected detection for: {sig}");
+    }
+
+    // --- Group C: has_text_str_param — negative cases ---
+
+    #[test]
+    fn non_first_position_slice_str_not_detected() {
+        let sig = "fn foo(docs: &[T], lines: &[&str])";
+        let params = extract_param_block(sig);
+        assert!(!has_text_str_param(&params));
+    }
+
+    #[test]
+    fn differently_named_first_param_not_detected() {
+        let sig = "fn foo(raw: &str, text: &str)";
+        let params = extract_param_block(sig);
+        assert!(!has_text_str_param(&params));
     }
 
     // After Task 2 the real code_actions signature starts with docs: &[Document<Span>] — not
@@ -352,6 +1160,250 @@ mod detection_tests {
         );
     }
 
+    // --- Group D: receiver stripping for new param names ---
+
+    #[rstest::rstest]
+    #[case::self_then_line_str("fn foo(&self, line: &str)")]
+    #[case::mut_self_then_lines_slice("fn foo(&mut self, lines: &[&str])")]
+    #[case::lifetime_self_then_content_str("fn foo(&'a self, content: &str)")]
+    #[case::self_then_source_str("fn foo(&self, source: &str)")]
+    #[case::self_then_input_str("fn foo(&self, input: &str)")]
+    fn method_receiver_stripped_for_new_names(#[case] sig: &str) {
+        let params = extract_param_block(sig);
+        assert!(
+            has_text_str_param(&params),
+            "expected detection after receiver strip for: {sig}"
+        );
+    }
+
+    // --- Group E: AllowMarker display correctness ---
+
+    #[test]
+    fn allow_entry_todo_retrofit_display() {
+        let entry = AllowEntry {
+            file: "foo.rs",
+            func: "bar",
+            marker: AllowMarker::TodoRetrofit { plan: "plan-xyz" },
+        };
+        let s = format!("{entry}");
+        assert!(s.contains("TodoRetrofit"), "missing TodoRetrofit in: {s}");
+        assert!(s.contains("plan-xyz"), "missing plan-xyz in: {s}");
+    }
+
+    #[test]
+    fn allow_entry_helper_of_display() {
+        let entry = AllowEntry {
+            file: "foo.rs",
+            func: "helper",
+            marker: AllowMarker::HelperOf {
+                root: "validate_foo",
+            },
+        };
+        let s = format!("{entry}");
+        assert!(s.contains("HelperOf"), "missing HelperOf in: {s}");
+        assert!(s.contains("validate_foo"), "missing validate_foo in: {s}");
+    }
+
+    #[test]
+    fn allow_entry_carve_out_display() {
+        let entry = AllowEntry {
+            file: "foo.rs",
+            func: "detect_bom",
+            marker: AllowMarker::CarveOut {
+                reason: "BOM detection",
+            },
+        };
+        let s = format!("{entry}");
+        assert!(s.contains("CarveOut"), "missing CarveOut in: {s}");
+        assert!(s.contains("BOM detection"), "missing BOM detection in: {s}");
+    }
+
+    // --- Group F: allow-list suppression per marker kind ---
+
+    #[test]
+    fn todo_retrofit_entry_suppresses_violation() {
+        let source = "pub fn validate_sentinel(text: &str) {}";
+        let violations = scan_file("validation/validators.rs", source);
+        assert_eq!(violations.len(), 1);
+
+        let local_allow = AllowEntry {
+            file: "validation/validators.rs",
+            func: "validate_sentinel",
+            marker: AllowMarker::TodoRetrofit { plan: "plan-test" },
+        };
+        let new_violations: Vec<&Violation> = violations
+            .iter()
+            .filter(|v| !(v.rel_path.ends_with(local_allow.file) && v.func == local_allow.func))
+            .collect();
+        assert!(
+            new_violations.is_empty(),
+            "TodoRetrofit entry should suppress violation: {new_violations:?}"
+        );
+    }
+
+    #[test]
+    fn helper_of_entry_suppresses_violation() {
+        let source = "fn helper_for_validate(text: &str) {}";
+        let violations = scan_file("validation/validators.rs", source);
+        assert_eq!(violations.len(), 1);
+
+        let local_allow = AllowEntry {
+            file: "validation/validators.rs",
+            func: "helper_for_validate",
+            marker: AllowMarker::HelperOf {
+                root: "validate_foo",
+            },
+        };
+        let new_violations: Vec<&Violation> = violations
+            .iter()
+            .filter(|v| !(v.rel_path.ends_with(local_allow.file) && v.func == local_allow.func))
+            .collect();
+        assert!(
+            new_violations.is_empty(),
+            "HelperOf entry should suppress violation: {new_violations:?}"
+        );
+    }
+
+    #[test]
+    fn carve_out_entry_suppresses_violation() {
+        let source = "pub fn detect_bom(input: &str) -> Option<usize> {}";
+        let violations = scan_file("parser.rs", source);
+        assert_eq!(violations.len(), 1);
+
+        let local_allow = AllowEntry {
+            file: "parser.rs",
+            func: "detect_bom",
+            marker: AllowMarker::CarveOut {
+                reason: "BOM detection",
+            },
+        };
+        let new_violations: Vec<&Violation> = violations
+            .iter()
+            .filter(|v| !(v.rel_path.ends_with(local_allow.file) && v.func == local_allow.func))
+            .collect();
+        assert!(
+            new_violations.is_empty(),
+            "CarveOut entry should suppress violation: {new_violations:?}"
+        );
+    }
+
+    // --- Group G: dead entry detection with each marker kind ---
+
+    #[test]
+    fn dead_todo_retrofit_entry_flagged() {
+        let source = "pub fn real_fn(text: &str) {}";
+        let violations = scan_file("a.rs", source);
+
+        let local_allow: &[(&str, &str)] = &[("a.rs", "real_fn"), ("a.rs", "validate_nonexistent")];
+        let detected_keys: HashSet<(&str, &str)> = violations
+            .iter()
+            .filter_map(|v| {
+                local_allow
+                    .iter()
+                    .find(|(f, func)| v.rel_path == *f && v.func == *func)
+                    .copied()
+            })
+            .collect();
+        let dead: Vec<(&str, &str)> = local_allow
+            .iter()
+            .copied()
+            .filter(|e| !detected_keys.contains(e))
+            .collect();
+
+        assert!(
+            dead.iter().any(|(_, func)| *func == "validate_nonexistent"),
+            "dead TodoRetrofit entry should be flagged; got: {dead:?}"
+        );
+    }
+
+    #[test]
+    fn dead_helper_of_entry_flagged() {
+        let source = "fn real_helper(lines: &[&str]) {}";
+        let violations = scan_file("a.rs", source);
+
+        let local_allow: &[(&str, &str)] = &[("a.rs", "real_helper"), ("a.rs", "helper_gone")];
+        let detected_keys: HashSet<(&str, &str)> = violations
+            .iter()
+            .filter_map(|v| {
+                local_allow
+                    .iter()
+                    .find(|(f, func)| v.rel_path == *f && v.func == *func)
+                    .copied()
+            })
+            .collect();
+        let dead: Vec<(&str, &str)> = local_allow
+            .iter()
+            .copied()
+            .filter(|e| !detected_keys.contains(e))
+            .collect();
+
+        assert!(
+            dead.iter().any(|(_, func)| *func == "helper_gone"),
+            "dead HelperOf entry should be flagged; got: {dead:?}"
+        );
+    }
+
+    #[test]
+    fn dead_carve_out_entry_flagged() {
+        let source = "fn real_fn(source: &str) {}";
+        let violations = scan_file("a.rs", source);
+
+        let local_allow: &[(&str, &str)] = &[("a.rs", "real_fn"), ("a.rs", "detect_bom_gone")];
+        let detected_keys: HashSet<(&str, &str)> = violations
+            .iter()
+            .filter_map(|v| {
+                local_allow
+                    .iter()
+                    .find(|(f, func)| v.rel_path == *f && v.func == *func)
+                    .copied()
+            })
+            .collect();
+        let dead: Vec<(&str, &str)> = local_allow
+            .iter()
+            .copied()
+            .filter(|e| !detected_keys.contains(e))
+            .collect();
+
+        assert!(
+            dead.iter().any(|(_, func)| *func == "detect_bom_gone"),
+            "dead CarveOut entry should be flagged; got: {dead:?}"
+        );
+    }
+
+    // --- Legacy tests (updated for new behavior) ---
+
+    #[test]
+    fn validate_foo_text_str_detected() {
+        let line = "pub fn validate_foo(text: &str, docs: &[Document]) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(has_text_str_param(&params));
+    }
+
+    #[test]
+    fn second_param_text_str_not_detected() {
+        let line = "pub fn validate_foo(docs: &[Document<Span>], text: &str) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(!has_text_str_param(&params));
+    }
+
+    #[test]
+    fn self_receiver_then_text_str_detected() {
+        let line = "pub fn validate_foo(&self, text: &str) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(has_text_str_param(&params));
+    }
+
+    #[test]
+    fn validate_foo_no_text_str_not_detected() {
+        let line = "pub fn validate_foo(docs: &[Document<Span>]) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(!has_text_str_param(&params));
+    }
+
     // Old-style code_actions (text: &str as first param) IS still a violation.
     #[test]
     fn code_actions_old_signature_text_first_param_detected() {
@@ -365,15 +1417,7 @@ mod detection_tests {
     }
 
     #[test]
-    fn flow_map_to_block_private_not_detected() {
-        let line =
-            "fn flow_map_to_block(lines: &[&str], diag: &Diagnostic) -> Option<CodeAction> {";
-        assert!(!is_candidate_fn_line(line));
-    }
-
-    #[test]
     fn non_text_named_str_param_not_detected() {
-        // Matches `validate_` prefix, but param is `raw: &str`, not `text: &str`.
         let line = "pub fn validate_and_normalize_url(raw: &str) -> Option<String> {";
         assert!(is_candidate_fn_line(line));
         let params = extract_param_block(line);
@@ -382,7 +1426,6 @@ mod detection_tests {
 
     #[test]
     fn generic_validate_fn_detected() {
-        // Generics on the function name: `pub fn validate_custom_tags<S: ...>(text: &str, ...)`
         let line = "pub fn validate_custom_tags<S: std::hash::BuildHasher>(";
         let next = "    text: &str,";
         let combined = format!("{line} {next}");
@@ -393,7 +1436,7 @@ mod detection_tests {
         assert!(has_text_str_param(&params));
     }
 
-    // --- Group B: allow-list mechanics ---
+    // --- Group B (allow-list mechanics) ---
 
     #[test]
     fn allowed_entry_suppresses_violation() {
@@ -443,14 +1486,12 @@ mod detection_tests {
 
     #[test]
     fn dead_allow_list_entry_for_nonexistent_fn_is_flagged() {
-        // Simulate: scan a file that does NOT contain `validate_nonexistent`.
         let source = "pub fn validate_real(docs: &[Document]) -> Vec<Diagnostic> {\n    vec![]\n}";
         let violations = scan_file("validation/validators.rs", source);
 
-        // Build a local allow-list with a dead entry.
         let local_allow: &[(&str, &str)] = &[
             ("validation/validators.rs", "validate_real"),
-            ("validation/validators.rs", "validate_nonexistent"), // dead
+            ("validation/validators.rs", "validate_nonexistent"),
         ];
 
         let detected_keys: HashSet<(&str, &str)> = violations
@@ -469,8 +1510,6 @@ mod detection_tests {
             .filter(|e| !detected_keys.contains(e))
             .collect();
 
-        // `validate_real` has no `text: &str` param so it's not detected; only the
-        // nonexistent entry is dead in this context. The point is that the mechanism works.
         assert!(
             dead.iter().any(|(_, func)| *func == "validate_nonexistent"),
             "dead entry detection should flag validate_nonexistent; got: {dead:?}"

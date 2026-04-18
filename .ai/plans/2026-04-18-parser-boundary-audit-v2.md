@@ -338,7 +338,7 @@ inert.
 
 ## Steps
 
-- [ ] Broaden the detection regex and parameter-shape
+- [x] Broaden the detection regex and parameter-shape
       match; add allow-list entries for every flagged
       function with an explicit marker; per-entry
       load-bearing verification
@@ -357,11 +357,11 @@ audit inventories every text-handling function in
 `rlsp-yaml/src/`. Keep the first-parameter anchor and the
 shrink-only discipline; only the detection surface grows.
 
-- [ ] Replace `is_candidate_fn_line` with a version that
+- [x] Replace `is_candidate_fn_line` with a version that
       matches any `(pub )?fn <name>(...)` — no function
       name prefix filter. Drop the
       `validate_*`/`code_actions` filter entirely.
-- [ ] Replace `has_text_str_param` with a version that
+- [x] Replace `has_text_str_param` with a version that
       matches the first positional parameter (after
       stripping an optional `&[mut ]self` receiver) with:
       - name in `{text, line, lines, content, source,
@@ -369,7 +369,7 @@ shrink-only discipline; only the detection surface grows.
       - type `&str` or `&[&str]`
       Use an anchored regex on the extracted parameter
       block; keep multi-line signature handling.
-- [ ] Extend the `AllowEntry` struct with a third field
+- [x] Extend the `AllowEntry` struct with a third field
       to make the marker explicit:
       ```rust
       enum AllowMarker {
@@ -382,12 +382,12 @@ shrink-only discipline; only the detection surface grows.
       Display each marker inline in the `Display`
       impl so audit failure messages show the full
       marker.
-- [ ] Add 97 new allow-list entries per the Context
+- [x] Add 97 new allow-list entries per the Context
       inventory — 5 queued-retrofit (TodoRetrofit),
       13 feature-level (TodoRetrofit), 52 helper-of
       (HelperOf), 27 carve-out (CarveOut). Each entry's
       marker must match its inventory row.
-- [ ] **Inventory reconciliation (already performed
+- [x] **Inventory reconciliation (already performed
       2026-04-18).** This step was run as part of Task 1
       dispatch and produced 101 total flagged functions
       (4 existing + 97 new). User approved the expanded
@@ -397,20 +397,20 @@ shrink-only discipline; only the detection surface grows.
       a 98th function (e.g. a file changed between
       reconciliation and implementation), stop and
       message the lead.
-- [ ] Per-entry load-bearing verification for every new
+- [x] Per-entry load-bearing verification for every new
       entry added (97 entries). For each: temp-remove the
       entry, run `cargo test --test parser_boundary_audit`,
       confirm failure cites `(file, func)`, restore,
       rerun, confirm pass. Record one line per entry in
       the commit message (file + func + marker kind).
-- [ ] Update the audit's top-of-file discipline comment
+- [x] Update the audit's top-of-file discipline comment
       to describe the new marker taxonomy: shrink-only
       still applies; a new entry is only acceptable when
       classified as a genuine carve-out with
       justification, or when a newly-introduced feature's
       root entry point requires a retrofit plan to be
       filed.
-- [ ] Update detection-helper unit tests to cover the new
+- [x] Update detection-helper unit tests to cover the new
       shapes:
   - Private `fn` with `text: &str` first param IS detected
   - Private `fn` with `lines: &[&str]` first param IS
@@ -430,7 +430,7 @@ shrink-only discipline; only the detection surface grows.
     trigger
   - Update the existing `code_actions_new_signature_not_detected`
     test to confirm the new regex still skips it
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` zero warnings
   - `cargo test` workspace green
@@ -446,6 +446,15 @@ and both types; full workspace test suite passes; clippy
 clean. The audit now fails if any new `(pub )?fn`
 matching the new shape is introduced without an explicit
 allow-list classification.
+
+**Completed:** commit `c70f642` — broadened audit landed
+with 101-entry allow-list (22 TodoRetrofit + 52 HelperOf
++ 27 CarveOut). `AllowMarker` typed enum replaces the
+single-`note` field. All 97 new entries verified
+load-bearing — record preserved in the commit body.
+47 detection-helper tests covering the 6×2 name×type
+matrix, receiver stripping, non-first-position rejection,
+and dead-entry detection per marker kind.
 
 ### Task 2: File new feature-level retrofit follow-up plans
 
