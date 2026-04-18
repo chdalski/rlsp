@@ -160,16 +160,53 @@ closes that gap via multiset-subset scalar preservation.
 Future retrofit plans should be defensive about this:
 "invariant passes" does not imply "no bug."
 
-## Move 1 status — plan drafted, queued behind Move 0
+## Move 1 status — Completed 2026-04-18
 
 Plan file: `.ai/plans/2026-04-18-one-parser-one-ast.md`
 
-Status: NotStarted; plan-reviewer returned "No issues
-found" after one revision pass. Will be edited to add a
-Move 0 prerequisite reference and a Task 2 acceptance
-line about removing specific Move 0 skip-list entries.
-User has not yet formally approved; approval comes after
-Move 0 lands.
+All five tasks landed. Commits:
+- Task 1 (`d06fff8`): "one parser, one AST" rule added
+  to root CLAUDE.md
+- Task 2 (`9c5a6e1`): `validate_flow_style` retrofitted
+  to `(docs: &[Document<Span>])`; 14 new unit tests;
+  `find_closing_char` deleted; Move 0 skip-list I4
+  entries became stale and were removed during the
+  retrofit cleanup
+- Task 3 (`9f40e88`): GHA-expression regression
+  coverage (unit test + `GHA_RELEASE_PLZ_STYLE`
+  ecosystem fixture); regression-catch verified
+- Task 4 (`e58fdf0`): `parser_boundary_audit.rs`
+  with shrink-only allow-list, 5 inventoried violators
+  (the 4 from plan + `validate_schema` discovered
+  during implementation), per-entry verification done
+- Task 5 (`189e9eb`): `release-plz.yml` gated on CI
+  via `workflow_run`; checks out validated `head_sha`;
+  action versions refreshed; top-of-file comment
+  documents the gate
+
+User-reported bug closure: GHA `${{ … }}` expressions
+no longer trip `flowMap`/`flowSeq` diagnostics; the
+double-report bug is gone; multi-line flow collections
+are now correctly detected.
+
+Operational findings during execution:
+1. I3 (code-action round-trip) passed on the current
+   corpus after the retrofit because the destructive
+   `flow_map_to_block` output happens to be
+   syntactically valid YAML — I4 (added in Move 0
+   mid-flight) is what catches the actual data-loss bug.
+2. After the retrofit, I4 STILL flags
+   `flow_map_to_block` on legitimate `- { ... }` flow
+   mappings inside sequence items, because Task 2's
+   `end_col + 1` range adjustment (needed to match the
+   parser's zero-width `MappingEnd` span) makes the
+   code action reach those flow maps. Skip-list entries
+   correctly remain until the destructive-code-action
+   fix lands.
+3. Extra violator discovered during Task 4:
+   `validate_schema` in `schema_validation.rs` — not
+   in the original inventory. Added to allow-list with
+   a TODO marker.
 
 Scope decisions (confirmed with the user):
 
@@ -226,29 +263,65 @@ Move 1 tasks (summary):
    diff-verifiable; manual post-merge verification is
    supplementary.
 
-## Move 1 follow-up queue (in dependency order)
+## Follow-up queue (in dependency order)
 
-These are queued AFTER Move 1 lands, BEFORE Move 2
-begins (except where noted). Each is a separate plan:
+Each is a separate plan, filed as needed. Order below
+reflects sequencing as of Move 1 completion.
 
 1. **Destructive `flow_map_to_block` / `flow_seq_to_block`
-   fix.** The latent defects (full-line replace,
-   single-line scope, key-reconstruction fragility).
-   Open question at the time of drafting: is the right
-   fix (a) tighten the replace range and guard rails
+   fix.** Stub plan filed at
+   `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`
+   during Move 0. Addresses the latent defects
+   (full-line replace, single-line scope,
+   key-reconstruction fragility). Still open question:
+   fix by (a) tighten replace range and guard rails
    (small), or (b) rewrite as AST-subtree → formatter
-   (big)? Move 2's code-action fixture format should
-   help frame "what fixed looks like" — could sequence
-   this after Move 2 starts rather than before.
+   (big)? Move 2's code-action fixture format may help
+   frame "what fixed looks like" — could sequence after
+   Move 2 starts rather than before.
 2. **Retrofit `validate_unused_anchors(text: &str)`** at
    `validators.rs:29`. Pure text-scan; similar shape to
-   flow-style retrofit. Low risk.
+   flow-style retrofit. Low risk. Shrinks audit
+   allow-list by one.
 3. **Retrofit `validate_custom_tags(text, docs, …)`** at
    `validators.rs:297`. Hybrid → AST-only.
 4. **Retrofit `validate_key_ordering(text, docs)`** at
    `validators.rs:475`. Hybrid → AST-only.
+5. **Retrofit `validate_schema` (schema_validation.rs).**
+   Discovered during Move 1 Task 4 — wasn't in original
+   inventory. Unknown current signature shape; treat
+   as "investigate + retrofit" scope.
+6. **Move 2 — fixture pattern for every LSP feature**
+   (see Architectural program). Per-feature narrow
+   assertions complement the broad invariants from
+   Move 0.
+7. **E2E LSP test harness** (previously deferred; see
+   "Deferred ideas" section below). Drives tower-lsp
+   through JSON-RPC; catches settings and
+   serialization bugs the in-process harness misses.
+8. **Remove `rlsp-yaml/tests/corpus/WORKLIST.md`.**
+   Queued after E2E tests plan per user request. The
+   premise of WORKLIST.md (human-readable mirror of a
+   transient skip-list) conflicts with the desired
+   discipline: zero-tolerance for known failures.
+   Cleanup scope: delete the file, update the
+   top-of-file comment in `corpus_invariants.rs` that
+   references it, adjust Move 0 plan's Decisions
+   section ("Empty-skip-list state is permanent
+   infrastructure" and "Corpus WORKLIST.md is a
+   human-readable mirror" entries — mark as superseded
+   by this cleanup plan), update feature-log.md
+   reference.
+   Open design question to resolve IN that cleanup
+   plan: whether to remove `SKIP_LIST` entirely
+   (zero-tolerance — all invariant failures become
+   build failures, surprise failures use `#[ignore]`
+   until fixed) or keep it as a between-plans safety
+   valve (empty at steady state; entries only exist
+   while a deferred fix is in flight).
 
-Each retrofit shrinks the audit's allow-list by one.
+Each validator retrofit shrinks the audit's
+allow-list by one.
 
 ## Key technical anchors a resumer should know
 
