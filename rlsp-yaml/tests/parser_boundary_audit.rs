@@ -133,23 +133,9 @@ const ALLOW_LIST: &[AllowEntry] = &[
     },
     AllowEntry {
         file: "editing/code_actions.rs",
-        func: "yaml11_bool_actions",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-yaml11-bool-actions",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
         func: "yaml11_octal_actions",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-yaml11-octal-actions",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "schema_yaml11_bool_type_actions",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-schema-yaml11-bool-type-actions",
         },
     },
     // -----------------------------------------------------------------------

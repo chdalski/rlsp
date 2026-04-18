@@ -253,7 +253,7 @@ dedicated cleanup plan after all retrofits land.
 
 ## Steps
 
-- [ ] Retrofit `yaml11_bool_actions` and
+- [x] Retrofit `yaml11_bool_actions` and
       `schema_yaml11_bool_type_actions` (combined
       because they share structure)
 - [ ] Retrofit `yaml11_octal_actions`
@@ -271,7 +271,7 @@ returns one — Convert). Retrofitting together captures
 the shared finder once and keeps the action-shape
 divergence explicit.
 
-- [ ] Change both signatures to
+- [x] Change both signatures to
       `fn yaml11_bool_actions(docs: &[Document<Span>],
       text: &str, diag: &Diagnostic, uri: &Url) ->
       Vec<CodeAction>` and the analogous form for
@@ -280,7 +280,7 @@ divergence explicit.
       `code_actions.rs:46-51` (`diag_actions` closure;
       `docs` and `text` already captured in scope since
       Move 1).
-- [ ] Extract a shared finder —
+- [x] Extract a shared finder —
       `fn find_yaml11_bool_scalar<'a>(docs: &'a
       [Document<Span>], diag: &Diagnostic) ->
       Option<(&'a Node<Span>, &'a Span, usize)>` —
@@ -295,30 +295,30 @@ divergence explicit.
      `base_indent` is the parent-context column for
      `format_subtree` (same `key_col` convention from
      `string_to_block_scalar`).
-- [ ] `yaml11_bool_actions` calls the finder, then
+- [x] `yaml11_bool_actions` calls the finder, then
       builds two clones (DoubleQuoted; canonical
       Plain) and emits two `TextEdit`s over the
       scalar's `loc` using `format_subtree`. Preserves
       the two current action titles ("Quote value",
       "Convert to boolean").
-- [ ] `schema_yaml11_bool_type_actions` calls the
+- [x] `schema_yaml11_bool_type_actions` calls the
       finder, then builds one clone (canonical Plain)
       and emits one `TextEdit`. Preserves the single
       current action title ("Convert to boolean").
       No "Quote value" action is added — current
       behavior shape is preserved per the Non-Goals.
-- [ ] Update call sites at
+- [x] Update call sites at
       `code_actions.rs:46-51` to pass `docs` and
       `text`. Both functions are currently called from
       the `diag_actions` closure.
-- [ ] Consult the test-engineer per the input gate.
+- [x] Consult the test-engineer per the input gate.
       The TE's new standard operating procedure
       (agent file step 3) requires scanning the
       existing test block for duplicates and
       producing a Consolidation section listing
       tests to retire or merge alongside the
       regression tests to add. Follow that protocol.
-- [ ] Regression tests (cross-reference with TE's
+- [x] Regression tests (cross-reference with TE's
       Consolidation section to avoid duplicating
       existing coverage):
   - Quote action produces a valid double-quoted
@@ -345,7 +345,7 @@ divergence explicit.
     single-action shape — the shared finder must not
     leak a "Quote value" action into the schema-type
     variant)
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace green
@@ -356,7 +356,7 @@ divergence explicit.
     (down from the 108-entry baseline — Task 1
     removes the `yaml11_bool_actions` and
     `schema_yaml11_bool_type_actions` entries)
-- [ ] Per the updated test-engineer protocol,
+- [x] Per the updated test-engineer protocol,
       obtain TE output-gate sign-off that both the
       regression additions AND the Consolidation
       deletions from the input gate's test list
@@ -371,6 +371,16 @@ regressions from the Context section covered plus
 any additional scenarios the TE surfaces; corpus
 SKIP_LIST stays empty; audit allow-list at 106
 (down from 108).
+
+**Landed:** commit `64d5726` (see `git log` — SHA
+may be superseded by follow-up amend). `const ALLOW_LIST` shrank
+from 100 to 98 (−2). The plan's 108/106 figures
+counted `AllowEntry {` occurrences including
+test-helper constructors; the net delta matches
+and the `cargo test --test parser_boundary_audit`
+gate passed. Subsequent tasks should reference the
+actual `ALLOW_LIST` count (now 98); post-Task-2
+target is 97, post-Task-3 target is 96.
 
 ### Task 2: Retrofit `yaml11_octal_actions` via AST + `format_subtree`
 
