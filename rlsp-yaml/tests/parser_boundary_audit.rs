@@ -131,13 +131,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             plan: "retrofit-delete-unused-anchor",
         },
     },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "yaml11_octal_actions",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-yaml11-octal-actions",
-        },
-    },
     // -----------------------------------------------------------------------
     // Feature-level violators (original 5)
     // -----------------------------------------------------------------------

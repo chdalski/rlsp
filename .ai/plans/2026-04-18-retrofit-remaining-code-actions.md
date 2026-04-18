@@ -256,7 +256,7 @@ dedicated cleanup plan after all retrofits land.
 - [x] Retrofit `yaml11_bool_actions` and
       `schema_yaml11_bool_type_actions` (combined
       because they share structure)
-- [ ] Retrofit `yaml11_octal_actions`
+- [x] Retrofit `yaml11_octal_actions`
 - [ ] Retrofit `delete_unused_anchor`
 
 ## Tasks
@@ -391,31 +391,31 @@ bool. Not combined with Task 1 because the canonical
 transform differs and the diagnostic trigger is a
 different validator rule.
 
-- [ ] Change signature to
+- [x] Change signature to
       `fn yaml11_octal_actions(docs:
       &[Document<Span>], text: &str, diag:
       &Diagnostic, uri: &Url) -> Vec<CodeAction>`.
-- [ ] Walk AST to find the `Node::Scalar` whose
+- [x] Walk AST to find the `Node::Scalar` whose
       `loc` matches the diagnostic range (same
       `end_col + 1` convention as Task 1). If the
       value isn't a YAML 1.1 octal (starts with
       `0` followed by octal digits, length ≥ 2),
       return `vec![]`.
-- [ ] Build two clones:
+- [x] Build two clones:
   1. Quote form: `style:
      ScalarStyle::DoubleQuoted`, value unchanged.
   2. Convert form: `value = format!("0o{}",
      &original[1..])` (drop the leading `0`,
      prepend `0o`), `style: ScalarStyle::Plain`.
-- [ ] Emit two `TextEdit`s over the scalar's
+- [x] Emit two `TextEdit`s over the scalar's
       `loc` span.
-- [ ] Update call site at
+- [x] Update call site at
       `code_actions.rs:46-51` (`diag_actions`
       closure).
-- [ ] TE input-gate consultation per the standard
+- [x] TE input-gate consultation per the standard
       protocol (scan existing tests, produce
       Consolidation section).
-- [ ] Regression tests (augment with TE's
+- [x] Regression tests (augment with TE's
       Consolidation decisions):
   - Quote action on `0777` produces a valid
     double-quoted scalar (the string `"0777"`),
@@ -430,11 +430,11 @@ different validator rule.
   - Mid-line cursor / sequence-item value
     (assertion that edit range starts at scalar,
     not col 0)
-- [ ] Build/test gates: fmt, clippy, full test,
+- [x] Build/test gates: fmt, clippy, full test,
       corpus invariants with empty SKIP_LIST,
       audit allow-list at 105 entries (one fewer
       than after Task 1).
-- [ ] TE output-gate sign-off covering
+- [x] TE output-gate sign-off covering
       regression adds + Consolidation deletes.
 
 Acceptance: `yaml11_octal_actions` consumes the
@@ -443,6 +443,10 @@ rejects non-octal inputs via the AST check;
 trailing-comment and mid-line-cursor regressions
 pass; corpus SKIP_LIST stays empty; audit
 allow-list at 105.
+
+**Landed:** commit `485b89c` (see `git log` — SHA
+may be superseded by follow-up amend). `const
+ALLOW_LIST` at 97 (−1 from 98).
 
 ### Task 3: Retrofit `delete_unused_anchor` via AST + `format_subtree`
 
