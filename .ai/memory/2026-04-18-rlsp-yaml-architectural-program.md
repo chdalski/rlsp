@@ -299,26 +299,56 @@ reflects sequencing as of Move 1 completion.
    "Deferred ideas" section below). Drives tower-lsp
    through JSON-RPC; catches settings and
    serialization bugs the in-process harness misses.
-8. **Remove `rlsp-yaml/tests/corpus/WORKLIST.md`.**
-   Queued after E2E tests plan per user request. The
-   premise of WORKLIST.md (human-readable mirror of a
-   transient skip-list) conflicts with the desired
-   discipline: zero-tolerance for known failures.
-   Cleanup scope: delete the file, update the
-   top-of-file comment in `corpus_invariants.rs` that
-   references it, adjust Move 0 plan's Decisions
-   section ("Empty-skip-list state is permanent
-   infrastructure" and "Corpus WORKLIST.md is a
-   human-readable mirror" entries — mark as superseded
-   by this cleanup plan), update feature-log.md
-   reference.
-   Open design question to resolve IN that cleanup
-   plan: whether to remove `SKIP_LIST` entirely
-   (zero-tolerance — all invariant failures become
-   build failures, surprise failures use `#[ignore]`
-   until fixed) or keep it as a between-plans safety
-   valve (empty at steady state; entries only exist
-   while a deferred fix is in flight).
+8. **Remove WORKLIST.md AND SKIP_LIST entirely —
+   switch to `#[ignore]` for any deferred failures.**
+   Queued after the E2E tests plan per user request.
+   User preference (confirmed 2026-04-18): the
+   WORKLIST.md + SKIP_LIST + Surprise Failure Protocol
+   machinery is heavier than needed. `#[ignore]` is
+   the natural idiomatic way to mark a test as
+   temporarily deferred in Rust; we should use it
+   instead of a custom skip-list construct.
+
+   Cleanup scope:
+   - Delete `rlsp-yaml/tests/corpus/WORKLIST.md`.
+   - Remove the `SKIP_LIST` constant and its matching
+     logic from `rlsp-yaml/tests/corpus_invariants.rs`.
+     The harness becomes pass/fail only — no skip
+     semantics.
+   - To retain per-(file, invariant) deferral
+     granularity, restructure the harness to emit
+     one `#[test]` per (corpus file, invariant) pair
+     rather than a single `corpus_invariants` test
+     wrapping everything. That way `#[ignore]` can be
+     applied to an individual failing pair with a
+     descriptive reason comment. Alternatively:
+     leave the harness as-is and accept that a single
+     failure takes down the whole test — if we truly
+     expect zero known failures at steady state, that's
+     fine.
+   - Update the top-of-file comment in
+     `corpus_invariants.rs` — drop the shrink-only /
+     Surprise Failure Protocol / mirror-of-WORKLIST
+     references. Replace with a short note: "no
+     known failures; if a new one appears, fix it or
+     `#[ignore]` with a plan reference in the reason
+     comment."
+   - Move 0 plan's Decisions section: the entries
+     "Empty-skip-list state is permanent
+     infrastructure", "Corpus WORKLIST.md is a
+     human-readable mirror", "Skip-list is shrink-only",
+     "Per-entry skip-list verification required", and
+     "Surprise Failure Protocol is the gate for any
+     new skip-list entry" are all superseded by this
+     cleanup plan. Add a single note citing the
+     cleanup plan's path.
+   - Update `rlsp-yaml/docs/feature-log.md` —
+     Move 0's entry referenced WORKLIST.md; adjust.
+
+   Discipline shift: from "shrink-only skip-list
+   tracked in data" to "zero-tolerance; deferrals
+   marked inline via `#[ignore]` with plan
+   references." Matches idiomatic Rust testing.
 
 Each validator retrofit shrinks the audit's
 allow-list by one.
