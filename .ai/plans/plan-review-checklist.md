@@ -185,3 +185,29 @@ plan-format.md.
 - Are Tasks ordered by dependency (foundational first)?
 - Does the filename follow the `YYYY-MM-DD-slug.md`
   convention?
+
+## 11. Separable Concerns
+
+A plan should address one cohesive feature or change.
+When a plan bundles work across separate domains,
+codebases, or sub-projects, the developer
+context-switches during execution and scope boundaries
+blur — tasks from one concern leak into another.
+
+- Do the tasks span different codebases or sub-projects
+  (e.g., main application and a browser extension)?
+- Could a subset of tasks be tested and deployed
+  independently of the rest?
+- Would splitting into two plans allow each to land
+  without the other temporarily?
+
+If any of these hold, recommend that the lead ask the
+user whether the plan should be split. This is a
+suggestion, not a rejection — tightly coupled changes
+(e.g., a database migration and the code that uses the
+new schema) belong together even when they touch
+different layers.
+
+When a split is appropriate, each resulting plan should
+list the other's scope in a Non-Goals section so the
+developer knows the boundary at implementation time.
