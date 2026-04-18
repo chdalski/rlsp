@@ -44,11 +44,11 @@ fn bench_validators_individual(c: &mut Criterion) {
     });
 
     group.bench_function("validate_custom_tags", |b| {
-        b.iter(|| validate_custom_tags(&text, &docs, &allowed_tags));
+        b.iter(|| validate_custom_tags(&docs, &allowed_tags));
     });
 
     group.bench_function("validate_key_ordering", |b| {
-        b.iter(|| validate_key_ordering(&text, &docs));
+        b.iter(|| validate_key_ordering(&docs));
     });
 
     group.bench_function("validate_duplicate_keys", |b| {

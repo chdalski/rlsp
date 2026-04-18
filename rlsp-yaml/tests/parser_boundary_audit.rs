@@ -94,20 +94,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // Existing violators (carried forward, now with typed marker)
     // -----------------------------------------------------------------------
     AllowEntry {
-        file: "validation/validators.rs",
-        func: "validate_custom_tags",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-validate-custom-tags",
-        },
-    },
-    AllowEntry {
-        file: "validation/validators.rs",
-        func: "validate_key_ordering",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-validate-key-ordering",
-        },
-    },
-    AllowEntry {
         file: "schema_validation.rs",
         func: "validate_schema",
         marker: AllowMarker::TodoRetrofit {
@@ -214,20 +200,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // -----------------------------------------------------------------------
     // HelperOf — private helpers of validators
     // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "validation/validators.rs",
-        func: "find_tag_occurrence",
-        marker: AllowMarker::HelperOf {
-            root: "validate_custom_tags",
-        },
-    },
-    AllowEntry {
-        file: "validation/validators.rs",
-        func: "is_inside_quotes",
-        marker: AllowMarker::HelperOf {
-            root: "validate_custom_tags",
-        },
-    },
     AllowEntry {
         file: "schema_validation.rs",
         func: "build_key_index",
@@ -1388,8 +1360,8 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source = "pub fn validate_custom_tags(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
-        let violations = scan_file("validation/validators.rs", source);
+        let source = "pub fn validate_schema(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
+        let violations = scan_file("schema_validation.rs", source);
         assert_eq!(violations.len(), 1);
 
         let new_violations: Vec<&Violation> = violations

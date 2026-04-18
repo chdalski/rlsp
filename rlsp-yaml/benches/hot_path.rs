@@ -42,11 +42,10 @@ fn bench_parse_and_validate(c: &mut Criterion) {
                 let _ = validate_unused_anchors(&result.documents);
                 let _ = validate_flow_style(&result.documents);
                 let _ = rlsp_yaml::validation::validators::validate_custom_tags(
-                    text,
                     &result.documents,
                     &allowed_tags,
                 );
-                let _ = validate_key_ordering(text, &result.documents);
+                let _ = validate_key_ordering(&result.documents);
                 let _ = validate_duplicate_keys(&result.documents);
             });
         });

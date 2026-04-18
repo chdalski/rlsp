@@ -286,7 +286,7 @@ cleanup waits for the post-program plan.
 - [x] Retrofit `validate_unused_anchors` (standalone —
       heaviest, changes signature and eliminates
       `scan_tokens` + document-boundary rescan)
-- [ ] Retrofit `validate_custom_tags` and
+- [x] Retrofit `validate_custom_tags` and
       `validate_key_ordering` (combined — both are
       position-retrofits on already-AST-walking
       validators with similar shape)
@@ -384,7 +384,7 @@ signature parameters other than removing `text`; both
 replace text-based position lookups with direct
 `Span` access on nodes the walker already has in hand.
 
-- [ ] Change signatures:
+- [x] Change signatures:
   - `fn validate_custom_tags<S: std::hash::BuildHasher>(docs:
     &[Document<Span>], allowed_tags: &HashSet<String,
     S>) -> Vec<Diagnostic>` — the `text` parameter
@@ -392,7 +392,7 @@ replace text-based position lookups with direct
   - `fn validate_key_ordering(docs:
     &[Document<Span>]) -> Vec<Diagnostic>` — the
     `text` parameter removed.
-- [ ] For `validate_custom_tags`:
+- [x] For `validate_custom_tags`:
   - Update `collect_tag_diagnostics` to pass the
     tag-carrying node's `loc: Span` through the
     recursion instead of a `seen_counts` dedup
@@ -416,25 +416,25 @@ replace text-based position lookups with direct
     `find_tag_occurrence` was the sole caller (this
     was confirmed at plan time but re-verify after
     the function is removed).
-- [ ] For `validate_key_ordering`:
+- [x] For `validate_key_ordering`:
   - Remove the pre-scan block that builds the key
     `HashMap<String, u32>`.
   - In `check_yaml_ordering`, use the mapping-key
     node's `loc: Span` to construct diagnostic
     ranges directly.
-- [ ] Remove four allow-list entries:
+- [x] Remove four allow-list entries:
   `validate_custom_tags` (line 105),
   `validate_key_ordering` (line 112),
   `find_tag_occurrence` (line 264),
   `is_inside_quotes` (validators.rs variant, line
   271).
-- [ ] Update call sites in
+- [x] Update call sites in
       `rlsp-yaml/src/language_server.rs` for both
       validators.
-- [ ] TE input-gate consultation for BOTH validators
+- [x] TE input-gate consultation for BOTH validators
       (one consult covering both; include
       Consolidation section).
-- [ ] Regression tests for `validate_custom_tags`
+- [x] Regression tests for `validate_custom_tags`
       (augment with TE decisions):
   - Tag on a mapping value (`key: !custom value`) —
     diagnostic range equals the scalar node's `loc`
@@ -451,7 +451,7 @@ replace text-based position lookups with direct
     them; verify explicitly)
   - Tag allowed via `allowed_tags` set — no
     diagnostic
-- [ ] Regression tests for `validate_key_ordering`
+- [x] Regression tests for `validate_key_ordering`
       (augment with TE decisions):
   - Out-of-order keys in a block mapping —
     diagnostic range covers the offending key's span
@@ -465,7 +465,7 @@ replace text-based position lookups with direct
     checked independently
   - Nested mappings — ordering checked at each
     nesting level
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace green
@@ -477,7 +477,7 @@ replace text-based position lookups with direct
     entries: `validate_custom_tags`,
     `validate_key_ordering`, `find_tag_occurrence`,
     `is_inside_quotes`)
-- [ ] TE output-gate sign-off covering regression adds
+- [x] TE output-gate sign-off covering regression adds
       + Consolidation deletes for both validators.
 
 Acceptance: both validators consume only the AST;
@@ -485,6 +485,12 @@ Acceptance: both validators consume only the AST;
 (validators.rs) deleted; key_ordering's pre-scan block
 removed; all four allow-list entries gone; audit at 98
 (down from 102).
+
+**Landed:** commit `f9f0640` (see `git log` — SHA may
+be superseded by follow-up amend). `const ALLOW_LIST`
+at 90 (−4 from 94). Task modified six files:
+`validators.rs`, `server.rs`, two bench files, and
+two test files.
 
 ### Task 3: Retrofit `validate_schema` to AST-first
 

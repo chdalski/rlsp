@@ -260,9 +260,11 @@ fn flow_diagnostic(code: &str, message: &str, loc: &Span) -> Diagnostic {
 /// Returns warning diagnostics for any `!tag` found in the YAML documents that is not
 /// listed in `allowed_tags`. When `allowed_tags` is empty, validation is skipped and
 /// an empty vec is returned — no tags configured means no warnings.
+///
+/// Diagnostic ranges use the tagged node's full `loc` span. Quoted scalars are never
+/// flagged because the parser stores `tag: None` for them.
 #[must_use]
 pub fn validate_custom_tags<S: std::hash::BuildHasher>(
-    text: &str,
     docs: &[Document<Span>],
     allowed_tags: &HashSet<String, S>,
 ) -> Vec<Diagnostic> {
@@ -270,20 +272,10 @@ pub fn validate_custom_tags<S: std::hash::BuildHasher>(
         return Vec::new();
     }
 
-    let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
-    // Track how many times each tag string has been seen so far (to handle duplicates).
-    let mut seen_counts: HashMap<String, usize> = HashMap::new();
 
     for doc in docs {
-        collect_tag_diagnostics(
-            &doc.root,
-            &lines,
-            allowed_tags,
-            &mut seen_counts,
-            &mut diagnostics,
-            0,
-        );
+        collect_tag_diagnostics(&doc.root, allowed_tags, &mut diagnostics, 0);
     }
 
     diagnostics
@@ -292,9 +284,7 @@ pub fn validate_custom_tags<S: std::hash::BuildHasher>(
 /// Recursively walk a YAML node and emit diagnostics for unknown tags.
 fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
     node: &Node<Span>,
-    lines: &[&str],
     allowed_tags: &HashSet<String, S>,
-    seen_counts: &mut HashMap<String, usize>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) {
@@ -303,28 +293,34 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
         return;
     }
 
-    // Check the tag field on this node (all variants carry an optional tag).
-    let tag = match node {
-        Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
-            tag.as_deref()
-        }
+    // Check the tag and loc fields on this node (all non-Alias variants carry them).
+    let tag_and_loc = match node {
+        Node::Scalar { tag, loc, .. }
+        | Node::Mapping { tag, loc, .. }
+        | Node::Sequence { tag, loc, .. } => tag.as_deref().map(|t| (t, loc)),
         Node::Alias { .. } => None,
     };
-    if let Some(tag_str) = tag {
+    if let Some((tag_str, loc)) = tag_and_loc {
         if !allowed_tags.contains(tag_str) {
-            let occurrence = *seen_counts.get(tag_str).unwrap_or(&0);
-            seen_counts.insert(tag_str.to_string(), occurrence + 1);
-
-            if let Some(range) = find_tag_occurrence(lines, tag_str, occurrence) {
-                diagnostics.push(Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("unknownTag".to_string())),
-                    message: format!("Unknown tag: {tag_str}"),
-                    source: Some("rlsp-yaml".to_string()),
-                    ..Diagnostic::default()
-                });
-            }
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
+            let range = Range::new(
+                Position::new(
+                    loc.start.line.saturating_sub(1) as u32,
+                    loc.start.column as u32,
+                ),
+                Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+            );
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("unknownTag".to_string())),
+                message: format!("Unknown tag: {tag_str}"),
+                source: Some("rlsp-yaml".to_string()),
+                ..Diagnostic::default()
+            });
         }
     }
 
@@ -332,156 +328,37 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_tag_diagnostics(
-                    key,
-                    lines,
-                    allowed_tags,
-                    seen_counts,
-                    diagnostics,
-                    depth + 1,
-                );
-                collect_tag_diagnostics(
-                    value,
-                    lines,
-                    allowed_tags,
-                    seen_counts,
-                    diagnostics,
-                    depth + 1,
-                );
+                collect_tag_diagnostics(key, allowed_tags, diagnostics, depth + 1);
+                collect_tag_diagnostics(value, allowed_tags, diagnostics, depth + 1);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_tag_diagnostics(
-                    item,
-                    lines,
-                    allowed_tags,
-                    seen_counts,
-                    diagnostics,
-                    depth + 1,
-                );
+                collect_tag_diagnostics(item, allowed_tags, diagnostics, depth + 1);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
-/// Find the byte range of the Nth occurrence (0-indexed) of `tag_str` in the text lines.
-/// Returns `None` if the occurrence index is out of range.
-///
-/// Skips occurrences that appear inside single- or double-quoted strings so that
-/// `note: "use !include for files"` does not shadow `value: !include actual.yaml`.
-fn find_tag_occurrence(lines: &[&str], tag_str: &str, occurrence: usize) -> Option<Range> {
-    let mut count = 0usize;
-
-    for (line_idx, line) in lines.iter().enumerate() {
-        let mut search_start = 0;
-        while let Some(pos) = line[search_start..].find(tag_str) {
-            let abs_pos = search_start + pos;
-
-            // Check whether this position is inside a quoted string by scanning
-            // from the start of the line up to abs_pos.
-            let in_quotes = is_inside_quotes(line, abs_pos);
-
-            // Make sure it's a real tag boundary: preceded by nothing or whitespace/colon/dash,
-            // and not immediately followed by another tag-name character.
-            let before_ok = abs_pos == 0
-                || line
-                    .as_bytes()
-                    .get(abs_pos - 1)
-                    .is_some_and(|&b| b == b' ' || b == b'\t' || b == b':' || b == b'-');
-            let after_end = abs_pos + tag_str.len();
-            let after_ok = line
-                .as_bytes()
-                .get(after_end)
-                .is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'-' && b != b'_' && b != b'.');
-
-            if !in_quotes && before_ok && after_ok {
-                if count == occurrence {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    return Some(Range::new(
-                        Position::new(line_idx as u32, abs_pos as u32),
-                        Position::new(line_idx as u32, after_end as u32),
-                    ));
-                }
-                count += 1;
-            }
-            search_start = abs_pos + 1;
-        }
-    }
-    None
-}
-
-/// Return `true` if byte position `pos` in `line` falls inside a single- or double-quoted
-/// string, using the same quote-tracking logic as `validate_flow_style`.
-fn is_inside_quotes(line: &str, pos: usize) -> bool {
-    let mut in_single = false;
-    let mut in_double = false;
-    for (i, ch) in line.char_indices() {
-        if i >= pos {
-            break;
-        }
-        match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            _ => {}
-        }
-    }
-    in_single || in_double
-}
-
 /// Validate map key ordering in YAML documents.
 ///
 /// Returns warning diagnostics for map keys that are not in alphabetical order.
-/// Uses case-sensitive lexicographic comparison.
-///
+/// Uses case-sensitive lexicographic comparison. Diagnostic ranges use the key
+/// node's `loc` span directly.
 #[must_use]
-pub fn validate_key_ordering(text: &str, docs: &[Document<Span>]) -> Vec<Diagnostic> {
-    let lines: Vec<&str> = text.lines().collect();
+pub fn validate_key_ordering(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // Build a key → first-line index once so check_yaml_ordering can do O(1)
-    // lookups instead of scanning all lines for every diagnostic emitted.
-    // Uses the same matching logic as the removed find_key_line: the key is
-    // the trimmed text before the first ':', which must not be empty.
-    let key_index: HashMap<String, u32> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(line_idx, line)| {
-            let trimmed = line.trim_start();
-            let colon_pos = trimmed.find(':')?;
-            let key = trimmed[..colon_pos].trim_end();
-            if key.is_empty() {
-                return None;
-            }
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "LSP line/col are u32; always fits"
-            )]
-            Some((key.to_string(), line_idx as u32))
-        })
-        .fold(HashMap::new(), |mut map, (key, line)| {
-            map.entry(key).or_insert(line);
-            map
-        });
-
     for doc in docs {
-        check_yaml_ordering(&doc.root, &key_index, &mut diagnostics, 0);
+        check_yaml_ordering(&doc.root, &mut diagnostics, 0);
     }
 
     diagnostics
 }
 
 /// Recursively check YAML nodes for key ordering, with depth limit.
-fn check_yaml_ordering(
-    node: &Node<Span>,
-    key_index: &HashMap<String, u32>,
-    diagnostics: &mut Vec<Diagnostic>,
-    depth: usize,
-) {
+fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, depth: usize) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
         return;
@@ -489,12 +366,12 @@ fn check_yaml_ordering(
 
     match node {
         Node::Mapping { entries, .. } => {
-            // Extract keys in order — skip null keys (they have no ordering semantics).
-            let keys: Vec<String> = entries
+            // Collect (key_string, key_loc) pairs, skipping null keys.
+            let keys: Vec<(&str, &Span)> = entries
                 .iter()
                 .filter_map(|(k, _)| match k {
-                    Node::Scalar { value, .. } if !crate::scalar_helpers::is_null(value) => {
-                        Some(value.clone())
+                    Node::Scalar { value, loc, .. } if !crate::scalar_helpers::is_null(value) => {
+                        Some((value.as_str(), loc))
                     }
                     Node::Scalar { .. }
                     | Node::Mapping { .. }
@@ -503,45 +380,43 @@ fn check_yaml_ordering(
                 })
                 .collect();
 
-            // Check if keys are in alphabetical order
-            // Track the maximum key seen so far to catch all out-of-order keys
-            let mut max_key: &str = keys.first().map_or("", String::as_str);
+            // Track the maximum key seen so far to catch all out-of-order keys.
+            let mut max_key: &str = keys.first().map_or("", |&(k, _)| k);
 
-            for key in keys.iter().skip(1) {
-                if key.as_str() < max_key {
-                    // Look up the line number in the pre-built index (O(1)).
-                    if let Some(&line_num) = key_index.get(key.as_str()) {
-                        #[expect(
-                            clippy::cast_possible_truncation,
-                            reason = "LSP line/col are u32; always fits"
-                        )]
-                        let key_len = key.len() as u32;
-                        diagnostics.push(Diagnostic {
-                            range: Range::new(
-                                Position::new(line_num, 0),
-                                Position::new(line_num, key_len),
-                            ),
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            code: Some(NumberOrString::String("mapKeyOrder".to_string())),
-                            message: format!("Key '{key}' is out of alphabetical order"),
-                            source: Some("rlsp-yaml".to_string()),
-                            ..Diagnostic::default()
-                        });
-                    }
-                } else if key.as_str() > max_key {
+            for &(key, loc) in keys.iter().skip(1) {
+                if key < max_key {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "LSP line/col are u32; always fits"
+                    )]
+                    let range = Range::new(
+                        Position::new(
+                            loc.start.line.saturating_sub(1) as u32,
+                            loc.start.column as u32,
+                        ),
+                        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+                    );
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("mapKeyOrder".to_string())),
+                        message: format!("Key '{key}' is out of alphabetical order"),
+                        source: Some("rlsp-yaml".to_string()),
+                        ..Diagnostic::default()
+                    });
+                } else if key > max_key {
                     max_key = key;
                 }
             }
 
-            // Recursively check nested structures
+            // Recursively check nested structures.
             for (_, value) in entries {
-                check_yaml_ordering(value, key_index, diagnostics, depth + 1);
+                check_yaml_ordering(value, diagnostics, depth + 1);
             }
         }
         Node::Sequence { items, .. } => {
-            // Recursively check array elements
             for item in items {
-                check_yaml_ordering(item, key_index, diagnostics, depth + 1);
+                check_yaml_ordering(item, diagnostics, depth + 1);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -1410,7 +1285,7 @@ jobs:
     #[case::case_sensitive_uppercase_first("Apple: 1\napple: 2\n")]
     fn key_ordering_returns_empty(#[case] input: &str) {
         let docs = rlsp_yaml_parser::load(input).unwrap();
-        let result = validate_key_ordering(input, &docs);
+        let result = validate_key_ordering(&docs);
 
         assert!(result.is_empty());
     }
@@ -1423,7 +1298,7 @@ jobs:
     #[case::numeric_string_lexicographic("2: two\n10: ten\n", 1)]
     fn key_ordering_count(#[case] input: &str, #[case] expected: usize) {
         let docs = rlsp_yaml_parser::load(input).unwrap();
-        let result = validate_key_ordering(input, &docs);
+        let result = validate_key_ordering(&docs);
 
         assert_eq!(result.len(), expected);
     }
@@ -1434,7 +1309,7 @@ jobs:
     fn should_detect_out_of_order_keys() {
         let text = "banana: 2\napple: 1\n";
         let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+        let result = validate_key_ordering(&docs);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -1447,10 +1322,12 @@ jobs:
     fn should_return_correct_range_for_out_of_order_key() {
         let text = "banana: 2\napple: 1\n";
         let docs = rlsp_yaml_parser::load(text).unwrap();
-        let result = validate_key_ordering(text, &docs);
+        let result = validate_key_ordering(&docs);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].range.start.line, 1, "apple is on line 1");
+        assert_eq!(result[0].range.start.character, 0, "apple starts at col 0");
+        assert_eq!(result[0].range.end.character, 5, "apple is 5 chars long");
     }
 
     // ---- Custom Tags Validator: Happy Paths / Multi-document / Nested ----
@@ -1463,7 +1340,7 @@ jobs:
     fn custom_tags_returns_empty(#[case] input: &str, #[case] allowed_tags: &[&str]) {
         let docs = parse_docs(input);
         let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
-        let result = validate_custom_tags(input, &docs, &allowed);
+        let result = validate_custom_tags(&docs, &allowed);
 
         assert!(result.is_empty());
     }
@@ -1472,12 +1349,10 @@ jobs:
     #[case::unknown_tag("value: !include foo.yaml\n", &["!other"] as &[&str])]
     #[case::multiple_tags_only_unknown_flagged("a: !include foo.yaml\nb: !ref bar.yaml\n", &["!include"])]
     #[case::nested_tagged_value("outer:\n  inner: !include nested.yaml\n", &["!other"])]
-    #[case::tag_in_double_quoted_skipped_range("note: \"use !include for files\"\nvalue: !include actual.yaml\n", &["!other"])]
-    #[case::tag_in_single_quoted_skipped_range("note: 'see !ref for details'\nvalue: !ref target.yaml\n", &["!other"])]
     fn custom_tags_single_diagnostic(#[case] input: &str, #[case] allowed_tags: &[&str]) {
         let docs = parse_docs(input);
         let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
-        let result = validate_custom_tags(input, &docs, &allowed);
+        let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
     }
@@ -1489,7 +1364,7 @@ jobs:
         let text = "value: !include foo.yaml\n";
         let docs = parse_docs(text);
         let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
-        let result = validate_custom_tags(text, &docs, &allowed);
+        let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -1507,36 +1382,116 @@ jobs:
 
         // Neither allowed
         let neither: HashSet<String> = HashSet::from(["!other".to_string()]);
-        let result = validate_custom_tags(text, &docs, &neither);
+        let result = validate_custom_tags(&docs, &neither);
         assert_eq!(result.len(), 2);
 
         // Both allowed
         let both: HashSet<String> = HashSet::from(["!include".to_string(), "!ref".to_string()]);
-        let result = validate_custom_tags(text, &docs, &both);
+        let result = validate_custom_tags(&docs, &both);
         assert!(result.is_empty());
     }
 
+    // ---- Custom Tags Validator: AST-range regression tests ----
+
     #[test]
-    fn tag_boundary_check_rejects_prefix_match() {
-        let text = "value: !include_extras foo.yaml\n";
+    fn tag_on_mapping_value_range_equals_scalar_loc() {
+        let text = "key: !custom value\n";
         let docs = parse_docs(text);
         let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
-        let result = validate_custom_tags(text, &docs, &allowed);
+        let result = validate_custom_tags(&docs, &allowed);
 
-        assert!(result.len() <= 1, "should not crash on boundary check");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 0, "scalar on line 0");
+        // The parser's loc.start.column for a tagged scalar points to where the
+        // value content begins (after the tag token and separating space).
+        // "key: !custom value" — "value" starts at col 13.
+        assert_eq!(
+            result[0].range.start.character, 13,
+            "scalar value content starts at col 13 (after '!custom ')"
+        );
     }
 
     #[test]
-    fn second_occurrence_of_same_tag_has_correct_range() {
+    fn tag_on_sequence_item_range_equals_scalar_loc() {
+        let text = "items:\n  - !custom value\n";
+        let docs = parse_docs(text);
+        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(&docs, &allowed);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 1, "scalar on line 1");
+        // "  - !custom value" — "value" starts at col 12.
+        assert_eq!(
+            result[0].range.start.character, 12,
+            "scalar value content starts at col 12 (after '  - !custom ')"
+        );
+    }
+
+    #[test]
+    fn repeated_tag_strings_each_emit_own_diagnostic() {
         let text = "a: !include file1.yaml\nb: !include file2.yaml\n";
         let docs = parse_docs(text);
         let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
-        let result = validate_custom_tags(text, &docs, &allowed);
+        let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 2);
-        let lines: Vec<u32> = result.iter().map(|d| d.range.start.line).collect();
-        assert!(lines.contains(&0), "first occurrence on line 0");
-        assert!(lines.contains(&1), "second occurrence on line 1");
+        assert_eq!(result[0].range.start.line, 0, "first node on line 0");
+        assert_eq!(result[1].range.start.line, 1, "second node on line 1");
+    }
+
+    #[test]
+    fn quoted_scalar_text_containing_tag_syntax_not_flagged() {
+        let text = "note: \"use !include for files\"\n";
+        let docs = parse_docs(text);
+        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let result = validate_custom_tags(&docs, &allowed);
+
+        assert!(
+            result.is_empty(),
+            "quoted scalar has tag: None — no diagnostic expected"
+        );
+    }
+
+    // ---- Key Ordering Validator: AST-range regression tests ----
+
+    #[test]
+    fn out_of_order_key_range_covers_key_span() {
+        let text = "banana: 2\napple: 1\n";
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let result = validate_key_ordering(&docs);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 1, "apple on line 1");
+        assert_eq!(result[0].range.start.character, 0, "apple at col 0");
+        assert_eq!(result[0].range.end.character, 5, "apple is 5 chars");
+    }
+
+    #[test]
+    fn out_of_order_key_in_indented_block_has_correct_column() {
+        let text = "outer:\n  zebra: 1\n  alpha: 2\n";
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let result = validate_key_ordering(&docs);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].range.start.line, 2, "alpha on line 2");
+        assert_eq!(result[0].range.start.character, 2, "alpha indented by 2");
+        assert_eq!(
+            result[0].range.end.character, 7,
+            "col 2 + len('alpha') == 7"
+        );
+    }
+
+    #[test]
+    fn out_of_order_keys_in_flow_mapping() {
+        let text = "{zebra: 1, alpha: 2}";
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let result = validate_key_ordering(&docs);
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].range.start.character > 0,
+            "alpha's column in flow mapping is non-zero"
+        );
     }
 
     // ---- Duplicate Key Validator: Happy Paths / Edge Cases / All no-dup groups ----

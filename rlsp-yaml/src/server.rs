@@ -509,7 +509,6 @@ impl Backend {
         let key_ordering = self.get_key_ordering();
         if key_ordering {
             diagnostics.extend(crate::validation::validators::validate_key_ordering(
-                text,
                 &result.documents,
             ));
         }
@@ -517,7 +516,6 @@ impl Backend {
         let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
         allowed_tags.extend(crate::schema::extract_custom_tags(text));
         diagnostics.extend(crate::validation::validators::validate_custom_tags(
-            text,
             &result.documents,
             &allowed_tags,
         ));

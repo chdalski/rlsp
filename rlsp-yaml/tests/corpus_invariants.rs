@@ -115,12 +115,12 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
     // Stage 4: validate_custom_tags (empty allowed set — all tags are unknown)
     let allowed_tags: HashSet<String> = HashSet::new();
     catch_unwind(AssertUnwindSafe(|| {
-        validate_custom_tags(text, &docs, &allowed_tags)
+        validate_custom_tags(&docs, &allowed_tags)
     }))
     .map_err(|e| format!("panic in validate_custom_tags: {}", panic_message(&e)))?;
 
     // Stage 5: validate_key_ordering
-    catch_unwind(AssertUnwindSafe(|| validate_key_ordering(text, &docs)))
+    catch_unwind(AssertUnwindSafe(|| validate_key_ordering(&docs)))
         .map_err(|e| format!("panic in validate_key_ordering: {}", panic_message(&e)))?;
 
     // Stage 6: validate_duplicate_keys
@@ -137,7 +137,7 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("panic in format_yaml: {}", panic_message(&e)))?;
 
     // Stage 9: code_actions with zero-width range at (0,0) and all diagnostics
-    let all_diagnostics = collect_all_diagnostics(text, &docs);
+    let all_diagnostics = collect_all_diagnostics(&docs);
     let zero_range = Range::new(Position::new(0, 0), Position::new(0, 0));
     let fake_uri = tower_lsp::lsp_types::Url::parse("file:///corpus/test.yaml").expect("valid URI");
     catch_unwind(AssertUnwindSafe(|| {
@@ -155,7 +155,7 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
 fn check_i2_range_validity(_path: &Path, text: &str) -> Result<(), String> {
     let parse_result = parse_yaml(text);
     let docs = parse_result.documents;
-    let diagnostics = collect_all_diagnostics(text, &docs);
+    let diagnostics = collect_all_diagnostics(&docs);
     check_diagnostic_ranges(text, &diagnostics)
 }
 
@@ -294,7 +294,7 @@ fn check_utf8_boundary(
 fn check_i3_code_action_round_trip(path: &Path, text: &str) -> Result<(), String> {
     let parse_result = parse_yaml(text);
     let docs = parse_result.documents;
-    let all_diagnostics = collect_all_diagnostics(text, &docs);
+    let all_diagnostics = collect_all_diagnostics(&docs);
 
     // Build pre-edit error set: only DiagnosticSeverity::Error entries.
     let pre_edit_errors = error_key_set(&collect_error_diagnostics(text));
@@ -378,7 +378,7 @@ fn check_i3_code_action_round_trip(path: &Path, text: &str) -> Result<(), String
 fn check_i4_scalar_preservation(path: &Path, text: &str) -> Result<(), String> {
     let parse_result = parse_yaml(text);
     let pre_scalars = collect_scalar_values(&parse_result.documents);
-    let all_diagnostics = collect_all_diagnostics(text, &parse_result.documents);
+    let all_diagnostics = collect_all_diagnostics(&parse_result.documents);
 
     let lines: Vec<&str> = text.lines().collect();
     let last_line = lines.len().saturating_sub(1) as u32;
@@ -504,7 +504,7 @@ fn missing_scalars(pre: &[String], post: &[String]) -> Vec<String> {
 fn collect_error_diagnostics(text: &str) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let parse_result = parse_yaml(text);
     let docs = parse_result.documents;
-    collect_all_diagnostics(text, &docs)
+    collect_all_diagnostics(&docs)
         .into_iter()
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect()
@@ -582,17 +582,16 @@ fn lsp_pos_to_byte_offset(text: &str, pos: Position) -> usize {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Collect diagnostics from all validators for a given text + parsed documents.
+/// Collect diagnostics from all validators for a given parsed documents set.
 fn collect_all_diagnostics(
-    text: &str,
     docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(docs));
     all.extend(validate_flow_style(docs));
-    all.extend(validate_custom_tags(text, docs, &allowed_tags));
-    all.extend(validate_key_ordering(text, docs));
+    all.extend(validate_custom_tags(docs, &allowed_tags));
+    all.extend(validate_key_ordering(docs));
     all.extend(validate_duplicate_keys(docs));
     all.extend(validate_yaml11_compat(docs));
     all
