@@ -223,7 +223,7 @@ developer blocks Task 3 if the stub is missing.
 - [x] Establish harness scaffolding and seed corpus
 - [x] Implement invariants I1 (no panics) and I2
       (range validity)
-- [ ] Implement invariant I3 (code-action round-trip)
+- [x] Implement invariant I3 (code-action round-trip)
 - [ ] Record baseline worklist
 
 ## Tasks
@@ -399,7 +399,7 @@ added).
 Implement the invariant that most directly catches the
 destructive quick-fix bug class.
 
-- [ ] Register I3 — "Code-action output parses":
+- [x] Register I3 — "Code-action output parses":
   - For each corpus file:
     - Collect all diagnostics from all validators (as
       in I1/I2)
@@ -421,7 +421,7 @@ destructive quick-fix bug class.
   - Failure message identifies: the code-action
     title, the originating diagnostic's code/range,
     and the new error introduced
-- [ ] Add skip-list entries for expected failures
+- [x] Add skip-list entries for expected failures
       following the Surprise Failure Protocol from
       Task 2. Entries fall into two known classes:
   - Entries caused by `validate_flow_style`
@@ -438,11 +438,11 @@ destructive quick-fix bug class.
     task, the developer blocks and messages the lead
     rather than adding a skip-list entry with an
     unfiled TODO marker.
-- [ ] Any other I3 failure beyond these two classes is
+- [x] Any other I3 failure beyond these two classes is
       a surprise failure — apply the Surprise Failure
       Protocol from Task 2.
-- [ ] Per-entry skip-list verification as in Task 2.
-- [ ] `cargo test --test corpus_invariants` exits
+- [x] Per-entry skip-list verification as in Task 2.
+- [x] `cargo test --test corpus_invariants` exits
       successfully with all failures accounted for.
       `cargo clippy --all-targets` clean.
 
@@ -450,6 +450,16 @@ Acceptance: I3 runs against every (file, diagnostic,
 action) tuple. All currently-failing cases are on the
 skip-list with verified per-entry coverage and
 specific follow-up-plan references.
+
+**Completed:** commit `0510bb7` — I3 registered.
+Skip-list stayed empty: all 4 corpus files pass I3 as
+currently defined (no code action produces
+syntactically-invalid YAML). Note the significant gap
+this exposes — see the Decisions section entry "I3 gap
+surfaced during Task 3" for the finding. Adds 9 unit
+tests for the `apply_text_edits` helper (reverse-order
+application, multi-line span, UTF-16 indexing after
+multi-byte chars, empty/zero-width edits).
 
 ### Task 4: Baseline worklist document
 
