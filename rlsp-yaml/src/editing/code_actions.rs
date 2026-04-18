@@ -63,7 +63,7 @@ pub fn code_actions(
             },
             quoted_bool_to_unquoted(line, line_idx, range, uri),
             string_to_block_scalar(line, line_idx, uri),
-            block_to_flow(docs, text, line_idx, uri),
+            block_to_flow(docs, line_idx, uri),
         ]
         .into_iter()
         .flatten()
@@ -375,7 +375,6 @@ const fn span_matches_diag(loc: &Span, diag: &Diagnostic) -> bool {
 
 fn block_to_flow(
     docs: &[Document<Span>],
-    text: &str,
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
@@ -403,8 +402,8 @@ fn block_to_flow(
 
     // Compute the edit text and range. The block collection is always the VALUE
     // of a mapping entry whose key starts on line_idx. The replacement emits the
-    // flow form inline (` [one, two]` or ` { a: 1, b: 2 }`) replacing from the
-    // end of the key line to the end of the block content.
+    // flow form inline (` [one, two]` or ` { a: 1, b: 2 }`) replacing from just
+    // after the key's colon to the end of the block content.
     //
     // base_indent = key column + 2: when the flow output wraps across lines,
     // continuation lines must be indented further than the surrounding block
@@ -412,7 +411,6 @@ fn block_to_flow(
     // base_indent = key_loc.start.column + 2 satisfies the YAML spec requirement
     // that flow continuation lines be indented more than the enclosing block.
     let base_indent = key_loc.start.column + 2;
-    let lines: Vec<&str> = text.lines().collect();
     let key_line = key_loc.start.line.saturating_sub(1); // 0-based
     let formatted = format_subtree(&flow_node, &YamlFormatOptions::default(), base_indent);
     let new_text = format!(" {formatted}");
@@ -427,9 +425,12 @@ fn block_to_flow(
         "Convert block to flow style".to_string()
     };
 
-    // Replace from the end of the key line to the end of the block content.
-    let key_line_text = lines.get(key_line).copied().unwrap_or("");
-    let edit_start_col = key_line_text.len();
+    // Replace from just after the key's colon to the end of the block content.
+    // key_loc.end is exclusive, so end.column is the column of the ':'. Adding 1
+    // positions the edit start after the colon. For anchored values like
+    // `defaults: &base`, this replaces ` &base\n  …` with ` &base { … }` so
+    // the formatter-emitted anchor is not duplicated on top of the existing one.
+    let edit_start_col = key_loc.end.column + 1;
 
     #[expect(
         clippy::cast_possible_truncation,
@@ -908,38 +909,6 @@ fn schema_yaml11_bool_type_actions(
     )]
 }
 
-// ---------- Helpers ----------
-
-/// Quote a block sequence item for use in a flow sequence if it contains
-/// characters that are unsafe in flow context.
-///
-/// Already-quoted items (surrounded by matching `"…"` or `'…'`) are returned
-/// as-is to prevent double-quoting.
-///
-/// Flow-unsafe: contains `,`, `[`, `]`, `{`, `}`, or starts with a character
-/// that would cause ambiguity (`#`, `&`, `*`, `!`, `|`, `>`, `'`, `"`, `%`,
-/// `@`, `` ` ``).
-#[cfg(test)]
-fn quote_flow_item(item: &str) -> String {
-    if (item.len() >= 2 && item.starts_with('"') && item.ends_with('"'))
-        || (item.len() >= 2 && item.starts_with('\'') && item.ends_with('\''))
-    {
-        return item.to_string();
-    }
-    let needs_quotes = item.contains([',', '[', ']', '{', '}'])
-        || item.chars().next().is_some_and(|c| {
-            matches!(
-                c,
-                '#' | '&' | '*' | '!' | '|' | '>' | '\'' | '"' | '%' | '@' | '`'
-            )
-        });
-    if needs_quotes {
-        format!("\"{item}\"")
-    } else {
-        item.to_string()
-    }
-}
-
 #[cfg(test)]
 #[expect(
     clippy::indexing_slicing,
@@ -1027,8 +996,11 @@ mod tests {
                 result.push_str(&src_line[..start_col]);
                 result.push_str(&edit.new_text);
                 result.push('\n');
+            } else if i == end_line {
+                result.push_str(&src_line[end_col..]);
+                result.push('\n');
             }
-            // lines between start and end are replaced (absorbed into the edit)
+            // lines strictly between start and end are absorbed into the edit
         }
         result
     }
@@ -1784,27 +1756,6 @@ mod tests {
         assert!(actions.is_empty());
     }
 
-    // ---- quote_flow_item ----
-
-    #[rstest]
-    #[case::double_quoted_passthrough("\"true\"", "\"true\"")]
-    #[case::single_quoted_passthrough("'hello'", "'hello'")]
-    #[case::plain_item_unchanged("plain", "plain")]
-    #[case::comma_triggers_quoting("value, with comma", "\"value, with comma\"")]
-    #[case::hash_prefix_triggers_quoting("#comment-like", "\"#comment-like\"")]
-    #[case::brackets_trigger_quoting("[nested]", "\"[nested]\"")]
-    // Starts with `"` but does not end with `"` — not a complete quoted string.
-    // Gets wrapped: `"` + `"unclosed` + `"` = `""unclosed"`
-    #[case::unclosed_opening_double_quote("\"unclosed", "\"\"unclosed\"")]
-    // Ends with `"` but does not start with `"` — safe, returned as-is.
-    #[case::only_trailing_double_quote("unclosed\"", "unclosed\"")]
-    // Single `"` char: starts and ends with `"` but len == 1, so not pre-quoted.
-    // Falls through to flow-unsafe path and gets wrapped: `"` + `"` + `"` = `"""`
-    #[case::single_double_quote_char("\"", "\"\"\"")]
-    fn quote_flow_item_cases(#[case] input: &str, #[case] expected: &str) {
-        assert_eq!(quote_flow_item(input), expected);
-    }
-
     #[test]
     fn should_preserve_double_quoted_item_when_converting_block_seq_to_flow() {
         let text = "items:\n  - \"true\"\n  - \"false\"\n";
@@ -1932,6 +1883,161 @@ mod tests {
         let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
 
         assert!(actions.iter().all(|a| a.title != "Quote value"));
+    }
+
+    // ---- block_to_flow: mapping-value quoting and anchor regression tests ----
+    // These tests cover defect classes from the OLD text-surgery implementation
+    // that would have produced broken or incorrect YAML. The AST+formatter path
+    // must handle all of them correctly.
+
+    // Mapping value containing a colon (e.g. a URL) — valid unquoted in flow context
+    // because ':' without a following space is not a YAML mapping separator.
+    #[test]
+    fn should_produce_valid_yaml_for_mapping_value_containing_colon() {
+        let text = "endpoint:\n  url: http://example.com\n  method: GET\n";
+        let result = apply_block_to_flow_edit(text, 0);
+        let parse_result = parse_yaml(&result);
+        assert!(
+            parse_result.diagnostics.is_empty(),
+            "colon-in-value mapping must reparse without diagnostics; got: {:?}\nresult:\n{result}",
+            parse_result.diagnostics
+        );
+        assert!(
+            result.contains("http://example.com"),
+            "URL value must be preserved: {result:?}"
+        );
+    }
+
+    // Mapping value containing a comma — must be quoted in flow context.
+    #[test]
+    fn should_quote_mapping_value_containing_comma_when_converting_block_to_flow() {
+        let text = "info:\n  tags: foo, bar\n  name: safe\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("\"foo, bar\""),
+            "comma-containing mapping value must be quoted: {:?}",
+            edits[0].new_text
+        );
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            parse_yaml(&result).diagnostics.is_empty(),
+            "result must reparse cleanly: {result:?}"
+        );
+    }
+
+    // Mapping value containing a brace — must be quoted in flow context.
+    #[test]
+    fn should_quote_mapping_value_containing_brace_when_converting_block_to_flow() {
+        let text = "template:\n  expr: ${VAR}\n  name: safe\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("\"${VAR}\""),
+            "brace-containing mapping value must be quoted: {:?}",
+            edits[0].new_text
+        );
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            parse_yaml(&result).diagnostics.is_empty(),
+            "result must reparse cleanly: {result:?}"
+        );
+    }
+
+    // Mapping value containing a bracket — must be quoted in flow context.
+    #[test]
+    fn should_quote_mapping_value_containing_bracket_when_converting_block_to_flow() {
+        let text = "filter:\n  pattern: a[0]\n  name: safe\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("\"a[0]\""),
+            "bracket-containing mapping value must be quoted: {:?}",
+            edits[0].new_text
+        );
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            parse_yaml(&result).diagnostics.is_empty(),
+            "result must reparse cleanly: {result:?}"
+        );
+    }
+
+    // Mapping key that is double-quoted with an embedded colon — the AST preserves
+    // the key's scalar value; the formatter emits it as a plain scalar in flow context
+    // (valid because ':' not followed by space is not a flow separator).
+    #[test]
+    fn should_preserve_quoted_key_with_colon_when_converting_block_to_flow() {
+        let text = "labels:\n  \"foo:bar\": value\n  safe: ok\n";
+        let result = apply_block_to_flow_edit(text, 0);
+        let parse_result = parse_yaml(&result);
+        assert!(
+            parse_result.diagnostics.is_empty(),
+            "quoted-key-with-colon mapping must reparse without diagnostics; got: {:?}\nresult:\n{result}",
+            parse_result.diagnostics
+        );
+        assert!(
+            result.contains("foo:bar"),
+            "key value must be preserved in output: {result:?}"
+        );
+    }
+
+    // Anchored block mapping — the formatter emits the anchor inline before the flow
+    // braces; the edit range starts after the key colon so the anchor is not duplicated.
+    #[test]
+    fn should_preserve_anchor_when_converting_anchored_block_mapping_to_flow() {
+        let text = "defaults: &base\n  timeout: 30\n  retries: 3\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("&base"),
+            "anchor must appear in flow output: {:?}",
+            edits[0].new_text
+        );
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            parse_yaml(&result).diagnostics.is_empty(),
+            "anchored mapping result must reparse without diagnostics; got: {:?}\nresult:\n{result}",
+            parse_yaml(&result).diagnostics
+        );
+    }
+
+    // Anchored block sequence — same anchor-preservation requirement as for mappings.
+    #[test]
+    fn should_preserve_anchor_when_converting_anchored_block_sequence_to_flow() {
+        let text = "items: &mylist\n  - a\n  - b\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].new_text.contains("&mylist"),
+            "anchor must appear in flow output: {:?}",
+            edits[0].new_text
+        );
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            parse_yaml(&result).diagnostics.is_empty(),
+            "anchored sequence result must reparse without diagnostics; got: {:?}\nresult:\n{result}",
+            parse_yaml(&result).diagnostics
+        );
     }
 
     #[test]

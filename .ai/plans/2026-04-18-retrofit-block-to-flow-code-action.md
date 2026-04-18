@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -172,7 +172,7 @@ closest to the cursor.
 
 - [x] Rewrite `block_to_flow` as AST + `format_subtree`
       with cursor-based block-node matching
-- [ ] Cleanup — retire `quote_flow_item` if unused,
+- [x] Cleanup — retire `quote_flow_item` if unused,
       add regression tests for the defect classes,
       update `feature-log.md`
 
@@ -294,12 +294,12 @@ helpers, add regression tests targeting the specific
 defect classes the old implementation failed on, and
 update user-facing docs.
 
-- [ ] Check `rlsp-yaml/src/editing/code_actions.rs`
+- [x] Check `rlsp-yaml/src/editing/code_actions.rs`
       for remaining callers of `quote_flow_item`. If
       no callers remain after Task 1, delete it.
       Otherwise leave in place with a one-line
       comment noting the remaining caller.
-- [ ] Audit allow-list status: verify
+- [x] Audit allow-list status: verify
       `rlsp-yaml/tests/parser_boundary_audit.rs`
       allow-list remains at exactly the 4 validator
       entries. The `block_to_flow` rewrite doesn't
@@ -307,7 +307,7 @@ update user-facing docs.
       function), so no audit regex interaction.
       Confirm nothing shifts by running
       `cargo test --test parser_boundary_audit`.
-- [ ] Add unit tests for the specific defect
+- [x] Add unit tests for the specific defect
       classes the old implementation failed on —
       these are NEW tests, not replacements for the
       existing ones:
@@ -331,7 +331,7 @@ update user-facing docs.
     records the anchor; the flow output must
     preserve it (verify against whatever the
     formatter emits for anchored nodes)
-- [ ] Update `rlsp-yaml/docs/feature-log.md`: add a
+- [x] Update `rlsp-yaml/docs/feature-log.md`: add a
       new entry recording the AST-based block-to-flow
       rewrite. Short form matching the flow-to-block
       entry's shape.
@@ -349,6 +349,19 @@ identifying the remaining caller. New regression
 tests cover each defect class from Context; audit
 allow-list unchanged at 4 entries; workspace suite
 green; `feature-log.md` records the change.
+
+**Completed:** commit `96cb85c` —
+`quote_flow_item` deleted (zero callers remained).
+Bonus fixes discovered during cleanup: anchor
+duplication bug in `edit_start_col` (now uses
+`key_loc.end.column + 1` after the colon — parser
+half-open span convention per `pos.rs:72-79`), and
+missing `else if i == end_line` branch in
+`apply_block_to_flow_edit` that was dropping the
+end-line tail on multi-line edits. 7 regression
+tests added covering all 5 Context-listed defect
+classes plus anchored-mapping and anchored-sequence
+bonuses. `feature-log.md` entry added.
 
 ## Decisions
 

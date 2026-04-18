@@ -12,6 +12,13 @@ with existing infrastructure.
 
 ---
 
+### AST-Based Block-to-Flow Code Action [completed]
+
+**Description:** Replaced the text-surgery implementation of the `block_to_flow` code action with an AST+formatter approach. The action now walks the `rlsp-yaml-parser` document tree to find the innermost block collection whose key starts on the cursor line, flips `CollectionStyle` to `Flow`, and re-emits via `format_subtree`. This eliminates four defect classes from the old implementation: (1) heuristic key detection via first-colon scan, which failed on URLs and quoted keys with embedded colons; (2) no flow-unsafe escaping on mapping values — values containing `,`, `[`, `]`, `{`, `}` now get correctly double-quoted; (3) quoting applied only to sequence items, leaving mapping values unescaped; (4) heuristic indent-walking that could misclassify structure near comments or unusual indentation. Anchors on block collections are correctly preserved in the flow output. The `quote_flow_item` helper function was removed.
+**Complexity:** Medium
+**Comment:** The edit range starts after the key's colon rather than at the end of the full key line, preventing the formatter-emitted anchor from being duplicated on top of an existing `key: &anchor` prefix in source. Refuse-nested behavior is preserved.
+**Tier:** 1
+
 ### AST-Based Flow-to-Block Quick Fixes [completed]
 
 **Description:** Replaced the text-surgery implementations of the `flow_map_to_block` and `flow_seq_to_block` quick fixes with an AST+formatter approach. Both quick fixes now find the target node by matching the diagnostic's range against parser AST spans, flip the node's `CollectionStyle` to `Block`, and re-emit the subtree via `format_subtree`. Previously the text-surgery path had three classes of destructive failures: (a) sequence-item flow mappings like `- { target: linux, os: ubuntu }` had the `-` and leading whitespace overwritten; (b) multi-line flow mappings were never correctly extracted; (c) key reconstruction via `prefix.trim_end().ends_with(':')` discarded key structure when the prefix was anything other than a mapping key, dropping scalar content. All three defect classes are resolved. The `code_actions` public entry point now takes `&[Document<Span>]` as its first parameter, removing the last edit-path function from the parser boundary audit allow-list.
