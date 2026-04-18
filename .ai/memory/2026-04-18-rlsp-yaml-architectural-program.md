@@ -288,21 +288,21 @@ reflects sequencing as of 2026-04-18 late afternoon
    apply_block_to_flow_edit. Retired `quote_flow_item`.
    Preserves refuse-nested behavior; nested-support
    lifting is queued in `project_followup_plans.md`.
-2.5. 🟡 **Retrofit `string_to_block_scalar` via AST +
-   format_subtree** (`.ai/plans/2026-04-18-retrofit-string-to-block-scalar-code-action.md`).
-   Task 1 (AST rewrite) landed at `370b8c4`
-   2026-04-18. Task 2 (cleanup, regression tests not
-   yet added in Task 1, feature-log.md entry, audit
-   re-verify) still pending. Important correction
-   made during execution: the plan's
-   `base_indent = key_col + 2` formula was WRONG for
-   block scalars — `format_subtree` already adds
-   `tab_width` via the printer, so `base_indent =
-   key_col` is correct. Decision rationale documented
-   in the Task 1 completion note. Pattern note: DO NOT
-   copy `block_to_flow`'s `+2` formula for scalar
-   retrofits — flow and block emitters have different
-   printer-indent behaviors.
+2.5. ✅ **Retrofit `string_to_block_scalar` via AST +
+   format_subtree.** Completed 2026-04-18 under
+   `.ai/plans/2026-04-18-retrofit-string-to-block-scalar-code-action.md`.
+   Two tasks: AST rewrite (`370b8c4`) + cleanup
+   (`52b2002`). All 10 defect-class regressions
+   covered (eagerly added in Task 1). Important
+   pattern note from execution: the initial plan
+   said `base_indent = key_col + 2` but the correct
+   formula is `base_indent = key_col` — `format_subtree`
+   already adds `tab_width` via `repr_block_to_doc`,
+   so adding `+2` at the call site would over-indent.
+   DO NOT copy `block_to_flow`'s `+2` formula when
+   retrofitting block-scalar code actions — flow and
+   block emitters have different printer-indent
+   behaviors.
 3. **Retrofit remaining code actions to AST+formatter.**
    Queued as individual items in
    `project_followup_plans.md`:
@@ -503,18 +503,20 @@ its own plan during Move 3's ongoing expansion.
 
 ## Immediate resume state (as of 2026-04-18 afternoon)
 
-**Last committed work:** `370b8c4` — Task 1 of
+**Last committed work:** `a48eba8` — Plan
 `.ai/plans/2026-04-18-retrofit-string-to-block-scalar-code-action.md`
-approved and committed.
+marked Completed. Both tasks landed cleanly.
 
-**Next immediate action:** Team `rlsp-yaml-s2bs` is
-still alive. Cycle it (TeamDelete + TeamCreate +
-spawn 4) and dispatch Task 2 of the
-string_to_block_scalar plan. Task 2 is CLEANUP:
-verify allow-list still at 4, add defect-class
-regression tests that weren't eagerly added in Task 1
-(many already were — verify which are actually still
-missing), update `feature-log.md`. Small task.
+**Next immediate action:** Per user's sequencing
+decision, start the **audit v2 extension** plan
+IMMEDIATELY (before the remaining code-action
+retrofits). Details in `project_followup_plans.md`
+under "Extend `parser_boundary_audit` to detect
+private + broader-parameter-name text-scan". After
+that, remaining code-action retrofits in any order:
+`quoted_bool_to_unquoted`, `yaml11_bool_actions`,
+`yaml11_octal_actions`, `schema_yaml11_bool_type_actions`,
+`delete_unused_anchor`.
 
 **Known quirks from Task 1 execution to watch for in
 future cycles:**
