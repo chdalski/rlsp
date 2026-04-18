@@ -131,7 +131,7 @@ shape.
 - [x] Add "One parser, one AST" rule to root CLAUDE.md
 - [x] Retrofit `validate_flow_style` to consume the AST
 - [x] Add regression coverage for GHA-style expressions
-- [ ] Add a boundary-audit `#[test]` that fails when new
+- [x] Add a boundary-audit `#[test]` that fails when new
       violators are introduced
 - [ ] Gate release-plz on successful CI via `workflow_run`
 
@@ -310,7 +310,7 @@ takes `text: &str` outside an allow-list. The test encodes
 the CLAUDE.md rule mechanically and carries the inventoried
 violators as a visible worklist.
 
-- [ ] Create `rlsp-yaml/tests/parser_boundary_audit.rs`
+- [x] Create `rlsp-yaml/tests/parser_boundary_audit.rs`
       that:
   - Walks `src/**/*.rs` using `std::fs` (no new deps)
   - Detects pub-fn signatures matching `pub fn validate_\w+\(`
@@ -327,7 +327,7 @@ violators as a visible worklist.
     in Context carry a `// TODO(follow-up-plan):`
     justification referencing the function name so
     follow-up plans have a visible worklist
-- [ ] Add a top-of-file comment to
+- [x] Add a top-of-file comment to
       `parser_boundary_audit.rs` stating explicitly: *the
       allow-list is shrink-only. Entries are removed as
       violators are retrofitted in follow-up plans. New
@@ -338,7 +338,7 @@ violators as a visible worklist.
       justification referencing the exception category*.
       This constraint is the audit's enforcement surface
       — without it the test degrades to a rubber stamp.
-- [ ] Verify per-entry coverage before trusting the
+- [x] Verify per-entry coverage before trusting the
       allow-list: for each inventoried violator placed
       on the list, temporarily remove its entry and run
       the audit. The test must fail citing that specific
@@ -348,10 +348,10 @@ violators as a visible worklist.
       actual signature, so the entry protects nothing.
       The commit message for Task 4 records that each
       inventoried entry was verified.
-- [ ] Test fails cleanly when a synthetic new violator
+- [x] Test fails cleanly when a synthetic new violator
       is added to the crate (manual spot-check during
       development)
-- [ ] Test passes on the retrofitted codebase
+- [x] Test passes on the retrofitted codebase
 
 Acceptance: `cargo test --test parser_boundary_audit`
 passes. The top-of-file comment states the shrink-only
@@ -360,6 +360,19 @@ stub locally (and reverting) confirms the audit fails on
 new violators. The per-entry verification has been
 performed for every allow-listed violator and recorded
 in the commit message.
+
+**Completed:** commit `84d6ece` — boundary
+audit lands in `rlsp-yaml/tests/parser_boundary_audit.rs`.
+5 allow-list entries (the 4 inventoried violators plus
+`validate_schema` in `schema_validation.rs`, discovered
+during implementation). Per-entry verification performed
+and reviewer-side re-verified. Also adds 10 unit tests
+covering regex detection (Group A) and allow-list
+mechanics (Group B). `flow_map_to_block` /
+`flow_seq_to_block` are private helpers taking
+`lines: &[&str]`, so they fall outside the audit's
+public-function scope by design — tracked in the
+destructive-code-action-fix stub plan.
 
 ### Task 5: Gate release-plz on successful CI
 
