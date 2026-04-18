@@ -1287,6 +1287,38 @@ mod tests {
         );
     }
 
+    // ---- Flow Style Validator: GHA expression regression (Task 3) ----
+
+    #[test]
+    fn flow_style_ignores_github_actions_expressions() {
+        // Regression guard: all four expression forms must produce zero diagnostics;
+        // the real flow mapping in the same document must still be detected.
+        let yaml = "\
+jobs:
+  build:
+    env:
+      TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MATRIX_JSON: ${{ fromJSON(needs.x.outputs.y) }}
+      COMBINED: ${{ x }} and ${{ y }}
+    strategy:
+      matrix: { target: linux, os: ubuntu }
+";
+        let docs = parse_docs(yaml);
+        let result = validate_flow_style(&docs);
+
+        // Only the real flow mapping on the `matrix:` line should be reported.
+        assert_eq!(
+            result.len(),
+            1,
+            "expected exactly 1 diagnostic (matrix line), got: {result:?}"
+        );
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "flowMap"),
+            "expected flowMap diagnostic on matrix line, got: {:?}",
+            result[0].code,
+        );
+    }
+
     // ---- Map Key Order Validator: Happy Paths / Nested Structures / Edge Cases ----
 
     #[rstest]

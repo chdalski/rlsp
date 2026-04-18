@@ -178,6 +178,50 @@ jobs:
         run: cargo build
 ";
 
+/// GitHub Actions workflow representative of `.github/workflows/release-plz.yml` —
+/// multiple `${{ … }}` expressions in env/if/run alongside a real flow mapping
+/// in `strategy.matrix`. This is the regression fixture for the GHA false-positive
+/// bug class: expression lines must produce zero diagnostics; the matrix line must
+/// produce exactly one `flowMap` diagnostic.
+const GHA_RELEASE_PLZ_STYLE: &str = "\
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        run: |
+          echo token=${{ secrets.GITHUB_TOKEN }}
+
+  cross-build:
+    name: Cross Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        env:
+          MATRIX_JSON: ${{ fromJSON(needs.prepare.outputs.config) }}
+        run: cargo build --target ${{ matrix.target }}
+";
+
 // ---- Ansible fixtures -------------------------------------------------------
 
 /// Ansible playbook — `yes`/`no` and `on`/`off` YAML 1.1 keywords as values.
@@ -268,6 +312,54 @@ fn gha_matrix_no_false_positives() {
     assert_no_false_positives("GHA Matrix", GHA_MATRIX);
 }
 
+#[test]
+fn gha_release_plz_style_no_false_positives() {
+    assert_no_false_positives("GHA release-plz style", GHA_RELEASE_PLZ_STYLE);
+}
+
+#[test]
+fn gha_release_plz_style_expression_lines_zero_flow_diagnostics() {
+    // `${{ … }}` expressions must never produce flowMap/flowSeq diagnostics.
+    // The fixture has exactly two real flow collections:
+    //   - `branches: [main]`                      → flowSeq
+    //   - `matrix: { target: …, os: … }`          → flowMap
+    // All `${{ … }}` expression lines must produce zero additional diagnostics.
+    let docs = parse_yaml(GHA_RELEASE_PLZ_STYLE).documents;
+    let diags = validate_flow_style(&docs);
+
+    let flow_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_ref(),
+                Some(tower_lsp::lsp_types::NumberOrString::String(code))
+                    if code == "flowMap" || code == "flowSeq"
+            )
+        })
+        .collect();
+
+    // Exactly two diagnostics: branches flow seq + matrix flow map.
+    assert_eq!(
+        flow_diags.len(),
+        2,
+        "expected 2 flow diagnostics (branches flowSeq + matrix flowMap), got: {flow_diags:?}"
+    );
+    let has_flow_seq = flow_diags.iter().any(|d| {
+        matches!(d.code.as_ref(), Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "flowSeq")
+    });
+    let has_flow_map = flow_diags.iter().any(|d| {
+        matches!(d.code.as_ref(), Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "flowMap")
+    });
+    assert!(
+        has_flow_seq,
+        "expected flowSeq diagnostic for branches: [main]"
+    );
+    assert!(
+        has_flow_map,
+        "expected flowMap diagnostic for matrix: {{ … }}"
+    );
+}
+
 // ---- Ansible tests ----------------------------------------------------------
 
 #[test]
@@ -299,6 +391,7 @@ fn all_fixtures_parse_cleanly() {
         ("K8s Service", K8S_SERVICE),
         ("GHA Workflow", GHA_WORKFLOW),
         ("GHA Matrix", GHA_MATRIX),
+        ("GHA release-plz style", GHA_RELEASE_PLZ_STYLE),
         ("Ansible Playbook", ANSIBLE_PLAYBOOK),
     ];
     for (label, text) in &fixtures {

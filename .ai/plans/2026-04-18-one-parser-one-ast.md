@@ -130,7 +130,7 @@ shape.
 
 - [x] Add "One parser, one AST" rule to root CLAUDE.md
 - [x] Retrofit `validate_flow_style` to consume the AST
-- [ ] Add regression coverage for GHA-style expressions
+- [x] Add regression coverage for GHA-style expressions
 - [ ] Add a boundary-audit `#[test]` that fails when new
       violators are introduced
 - [ ] Gate release-plz on successful CI via `workflow_run`
@@ -262,7 +262,7 @@ Write tests that would have caught the original bug
 class. Both a narrow unit test and an ecosystem-style
 fixture using a representative GitHub Actions workflow.
 
-- [ ] Add unit test
+- [x] Add unit test
       `flow_style_ignores_github_actions_expressions` in
       `validators.rs` covering:
   - Single `${{ foo }}` as a plain-scalar value
@@ -273,7 +273,7 @@ fixture using a representative GitHub Actions workflow.
   - A real flow mapping in the same document
     (`matrix: { target: linux, os: ubuntu }`) to confirm
     positive detection still works
-- [ ] Add an ecosystem fixture exercising the pattern.
+- [x] Add an ecosystem fixture exercising the pattern.
       Either a new module/case in
       `tests/ecosystem_fixtures.rs` using a GitHub Actions
       workflow snippet, or a fixture file under
@@ -285,12 +285,22 @@ fixture using a representative GitHub Actions workflow.
       and assert zero `flowMap`/`flowSeq` diagnostics
       on the expression lines, plus positive detection
       on the matrix line
-- [ ] Tests must fail against current (pre-Task-2)
+- [x] Tests must fail against current (pre-Task-2)
       behavior and pass after Task 2
 
 Acceptance: running the new tests before Task 2's
 implementation lands shows them failing with specific
 false-positive diagnostics; after Task 2 they pass.
+
+**Completed:** commit `07048dc` — added
+`flow_style_ignores_github_actions_expressions` unit
+test and the `GHA_RELEASE_PLZ_STYLE` ecosystem fixture
+with `gha_release_plz_style_no_false_positives` and
+`gha_release_plz_style_expression_lines_zero_flow_diagnostics`
+tests. Regression-catch demonstrated: reverting Task 2
+locally surfaced 9 false positives on the unit test
+and 16 on the ecosystem test, consistent with the 2N-
+per-expression bug class documented in plan context.
 
 ### Task 4: Add boundary-audit test
 
