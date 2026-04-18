@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-18
 
 ## Goal
@@ -87,7 +87,7 @@ while something else quietly broke.
   that runs every registered invariant over every
   corpus file and reports failures per (file,
   invariant) pair
-- Three foundational invariants:
+- Four foundational invariants:
   - **I1 — No panics.** The full LSP pipeline (parser,
     every validator, formatter, code-action
     enumeration) must not panic on any corpus file.
@@ -109,6 +109,20 @@ while something else quietly broke.
     the original parse had no Error diagnostics, so
     the diagnostic-delta definition is what the
     harness actually checks.)
+  - **I4 — Refactor code actions preserve scalar
+    content.** For every code action with
+    `kind == CodeActionKind::REFACTOR_REWRITE`, every
+    scalar value (both keys and values) present in the
+    pre-edit AST must still be present in the
+    post-edit AST. New scalars may appear (e.g.
+    explicit null markers from a structural rewrite);
+    no pre-existing scalar may disappear. Catches the
+    class of bugs where an edit produces syntactically
+    valid but semantically destructive output — the
+    parseable-but-data-losing failure mode that
+    motivated the originating GHA-expression bug
+    report. Added after Task 3 surfaced that I3 was
+    too narrow to catch this class on its own.
 - A shrink-only skip-list mechanism for currently-failing
   (file, invariant) pairs where every entry references a
   concrete follow-up plan file path (same discipline as
@@ -129,11 +143,10 @@ while something else quietly broke.
   fixing each one is the job of subsequent plans
   (Move 1 retrofit, destructive code-action fix, other
   validator retrofits).
-- **No additional invariants beyond I1, I2, I3.** I4
-  (refactor AST equivalence), I5 (validator stability
-  under whitespace re-emit), I6 (formatter round-trip)
-  are explicitly deferred to later expansions under
-  Move 3.
+- **No additional invariants beyond I1, I2, I3, I4.**
+  I5 (validator stability under whitespace re-emit)
+  and I6 (formatter round-trip) are explicitly
+  deferred to later expansions under Move 3.
 - **No corpus expansion beyond 4 files.** Expansion is
   follow-up work under Move 3.
 
@@ -152,29 +165,31 @@ while something else quietly broke.
   `benches/insight.rs` run validators for timing, not
   correctness. Unaffected.
 
-### Lead pre-execution step
+### Lead pre-execution step (completed)
 
 The destructive `flow_map_to_block` / `flow_seq_to_block`
-quick-fix bug is known to produce I3 failures on
+quick-fix bug is known to produce I3 and I4 failures on
 legitimate flow maps in the corpus (traced during the
 investigation that motivated this plan). A follow-up
-plan to fix that bug must exist before Task 3 begins
-execution, so Task 3's skip-list entries can cite a
-concrete plan file rather than unfiled TODO markers.
+plan to fix that bug needed to exist before any task
+that would create skip-list entries citing it, so those
+entries could reference a concrete plan file rather
+than unfiled TODO markers.
 
-The lead files a stub plan
-(`.ai/plans/2026-04-NN-fix-destructive-flow-to-block-code-action.md`
-or similar) BEFORE dispatching Task 3 to the developer.
-The stub carries at minimum: Repository, Status
-NotStarted, Created, a one-paragraph Goal referencing
-this plan and the Move 1 plan, and a single Step "file
-proper plan content when Move 1 completes." The stub
-exists so Task 3 can reference it in the skip-list.
+The lead filed the stub plan at
+`.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`
+before Task 3 dispatched. The stub carries Repository,
+Status NotStarted, Created, a Goal referencing this
+plan and the Move 1 plan, and a single Step "file
+proper plan content when Move 1 completes." Task 3 and
+Task 4 skip-list entries for destructive-action
+failures reference that exact path.
 
-Without this stub, Task 3's skip-list entries for
-destructive-action failures have nowhere concrete to
-point, violating the skip-list discipline. The
-developer blocks Task 3 if the stub is missing.
+Task 3 landed with an empty skip-list because I3's
+definition doesn't catch the destructive output (see
+Task 4 for the motivation to add I4). Task 4 is
+expected to populate the skip-list with entries against
+the stub plan's path.
 
 ### Key implementation anchors
 
@@ -224,6 +239,8 @@ developer blocks Task 3 if the stub is missing.
 - [x] Implement invariants I1 (no panics) and I2
       (range validity)
 - [x] Implement invariant I3 (code-action round-trip)
+- [ ] Implement invariant I4 (refactor scalar/key
+      preservation)
 - [ ] Record baseline worklist
 
 ## Tasks
@@ -451,17 +468,123 @@ action) tuple. All currently-failing cases are on the
 skip-list with verified per-entry coverage and
 specific follow-up-plan references.
 
-**Completed:** commit `0510bb7` — I3 registered.
+**Completed:** commit `f9e28ae` — I3 registered.
 Skip-list stayed empty: all 4 corpus files pass I3 as
 currently defined (no code action produces
 syntactically-invalid YAML). Note the significant gap
-this exposes — see the Decisions section entry "I3 gap
-surfaced during Task 3" for the finding. Adds 9 unit
-tests for the `apply_text_edits` helper (reverse-order
-application, multi-line span, UTF-16 indexing after
-multi-byte chars, empty/zero-width edits).
+this exposes — see the Decisions section entry on the
+I4 addition for the finding. Adds 9 unit tests for the
+`apply_text_edits` helper (reverse-order application,
+multi-line span, UTF-16 indexing after multi-byte
+chars, empty/zero-width edits).
 
-### Task 4: Baseline worklist document
+### Task 4: Register invariant I4 (refactor scalar/key preservation)
+
+Add I4 to the harness. I4 catches the class of bugs
+where a code action produces syntactically valid but
+semantically destructive output — specifically, the
+kind of destructive quick-fix that motivated this
+architectural program. The `flow_map_to_block` /
+`flow_seq_to_block` code actions currently drop the
+`GITHUB_TOKEN` key on inputs like
+`GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` (the
+mangled output is parseable YAML, so I3 misses it, but
+the key has vanished). I4 surfaces this as a failure
+the destructive-code-action-fix follow-up plan will
+drive to green.
+
+**Operational definition:** For every code action with
+`kind == CodeActionKind::REFACTOR_REWRITE`:
+1. Collect the multiset of `Scalar` values from the
+   pre-edit AST — both keys and values, recursing
+   into nested collections
+2. Apply the code action's `TextEdit`s to a copy of
+   the source text (reverse-start-position order, same
+   as I3)
+3. Parse the post-edit text and collect the multiset
+   of `Scalar` values from the post-edit AST
+4. Assert every scalar value in the pre-edit multiset
+   appears at least once in the post-edit multiset —
+   new scalars may appear, none may disappear
+5. If any pre-edit scalar value is missing post-edit
+   → invariant fails; message identifies the
+   code-action title, the originating diagnostic's
+   code/range, and the specific scalar string that
+   disappeared
+
+Rationale for the "multiset subset, not equality"
+framing: a legitimate refactor may add structural
+scalars (e.g. an explicit `null` marker where one was
+implicit). What must not happen is pre-existing
+scalar content going away. This catches the
+destructive-quick-fix data loss without false-flagging
+legitimate structural expansion.
+
+- [ ] Register I4 in the `INVARIANTS` constant with
+      id `"I4"` and description referencing the
+      scalar-preservation rule
+- [ ] Implement the helper `collect_scalar_values(
+      docs: &[Document<Span>]) -> Vec<String>` that
+      walks every document's node tree, descending
+      into mapping entries (both keys and values) and
+      sequence items, and returns every `Scalar`
+      node's value string as a flat vec. Empty
+      scalars (`""`) are included.
+- [ ] Implement the comparison helper
+      `missing_scalars(pre: &[String],
+      post: &[String]) -> Vec<String>` that returns
+      scalars present in `pre` whose count in `post`
+      is less than in `pre` (multiset subset check).
+      Returns the missing values.
+- [ ] I4 invariant function: per file, collect
+      diagnostics, request code actions via
+      `code_actions(text, whole-file range,
+      &diagnostics, &uri)`, filter to those with
+      `kind == CodeActionKind::REFACTOR_REWRITE`, for
+      each apply edits + parse + check
+      `missing_scalars(pre, post)`. Any non-empty
+      missing list → failure, with the code-action
+      title + originating diagnostic code/range +
+      first missing scalar named in the message.
+- [ ] Run the harness. Known expected failures:
+  - `flow_map_to_block` / `flow_seq_to_block`
+    destructive output on any corpus file where
+    they fire and drop content → skip-list entry
+    cites `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`
+  - Any other I4 failure → Surprise Failure
+    Protocol: developer messages the lead, blocks
+    until a follow-up plan is filed or the lead
+    directs in-scope handling
+- [ ] Per-entry skip-list verification: for each
+      entry added, temporarily remove it, run the
+      harness, confirm the test fails citing that
+      specific (file, invariant) pair, restore.
+      Record verification in the commit message —
+      name each verified entry explicitly.
+- [ ] Add unit tests for `collect_scalar_values` and
+      `missing_scalars` covering:
+  - Empty document
+  - Flat mapping (keys + values collected)
+  - Nested mapping (recursion works)
+  - Sequence of scalars
+  - Mapping with sequence values (both sides
+    traversed)
+  - Duplicate scalar values (multiset semantics —
+    two `foo` in pre requires two `foo` in post)
+  - Missing-scalars helper: equal multisets return
+    empty; pre larger than post returns the extras
+- [ ] `cargo test --test corpus_invariants` exits
+      successfully with all failures accounted for.
+      `cargo clippy --all-targets` clean.
+      `cargo fmt` applied.
+
+Acceptance: I4 runs against every (file,
+refactor-kind action) pair. All currently-failing
+cases are on the skip-list with verified per-entry
+coverage and specific follow-up-plan references.
+Unit tests for both helpers present and passing.
+
+### Task 5: Baseline worklist document
 
 Produce a human-readable `WORKLIST.md` derived from
 the skip-list so that follow-up plans have a visible,
@@ -497,12 +620,17 @@ markers (per the Surprise Failure Protocol).
 
 ## Decisions
 
-- **Minimum viable invariant set: I1, I2, I3.** Broader
-  invariants (I4 refactor-AST-equivalence, I5
-  validator-stability-under-whitespace-reformat, I6
-  formatter-round-trip) are deferred to later Move 3
-  expansions. The chosen three cover the user-reported
-  bug class and establish the harness pattern.
+- **Minimum viable invariant set: I1, I2, I3, I4.**
+  I4 was added after Task 3 landed and exposed that
+  I3's diagnostic-delta framing cannot catch
+  semantically-destructive-but-parseable edits (the
+  destructive `flow_map_to_block` output on
+  `${{ … }}` inputs is valid YAML, just with the key
+  eaten — so I3 passes). I4 closes that gap with a
+  scalar-preservation check on refactor-kind actions.
+  I5 (validator-stability-under-whitespace-reformat)
+  and I6 (formatter-round-trip) remain deferred to
+  later Move 3 expansions.
 - **Seed corpus size: 4 files.** One from each of the
   three primary real-world YAML shapes users will use
   the LSP on (GitHub Actions, Kubernetes,

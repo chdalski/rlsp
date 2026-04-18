@@ -276,6 +276,54 @@ valid YAML" paragraph:
   in `.ai/plans/` already matched the canonical
   templates — nothing to commit from that skill.
 
+## Deferred ideas (post-Move-2 follow-ups)
+
+### End-to-end LSP pipeline test harness
+
+Discussed 2026-04-18. Current Move 0 invariants invoke
+`parse_yaml`, validators, `format_yaml`, and
+`code_actions` individually in-process. A true E2E
+harness would drive the `tower-lsp` server through
+JSON-RPC: send `didOpen` / `didChange`, wait for
+`publishDiagnostics`, send `textDocument/codeAction`,
+apply the returned `WorkspaceEdit` to the buffer, send
+`didChange` again, wait for fresh diagnostics. Treats
+the server as a black box.
+
+**Gaps it would close that Move 0 does not:**
+
+- **Settings wiring.** `parse_and_publish` at
+  `rlsp-yaml/src/server.rs:476` reads configuration
+  (e.g. `self.get_flow_style()` at ~line 481) and
+  applies severity overrides (~lines 484–488). Direct
+  validator calls bypass the settings merge, so
+  setting-dependent severity bugs are invisible
+  in-process.
+- **JSON-RPC serialization.** Diagnostic ranges, code
+  actions, and `WorkspaceEdit`s all cross the wire as
+  JSON. Encoding bugs (UTF-16 offsets vs. byte offsets,
+  URI escaping, null vs. missing fields) only surface
+  at protocol boundaries.
+
+**Where it fits:** after Move 0 + Move 2 land. Not a
+replacement for either — in-process invariants are
+cheaper and catch the core class of bugs; E2E catches
+the serialization/settings-dependent ones. Scoped as
+its own plan during Move 3's ongoing expansion.
+
+**Production pipeline shape (for reference):**
+1. Client sends `didOpen` / `didChange` → server stores
+   the document
+2. Server calls `parse_and_publish` → parse + all
+   validators + severity overrides + publish
+3. Client triggers Quick Fix → `textDocument/codeAction`
+   → server returns `CodeAction`s with `WorkspaceEdit`s
+4. Client applies the edit (server not involved); sends
+   `didChange` → server re-parses and re-validates
+5. The formatter is NOT invoked on the quickfix path —
+   relevant for why `flow_map_to_block` produces ugly
+   whitespace that never gets cleaned up
+
 ## How to resume
 
 1. Read `.ai/plans/2026-04-18-one-parser-one-ast.md` for
