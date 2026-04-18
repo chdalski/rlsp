@@ -279,6 +279,19 @@ entire pipeline.
      Critical and High issues (mandatory). Fix Medium
      issues (recommended). Resubmit for review. Repeat
      until approved.
+   - **After the 3rd rejection on the same task**, before
+     submitting your next fix, message the requester with
+     a brief status update: one line per rejection cycle
+     summarizing what was flagged, what you are changing
+     this time, and whether you suspect the task needs
+     rescoping or an advisor consult the requester did
+     not originally direct. Continue the fix-resubmit
+     cycle in parallel — do not block waiting for the
+     requester to reply. The status update gives them
+     early visibility so they can intervene if the loop
+     has a structural problem; the rejection-fix loop is
+     otherwise opaque to them and a stuck task stays
+     invisible until you surface it.
 
 ## Before Submitting for Review
 

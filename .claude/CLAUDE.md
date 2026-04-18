@@ -352,13 +352,38 @@ For each task slice in the plan:
 After the developer finishes implementing, the developer
 sends the work to the reviewer. The developer handles the
 rejection loop with the reviewer directly — this is opaque
-to you. You do not need to monitor or relay these messages.
+to you by default. You do not need to monitor or relay
+these messages.
 
 The reviewer messages you on approval with:
 - The composed commit message
 - The baseline commit SHA (from the developer's handoff)
 - The verified file list
 - A review summary confirming build and tests pass
+
+**Rejection-cycle status updates.** The developer is
+instructed to break opacity after 3 rejections on the same
+task and send you a status update summarizing the cycle.
+When you receive one, assess whether the task has a
+structural problem — do not reply with "keep trying." A
+loop that has reached this threshold needs intervention,
+not persistence. Likely causes and responses:
+
+- **Missing advisor input** — the rejection reasons point
+  at coverage or risk concerns you did not direct at
+  dispatch. Direct the developer to consult the relevant
+  advisor now and wait for sign-off before resubmitting.
+- **Unclear acceptance criteria** — the reviewer and
+  developer disagree on what "done" means for this task.
+  Rescope the task with tighter criteria and send a
+  revised dispatch.
+- **Fundamental ambiguity** — neither re-consult nor
+  rescoping will resolve it. Pause execution and ask the
+  user.
+
+A rejection-cycle update does not block the developer —
+they continue fixing and resubmitting while you assess.
+Your intervention supersedes the in-flight fix.
 
 ### After Reviewer Approval
 
@@ -585,7 +610,8 @@ infrastructure that you commit directly.
 This covers:
 - `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
   config, TypeScript strictness config
-- `/ensure-ai-dirs` outputs — plan format guide
+- `/ensure-ai-dirs` outputs — plan format guide, review
+  checklist, plan archive moves
 - Plan status changes — marking plans Completed or Canceled
   after execution ends (task-level updates are committed by
   the reviewer during execution)

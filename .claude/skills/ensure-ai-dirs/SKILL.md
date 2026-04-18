@@ -2,8 +2,9 @@
 name: ensure-ai-dirs
 description: >
   Ensure the configured plans and memory directories exist,
-  and sync the plan format guide. Run once before planning
-  begins.
+  sync the plan format guide and review checklist, and
+  archive completed plans older than 14 days. Run once
+  before planning begins.
 ---
 
 # /ensure-ai-dirs
@@ -21,6 +22,9 @@ sessions.
 every time.** Do not skip step 2 because the directory
 already exists or the format guide appears current. Do not
 skip step 3 because the memory directory already exists.
+Do not skip step 4 because no plans appear old enough to
+archive — the scan is cheap and the skill is idempotent
+when nothing is archivable.
 
 ## Steps
 
@@ -95,3 +99,40 @@ skip step 3 because the memory directory already exists.
    guide is needed — Claude Code manages memory files
    directly. Report whether the directory was created or
    already existed.
+
+4. **Archive old plans** — scan `<plansDirectory>` for
+   completed or canceled plans older than 14 days and
+   move them to `<plansDirectory>/archive/`. Archiving
+   keeps the active plans directory focused on in-progress
+   work while preserving history.
+
+   a. List files in `<plansDirectory>` matching the plan
+      filename pattern `YYYY-MM-DD-*.md`. Exclude the
+      synced files (`CLAUDE.md`, `plan-format.md`,
+      `plan-review-checklist.md`) and the `archive/`
+      subdirectory itself.
+
+   b. For each plan file, read the `**Status:**` line
+      from the header:
+      - `Canceled` — always archive (no useful date; the
+        plan is terminated).
+      - `Completed (YYYY-MM-DD)` — archive if the recorded
+        date is more than 14 days before today.
+      - `NotStarted` or `InProgress` — never archive.
+
+   c. If there are any plans to archive:
+      - Create `<plansDirectory>/archive/` if it does not
+        exist.
+      - Move each archivable plan using
+        `git mv <src> <dst>` so git tracks the rename and
+        history is preserved.
+
+   d. Report which plans were archived, or state that none
+      were archivable.
+
+   The 14-day window preserves recent completions in the
+   active directory — a user asking "what did we just
+   finish" sees recent work without digging into the
+   archive. Canceled plans bypass the window because they
+   are terminated, not completed, and have no remaining
+   value in the active view.
