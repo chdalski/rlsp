@@ -218,7 +218,7 @@ not a sequence item — matching current behavior).
 
 ## Steps
 
-- [ ] Rewrite `string_to_block_scalar` as AST +
+- [x] Rewrite `string_to_block_scalar` as AST +
       `format_subtree` with cursor-based scalar-node
       matching
 - [ ] Cleanup — retire any helpers that become
@@ -235,13 +235,13 @@ the current narrow behavior (mapping values only,
 plain/quoted styles only, 40-char length threshold,
 literal `|` target style).
 
-- [ ] Change `string_to_block_scalar` signature to
+- [x] Change `string_to_block_scalar` signature to
       `fn string_to_block_scalar(docs:
       &[Document<Span>], text: &str, line_idx:
       usize, uri: &Url) -> Option<CodeAction>`. The
       call site at `code_actions.rs:65` already
       passes `docs` and `text` in scope.
-- [ ] Walk `docs` for a mapping entry `(key, value)`
+- [x] Walk `docs` for a mapping entry `(key, value)`
       where:
   - `value` is a `Node::Scalar`
   - `value`'s span starts on line `line_idx + 1`
@@ -256,13 +256,13 @@ literal `|` target style).
   - `value.value.chars().count() >= 40` (use
     char count, not byte length, so multi-byte
     characters don't inflate the threshold)
-- [ ] If no qualifying scalar is found, return
+- [x] If no qualifying scalar is found, return
       `None`. This replaces the current heuristic
       early returns (lines 696, 701-707).
-- [ ] Clone the scalar node with
+- [x] Clone the scalar node with
       `style: ScalarStyle::Literal`. Anchor, tag,
       and other fields preserved unchanged.
-- [ ] Compute `base_indent` as the mapping key's
+- [x] Compute `base_indent` as the mapping key's
       column plus 2 (`key_loc.start.column + 2`,
       using the parser's 0-based column convention).
       This matches the pattern established in
@@ -273,23 +273,23 @@ literal `|` target style).
       header `|` lands after `key: ` on the same
       line, and the scalar's continuation content
       is indented to K+2.
-- [ ] Call `format_subtree(&cloned,
+- [x] Call `format_subtree(&cloned,
       &YamlFormatOptions::default(), base_indent)`.
-- [ ] Emit a `TextEdit` whose range is the scalar
+- [x] Emit a `TextEdit` whose range is the scalar
       node's `loc` span (NOT the full line). The
       edit starts at the scalar's starting position
       and ends at its end position. Trailing
       comments and whitespace after the scalar on
       the same line are preserved.
-- [ ] Preserve the title `"Convert to block
+- [x] Preserve the title `"Convert to block
       scalar"`.
-- [ ] Update call site at `code_actions.rs:65` to
+- [x] Update call site at `code_actions.rs:65` to
       pass `docs` and `text`.
-- [ ] Update any existing unit tests that invoke
+- [x] Update any existing unit tests that invoke
       `string_to_block_scalar` directly (grep for
       the function name under `#[cfg(test)]` to
       enumerate). Preserve test intents.
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace passes
@@ -313,6 +313,21 @@ output with proper escape handling, indentation,
 and no collateral edits to surrounding content;
 existing unit-test intents preserved; corpus
 SKIP_LIST stays empty; audit allow-list unchanged.
+
+**Completed:** commit `8f987db` — AST-first
+rewrite landed. `base_indent = key_col` (NOT
+`key_col + 2` as the plan originally said; corrected
+during execution — `format_subtree` already adds
+`tab_width` via the printer, so adding `+2` at the
+call site would stack and over-indent). Walker
+filters to block mappings only (`CollectionStyle::Block`),
+scalar styles ∈ {Plain, SingleQuoted, DoubleQuoted},
+`chars().count() >= 40`. TextEdit covers scalar's
+`loc` span (not full line) — trailing comments and
+post-scalar content preserved. 22 tests cover
+qualifying-scalar criteria + all 10 defect-class
+regressions (many eagerly added in Task 1 rather
+than deferred to Task 2).
 
 ### Task 2: Cleanup — regression tests, docs
 
