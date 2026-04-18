@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -342,7 +342,7 @@ inert.
       match; add allow-list entries for every flagged
       function with an explicit marker; per-entry
       load-bearing verification
-- [ ] Update `project_followup_plans.md` — file new
+- [x] Update `project_followup_plans.md` — file new
       retrofit items for each feature-level violator
       (`hover_at`, `complete_at`, `format_on_type`,
       `find_document_links`, `find_colors`); add a note
@@ -470,7 +470,7 @@ Also annotate the helper-of convention so future agents
 understand that retrofitting the root automatically
 clears its helper-of entries.
 
-- [ ] Add a new follow-up item to
+- [x] Add a new follow-up item to
       `.ai/memory/project_followup_plans.md` under
       "Open: rlsp-yaml" for each of the 13 feature-level
       violators. Each item must include:
@@ -485,13 +485,13 @@ clears its helper-of entries.
     Task 1) are retired when the root retrofit lands.
     Name them explicitly so the reader of the follow-up
     item knows the blast radius of the retrofit.
-- [ ] Add a short note near the top of the "Open:
+- [x] Add a short note near the top of the "Open:
       rlsp-yaml" section explaining the `helper-of:`
       allow-list marker convention: a helper-of entry
       exists because its root is allow-listed; the entry
       disappears when the root's retrofit plan lands, not
       through an independent retrofit of the helper.
-- [ ] Update the authorizing follow-up item in
+- [x] Update the authorizing follow-up item in
       `project_followup_plans.md` (the "Extend
       `parser_boundary_audit` to detect private +
       broader-parameter-name text-scan (audit v2)"
@@ -503,7 +503,7 @@ clears its helper-of entries.
       convention, but the interim update prevents the
       stale estimate from misleading agents reading the
       queue between Task 2 landing and plan completion.
-- [ ] Update `.ai/memory/2026-04-18-rlsp-yaml-architectural-program.md`:
+- [x] Update `.ai/memory/2026-04-18-rlsp-yaml-architectural-program.md`:
       the file currently states the audit has 4–5 allow-list
       entries and describes the old single-string `note`
       field. Update the relevant passages to state the
@@ -511,7 +511,7 @@ clears its helper-of entries.
       `AllowMarker` taxonomy (TodoRetrofit / HelperOf /
       CarveOut). Do not rewrite the whole file; only the
       audit-related paragraphs need editing.
-- [ ] Commit the memory updates (both
+- [x] Commit the memory updates (both
       `project_followup_plans.md` and
       `2026-04-18-rlsp-yaml-architectural-program.md`)
       with message `chore(memory): queue audit-v2
@@ -526,6 +526,15 @@ the architectural-program memory reflects the final
 allow-list count (101 entries at baseline) and the
 `AllowMarker` taxonomy; memory commit lands
 with the descriptive message.
+
+**Completed:** commit `bec0dde` — 13 feature-level
+retrofit follow-ups filed in `project_followup_plans.md`
+(one per root, each with signature + file:line + rule
+violation + AST-first replacement sketch + retired
+helpers). Helper-of convention note added. Authorizing
+audit-v2 bullet updated from "~10-15" to actual result.
+Architectural-program memory updated to reflect the
+101-entry count and the `AllowMarker` taxonomy.
 
 ## Non-Goals
 

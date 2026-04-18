@@ -178,7 +178,14 @@ All five tasks landed. Commits:
 - Task 4 (`e58fdf0`): `parser_boundary_audit.rs`
   with shrink-only allow-list, 5 inventoried violators
   (the 4 from plan + `validate_schema` discovered
-  during implementation), per-entry verification done
+  during implementation), per-entry verification done.
+  **Superseded by audit v2** (commit `c70f642`,
+  `.ai/plans/2026-04-18-parser-boundary-audit-v2.md`
+  Task 1): allow-list expanded to 101 entries
+  (22 TodoRetrofit + 52 HelperOf + 27 CarveOut)
+  using a typed `AllowMarker` enum replacing the old
+  single-string `note` field; 97 new entries
+  load-bearing verified
 - Task 5 (`189e9eb`): `release-plz.yml` gated on CI
   via `workflow_run`; checks out validated `head_sha`;
   action versions refreshed; top-of-file comment
@@ -279,6 +286,9 @@ reflects sequencing as of 2026-04-18 late afternoon
    first-parameter-only + helper retirement + docs
    (`76dbf5c`). Audit allow-list down to 4 entries
    (the validators). Corpus SKIP_LIST empty.
+   **Further expanded by audit v2** (`c70f642`):
+   101 entries total (22 TodoRetrofit + 52 HelperOf
+   + 27 CarveOut) with typed `AllowMarker` taxonomy.
 2. ✅ **Retrofit `block_to_flow` via AST + format_subtree.**
    Completed 2026-04-18 under
    `.ai/plans/2026-04-18-retrofit-block-to-flow-code-action.md`.
