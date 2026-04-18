@@ -94,13 +94,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // Feature-level violators (original 5)
     // -----------------------------------------------------------------------
     AllowEntry {
-        file: "hover.rs",
-        func: "hover_at",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-hover-at",
-        },
-    },
-    AllowEntry {
         file: "completion.rs",
         func: "complete_at",
         marker: AllowMarker::TodoRetrofit {
@@ -186,34 +179,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-rename",
         },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of hover_at
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "hover.rs",
-        func: "document_index_for_line",
-        marker: AllowMarker::HelperOf { root: "hover_at" },
-    },
-    AllowEntry {
-        file: "hover.rs",
-        func: "token_at_cursor",
-        marker: AllowMarker::HelperOf { root: "hover_at" },
-    },
-    AllowEntry {
-        file: "hover.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf { root: "hover_at" },
-    },
-    AllowEntry {
-        file: "hover.rs",
-        func: "indentation_level",
-        marker: AllowMarker::HelperOf { root: "hover_at" },
-    },
-    AllowEntry {
-        file: "hover.rs",
-        func: "sequence_index",
-        marker: AllowMarker::HelperOf { root: "hover_at" },
     },
     // -----------------------------------------------------------------------
     // HelperOf — private helpers of find_document_links
@@ -1340,8 +1305,8 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source = "pub fn hover_at(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
-        let violations = scan_file("hover.rs", source);
+        let source = "pub fn complete_at(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
+        let violations = scan_file("completion.rs", source);
         assert_eq!(violations.len(), 1);
 
         let new_violations: Vec<&Violation> = violations

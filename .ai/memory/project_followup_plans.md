@@ -26,12 +26,6 @@ type: project
      These were surfaced and allow-listed in commit c70f642 under
      .ai/plans/2026-04-18-parser-boundary-audit-v2.md Task 1. -->
 
-- **Retrofit `hover_at` to AST-first** — `hover.rs:31`:
-  `pub fn hover_at(text: &str, documents: Option<&Vec<Document<Span>>>, position: Position, schema: Option<&JsonSchema>) -> Option<Hover>`.
-  Violation: splits `text` into `lines`, scans line text to find the token at the cursor (`token_at_cursor`), determines which document the line belongs to by counting `---` separators (`document_index_for_line`), and reads indentation and colon positions directly from raw text. The parser AST already has `loc: Span` on every node — cursor resolution should walk the AST by span containment rather than re-scanning text.
-  Replacement: remove `text` parameter; accept `documents: &[Document<Span>]` (already partially present but not used for cursor position resolution). Walk the AST to find the deepest node whose `loc` span contains the cursor position; derive path and type from the node itself.
-  Helpers retired when this retrofit lands: `document_index_for_line` (hover.rs), `token_at_cursor` (hover.rs), `find_mapping_colon` (hover.rs), `indentation_level` (hover.rs), `sequence_index` (hover.rs).
-
 - **Retrofit `complete_at` to AST-first** — `completion.rs:32`:
   `pub fn complete_at(text: &str, documents: Option<&Vec<Document<Span>>>, position: Position, schema: Option<&JsonSchema>) -> Vec<CompletionItem>`.
   Violation: splits `text` into `lines` and uses a large family of private text-scanning helpers to reconstruct the YAML structural context at the cursor (key path, sibling keys, sequence context, indentation). All structural information is already in the parser AST.

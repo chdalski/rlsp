@@ -763,15 +763,19 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
+        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
+            let text_present = store.get(&uri).is_some();
             let docs = store.get_documents(&uri).cloned();
-            (text, docs)
+            (docs, text_present)
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
+        if !text_present {
+            return Ok(None);
+        }
+
+        let Some(docs) = docs else {
             return Ok(None);
         };
 
@@ -789,12 +793,7 @@ impl LanguageServer for Backend {
                 .and_then(|cache| cache.get(&url).cloned())
         });
 
-        Ok(crate::hover::hover_at(
-            &text,
-            docs.as_ref(),
-            position,
-            schema.as_ref(),
-        ))
+        Ok(crate::hover::hover_at(&docs, position, schema.as_ref()))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

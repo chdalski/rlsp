@@ -83,7 +83,7 @@ fn bench_hover_and_references(c: &mut Criterion) {
     let mut group = c.benchmark_group("hover_and_references");
 
     group.bench_function("hover_at", |b| {
-        b.iter(|| hover_at(&text, Some(&docs), hover_pos, Some(&schema)));
+        b.iter(|| hover_at(&docs, hover_pos, Some(&schema)));
     });
 
     group.bench_function("find_references", |b| {

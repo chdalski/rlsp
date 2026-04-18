@@ -268,7 +268,7 @@ per the integration-testing rule.
 
 ## Steps
 
-- [ ] Retrofit `hover_at` to AST-span-containment
+- [x] Retrofit `hover_at` to AST-span-containment
       cursor resolution (single task — no further
       decomposition warranted; the retrofit is a
       contained change in one file plus one call
@@ -278,12 +278,12 @@ per the integration-testing rule.
 
 ### Task 1: Retrofit `hover_at` to AST-first cursor resolution
 
-- [ ] Change signature to
+- [x] Change signature to
       `pub fn hover_at(docs: &[Document<Span>],
       position: Position, schema: Option<&JsonSchema>)
       -> Option<Hover>`. The `text` parameter is
       removed; `docs` becomes required (no `Option`).
-- [ ] Implement the AST-walk cursor resolver:
+- [x] Implement the AST-walk cursor resolver:
   1. Convert LSP `Position` to parser `Pos`
      (line: `+1` for 1-based parser convention;
      column pass-through).
@@ -298,11 +298,11 @@ per the integration-testing rule.
      return `None` — or fall through to the parent
      mapping per the semantic-gap decision settled
      with the TE.
-- [ ] Produce the same downstream hover content from
+- [x] Produce the same downstream hover content from
       the resolved node as before: type name, scalar
       value, optional schema lookup keyed by the
       AST-derived path.
-- [ ] Delete the five hover-local text-scanning
+- [x] Delete the five hover-local text-scanning
       helpers: `document_index_for_line`,
       `token_at_cursor`, `find_mapping_colon`,
       `indentation_level`, `sequence_index`. Verify
@@ -311,7 +311,7 @@ per the integration-testing rule.
       callers exist in the crate before deletion —
       each helper is file-local to `hover.rs` but
       confirm by inspection.
-- [ ] Update the single call site in
+- [x] Update the single call site in
       `rlsp-yaml/src/server.rs` (around line 801;
       grep for `hover::hover_at` to locate). Before
       the invocation, add an early return for the
@@ -327,13 +327,13 @@ per the integration-testing rule.
       argument. Do NOT use `unwrap()` on `docs` —
       that panics when the document store has no
       parsed documents for the URI.
-- [ ] Remove six allow-list entries from
+- [x] Remove six allow-list entries from
       `rlsp-yaml/tests/parser_boundary_audit.rs`:
       `hover_at` root plus five `HelperOf { root:
       "hover_at" }` entries. DO NOT add any new
       allow-list entries — shrink-only discipline
       applies.
-- [ ] Remove the `hover_at` retrofit block from
+- [x] Remove the `hover_at` retrofit block from
       `/workspace/.ai/memory/project_followup_plans.md`
       (currently occupies roughly lines 29-33 —
       describes `hover_at`'s signature, violation,
@@ -341,13 +341,13 @@ per the integration-testing rule.
       helpers). The block represents completed work
       after this retrofit lands; leaving it in the
       open-items queue misleads future sessions.
-- [ ] Settle the semantic-gap question with the TE at
+- [x] Settle the semantic-gap question with the TE at
       input gate (see Context "Semantic gap to
       surface"). Record the decision (option 1:
       fall through to parent; option 2: return
       `None`) in this plan's Decisions section
       before implementing.
-- [ ] TE input-gate consultation. Scan the 51
+- [x] TE input-gate consultation. Scan the 51
       existing `hover.rs` tests; produce a test list
       with a Consolidation section listing:
       - Tests asserting text-scanning intermediates
@@ -357,7 +357,7 @@ per the integration-testing rule.
         retrofit.
       - New regression tests covering AST-walk edge
         cases.
-- [ ] Regression tests (augment with TE's
+- [x] Regression tests (augment with TE's
       Consolidation decisions):
   - Cursor on a top-level mapping key — returns hover
     for that key's schema entry.
@@ -379,7 +379,7 @@ per the integration-testing rule.
     (start-inclusive, end-exclusive behavior) — the
     node containing `start` matches; the node whose
     `end` equals the cursor does not.
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace green
@@ -389,7 +389,7 @@ per the integration-testing rule.
     passes with allow-list at exactly 82 entries
     (baseline 88 after validator plan completes,
     minus six hover-retrofit entries)
-- [ ] TE output-gate sign-off covering regression
+- [x] TE output-gate sign-off covering regression
       adds + Consolidation deletes.
 
 Acceptance: `hover_at` consumes only the AST; five
@@ -399,6 +399,15 @@ ones retired per the TE's Consolidation section);
 corpus SKIP_LIST stays empty; audit allow-list at
 82.
 
+**Landed:** commit `b1efee9` (see `git log` — SHA may
+be superseded by follow-up amend). `const ALLOW_LIST`
+at 82 (−6 from 88). TE-settled semantic-gap decision:
+option 2 (return `None` for structural positions —
+deliberate behavior change documented in Decisions).
+Integration coverage already present:
+`should_return_null_hover_for_whitespace_position` in
+`tests/lsp_lifecycle.rs` exercises the null-hover path.
+
 ## Decisions
 
 - **Single task.** The retrofit is a contained change
@@ -407,12 +416,19 @@ corpus SKIP_LIST stays empty; audit allow-list at
   "add AST walker" / "delete helpers" / "update call
   site") that the reviewer would bundle back for
   review anyway. One task, one commit.
-- **Semantic-gap choice (option 1 vs option 2).**
-  Deferred to the TE's input-gate consult. The TE
-  scans the current test suite to determine which
-  behavior is locked in by existing tests. The
-  decision is recorded here once settled; the
-  developer implements accordingly.
+- **Semantic-gap choice: option 2 — return `None` for
+  structural positions (empty lines, comment regions,
+  beyond-doc positions).** Settled at the TE's
+  input-gate consult. The TE determined that the
+  existing test suite locked in option-2 behavior:
+  no test expected `Some` for empty-line, comment, or
+  beyond-document cursor positions, so the AST walk
+  returning `None` for those positions is consistent
+  with the test contract. This is a behavior change
+  versus the old text-scanning implementation (which
+  emitted hover for any `key:`-shaped line on the
+  current or prior line), but not a change from the
+  test suite's perspective.
 - **`find_mapping_colon` and `indentation_level`
   other-file copies are NOT touched.** Each is its
   own function with its own allow-list entry and
