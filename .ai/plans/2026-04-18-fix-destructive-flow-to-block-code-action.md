@@ -182,7 +182,7 @@ user-visible defect this plan closes.
 ## Steps
 
 - [x] Add `format_subtree` public API to the formatter
-- [ ] Rewrite `flow_map_to_block` and
+- [x] Rewrite `flow_map_to_block` and
       `flow_seq_to_block` to use AST + `format_subtree`;
       change `code_actions` public signature to take
       AST
@@ -268,7 +268,7 @@ with its `style` flipped to `Block`. Emit a `TextEdit`
 replacing the AST node's span (not the diagnostic's
 line) with the formatted output.
 
-- [ ] Change `code_actions` signature from
+- [x] Change `code_actions` signature from
       `pub fn code_actions(text: &str, cursor_range:
       Range, diagnostics: &[Diagnostic], uri: &Url)`
       to
@@ -280,13 +280,13 @@ line) with the formatted output.
       allow-list entry for `code_actions` goes away
       because the *first* parameter shape no longer
       matches the violator regex.
-- [ ] Update call site at `rlsp-yaml/src/server.rs`
+- [x] Update call site at `rlsp-yaml/src/server.rs`
       to pass `&result.documents`.
-- [ ] Update all test call sites that invoke
+- [x] Update all test call sites that invoke
       `code_actions` directly — parse + pass docs.
       Includes `rlsp-yaml/tests/corpus_invariants.rs`
       (I3 and I4 invariants both call `code_actions`).
-- [ ] Rewrite `flow_map_to_block`:
+- [x] Rewrite `flow_map_to_block`:
   - New signature:
     `fn flow_map_to_block(docs: &[Document<Span>],
     text: &str, diag: &Diagnostic, uri: &Url) ->
@@ -311,10 +311,10 @@ line) with the formatted output.
   - Produce a `TextEdit` with range = the node's
     original `loc` span, new_text = formatted output
   - Return the `CodeAction`
-- [ ] Rewrite `flow_seq_to_block` symmetrically.
+- [x] Rewrite `flow_seq_to_block` symmetrically.
       Same shape — just target `Node::Sequence` with
       flow style.
-- [ ] Remove the two existing `SKIP_LIST` entries
+- [x] Remove the two existing `SKIP_LIST` entries
       from `rlsp-yaml/tests/corpus_invariants.rs`
       (currently at lines 70-85): the
       `(github-actions-matrix.yml, I4)` and
@@ -324,13 +324,13 @@ line) with the formatted output.
       entries causes the harness's
       `PassedUnexpected` outcome → test failure. The
       `SKIP_LIST` must be empty after this task.
-- [ ] Mirror the SKIP_LIST removal in
+- [x] Mirror the SKIP_LIST removal in
       `rlsp-yaml/tests/corpus/WORKLIST.md`: delete
       the two table rows so the "Current failures"
       table becomes empty (keep the skill-output
       prose, shrink-only discipline paragraph, and
       the empty-state note at the bottom).
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full suite passes
@@ -352,6 +352,25 @@ produces correct output; Move 0 corpus I4 passes on
 all 4 files; `SKIP_LIST` is empty (both removed
 entries gone, no new entries added); `WORKLIST.md`'s
 "Current failures" table is empty.
+
+**Completed:** commit `b281f51` — AST-first
+rewrite of both code actions lands with a
+`block_text_and_start_col` helper that prepends
+`"\n<indent>"` when the flow collection is a mapping
+value (valid block YAML after the edit). `code_actions`
+signature now `(docs, text, cursor_range, diagnostics,
+uri)`. Both stale SKIP_LIST entries removed; WORKLIST.md
+cleared. Test coverage: FM-1..FM-7, FS-1..FS-3,
+SIG-1..SIG-3, INT-1..INT-2.
+
+**Deferred to Task 3 (observation from reviewer):** the
+audit allow-list entry for `code_actions` is NOT
+removed by this task — the detection regex matches the
+`text: &str` parameter's presence even when it's not
+the first parameter. Task 3 will resolve this
+(tighten the regex to first-parameter-only, document
+`code_actions` as a permanent carve-out, or some other
+resolution).
 
 ### Task 3: Cleanup — retire helpers, shrink audit, regression coverage, docs
 

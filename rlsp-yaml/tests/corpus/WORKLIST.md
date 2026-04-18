@@ -23,8 +23,6 @@ Protocol**.
 
 | File | Invariant | Plan |
 |------|-----------|------|
-| `github-actions-matrix.yml` | I4 | [fix-destructive-flow-to-block-code-action](../../../../.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md) — `flow_map_to_block` drops sequence-item content when converting a flow map inside a `- { ... }` sequence entry |
-| `release-plz-workflow.yml` | I4 | [fix-destructive-flow-to-block-code-action](../../../../.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md) — `flow_map_to_block` drops sequence-item content when converting a flow map inside a `- { ... }` sequence entry |
 
 ---
 

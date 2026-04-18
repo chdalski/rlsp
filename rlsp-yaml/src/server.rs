@@ -987,7 +987,9 @@ impl LanguageServer for Backend {
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
-        let actions = crate::editing::code_actions::code_actions(&text, range, &diagnostics, &uri);
+        let docs = crate::parser::parse_yaml(&text).documents;
+        let actions =
+            crate::editing::code_actions::code_actions(&docs, &text, range, &diagnostics, &uri);
         if actions.is_empty() {
             return Ok(None);
         }

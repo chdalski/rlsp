@@ -67,22 +67,7 @@ struct Invariant {
 /// Skip-list entries: `(corpus_file_name, invariant_id, followup_plan_reference_and_justification)`.
 ///
 /// Shrink-only — see module-level doc comment for the discipline.
-const SKIP_LIST: &[(&str, &str, &str)] = &[
-    (
-        "github-actions-matrix.yml",
-        "I4",
-        ".ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md: \
-         flow_map_to_block drops sequence-item content when converting a flow \
-         map inside a `- { ... }` sequence entry",
-    ),
-    (
-        "release-plz-workflow.yml",
-        "I4",
-        ".ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md: \
-         flow_map_to_block drops sequence-item content when converting a flow \
-         map inside a `- { ... }` sequence entry",
-    ),
-];
+const SKIP_LIST: &[(&str, &str, &str)] = &[];
 
 /// Registered invariants.
 const INVARIANTS: &[Invariant] = &[
@@ -156,7 +141,7 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
     let zero_range = Range::new(Position::new(0, 0), Position::new(0, 0));
     let fake_uri = tower_lsp::lsp_types::Url::parse("file:///corpus/test.yaml").expect("valid URI");
     catch_unwind(AssertUnwindSafe(|| {
-        code_actions(text, zero_range, &all_diagnostics, &fake_uri)
+        code_actions(&docs, text, zero_range, &all_diagnostics, &fake_uri)
     }))
     .map_err(|e| format!("panic in code_actions: {}", panic_message(&e)))?;
 
@@ -326,7 +311,7 @@ fn check_i3_code_action_round_trip(path: &Path, text: &str) -> Result<(), String
     let uri = tower_lsp::lsp_types::Url::parse(&format!("file:///corpus/{file_name}"))
         .expect("valid URI");
 
-    let actions = code_actions(text, whole_file, &all_diagnostics, &uri);
+    let actions = code_actions(&docs, text, whole_file, &all_diagnostics, &uri);
 
     for action in &actions {
         let Some(edit) = &action.edit else {
@@ -407,7 +392,13 @@ fn check_i4_scalar_preservation(path: &Path, text: &str) -> Result<(), String> {
     let uri = tower_lsp::lsp_types::Url::parse(&format!("file:///corpus/{file_name}"))
         .expect("valid URI");
 
-    let actions = code_actions(text, whole_file, &all_diagnostics, &uri);
+    let actions = code_actions(
+        &parse_result.documents,
+        text,
+        whole_file,
+        &all_diagnostics,
+        &uri,
+    );
 
     for action in &actions {
         if action.kind.as_ref() != Some(&CodeActionKind::REFACTOR_REWRITE) {
