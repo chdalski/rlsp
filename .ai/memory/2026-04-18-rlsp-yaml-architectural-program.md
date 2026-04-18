@@ -119,14 +119,46 @@ four moves answer four distinct questions:
 - *Does the feature hold up across a growing real-world
   corpus?* → Move 3
 
-## Move 0 status — drafting in progress
+## Move 0 status — Completed 2026-04-18
 
 Plan file: `.ai/plans/2026-04-18-corpus-invariants-scaffold.md`
-(to be created this session).
 
-User agreed to sequence Move 0 first as a TDD-style
-anchor for subsequent retrofits. Once the Move 0 plan is
-approved and executes, Move 1 follows.
+All five tasks landed. Key outcomes:
+
+- `rlsp-yaml/tests/corpus_invariants.rs` — test harness
+  with I1 (no panics), I2 (diagnostic range validity),
+  I3 (code-action round-trip: post-edit still parses
+  without new Error diagnostics), I4 (refactor code
+  actions preserve scalar content — added after Task 3
+  exposed that I3 couldn't catch
+  semantically-destructive-but-parseable edits).
+- `rlsp-yaml/tests/corpus/` — 4 real-world seed files
+  (release-plz-workflow.yml, kubernetes-deployment.yaml,
+  docker-compose.yml, github-actions-matrix.yml).
+- `rlsp-yaml/tests/corpus/WORKLIST.md` — human-readable
+  mirror of the `SKIP_LIST` constant.
+- Current skip-list has two entries, both on I4, both
+  citing `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`:
+  `(github-actions-matrix.yml, I4)` and
+  `(release-plz-workflow.yml, I4)` — both surface the
+  `flow_map_to_block` destructive edit that drops
+  scalar content.
+- 47 corpus_invariants tests total (harness-internal,
+  range-validity helpers, scalar-collection helpers,
+  integration probes). Full workspace suite green.
+
+Commits: `678b16e`, `9074b51`, `f9e28ae`, `c9210a1`,
+`1b9ffbb`, plus status/SHA-correction doc commits.
+
+Notable insight from Task 3 → Task 4: I3 as originally
+framed ("no new Error diagnostics after applying the
+edit") is too narrow to catch destructive-but-parseable
+code actions. The destructive `flow_map_to_block` output
+on `${{ … }}` produces valid YAML (flow mapping under
+`env:`), so I3 passes even though data is lost. I4
+closes that gap via multiset-subset scalar preservation.
+Future retrofit plans should be defensive about this:
+"invariant passes" does not imply "no bug."
 
 ## Move 1 status — plan drafted, queued behind Move 0
 
