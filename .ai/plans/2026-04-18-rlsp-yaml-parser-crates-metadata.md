@@ -64,7 +64,7 @@ with the sibling crates.
 
 ### Task 1: Add homepage, keywords, categories to rlsp-yaml-parser/Cargo.toml
 
-**Committed:** `bf7a8330492a0126678a3412e7a4efc095c6fb61`
+**Committed:** `f5e0c9cf487c0149726601a4f65c731d02847642`
 
 Add the three missing crates.io metadata fields to
 `rlsp-yaml-parser/Cargo.toml` inside the existing
