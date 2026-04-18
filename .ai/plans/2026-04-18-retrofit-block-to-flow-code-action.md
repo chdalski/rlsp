@@ -350,7 +350,7 @@ tests cover each defect class from Context; audit
 allow-list unchanged at 4 entries; workspace suite
 green; `feature-log.md` records the change.
 
-**Completed:** commit `96cb85c` —
+**Completed:** commit `b752319` —
 `quote_flow_item` deleted (zero callers remained).
 Bonus fixes discovered during cleanup: anchor
 duplication bug in `edit_start_col` (now uses
