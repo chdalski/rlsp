@@ -54,6 +54,7 @@ pub fn code_actions(
 
     // Context-driven actions (not tied to diagnostics)
     let line_idx = range.start.line as usize;
+    let col = range.start.character as usize;
     let context_actions: Vec<CodeAction> = lines.get(line_idx).map_or(vec![], |line| {
         [
             if line.contains('\t') {
@@ -61,7 +62,7 @@ pub fn code_actions(
             } else {
                 None
             },
-            quoted_bool_to_unquoted(line, line_idx, range, uri),
+            quoted_bool_to_unquoted(docs, line_idx, col, uri),
             string_to_block_scalar(docs, text, line_idx, uri),
             block_to_flow(docs, line_idx, uri),
         ]
@@ -628,47 +629,102 @@ fn delete_unused_anchor(
 // ---------- Quoted boolean to unquoted ----------
 
 fn quoted_bool_to_unquoted(
-    line: &str,
+    docs: &[Document<Span>],
     line_idx: usize,
-    range: Range,
+    col: usize,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let col = range.start.character as usize;
+    let parser_line = line_idx + 1;
+    let scalar = find_quoted_bool_scalar(docs, parser_line, col)?;
 
-    // Look for quoted boolean patterns in the line
-    for pattern in &["\"true\"", "\"false\"", "'true'", "'false'"] {
-        if let Some(pos) = line.find(pattern) {
-            // Check if the cursor is near this pattern
-            let pattern_end = pos + pattern.len();
-            if col <= pattern_end {
-                let unquoted = &pattern[1..pattern.len() - 1];
-                let before = &line[..pos];
-                let after = &line[pattern_end..];
-                let new_text = format!("{before}{unquoted}{after}");
+    let Node::Scalar { value, loc, .. } = scalar else {
+        return None;
+    };
 
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "LSP line/col are u32; always fits"
-                )]
-                let edit_range = Range::new(
-                    Position::new(line_idx as u32, 0),
-                    Position::new(line_idx as u32, line.len() as u32),
-                );
+    let mut plain = scalar.clone();
+    if let Node::Scalar { style, .. } = &mut plain {
+        *style = ScalarStyle::Plain;
+    }
 
-                return Some(make_action(
-                    format!("Convert quoted string to {unquoted}"),
-                    uri,
-                    vec![TextEdit {
-                        range: edit_range,
-                        new_text,
-                    }],
-                    CodeActionKind::QUICKFIX,
-                    None,
-                ));
-            }
+    let base_indent = loc.start.column;
+    let new_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
+    let edit_range = Range::new(
+        Position::new(
+            loc.start.line.saturating_sub(1) as u32,
+            loc.start.column as u32,
+        ),
+        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+    );
+
+    Some(make_action(
+        format!("Convert quoted string to {value}"),
+        uri,
+        vec![TextEdit {
+            range: edit_range,
+            new_text,
+        }],
+        CodeActionKind::QUICKFIX,
+        None,
+    ))
+}
+
+fn find_quoted_bool_scalar(
+    docs: &[Document<Span>],
+    parser_line: usize,
+    col: usize,
+) -> Option<&Node<Span>> {
+    for doc in docs {
+        if let Some(node) = find_quoted_bool_in_node(&doc.root, parser_line, col) {
+            return Some(node);
         }
     }
     None
+}
+
+fn find_quoted_bool_in_node(
+    node: &Node<Span>,
+    parser_line: usize,
+    col: usize,
+) -> Option<&Node<Span>> {
+    match node {
+        Node::Scalar {
+            style: ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+            value,
+            loc,
+            ..
+        } if loc.start.line == parser_line
+            && col >= loc.start.column
+            && col <= loc.end.column
+            && (value == "true" || value == "false") =>
+        {
+            Some(node)
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => None,
+        Node::Mapping { entries, .. } => {
+            for (k, v) in entries {
+                if let Some(found) = find_quoted_bool_in_node(k, parser_line, col) {
+                    return Some(found);
+                }
+                if let Some(found) = find_quoted_bool_in_node(v, parser_line, col) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                if let Some(found) = find_quoted_bool_in_node(item, parser_line, col) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+    }
 }
 
 // ---------- String to block scalar ----------
@@ -1700,26 +1756,30 @@ mod tests {
 
     #[test]
     fn should_convert_double_quoted_true_to_unquoted() {
+        // "enabled: \"true\"\n" — scalar at col 9, cursor at col 10
         let text = "enabled: \"true\"\n";
         let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
 
         let action = actions.iter().find(|a| a.title.contains("true")).unwrap();
-        let edit = action.edit.as_ref().unwrap();
-        let changes = edit.changes.as_ref().unwrap();
-        let edits = &changes[&test_uri()];
-        assert_eq!(edits[0].new_text, "enabled: true");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        // AST edit replaces only the scalar span — "true" (plain, not the full line)
+        assert_eq!(edits[0].new_text, "true");
+        // Edit range starts at the opening quote column (9), not column 0
+        assert_eq!(edits[0].range.start.character, 9);
     }
 
     #[test]
     fn should_convert_single_quoted_false_to_unquoted() {
+        // "enabled: 'false'\n" — scalar at col 9, cursor at col 10
         let text = "enabled: 'false'\n";
         let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
 
         let action = actions.iter().find(|a| a.title.contains("false")).unwrap();
-        let edit = action.edit.as_ref().unwrap();
-        let changes = edit.changes.as_ref().unwrap();
-        let edits = &changes[&test_uri()];
-        assert_eq!(edits[0].new_text, "enabled: false");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        // AST edit replaces only the scalar span — "false" (plain, not the full line)
+        assert_eq!(edits[0].new_text, "false");
+        // Edit range starts at the opening quote column (9), not column 0
+        assert_eq!(edits[0].range.start.character, 9);
     }
 
     #[test]
@@ -1728,6 +1788,298 @@ mod tests {
         let actions = code_actions(&docs_for(text), text, cursor_range(0, 7), &[], &test_uri());
 
         assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_convert_double_quoted_false_to_unquoted() {
+        let text = "flag: \"false\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 7), &[], &test_uri());
+
+        let action = actions.iter().find(|a| a.title.contains("false")).unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "false");
+        assert_eq!(edits[0].range.start.character, 6);
+    }
+
+    #[test]
+    fn should_convert_single_quoted_true_to_unquoted() {
+        let text = "active: 'true'\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 9), &[], &test_uri());
+
+        let action = actions.iter().find(|a| a.title.contains("true")).unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "true");
+    }
+
+    #[test]
+    fn should_not_offer_bool_conversion_for_plain_true() {
+        // Plain `true` is already unquoted — no action
+        let text = "enabled: true\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 9), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_not_offer_bool_conversion_for_case_variant_true() {
+        // "True" decoded value is "True" ≠ "true" — must not match
+        let text = "flag: \"True\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 7), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_not_offer_bool_conversion_for_uppercase_false() {
+        // "FALSE" decoded value is "FALSE" ≠ "false" — must not match
+        let text = "flag: \"FALSE\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 7), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_not_offer_bool_conversion_when_cursor_before_scalar() {
+        // "enabled: \"true\"\n" — scalar starts at col 9; cursor at col 8 (the space before quote)
+        let text = "enabled: \"true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 8), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_offer_bool_conversion_when_cursor_at_scalar_start_column() {
+        // Cursor exactly at the opening quote column
+        let text = "enabled: \"true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 9), &[], &test_uri());
+
+        assert!(actions.iter().any(|a| a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn quoted_bool_edit_range_is_scalar_span_not_full_line() {
+        // Trailing comment must be preserved: edit range must cover only the scalar span.
+        // "enabled: \"true\"  # keep this comment\n"
+        // scalar `"true"` at col 9, parser loc: start.col=9, end.col=15 (exclusive)
+        let text = "enabled: \"true\"  # keep this comment\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        // new_text must be just the scalar value, not the full line
+        assert_eq!(edits[0].new_text, "true");
+        // start column must be the opening-quote column (9), not 0
+        assert_eq!(
+            edits[0].range.start.character, 9,
+            "edit range must start at the opening-quote column: {:?}",
+            edits[0].range
+        );
+        // end column must be the exclusive end (15 = col after closing quote)
+        assert_eq!(
+            edits[0].range.end.character, 15,
+            "edit range end must be the exclusive end of the scalar, not the full line: {:?}",
+            edits[0].range
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_offered_for_second_document() {
+        // Quoted bool in the second YAML document must trigger the action
+        let text = "key: value\n---\nflag: \"true\"\n";
+        // "flag: \"true\"" is on LSP line 2 (0-based); scalar starts at col 6
+        let actions = code_actions(&docs_for(text), text, cursor_range(2, 7), &[], &test_uri());
+
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "must offer bool conversion for quoted bool in second document"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_offered_inside_flow_sequence() {
+        // Quoted bool inside a flow sequence must trigger the action
+        let text = "items: [\"true\", \"false\"]\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 9), &[], &test_uri());
+
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "must offer bool conversion for quoted bool inside flow sequence"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_not_offered_when_cursor_on_different_line() {
+        let text = "a: true\nb: \"false\"\n";
+        // Cursor on line 0 while quoted bool is on line 1
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 3), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn should_offer_bool_conversion_when_cursor_at_scalar_end_column() {
+        // "enabled: \"true\"\n" — scalar `"true"` is 6 chars starting at col 9.
+        // loc.end.column is the exclusive end = col 15 (one past the closing quote).
+        // The containment check is col <= end.column, so cursor at col 15 must still match.
+        let text = "enabled: \"true\"\n";
+        let docs = docs_for(text);
+        let actions = code_actions(&docs, text, cursor_range(0, 15), &[], &test_uri());
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "cursor at loc.end.column (exclusive end) must still trigger action"
+        );
+        // Cursor one past end.column must NOT trigger the action
+        let actions_past = code_actions(&docs, text, cursor_range(0, 16), &[], &test_uri());
+        assert!(
+            actions_past
+                .iter()
+                .all(|a| !a.title.contains("Convert quoted")),
+            "cursor past loc.end.column must not trigger action"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_offered_for_sequence_item() {
+        // Scalar as a sequence item — the Sequence branch of find_quoted_bool_in_node must fire
+        let text = "items:\n  - \"true\"\n  - \"false\"\n";
+        // `- "true"` is on LSP line 1; the scalar starts at col 4 (after `- `)
+        let actions = code_actions(&docs_for(text), text, cursor_range(1, 5), &[], &test_uri());
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "must offer bool conversion for quoted bool as a sequence item"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_not_offered_for_empty_docs() {
+        // Empty docs slice — must not panic and must produce no action
+        let actions = code_actions(
+            &[],
+            "enabled: \"true\"\n",
+            cursor_range(0, 10),
+            &[],
+            &test_uri(),
+        );
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn quoted_bool_action_offered_for_unicode_escaped_true() {
+        // "\u0074rue" is a double-quoted scalar whose decoded value is "true"
+        // (U+0074 is the letter 't'). The check is on the decoded AST value,
+        // so this must trigger the action even though the raw text differs.
+        let text = "flag: \"\\u0074rue\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 8), &[], &test_uri());
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "decoded value 'true' via unicode escape must trigger action"
+        );
+        // The new_text must be the plain value `true`
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(
+            edits[0].new_text, "true",
+            "new_text must be plain 'true', not the unicode-escaped form"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_kind_is_quickfix() {
+        let text = "enabled: \"true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .unwrap();
+        assert_eq!(
+            action.kind,
+            Some(CodeActionKind::QUICKFIX),
+            "action kind must be QUICKFIX"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_action_title_uses_plain_value() {
+        let text = "flag: 'false'\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 8), &[], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .unwrap();
+        assert_eq!(action.title, "Convert quoted string to false");
+    }
+
+    #[test]
+    fn quoted_bool_cursor_at_closing_quote_column_offers_action() {
+        // scalar `"true"` at col 9: closing `"` is at col 14 (0-based).
+        // cursor at col 14 must be within `start.col(9) <= col <= end.col(15)`.
+        let text = "enabled: \"true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 14), &[], &test_uri());
+
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "cursor at closing-quote column must still trigger action"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_cursor_after_scalar_end_offers_no_action() {
+        // cursor at col 16 (one past the exclusive end of the scalar at col 15) → no action
+        let text = "enabled: \"true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 16), &[], &test_uri());
+
+        assert!(
+            actions.iter().all(|a| !a.title.contains("Convert quoted")),
+            "cursor past scalar exclusive end must not trigger action"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_mixed_case_offers_no_action() {
+        // "tRuE" decoded value is "tRuE" ≠ "true" — must not match
+        let text = "enabled: \"tRuE\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn quoted_bool_literal_block_scalar_offers_no_action() {
+        // Literal block scalar `|` style has decoded value "true\n" (with newline) — must not match
+        let text = "enabled: |\n  true\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(1, 3), &[], &test_uri());
+
+        assert!(
+            actions.iter().all(|a| !a.title.contains("Convert quoted")),
+            "literal block scalar must not trigger bool conversion"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_inside_flow_mapping_value_offers_action() {
+        // Scalar as a flow mapping value — the Mapping branch of find_quoted_bool_in_node fires
+        let text = "config: {enabled: \"true\"}\n";
+        // `"true"` starts after `enabled: ` inside the flow mapping; col 18
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 19), &[], &test_uri());
+
+        assert!(
+            actions.iter().any(|a| a.title.contains("Convert quoted")),
+            "must offer bool conversion for quoted bool as a flow mapping value"
+        );
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "true");
     }
 
     // ---- String to block scalar ----

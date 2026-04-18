@@ -133,13 +133,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     },
     AllowEntry {
         file: "editing/code_actions.rs",
-        func: "quoted_bool_to_unquoted",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-quoted-bool-to-unquoted",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
         func: "yaml11_bool_actions",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-yaml11-bool-actions",

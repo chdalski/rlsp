@@ -180,7 +180,7 @@ user's intent that the cursor be "on" the quoted bool.
 
 ## Steps
 
-- [ ] Rewrite `quoted_bool_to_unquoted` as AST +
+- [x] Rewrite `quoted_bool_to_unquoted` as AST +
       `format_subtree` with cursor-based scalar-node
       matching; shrink audit allow-list by one entry
 - [ ] Cleanup — add regression tests for the defect
@@ -197,14 +197,14 @@ behavior envelope (quoted `true`/`false` only, plain-form
 target, `QUICKFIX` kind). Remove the allow-list entry for
 this function in the same commit.
 
-- [ ] Change `quoted_bool_to_unquoted` signature to
+- [x] Change `quoted_bool_to_unquoted` signature to
       `fn quoted_bool_to_unquoted(docs: &[Document<Span>],
       line_idx: usize, col: usize, uri: &Url) ->
       Option<CodeAction>`. The call site at
       `code_actions.rs:64` already has `docs` in scope
       (from the outer function's parameters) and can
       derive `col` from `range.start.character as usize`.
-- [ ] Walk `docs` for a `Node::Scalar` where:
+- [x] Walk `docs` for a `Node::Scalar` where:
   - `scalar.loc.start.line == line_idx + 1`
     (LSP 0-based → parser 1-based; cross-reference the
     same convention used in `string_to_block_scalar`
@@ -218,41 +218,41 @@ this function in the same commit.
   - `scalar.value` is exactly `"true"` or `"false"`
     (case-sensitive, no leading/trailing whitespace —
     the decoded value from the parser is authoritative)
-- [ ] If no qualifying scalar is found, return `None`.
-- [ ] Clone the scalar node with
+- [x] If no qualifying scalar is found, return `None`.
+- [x] Clone the scalar node with
       `style: ScalarStyle::Plain`. Anchor, tag, and
       `value` preserved unchanged.
-- [ ] Compute `base_indent` as the scalar's start column
+- [x] Compute `base_indent` as the scalar's start column
       (`scalar.loc.start.column`). Plain scalars emit
       inline — no continuation lines, no indentation
       semantics to worry about. `format_subtree` handles
       emission.
-- [ ] Call `format_subtree(&cloned_scalar,
+- [x] Call `format_subtree(&cloned_scalar,
       &YamlFormatOptions::default(), base_indent)`.
-- [ ] Emit a `TextEdit` whose range is the scalar node's
+- [x] Emit a `TextEdit` whose range is the scalar node's
       `loc` span (NOT the full line). Start at
       `(loc.start.line - 1, loc.start.column)`, end at
       `(loc.end.line - 1, loc.end.column)`.
-- [ ] Preserve the title
+- [x] Preserve the title
       `"Convert quoted string to {unquoted}"` where
       `{unquoted}` is the literal `"true"` or `"false"`
       matching the decoded value.
-- [ ] Update the call site at `code_actions.rs:64` to
+- [x] Update the call site at `code_actions.rs:64` to
       pass `docs, line_idx, col, uri` instead of the
       current `line, line_idx, range, uri`.
-- [ ] Update any existing unit tests that invoke
+- [x] Update any existing unit tests that invoke
       `quoted_bool_to_unquoted` directly (grep for the
       function name under `#[cfg(test)]`). Preserve test
       intents; adjust signatures to match the new
       parameter list.
-- [ ] Remove the `quoted_bool_to_unquoted` entry from
+- [x] Remove the `quoted_bool_to_unquoted` entry from
       `ALLOW_LIST` in `rlsp-yaml/tests/parser_boundary_audit.rs`.
       The audit test will fail if the function still
       matches the detection regex after retrofit —
       which it should not (the new signature takes
       `docs: &[Document<Span>]` first, then `line_idx:
       usize`, so the first-param anchor excludes it).
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace passes
@@ -261,7 +261,7 @@ this function in the same commit.
   - `cargo test --test parser_boundary_audit` passes
     with exactly **100** allow-list entries (was 101;
     one entry removed for this retrofit).
-- [ ] Per-entry audit verification: temp-remove a
+- [x] Per-entry audit verification: temp-remove a
       different (unrelated) allow-list entry, confirm
       the audit fails citing THAT entry, restore.
       Protects against accidental regex breakage.
@@ -275,6 +275,16 @@ comments, neighboring flow-collection entries) untouched;
 corpus SKIP_LIST empty; audit allow-list at exactly 100
 entries (the removed entry was `editing/code_actions.rs::quoted_bool_to_unquoted`
 with `TodoRetrofit` marker); full workspace suite green.
+
+**Completed:** commit `5fb6482` — AST-first rewrite
+landed. `base_indent = scalar.loc.start.column` per
+the plan (plain scalars emit inline; no block-style
+indentation semantics). Allow-list shrunk from 101 to
+100 entries. 22 tests cover style/value matching,
+cursor containment, multi-doc walks, flow-context
+preservation, unicode escapes, case variants refused,
+QUICKFIX kind, title text, literal-block refused,
+empty-docs safety.
 
 ### Task 2: Cleanup — regression tests, docs, audit verification
 
