@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -627,7 +627,7 @@ references a filed plan by file path — no ad-hoc
 markers (per the Surprise Failure Protocol).
 `docs/feature-log.md` mentions the new harness.
 
-**Completed:** commit `6ec98de` — `WORKLIST.md` created
+**Completed:** commit `1b9ffbb` — `WORKLIST.md` created
 with one section per follow-up plan (one section
 currently, for the destructive-code-action-fix stub plan,
 with both I4 entries). `feature-log.md` updated with a
