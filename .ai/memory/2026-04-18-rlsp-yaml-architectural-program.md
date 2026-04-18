@@ -280,28 +280,33 @@ fix's completion (2026-04-18).
    (`76dbf5c`). Audit allow-list down to 4 entries
    (the validators). Corpus SKIP_LIST empty.
 2. **Retrofit `block_to_flow` via AST + format_subtree.**
-   Inverse of the just-completed fix. Same risk class
-   (structural text surgery on block → flow
-   conversion). Not currently known to be destructive,
-   but likely has analogous latent defects. Same plan
-   shape as the flow-to-block retrofit: use
-   `format_subtree` with `CollectionStyle::Flow` style
-   override, replace node span with formatted output.
-   High priority per user preference: exclude the bug
-   class preemptively rather than wait for a user
-   report.
-3. **Audit `string_to_block_scalar` + retrofit if
-   warranted.** Scalar-to-scalar conversion that's
-   indentation-sensitive. Not structural in the same
-   sense as flow/block conversions, but could mis-pick
-   indentation on surrounding mapping structure.
-   First-pass: add corpus-harness probes or targeted
-   unit tests that stress the action on
-   deeply-indented / nested contexts. If harness
-   surfaces data loss, retrofit via
-   `format_subtree` (block scalar emission already
-   supported by the formatter). If not, leave as-is
-   and document the audit result.
+   Plan filed at
+   `.ai/plans/2026-04-18-retrofit-block-to-flow-code-action.md`
+   (Status: InProgress). Two tasks. Inverse of the
+   flow-to-block fix; same risk class (structural
+   text surgery on block → flow conversion).
+   Preserves the current refuse-nested narrow
+   behavior; nested-support lifting is a separate
+   enhancement plan (queued in
+   `project_followup_plans.md`).
+3. **Retrofit remaining code actions to AST+formatter.**
+   Queued as individual items in
+   `project_followup_plans.md`:
+   `quoted_bool_to_unquoted`, `yaml11_bool_actions`,
+   `yaml11_octal_actions`,
+   `schema_yaml11_bool_type_actions`,
+   `delete_unused_anchor`, `string_to_block_scalar`.
+   All are low-complexity scalar-style or
+   node-property changes that the `format_subtree`
+   API handles uniformly. `tab_to_spaces` explicitly
+   stays as text (pre-parse lexical concern —
+   whitespace normalization, not AST data).
+   Rationale for one-plan-per-action: each has
+   distinct edge cases (bool quoting semantics,
+   octal numeric semantics, block-scalar
+   indentation, anchor semantics). Incremental
+   landing is lower per-plan risk than a bundled
+   sweep.
 4. **Retrofit `validate_unused_anchors(text: &str)`** at
    `validators.rs:29`. Pure text-scan; similar shape to
    flow-style retrofit. Low risk. Shrinks audit
