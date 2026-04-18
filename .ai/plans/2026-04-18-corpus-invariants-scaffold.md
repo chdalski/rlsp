@@ -387,7 +387,7 @@ specific follow-up-plan reference. `cargo test --test
 corpus_invariants` exits successfully. `cargo clippy
 --all-targets` clean.
 
-**Completed:** commit `38b9aa7` — I1 and I2
+**Completed:** commit `9074b51` — I1 and I2
 registered; skip-list stayed empty (all 4 corpus files
 pass both invariants). Adds 12 unit tests for
 `check_diagnostic_ranges` and `check_utf8_boundary`.
