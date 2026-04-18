@@ -279,16 +279,15 @@ fix's completion (2026-04-18).
    first-parameter-only + helper retirement + docs
    (`76dbf5c`). Audit allow-list down to 4 entries
    (the validators). Corpus SKIP_LIST empty.
-2. **Retrofit `block_to_flow` via AST + format_subtree.**
-   Plan filed at
-   `.ai/plans/2026-04-18-retrofit-block-to-flow-code-action.md`
-   (Status: InProgress). Two tasks. Inverse of the
-   flow-to-block fix; same risk class (structural
-   text surgery on block → flow conversion).
-   Preserves the current refuse-nested narrow
-   behavior; nested-support lifting is a separate
-   enhancement plan (queued in
-   `project_followup_plans.md`).
+2. ✅ **Retrofit `block_to_flow` via AST + format_subtree.**
+   Completed 2026-04-18 under
+   `.ai/plans/2026-04-18-retrofit-block-to-flow-code-action.md`.
+   Two tasks: AST rewrite (`173f838`) + cleanup
+   (`b752319`). Bonus fixes: anchor-duplication bug
+   in edit_start_col + missing end-line branch in
+   apply_block_to_flow_edit. Retired `quote_flow_item`.
+   Preserves refuse-nested behavior; nested-support
+   lifting is queued in `project_followup_plans.md`.
 3. **Retrofit remaining code actions to AST+formatter.**
    Queued as individual items in
    `project_followup_plans.md`:
