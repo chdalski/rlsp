@@ -257,7 +257,7 @@ dedicated cleanup plan after all retrofits land.
       `schema_yaml11_bool_type_actions` (combined
       because they share structure)
 - [x] Retrofit `yaml11_octal_actions`
-- [ ] Retrofit `delete_unused_anchor`
+- [x] Retrofit `delete_unused_anchor`
 
 ## Tasks
 
@@ -455,11 +455,11 @@ anchor property from a node rather than changing a
 scalar value or style. Diagnostic-based dispatch;
 single action returned.
 
-- [ ] Change signature to
+- [x] Change signature to
       `fn delete_unused_anchor(docs:
       &[Document<Span>], text: &str, diag:
       &Diagnostic, uri: &Url) -> Option<CodeAction>`.
-- [ ] Walk AST to find the node carrying the
+- [x] Walk AST to find the node carrying the
       anchor. The diagnostic's range points at the
       `&name` token. The anchored node's `loc`
       typically starts AT or AFTER the anchor
@@ -477,28 +477,28 @@ single action returned.
      current text-edit's range assumptions.
   3. If no match is found (stale diagnostic,
      already-removed anchor), return `None`.
-- [ ] Clone the matched node with `anchor: None`.
+- [x] Clone the matched node with `anchor: None`.
       All other fields preserved (including any
       tag, value/entries/items, and nested
       structure).
-- [ ] Call `format_subtree` on the clone with
+- [x] Call `format_subtree` on the clone with
       `base_indent` set appropriately for the
       node's position in its parent. For a mapping
       value, `base_indent = key_col` (pattern
       from `string_to_block_scalar`).
-- [ ] Emit `TextEdit` with range = union of
+- [x] Emit `TextEdit` with range = union of
       diagnostic range (covering `&name`) and the
       node's `loc` — i.e., from the anchor's
       start column through the node's end column.
       This replaces the entire `&anchor_name
       <value>` region with the formatter's clean
       re-emission.
-- [ ] Update call site at
+- [x] Update call site at
       `code_actions.rs:46-51` (`diag_actions`
       closure).
-- [ ] TE input-gate consultation (scan existing
+- [x] TE input-gate consultation (scan existing
       tests, Consolidation section).
-- [ ] Regression tests (augment with TE's
+- [x] Regression tests (augment with TE's
       Consolidation decisions):
   - Anchor on a scalar value (`key: &a "hello"`)
     — the action removes `&a ` and leaves
@@ -515,11 +515,11 @@ single action returned.
   - Stale diagnostic (anchor already removed
     from buffer text) — returns `None`, no edit
     emitted
-- [ ] Build/test gates: fmt, clippy, full test,
+- [x] Build/test gates: fmt, clippy, full test,
       corpus invariants with empty SKIP_LIST,
       audit allow-list at 104 entries (one fewer
       than after Task 2).
-- [ ] TE output-gate sign-off covering
+- [x] TE output-gate sign-off covering
       regression adds + Consolidation deletes.
 
 Acceptance: `delete_unused_anchor` consumes the
@@ -528,6 +528,10 @@ re-emission; preserves tags, values, and trailing
 comments; returns `None` on stale diagnostics;
 corpus SKIP_LIST stays empty; audit allow-list at
 104.
+
+**Landed:** commit `0bc9d38` (see `git log` — SHA
+may be superseded by follow-up amend). `const
+ALLOW_LIST` at 96 (−1 from 97).
 
 ## Decisions
 

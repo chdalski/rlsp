@@ -43,7 +43,7 @@ pub fn code_actions(
             Some("flowSeq") => flow_seq_to_block(docs, text, diag, uri)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("unusedAnchor") => delete_unused_anchor(&lines, diag, uri)
+            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri)
                 .into_iter()
                 .collect::<Vec<_>>(),
             Some("yaml11Boolean" | "schemaYaml11Boolean") => yaml11_bool_actions(docs, diag, uri),
@@ -586,32 +586,44 @@ fn tab_to_spaces(
 // ---------- Delete unused anchor ----------
 
 fn delete_unused_anchor(
-    lines: &[&str],
+    docs: &[Document<Span>],
+    text: &str,
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let line_idx = diag.range.start.line as usize;
-    let line = lines.get(line_idx)?;
-    let start_col = diag.range.start.character as usize;
-    let end_col = diag.range.end.character as usize;
+    let diag_line = diag.range.start.line as usize;
+    let anchor_start_col = diag.range.start.character as usize;
+    let anchor_end_col = diag.range.end.character as usize;
 
-    if start_col >= line.len() || end_col > line.len() {
+    // Extract the anchor name from the text to match against AST nodes.
+    let line = text.lines().nth(diag_line)?;
+    if anchor_start_col >= line.len() || anchor_end_col > line.len() {
         return None;
     }
+    // Diagnostic range starts at `&` — the name follows.
+    let anchor_name = &line[anchor_start_col + 1..anchor_end_col];
 
-    // The anchor includes `&name` — remove it and any trailing space
-    let before = &line[..start_col];
-    let after = &line[end_col..];
-    let after = after.strip_prefix(' ').unwrap_or(after);
-    let new_text = format!("{before}{after}");
+    let node = find_anchored_node(docs, diag_line, anchor_name)?;
+    let loc = node_loc(node);
+
+    let mut deanchored = node.clone();
+    match &mut deanchored {
+        Node::Scalar { anchor, .. }
+        | Node::Mapping { anchor, .. }
+        | Node::Sequence { anchor, .. } => *anchor = None,
+        Node::Alias { .. } => return None,
+    }
+
+    let base_indent = loc.start.column;
+    let new_text = format_subtree(&deanchored, &YamlFormatOptions::default(), base_indent);
 
     #[expect(
         clippy::cast_possible_truncation,
         reason = "LSP line/col are u32; always fits"
     )]
     let edit_range = Range::new(
-        Position::new(line_idx as u32, 0),
-        Position::new(line_idx as u32, line.len() as u32),
+        Position::new(diag_line as u32, anchor_start_col as u32),
+        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
     );
 
     Some(make_action(
@@ -624,6 +636,59 @@ fn delete_unused_anchor(
         CodeActionKind::QUICKFIX,
         Some(vec![diag.clone()]),
     ))
+}
+
+fn find_anchored_node<'a>(
+    docs: &'a [Document<Span>],
+    diag_line: usize,
+    anchor_name: &str,
+) -> Option<&'a Node<Span>> {
+    // The anchor is on diag_line (0-based). In the parser's 1-based convention the
+    // node's loc starts either on the same line (inline anchor, e.g. `key: &a val`)
+    // or on the following line (standalone anchor, e.g. `key: &a\n` where the value
+    // node is an empty scalar emitted one line later).  Accept both.
+    let parser_line = diag_line + 1;
+    for doc in docs {
+        if let Some(node) = find_anchored_node_in(&doc.root, parser_line, anchor_name) {
+            return Some(node);
+        }
+    }
+    None
+}
+
+fn find_anchored_node_in<'a>(
+    node: &'a Node<Span>,
+    parser_line: usize,
+    anchor_name: &str,
+) -> Option<&'a Node<Span>> {
+    if node.anchor() == Some(anchor_name) {
+        let loc_line = node_loc(node).start.line;
+        if loc_line == parser_line || loc_line == parser_line + 1 {
+            return Some(node);
+        }
+    }
+    match node {
+        Node::Mapping { entries, .. } => {
+            for (k, v) in entries {
+                if let Some(found) = find_anchored_node_in(k, parser_line, anchor_name) {
+                    return Some(found);
+                }
+                if let Some(found) = find_anchored_node_in(v, parser_line, anchor_name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                if let Some(found) = find_anchored_node_in(item, parser_line, anchor_name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => None,
+    }
 }
 
 // ---------- Quoted boolean to unquoted ----------
@@ -2018,9 +2083,11 @@ mod tests {
 
     // ---- Delete unused anchor ----
 
+    // UA-1: plain scalar — anchor removed, surrounding structure preserved
     #[test]
-    fn should_delete_unused_anchor() {
+    fn delete_anchor_plain_scalar_value() {
         let text = "defaults: &unused value\n";
+        // `&unused` occupies cols 10–17
         let diag = make_diagnostic(0, 10, 17, "unusedAnchor");
         let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
 
@@ -2028,15 +2095,20 @@ mod tests {
             .iter()
             .find(|a| a.title.contains("unused anchor"))
             .unwrap();
-        let edit = action.edit.as_ref().unwrap();
-        let changes = edit.changes.as_ref().unwrap();
-        let edits = &changes[&test_uri()];
-        assert_eq!(edits[0].new_text, "defaults: value");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        // Edit replaces from anchor-start through node end — new_text is the
+        // re-formatted scalar only (no anchor prefix).
+        assert_eq!(edits[0].new_text, "value");
+        assert!(!edits[0].new_text.contains("&unused"));
+        // Edit range starts at the anchor's column, not column 0.
+        assert_eq!(edits[0].range.start.character, 10);
     }
 
+    // UA-2: anchor is the sole value (empty scalar after removal)
     #[test]
-    fn should_delete_anchor_at_end_of_value() {
+    fn delete_anchor_sole_value_empty_scalar() {
         let text = "data: &unused\n";
+        // `&unused` occupies cols 6–13
         let diag = make_diagnostic(0, 6, 13, "unusedAnchor");
         let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
 
@@ -2044,10 +2116,150 @@ mod tests {
             .iter()
             .find(|a| a.title.contains("unused anchor"))
             .unwrap();
-        let edit = action.edit.as_ref().unwrap();
-        let changes = edit.changes.as_ref().unwrap();
-        let edits = &changes[&test_uri()];
-        assert_eq!(edits[0].new_text, "data: ");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(!edits[0].new_text.contains("&unused"));
+    }
+
+    // UA-3: quoted scalar — anchor removed, quotes preserved
+    #[test]
+    fn delete_anchor_quoted_scalar() {
+        let text = "key: &a \"hello\"\n";
+        // `&a` occupies cols 5–7
+        let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(!edits[0].new_text.contains("&a"));
+        assert!(edits[0].new_text.contains("hello"));
+    }
+
+    // UA-4: anchor with user-defined tag — tag preserved after anchor removal
+    #[test]
+    fn delete_anchor_user_tag_preserved() {
+        // User-defined tags (non-core-schema) are always kept by the formatter.
+        let text = "key: &a !custom \"hello\"\n";
+        // `&a` occupies cols 5–7
+        let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(!edits[0].new_text.contains("&a"));
+        assert!(
+            edits[0].new_text.contains("!custom"),
+            "user tag must be preserved: {:?}",
+            edits[0].new_text
+        );
+        assert!(edits[0].new_text.contains("hello"));
+    }
+
+    // UA-5: flow sequence — anchor removed, collection style preserved
+    #[test]
+    fn delete_anchor_flow_sequence() {
+        let text = "list: &nums [1, 2, 3]\n";
+        // `&nums` occupies cols 6–11
+        let diag = make_diagnostic(0, 6, 11, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(!edits[0].new_text.contains("&nums"));
+        assert!(
+            edits[0].new_text.contains('['),
+            "flow sequence bracket must be preserved: {:?}",
+            edits[0].new_text
+        );
+        assert!(edits[0].new_text.contains('1'));
+    }
+
+    // UA-6: block mapping value with anchor (multi-line)
+    #[test]
+    fn delete_anchor_block_mapping_value() {
+        let text = "base: &defaults\n  x: 1\n  y: 2\n";
+        // `&defaults` occupies cols 6–14 on line 0
+        let diag = make_diagnostic(0, 6, 15, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            !edits[0].new_text.contains("&defaults"),
+            "anchor must be removed: {:?}",
+            edits[0].new_text
+        );
+        assert!(
+            edits[0].new_text.contains("x: 1"),
+            "x entry must be preserved: {:?}",
+            edits[0].new_text
+        );
+        assert!(
+            edits[0].new_text.contains("y: 2"),
+            "y entry must be preserved: {:?}",
+            edits[0].new_text
+        );
+    }
+
+    // UA-7: out-of-bounds diagnostic → no action (covered by rstest case
+    // `case::unused_anchor_invalid_range` above; verified still passes after retrofit)
+
+    // Trailing comment preservation: edit range must not reach into the comment,
+    // and applying the edit must leave the comment intact.
+    #[test]
+    fn delete_anchor_trailing_comment_preserved() {
+        let text = "key: &a value  # keep me\n";
+        // `&a` occupies cols 5–7
+        let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert!(
+            edits[0].range.end.character as usize <= "key: &a value".len(),
+            "edit end must not reach into trailing comment: {:?}",
+            edits[0].range
+        );
+        assert!(
+            !edits[0].new_text.contains('#'),
+            "new_text must not contain the trailing comment: {:?}",
+            edits[0].new_text
+        );
+        // Simulate applying the edit: replace anchor+node span with new_text.
+        let mut result = text.to_string();
+        let start = "key: ".len();
+        let end = "key: &a value".len();
+        result.replace_range(start..end, &edits[0].new_text);
+        assert!(
+            result.contains("# keep me"),
+            "trailing comment must survive: {result:?}"
+        );
+    }
+
+    // UA-8: stale diagnostic — anchor already absent from text
+    #[test]
+    fn delete_anchor_stale_diagnostic_returns_no_action() {
+        let text = "data: value\n";
+        // Diag claims unusedAnchor at cols 6–13, but no anchor in text
+        let diag = make_diagnostic(0, 6, 13, "unusedAnchor");
+        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        assert!(
+            actions.iter().all(|a| !a.title.contains("unused anchor")),
+            "stale diagnostic must not produce an action"
+        );
     }
 
     // ---- Quoted bool to unquoted ----

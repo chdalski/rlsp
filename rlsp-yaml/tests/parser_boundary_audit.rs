@@ -122,16 +122,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     // -----------------------------------------------------------------------
-    // Queued code-action retrofits
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "delete_unused_anchor",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-delete-unused-anchor",
-        },
-    },
-    // -----------------------------------------------------------------------
     // Feature-level violators (original 5)
     // -----------------------------------------------------------------------
     AllowEntry {
