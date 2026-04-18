@@ -455,7 +455,7 @@ passes cleanly with zero `SKIP_LIST` entries;
 the Corpus Invariant Harness entry to reflect
 the empty-steady-state.
 
-**Completed:** commit `e90a470` — audit
+**Completed:** commit `76dbf5c` — audit
 regex tightened to match first-parameter only (strips
 optional `&[mut ]self` receiver then anchors on
 `^\s*text\s*:\s*&str\b`); `code_actions` entry removed
