@@ -165,6 +165,60 @@ carve-out and appears only in the carve-out table below.
 | `completion.rs` | `collect_all_sequence_item_keys` | `lines: &[&str]` | helper-of: complete_at |
 | `completion.rs` | `collect_sibling_keys` | `lines: &[&str]` | helper-of: complete_at |
 
+#### New violators — additional feature modules surfaced during reconciliation
+
+The initial plan inventory omitted several feature
+modules. The Task 1 inventory-reconciliation step (run
+before any allow-list entries are added) surfaced them.
+User-approved 2026-04-18 to accept the full count.
+
+| File | Function | Shape | Class |
+|---|---|---|---|
+| `analysis/folding.rs` | `folding_ranges` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `analysis/selection.rs` | `selection_ranges` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `analysis/semantic_tokens.rs` | `semantic_tokens` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `analysis/symbols.rs` | `document_symbols` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `navigation/references.rs` | `goto_definition` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `navigation/references.rs` | `find_references` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `navigation/rename.rs` | `prepare_rename` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+| `navigation/rename.rs` | `rename` | `text: &str` | V (feature root — new retrofit follow-up to file) |
+
+#### Additional helper-of entries (from reconciliation)
+
+| File | Function | Shape | Helper of |
+|---|---|---|---|
+| `analysis/folding.rs` | `collect_indentation_folds` | `lines: &[&str]` or similar | helper-of: folding_ranges |
+| `analysis/folding.rs` | `collect_document_section_folds` | `lines: &[&str]` or similar | helper-of: folding_ranges |
+| `analysis/folding.rs` | `collect_comment_block_folds` | `lines: &[&str]` or similar | helper-of: folding_ranges |
+| `analysis/folding.rs` | `find_last_content_line` | `lines: &[&str]` or similar | helper-of: folding_ranges |
+| `analysis/folding.rs` | `find_last_content_line_in_range` | `lines: &[&str]` or similar | helper-of: folding_ranges |
+| `analysis/folding.rs` | `find_mapping_colon` | `line: &str` | helper-of: folding_ranges |
+| `analysis/selection.rs` | `selection_range_for_position` | `line: &str` or `lines: &[&str]` | helper-of: selection_ranges |
+| `analysis/selection.rs` | `find_document_for_line` | `lines: &[&str]` | helper-of: selection_ranges |
+| `analysis/selection.rs` | `find_document_end` | `lines: &[&str]` | helper-of: selection_ranges |
+| `analysis/semantic_tokens.rs` | `collect_inline_markers` | `line: &str` or `lines: &[&str]` | helper-of: semantic_tokens |
+| `analysis/semantic_tokens.rs` | `char_col_of` | `line: &str` | helper-of: semantic_tokens |
+| `analysis/semantic_tokens.rs` | `find_mapping_colon` | `line: &str` | helper-of: semantic_tokens |
+| `analysis/symbols.rs` | `split_document_regions` | `lines: &[&str]` | helper-of: document_symbols |
+| `analysis/symbols.rs` | `find_sequence_item_line` | `lines: &[&str]` | helper-of: document_symbols |
+| `analysis/symbols.rs` | `find_value_end_line` | `lines: &[&str]` | helper-of: document_symbols |
+| `analysis/symbols.rs` | `find_mapping_colon` | `line: &str` | helper-of: document_symbols |
+| `completion.rs` | `find_mapping_colon` | `line: &str` | helper-of: complete_at |
+| `completion.rs` | `indentation_level` | `line: &str` | helper-of: complete_at |
+| `completion.rs` | `document_range` | `lines: &[&str]` | helper-of: complete_at |
+| `completion.rs` | `suggest_values_for_key` | `line: &str` or `lines: &[&str]` | helper-of: complete_at |
+| `navigation/references.rs` | `scan_tokens` | `lines: &[&str]` | helper-of: goto_definition / find_references |
+| `navigation/references.rs` | `document_range_for_line` | `lines: &[&str]` | helper-of: goto_definition / find_references |
+| `navigation/rename.rs` | `scan_tokens` | `lines: &[&str]` | helper-of: prepare_rename / rename |
+| `navigation/rename.rs` | `document_range_for_line` | `lines: &[&str]` | helper-of: prepare_rename / rename |
+
+Exact parameter shapes for each helper are verified by
+the developer during Task 1 against the current source;
+this table reflects the developer's reconciliation
+output. The developer may correct individual shape notes
+without escalation; the classification column (HelperOf
+vs. other) is fixed.
+
 #### New carve-outs — pre-parse lexical concerns and whitespace
 
 These functions handle concerns that the CLAUDE.md rule
@@ -182,26 +236,72 @@ explicitly exempts:
 | `editing/formatter.rs` | `find_comment_on_line` | `line: &str` | Comment-boundary scan helper; used by pre-parse document-prefix extraction |
 | `editing/formatter.rs` | `content_signature` | `line: &str` | Helper of `find_comment_on_line`; pre-parse lexical |
 | `editing/code_actions.rs` | `tab_to_spaces` | `lines: &[&str]` | Whitespace normalization: tabs are YAML 1.2 §6.1 pre-parse lexical; not represented in the AST |
+| `schema/association.rs` | `extract_schema_url` | `text: &str` | Pre-parse lexical: schema URL modeline extraction |
+| `schema/association.rs` | `extract_yaml_version` | `text: &str` | Pre-parse lexical: YAML version modeline extraction |
+| `schema/association.rs` | `extract_custom_tags` | `text: &str` | Pre-parse lexical: custom tag modeline extraction |
+
+#### Test-helper carve-outs (functions inside `#[cfg(test)]` blocks)
+
+Test fixtures that take `text: &str` / `lines: &[&str]`
+are not production violations — they are unit-test
+plumbing for parsing sample YAML into ASTs. The current
+scanner reads the whole file including `#[cfg(test)]`
+modules, so these functions are flagged. User-approved
+2026-04-18 to list each as a `CarveOut` with reason
+`test fixture` rather than excluding `#[cfg(test)]`
+from the scan (keeps the scanner logic simple; each
+entry is still load-bearing via the per-entry
+verification protocol).
+
+| File | Function | Carve-out reason |
+|---|---|---|
+| `analysis/selection.rs` | `parse_docs` | test fixture |
+| `analysis/symbols.rs` | `parse_docs` | test fixture |
+| `completion.rs` | `parse_docs` | test fixture |
+| `editing/code_actions.rs` | `flow_map_action` | test fixture |
+| `editing/code_actions.rs` | `flow_seq_action` | test fixture |
+| `editing/code_actions.rs` | `apply_block_to_flow_edit` | test fixture |
+| `editing/code_actions.rs` | `apply_block_scalar_edit` | test fixture |
+| `editing/code_actions.rs` | `docs_for` | test fixture |
+| `editing/code_actions.rs` | `flow_diags_for` | test fixture |
+| `hover.rs` | `parse_docs` | test fixture |
+| `schema/association.rs` | `parse_docs` | test fixture |
+| `schema_validation.rs` | `parse_docs` | test fixture |
+| `schema_validation.rs` | `run_content` | test fixture |
+| `schema_validation/formats.rs` | `parse_docs` | test fixture |
+| `schema_validation/formats.rs` | `run_format` | test fixture |
+| `validation/validators.rs` | `parse_docs` | test fixture |
+| `validation/validators.rs` | `parse_duplicate` | test fixture |
+| `validation/validators.rs` | `parse_yaml11` | test fixture |
 
 ### Allow-list shape after Task 1
 
 The current allow-list has 4 entries. After Task 1 it
-will have **48 entries** based on the inventory above:
+will have **101 entries** based on the inventory above
+(inventory revised 2026-04-18 after reconciliation
+surfaced 53 additional flagged functions the initial
+draft did not enumerate; user approved the expanded
+scope):
 
 - 4 existing (carry forward)
-- 5 queued code-action retrofits
-- 5 feature-level violators (new follow-up plans to file)
-- 28 private helpers of flagged roots (`helper-of:`
-  marker; helper count drawn from this plan's inventory,
-  which may be off by a small number if the broadened
-  regex flags a helper the inventory missed — see the
-  inventory-reconciliation sub-task in Task 1)
-- 6 carve-outs (`// carve-out:` marker)
+- 5 queued code-action retrofits (`TodoRetrofit`)
+- 13 feature-level violators (`TodoRetrofit` — 5
+  originally planned + 8 surfaced by reconciliation:
+  `folding_ranges`, `selection_ranges`, `semantic_tokens`,
+  `document_symbols`, `goto_definition`,
+  `find_references`, `prepare_rename`, `rename`)
+- 52 private helpers of flagged roots (`HelperOf` —
+  28 originally planned + 24 additional)
+- 27 carve-outs (`CarveOut` — 6 pre-parse + 3 schema
+  association modeline extraction + 18 test fixtures)
 
 The count is high but the structure makes it readable: an
 entry's marker tells the reader exactly why it is there
 and what removes it. Helper-of entries disappear as a
-group when their root is retrofitted.
+group when their root is retrofitted. Test-fixture
+carve-outs disappear when the associated production
+entry point is retrofitted (the test helper can then be
+removed or rewritten to consume the parser directly).
 
 ### Per-entry verification
 
@@ -282,32 +382,27 @@ shrink-only discipline; only the detection surface grows.
       Display each marker inline in the `Display`
       impl so audit failure messages show the full
       marker.
-- [ ] Add 44 new allow-list entries per the Context
-      inventory — 5 queued-retrofit, 5 feature-level,
-      28 helper-of, 6 carve-out. Each entry's marker must
-      match its inventory row.
-- [ ] **Inventory reconciliation.** Run the broadened
-      audit without any new allow-list entries (just
-      the existing 4) and capture the full set of
-      violations. Diff against the 44 new entries
-      from the inventory above. If the broadened audit
-      flags a function not in the inventory, OR if the
-      inventory lists a function the audit does not
-      flag, the developer stops and messages the lead
-      with the surprise finding. The lead escalates to
-      the user — the inventory count (48) is a
-      user-approved target, and any change requires
-      user sign-off. Do not silently append or drop
-      entries; do not proceed to the "add 44 new entries"
-      sub-task until the discrepancy is resolved.
+- [ ] Add 97 new allow-list entries per the Context
+      inventory — 5 queued-retrofit (TodoRetrofit),
+      13 feature-level (TodoRetrofit), 52 helper-of
+      (HelperOf), 27 carve-out (CarveOut). Each entry's
+      marker must match its inventory row.
+- [ ] **Inventory reconciliation (already performed
+      2026-04-18).** This step was run as part of Task 1
+      dispatch and produced 101 total flagged functions
+      (4 existing + 97 new). User approved the expanded
+      count. The reconciliation is now closed: proceed
+      directly to installing the 97 new entries. If,
+      during installation, the audit's detection surfaces
+      a 98th function (e.g. a file changed between
+      reconciliation and implementation), stop and
+      message the lead.
 - [ ] Per-entry load-bearing verification for every new
-      entry added (the final count, after
-      reconciliation, which is 44 if no surprises).
-      For each: temp-remove the entry, run `cargo test
-      --test parser_boundary_audit`, confirm failure
-      cites `(file, func)`, restore, rerun, confirm
-      pass. Record one line per entry in the commit
-      message (file + func + marker kind).
+      entry added (97 entries). For each: temp-remove the
+      entry, run `cargo test --test parser_boundary_audit`,
+      confirm failure cites `(file, func)`, restore,
+      rerun, confirm pass. Record one line per entry in
+      the commit message (file + func + marker kind).
 - [ ] Update the audit's top-of-file discipline comment
       to describe the new marker taxonomy: shrink-only
       still applies; a new entry is only acceptable when
@@ -340,10 +435,10 @@ shrink-only discipline; only the detection surface grows.
   - `cargo clippy --all-targets` zero warnings
   - `cargo test` workspace green
   - `cargo test --test parser_boundary_audit` passes
-    with exactly 48 allow-list entries, all load-bearing.
+    with exactly 101 allow-list entries, all load-bearing.
 
-Acceptance: the audit's allow-list contains exactly 48
-entries (4 existing + 44 new) using the three-way
+Acceptance: the audit's allow-list contains exactly 101
+entries (4 existing + 97 new) using the three-way
 `AllowMarker` taxonomy; every entry is load-bearing
 (per-entry verification recorded);
 detection-helper unit tests cover all 6 parameter names
@@ -354,18 +449,21 @@ allow-list classification.
 
 ### Task 2: File new feature-level retrofit follow-up plans
 
-The broadened audit surfaces 5 feature-level violators
+The broadened audit surfaces 13 feature-level violators
 that do not yet have items in the follow-up queue:
 `hover_at`, `complete_at`, `format_on_type`,
-`find_document_links`, `find_colors`. File a follow-up
-item for each so future sessions have a traceable
-retrofit task. Also annotate the helper-of convention so
-future agents understand that retrofitting the root
-automatically clears its helper-of entries.
+`find_document_links`, `find_colors`, `folding_ranges`,
+`selection_ranges`, `semantic_tokens`,
+`document_symbols`, `goto_definition`, `find_references`,
+`prepare_rename`, `rename`. File a follow-up item for
+each so future sessions have a traceable retrofit task.
+Also annotate the helper-of convention so future agents
+understand that retrofitting the root automatically
+clears its helper-of entries.
 
 - [ ] Add a new follow-up item to
       `.ai/memory/project_followup_plans.md` under
-      "Open: rlsp-yaml" for each of the 5 feature-level
+      "Open: rlsp-yaml" for each of the 13 feature-level
       violators. Each item must include:
   - Current signature and file:line location
   - Why it violates the rule (what structure it parses
@@ -390,8 +488,8 @@ automatically clears its helper-of entries.
       broader-parameter-name text-scan (audit v2)"
       bullet). Remove the stale "~10-15 new allow-list
       entries" estimate and replace with the actual
-      final count (the number from Task 1's commit
-      message). This item will later be removed entirely
+      final count (101 entries total, 97 new). This item
+      will later be removed entirely
       when the plan is marked Completed per memory
       convention, but the interim update prevents the
       stale estimate from misleading agents reading the
@@ -400,7 +498,7 @@ automatically clears its helper-of entries.
       the file currently states the audit has 4–5 allow-list
       entries and describes the old single-string `note`
       field. Update the relevant passages to state the
-      post-Task-1 count (48 entries at baseline) and the new
+      post-Task-1 count (101 entries at baseline) and the new
       `AllowMarker` taxonomy (TodoRetrofit / HelperOf /
       CarveOut). Do not rewrite the whole file; only the
       audit-related paragraphs need editing.
@@ -411,12 +509,12 @@ automatically clears its helper-of entries.
       feature-level retrofits and update allow-list
       taxonomy`.
 
-Acceptance: `project_followup_plans.md` has 5 new items
+Acceptance: `project_followup_plans.md` has 13 new items
 for the feature-level violators, each describing the
 retrofit shape; the helper-of convention is documented so
 future sessions handle allow-list maintenance correctly;
 the architectural-program memory reflects the final
-allow-list count (48 entries at baseline) and the
+allow-list count (101 entries at baseline) and the
 `AllowMarker` taxonomy; memory commit lands
 with the descriptive message.
 
@@ -477,21 +575,37 @@ with the descriptive message.
 - **`parse_yaml` is a carve-out, not a violator.** It is
   the one parser the rule references; exempting it
   prevents the rule from self-referring.
-- **Estimate-vs-actual allow-list count (~10–15 vs 44
+- **Estimate-vs-actual allow-list count (~10–15 vs 97
   new entries).** The follow-up queue note that authorized
   this plan estimated "~10-15 new allow-list entries."
   Actual enumeration against `rlsp-yaml/src/` produces
-  44 new entries (48 total with the existing 4). The gap is explained by two categories
-  the original estimate did not anticipate: (a) the five
-  feature-level public APIs (`hover_at`, `complete_at`,
-  `format_on_type`, `find_document_links`, `find_colors`)
-  that also match the broadened regex because they take
-  `text: &str` first — the original estimate assumed the
-  broadening would mostly catch private helpers within
-  `code_actions.rs`; and (b) the 28 private helpers of
-  those feature-level roots that the broadened
-  `(pub )?fn` match surfaces. The larger count is the
-  correct reading of the rule's scope as worded in
-  root `CLAUDE.md` ("No code in `rlsp-yaml/` may re-parse
-  YAML structure from raw text") — the estimate was
-  optimistic, not the inventory.
+  97 new entries (101 total with the existing 4). The
+  gap has three layers, each larger than the last: (a)
+  five feature-level public APIs in the initial inventory
+  draft (`hover_at`, `complete_at`, `format_on_type`,
+  `find_document_links`, `find_colors`); (b) a further
+  eight feature-level public APIs surfaced during Task 1's
+  reconciliation that the initial draft omitted because
+  I did not enumerate `analysis/`, `navigation/`, or
+  `schema/association.rs` (`folding_ranges`,
+  `selection_ranges`, `semantic_tokens`,
+  `document_symbols`, `goto_definition`, `find_references`,
+  `prepare_rename`, `rename`); (c) 52 private helpers of
+  those roots plus 18 test-fixture helpers inside
+  `#[cfg(test)]` blocks that the current scanner picks
+  up. User approved the full count (2026-04-18) rather
+  than narrowing scope. The larger count is the correct
+  reading of the rule's scope as worded in root
+  `CLAUDE.md` ("No code in `rlsp-yaml/` may re-parse YAML
+  structure from raw text"); the estimate was optimistic.
+- **Test-fixture helpers listed as `CarveOut`, not
+  excluded from the scan.** The scanner reads whole files
+  including `#[cfg(test)]` blocks. Rather than teaching
+  the scanner to skip test modules, user-approved to
+  list each test fixture as a carve-out with reason
+  `test fixture`. Keeps scanner logic simple; each
+  entry is still load-bearing via per-entry
+  verification. When a feature root is retrofitted, its
+  test fixtures can be removed or rewritten to consume
+  the parser directly — the carve-out entries are
+  removed at that time.
