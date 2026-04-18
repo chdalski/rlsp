@@ -307,7 +307,7 @@ The empty test run completes successfully. The
 shrink-only skip-list discipline is documented in a
 top-of-file comment.
 
-**Completed:** commit `992f2ba` — harness scaffold
+**Completed:** commit `678b16e` — harness scaffold
 with 4 seed files, `INVARIANTS` / `SKIP_LIST` constants
 empty, 8 harness-internal tests passing.
 
