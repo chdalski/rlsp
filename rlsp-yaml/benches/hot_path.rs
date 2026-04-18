@@ -40,7 +40,7 @@ fn bench_parse_and_validate(c: &mut Criterion) {
             b.iter(|| {
                 let result = parse_yaml(text);
                 let _ = validate_unused_anchors(text);
-                let _ = validate_flow_style(text);
+                let _ = validate_flow_style(&result.documents);
                 let _ = rlsp_yaml::validation::validators::validate_custom_tags(
                     text,
                     &result.documents,

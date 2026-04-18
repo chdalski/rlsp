@@ -12,6 +12,13 @@ with existing infrastructure.
 
 ---
 
+### AST-Based Flow Style Validator [completed]
+
+**Description:** Replaced the text-scanning implementation of `validate_flow_style` with an AST walker that consumes the `rlsp-yaml-parser` document tree. Two user-visible behavior changes: (a) plain scalars containing `{` or `[` — including GitHub Actions template expressions such as `${{ secrets.GITHUB_TOKEN }}` — no longer produce false-positive `flowMap`/`flowSeq` diagnostics; (b) multi-line flow collections (where `{` or `[` opens on one line and `}` or `]` closes on a later line) are now detected, where the old line-by-line scanner missed them.
+**Complexity:** Low
+**Comment:** Closes the false-positive class caused by `${{ … }}` in GHA workflows. The AST carries `CollectionStyle::Flow` directly on `Node::Mapping` and `Node::Sequence`, making the fix a straightforward tree walk. Diagnostic codes (`flowMap`, `flowSeq`), severity, source, and message text are unchanged so existing `flowStyle` severity overrides continue to work.
+**Tier:** 1
+
 ### Corpus Invariant Harness [completed]
 
 **Description:** A real-world corpus of 4 YAML files (`release-plz-workflow.yml`,

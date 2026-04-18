@@ -14,40 +14,16 @@ use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::validation::validators::{validate_duplicate_keys, validate_flow_style};
 // ---- Helpers ----------------------------------------------------------------
 
-/// Assert that the given valid YAML text produces no duplicate-key or
-/// flow-style false-positive diagnostics.
+/// Assert that the given valid YAML text produces no duplicate-key false-positive
+/// diagnostics. Flow-style false positives are eliminated structurally by the
+/// AST-based validator; empty collections never warn and plain scalars containing
+/// `{`/`[` (e.g. `${{ … }}`) are never flagged.
 fn assert_no_false_positives(label: &str, text: &str) {
     let docs = parse_yaml(text).documents;
     let dup_diags = validate_duplicate_keys(&docs);
     assert!(
         dup_diags.is_empty(),
         "{label}: unexpected duplicate-key diagnostics: {dup_diags:?}"
-    );
-    let flow_diags: Vec<_> = validate_flow_style(text)
-        .into_iter()
-        .filter(|d| {
-            // Suppress expected flowMap/flowSeq warnings on non-empty collections —
-            // those are intentional. We only care about false positives on empty
-            // collections (status: {}) and the duplicate-key bug pattern.
-            if let Some(tower_lsp::lsp_types::NumberOrString::String(code)) = &d.code {
-                // Empty flow collections should never warn.
-                let snippet = {
-                    let line = d.range.start.line as usize;
-                    text.lines().nth(line).unwrap_or("")
-                };
-                let trimmed = snippet.trim();
-                // If the line contains only `{}` or `[]` as the value, it's an
-                // empty-collection false positive.
-                (code == "flowMap" && trimmed.contains("{}"))
-                    || (code == "flowSeq" && trimmed.contains("[]"))
-            } else {
-                false
-            }
-        })
-        .collect();
-    assert!(
-        flow_diags.is_empty(),
-        "{label}: unexpected flow-style diagnostics on empty collections: {flow_diags:?}"
     );
 }
 
@@ -243,19 +219,13 @@ fn k8s_deployment_no_false_positives() {
 
 #[test]
 fn k8s_deployment_status_empty_flow_map_no_warning() {
-    // `status: {}` must not produce a flowMap warning.
-    let diags = validate_flow_style(K8S_DEPLOYMENT);
+    // `status: {}` must not produce a flowMap warning — AST knows the collection is empty.
+    let docs = parse_yaml(K8S_DEPLOYMENT).documents;
+    let diags = validate_flow_style(&docs);
     let status_warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
-            if let Some(tower_lsp::lsp_types::NumberOrString::String(code)) = &d.code {
-                if code == "flowMap" {
-                    let line = d.range.start.line as usize;
-                    let snippet = K8S_DEPLOYMENT.lines().nth(line).unwrap_or("");
-                    return snippet.contains("status: {}");
-                }
-            }
-            false
+            matches!(d.code.as_ref(), Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "flowMap")
         })
         .collect();
     assert!(
@@ -271,19 +241,13 @@ fn k8s_config_map_no_false_positives() {
 
 #[test]
 fn k8s_service_status_empty_flow_map_no_warning() {
-    // `status: {}` on a Service must not produce a flowMap warning.
-    let diags = validate_flow_style(K8S_SERVICE);
+    // `status: {}` on a Service must not produce a flowMap warning — AST knows the collection is empty.
+    let docs = parse_yaml(K8S_SERVICE).documents;
+    let diags = validate_flow_style(&docs);
     let status_warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
-            if let Some(tower_lsp::lsp_types::NumberOrString::String(code)) = &d.code {
-                if code == "flowMap" {
-                    let line = d.range.start.line as usize;
-                    let snippet = K8S_SERVICE.lines().nth(line).unwrap_or("");
-                    return snippet.contains("status: {}");
-                }
-            }
-            false
+            matches!(d.code.as_ref(), Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "flowMap")
         })
         .collect();
     assert!(

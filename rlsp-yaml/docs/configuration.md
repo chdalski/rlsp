@@ -248,6 +248,8 @@ Controls the severity of `flowMap` and `flowSeq` diagnostics, which are emitted 
 | `"warning"` | Flow-style collections are flagged with a warning squiggle (default) |
 | `"error"` | Flow-style collections are flagged as errors |
 
+Detection is AST-based: only genuine YAML flow collections trigger diagnostics. Plain scalars that contain `{` or `[` characters — such as GitHub Actions template expressions (`${{ secrets.TOKEN }}`) — are never flagged. Multi-line flow collections (where `{` opens on one line and `}` closes on a later line) are also detected.
+
 When `formatEnforceBlockStyle` is `true`, the formatter will rewrite flow-style collections to block style on save, which pairs well with `"error"` to enforce block style as a hard rule.
 
 ```json

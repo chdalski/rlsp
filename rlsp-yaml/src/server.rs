@@ -480,7 +480,8 @@ impl Backend {
         diagnostics.extend(crate::validation::validators::validate_unused_anchors(text));
         let flow_style_setting = self.get_flow_style();
         if flow_style_setting.as_deref() != Some("off") {
-            let mut flow_diags = crate::validation::validators::validate_flow_style(text);
+            let mut flow_diags =
+                crate::validation::validators::validate_flow_style(&result.documents);
             if flow_style_setting.as_deref() == Some("error") {
                 for diag in &mut flow_diags {
                     diag.severity = Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR);

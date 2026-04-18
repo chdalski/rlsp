@@ -129,7 +129,7 @@ shape.
 ## Steps
 
 - [x] Add "One parser, one AST" rule to root CLAUDE.md
-- [ ] Retrofit `validate_flow_style` to consume the AST
+- [x] Retrofit `validate_flow_style` to consume the AST
 - [ ] Add regression coverage for GHA-style expressions
 - [ ] Add a boundary-audit `#[test]` that fails when new
       violators are introduced
@@ -183,56 +183,56 @@ every `Node::Sequence { style: CollectionStyle::Flow, .. }`
 with non-empty `items`. Use the node's `loc` span as the
 diagnostic range.
 
-- [ ] Rewrite the function body as an AST walker; extract
+- [x] Rewrite the function body as an AST walker; extract
       a small helper for "walk node, collect flow
       diagnostics" since mappings and sequences both
       contain children that need the same treatment
-- [ ] Preserve the "skip empty collections" behavior —
+- [x] Preserve the "skip empty collections" behavior —
       check `entries.is_empty()` / `items.is_empty()`
       before emitting
-- [ ] Convert `Span` to LSP `Range` using the existing
+- [x] Convert `Span` to LSP `Range` using the existing
       span-to-range helpers already used in
       `validate_duplicate_keys` / `validate_yaml11_compat`
-- [ ] Keep the diagnostic code strings (`"flowMap"`,
+- [x] Keep the diagnostic code strings (`"flowMap"`,
       `"flowSeq"`), severity (`WARNING`), source
       (`"rlsp-yaml"`), and message text identical so the
       `flowStyle` setting's severity override in
       `server.rs:484-488` continues to work without changes
-- [ ] Update `rlsp-yaml/src/server.rs:483` to pass
+- [x] Update `rlsp-yaml/src/server.rs:483` to pass
       `&result.documents`
-- [ ] Update `rlsp-yaml/benches/hot_path.rs:43` — parse
+- [x] Update `rlsp-yaml/benches/hot_path.rs:43` — parse
       inputs once in bench setup, pass docs
-- [ ] Update `rlsp-yaml/benches/insight.rs:43` — same
+- [x] Update `rlsp-yaml/benches/insight.rs:43` — same
       (line 33 already parses docs; only the bench closure
       needs the new signature)
-- [ ] Update `rlsp-yaml/tests/ecosystem_fixtures.rs:26,
+- [x] Update `rlsp-yaml/tests/ecosystem_fixtures.rs:26,
       247, 275` — parse, pass docs
-- [ ] Rewrite the unit-test block in
+- [x] Rewrite the unit-test block in
       `validators.rs:1028-1113` to build docs in each
       test. Preserve existing test names and intents
       (empty collections skipped, real flow mappings
       detected, nested detection, quoted content ignored,
       multi-document behavior)
-- [ ] Check whether `find_closing_char` at
+- [x] Check whether `find_closing_char` at
       `validators.rs:268` has any remaining callers after
       the retrofit. If only `validate_flow_style` used it,
       delete it. If `validate_unused_anchors` still uses
       it (that function stays text-based in this plan),
       leave it in place.
-- [ ] Update `rlsp-yaml/docs/configuration.md` under the
+- [x] Update `rlsp-yaml/docs/configuration.md` under the
       `flowStyle` entry to note that multi-line flow
       collections (the form where `{` or `[` opens on one
       line and closes on another) are also detected — the
       current text-based implementation misses them, and
       users relying on `flowStyle: warning` will start
       seeing new warnings after this change
-- [ ] Add an entry to `rlsp-yaml/docs/feature-log.md`
+- [x] Add an entry to `rlsp-yaml/docs/feature-log.md`
       recording the two user-visible behavior changes:
       (a) `${{ … }}` GitHub Actions expressions and any
       other plain scalar containing `{`/`[` no longer
       trip `flowMap`/`flowSeq`; (b) multi-line flow
       collections are now detected
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`,
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`,
       `cargo test` — all clean
 
 Acceptance: the retrofitted function uses AST only; the
@@ -240,6 +240,21 @@ test suite passes; the GHA-expression input produces
 zero diagnostics when passed through the full pipeline;
 multi-line flow collections now emit warnings; the two
 user-facing docs reflect the new behavior.
+
+**Completed:** commit `ffa6941` — retrofit
+lands via AST walker; 14 new tests for field identity,
+GHA-style expressions, multi-line detection, and
+no-double-report; existing standalone intents preserved.
+`find_closing_char` deleted (no remaining callers).
+Range contract preserved via `end_col + 1` adjustment
+to match the parser's zero-width `MappingEnd`/`SequenceEnd`
+span — documented in-source. Corpus harness's I4 skip-list
+entries for `release-plz-workflow.yml` and
+`github-actions-matrix.yml` stay active: the range
+correctness fix makes `flow_map_to_block` reachable on
+`- { ... }` sequence-entry flow maps, which triggers the
+destructive-code-action bug tracked in the
+destructive-code-action-fix stub plan.
 
 ### Task 3: Add regression coverage for GHA-style expressions
 

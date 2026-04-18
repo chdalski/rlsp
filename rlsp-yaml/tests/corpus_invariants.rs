@@ -72,15 +72,15 @@ const SKIP_LIST: &[(&str, &str, &str)] = &[
         "github-actions-matrix.yml",
         "I4",
         ".ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md: \
-         flow_map_to_block drops ${{ matrix.target.triple }} key when converting \
-         flow map containing template expressions",
+         flow_map_to_block drops sequence-item content when converting a flow \
+         map inside a `- { ... }` sequence entry",
     ),
     (
         "release-plz-workflow.yml",
         "I4",
         ".ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md: \
-         flow_map_to_block drops GITHUB_TOKEN key when converting flow map \
-         whose value contains ${{ ... }} expression",
+         flow_map_to_block drops sequence-item content when converting a flow \
+         map inside a `- { ... }` sequence entry",
     ),
 ];
 
@@ -124,7 +124,7 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("panic in validate_unused_anchors: {}", panic_message(&e)))?;
 
     // Stage 3: validate_flow_style
-    catch_unwind(AssertUnwindSafe(|| validate_flow_style(text)))
+    catch_unwind(AssertUnwindSafe(|| validate_flow_style(&docs)))
         .map_err(|e| format!("panic in validate_flow_style: {}", panic_message(&e)))?;
 
     // Stage 4: validate_custom_tags (empty allowed set — all tags are unknown)
@@ -599,7 +599,7 @@ fn collect_all_diagnostics(
     let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(text));
-    all.extend(validate_flow_style(text));
+    all.extend(validate_flow_style(docs));
     all.extend(validate_custom_tags(text, docs, &allowed_tags));
     all.extend(validate_key_ordering(text, docs));
     all.extend(validate_duplicate_keys(docs));

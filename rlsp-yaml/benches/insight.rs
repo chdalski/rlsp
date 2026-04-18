@@ -40,7 +40,7 @@ fn bench_validators_individual(c: &mut Criterion) {
     });
 
     group.bench_function("validate_flow_style", |b| {
-        b.iter(|| validate_flow_style(&text));
+        b.iter(|| validate_flow_style(&docs));
     });
 
     group.bench_function("validate_custom_tags", |b| {

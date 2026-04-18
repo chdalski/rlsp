@@ -21,21 +21,12 @@ Protocol**.
 
 ## Current failures
 
-### `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`
-
-Both entries below share the same root cause: `flow_map_to_block` produces
-syntactically valid but semantically destructive output when a flow-mapping
-value contains `${{ … }}` template expressions. The fix is tracked in the
-plan referenced above.
-
-| File | Invariant | Explanation |
-|------|-----------|-------------|
-| `github-actions-matrix.yml` | I4 | `flow_map_to_block` drops the `${{ matrix.target.triple }}` key when converting a flow map whose value contains template expressions. |
-| `release-plz-workflow.yml` | I4 | `flow_map_to_block` drops the `GITHUB_TOKEN` key when converting a flow map whose value contains a `${{ secrets.GITHUB_TOKEN }}` expression. |
+| File | Invariant | Plan |
+|------|-----------|------|
+| `github-actions-matrix.yml` | I4 | [fix-destructive-flow-to-block-code-action](../../../../.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md) — `flow_map_to_block` drops sequence-item content when converting a flow map inside a `- { ... }` sequence entry |
+| `release-plz-workflow.yml` | I4 | [fix-destructive-flow-to-block-code-action](../../../../.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md) — `flow_map_to_block` drops sequence-item content when converting a flow map inside a `- { ... }` sequence entry |
 
 ---
 
-*When the skip-list reaches zero entries, update this file to note the
-empty state rather than deleting it. The discipline is cheaper to preserve
-than to re-establish. An empty list here means the harness is fully green
-— not that it is unused.*
+*An empty list here means the harness is fully green — not that it is
+unused. The discipline is cheaper to preserve than to re-establish.*
