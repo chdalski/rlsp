@@ -95,13 +95,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // -----------------------------------------------------------------------
     AllowEntry {
         file: "validation/validators.rs",
-        func: "validate_unused_anchors",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-validate-unused-anchors",
-        },
-    },
-    AllowEntry {
-        file: "validation/validators.rs",
         func: "validate_custom_tags",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-validate-custom-tags",
@@ -221,13 +214,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // -----------------------------------------------------------------------
     // HelperOf — private helpers of validators
     // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "validation/validators.rs",
-        func: "scan_tokens",
-        marker: AllowMarker::HelperOf {
-            root: "validate_unused_anchors",
-        },
-    },
     AllowEntry {
         file: "validation/validators.rs",
         func: "find_tag_occurrence",
@@ -1402,8 +1388,7 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source =
-            "pub fn validate_unused_anchors(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
+        let source = "pub fn validate_custom_tags(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
         let violations = scan_file("validation/validators.rs", source);
         assert_eq!(violations.len(), 1);
 

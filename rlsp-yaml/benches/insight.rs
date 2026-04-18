@@ -36,7 +36,7 @@ fn bench_validators_individual(c: &mut Criterion) {
     let mut group = c.benchmark_group("validators_individual");
 
     group.bench_function("validate_unused_anchors", |b| {
-        b.iter(|| validate_unused_anchors(&text));
+        b.iter(|| validate_unused_anchors(&docs));
     });
 
     group.bench_function("validate_flow_style", |b| {

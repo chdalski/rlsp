@@ -105,7 +105,7 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
     let docs = parse_result.documents;
 
     // Stage 2: validate_unused_anchors
-    catch_unwind(AssertUnwindSafe(|| validate_unused_anchors(text)))
+    catch_unwind(AssertUnwindSafe(|| validate_unused_anchors(&docs)))
         .map_err(|e| format!("panic in validate_unused_anchors: {}", panic_message(&e)))?;
 
     // Stage 3: validate_flow_style
@@ -589,7 +589,7 @@ fn collect_all_diagnostics(
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
-    all.extend(validate_unused_anchors(text));
+    all.extend(validate_unused_anchors(docs));
     all.extend(validate_flow_style(docs));
     all.extend(validate_custom_tags(text, docs, &allowed_tags));
     all.extend(validate_key_ordering(text, docs));

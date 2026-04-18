@@ -477,7 +477,9 @@ impl Backend {
         let mut diagnostics = result.diagnostics.clone();
 
         // Run validators and combine diagnostics
-        diagnostics.extend(crate::validation::validators::validate_unused_anchors(text));
+        diagnostics.extend(crate::validation::validators::validate_unused_anchors(
+            &result.documents,
+        ));
         let flow_style_setting = self.get_flow_style();
         if flow_style_setting.as_deref() != Some("off") {
             let mut flow_diags =

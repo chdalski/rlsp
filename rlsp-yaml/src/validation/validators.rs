@@ -8,184 +8,137 @@ use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
 };
 
-/// A token found in the text: either an anchor (`&name`) or an alias (`*name`).
-#[derive(Debug, Clone)]
-struct Token {
+/// An anchor definition collected from the AST.
+struct AnchorEntry {
     name: String,
-    line: u32,
-    start_col: u32,
-    end_col: u32,
-    is_anchor: bool,
+    range: Range,
 }
 
-/// Validate unused anchors and unresolved aliases in YAML text.
+/// Validate unused anchors and unresolved aliases in YAML documents.
 ///
 /// Returns diagnostics for:
 /// - Anchors (`&name`) that are never referenced by any alias (marked with `DiagnosticTag::Unnecessary`)
 /// - Aliases (`*name`) that reference non-existent anchors (error severity)
 ///
-/// Anchors and aliases are scoped to individual YAML documents.
+/// Anchors and aliases are scoped to individual YAML documents. Diagnostic ranges
+/// use the anchor-carrying node's `loc` span directly.
 #[must_use]
-pub fn validate_unused_anchors(text: &str) -> Vec<Diagnostic> {
-    let lines: Vec<&str> = text.lines().collect();
+pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // Find all document boundaries
-    let mut doc_ranges = Vec::new();
-    let mut current_start = 0;
+    for doc in docs {
+        let mut anchors: Vec<AnchorEntry> = Vec::new();
+        let mut alias_names: Vec<(String, Range)> = Vec::new();
 
-    for (line_idx, line) in lines.iter().enumerate() {
-        if line.trim() == "---" {
-            if line_idx > current_start {
-                doc_ranges.push((current_start, line_idx));
-            }
-            current_start = line_idx + 1;
-        }
-    }
-    // Add final document
-    if current_start < lines.len() {
-        doc_ranges.push((current_start, lines.len()));
-    }
-    // If no separators found, treat as single document
-    if doc_ranges.is_empty() && !lines.is_empty() {
-        doc_ranges.push((0, lines.len()));
-    }
+        collect_anchors_and_aliases(&doc.root, &mut anchors, &mut alias_names, 0);
 
-    // Process each document independently
-    for (start_line, end_line) in doc_ranges {
-        let tokens = scan_tokens(&lines, start_line, end_line);
+        // Build anchor name → range map for lookup (last definition wins on duplicates)
+        let anchor_map: HashMap<&str, &AnchorEntry> =
+            anchors.iter().map(|e| (e.name.as_str(), e)).collect();
 
-        // Build anchor map for O(1) lookup
-        let mut anchors: HashMap<String, &Token> = HashMap::new();
-        let mut aliases: Vec<&Token> = Vec::new();
+        let mut used: HashSet<&str> = HashSet::new();
 
-        for token in &tokens {
-            if token.is_anchor {
-                anchors.insert(token.name.clone(), token);
+        for (alias_name, alias_range) in &alias_names {
+            if anchor_map.contains_key(alias_name.as_str()) {
+                used.insert(alias_name.as_str());
             } else {
-                aliases.push(token);
-            }
-        }
-
-        // Track which anchors are used
-        let mut used_anchors: HashSet<String> = HashSet::new();
-
-        // Check aliases for unresolved references
-        for alias in &aliases {
-            if anchors.contains_key(&alias.name) {
-                used_anchors.insert(alias.name.clone());
-            } else {
-                // Unresolved alias
                 diagnostics.push(Diagnostic {
-                    range: Range::new(
-                        Position::new(alias.line, alias.start_col),
-                        Position::new(alias.line, alias.end_col),
-                    ),
+                    range: *alias_range,
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: Some(NumberOrString::String("unresolvedAlias".to_string())),
-                    message: format!("Alias '{}' has no matching anchor", alias.name),
+                    message: format!("Alias '{alias_name}' has no matching anchor"),
                     source: Some("rlsp-yaml".to_string()),
                     ..Diagnostic::default()
                 });
             }
         }
 
-        // Report unused anchors
-        diagnostics.extend(
-            anchors
-                .iter()
-                .filter(|(name, _)| !used_anchors.contains(*name))
-                .map(|(name, anchor)| {
-                    let truncated_name = if name.len() > 100 {
-                        format!("{}...", &name[..100])
-                    } else {
-                        name.clone()
-                    };
-                    Diagnostic {
-                        range: Range::new(
-                            Position::new(anchor.line, anchor.start_col),
-                            Position::new(anchor.line, anchor.end_col),
-                        ),
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unusedAnchor".to_string())),
-                        message: format!("Anchor '{truncated_name}' is never used"),
-                        source: Some("rlsp-yaml".to_string()),
-                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                        ..Diagnostic::default()
-                    }
-                }),
-        );
+        for entry in &anchors {
+            if !used.contains(entry.name.as_str()) {
+                let truncated_name = if entry.name.len() > 100 {
+                    format!("{}...", &entry.name[..100])
+                } else {
+                    entry.name.clone()
+                };
+                diagnostics.push(Diagnostic {
+                    range: entry.range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unusedAnchor".to_string())),
+                    message: format!("Anchor '{truncated_name}' is never used"),
+                    source: Some("rlsp-yaml".to_string()),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..Diagnostic::default()
+                });
+            }
+        }
     }
 
     diagnostics
 }
 
-/// Scan lines for anchor (`&name`) and alias (`*name`) tokens within the
-/// given line range. Skips comment lines.
-fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token> {
-    let mut tokens = Vec::new();
+/// Recursively walk the AST collecting anchor definitions and alias references.
+fn collect_anchors_and_aliases(
+    node: &Node<Span>,
+    anchors: &mut Vec<AnchorEntry>,
+    aliases: &mut Vec<(String, Range)>,
+    depth: usize,
+) {
+    const MAX_DEPTH: usize = 100;
+    if depth > MAX_DEPTH {
+        return;
+    }
 
-    for line_idx in start_line..end_line {
-        let Some(line) = lines.get(line_idx) else {
-            continue;
-        };
-
-        let trimmed = line.trim();
-
-        // Skip comment lines
-        if trimmed.starts_with('#') {
-            continue;
+    match node {
+        Node::Alias { name, loc, .. } => {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "LSP line/col are u32; always fits"
+            )]
+            let range = Range::new(
+                Position::new(
+                    loc.start.line.saturating_sub(1) as u32,
+                    loc.start.column as u32,
+                ),
+                Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+            );
+            aliases.push((name.clone(), range));
         }
-
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let line_num = line_idx as u32;
-
-        let mut chars = line.char_indices().peekable();
-        while let Some((i, ch)) = chars.next() {
-            if ch == '&' || ch == '*' {
-                let is_anchor = ch == '&';
-
-                // Check if followed by a valid anchor name character
-                let name_start = i + 1;
-                let mut name_end = name_start;
-
-                while let Some(&(j, next_ch)) = chars.peek() {
-                    if is_anchor_name_char(next_ch) {
-                        name_end = j + next_ch.len_utf8();
-                        chars.next();
-                    } else {
-                        break;
+        Node::Scalar { anchor, loc, .. }
+        | Node::Mapping { anchor, loc, .. }
+        | Node::Sequence { anchor, loc, .. } => {
+            if let Some(name) = anchor {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "LSP line/col are u32; always fits"
+                )]
+                let range = Range::new(
+                    Position::new(
+                        loc.start.line.saturating_sub(1) as u32,
+                        loc.start.column as u32,
+                    ),
+                    Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+                );
+                anchors.push(AnchorEntry {
+                    name: name.clone(),
+                    range,
+                });
+            }
+            match node {
+                Node::Mapping { entries, .. } => {
+                    for (key, value) in entries {
+                        collect_anchors_and_aliases(key, anchors, aliases, depth + 1);
+                        collect_anchors_and_aliases(value, anchors, aliases, depth + 1);
                     }
                 }
-
-                // Must have at least one name character
-                if name_end > name_start {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    tokens.push(Token {
-                        name: line[name_start..name_end].to_string(),
-                        line: line_num,
-                        start_col: i as u32,
-                        end_col: name_end as u32,
-                        is_anchor,
-                    });
+                Node::Sequence { items, .. } => {
+                    for item in items {
+                        collect_anchors_and_aliases(item, anchors, aliases, depth + 1);
+                    }
                 }
+                Node::Scalar { .. } | Node::Alias { .. } => {}
             }
         }
     }
-
-    tokens
-}
-
-/// Check if a character is valid in a YAML anchor/alias name.
-/// Valid characters: alphanumeric, `-`, `_`, `.`
-const fn is_anchor_name_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'
 }
 
 /// Validate flow style usage in YAML documents.
@@ -819,6 +772,10 @@ mod tests {
         rlsp_yaml_parser::load(text).unwrap()
     }
 
+    fn parse_anchors(yaml: &str) -> Vec<super::Diagnostic> {
+        validate_unused_anchors(&parse_docs(yaml))
+    }
+
     fn parse_duplicate(text: &str) -> Vec<super::Diagnostic> {
         let docs = rlsp_yaml_parser::load(text).unwrap();
         validate_duplicate_keys(&docs)
@@ -834,9 +791,9 @@ mod tests {
     #[case::anchors_in_comments("# &fake anchor\nkey: value\n")]
     #[case::anchor_used_multiple_times("defaults: &shared\n  k: v\na: *shared\nb: *shared\n")]
     #[case::anchor_with_special_chars("data: &my-anchor_v2.0\n  k: v\nref: *my-anchor_v2.0\n")]
-    #[case::invalid_anchor_chars_terminates_name("data: &anchor!@# value\nref: *anchor\n")]
+    #[case::invalid_anchor_chars_terminates_name("data: &anchor!@# value\nref: *anchor!@#\n")]
     fn unused_anchors_returns_empty(#[case] input: &str) {
-        let result = validate_unused_anchors(input);
+        let result = parse_anchors(input);
 
         assert!(result.is_empty());
     }
@@ -861,7 +818,7 @@ mod tests {
     )]
     #[case::doc2_unused_one_diag("a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n", 1)]
     fn unused_anchors_count(#[case] input: &str, #[case] expected: usize) {
-        let result = validate_unused_anchors(input);
+        let result = parse_anchors(input);
 
         assert_eq!(result.len(), expected);
     }
@@ -872,7 +829,7 @@ mod tests {
     #[case::single_unresolved_alias("production:\n  <<: *undefined\n")]
     #[case::two_unresolved_aliases("a: *missing1\nb: *missing2\n")]
     fn unused_anchors_all_errors(#[case] input: &str) {
-        let result = validate_unused_anchors(input);
+        let result = parse_anchors(input);
 
         assert!(
             result
@@ -890,7 +847,7 @@ mod tests {
         "a: &name\n  k: v\n---\nb: &name\n  k: v\nref: *name\n"
     )]
     fn unused_anchor_has_unnecessary_tag(#[case] input: &str) {
-        let result = validate_unused_anchors(input);
+        let result = parse_anchors(input);
 
         assert!(
             result[0]
@@ -913,7 +870,7 @@ mod tests {
             writeln!(text, "ref{i}: *anchor{i}").unwrap();
         }
 
-        let result = validate_unused_anchors(&text);
+        let result = parse_anchors(&text);
 
         // Should report 60 unused anchors (odd-numbered)
         assert_eq!(result.len(), 60);
@@ -928,7 +885,7 @@ mod tests {
     fn should_handle_long_anchor_name() {
         let long_name = "a".repeat(200);
         let text = format!("data: &{long_name}\n  k: v\n");
-        let result = validate_unused_anchors(&text);
+        let result = parse_anchors(&text);
 
         assert_eq!(result.len(), 1);
         assert!(!result[0].message.is_empty());
@@ -939,7 +896,7 @@ mod tests {
     #[test]
     fn should_report_unused_anchor_scoped_to_document() {
         let text = "doc1: &shared\n  k: v\n---\ndoc2:\n  ref: *shared\n";
-        let result = validate_unused_anchors(text);
+        let result = parse_anchors(text);
 
         // &shared in doc1 is unused (within doc1)
         // *shared in doc2 is unresolved (within doc2)
@@ -960,19 +917,23 @@ mod tests {
 
     #[test]
     fn should_produce_correct_range_with_unicode_in_text() {
+        // &unused anchors a Mapping whose content starts at line 2 (0-based), col 2.
         let text = "name: 中文\ndata: &unused\n  key: val\n";
-        let result = validate_unused_anchors(text);
+        let result = parse_anchors(text);
 
         assert_eq!(result.len(), 1);
         let diag = &result[0];
-        assert_eq!(diag.range.start.line, 1, "anchor is on line 1");
-        assert_eq!(diag.range.start.character, 6, "anchor starts at column 6");
+        assert_eq!(diag.range.start.line, 2, "mapping content is on line 2");
+        assert_eq!(
+            diag.range.start.character, 2,
+            "mapping content starts at col 2"
+        );
     }
 
     #[test]
     fn should_not_satisfy_alias_in_doc1_with_anchor_in_doc2() {
         let text = "ref: *later\n---\ndata: &later\n  key: val\n";
-        let result = validate_unused_anchors(text);
+        let result = parse_anchors(text);
 
         // *later in doc1 is unresolved, &later in doc2 is unused
         assert_eq!(result.len(), 2);
@@ -996,31 +957,150 @@ mod tests {
     }
 
     #[test]
-    fn should_return_correct_range_for_unused_anchor() {
-        let text = "defaults: &defaults\n  key: val\n";
-        let result = validate_unused_anchors(text);
-
-        assert_eq!(result.len(), 1);
-        let diag = &result[0];
-        assert_eq!(diag.range.start.line, 0);
-        assert_eq!(diag.range.start.character, 10, "anchor starts at column 10");
-        assert_eq!(diag.range.end.character, 19, "anchor ends at column 19");
-    }
-
-    #[test]
     fn should_evaluate_each_document_independently_for_unused_anchors() {
         // Doc1: anchor used. Doc2: anchor unused.
         let text = "a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n";
-        let result = validate_unused_anchors(text);
+        let result = parse_anchors(text);
 
         // Only doc2's &unused should be flagged
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.line, 4); // &unused is on line 4
+        // &unused anchors a Mapping whose content (  k: v) is on line 5 (0-based), col 2.
+        assert_eq!(
+            result[0].range.start.line, 5,
+            "mapping content is on line 5"
+        );
+        assert_eq!(
+            result[0].range.start.character, 2,
+            "mapping content starts at col 2"
+        );
         assert!(
             result[0]
                 .tags
                 .as_ref()
                 .is_some_and(|t| t.contains(&DiagnosticTag::UNNECESSARY))
+        );
+    }
+
+    // ---- Unused Anchors Validator: AC-4 Regression Tests ----
+
+    #[test]
+    fn ac4_undefined_alias_produces_error_not_warning() {
+        // "ref: *does_not_exist\n" — *does_not_exist starts at col 5, ends at col 20.
+        let text = "ref: *does_not_exist\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].severity,
+            Some(DiagnosticSeverity::ERROR),
+            "undefined alias should be an error"
+        );
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String("unresolvedAlias".to_string()))
+        );
+        assert_eq!(result[0].range.start.character, 5, "alias starts at col 5");
+        assert_eq!(result[0].range.end.character, 20, "alias ends at col 20");
+    }
+
+    #[test]
+    fn unused_anchor_on_block_mapping_node_loc_used() {
+        // The plan specifies using the anchor-carrying node's loc directly.
+        // &defaults anchors a Mapping; the Mapping's loc.start is at the content
+        // (line 1, col 2 in LSP), not at the &defaults token on line 0.
+        let text = "defaults: &defaults\n  key: val\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.line, 1, "mapping content is on line 1");
+        assert_eq!(
+            diag.range.start.character, 2,
+            "mapping content starts at col 2"
+        );
+        assert_eq!(diag.range.end.line, 2, "mapping content ends on line 2");
+        assert_eq!(diag.range.end.character, 0);
+    }
+
+    #[test]
+    fn unused_anchor_on_flow_sequence_node_loc_used() {
+        // &a anchors a Sequence; the Sequence's loc covers `[1, 2, 3]` starting at col 10.
+        let text = "items: &a [1, 2, 3]\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.line, 0);
+        assert_eq!(
+            diag.range.start.character, 10,
+            "sequence starts at col 10 (the `[`)"
+        );
+        assert_eq!(diag.range.end.character, 18, "sequence ends at col 18");
+    }
+
+    #[test]
+    fn unused_anchor_on_inline_scalar_node_loc_used() {
+        // &myanchor anchors a Scalar; the Scalar's loc covers `value` starting at col 15.
+        let text = "key: &myanchor value\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.line, 0);
+        assert_eq!(
+            diag.range.start.character, 15,
+            "scalar `value` starts at col 15"
+        );
+        assert_eq!(
+            diag.range.end.character, 20,
+            "scalar `value` ends at col 20"
+        );
+    }
+
+    #[test]
+    fn unused_anchor_trailing_comment_node_loc_excludes_comment() {
+        // &anchor anchors a Scalar; the Scalar's loc covers `value` (col 13–18),
+        // not the trailing comment. Node loc is tighter than the full line.
+        let text = "key: &anchor value # this is a comment\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(
+            diag.range.start.character, 13,
+            "scalar `value` starts at col 13"
+        );
+        assert_eq!(
+            diag.range.end.character, 18,
+            "scalar `value` ends at col 18, before comment"
+        );
+    }
+
+    #[test]
+    fn unresolved_alias_range_points_to_asterisk() {
+        // Node::Alias { loc } covers *missing directly — unchanged by this refactor.
+        let text = "ref: *missing\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.character, 5, "* sigil at col 5");
+        assert_eq!(diag.range.end.character, 13, "*missing ends at col 13");
+    }
+
+    #[test]
+    fn unused_anchor_second_document_correct_line() {
+        // &unused anchors a Mapping in doc2; the Mapping's content (  k: v) is
+        // on line 5 (0-based), col 2 — one line below `b: &unused` on line 4.
+        let text = "a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n";
+        let result = parse_anchors(text);
+
+        assert_eq!(result.len(), 1);
+        let diag = &result[0];
+        assert_eq!(diag.range.start.line, 5, "mapping content is on line 5");
+        assert_eq!(
+            diag.range.start.character, 2,
+            "mapping content starts at col 2"
         );
     }
 

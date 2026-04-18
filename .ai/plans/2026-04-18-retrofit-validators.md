@@ -283,7 +283,7 @@ cleanup waits for the post-program plan.
 
 ## Steps
 
-- [ ] Retrofit `validate_unused_anchors` (standalone —
+- [x] Retrofit `validate_unused_anchors` (standalone —
       heaviest, changes signature and eliminates
       `scan_tokens` + document-boundary rescan)
 - [ ] Retrofit `validate_custom_tags` and
@@ -302,11 +302,11 @@ Standalone because this validator currently takes only
 rediscovers document boundaries — the retrofit touches
 all three and warrants one focused task.
 
-- [ ] Change signature to
+- [x] Change signature to
       `fn validate_unused_anchors(docs:
       &[Document<Span>]) -> Vec<Diagnostic>`. The `text`
       parameter is removed entirely.
-- [ ] Implement the new body as a per-document AST
+- [x] Implement the new body as a per-document AST
       walker that collects:
   1. Anchor definitions — any node with
      `anchor: Some(name)`. Record `(name, loc)`.
@@ -315,22 +315,22 @@ all three and warrants one focused task.
   3. Anchors with zero matching aliases become
      diagnostics using the anchor-carrying node's
      `loc: Span` for the range.
-- [ ] Remove `fn scan_tokens` and `struct Token` from
+- [x] Remove `fn scan_tokens` and `struct Token` from
       `validators.rs`. Search the crate for any other
       usage — if none, delete outright; if any survive
       (unlikely, but verify), document in Decisions why
       and keep them in the allow-list.
-- [ ] Remove the two allow-list entries
+- [x] Remove the two allow-list entries
       (`validate_unused_anchors` at line 98,
       `scan_tokens` at line 257).
-- [ ] Update the single call site in
+- [x] Update the single call site in
       `rlsp-yaml/src/language_server.rs` to pass `docs`
       instead of `text`.
-- [ ] TE input-gate consultation. Scan existing tests
+- [x] TE input-gate consultation. Scan existing tests
       for `validate_unused_anchors` coverage; produce a
       Consolidation section listing duplicates to
       retire and test-coverage shape to add.
-- [ ] Regression tests (augment with TE's Consolidation
+- [x] Regression tests (augment with TE's Consolidation
       decisions):
   - Single-document anchor with no alias emits
     diagnostic pointing at the anchor's span (not the
@@ -349,7 +349,7 @@ all three and warrants one focused task.
     regression in that direction
   - Trailing comment on the anchor's line — diagnostic
     range does not include the comment
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace green
@@ -360,13 +360,21 @@ all three and warrants one focused task.
     104 after sibling plan lands, minus two entries
     for `validate_unused_anchors` root and
     `scan_tokens` helper)
-- [ ] TE output-gate sign-off covering regression adds
+- [x] TE output-gate sign-off covering regression adds
       + Consolidation deletes.
 
 Acceptance: `validate_unused_anchors` consumes only the
 AST; `scan_tokens` and `Token` deleted; single call site
 updated; corpus SKIP_LIST stays empty; audit allow-list
 at 102 (down from 104).
+
+**Landed:** commit `bb7a889` (see `git log` — SHA may
+be superseded by follow-up amend). `const ALLOW_LIST`
+at 94 (−2 from 96). Task modified six files: the
+validator (`validators.rs`), the LSP handler
+(`server.rs`), two bench files (`hot_path.rs`,
+`insight.rs`), and two test files
+(`corpus_invariants.rs`, `parser_boundary_audit.rs`).
 
 ### Task 2: Retrofit `validate_custom_tags` and `validate_key_ordering` to AST-first
 
