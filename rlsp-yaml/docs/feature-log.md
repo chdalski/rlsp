@@ -4,27 +4,24 @@ User-facing feature decisions for rlsp-yaml, newest first.
 Tiered by user impact, implementation feasibility, and
 alignment with existing infrastructure.
 
-## Scope
+<!--
+Agent scope note (hidden from rendered docs):
 
-This file documents changes a **user of the language
-server** would notice — new LSP capabilities, behavior
-changes visible in their editor, settings that unlock new
-UX. It is published documentation under `docs/`, not an
-internal changelog.
+This file is USER-FACING documentation. Entries describe
+changes a user of the language server would notice — new
+LSP capabilities, behavior changes visible in their
+editor, settings that unlock new UX.
 
-Do **not** add entries for:
-
+Do NOT add entries for:
 - Internal refactors (e.g. "retrofit X to AST+formatter")
 - Implementation rewrites that don't change user-visible
-  behavior (same quickfix titles, same diagnostics, same
-  output)
-- Test infrastructure, audits, or boundary-check additions
+  behavior (same quickfix titles, diagnostics, output)
+- Test infrastructure, audits, boundary-check additions
 - Memory or plan-file updates
 
-Internal changes belong in git history (commit messages)
-and in the corresponding plan file under `.ai/plans/`.
-A reader skimming this log should see only things they
-can actually try out.
+Internal changes belong in git history and the
+corresponding plan file under `.ai/plans/`.
+-->
 
 **Tiers:**
 - **1** — High impact, feasible now
