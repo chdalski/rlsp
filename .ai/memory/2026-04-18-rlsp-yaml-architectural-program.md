@@ -266,8 +266,8 @@ Move 1 tasks (summary):
 ## Follow-up queue (in dependency order)
 
 Each is a separate plan, filed as needed. Order below
-reflects sequencing as of the destructive-code-action
-fix's completion (2026-04-18).
+reflects sequencing as of 2026-04-18 late afternoon
+(after Task 1 of `string_to_block_scalar` retrofit).
 
 1. ✅ **Destructive `flow_map_to_block` /
    `flow_seq_to_block` fix.** Completed 2026-04-18
@@ -288,6 +288,21 @@ fix's completion (2026-04-18).
    apply_block_to_flow_edit. Retired `quote_flow_item`.
    Preserves refuse-nested behavior; nested-support
    lifting is queued in `project_followup_plans.md`.
+2.5. 🟡 **Retrofit `string_to_block_scalar` via AST +
+   format_subtree** (`.ai/plans/2026-04-18-retrofit-string-to-block-scalar-code-action.md`).
+   Task 1 (AST rewrite) landed at `370b8c4`
+   2026-04-18. Task 2 (cleanup, regression tests not
+   yet added in Task 1, feature-log.md entry, audit
+   re-verify) still pending. Important correction
+   made during execution: the plan's
+   `base_indent = key_col + 2` formula was WRONG for
+   block scalars — `format_subtree` already adds
+   `tab_width` via the printer, so `base_indent =
+   key_col` is correct. Decision rationale documented
+   in the Task 1 completion note. Pattern note: DO NOT
+   copy `block_to_flow`'s `+2` formula for scalar
+   retrofits — flow and block emitters have different
+   printer-indent behaviors.
 3. **Retrofit remaining code actions to AST+formatter.**
    Queued as individual items in
    `project_followup_plans.md`:
@@ -485,6 +500,56 @@ its own plan during Move 3's ongoing expansion.
 5. The formatter is NOT invoked on the quickfix path —
    relevant for why `flow_map_to_block` produces ugly
    whitespace that never gets cleaned up
+
+## Immediate resume state (as of 2026-04-18 afternoon)
+
+**Last committed work:** `370b8c4` — Task 1 of
+`.ai/plans/2026-04-18-retrofit-string-to-block-scalar-code-action.md`
+approved and committed.
+
+**Next immediate action:** Team `rlsp-yaml-s2bs` is
+still alive. Cycle it (TeamDelete + TeamCreate +
+spawn 4) and dispatch Task 2 of the
+string_to_block_scalar plan. Task 2 is CLEANUP:
+verify allow-list still at 4, add defect-class
+regression tests that weren't eagerly added in Task 1
+(many already were — verify which are actually still
+missing), update `feature-log.md`. Small task.
+
+**Known quirks from Task 1 execution to watch for in
+future cycles:**
+- Developer loop-risk: if the same rejection repeats
+  2+ times on the SAME specific item, intervene EARLY
+  with a literal edit instruction ("add exactly this
+  line at exactly this location"). The developer
+  proved prone to resubmitting without actually making
+  the change, claiming TE was unreachable, and asking
+  for gate bypass. Do NOT grant gate bypass; the
+  advisor-gate-independence rule stands.
+- Inbox-ordering confusion: the developer acted on
+  older rejection messages as if they were live even
+  when TE had subsequently granted sign-off. When
+  this happens, quote the latest message's timestamp
+  explicitly.
+- Reviewer's preferred routing: approval messages go
+  DIRECTLY from reviewer to lead (not routed through
+  developer). Include this in future reviewer spawn
+  prompts.
+
+**Queue after this plan completes (see
+`project_followup_plans.md` for details):**
+- Audit v2 (broaden regex to catch private helpers
+  with `text`/`line`/`lines`/`content`/`source`/`input`
+  parameters) — sequence IMMEDIATELY after this plan
+- Then: retrofit `quoted_bool_to_unquoted`,
+  `yaml11_bool_actions`, `yaml11_octal_actions`,
+  `schema_yaml11_bool_type_actions`,
+  `delete_unused_anchor` — in any order
+- Then validator retrofits: `validate_unused_anchors`,
+  `validate_custom_tags`, `validate_key_ordering`,
+  `validate_schema`
+- Then Move 2 (fixture pattern), E2E harness,
+  WORKLIST.md removal
 
 ## How to resume
 
