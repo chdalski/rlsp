@@ -266,40 +266,63 @@ Move 1 tasks (summary):
 ## Follow-up queue (in dependency order)
 
 Each is a separate plan, filed as needed. Order below
-reflects sequencing as of Move 1 completion.
+reflects sequencing as of the destructive-code-action
+fix's completion (2026-04-18).
 
-1. **Destructive `flow_map_to_block` / `flow_seq_to_block`
-   fix.** Stub plan filed at
-   `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`
-   during Move 0. Addresses the latent defects
-   (full-line replace, single-line scope,
-   key-reconstruction fragility). Still open question:
-   fix by (a) tighten replace range and guard rails
-   (small), or (b) rewrite as AST-subtree → formatter
-   (big)? Move 2's code-action fixture format may help
-   frame "what fixed looks like" — could sequence after
-   Move 2 starts rather than before.
-2. **Retrofit `validate_unused_anchors(text: &str)`** at
+1. ✅ **Destructive `flow_map_to_block` /
+   `flow_seq_to_block` fix.** Completed 2026-04-18
+   under
+   `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`.
+   Three tasks landed: `format_subtree` public API
+   (`8dfe0e0`), AST+formatter rewrite + SKIP_LIST
+   cleanup (`957c80f`), audit regex tightened to
+   first-parameter-only + helper retirement + docs
+   (`76dbf5c`). Audit allow-list down to 4 entries
+   (the validators). Corpus SKIP_LIST empty.
+2. **Retrofit `block_to_flow` via AST + format_subtree.**
+   Inverse of the just-completed fix. Same risk class
+   (structural text surgery on block → flow
+   conversion). Not currently known to be destructive,
+   but likely has analogous latent defects. Same plan
+   shape as the flow-to-block retrofit: use
+   `format_subtree` with `CollectionStyle::Flow` style
+   override, replace node span with formatted output.
+   High priority per user preference: exclude the bug
+   class preemptively rather than wait for a user
+   report.
+3. **Audit `string_to_block_scalar` + retrofit if
+   warranted.** Scalar-to-scalar conversion that's
+   indentation-sensitive. Not structural in the same
+   sense as flow/block conversions, but could mis-pick
+   indentation on surrounding mapping structure.
+   First-pass: add corpus-harness probes or targeted
+   unit tests that stress the action on
+   deeply-indented / nested contexts. If harness
+   surfaces data loss, retrofit via
+   `format_subtree` (block scalar emission already
+   supported by the formatter). If not, leave as-is
+   and document the audit result.
+4. **Retrofit `validate_unused_anchors(text: &str)`** at
    `validators.rs:29`. Pure text-scan; similar shape to
    flow-style retrofit. Low risk. Shrinks audit
    allow-list by one.
-3. **Retrofit `validate_custom_tags(text, docs, …)`** at
+5. **Retrofit `validate_custom_tags(text, docs, …)`** at
    `validators.rs:297`. Hybrid → AST-only.
-4. **Retrofit `validate_key_ordering(text, docs)`** at
+6. **Retrofit `validate_key_ordering(text, docs)`** at
    `validators.rs:475`. Hybrid → AST-only.
-5. **Retrofit `validate_schema` (schema_validation.rs).**
+7. **Retrofit `validate_schema` (schema_validation.rs).**
    Discovered during Move 1 Task 4 — wasn't in original
    inventory. Unknown current signature shape; treat
    as "investigate + retrofit" scope.
-6. **Move 2 — fixture pattern for every LSP feature**
+8. **Move 2 — fixture pattern for every LSP feature**
    (see Architectural program). Per-feature narrow
    assertions complement the broad invariants from
    Move 0.
-7. **E2E LSP test harness** (previously deferred; see
+9. **E2E LSP test harness** (previously deferred; see
    "Deferred ideas" section below). Drives tower-lsp
    through JSON-RPC; catches settings and
    serialization bugs the in-process harness misses.
-8. **Remove WORKLIST.md AND SKIP_LIST entirely —
+10. **Remove WORKLIST.md AND SKIP_LIST entirely —
    switch to `#[ignore]` for any deferred failures.**
    Queued after the E2E tests plan per user request.
    User preference (confirmed 2026-04-18): the
