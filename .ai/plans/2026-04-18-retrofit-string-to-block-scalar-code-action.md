@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** InProgress (Task 2 complete, all tasks done — pending final commit)
 **Created:** 2026-04-18
 
 ## Goal
@@ -221,7 +221,7 @@ not a sequence item — matching current behavior).
 - [x] Rewrite `string_to_block_scalar` as AST +
       `format_subtree` with cursor-based scalar-node
       matching
-- [ ] Cleanup — retire any helpers that become
+- [x] Cleanup — retire any helpers that become
       unused, add regression tests for the defect
       classes, update `feature-log.md`
 
@@ -336,7 +336,7 @@ the specific defect classes the old text-surgery
 implementation failed on, and update user-facing
 docs.
 
-- [ ] Grep `code_actions.rs` for remaining callers
+- [x] Grep `code_actions.rs` for remaining callers
       of any helper that was used solely by the
       old `string_to_block_scalar`. The current
       implementation inlines all logic; there's
@@ -345,78 +345,66 @@ docs.
       protocol used in the block_to_flow cleanup
       (Task 2 of
       `.ai/plans/2026-04-18-retrofit-block-to-flow-code-action.md`).
-- [ ] Verify `parser_boundary_audit` allow-list
+- [x] Verify `parser_boundary_audit` allow-list
       remains at exactly 4 entries. No code-action
       signature changes this task; this is a
       confirmation check.
-- [ ] Add NEW regression unit tests covering the
+- [x] Add NEW regression unit tests covering the
       defect classes from Context:
-  - **Embedded escape sequences** — a
-    double-quoted value containing `\n`, `\t`,
-    `\\`, `\"`, and `\uXXXX`. After conversion,
-    the block scalar must contain the resolved
-    characters (actual newline, tab, backslash,
-    quote, unicode character), not the literal
-    two-character escape sequences.
-  - **Single-quoted escapes** — a single-quoted
-    value containing `''` (the single-quote
-    escape). After conversion, the block scalar
-    must contain a literal `'`.
-  - **URL-style value** — a mapping value like
-    `homepage: http://example.com/very-long-path-that-exceeds-40-chars`.
-    Key detection must not be fooled by the `:`
-    inside the URL; conversion must preserve the
-    full URL.
-  - **Trailing comment** — a mapping entry with a
-    trailing comment on the same line
-    (`key: "long value"  # note`). The edit must
-    preserve the comment. The scalar's `loc` span
-    covers the scalar content only, so the edit
-    (ranged over `loc`) does not touch the
-    trailing whitespace or comment. If during
-    implementation the parser's `loc` is observed
-    to include trailing whitespace or extend past
-    the scalar content, that is a blocker — the
-    developer messages the lead before proceeding.
-  - **Quoted key with embedded colon** — a
-    mapping entry where the key is `"foo:bar":
-    long value`. The new implementation must
-    target the value, not be fooled by the colon
-    inside the quoted key.
-  - **Already-block scalar** — a mapping value
-    whose scalar style is already
-    `Literal`/`Folded`. The code action must not
-    be offered (return `None`).
-  - **Short value** — a mapping value under the
-    40-char threshold. The action must not be
-    offered.
-  - **Sequence item scalar** — a sequence item
-    like `- "long string"`. The action must not
-    be offered (not a mapping value). Preserves
-    current narrow behavior.
-  - **Flow collection start** — a mapping value
-    like `key: [long, list, of, items]`. The
-    value is a `Node::Sequence`, not a scalar.
-    The action must not be offered.
-  - **Anchor-only exclusion is replaced by AST
-    checks** — a mapping value with an anchor
-    (e.g., `key: &anchor "long string"`). The
-    scalar's `anchor` field is preserved under
-    `format_subtree`; conversion emits the
-    anchor correctly. Verify this is the case
-    (and add the test), since the old code's
-    `starts_with('&')` heuristic refused such
-    values.
-- [ ] Update `rlsp-yaml/docs/feature-log.md` with
+  - **Embedded escape sequences** — covered by
+    `should_resolve_escape_sequences_in_double_quoted_value`
+    (added in Task 1).
+  - **Single-quoted escapes** — covered by
+    `should_resolve_single_quoted_escape_to_literal_apostrophe`
+    (added in Task 1).
+  - **URL-style value** — covered by
+    `should_not_be_fooled_by_colon_in_url_value`
+    (added in Task 1).
+  - **Trailing comment** — covered by
+    `should_preserve_trailing_comment_when_converting_to_block_scalar`
+    (added in Task 1).
+  - **Quoted key with embedded colon** — covered by
+    `should_not_be_fooled_by_colon_in_quoted_key`
+    (added in Task 1).
+  - **Already-block scalar** — covered by
+    `should_not_offer_block_scalar_for_already_literal_block_scalar`
+    and `should_not_offer_block_scalar_for_already_folded_block_scalar`
+    (added in Task 1).
+  - **Short value** — covered by
+    `should_not_offer_block_scalar_for_value_below_char_threshold`
+    (added in Task 1).
+  - **Sequence item scalar** — covered by
+    `should_not_offer_block_scalar_for_sequence_item`
+    (added in Task 1).
+  - **Flow collection start** — covered by
+    `should_not_offer_block_scalar_for_flow_sequence_value`
+    (added in Task 1).
+  - **Anchor preservation** — covered by
+    `should_preserve_anchor_when_converting_to_block_scalar`
+    (added in Task 1).
+  All 10 defect-class regressions were eagerly added in
+  Task 1; no duplicates added in Task 2.
+- [x] Update `rlsp-yaml/docs/feature-log.md` with
       a new entry recording the AST-based
       `string_to_block_scalar` rewrite. Match the
       shape of the `block_to_flow` entry.
-- [ ] Build/test gates (same as Task 1).
+- [x] Build/test gates (same as Task 1).
 
 Acceptance: regression tests cover all listed
 defect classes; audit allow-list unchanged at 4
 entries; workspace suite green;
 `feature-log.md` records the change.
+
+**Completed:** commit `c2aa68f` — cleanup landed.
+All 10 defect-class regressions were already present
+from Task 1 (verified by cross-reference against the
+Task 2 list); no duplicates added. Audit allow-list
+confirmed at 4 entries (`validate_unused_anchors`,
+`validate_custom_tags`, `validate_key_ordering`,
+`validate_schema`). `feature-log.md` entry added
+matching the `block_to_flow` shape. No helpers
+retired — the Task 1 rewrite inlined all logic.
+No production-code changes in this task.
 
 ## Decisions
 
