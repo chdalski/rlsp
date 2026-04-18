@@ -248,7 +248,7 @@ the formatter module; unit tests pass; rustdoc
 documents the indent semantics; full workspace suite
 stays green.
 
-**Completed:** commit `7bad8e8` — public
+**Completed:** commit `8dfe0e0` — public
 `format_subtree` added to `formatter.rs` reusing
 `node_to_doc` + `fmt_format`, no new emission logic.
 Rustdoc documents first-line-col-0 semantics and
