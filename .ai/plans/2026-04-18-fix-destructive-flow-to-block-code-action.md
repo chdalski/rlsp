@@ -240,7 +240,7 @@ rewrite. Independent and unit-testable in isolation.
     converted to block form
   - Various `base_indent` values (0, 2, 8) produce
     correctly-indented output
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
       `cargo test` — all clean.
 
 Acceptance: `format_subtree` is callable from outside
