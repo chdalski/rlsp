@@ -792,6 +792,32 @@ fn string_to_doc(s: &str, options: &YamlFormatOptions, in_key: bool) -> Doc {
     }
 }
 
+/// Returns true if a plain scalar value would be ambiguous in a flow collection
+/// context — specifically if it contains characters that serve as flow delimiters
+/// (`,`, `[`, `]`, `{`, `}`).
+fn needs_flow_quoting(s: &str) -> bool {
+    s.contains([',', '[', ']', '{', '}'])
+}
+
+/// Emit a node for use inside a flow collection (flow sequence or flow mapping).
+///
+/// For plain scalars that contain flow-unsafe characters, wraps in double quotes
+/// so they are not misread as separators or delimiters by a YAML parser.
+fn flow_item_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
+    match node {
+        Node::Scalar {
+            value,
+            style: ScalarStyle::Plain,
+            anchor: None,
+            tag: None,
+            ..
+        } if needs_flow_quoting(value) => text(format!("\"{}\"", escape_double_quoted(value))),
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+            node_to_doc(node, options, in_key)
+        }
+    }
+}
+
 /// Returns true if a string value requires quoting to avoid YAML ambiguity.
 ///
 /// The `version` parameter controls whether YAML 1.1-only boolean keywords
@@ -1118,8 +1144,8 @@ fn flow_mapping_to_doc(entries: &[(Node<Span>, Node<Span>)], options: &YamlForma
     let items: Vec<Doc> = entries
         .iter()
         .map(|(key, value)| {
-            let key_doc = node_to_doc(key, options, true);
-            let val_doc = node_to_doc(value, options, false);
+            let key_doc = flow_item_to_doc(key, options, true);
+            let val_doc = flow_item_to_doc(value, options, false);
             // Alias keys and tagged empty scalar keys require a space before `:`
             // to prevent ambiguous re-parsing:
             //   - `*a: v` → alias name `a:` (alias consumes the colon)
@@ -1465,7 +1491,7 @@ fn sequence_to_doc(seq: &[Node<Span>], style: CollectionStyle, options: &YamlFor
 fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptions) -> Doc {
     let items: Vec<Doc> = seq
         .iter()
-        .map(|item| node_to_doc(item, options, false))
+        .map(|item| flow_item_to_doc(item, options, false))
         .collect();
     let sep = concat(vec![text(","), line()]);
     let inner = join(&sep, items);

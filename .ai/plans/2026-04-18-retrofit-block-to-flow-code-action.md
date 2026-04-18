@@ -170,7 +170,7 @@ closest to the cursor.
 
 ## Steps
 
-- [ ] Rewrite `block_to_flow` as AST + `format_subtree`
+- [x] Rewrite `block_to_flow` as AST + `format_subtree`
       with cursor-based block-node matching
 - [ ] Cleanup — retire `quote_flow_item` if unused,
       add regression tests for the defect classes,
@@ -186,7 +186,7 @@ AST-first approach. Keep the cursor-based trigger
 offered from diagnostics). Preserve the narrow
 refuse-nested behavior.
 
-- [ ] Change `block_to_flow` signature to
+- [x] Change `block_to_flow` signature to
       `fn block_to_flow(docs: &[Document<Span>],
       text: &str, line_idx: usize, uri: &Url) ->
       Option<CodeAction>`. The call site at
@@ -194,7 +194,7 @@ refuse-nested behavior.
       available — the Move-1-follow-up `code_actions`
       public signature takes `docs` as its first
       parameter).
-- [ ] Walk `docs` to find the innermost block
+- [x] Walk `docs` to find the innermost block
       collection Node whose `loc.start.line` equals
       `line_idx + 1` (LSP line 0-based; parser line
       1-based — verify the convention used elsewhere
@@ -206,38 +206,38 @@ refuse-nested behavior.
   - Prefer the innermost match so nested structures
     target the closest block to the cursor (but see
     next bullet for the nested-rejection check)
-- [ ] Pre-check the candidate for nested collection
+- [x] Pre-check the candidate for nested collection
       children. Walk its direct children
       (mapping entries' values, sequence items): if
       any is a `Node::Mapping` or `Node::Sequence`
       (regardless of style), return `None`. This
       preserves the current "refuse nested" behavior
       and keeps the plan scope minimal.
-- [ ] Clone the candidate node with
+- [x] Clone the candidate node with
       `style: CollectionStyle::Flow`.
-- [ ] Compute `base_indent` from the parent context
+- [x] Compute `base_indent` from the parent context
       (the same strategy the flow-to-block retrofit
       uses). For a mapping value, `base_indent` is
       `key_indent + 2`; for a standalone block at
       column C, `base_indent = C`.
-- [ ] Call `format_subtree(&cloned,
+- [x] Call `format_subtree(&cloned,
       &YamlFormatOptions::default(), base_indent)`.
-- [ ] Emit a `TextEdit` whose range is the AST
+- [x] Emit a `TextEdit` whose range is the AST
       node's `loc` (NOT full lines). Use the same
       `block_text_and_start_col` helper pattern
       established in Task 2 of the flow-to-block
       retrofit — for cursor-based dispatch the
       helper may need a tweak or a sibling function;
       reuse where possible.
-- [ ] Preserve the existing title selection:
+- [x] Preserve the existing title selection:
       "Convert block to flow style" vs
       "Convert block to flow style (long line)"
       based on a length heuristic. Keep the
       threshold at 80 chars unless the formatter's
       output makes a different threshold obvious.
-- [ ] Update call site at `code_actions.rs:66` to
+- [x] Update call site at `code_actions.rs:66` to
       pass `docs` and `text`.
-- [ ] Update unit tests at `code_actions.rs:1120,
+- [x] Update unit tests at `code_actions.rs:1120,
       1128, 1136, 1160, 1184` to the new
       signature. The intent of each test stays:
   - `should_not_offer_block_to_flow_for_inline_value`
@@ -253,7 +253,7 @@ refuse-nested behavior.
     — same
   - `should_not_quote_safe_items_when_converting_block_to_flow`
     — formatter doesn't over-quote safe items
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full suite passes
@@ -273,6 +273,19 @@ mapping values; refuses nested structures (matches
 prior behavior); existing unit-test intents
 preserved; workspace suite green; corpus SKIP_LIST
 still empty.
+
+**Completed:** commit `056d397` — AST-first
+rewrite landed. `find_innermost_block_collection`
+locates the block by cursor's parent-key line;
+refuse-nested pre-check preserved. `base_indent =
+key_column + 2` (parser column is 0-based, verified
+against `pos.rs:5`). New `flow_item_to_doc` +
+`needs_flow_quoting` in formatter handle flow-context
+quoting so scalars containing `,`, `[`, `]`, `{`, `}`
+get double-quoted. Two reparse-validation tests
+(`should_produce_reparseable_yaml_when_long_sequence_wraps`,
+`should_produce_reparseable_yaml_when_long_nested_mapping_wraps`)
+apply the edit and assert the result parses cleanly.
 
 ### Task 2: Cleanup — retire helpers, regression tests, docs
 
@@ -322,7 +335,7 @@ update user-facing docs.
       new entry recording the AST-based block-to-flow
       rewrite. Short form matching the flow-to-block
       entry's shape.
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full suite passes
