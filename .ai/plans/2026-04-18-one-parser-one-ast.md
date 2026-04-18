@@ -361,7 +361,7 @@ new violators. The per-entry verification has been
 performed for every allow-listed violator and recorded
 in the commit message.
 
-**Completed:** commit `84d6ece` — boundary
+**Completed:** commit `e58fdf0` — boundary
 audit lands in `rlsp-yaml/tests/parser_boundary_audit.rs`.
 5 allow-list entries (the 4 inventoried violators plus
 `validate_schema` in `schema_validation.rs`, discovered
