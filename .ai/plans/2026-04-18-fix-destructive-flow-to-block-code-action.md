@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -186,7 +186,7 @@ user-visible defect this plan closes.
       `flow_seq_to_block` to use AST + `format_subtree`;
       change `code_actions` public signature to take
       AST
-- [ ] Cleanup — retire text-surgery helpers, shrink
+- [x] Cleanup — retire text-surgery helpers, shrink
       audit allow-list, add regression coverage
 
 ## Tasks
@@ -379,13 +379,13 @@ helpers, remove the allow-list entry that covered
 `code_actions`, add regression coverage for the
 specific defect classes, and update user-facing docs.
 
-- [ ] Verify no remaining callers of `split_flow_items`
+- [x] Verify no remaining callers of `split_flow_items`
       or `quote_flow_item` (both in
       `rlsp-yaml/src/editing/code_actions.rs`).
       Delete if unused; leave in place with a comment
       if `block_to_flow` or another code action still
       uses them.
-- [ ] Remove the `code_actions` entry from the
+- [x] Remove the `code_actions` entry from the
       allow-list in `rlsp-yaml/tests/parser_boundary_audit.rs`.
       Per-entry verification: confirm the audit
       still passes overall (the entry is no longer
@@ -393,7 +393,7 @@ specific defect classes, and update user-facing docs.
       first parameter is now `docs: &[Document<Span>]`,
       not `text: &str`). Document the shrink in the
       commit message.
-- [ ] Add unit tests in
+- [x] Add unit tests in
       `rlsp-yaml/src/editing/code_actions.rs` (module
       tests) covering the specific defect classes the
       old implementation failed on:
@@ -416,7 +416,7 @@ specific defect classes, and update user-facing docs.
   - Flow mapping with nested flow sequence as a
     value (`{a: [1, 2]}`) — preserves both structures
     after the outer-to-block conversion
-- [ ] Update `rlsp-yaml/docs/feature-log.md`:
+- [x] Update `rlsp-yaml/docs/feature-log.md`:
       (a) add a new entry recording that the
       destructive flow-to-block quick fix has been
       replaced with an AST+formatter approach; specific
@@ -430,13 +430,13 @@ specific defect classes, and update user-facing docs.
       and "See `tests/corpus/WORKLIST.md` for the
       current failure worklist" to reflect the
       now-empty steady state.
-- [ ] Run the Move 0 corpus-invariants harness
+- [x] Run the Move 0 corpus-invariants harness
       explicitly as a final check: `cargo test --test
       corpus_invariants`. Must exit successfully with
       zero `SKIP_LIST` entries (both prior entries
       removed in Task 2 of this plan; no new entries
       added).
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
       `cargo test` — all clean.
 
 Acceptance: audit allow-list retains exactly four
@@ -454,6 +454,20 @@ passes cleanly with zero `SKIP_LIST` entries;
 `feature-log.md` records the change and updates
 the Corpus Invariant Harness entry to reflect
 the empty-steady-state.
+
+**Completed:** commit `e90a470` — audit
+regex tightened to match first-parameter only (strips
+optional `&[mut ]self` receiver then anchors on
+`^\s*text\s*:\s*&str\b`); `code_actions` entry removed
+from allow-list; final 4 entries each verified
+load-bearing via temp-remove + restore. `split_flow_items`
+deleted (no production callers); `quote_flow_item`
+retained — `block_to_flow` still uses it (out of scope
+per Non-Goals). Regression coverage verified: all 7
+defect classes are mapped to existing FM-/FS- tests;
+FM-4b added as a nested-inside-flow-seq complement.
+feature-log.md got both the new-entry and
+corpus-harness-entry updates.
 
 ## Decisions
 

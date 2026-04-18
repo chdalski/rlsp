@@ -12,6 +12,13 @@ with existing infrastructure.
 
 ---
 
+### AST-Based Flow-to-Block Quick Fixes [completed]
+
+**Description:** Replaced the text-surgery implementations of the `flow_map_to_block` and `flow_seq_to_block` quick fixes with an AST+formatter approach. Both quick fixes now find the target node by matching the diagnostic's range against parser AST spans, flip the node's `CollectionStyle` to `Block`, and re-emit the subtree via `format_subtree`. Previously the text-surgery path had three classes of destructive failures: (a) sequence-item flow mappings like `- { target: linux, os: ubuntu }` had the `-` and leading whitespace overwritten; (b) multi-line flow mappings were never correctly extracted; (c) key reconstruction via `prefix.trim_end().ends_with(':')` discarded key structure when the prefix was anything other than a mapping key, dropping scalar content. All three defect classes are resolved. The `code_actions` public entry point now takes `&[Document<Span>]` as its first parameter, removing the last edit-path function from the parser boundary audit allow-list.
+**Complexity:** Medium
+**Comment:** Enabling API `format_subtree(node, options, base_indent)` was added to the formatter, wrapping the existing `node_to_doc` internal function. The code action produces a `TextEdit` covering the AST node's span (not the diagnostic's line), so surrounding content — sequence item prefix, mapping key — is preserved by the caller. Default `YamlFormatOptions` are used; matching the user's formatter settings is a follow-up.
+**Tier:** 1
+
 ### AST-Based Flow Style Validator [completed]
 
 **Description:** Replaced the text-scanning implementation of `validate_flow_style` with an AST walker that consumes the `rlsp-yaml-parser` document tree. Two user-visible behavior changes: (a) plain scalars containing `{` or `[` — including GitHub Actions template expressions such as `${{ secrets.GITHUB_TOKEN }}` — no longer produce false-positive `flowMap`/`flowSeq` diagnostics; (b) multi-line flow collections (where `{` or `[` opens on one line and `}` or `]` closes on a later line) are now detected, where the old line-by-line scanner missed them.
@@ -28,10 +35,10 @@ that runs every registered invariant over every corpus file. Four foundational
 invariants are registered: I1 (no panics on full LSP pipeline), I2 (diagnostic
 range validity per LSP §3.17 UTF-16 semantics), I3 (code-action output introduces
 no new Error diagnostics), and I4 (refactor code actions preserve all pre-existing
-scalar content). A shrink-only skip-list tracks currently-failing (file, invariant)
-pairs, each citing a filed follow-up plan. See
-[`tests/corpus/WORKLIST.md`](../tests/corpus/WORKLIST.md) for the current failure
-worklist.
+scalar content). A shrink-only skip-list is maintained for any currently-failing
+(file, invariant) pairs; the skip-list is empty at steady state — all four corpus
+files pass all four invariants. [`tests/corpus/WORKLIST.md`](../tests/corpus/WORKLIST.md)
+tracks any active failures if the skip-list grows again.
 **Complexity:** Medium
 **Comment:** Motivated by a user-reported bug that passed every existing unit test
 but broke on first contact with a real GitHub Actions workflow. The harness

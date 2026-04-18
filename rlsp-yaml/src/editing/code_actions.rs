@@ -1374,63 +1374,6 @@ mod tests {
         assert!(actions.iter().all(|a| !a.title.contains("block scalar")));
     }
 
-    // ---- split_flow_items helper (test-only; production code no longer uses it) ----
-
-    fn split_flow_items(content: &str) -> Vec<String> {
-        let mut items = Vec::new();
-        let mut current = String::new();
-        let mut depth = 0i32;
-        let mut in_single_quote = false;
-        let mut in_double_quote = false;
-
-        for ch in content.chars() {
-            match ch {
-                '\'' if !in_double_quote => {
-                    in_single_quote = !in_single_quote;
-                    current.push(ch);
-                }
-                '"' if !in_single_quote => {
-                    in_double_quote = !in_double_quote;
-                    current.push(ch);
-                }
-                '{' | '[' if !in_single_quote && !in_double_quote => {
-                    depth += 1;
-                    current.push(ch);
-                }
-                '}' | ']' if !in_single_quote && !in_double_quote => {
-                    depth -= 1;
-                    current.push(ch);
-                }
-                ',' if depth == 0 && !in_single_quote && !in_double_quote => {
-                    items.push(current.trim().to_string());
-                    current = String::new();
-                }
-                _ => current.push(ch),
-            }
-        }
-
-        let final_item = current.trim().to_string();
-        if !final_item.is_empty() {
-            items.push(final_item);
-        }
-
-        items
-    }
-
-    #[rstest]
-    #[case::simple_pairs("a: 1, b: 2, c: 3", vec!["a: 1", "b: 2", "c: 3"])]
-    #[case::nested_braces("a: {x: 1}, b: 2", vec!["a: {x: 1}", "b: 2"])]
-    #[case::nested_brackets("a: [1, 2], b: 3", vec!["a: [1, 2]", "b: 3"])]
-    #[case::quoted_comma("a: \"hello, world\", b: 2", vec!["a: \"hello, world\"", "b: 2"])]
-    fn split_flow_items_cases(#[case] input: &str, #[case] expected: Vec<&str>) {
-        assert_eq!(split_flow_items(input), expected);
-    }
-
-    #[test]
-    fn split_flow_items_empty_input() {
-        assert!(split_flow_items("").is_empty());
-    }
-
     // ---- Diagnostic overlap ----
 
     #[test]
@@ -2305,6 +2248,29 @@ mod tests {
         assert!(
             new_text.contains('2'),
             "scalar 2 must survive: {new_text:?}"
+        );
+    }
+
+    // FM-4b: flow mapping nested inside a flow sequence — map-to-block action triggers on
+    // the inner map only, leaving the outer sequence untouched.
+    #[test]
+    fn flow_map_to_block_inside_flow_seq_no_data_loss() {
+        let text = "list: [{a: 1, b: 2}]\n";
+        let action = flow_map_action(text).expect("flow-map action must be offered for inner map");
+        let new_text = new_text_for(&action);
+        assert!(new_text.contains('a'), "key a must survive: {new_text:?}");
+        assert!(
+            new_text.contains('1'),
+            "scalar 1 must survive: {new_text:?}"
+        );
+        assert!(new_text.contains('b'), "key b must survive: {new_text:?}");
+        assert!(
+            new_text.contains('2'),
+            "scalar 2 must survive: {new_text:?}"
+        );
+        assert!(
+            !new_text.contains('{'),
+            "block output must not contain '{{': {new_text:?}"
         );
     }
 

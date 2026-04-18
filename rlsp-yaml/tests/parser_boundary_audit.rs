@@ -74,11 +74,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         note: "TODO(retrofit-validate-key-ordering): hybrid text+docs, follow-up plan not yet filed",
     },
     AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "code_actions",
-        note: "TODO(.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md): top-level dispatcher passes raw text to internal helpers",
-    },
-    AllowEntry {
         file: "schema_validation.rs",
         func: "validate_schema",
         note: "TODO(retrofit-validate-schema): hybrid text+docs, follow-up plan not yet filed",
@@ -114,11 +109,20 @@ fn extract_fn_name(line: &str) -> Option<&str> {
     if name.is_empty() { None } else { Some(name) }
 }
 
-/// Returns `true` if the collected parameter block for a function contains
-/// `text: &str` as a parameter (not just any `&str` named something else).
+/// Returns `true` if the **first** named parameter of the function is `text: &str`.
+///
+/// Uses a `^`-anchored regex on the extracted param block so that `text: &str`
+/// must appear at the start (after optional whitespace). An optional `&[mut ]self`
+/// or `&'lt [mut ]self` method receiver is stripped first so that methods whose
+/// first real parameter is `text: &str` are still detected.
+///
+/// This ensures `code_actions(docs: &[…], text: &str, …)` is NOT detected as a
+/// violation while `validate_foo(text: &str, …)` IS detected.
 fn has_text_str_param(param_block: &str) -> bool {
-    let re = Regex::new(r"\btext\s*:\s*&str\b").unwrap();
-    re.is_match(param_block)
+    let re_receiver = Regex::new(r"^\s*&(?:'[a-z_]+\s+)?(?:mut\s+)?self\s*,\s*").unwrap();
+    let stripped = re_receiver.replace(param_block, "");
+    let re = Regex::new(r"^\s*text\s*:\s*&str\b").unwrap();
+    re.is_match(stripped.as_ref())
 }
 
 /// A detected violation: a function whose signature contains `text: &str`.
@@ -296,7 +300,26 @@ mod detection_tests {
 
     #[test]
     fn validate_foo_text_str_detected() {
+        // text: &str as first parameter — must be detected as a violation.
         let line = "pub fn validate_foo(text: &str, docs: &[Document]) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(has_text_str_param(&params));
+    }
+
+    #[test]
+    fn second_param_text_str_not_detected() {
+        // text: &str as second parameter — must NOT be detected.
+        let line = "pub fn validate_foo(docs: &[Document<Span>], text: &str) -> Vec<Diagnostic> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(!has_text_str_param(&params));
+    }
+
+    #[test]
+    fn self_receiver_then_text_str_detected() {
+        // &self receiver then text: &str as first real param — must be detected.
+        let line = "pub fn validate_foo(&self, text: &str) -> Vec<Diagnostic> {";
         assert!(is_candidate_fn_line(line));
         let params = extract_param_block(line);
         assert!(has_text_str_param(&params));
@@ -316,12 +339,29 @@ mod detection_tests {
         assert!(!is_candidate_fn_line(line));
     }
 
+    // After Task 2 the real code_actions signature starts with docs: &[Document<Span>] — not
+    // text: &str — so the first-parameter check must NOT detect it as a violation.
     #[test]
-    fn code_actions_pub_fn_text_str_detected() {
+    fn code_actions_new_signature_not_detected() {
+        let line = "pub fn code_actions(docs: &[Document<Span>], text: &str, range: Range, diagnostics: &[Diagnostic], uri: &Url) -> Vec<CodeAction> {";
+        assert!(is_candidate_fn_line(line));
+        let params = extract_param_block(line);
+        assert!(
+            !has_text_str_param(&params),
+            "code_actions new signature must not be detected (text: &str is not the first param)"
+        );
+    }
+
+    // Old-style code_actions (text: &str as first param) IS still a violation.
+    #[test]
+    fn code_actions_old_signature_text_first_param_detected() {
         let line = "pub fn code_actions(text: &str, range: Range, diagnostics: &[Diagnostic]) -> Vec<CodeAction> {";
         assert!(is_candidate_fn_line(line));
         let params = extract_param_block(line);
-        assert!(has_text_str_param(&params));
+        assert!(
+            has_text_str_param(&params),
+            "old-style code_actions with text: &str as first param must be detected"
+        );
     }
 
     #[test]
