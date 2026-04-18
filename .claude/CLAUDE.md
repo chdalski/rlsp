@@ -616,6 +616,50 @@ This covers:
   after execution ends (task-level updates are committed by
   the reviewer during execution)
 
+See Commit Timing below for when these commits run — skill
+outputs always land in a team-down window since skills run
+before the team exists for a task.
+
+## Commit Timing
+
+With a team active, the only commits you make are the
+post-approval task commit sequence (steps 2–6 of After
+Reviewer Approval). Those are bounded by the squash reset
+at step 2 and use the reviewer's handoff data as input.
+Every other lead commit — skill outputs, plan file commits,
+plan-status updates, and user-directed ad-hoc changes (doc
+tweaks, convention updates, small fixes) — happens only in
+a team-down window.
+
+**Team-down windows:**
+- Before the first `TeamCreate` (initial planning, skill
+  runs, user clarifications).
+- Between `TeamDelete` and the next `TeamCreate` in the
+  inter-task cycle (step 7 of After Reviewer Approval).
+- After the final `TeamDelete` at plan completion or
+  abandonment.
+
+**When the user requests a lead-side change while a team is
+active**, note it and commit it in the next team-down
+window. Do not commit ad-hoc changes while a team is up,
+even if the change is small and the files do not overlap
+with the developer's WIP.
+
+**Why.** The post-approval squash runs
+`git reset <baseline-sha>`, which wipes every commit
+between the task's baseline and HEAD. An ad-hoc commit made
+while a team is active lands in that range and is lost at
+squash time. A production incident committed two
+user-directed doc changes on top of the developer's WIP;
+the commits were stranded between baseline and WIP and
+required an emergency history reorder (stash + reset +
+cherry-pick ×3 + pop) while the developer was actively
+editing — the developer's uncommitted work was at risk
+because the doc commits happened to not touch the WIP
+files, not because the sequence was safe. The safe rule is
+not "commit carefully during a task" — it is "do not commit
+at all until the team is down."
+
 ## Conventional Commits
 
 This blueprint uses conventional commit prefixes. The

@@ -73,6 +73,17 @@ You receive:
    functions, or concepts across `.md` files in the repo.
    Flag any references that would become stale.
 
+8. **Program-level consolidation check.** Glob the plans
+   directory for sibling plan files and read any whose
+   tasks target the same files as the plan under review.
+   If two or more sibling plans target the same file and
+   no plan in the program includes a consolidation task
+   (test pruning, helper merging, file splitting), flag it
+   per checklist section 12. You are the only agent with
+   visibility across sibling plans before execution starts;
+   downstream agents see one task at a time and cannot
+   catch this.
+
 ## Output
 
 Return a structured findings report:
