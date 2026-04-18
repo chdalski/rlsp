@@ -274,7 +274,7 @@ prior behavior); existing unit-test intents
 preserved; workspace suite green; corpus SKIP_LIST
 still empty.
 
-**Completed:** commit `056d397` — AST-first
+**Completed:** commit `173f838` — AST-first
 rewrite landed. `find_innermost_block_collection`
 locates the block by cursor's parent-key line;
 refuse-nested pre-check preserved. `base_indent =
