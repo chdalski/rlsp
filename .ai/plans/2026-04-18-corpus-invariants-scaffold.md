@@ -584,7 +584,7 @@ cases are on the skip-list with verified per-entry
 coverage and specific follow-up-plan references.
 Unit tests for both helpers present and passing.
 
-**Completed:** commit `c8e41d6` — I4 registered with
+**Completed:** commit `c9210a1` — I4 registered with
 two skip-list entries (`github-actions-matrix.yml` and
 `release-plz-workflow.yml`, both citing
 `.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`).
