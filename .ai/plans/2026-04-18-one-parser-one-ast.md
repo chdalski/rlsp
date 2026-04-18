@@ -167,7 +167,7 @@ Acceptance: root `CLAUDE.md` contains the rule; reading
 the Crate Boundaries section end-to-end gives a clear
 statement of the boundary.
 
-**Completed:** commit `3556fd5` — rule added to
+**Completed:** commit `d06fff8` — rule added to
 CLAUDE.md immediately after the "parser is the
 authority" paragraph, as planned.
 
