@@ -292,7 +292,7 @@ Acceptance: running the new tests before Task 2's
 implementation lands shows them failing with specific
 false-positive diagnostics; after Task 2 they pass.
 
-**Completed:** commit `07048dc` — added
+**Completed:** commit `9f40e88` — added
 `flow_style_ignores_github_actions_expressions` unit
 test and the `GHA_RELEASE_PLZ_STYLE` ecosystem fixture
 with `gha_release_plz_style_no_false_positives` and
