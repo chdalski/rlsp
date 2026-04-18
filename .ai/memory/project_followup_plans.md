@@ -12,6 +12,8 @@ type: project
 
 ## Open: rlsp-yaml
 
+- **Clean internal-refactor entries out of `rlsp-yaml/docs/feature-log.md`** — The feature-log is published user-facing docs; it accumulated internal-refactor entries during the architectural program (e.g. "AST-Based String-to-Block-Scalar Code Action", "AST-Based Block-to-Flow Code Action", "AST-Based Flow-to-Block Quick Fixes", "AST-Based Flow Style Validator", "Corpus Invariant Harness"). These describe implementation decisions the user doesn't interact with. A future cleanup pass removes them. The user-facing remainder (actual new LSP features, user-visible behavior changes) stays. Criterion for keeping an entry: "would a user of the language server notice this?"
+
 <!-- helper-of: convention — an allow-list entry marked `HelperOf` exists because its root
      feature function is also allow-listed as a `TodoRetrofit`. When the root's retrofit plan
      lands, all `HelperOf` entries pointing at that root are removed from the allow-list at the

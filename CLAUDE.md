@@ -49,7 +49,7 @@ pnpm run format    # check formatting (prettier)
 - pnpm as Node.js package manager
 - AI-written project — external contributions via GitHub issues only
 - Each `rlsp-<language>` crate must have `README.md`, `docs/configuration.md`, `docs/feature-log.md`
-- Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference
+- Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference; `docs/feature-log.md` is user-facing feature decisions only — internal refactors and implementation rewrites do NOT go there (commit history + plan files carry that record)
 - Workspace path dependencies must include a `version` field — `cargo publish` rejects path-only deps
 - Use `#[expect(lint, reason = "...")]` instead of `#[allow(lint)]` — enforced by `allow_attributes = "deny"` and `allow_attributes_without_reason = "deny"` in workspace lints
 

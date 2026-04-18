@@ -184,9 +184,8 @@ user's intent that the cursor be "on" the quoted bool.
       `format_subtree` with cursor-based scalar-node
       matching; shrink audit allow-list by one entry
 - [ ] Cleanup — add regression tests for the defect
-      classes, update `feature-log.md`, verify audit
-      allow-list count, remove the retrofit bullet
-      from `project_followup_plans.md`
+      classes, verify audit allow-list count, remove
+      the retrofit bullet from `project_followup_plans.md`
 
 ## Tasks
 
@@ -322,11 +321,6 @@ failed on, and update user-facing docs.
     `key: "true"  # comment` with cursor on the
     comment. Not offered (span-containment check
     excludes it).
-- [ ] Update `rlsp-yaml/docs/feature-log.md` with a new
-      entry recording the AST-based
-      `quoted_bool_to_unquoted` rewrite. Match the shape
-      of the `block_to_flow` / `string_to_block_scalar`
-      entries.
 - [ ] Verify `parser_boundary_audit` allow-list is at
       exactly 100 entries (was 101; lost the retrofit
       entry). No per-entry re-verification needed —
@@ -348,8 +342,10 @@ Acceptance: regression tests cover all listed defect
 classes; audit allow-list at exactly 100 entries;
 `project_followup_plans.md` no longer contains the
 `quoted_bool_to_unquoted` retrofit bullet; full
-workspace suite green; `feature-log.md` records the
-change.
+workspace suite green. No `feature-log.md` entry is
+added — the file is reserved for user-facing feature
+decisions; internal refactors like this retrofit
+belong in git history and this plan file only.
 
 ## Non-Goals
 
