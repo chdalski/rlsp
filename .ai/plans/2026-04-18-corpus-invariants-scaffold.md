@@ -239,7 +239,7 @@ the stub plan's path.
 - [x] Implement invariants I1 (no panics) and I2
       (range validity)
 - [x] Implement invariant I3 (code-action round-trip)
-- [ ] Implement invariant I4 (refactor scalar/key
+- [x] Implement invariant I4 (refactor scalar/key
       preservation)
 - [ ] Record baseline worklist
 
@@ -520,23 +520,23 @@ scalar content going away. This catches the
 destructive-quick-fix data loss without false-flagging
 legitimate structural expansion.
 
-- [ ] Register I4 in the `INVARIANTS` constant with
+- [x] Register I4 in the `INVARIANTS` constant with
       id `"I4"` and description referencing the
       scalar-preservation rule
-- [ ] Implement the helper `collect_scalar_values(
+- [x] Implement the helper `collect_scalar_values(
       docs: &[Document<Span>]) -> Vec<String>` that
       walks every document's node tree, descending
       into mapping entries (both keys and values) and
       sequence items, and returns every `Scalar`
       node's value string as a flat vec. Empty
       scalars (`""`) are included.
-- [ ] Implement the comparison helper
+- [x] Implement the comparison helper
       `missing_scalars(pre: &[String],
       post: &[String]) -> Vec<String>` that returns
       scalars present in `pre` whose count in `post`
       is less than in `pre` (multiset subset check).
       Returns the missing values.
-- [ ] I4 invariant function: per file, collect
+- [x] I4 invariant function: per file, collect
       diagnostics, request code actions via
       `code_actions(text, whole-file range,
       &diagnostics, &uri)`, filter to those with
@@ -546,7 +546,7 @@ legitimate structural expansion.
       missing list → failure, with the code-action
       title + originating diagnostic code/range +
       first missing scalar named in the message.
-- [ ] Run the harness. Known expected failures:
+- [x] Run the harness. Known expected failures:
   - `flow_map_to_block` / `flow_seq_to_block`
     destructive output on any corpus file where
     they fire and drop content → skip-list entry
@@ -555,13 +555,13 @@ legitimate structural expansion.
     Protocol: developer messages the lead, blocks
     until a follow-up plan is filed or the lead
     directs in-scope handling
-- [ ] Per-entry skip-list verification: for each
+- [x] Per-entry skip-list verification: for each
       entry added, temporarily remove it, run the
       harness, confirm the test fails citing that
       specific (file, invariant) pair, restore.
       Record verification in the commit message —
       name each verified entry explicitly.
-- [ ] Add unit tests for `collect_scalar_values` and
+- [x] Add unit tests for `collect_scalar_values` and
       `missing_scalars` covering:
   - Empty document
   - Flat mapping (keys + values collected)
@@ -573,7 +573,7 @@ legitimate structural expansion.
     two `foo` in pre requires two `foo` in post)
   - Missing-scalars helper: equal multisets return
     empty; pre larger than post returns the extras
-- [ ] `cargo test --test corpus_invariants` exits
+- [x] `cargo test --test corpus_invariants` exits
       successfully with all failures accounted for.
       `cargo clippy --all-targets` clean.
       `cargo fmt` applied.
@@ -583,6 +583,15 @@ refactor-kind action) pair. All currently-failing
 cases are on the skip-list with verified per-entry
 coverage and specific follow-up-plan references.
 Unit tests for both helpers present and passing.
+
+**Completed:** commit `c8e41d6` — I4 registered with
+two skip-list entries (`github-actions-matrix.yml` and
+`release-plz-workflow.yml`, both citing
+`.ai/plans/2026-04-18-fix-destructive-flow-to-block-code-action.md`).
+Per-entry verification performed for both; recorded
+in the commit message. Adds 17 new tests (10 for
+`collect_scalar_values`, 7 for `missing_scalars`,
+plus an integration probe).
 
 ### Task 5: Baseline worklist document
 
