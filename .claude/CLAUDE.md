@@ -309,10 +309,18 @@ For each task slice in the plan:
    identify the trigger.
 
 3. **Send the task** to the `developer` via `SendMessage`.
-   Include:
-   - The task description from the plan
+   Extract these sections from the plan and include them
+   inline in the message — do not send the plan file path
+   or paste the full plan:
+   - **Goal** — the plan's goal section (why we're doing
+     this)
+   - **Context** — constraints, specs, prior decisions
+   - **Decisions** — key choices to avoid contradicting
+   - **Non-Goals** — what is explicitly excluded (if the
+     section exists)
+   - **Current task only** — the task description and
+     acceptance criteria for this specific task
    - Which files are involved
-   - Relevant context from the plan and codebase analysis
    - Any constraints or patterns to follow
    - Which advisors to consult (from the risk check above),
      or "no advisors needed" if the task is low risk and
@@ -322,6 +330,13 @@ For each task slice in the plan:
      developer's instructions reference this rather than
      hardcoding a teammate name, keeping the agent file
      reusable across workflows
+
+   **Do not include other tasks' descriptions.** The
+   developer attends to all visible context — other tasks'
+   descriptions cause scope bleed where the developer
+   pulls work from future tasks into the current one. This
+   corrupts plan progress tracking and violates the
+   one-task-one-commit design.
 
    Send one task at a time — the developer works on a single
    task until it is committed, then receives the next one.

@@ -155,6 +155,29 @@ would need to know. Skip obvious ones — documenting every
 micro-decision adds noise that makes important decisions
 harder to find.
 
+## Optional Sections
+
+### Non-Goals
+
+Work that is explicitly excluded from this plan's scope.
+Include this section when adjacent work exists that the
+developer might reasonably attempt — without an explicit
+boundary, the developer pattern-matches against visible
+context and pulls related-but-excluded work into the
+current plan's tasks.
+
+```markdown
+- Updating the browser extension to use the new auth
+  flow (separate plan)
+- Migrating legacy endpoints — only new endpoints are
+  in scope
+```
+
+Only list items that someone working on this plan might
+otherwise assume are included. Do not list unrelated
+work — a Non-Goals section full of obvious exclusions
+is noise.
+
 ## Conventions
 
 - Use plain markdown. No frontmatter — plans are runtime
