@@ -314,7 +314,7 @@ and no collateral edits to surrounding content;
 existing unit-test intents preserved; corpus
 SKIP_LIST stays empty; audit allow-list unchanged.
 
-**Completed:** commit `8f987db` — AST-first
+**Completed:** commit `370b8c4` — AST-first
 rewrite landed. `base_indent = key_col` (NOT
 `key_col + 2` as the plan originally said; corrected
 during execution — `format_subtree` already adds
