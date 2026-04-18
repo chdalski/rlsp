@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -183,7 +183,7 @@ user's intent that the cursor be "on" the quoted bool.
 - [x] Rewrite `quoted_bool_to_unquoted` as AST +
       `format_subtree` with cursor-based scalar-node
       matching; shrink audit allow-list by one entry
-- [ ] Cleanup — add regression tests for the defect
+- [x] Cleanup — add regression tests for the defect
       classes, verify audit allow-list count, remove
       the retrofit bullet from `project_followup_plans.md`
 
@@ -292,7 +292,7 @@ Finalize the change: add regression tests targeting the
 defect classes the old text-surgery implementation
 failed on, and update user-facing docs.
 
-- [ ] Add NEW regression unit tests covering the defect
+- [x] Add NEW regression unit tests covering the defect
       classes from Context:
   - **Pattern-inside-longer-scalar** — a double-quoted
     value whose decoded form contains the literal 6-char
@@ -312,6 +312,7 @@ failed on, and update user-facing docs.
     `key: "true"  # explicit string`. The edit must
     cover the scalar's loc span only, leaving the
     comment intact after the edit.
+    (Already covered by `quoted_bool_edit_range_is_scalar_span_not_full_line`.)
   - **Flow-context preservation** —
     `{ a: "true", b: 1 }`. Converting `"true"` to `true`
     must not destroy the rest of the flow mapping
@@ -319,6 +320,7 @@ failed on, and update user-facing docs.
   - **Sequence-item scalar** — `- "true"`. The AST walk
     finds it (no mapping-value constraint). Convert
     produces `- true` without touching siblings.
+    (Already covered by `quoted_bool_action_offered_for_sequence_item`.)
   - **Value with whitespace not offered** —
     `key: " true"` (decoded value has leading space).
     The action must NOT be offered (decoded value
@@ -331,13 +333,13 @@ failed on, and update user-facing docs.
     `key: "true"  # comment` with cursor on the
     comment. Not offered (span-containment check
     excludes it).
-- [ ] Verify `parser_boundary_audit` allow-list is at
+- [x] Verify `parser_boundary_audit` allow-list is at
       exactly 100 entries (was 101; lost the retrofit
       entry). No per-entry re-verification needed —
       Task 1 already removed the entry. Confirm by
       inspection of the ALLOW_LIST constant and a fresh
       `cargo test --test parser_boundary_audit` run.
-- [ ] Remove the `Retrofit quoted_bool_to_unquoted to
+- [x] Remove the `Retrofit quoted_bool_to_unquoted to
       AST+formatter` bullet from
       `.ai/memory/project_followup_plans.md` under
       "Open: rlsp-yaml". Memory convention mandates
@@ -346,7 +348,7 @@ failed on, and update user-facing docs.
       bullet. Do not leave the bullet in place with a
       "Completed" annotation; the file is a queue of
       open items only.
-- [ ] Build/test gates (same as Task 1).
+- [x] Build/test gates (same as Task 1).
 
 Acceptance: regression tests cover all listed defect
 classes; audit allow-list at exactly 100 entries;
@@ -356,6 +358,13 @@ workspace suite green. No `feature-log.md` entry is
 added — the file is reserved for user-facing feature
 decisions; internal refactors like this retrofit
 belong in git history and this plan file only.
+
+**Completed:** commit `e1e3a67` — 8 new defect-class
+regression tests added (trailing-comment and
+sequence-item already covered by Task 1). Audit
+allow-list verified at 100 entries. Follow-up bullet
+removed from `project_followup_plans.md`. No
+`feature-log.md` entry per the plan amendment.
 
 ## Non-Goals
 

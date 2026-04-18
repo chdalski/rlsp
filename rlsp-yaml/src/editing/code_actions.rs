@@ -2082,6 +2082,115 @@ mod tests {
         assert_eq!(edits[0].new_text, "true");
     }
 
+    #[test]
+    fn quoted_bool_pattern_inside_longer_scalar_not_offered() {
+        // Single-quoted outer scalar whose decoded value contains the literal 6-char sequence
+        // 'true' as a substring.  The outer scalar is NOT a standalone bool — do not offer.
+        let text = "msg: 'status ''true'' reported'\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+        assert!(
+            actions.iter().all(|a| !a.title.contains("Convert quoted")),
+            "longer scalar containing 'true' substring must not trigger action"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_multiple_bools_same_line_cursor_on_first() {
+        // Two quoted bools on one line; cursor on the first must offer "true", not "false".
+        let text = "x: { a: \"true\", b: \"false\" }\n";
+        // `"true"` starts at col 8; cursor inside it at col 9
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 9), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .expect("must offer action for first bool");
+        assert_eq!(
+            action.title, "Convert quoted string to true",
+            "cursor on first bool must offer 'true', not 'false'"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_multiple_bools_same_line_cursor_on_second() {
+        // Same line; cursor on the second bool must offer "false".
+        let text = "x: { a: \"true\", b: \"false\" }\n";
+        // `"false"` starts at col 19; cursor inside it at col 20
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 20), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .expect("must offer action for second bool");
+        assert_eq!(
+            action.title, "Convert quoted string to false",
+            "cursor on second bool must offer 'false', not 'true'"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_flow_context_rest_of_mapping_preserved() {
+        // Converting "true" in a multi-entry flow mapping must not destroy other entries.
+        // Edit range must cover only the scalar span, leaving `, b: 1 }` intact.
+        let text = "config: { a: \"true\", b: 1 }\n";
+        // `"true"` starts at col 13; cursor inside it
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 14), &[], &test_uri());
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .expect("must offer action inside flow mapping");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        assert_eq!(edits[0].new_text, "true");
+        // The edit range must not start at column 0 (full-line replacement)
+        assert_ne!(
+            edits[0].range.start.character, 0,
+            "edit must not replace from col 0 — that would destroy surrounding flow content"
+        );
+        // The edit range end must not reach past the scalar's closing quote
+        // `"true"` is 6 chars starting at col 13, so end must be ≤ 19
+        assert!(
+            edits[0].range.end.character <= 19,
+            "edit end must not extend past the closing quote of the scalar"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_value_with_leading_whitespace_not_offered() {
+        // Decoded value " true" (leading space) is NOT the YAML bool `true` — must not offer.
+        let text = "key: \" true\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 7), &[], &test_uri());
+        assert!(
+            actions.iter().all(|a| !a.title.contains("Convert quoted")),
+            "scalar with leading whitespace in decoded value must not trigger action"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_non_bool_string_not_offered() {
+        // Plain quoted string "hello" — must not offer.
+        let text = "key: \"hello\"\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 6), &[], &test_uri());
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn quoted_bool_already_plain_not_offered() {
+        // Plain-style `true` — style is Plain, not quoted, must not offer.
+        let text = "key: true\n";
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 6), &[], &test_uri());
+        assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
+    }
+
+    #[test]
+    fn quoted_bool_cursor_on_trailing_comment_not_offered() {
+        // Cursor placed on the trailing comment, which is past the scalar's span — must not offer.
+        let text = "key: \"true\"  # comment\n";
+        // `"true"` ends at col 11 (exclusive); cursor at col 14 is inside the comment
+        let actions = code_actions(&docs_for(text), text, cursor_range(0, 14), &[], &test_uri());
+        assert!(
+            actions.iter().all(|a| !a.title.contains("Convert quoted")),
+            "cursor on trailing comment must not trigger action"
+        );
+    }
+
     // ---- String to block scalar ----
 
     #[test]
