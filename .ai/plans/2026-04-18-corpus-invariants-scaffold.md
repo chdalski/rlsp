@@ -241,7 +241,7 @@ the stub plan's path.
 - [x] Implement invariant I3 (code-action round-trip)
 - [x] Implement invariant I4 (refactor scalar/key
       preservation)
-- [ ] Record baseline worklist
+- [x] Record baseline worklist
 
 ## Tasks
 
@@ -626,6 +626,13 @@ correspond 1:1 to the current `SKIP_LIST`. Every entry
 references a filed plan by file path — no ad-hoc
 markers (per the Surprise Failure Protocol).
 `docs/feature-log.md` mentions the new harness.
+
+**Completed:** commit `6ec98de` — `WORKLIST.md` created
+with one section per follow-up plan (one section
+currently, for the destructive-code-action-fix stub plan,
+with both I4 entries). `feature-log.md` updated with a
+new entry introducing the corpus-invariants harness and
+linking to the worklist.
 
 ## Decisions
 

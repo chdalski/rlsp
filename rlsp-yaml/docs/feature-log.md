@@ -12,6 +12,27 @@ with existing infrastructure.
 
 ---
 
+### Corpus Invariant Harness [completed]
+
+**Description:** A real-world corpus of 4 YAML files (`release-plz-workflow.yml`,
+`kubernetes-deployment.yaml`, `docker-compose.yml`, `github-actions-matrix.yml`)
+paired with a broad-invariant test harness (`rlsp-yaml/tests/corpus_invariants.rs`)
+that runs every registered invariant over every corpus file. Four foundational
+invariants are registered: I1 (no panics on full LSP pipeline), I2 (diagnostic
+range validity per LSP §3.17 UTF-16 semantics), I3 (code-action output introduces
+no new Error diagnostics), and I4 (refactor code actions preserve all pre-existing
+scalar content). A shrink-only skip-list tracks currently-failing (file, invariant)
+pairs, each citing a filed follow-up plan. See
+[`tests/corpus/WORKLIST.md`](../tests/corpus/WORKLIST.md) for the current failure
+worklist.
+**Complexity:** Medium
+**Comment:** Motivated by a user-reported bug that passed every existing unit test
+but broke on first contact with a real GitHub Actions workflow. The harness
+provides regression protection over representative real-world files; the skip-list
+surfaces the failure worklist for retrofit plans rather than hiding failures behind
+disabled tests.
+**Tier:** 1
+
 ### YAML 1.1 Compatibility Diagnostics [completed]
 
 **Description:** Warn when plain scalars would be interpreted differently by YAML 1.1 parsers (Kubernetes, Ansible, GitLab CI, etc.). `yaml11Boolean` (warning) fires for the 16 YAML 1.1 boolean forms not in YAML 1.2 (`yes`, `no`, `on`, `off`, `y`, `n`, and case variants); `yaml11Octal` (info) fires for C-style octal literals (`0777`). Schema-aware variants (`schemaYaml11Boolean`, `schemaYaml11Octal`) escalate severity when the field is schema-typed as `string` — the 1.2 parser accepts the value but downstream 1.1 tools will silently corrupt it; `schemaType` messages are enhanced when a boolean-typed field receives a 1.1 boolean form. Quick fixes: quote value (universally safe, listed first) or convert to canonical 1.2 form (`true`/`false`, `0o777`). All four diagnostics are suppressed when `yamlVersion` is `"1.1"`. The VS Code extension now exposes `rlsp-yaml.yamlVersion` and `rlsp-yaml.validate` settings.
