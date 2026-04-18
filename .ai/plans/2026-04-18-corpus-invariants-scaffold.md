@@ -221,7 +221,7 @@ developer blocks Task 3 if the stub is missing.
 ## Steps
 
 - [x] Establish harness scaffolding and seed corpus
-- [ ] Implement invariants I1 (no panics) and I2
+- [x] Implement invariants I1 (no panics) and I2
       (range validity)
 - [ ] Implement invariant I3 (code-action round-trip)
 - [ ] Record baseline worklist
@@ -316,7 +316,7 @@ empty, 8 harness-internal tests passing.
 Implement the two foundational invariants and register
 them in the harness.
 
-- [ ] Register I1 — "No panics on full LSP pipeline":
+- [x] Register I1 — "No panics on full LSP pipeline":
   - For each corpus file, sequentially invoke (each
     wrapped in `std::panic::catch_unwind` with
     `AssertUnwindSafe`):
@@ -338,7 +338,7 @@ them in the harness.
   - Any caught panic → invariant fails; the failure
     message identifies which pipeline stage panicked
     and the panic message
-- [ ] Register I2 — "Diagnostic range validity":
+- [x] Register I2 — "Diagnostic range validity":
   - For each corpus file, collect all diagnostics from
     all validators
   - For each diagnostic's `range`:
@@ -356,7 +356,7 @@ them in the harness.
   - Any failed check → invariant fails; the failure
     message identifies the diagnostic (code, range)
     and which check failed
-- [ ] Run the full harness on the corpus. Record every
+- [x] Run the full harness on the corpus. Record every
       (file, invariant) failure. For each failure that
       corresponds to a known issue that will be fixed
       in a filed follow-up plan, add a skip-list entry
@@ -373,7 +373,7 @@ them in the harness.
       in-scope-for-this-plan. The developer never
       adds a skip-list entry with an ad-hoc `TODO(...)`
       marker lacking a plan reference.
-- [ ] Per-entry skip-list verification: for each
+- [x] Per-entry skip-list verification: for each
       skip-list entry added in this task, temporarily
       remove the entry and run the harness. The
       harness must fail citing that specific (file,
@@ -386,6 +386,13 @@ pass or have a verified skip-list entry with a
 specific follow-up-plan reference. `cargo test --test
 corpus_invariants` exits successfully. `cargo clippy
 --all-targets` clean.
+
+**Completed:** commit `38b9aa7` — I1 and I2
+registered; skip-list stayed empty (all 4 corpus files
+pass both invariants). Adds 12 unit tests for
+`check_diagnostic_ranges` and `check_utf8_boundary`.
+Per-entry verification not applicable (no skip entries
+added).
 
 ### Task 3: Register invariant I3 (code-action round-trip)
 
