@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -435,7 +435,7 @@ reviewable from diff):
 - Known-good CI run triggers release-plz against the
   validated commit SHA
 
-**Completed:** commit `77436e0` — release-plz
+**Completed:** commit `189e9eb` — release-plz
 now triggers on `workflow_run` of CI (success-gated),
 checks out `workflow_run.head_sha` on release-context
 jobs, keeps `matrix.crate.tag` on build-binaries (it
