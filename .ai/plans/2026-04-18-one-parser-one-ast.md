@@ -241,7 +241,7 @@ zero diagnostics when passed through the full pipeline;
 multi-line flow collections now emit warnings; the two
 user-facing docs reflect the new behavior.
 
-**Completed:** commit `ffa6941` — retrofit
+**Completed:** commit `9c5a6e1` — retrofit
 lands via AST walker; 14 new tests for field identity,
 GHA-style expressions, multi-line detection, and
 no-double-report; existing standalone intents preserved.
