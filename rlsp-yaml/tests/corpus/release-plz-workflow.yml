@@ -1,0 +1,141 @@
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-plz-release-pr:
+    name: Release-plz release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      releases: ${{ steps.release.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - id: release
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  trigger-vscode:
+    name: Trigger VS Code extension release
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check if rlsp-yaml was released
+        id: check
+        env:
+          RELEASES: ${{ needs.release-plz-release.outputs.releases }}
+        run: |
+          FOUND=$(echo "$RELEASES" | jq -r '[.[] | select(.package_name == "rlsp-yaml")] | length > 0')
+          echo "found=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger VS Code extension workflow
+        if: steps.check.outputs.found == 'true'
+        run: gh workflow run vscode-extension.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  filter-binaries:
+    name: Filter binary releases
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    permissions: {}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - id: filter
+        run: |
+          BINARY_CRATES='["rlsp-yaml"]'
+          RELEASES='${{ needs.release-plz-release.outputs.releases }}'
+          MATRIX=$(echo "$RELEASES" | jq -c --argjson bins "$BINARY_CRATES" \
+            '[.[] | select(.package_name as $p | $bins | index($p)) | {crate: .package_name, tag: .tag}]')
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  build-binaries:
+    name: Build ${{ matrix.crate.crate }} (${{ matrix.target.target }})
+    needs: filter-binaries
+    if: needs.filter-binaries.outputs.matrix != '[]'
+    runs-on: ${{ matrix.target.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        crate: ${{ fromJSON(needs.filter-binaries.outputs.matrix) }}
+        target:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: riscv64gc-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.crate.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target.target }}
+      - name: Install cross (Linux cross-compilation)
+        if: matrix.target.target == 'aarch64-unknown-linux-gnu' || matrix.target.target == 'riscv64gc-unknown-linux-gnu'
+        run: cargo install cross
+      - name: Build (cross)
+        if: matrix.target.target == 'aarch64-unknown-linux-gnu' || matrix.target.target == 'riscv64gc-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target.target }}
+      - name: Build (native)
+        if: matrix.target.target != 'aarch64-unknown-linux-gnu' && matrix.target.target != 'riscv64gc-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target.target }}
+      - name: Package (Linux/macOS)
+        if: matrix.target.os != 'windows-latest'
+        run: tar czf ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz -C target/${{ matrix.target.target }}/release ${{ matrix.crate.crate }}
+      - name: Package (Windows)
+        if: matrix.target.os == 'windows-latest'
+        run: Compress-Archive -Path target/${{ matrix.target.target }}/release/${{ matrix.crate.crate }}.exe -DestinationPath ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip
+        shell: pwsh
+      - name: Upload to GitHub Release (Linux/macOS)
+        if: matrix.target.os != 'windows-latest'
+        run: gh release upload ${{ matrix.crate.tag }} ${{ matrix.crate.crate }}-${{ matrix.target.target }}.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to GitHub Release (Windows)
+        if: matrix.target.os == 'windows-latest'
+        run: gh release upload ${{ matrix.crate.tag }} ${{ matrix.crate.crate }}-${{ matrix.target.target }}.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -220,7 +220,7 @@ developer blocks Task 3 if the stub is missing.
 
 ## Steps
 
-- [ ] Establish harness scaffolding and seed corpus
+- [x] Establish harness scaffolding and seed corpus
 - [ ] Implement invariants I1 (no panics) and I2
       (range validity)
 - [ ] Implement invariant I3 (code-action round-trip)
@@ -233,32 +233,32 @@ developer blocks Task 3 if the stub is missing.
 Create the test harness file and populate the corpus
 with 4 representative files.
 
-- [ ] Create directory `rlsp-yaml/tests/corpus/`
-- [ ] Add seed file `release-plz-workflow.yml` — an
+- [x] Create directory `rlsp-yaml/tests/corpus/`
+- [x] Add seed file `release-plz-workflow.yml` — an
       independent copy of the current
       `.github/workflows/release-plz.yml` (the file
       that triggered the originating bug report). Keep
       it as a checked-in corpus copy, not a symlink,
       so future workflow edits don't perturb the test
       corpus.
-- [ ] Add seed file `kubernetes-deployment.yaml` —
+- [x] Add seed file `kubernetes-deployment.yaml` —
       a Deployment manifest exercising anchors,
       multi-container pods, env vars, volume mounts,
       and typical annotations. Source: a
       copyright-safe example from upstream Kubernetes
       documentation.
-- [ ] Add seed file `docker-compose.yml` — a typical
+- [x] Add seed file `docker-compose.yml` — a typical
       compose file with services, environment,
       volumes, build context. Source: Compose spec
       example.
-- [ ] Add seed file `github-actions-matrix.yml` — a
+- [x] Add seed file `github-actions-matrix.yml` — a
       GitHub Actions workflow specifically exercising
       `strategy.matrix` with inline flow mappings
       (`{ target: …, os: … }`) *alongside*
       `${{ … }}` expressions, so the corpus contains
       both a legitimate flow collection case and the
       plain-scalar-with-braces case in the same file.
-- [ ] Create `rlsp-yaml/tests/corpus_invariants.rs`
+- [x] Create `rlsp-yaml/tests/corpus_invariants.rs`
       with:
   - Top-of-file comment stating the skip-list
     discipline: *the skip-list is shrink-only. Entries
@@ -297,7 +297,7 @@ with 4 representative files.
     yet (scaffolding only). The test runs successfully
     with an empty invariant set, printing
     "0 files × 0 invariants = 0 checks" or similar.
-- [ ] `cargo test --test corpus_invariants` passes
+- [x] `cargo test --test corpus_invariants` passes
       (compilation + empty run completes cleanly)
 
 Acceptance: the corpus directory exists with exactly
@@ -306,6 +306,10 @@ under `cargo clippy --all-targets` with no warnings.
 The empty test run completes successfully. The
 shrink-only skip-list discipline is documented in a
 top-of-file comment.
+
+**Completed:** commit `992f2ba` — harness scaffold
+with 4 seed files, `INVARIANTS` / `SKIP_LIST` constants
+empty, 8 harness-internal tests passing.
 
 ### Task 2: Register invariants I1 and I2
 

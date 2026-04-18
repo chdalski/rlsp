@@ -1,0 +1,82 @@
+name: CI Matrix
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test ${{ matrix.target.name }}
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta]
+        target:
+          - { name: Linux x86_64, os: ubuntu-latest, triple: x86_64-unknown-linux-gnu }
+          - { name: macOS ARM, os: macos-latest, triple: aarch64-apple-darwin }
+          - { name: Windows, os: windows-latest, triple: x86_64-pc-windows-msvc }
+        include:
+          - rust: stable
+            target: { name: Linux x86_64, os: ubuntu-latest, triple: x86_64-unknown-linux-gnu }
+            extra-flags: --all-features
+        exclude:
+          - rust: beta
+            target: { name: Windows, os: windows-latest, triple: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: ${{ matrix.target.triple }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target.triple }}-${{ matrix.rust }}
+      - name: Build
+        run: cargo build --target ${{ matrix.target.triple }}
+      - name: Test
+        run: cargo test --target ${{ matrix.target.triple }} ${{ matrix.extra-flags || '' }}
+      - name: Clippy
+        if: matrix.rust == 'stable'
+        run: cargo clippy --target ${{ matrix.target.triple }} -- -D warnings
+
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+      - name: Generate coverage
+        run: cargo llvm-cov --lcov --output-path lcov.info
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
