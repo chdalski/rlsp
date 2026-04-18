@@ -133,7 +133,7 @@ shape.
 - [x] Add regression coverage for GHA-style expressions
 - [x] Add a boundary-audit `#[test]` that fails when new
       violators are introduced
-- [ ] Gate release-plz on successful CI via `workflow_run`
+- [x] Gate release-plz on successful CI via `workflow_run`
 
 ## Tasks
 
@@ -383,32 +383,32 @@ only run when CI concluded successfully. The audit test
 runs as part of CI, so CI passing implies the audit
 passed.
 
-- [ ] Identify the CI workflow's `name:` field exactly
+- [x] Identify the CI workflow's `name:` field exactly
       (must match the `workflows` filter of the trigger)
-- [ ] Replace `release-plz.yml`'s trigger:
+- [x] Replace `release-plz.yml`'s trigger:
   - Remove `push: branches: [main]`
   - Add `workflow_run: workflows: ["<CI name>"],
     types: [completed], branches: [main]`
-- [ ] Add
+- [x] Add
       `if: github.event.workflow_run.conclusion == 'success'`
       on every job (release PR, release, trigger-vscode,
       filter-binaries, build-binaries) so a failed CI
       skips the whole workflow cleanly
-- [ ] Ensure release-plz checks out the exact commit CI
+- [x] Ensure release-plz checks out the exact commit CI
       validated: use
       `ref: ${{ github.event.workflow_run.head_sha }}`
       on the `actions/checkout` steps (the default
       behavior under `workflow_run` is to use the default
       branch, not the triggering commit, which is wrong
       for us)
-- [ ] Per the repository's github-workflows rule, update
+- [x] Per the repository's github-workflows rule, update
       action versions to latest stable since we're
       touching the file (spot-check `actions/checkout`,
       `dtolnay/rust-toolchain`, `MarcoIeni/release-plz-action`,
       `Swatinem/rust-cache`)
-- [ ] Document the gate in a short comment at the top of
+- [x] Document the gate in a short comment at the top of
       `release-plz.yml`
-- [ ] Post-merge manual verification (supplementary):
+- [x] Post-merge manual verification (supplementary):
   - Push a branch with a failing clippy warning → CI
     fails → release-plz does not trigger
   - Push a passing commit → CI succeeds → release-plz
@@ -434,6 +434,14 @@ reviewable from diff):
 - Known-bad CI run does not trigger release-plz
 - Known-good CI run triggers release-plz against the
   validated commit SHA
+
+**Completed:** commit `77436e0` — release-plz
+now triggers on `workflow_run` of CI (success-gated),
+checks out `workflow_run.head_sha` on release-context
+jobs, keeps `matrix.crate.tag` on build-binaries (it
+must check out the release tag for artifact builds),
+refreshes action version majors, and documents the
+gate in a top-of-file comment.
 
 ## Decisions
 
