@@ -78,8 +78,8 @@ fn bench_schema_validation(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("schema_validation");
     for (name, text, docs) in &parsed {
-        group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
-            b.iter(|| validate_schema(text, docs, &schema, false, YamlVersion::V1_2));
+        group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, _text| {
+            b.iter(|| validate_schema(docs, &schema, false, YamlVersion::V1_2));
         });
     }
     group.finish();

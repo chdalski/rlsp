@@ -313,7 +313,6 @@ impl Backend {
         schema_url: &str,
         diagnostics: &mut Vec<Diagnostic>,
         documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
-        text: &str,
         yaml_version: YamlVersion,
     ) {
         let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();
@@ -386,7 +385,6 @@ impl Backend {
             if let Some(s) = schema {
                 let format_validation = self.get_format_validation();
                 diagnostics.extend(crate::schema_validation::validate_schema(
-                    text,
                     documents,
                     &s,
                     format_validation,
@@ -420,7 +418,7 @@ impl Backend {
                 }
                 // Fall through: non-schema validators already ran above.
             } else {
-                self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+                self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
                     .await;
             }
             return;
@@ -434,7 +432,7 @@ impl Backend {
         let schema_store_enabled = self.get_schema_store_enabled();
         let filename = uri.path();
         if let Some(schema_url) = crate::schema::match_schema_by_filename(filename, &associations) {
-            self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+            self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
                 .await;
         } else if let Some((api_version, kind)) =
             crate::schema::detect_kubernetes_resource(documents)
@@ -442,7 +440,7 @@ impl Backend {
             // Third fallback: Kubernetes auto-detection.
             let schema_url =
                 crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
-            self.process_schema(uri, &schema_url, diagnostics, documents, text, yaml_version)
+            self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
                 .await;
         } else if schema_store_enabled {
             // Fourth fallback: SchemaStore catalog.
@@ -450,15 +448,8 @@ impl Backend {
             // schemastore_catalog lock without holding any other lock.
             if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await {
                 if let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog) {
-                    self.process_schema(
-                        uri,
-                        &schema_url,
-                        diagnostics,
-                        documents,
-                        text,
-                        yaml_version,
-                    )
-                    .await;
+                    self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
+                        .await;
                 }
             }
         }

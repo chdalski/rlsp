@@ -467,7 +467,7 @@ mod tests {
     fn run_format(text: &str, fmt: &str) -> Vec<Diagnostic> {
         let schema = format_schema(fmt);
         let docs = parse_docs(text);
-        validate_schema(text, &docs, &schema, true, YamlVersion::V1_2)
+        validate_schema(&docs, &schema, true, YamlVersion::V1_2)
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -698,7 +698,7 @@ mod tests {
     fn format_validation_disabled_produces_no_format_diagnostics() {
         let schema = format_schema("date");
         let docs = parse_docs("not-a-date");
-        let result = validate_schema("not-a-date", &docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 }

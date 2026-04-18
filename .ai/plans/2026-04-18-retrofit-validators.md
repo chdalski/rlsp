@@ -290,7 +290,7 @@ cleanup waits for the post-program plan.
       `validate_key_ordering` (combined — both are
       position-retrofits on already-AST-walking
       validators with similar shape)
-- [ ] Retrofit `validate_schema` (standalone — largest
+- [x] Retrofit `validate_schema` (standalone — largest
       helper tree; touches `Ctx` struct)
 
 ## Tasks
@@ -502,14 +502,14 @@ removal ripple through enough call sites that
 combining with Task 2 would inflate that task's review
 surface.
 
-- [ ] Change signature to
+- [x] Change signature to
       `fn validate_schema(docs: &[Document<Span>],
       schema: &JsonSchema, format_validation: bool,
       yaml_version: YamlVersion) -> Vec<Diagnostic>`.
       The `text` parameter is removed.
-- [ ] Remove `build_key_index` (line 250) and the
+- [x] Remove `build_key_index` (line 250) and the
       `key_index` field on the `Ctx` struct.
-- [ ] Remove the `key_index`-based position helpers
+- [x] Remove the `key_index`-based position helpers
       that become dead: `node_range` (line 1695),
       `mapping_range` (line 1703), `key_range`
       (line 1711), `find_key_range` (line 1717). Each
@@ -522,16 +522,16 @@ surface.
       Update the `Ctx` struct definition at line 183
       and its construction at line 191 to drop the
       `key_index` field.
-- [ ] Remove two allow-list entries:
+- [x] Remove two allow-list entries:
       `validate_schema` (line 119),
       `build_key_index` (line 278).
-- [ ] Update the call site in
+- [x] Update the call site in
       `rlsp-yaml/src/language_server.rs`.
-- [ ] TE input-gate consultation. The
+- [x] TE input-gate consultation. The
       `schema_validation.rs` test file is large;
       scan carefully and produce a Consolidation
       section.
-- [ ] Regression tests (augment with TE decisions):
+- [x] Regression tests (augment with TE decisions):
   - Type-mismatch diagnostic — range equals the
     offending scalar node's `loc`
   - Missing required property — range equals the
@@ -560,7 +560,7 @@ surface.
     deepest offending node's `loc`; diagnostic
     codes and messages preserved from pre-retrofit
     behavior
-- [ ] Build/test gates:
+- [x] Build/test gates:
   - `cargo fmt`
   - `cargo clippy --all-targets` clean
   - `cargo test` full workspace green
@@ -570,13 +570,23 @@ surface.
     passes with allow-list at exactly 96 entries
     (down from 98 after Task 2 — removes two
     entries: `validate_schema`, `build_key_index`)
-- [ ] TE output-gate sign-off covering regression
+- [x] TE output-gate sign-off covering regression
       adds + Consolidation deletes.
 
 Acceptance: `validate_schema` consumes only the AST;
 `build_key_index` deleted; `Ctx.key_index` field
 removed; all diagnostic codes, messages, severities
 preserved; audit at 96 (down from 98).
+
+**Landed:** commit `76f1ef4` (see `git log` — SHA may
+be superseded by follow-up amend). `const ALLOW_LIST`
+at 88 (−2 from 90). Task modified five files:
+`schema_validation.rs`, `schema_validation/formats.rs`,
+`server.rs`, one bench file, and `parser_boundary_audit.rs`.
+Also added two shared helpers: `span_to_range(loc: Span)
+-> Range` and `const fn node_loc(node: &Node<Span>) ->
+Span`, plus 20 new `diagnostic_range_*` regression
+tests.
 
 ## Decisions
 

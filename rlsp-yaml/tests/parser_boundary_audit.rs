@@ -91,16 +91,6 @@ impl fmt::Display for AllowEntry {
 /// Each entry must have an explicit marker. See allow-list discipline comment above.
 const ALLOW_LIST: &[AllowEntry] = &[
     // -----------------------------------------------------------------------
-    // Existing violators (carried forward, now with typed marker)
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "schema_validation.rs",
-        func: "validate_schema",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-validate-schema",
-        },
-    },
-    // -----------------------------------------------------------------------
     // Feature-level violators (original 5)
     // -----------------------------------------------------------------------
     AllowEntry {
@@ -195,16 +185,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "rename",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-rename",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of validators
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "schema_validation.rs",
-        func: "build_key_index",
-        marker: AllowMarker::HelperOf {
-            root: "validate_schema",
         },
     },
     // -----------------------------------------------------------------------
@@ -1360,8 +1340,8 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source = "pub fn validate_schema(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
-        let violations = scan_file("schema_validation.rs", source);
+        let source = "pub fn hover_at(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
+        let violations = scan_file("hover.rs", source);
         assert_eq!(violations.len(), 1);
 
         let new_violations: Vec<&Violation> = violations

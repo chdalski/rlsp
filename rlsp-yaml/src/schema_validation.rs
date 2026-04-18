@@ -8,6 +8,34 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+/// Convert a parser `Span` to an LSP `Range`.
+///
+/// `Pos::line` is 1-based; LSP lines are 0-based — hence the `saturating_sub(1)`.
+/// `Pos::column` is already 0-based.
+fn span_to_range(loc: Span) -> Range {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP positions are u32; documents exceeding 4 billion lines/columns are not a realistic concern"
+    )]
+    Range::new(
+        Position::new(
+            loc.start.line.saturating_sub(1) as u32,
+            loc.start.column as u32,
+        ),
+        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+    )
+}
+
+/// Extract the `loc` span from any AST node.
+const fn node_loc(node: &Node<Span>) -> Span {
+    match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => *loc,
+    }
+}
+
 use crate::scalar_helpers;
 use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
 use crate::server::YamlVersion;
@@ -172,15 +200,11 @@ fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
 /// Shared per-call context threaded through the validation walk.
 ///
 /// Bundles the parameters that every helper needs — the diagnostic accumulator,
-/// the `format_validation` flag, a pre-built key index for O(1) position
-/// lookups, and the `yaml_version` for YAML 1.1 compatibility checks — so
-/// individual helpers do not need many arguments.
+/// the `format_validation` flag, and the `yaml_version` for YAML 1.1
+/// compatibility checks — so individual helpers do not need many arguments.
 struct Ctx<'a> {
     diagnostics: &'a mut Vec<Diagnostic>,
     format_validation: bool,
-    /// Pre-built index: key string → Range in the document.
-    /// Built once in `validate_schema`; replaces per-diagnostic O(n) scans.
-    key_index: &'a HashMap<String, Range>,
     yaml_version: YamlVersion,
 }
 
@@ -188,13 +212,11 @@ impl<'a> Ctx<'a> {
     const fn new(
         diagnostics: &'a mut Vec<Diagnostic>,
         format_validation: bool,
-        key_index: &'a HashMap<String, Range>,
         yaml_version: YamlVersion,
     ) -> Self {
         Self {
             diagnostics,
             format_validation,
-            key_index,
             yaml_version,
         }
     }
@@ -206,78 +228,25 @@ impl<'a> Ctx<'a> {
 
 /// Validate `docs` (parsed YAML ASTs) against `schema` and return diagnostics.
 ///
-/// `text` is the raw document text used for position lookup.
 /// Each element of `docs` is one YAML document (separated by `---`).
 /// `format_validation` controls whether the `format` keyword is validated.
 /// `yaml_version` is used to suppress YAML 1.1 compatibility warnings when the
 /// user has explicitly opted into 1.1 semantics.
 #[must_use]
 pub fn validate_schema(
-    text: &str,
     docs: &[Document<Span>],
     schema: &JsonSchema,
     format_validation: bool,
     yaml_version: YamlVersion,
 ) -> Vec<Diagnostic> {
-    let lines: Vec<&str> = text.lines().collect();
     let mut diagnostics = Vec::new();
-
-    // Build a key → Range index once so all position lookups are O(1)
-    // instead of scanning all lines for every diagnostic emitted.
-    // Uses the same matching logic as the removed find_key_range scan.
-    let key_index = build_key_index(&lines);
-
-    let mut ctx = Ctx::new(
-        &mut diagnostics,
-        format_validation,
-        &key_index,
-        yaml_version,
-    );
+    let mut ctx = Ctx::new(&mut diagnostics, format_validation, yaml_version);
 
     for doc in docs {
         validate_node(&doc.root, schema, &[], &mut ctx, 0);
     }
 
     diagnostics
-}
-
-/// Build a `HashMap` from key string to its `Range` in the document.
-///
-/// Scans `lines` once, applying the same matching logic as `find_key_range`:
-/// - Strips a leading `"- "` sequence-item marker if present
-/// - Matches `key:` and `key :` patterns (colon-only split, space within key preserved)
-/// - First occurrence of each key wins (preserves `find_key_range` semantics)
-fn build_key_index(lines: &[&str]) -> HashMap<String, Range> {
-    let mut index = HashMap::new();
-    for (line_idx, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        let col_offset = line.len() - trimmed.len();
-        let candidate = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-
-        // Split at the first ':' and trim trailing whitespace from the key.
-        // This preserves spaces within keys (e.g. "foo bar: value" → "foo bar")
-        // and handles "key : value" (space before colon).
-        let Some(colon_pos) = candidate.find(':') else {
-            continue;
-        };
-        let key = candidate[..colon_pos].trim_end();
-        if key.is_empty() {
-            continue;
-        }
-
-        // col is the indentation of the original line, matching find_key_range.
-        let col = u32::try_from(col_offset).unwrap_or(0);
-        let end_col = col + u32::try_from(key.len()).unwrap_or(0);
-        let line_u32 = u32::try_from(line_idx).unwrap_or(0);
-        let range = Range::new(
-            Position::new(line_u32, col),
-            Position::new(line_u32, end_col),
-        );
-
-        // First-occurrence wins — matches find_key_range find_map semantics.
-        index.entry(key.to_string()).or_insert(range);
-    }
-    index
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -333,7 +302,7 @@ fn validate_type(
     let effective = effective_yaml_type(node, schema_type, yaml_type, is_plain, ctx.yaml_version);
 
     if !type_matches(effective, schema_type) {
-        let range = node_range(path, ctx.key_index);
+        let range = span_to_range(node_loc(node));
         let (code, message) = type_mismatch_diagnostic(
             node,
             schema_type,
@@ -419,7 +388,7 @@ fn emit_yaml11_string_warnings(node: &Node<Span>, path: &[String], ctx: &mut Ctx
     };
     if scalar_helpers::is_yaml11_bool(value) {
         let canonical = scalar_helpers::yaml11_bool_canonical(value);
-        let range = node_range(path, ctx.key_index);
+        let range = span_to_range(node_loc(node));
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::WARNING,
@@ -434,7 +403,7 @@ fn emit_yaml11_string_warnings(node: &Node<Span>, path: &[String], ctx: &mut Ctx
     } else if scalar_helpers::is_yaml11_octal(value) {
         let decimal = i64::from_str_radix(&value[1..], 8).unwrap_or(0);
         let yaml12 = format!("0o{}", &value[1..]);
-        let range = node_range(path, ctx.key_index);
+        let range = span_to_range(node_loc(node));
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::WARNING,
@@ -474,7 +443,7 @@ fn validate_node(
         && let Some(yaml_val) = yaml_to_json(node)
         && !enum_values.contains(&yaml_val)
     {
-        let range = node_range(path, ctx.key_index);
+        let range = span_to_range(node_loc(node));
         let listed: Vec<String> = enum_values
             .iter()
             .take(MAX_ENUM_DISPLAY)
@@ -501,13 +470,13 @@ fn validate_node(
     validate_scalar_constraints(node, schema, path, ctx);
 
     // Mapping-specific checks
-    if let Node::Mapping { entries, .. } = node {
-        validate_mapping(entries, schema, path, ctx, depth);
+    if let Node::Mapping { entries, loc, .. } = node {
+        validate_mapping(entries, *loc, schema, path, ctx, depth);
     }
 
     // Sequence-specific checks
-    if let Node::Sequence { items, .. } = node {
-        validate_sequence(items, schema, path, ctx, depth);
+    if let Node::Sequence { items, loc, .. } = node {
+        validate_sequence(items, *loc, schema, path, ctx, depth);
     }
 
     // Composition
@@ -544,7 +513,7 @@ fn validate_unevaluated_properties(
         }
         match &schema.unevaluated_properties {
             Some(AdditionalProperties::Denied) => {
-                let range = key_range(&key_str, path, ctx.key_index);
+                let range = span_to_range(node_loc(k));
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::WARNING,
@@ -589,6 +558,7 @@ fn validate_unevaluated_items(
 
 fn validate_sequence(
     seq: &[Node<Span>],
+    seq_loc: Span,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -617,7 +587,7 @@ fn validate_sequence(
             item_path.push(format!("[{i}]"));
             match additional_items {
                 AdditionalProperties::Denied => {
-                    let range = node_range(&item_path, ctx.key_index);
+                    let range = span_to_range(node_loc(item));
                     ctx.diagnostics.push(make_diagnostic(
                         range,
                         DiagnosticSeverity::WARNING,
@@ -634,11 +604,12 @@ fn validate_sequence(
             }
         }
     }
-    validate_array_constraints(seq, schema, path, ctx, depth);
+    validate_array_constraints(seq, seq_loc, schema, path, ctx, depth);
 }
 
 fn validate_array_constraints(
     seq: &[Node<Span>],
+    seq_loc: Span,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -648,7 +619,7 @@ fn validate_array_constraints(
 
     if let Some(min) = schema.min_items {
         if len < min {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(seq_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -665,7 +636,7 @@ fn validate_array_constraints(
 
     if let Some(max) = schema.max_items {
         if len > max {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(seq_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -688,7 +659,7 @@ fn validate_array_constraints(
                 .is_some_and(|prev| prev.iter().any(|b| a == b))
         });
         if has_duplicate {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(seq_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -699,12 +670,13 @@ fn validate_array_constraints(
     }
 
     if let Some(contains_schema) = &schema.contains {
-        validate_contains(seq, contains_schema, schema, path, ctx, depth);
+        validate_contains(seq, seq_loc, contains_schema, schema, path, ctx, depth);
     }
 }
 
 fn validate_mapping_constraints(
     entries: &[(Node<Span>, Node<Span>)],
+    mapping_loc: Span,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -713,7 +685,7 @@ fn validate_mapping_constraints(
 
     if let Some(min) = schema.min_properties {
         if len < min {
-            let range = mapping_range(path, ctx.key_index);
+            let range = span_to_range(mapping_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -730,7 +702,7 @@ fn validate_mapping_constraints(
 
     if let Some(max) = schema.max_properties {
         if len > max {
-            let range = mapping_range(path, ctx.key_index);
+            let range = span_to_range(mapping_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -748,20 +720,20 @@ fn validate_mapping_constraints(
 
 fn validate_contains(
     seq: &[Node<Span>],
+    seq_loc: Span,
     contains_schema: &JsonSchema,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    let key_index = ctx.key_index;
     let format_validation = ctx.format_validation;
     let yaml_version = ctx.yaml_version;
     let match_count = seq
         .iter()
         .filter(|item| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, key_index, yaml_version);
+            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
             validate_node(item, contains_schema, path, &mut probe, depth + 1);
             scratch.is_empty()
         })
@@ -771,7 +743,7 @@ fn validate_contains(
     let effective_min = schema.min_contains.unwrap_or(1);
 
     if match_count < effective_min {
-        let range = node_range(path, ctx.key_index);
+        let range = span_to_range(seq_loc);
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::ERROR,
@@ -787,7 +759,7 @@ fn validate_contains(
 
     if let Some(max) = schema.max_contains {
         if match_count > max {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(seq_loc);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -810,7 +782,10 @@ fn validate_scalar_constraints(
     ctx: &mut Ctx<'_>,
 ) {
     use rlsp_yaml_parser::ScalarStyle;
-    if let Node::Scalar { value, style, .. } = node {
+    if let Node::Scalar {
+        value, style, loc, ..
+    } = node
+    {
         let is_plain = matches!(style, ScalarStyle::Plain);
 
         // String constraints apply to all scalars that resolve to string type.
@@ -822,7 +797,7 @@ fn validate_scalar_constraints(
                 && !scalar_helpers::is_integer(value)
                 && !scalar_helpers::is_float(value))
         {
-            validate_string_constraints(value, schema, path, ctx);
+            validate_string_constraints(value, *loc, schema, path, ctx);
         }
 
         // Numeric constraints only apply to plain scalars.
@@ -836,7 +811,7 @@ fn validate_scalar_constraints(
                 })
                 .or_else(|| scalar_helpers::parse_float(value));
             if let Some(val) = numeric_val {
-                validate_numeric_constraints(val, schema, path, ctx);
+                validate_numeric_constraints(val, *loc, schema, path, ctx);
             }
         }
     }
@@ -845,7 +820,7 @@ fn validate_scalar_constraints(
     if let Some(const_val) = &schema.const_value {
         if let Some(yaml_val) = yaml_to_json(node) {
             if yaml_val != *const_val {
-                let range = node_range(path, ctx.key_index);
+                let range = span_to_range(node_loc(node));
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -858,10 +833,16 @@ fn validate_scalar_constraints(
     }
 }
 
-fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
+fn validate_string_constraints(
+    s: &str,
+    loc: Span,
+    schema: &JsonSchema,
+    path: &[String],
+    ctx: &mut Ctx<'_>,
+) {
+    let range = span_to_range(loc);
     if let Some(pattern) = &schema.pattern {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -873,7 +854,6 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
             ));
         } else if let Some(re) = get_regex(pattern) {
             if !re.is_match(s) {
-                let range = node_range(path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -886,7 +866,6 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
                 ));
             }
         } else {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -903,7 +882,6 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if let Some(min_len) = schema.min_length {
         if char_count < min_len {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -920,7 +898,6 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if let Some(max_len) = schema.max_length {
         if char_count > max_len {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -937,13 +914,13 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 
     if ctx.format_validation {
         if let Some(format) = &schema.format {
-            validate_format(s, format, path, ctx.key_index, ctx.diagnostics);
+            validate_format(s, format, loc, path, ctx.diagnostics);
         }
         if schema.content_encoding.is_some()
             || schema.content_media_type.is_some()
             || schema.content_schema.is_some()
         {
-            validate_content(s, schema, path, ctx.key_index, ctx.diagnostics);
+            validate_content(s, schema, loc, path, ctx.diagnostics);
         }
     }
 }
@@ -954,8 +931,8 @@ fn validate_string_constraints(s: &str, schema: &JsonSchema, path: &[String], ct
 fn validate_format(
     s: &str,
     format: &str,
+    loc: Span,
     path: &[String],
-    key_index: &HashMap<String, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let valid = match format {
@@ -982,9 +959,8 @@ fn validate_format(
         _ => return,
     };
     if !valid {
-        let range = node_range(path, key_index);
         diagnostics.push(make_diagnostic(
-            range,
+            span_to_range(loc),
             DiagnosticSeverity::WARNING,
             "schemaFormat",
             format!(
@@ -1004,8 +980,8 @@ fn validate_format(
 fn validate_content(
     s: &str,
     schema: &JsonSchema,
+    loc: Span,
     path: &[String],
-    key_index: &HashMap<String, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Step 1: decode if contentEncoding is set
@@ -1021,9 +997,8 @@ fn validate_content(
         if let Ok(bytes) = result {
             Some(bytes)
         } else {
-            let range = node_range(path, key_index);
             diagnostics.push(make_diagnostic(
-                range,
+                span_to_range(loc),
                 DiagnosticSeverity::WARNING,
                 "schemaContentEncoding",
                 format!(
@@ -1047,9 +1022,8 @@ fn validate_content(
                 .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
             let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
             if !valid {
-                let range = node_range(path, key_index);
                 diagnostics.push(make_diagnostic(
-                    range,
+                    span_to_range(loc),
                     DiagnosticSeverity::WARNING,
                     "schemaContentMediaType",
                     format!(
@@ -1065,14 +1039,7 @@ fn validate_content(
     }
 
     // Step 3: validate decoded content against contentSchema if present
-    validate_content_schema(
-        s,
-        decoded_bytes.as_deref(),
-        schema,
-        path,
-        key_index,
-        diagnostics,
-    );
+    validate_content_schema(s, decoded_bytes.as_deref(), schema, loc, path, diagnostics);
 }
 
 /// If `contentSchema` is present, parse the (possibly decoded) content as YAML
@@ -1081,8 +1048,8 @@ fn validate_content_schema(
     raw: &str,
     decoded_bytes: Option<&[u8]>,
     schema: &JsonSchema,
+    loc: Span,
     path: &[String],
-    key_index: &HashMap<String, Range>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(content_schema) = &schema.content_schema else {
@@ -1096,9 +1063,8 @@ fn validate_content_schema(
 
     // Parse the content as YAML.
     let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
-        let range = node_range(path, key_index);
         diagnostics.push(make_diagnostic(
-            range,
+            span_to_range(loc),
             DiagnosticSeverity::WARNING,
             "schemaContentSchema",
             format!(
@@ -1110,18 +1076,24 @@ fn validate_content_schema(
     };
 
     // Validate each parsed document against the content schema.
+    // Content schemas validate embedded content — 1.1 compat warnings are
+    // not applicable here, so always use V1_2.
     for doc in &docs {
         let mut content_path = path.to_vec();
         content_path.push("(content)".to_string());
-        let content_key_index = build_key_index(&content_text.lines().collect::<Vec<_>>());
-        // Content schemas validate embedded content — 1.1 compat warnings are
-        // not applicable here, so always use V1_2.
-        let mut ctx = Ctx::new(diagnostics, true, &content_key_index, YamlVersion::V1_2);
+        let mut ctx = Ctx::new(diagnostics, true, YamlVersion::V1_2);
         validate_node(&doc.root, content_schema, &content_path, &mut ctx, 0);
     }
 }
 
-fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], ctx: &mut Ctx<'_>) {
+fn validate_numeric_constraints(
+    val: f64,
+    loc: Span,
+    schema: &JsonSchema,
+    path: &[String],
+    ctx: &mut Ctx<'_>,
+) {
+    let range = span_to_range(loc);
     // minimum (inclusive by default; strict if Draft-04 exclusiveMinimum is true)
     if let Some(minimum) = schema.minimum {
         let exclusive = schema.exclusive_minimum_draft04.unwrap_or(false);
@@ -1131,7 +1103,6 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
             val < minimum
         };
         if violation {
-            let range = node_range(path, ctx.key_index);
             let msg = if exclusive {
                 format!(
                     "Value at {} is below exclusive minimum {minimum}",
@@ -1158,7 +1129,6 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
             val > maximum
         };
         if violation {
-            let range = node_range(path, ctx.key_index);
             let msg = if exclusive {
                 format!(
                     "Value at {} is above exclusive maximum {maximum}",
@@ -1179,7 +1149,6 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
     // exclusiveMinimum (Draft-06+ number form)
     if let Some(excl_min) = schema.exclusive_minimum {
         if val <= excl_min {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1195,7 +1164,6 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
     // exclusiveMaximum (Draft-06+ number form)
     if let Some(excl_max) = schema.exclusive_maximum {
         if val >= excl_max {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -1213,7 +1181,6 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
         if multiple_of > 0.0 {
             let quotient = val / multiple_of;
             if (quotient - quotient.round()).abs() >= f64::EPSILON {
-                let range = node_range(path, ctx.key_index);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -1230,12 +1197,13 @@ fn validate_numeric_constraints(val: f64, schema: &JsonSchema, path: &[String], 
 
 fn validate_mapping(
     entries: &[(Node<Span>, Node<Span>)],
+    mapping_loc: Span,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    validate_mapping_constraints(entries, schema, path, ctx);
+    validate_mapping_constraints(entries, mapping_loc, schema, path, ctx);
 
     let properties = schema.properties.as_ref();
 
@@ -1256,7 +1224,7 @@ fn validate_mapping(
                 .iter()
                 .filter(|req_key| !entries_contains_key(entries, req_key))
                 .map(|req_key| {
-                    let range = mapping_range(path, ctx.key_index);
+                    let range = span_to_range(mapping_loc);
                     make_diagnostic(
                         range,
                         DiagnosticSeverity::ERROR,
@@ -1293,7 +1261,7 @@ fn validate_mapping(
                 // Check additionalProperties
                 match &schema.additional_properties {
                     Some(AdditionalProperties::Denied) => {
-                        let range = key_range(&key_str, path, ctx.key_index);
+                        let range = span_to_range(node_loc(k));
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::WARNING,
@@ -1334,11 +1302,12 @@ fn validate_mapping(
         }
     }
 
-    validate_dependencies(entries, schema, path, ctx, depth);
+    validate_dependencies(entries, mapping_loc, schema, path, ctx, depth);
 }
 
 fn validate_dependencies(
     entries: &[(Node<Span>, Node<Span>)],
+    mapping_loc: Span,
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
@@ -1350,7 +1319,7 @@ fn validate_dependencies(
             if entries_contains_key(entries, trigger) {
                 for missing in required_keys {
                     if !entries_contains_key(entries, missing) {
-                        let range = mapping_range(path, ctx.key_index);
+                        let range = span_to_range(mapping_loc);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::ERROR,
@@ -1408,7 +1377,7 @@ fn validate_pattern_properties(
     let mut matched = false;
     for (pattern, pat_schema) in pattern_props {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(node_loc(value));
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1428,7 +1397,7 @@ fn validate_pattern_properties(
                 validate_node(value, pat_schema, &child_path, ctx, depth + 1);
             }
         } else {
-            let range = node_range(path, ctx.key_index);
+            let range = span_to_range(node_loc(value));
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1450,10 +1419,9 @@ fn validate_composition(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    // Extract probe parameters once; probe Ctx borrows are ephemeral.
-    let key_index = ctx.key_index;
     let format_validation = ctx.format_validation;
     let yaml_version = ctx.yaml_version;
+    let node_range = span_to_range(node_loc(node));
 
     // allOf: all branches must pass
     if let Some(all_of) = &schema.all_of {
@@ -1467,14 +1435,13 @@ fn validate_composition(
         let branch_count = any_of.iter().take(MAX_BRANCH_COUNT).count();
         let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, key_index, yaml_version);
+            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
             validate_node(node, branch, path, &mut probe, depth + 1);
             scratch.is_empty()
         });
         if !any_passes {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
-                range,
+                node_range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
@@ -1493,16 +1460,15 @@ fn validate_composition(
             .take(MAX_BRANCH_COUNT)
             .filter(|branch| {
                 let mut scratch = Vec::new();
-                let mut probe = Ctx::new(&mut scratch, format_validation, key_index, yaml_version);
+                let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
                 validate_node(node, branch, path, &mut probe, depth + 1);
                 scratch.is_empty()
             })
             .count();
 
         if passing == 0 {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
-                range,
+                node_range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
@@ -1511,9 +1477,8 @@ fn validate_composition(
                 ),
             ));
         } else if passing > 1 {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
-                range,
+                node_range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
@@ -1527,12 +1492,11 @@ fn validate_composition(
     // not: the value must NOT match the sub-schema
     if let Some(not_schema) = &schema.not {
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, key_index, yaml_version);
+        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
         validate_node(node, not_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
-            let range = node_range(path, ctx.key_index);
             ctx.diagnostics.push(make_diagnostic(
-                range,
+                node_range,
                 DiagnosticSeverity::ERROR,
                 "schemaNot",
                 format!(
@@ -1546,7 +1510,7 @@ fn validate_composition(
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, key_index, yaml_version);
+        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
         validate_node(node, if_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
             if let Some(then_schema) = &schema.then_schema {
@@ -1687,43 +1651,6 @@ fn truncate_message(msg: String) -> String {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Range / position helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// Find the range for a node identified by its path.
-/// Falls back to `(0,0)-(0,0)` if not found.
-fn node_range(path: &[String], key_index: &HashMap<String, Range>) -> Range {
-    path.last().map_or_else(
-        || Range::new(Position::new(0, 0), Position::new(0, 0)),
-        |key| find_key_range(key, key_index),
-    )
-}
-
-/// Find the range for the opening of a mapping (for required-property errors).
-fn mapping_range(path: &[String], key_index: &HashMap<String, Range>) -> Range {
-    path.last().map_or_else(
-        || Range::new(Position::new(0, 0), Position::new(0, 0)),
-        |key| find_key_range(key, key_index),
-    )
-}
-
-/// Find the range for a specific key within the document text.
-fn key_range(key: &str, _path: &[String], key_index: &HashMap<String, Range>) -> Range {
-    find_key_range(key, key_index)
-}
-
-/// Look up `key` in the pre-built index and return its Range.
-/// Returns `(0,0)-(0,0)` if the key is not found.
-fn find_key_range(key: &str, key_index: &HashMap<String, Range>) -> Range {
-    // Strip array-index brackets if present (e.g. "[0]")
-    let key = key.trim_start_matches('[').trim_end_matches(']');
-    key_index
-        .get(key)
-        .copied()
-        .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)))
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Path formatting
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1813,7 +1740,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -1825,7 +1752,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaRequired");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1844,7 +1771,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 3);
         assert!(result.iter().all(|d| code_of(d) == "schemaRequired"));
     }
@@ -1857,7 +1784,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1\nb: 2");
-        let result = validate_schema("a: 1\nb: 2", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -1869,7 +1796,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("key: value");
-        let result = validate_schema("key: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -1885,7 +1812,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaRequired");
         assert!(result[0].message.contains("name"));
@@ -1927,7 +1854,7 @@ mod tests {
     )]
     fn type_mismatch_produces_schematype_error(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -1938,7 +1865,7 @@ mod tests {
     fn type_mismatch_message_names_expected_type() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: \"hello\"");
-        let result = validate_schema("count: \"hello\"", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -1983,7 +1910,7 @@ mod tests {
     )]
     fn type_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2017,7 +1944,7 @@ mod tests {
     )]
     fn enum_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2032,7 +1959,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -2062,7 +1989,7 @@ mod tests {
     )]
     fn enum_mismatch_produces_schemaenum_error(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
     }
@@ -2077,7 +2004,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2092,7 +2019,7 @@ mod tests {
         };
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -2109,7 +2036,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2124,7 +2051,7 @@ mod tests {
         };
         let text = "name: Alice\nextra1: a\nextra2: b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 2);
         assert!(
             result
@@ -2144,7 +2071,7 @@ mod tests {
         };
         let text = "name: Alice\nextra: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -2170,7 +2097,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1\nb: 2");
-        let result = validate_schema("a: 1\nb: 2", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2191,7 +2118,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema("a: 1", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
     }
 
@@ -2212,7 +2139,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema("name: Alice", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2233,7 +2160,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
     }
 
@@ -2254,7 +2181,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema("a: 1", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2275,7 +2202,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
     }
 
@@ -2293,7 +2220,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: hello");
-        let result = validate_schema("a: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
     }
 
@@ -2312,7 +2239,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("server", server_schema)]);
         let text = "server:\n  port: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -2330,7 +2257,7 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -2348,7 +2275,7 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - 9090";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2379,7 +2306,7 @@ mod tests {
         };
         let text = "a:\n  b:\n    c:\n      d: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &l1, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &l1, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2402,7 +2329,7 @@ mod tests {
         let text = "x:\n".repeat(25) + "  value: leaf";
         let docs = parse_docs(&text);
         // Must complete without panic
-        let _ = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let _ = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2417,7 +2344,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert!(
             result
@@ -2434,7 +2361,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2447,7 +2374,7 @@ mod tests {
     fn should_set_correct_code_for_type_violation() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: hello");
-        let result = validate_schema("count: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2466,7 +2393,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -2483,13 +2410,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(
-            "name: Alice\nextra: value",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         let ap_diags: Vec<_> = result
             .iter()
             .filter(|d| code_of(d) == "schemaAdditionalProperty")
@@ -2511,7 +2432,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2521,7 +2442,7 @@ mod tests {
     fn should_set_error_severity_for_type_violation() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
         let docs = parse_docs("count: hello");
-        let result = validate_schema("count: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2537,7 +2458,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -2551,13 +2472,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(
-            "name: Alice\nextra: value",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         let ap = result
             .iter()
             .find(|d| code_of(d) == "schemaAdditionalProperty")
@@ -2576,7 +2491,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2596,7 +2511,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema("env: testing", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(msg.contains("prod"), "message should contain 'prod'");
@@ -2615,7 +2530,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("");
-        let result = validate_schema("", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2626,7 +2541,7 @@ mod tests {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
         };
-        let result = validate_schema("name: Alice", &[], &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2635,13 +2550,7 @@ mod tests {
     fn should_return_empty_for_schema_with_no_constraints() {
         let schema = JsonSchema::default();
         let docs = parse_docs("anything: value\nnested:\n  key: 123");
-        let result = validate_schema(
-            "anything: value\nnested:\n  key: 123",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2653,7 +2562,7 @@ mod tests {
             ..JsonSchema::default()
         };
         // Simulate parse failure by passing empty docs slice
-        let result = validate_schema("invalid: [yaml", &[], &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2666,7 +2575,7 @@ mod tests {
         };
         let text = "name: Alice\n---\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // Second document is missing "name"
         assert_eq!(
             result
@@ -2685,7 +2594,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("anything: value");
-        let result = validate_schema("anything: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2718,7 +2627,7 @@ mod tests {
         }
         let docs = parse_docs(&text);
         // Must return without panicking — result content doesn't matter
-        let _result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
     // Test 59
@@ -2747,7 +2656,7 @@ mod tests {
         text.push_str("42\n");
         let docs = parse_docs(&text);
         // Must return without panicking — depth guard may suppress leaf-level error
-        let _result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2770,7 +2679,7 @@ mod tests {
         };
         let docs = parse_docs("other: value");
         // Must return (not hang) — result content doesn't matter
-        let _result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
     // Test 61
@@ -2789,7 +2698,7 @@ mod tests {
         };
         // Only field_0 is present — all other branches unsatisfied
         let docs = parse_docs("field_0: value");
-        let result = validate_schema("field_0: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // Non-empty: at least one diagnostic for unsatisfied branches
         assert!(!result.is_empty());
     }
@@ -2817,7 +2726,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         // Message must not contain the full 1000-char description
         for d in &result {
@@ -2843,7 +2752,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: invalid");
-        let result = validate_schema("env: invalid", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaEnum");
         // Message must be bounded — 50 values * ~6 chars each would be ~300+
@@ -2904,7 +2813,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2941,7 +2850,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -2970,7 +2879,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: ABC");
-        let result = validate_schema("code: ABC", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -2986,7 +2895,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema("code: abc", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3005,7 +2914,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: anything");
-        let result = validate_schema("val: anything", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPatternLimit");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -3038,7 +2947,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3068,7 +2977,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3101,7 +3010,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3131,7 +3040,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3167,7 +3076,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
     }
@@ -3184,7 +3093,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3216,7 +3125,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
     }
@@ -3242,7 +3151,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3262,7 +3171,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 15");
-        let result = validate_schema("count: 15", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3278,7 +3187,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 7");
-        let result = validate_schema("count: 7", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMultipleOf");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3306,7 +3215,7 @@ mod tests {
     )]
     fn const_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3321,7 +3230,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("version: v2");
-        let result = validate_schema("version: v2", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaConst");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3339,7 +3248,7 @@ mod tests {
         )]);
         let text = "obj:\n  key: other";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // yaml_to_json returns None for mappings — const check skipped
         assert!(result.iter().all(|d| code_of(d) != "schemaConst"));
     }
@@ -3362,7 +3271,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3382,7 +3291,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 42");
-        let result = validate_schema("val: 42", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3397,7 +3306,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("hello");
-        let result = validate_schema("hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -3413,7 +3322,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("42");
-        let result = validate_schema("42", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3431,7 +3340,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: prod");
-        let result = validate_schema("env: prod", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -3450,7 +3359,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: dev");
-        let result = validate_schema("env: dev", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3469,7 +3378,7 @@ mod tests {
         // str_name should be validated as string — integer is a type violation
         let text = "str_name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -3484,7 +3393,7 @@ mod tests {
         };
         let text = "str_name: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3499,7 +3408,7 @@ mod tests {
         };
         let text = "str_name: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // str_name matches the pattern — no additionalProperty diagnostic
         assert!(
             result
@@ -3520,7 +3429,7 @@ mod tests {
         // "other" doesn't match "^str_" and there are no properties
         let text = "other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
     }
@@ -3540,7 +3449,7 @@ mod tests {
         // patternProperties schema (string) is not applied for known properties.
         let text = "name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3560,7 +3469,7 @@ mod tests {
         // value is integer — fails string pattern, passes integer pattern
         let text = "x_num: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // One type violation from the string pattern
         assert_eq!(
             result.iter().filter(|d| code_of(d) == "schemaType").count(),
@@ -3582,7 +3491,7 @@ mod tests {
         // "key" also falls through to additionalProperties (not matched by any pattern).
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
             && d.severity == Some(DiagnosticSeverity::WARNING)));
         assert!(
@@ -3612,7 +3521,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
         let text = "tags:\n  - a";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3624,7 +3533,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
         let text = "tags:\n  - a\n  - b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3634,7 +3543,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
         let text = "tags:\n  - a\n  - b\n  - c";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaxItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3646,7 +3555,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
         let text = "tags:\n  - a\n  - b";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3656,7 +3565,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
         let text = "tags:\n  - foo\n  - bar\n  - foo";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaUniqueItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3668,7 +3577,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
         let text = "tags:\n  - foo\n  - bar\n  - baz";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3679,7 +3588,7 @@ mod tests {
             object_schema_with_props(vec![("tags", array_schema(None, None, Some(false)))]);
         let text = "tags:\n  - foo\n  - foo";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3698,7 +3607,7 @@ mod tests {
         // Invalid regex in patternProperties — warning emitted
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.iter().any(|d| code_of(d) == "schemaPatternLimit"
             && d.severity == Some(DiagnosticSeverity::WARNING)));
     }
@@ -3716,7 +3625,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema("code: abc", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
     }
@@ -3732,7 +3641,7 @@ mod tests {
         };
         let text = "str_name: 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -3754,7 +3663,7 @@ mod tests {
         };
         let text = "foo: 1\nbar_baz: 2";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3772,7 +3681,7 @@ mod tests {
         // "BadKey" contains uppercase — violates pattern
         let text = "BadKey: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3791,7 +3700,7 @@ mod tests {
         };
         let text = "ab: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
@@ -3809,7 +3718,7 @@ mod tests {
         };
         let text = "baz: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaEnum");
     }
@@ -3830,7 +3739,7 @@ mod tests {
         // Both keys are lowercase — no violations
         let text = "name: Alice\nextra: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3847,7 +3756,7 @@ mod tests {
         };
         let text = "UPPER: 1\nAlso_Bad: 2\ngood: 3";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(
             result
                 .iter()
@@ -3878,7 +3787,7 @@ mod tests {
         // credit_card present but billing_address absent
         let text = "credit_card: 1234";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaDependentRequired");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3902,7 +3811,7 @@ mod tests {
         };
         let text = "credit_card: 1234\nbilling_address: 123 Main St";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3923,7 +3832,7 @@ mod tests {
         // trigger absent — no check performed
         let text = "name: Alice";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3942,7 +3851,7 @@ mod tests {
         };
         let text = "name: Alice";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaRequired");
     }
@@ -3961,7 +3870,7 @@ mod tests {
         };
         let text = "name: Alice\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -3980,7 +3889,7 @@ mod tests {
         // trigger "name" absent — dep schema not checked
         let text = "other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4008,7 +3917,7 @@ mod tests {
         )]);
         // val is a string of length 5 — if matches, then passes
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4031,7 +3940,7 @@ mod tests {
         )]);
         // val is a short string — if matches, then fails
         let docs = parse_docs("val: hi");
-        let result = validate_schema("val: hi", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
@@ -4055,7 +3964,7 @@ mod tests {
         )]);
         // val is integer 5 — if doesn't match (not string), else passes (>= 0)
         let docs = parse_docs("val: 5");
-        let result = validate_schema("val: 5", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4078,7 +3987,7 @@ mod tests {
         )]);
         // val is integer 3 — if doesn't match, else fails (< 10)
         let docs = parse_docs("val: 3");
-        let result = validate_schema("val: 3", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
@@ -4102,7 +4011,7 @@ mod tests {
         )]);
         // val is string — if matches, no then → no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4125,7 +4034,7 @@ mod tests {
         )]);
         // val is integer — if doesn't match, no else → no diagnostic
         let docs = parse_docs("val: 42");
-        let result = validate_schema("val: 42", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4148,7 +4057,7 @@ mod tests {
         )]);
         // Without if, then/else are ignored — string value produces no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4171,13 +4080,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_array_has_one_matching_item_no_min_max() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(
-            "items:\n  - 1\n  - hello",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4186,13 +4089,7 @@ mod tests {
     fn should_produce_diagnostic_when_no_items_match_contains_schema() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(
-            "items:\n  - hello\n  - world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 1"));
     }
@@ -4202,13 +4099,7 @@ mod tests {
     fn should_produce_diagnostic_when_min_contains_not_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(
-            "items:\n  - 1\n  - hello",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 2"));
     }
@@ -4218,13 +4109,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_min_contains_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema(
-            "items:\n  - 1\n  - 2",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4233,13 +4118,7 @@ mod tests {
     fn should_produce_diagnostic_when_max_contains_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema(
-            "items:\n  - 1\n  - 2",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at most 1"));
     }
@@ -4249,13 +4128,7 @@ mod tests {
     fn should_produce_no_diagnostics_when_max_contains_not_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(
-            "items:\n  - 1\n  - hello",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4265,13 +4138,7 @@ mod tests {
         // minContains: 0 disables the "at least one" requirement
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(0), None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(
-            "items:\n  - hello\n  - world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4288,13 +4155,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(
-            "items:\n  - hello\n  - world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4317,13 +4178,7 @@ mod tests {
         )]);
         // [0] is a string (ok), [1] is a string but expected integer (fail)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema(
-            "arr:\n  - hello\n  - world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4336,13 +4191,7 @@ mod tests {
             tuple_schema(vec![string_schema(), integer_schema()], None),
         )]);
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema(
-            "arr:\n  - hello\n  - 42",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4355,13 +4204,7 @@ mod tests {
         )]);
         // [0] string ok, [1] integer ok (matches items schema)
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema(
-            "arr:\n  - hello\n  - 42",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4374,13 +4217,7 @@ mod tests {
         )]);
         // [0] string ok, [1] string fails items schema (expected integer)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema(
-            "arr:\n  - hello\n  - world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4397,7 +4234,7 @@ mod tests {
         )]);
         // Only one item — only [0] is validated, [1] and [2] positions absent
         let docs = parse_docs("arr:\n  - hello");
-        let result = validate_schema("arr:\n  - hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4458,7 +4295,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello");
-        let result = validate_schema("name: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4475,13 +4312,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema(
-            "name: hello\nextra: world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("extra"));
     }
@@ -4500,13 +4331,7 @@ mod tests {
         };
         // "extra" is unevaluated and not an integer — diagnostic
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema(
-            "name: hello\nextra: world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4523,7 +4348,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("- hello\n- 42");
-        let result = validate_schema("- hello\n- 42", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4537,7 +4362,7 @@ mod tests {
         };
         // [0] is string (evaluated by prefix), [1] is string (unevaluated, fails integer)
         let docs = parse_docs("- hello\n- world");
-        let result = validate_schema("- hello\n- world", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -4559,13 +4384,7 @@ mod tests {
         };
         // "extra" is in then_schema — evaluated, no diagnostic
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema(
-            "name: hello\nextra: world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // "name" is not in then properties — it's unevaluated → diagnostic
         // "extra" IS in then properties → no diagnostic for extra
         assert!(
@@ -4579,13 +4398,7 @@ mod tests {
     fn should_not_change_behavior_when_no_unevaluated_keywords() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
         let docs = parse_docs("name: hello\nextra: world");
-        let result = validate_schema(
-            "name: hello\nextra: world",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // Without unevaluated keywords, extra property is allowed
         assert!(result.is_empty());
     }
@@ -4606,7 +4419,7 @@ mod tests {
     ) -> Vec<Diagnostic> {
         let schema = content_schema(encoding, media_type);
         let docs = parse_docs(text);
-        validate_schema(text, &docs, &schema, true, YamlVersion::V1_2)
+        validate_schema(&docs, &schema, true, YamlVersion::V1_2)
     }
 
     // Tests 187, 189, 191, 193: valid contentEncoding → no diagnostics
@@ -4645,7 +4458,7 @@ mod tests {
         // "\"42\"" parses as YAML string "42", which is valid JSON
         let schema = content_schema(None, Some("application/json"));
         let docs = parse_docs("\"42\"");
-        assert!(validate_schema("\"42\"", &docs, &schema, true, YamlVersion::V1_2).is_empty());
+        assert!(validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty());
     }
 
     // Test 197 — contentMediaType application/json: invalid (no encoding)
@@ -4705,13 +4518,7 @@ mod tests {
     fn content_validation_disabled_when_format_validation_off() {
         let schema = content_schema(Some("base64"), Some("application/json"));
         let docs = parse_docs("not-valid-base64!!!");
-        let result = validate_schema(
-            "not-valid-base64!!!",
-            &docs,
-            &schema,
-            false,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -4744,7 +4551,7 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"NDI=\"");
         assert!(
-            validate_schema("\"NDI=\"", &docs, &schema, true, YamlVersion::V1_2).is_empty(),
+            validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty(),
             "valid base64-encoded integer should pass contentSchema validation"
         );
     }
@@ -4759,7 +4566,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"ImhlbGxvIg==\"");
-        let result = validate_schema("\"ImhlbGxvIg==\"", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.iter().any(|d| code_of(d) == "schemaType"),
             "string decoded where integer expected should produce schemaType error: {result:?}"
@@ -4777,7 +4584,7 @@ mod tests {
         // The raw YAML value "42" (as a quoted string) should be parsed as YAML integer
         let docs = parse_docs("\"42\"");
         assert!(
-            validate_schema("\"42\"", &docs, &schema, true, YamlVersion::V1_2).is_empty(),
+            validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty(),
             "raw string '42' should validate as integer against contentSchema"
         );
     }
@@ -4791,7 +4598,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(None, None, sub);
         let docs = parse_docs("\"hello\"");
-        let result = validate_schema("\"hello\"", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.iter().any(|d| code_of(d) == "schemaType"),
             "string 'hello' should fail integer contentSchema: {result:?}"
@@ -4807,13 +4614,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"not-valid-base64!!!\"");
-        let result = validate_schema(
-            "\"not-valid-base64!!!\"",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // Should get encoding error but NOT contentSchema type error
         assert!(
             result.iter().any(|d| code_of(d) == "schemaContentEncoding"),
@@ -4834,13 +4635,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(None, Some("application/json"), sub);
         let docs = parse_docs("\"not json at all\"");
-        let result = validate_schema(
-            "\"not json at all\"",
-            &docs,
-            &schema,
-            true,
-            YamlVersion::V1_2,
-        );
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result
                 .iter()
@@ -4875,7 +4670,7 @@ mod tests {
         // base64("name: alice\n") = "bmFtZTogYWxpY2UK"
         let text = "\"bmFtZTogYWxpY2UK\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "embedded YAML mapping should validate: {result:?}"
@@ -4902,7 +4697,7 @@ mod tests {
         // base64("name: 42\n") = "bmFtZTogNDIK"
         let text = "\"bmFtZTogNDIK\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             !result.is_empty(),
             "embedded mapping with integer name should fail string check: {result:?}"
@@ -4919,7 +4714,7 @@ mod tests {
         let schema = content_schema_with_sub(None, None, sub);
         let docs = parse_docs("\"hello\"");
         // format_validation = false → content keywords not checked
-        let result = validate_schema("\"hello\"", &docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "contentSchema should not be checked when format_validation is off: {result:?}"
@@ -4937,7 +4732,7 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let text = "\"eyJrZXkiOiAidmFsdWUifQ==\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "all three checks should pass: {result:?}"
@@ -4955,7 +4750,7 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), None, sub);
         let text = "\"OiBiYWQ6IFs=\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.iter().any(|d| code_of(d) == "schemaContentSchema"),
             "unparseable decoded YAML should produce schemaContentSchema: {result:?}"
@@ -4972,7 +4767,7 @@ mod tests {
         let schema = content_schema_with_sub(None, None, sub);
         let text = "\"\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // load("") returns 0 documents — nothing to validate, no diagnostics.
         assert!(
             result.is_empty(),
@@ -5002,7 +4797,7 @@ mod tests {
         // Embedded YAML: value is 42 (integer), but schema expects string
         let text = "\"dmFsdWU6IDQyCg==\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             !result.is_empty(),
             "nested schema should catch type mismatch: {result:?}"
@@ -5028,7 +4823,7 @@ mod tests {
         let schema = object_schema_with_cardinality(Some(2), None);
         let text = "name: Alice";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinProperties");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -5040,7 +4835,7 @@ mod tests {
         let schema = object_schema_with_cardinality(Some(2), None);
         let text = "name: Alice\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5050,7 +4845,7 @@ mod tests {
         let schema = object_schema_with_cardinality(None, Some(1));
         let text = "name: Alice\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMaxProperties");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -5062,7 +4857,7 @@ mod tests {
         let schema = object_schema_with_cardinality(None, Some(2));
         let text = "name: Alice\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5090,7 +4885,7 @@ mod tests {
         );
         let text = "- hello\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalItems");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -5111,7 +4906,7 @@ mod tests {
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5124,7 +4919,7 @@ mod tests {
         );
         let text = "- hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5137,7 +4932,7 @@ mod tests {
         );
         let text = "- hello\n- extra1\n- extra2";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|d| code_of(d) == "schemaAdditionalItems"));
     }
@@ -5151,7 +4946,7 @@ mod tests {
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5164,7 +4959,7 @@ mod tests {
         );
         let text = "- hello\n- world";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -5182,7 +4977,7 @@ mod tests {
         };
         let text = "- hello\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5192,7 +4987,7 @@ mod tests {
         let schema = tuple_schema_with_additional_items(vec![string_schema()], None);
         let text = "- hello\n- 42\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
     }
 
@@ -5206,7 +5001,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("replicas", integer_schema())]);
         let text = "replicas: \"hello\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5238,7 +5033,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  replicas: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5317,7 +5112,7 @@ mod tests {
         #[case] excluded_phrase: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5351,7 +5146,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let any_of_diag = result
             .iter()
@@ -5383,7 +5178,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let any_of_diag = result
             .iter()
@@ -5417,7 +5212,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -5449,7 +5244,7 @@ mod tests {
         };
         // "a: hello" matches both branches
         let docs = parse_docs("a: hello");
-        let result = validate_schema("a: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -5481,7 +5276,7 @@ mod tests {
         };
         // "a: hello" matches the first two branches (2 of 3)
         let docs = parse_docs("a: hello");
-        let result = validate_schema("a: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -5516,7 +5311,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: hello");
-        let result = validate_schema("val: hello", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5541,7 +5336,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema("age: 30", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5566,7 +5361,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema("other: value", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -5590,7 +5385,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -5629,7 +5424,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let text = format!("flag: {value}");
         let docs = parse_docs(&text);
-        let result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(
             result.len(),
             1,
@@ -5644,7 +5439,7 @@ mod tests {
     fn schema_yaml11_boolean_message_contains_value_and_canonical() {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let docs = parse_docs("flag: yes");
-        let result = validate_schema("flag: yes", &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(msg.contains("yes"), "message should contain 'yes': {msg}");
@@ -5664,7 +5459,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let text = "flag: \"yes\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "quoted scalar should not trigger warning: {result:?}"
@@ -5677,7 +5472,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let text = "flag: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "ordinary string should not trigger warning: {result:?}"
@@ -5690,7 +5485,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let text = "flag: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_1);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_1);
         assert!(
             result.is_empty(),
             "1.1 mode should suppress schema yaml11 boolean warning: {result:?}"
@@ -5703,7 +5498,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("other", string_schema())]);
         let text = "flag: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "field without schema should not trigger warning: {result:?}"
@@ -5724,7 +5519,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("mode", string_schema())]);
         let text = format!("mode: {value}");
         let docs = parse_docs(&text);
-        let result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(
             result.len(),
             1,
@@ -5740,7 +5535,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("mode", string_schema())]);
         let text = "mode: 0755";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(msg.contains("0755"), "message should contain '0755': {msg}");
@@ -5760,7 +5555,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("mode", string_schema())]);
         let text = "mode: \"0755\"";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "quoted scalar should not trigger warning: {result:?}"
@@ -5776,7 +5571,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("mode", string_schema())]);
         let text = format!("mode: {value}");
         let docs = parse_docs(&text);
-        let result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         // 42 is an integer (schemaType error); 0 is an integer (schemaType error);
         // 0o755 is an integer (schemaType error) — none should be schemaYaml11Octal
         assert!(
@@ -5791,7 +5586,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("mode", string_schema())]);
         let text = "mode: 0755";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_1);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_1);
         assert!(
             result.is_empty(),
             "1.1 mode should suppress schema yaml11 octal warning: {result:?}"
@@ -5824,7 +5619,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = format!("enabled: {value}");
         let docs = parse_docs(&text);
-        let result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(
             result.len(),
             1,
@@ -5840,7 +5635,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = "enabled: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(msg.contains("yes"), "message should contain 'yes': {msg}");
@@ -5866,7 +5661,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = format!("enabled: {value}");
         let docs = parse_docs(&text);
-        let result = validate_schema(&text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.is_empty(),
             "YAML 1.2 boolean should not produce error: {result:?}"
@@ -5879,7 +5674,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = "enabled: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
         assert!(
@@ -5895,7 +5690,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = "enabled: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_1);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_1);
         assert!(
             result.is_empty(),
             "in 1.1 mode 'yes' is a valid boolean — no error expected: {result:?}"
@@ -5912,7 +5707,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("flag", string_schema())]);
         let text = "flag: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(
             result.iter().all(|d| code_of(d) != "schemaType"),
             "should not emit schemaType for string field with 1.1 bool: {result:?}"
@@ -5925,11 +5720,429 @@ mod tests {
         let schema = object_schema_with_props(vec![("enabled", boolean_schema())]);
         let text = "enabled: yes";
         let docs = parse_docs(text);
-        let result = validate_schema(text, &docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(
             result.len(),
             1,
             "exactly one diagnostic expected: {result:?}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Diagnostic range (span-based) regression tests
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn diagnostic_range_type_mismatch_points_at_value_node() {
+        // "age" expects integer; "hello" is a string scalar at col 5–10.
+        let schema = object_schema_with_props(vec![("age", integer_schema())]);
+        let docs = parse_docs("age: hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // "hello" value: line 0 (0-based), col 5..10
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 5, "start column");
+        assert_eq!(diag.range.end.line, 0, "end line");
+        assert_eq!(diag.range.end.character, 10, "end column");
+    }
+
+    #[test]
+    fn diagnostic_range_missing_required_points_at_mapping() {
+        // Required "name" is absent; diagnostic should span the mapping root.
+        let schema = JsonSchema {
+            required: Some(vec!["name".to_string()]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("age: 30");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaRequired")
+            .expect("expected a schemaRequired diagnostic");
+        // Entire mapping starts at line 0, col 0
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 0, "start column");
+    }
+
+    #[test]
+    fn diagnostic_range_additional_property_points_at_key_node() {
+        // "extra" key is not allowed; range should span the "extra" key node.
+        let schema = JsonSchema {
+            properties: Some([("name".to_string(), string_schema())].into()),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("name: Alice\nextra: value");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaAdditionalProperty")
+            .expect("expected a schemaAdditionalProperty diagnostic");
+        // "extra" key: line 1 (0-based), col 0..5
+        assert_eq!(diag.range.start.line, 1, "start line");
+        assert_eq!(diag.range.start.character, 0, "start column");
+        assert_eq!(diag.range.end.line, 1, "end line");
+        assert_eq!(diag.range.end.character, 5, "end column");
+    }
+
+    #[test]
+    fn diagnostic_range_format_validation_points_at_value_node() {
+        // "date" field has an invalid date value "not-a-date" at col 6..16.
+        let date_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            format: Some("date".to_string()),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("date", date_schema)]);
+        let docs = parse_docs("date: not-a-date");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaFormat")
+            .expect("expected a schemaFormat diagnostic");
+        // "not-a-date" value: line 0, col 6..16
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 6, "start column");
+        assert_eq!(diag.range.end.line, 0, "end line");
+        assert_eq!(diag.range.end.character, 16, "end column");
+    }
+
+    #[test]
+    fn diagnostic_range_yaml11_string_warning_points_at_value_node() {
+        // "yes" is a YAML 1.1 boolean but schema expects string — warning at value.
+        let schema = object_schema_with_props(vec![("flag", string_schema())]);
+        let docs = parse_docs("flag: yes");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaYaml11Boolean")
+            .expect("expected a schemaYaml11Boolean diagnostic");
+        // "yes" value: line 0, col 6..9
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 6, "start column");
+        assert_eq!(diag.range.end.line, 0, "end line");
+        assert_eq!(diag.range.end.character, 9, "end column");
+    }
+
+    #[test]
+    fn diagnostic_range_composition_error_points_at_node() {
+        // anyOf with two string-type branches; integer value matches neither.
+        let schema = JsonSchema {
+            any_of: Some(vec![string_schema(), string_schema()]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("42");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // Scalar "42" at line 0, col 0..2
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 0, "start column");
+        assert_eq!(diag.range.end.line, 0, "end line");
+        assert_eq!(diag.range.end.character, 2, "end column");
+    }
+
+    #[test]
+    fn diagnostic_range_deeply_nested_violation_points_at_correct_node() {
+        // Deeply nested: root > items > [0] > value is a string; expects integer.
+        let inner = integer_schema();
+        let arr = JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            items: Some(Box::new(inner)),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("items", arr)]);
+        let docs = parse_docs("items:\n  - hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // "hello" item: line 1 (0-based), col 4..9
+        assert_eq!(diag.range.start.line, 1, "start line");
+        assert_eq!(diag.range.start.character, 4, "start column");
+        assert_eq!(diag.range.end.line, 1, "end line");
+        assert_eq!(diag.range.end.character, 9, "end column");
+    }
+
+    // T-R2: type mismatch on nested scalar
+    #[test]
+    fn diagnostic_range_type_mismatch_nested_scalar() {
+        let port_schema = integer_schema();
+        let spec_schema = object_schema_with_props(vec![("port", port_schema)]);
+        let schema = object_schema_with_props(vec![("spec", spec_schema)]);
+        let docs = parse_docs("spec:\n  port: hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // "hello" on line 2, col 8 (0-indexed line 1, col 8)
+        assert_eq!(diag.range.start.line, 1, "start line");
+        assert_eq!(diag.range.start.character, 8, "start column");
+    }
+
+    // T-R3: missing required property range derived from AST root
+    #[test]
+    fn diagnostic_range_missing_required_uses_ast_mapping_loc() {
+        let schema = JsonSchema {
+            required: Some(vec!["name".to_string()]),
+            ..JsonSchema::default()
+        };
+        let text = "age: 30";
+        let docs = parse_docs(text);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaRequired")
+            .expect("expected a schemaRequired diagnostic");
+        // Derive expected range from the AST directly
+        let root_loc = node_loc(&docs[0].root);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "test: position values are small"
+        )]
+        let expected_start = Position::new(
+            root_loc.start.line.saturating_sub(1) as u32,
+            root_loc.start.column as u32,
+        );
+        assert_eq!(diag.range.start, expected_start, "range must match mapping loc");
+    }
+
+    // T-R4: missing required at nested path points to nested mapping
+    #[test]
+    fn diagnostic_range_missing_required_nested_mapping() {
+        let spec_schema = JsonSchema {
+            required: Some(vec!["name".to_string()]),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("spec", spec_schema)]);
+        let docs = parse_docs("spec:\n  other: value");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaRequired")
+            .expect("expected a schemaRequired diagnostic");
+        // The nested mapping `spec` starts at line 2 (0-indexed line 1)
+        assert_eq!(diag.range.start.line, 1, "nested mapping is on 0-indexed line 1");
+    }
+
+    // T-R6: additional property on indented key
+    #[test]
+    fn diagnostic_range_additional_property_indented_key() {
+        let inner_schema = JsonSchema {
+            properties: Some([("name".to_string(), string_schema())].into()),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("spec", inner_schema)]);
+        let docs = parse_docs("spec:\n  name: Alice\n  bad: x");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaAdditionalProperty")
+            .expect("expected a schemaAdditionalProperty diagnostic");
+        // "bad" key: line 3 (0-indexed line 2), col 2
+        assert_eq!(diag.range.start.line, 2, "start line");
+        assert_eq!(diag.range.start.character, 2, "start column");
+    }
+
+    // T-R10: oneOf zero-match range points to offending node
+    #[test]
+    fn diagnostic_range_oneof_zero_match() {
+        let schema = JsonSchema {
+            one_of: Some(vec![
+                JsonSchema {
+                    required: Some(vec!["a".to_string()]),
+                    ..JsonSchema::default()
+                },
+                JsonSchema {
+                    required: Some(vec!["b".to_string()]),
+                    ..JsonSchema::default()
+                },
+            ]),
+            ..JsonSchema::default()
+        };
+        let docs = parse_docs("val: hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        assert_eq!(diag.range.start.line, 0, "start line");
+    }
+
+    // T-R11: deeply nested three-level violation
+    #[test]
+    fn diagnostic_range_three_level_nested_violation() {
+        let c_schema = integer_schema();
+        let b_schema = object_schema_with_props(vec![("c", c_schema)]);
+        let a_schema = object_schema_with_props(vec![("b", b_schema)]);
+        let schema = object_schema_with_props(vec![("a", a_schema)]);
+        let docs = parse_docs("a:\n  b:\n    c: hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // "hello" on line 3 (0-indexed 2), col 7
+        assert_eq!(diag.range.start.line, 2, "start line");
+        assert_eq!(diag.range.start.character, 7, "start column");
+    }
+
+    // T-R12: contentSchema diagnostic range is on outer scalar
+    #[test]
+    fn diagnostic_range_content_schema_uses_outer_scalar_loc() {
+        // base64("\"hello\"") = "ImhlbGxvIg==" — type mismatch (expects integer)
+        let sub = JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        };
+        let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
+        let docs = parse_docs("\"ImhlbGxvIg==\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // Outer scalar is on line 0 — not inside the decoded content
+        assert_eq!(diag.range.start.line, 0, "must point at outer scalar, not inner content");
+    }
+
+    // T-R13: enum violation range points to scalar node
+    #[test]
+    fn diagnostic_range_enum_violation_points_at_scalar() {
+        let env_schema = JsonSchema {
+            enum_values: Some(vec![
+                serde_json::Value::String("prod".to_string()),
+                serde_json::Value::String("staging".to_string()),
+            ]),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("env", env_schema)]);
+        let docs = parse_docs("env: testing");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaEnum")
+            .expect("expected a schemaEnum diagnostic");
+        // "testing" value: line 0, col 5..12
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 5, "start column");
+    }
+
+    // T-R14: minLength violation range points to scalar node
+    #[test]
+    fn diagnostic_range_min_length_violation_points_at_scalar() {
+        let code_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            min_length: Some(5),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("code", code_schema)]);
+        let docs = parse_docs("code: hi");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaMinLength")
+            .expect("expected a schemaMinLength diagnostic");
+        // "hi" value: line 0, col 6
+        assert_eq!(diag.range.start.line, 0, "start line");
+        assert_eq!(diag.range.start.character, 6, "start column");
+    }
+
+    // T-R15: minItems violation range derived from sequence AST node
+    #[test]
+    fn diagnostic_range_min_items_uses_sequence_loc() {
+        let tags_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            min_items: Some(2),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![("tags", tags_schema)]);
+        let text = "tags:\n  - a";
+        let docs = parse_docs(text);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaMinItems")
+            .expect("expected a schemaMinItems diagnostic");
+        // Derive expected range from the sequence node in the AST
+        let seq_loc = if let Node::Mapping { entries, .. } = &docs[0].root {
+            let (_, v) = entries
+                .iter()
+                .find(|(k, _)| matches!(k, Node::Scalar { value, .. } if value == "tags"))
+                .expect("tags key");
+            node_loc(v)
+        } else {
+            panic!("expected mapping root");
+        };
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "test: position values are small"
+        )]
+        let expected_start = Position::new(
+            seq_loc.start.line.saturating_sub(1) as u32,
+            seq_loc.start.column as u32,
+        );
+        assert_eq!(diag.range.start, expected_start, "range must match sequence loc");
+    }
+
+    // T-R16: range uses 0-based line numbers (off-by-one regression guard)
+    #[test]
+    fn diagnostic_range_uses_zero_based_lines() {
+        let schema = object_schema_with_props(vec![("x", integer_schema())]);
+        let docs = parse_docs("x: bad");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        assert_eq!(diag.range.start.line, 0, "must be 0-based (not 1-based)");
+    }
+
+    // T-R17: range on second line is correct
+    #[test]
+    fn diagnostic_range_second_line_is_correct() {
+        let schema = object_schema_with_props(vec![
+            ("ok", integer_schema()),
+            ("bad", integer_schema()),
+        ]);
+        let docs = parse_docs("ok: 1\nbad: hello");
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaType")
+            .expect("expected a schemaType diagnostic");
+        // "hello" is on 0-indexed line 1
+        assert_eq!(diag.range.start.line, 1, "second line is 0-indexed 1");
+    }
+
+    // T-R18: format violation on third line has correct line number
+    #[test]
+    fn diagnostic_range_format_violation_third_line() {
+        let date_schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            format: Some("date".to_string()),
+            ..JsonSchema::default()
+        };
+        let schema = object_schema_with_props(vec![
+            ("a", string_schema()),
+            ("b", string_schema()),
+            ("c", date_schema),
+        ]);
+        let docs = parse_docs("a: foo\nb: bar\nc: not-a-date");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let diag = result
+            .iter()
+            .find(|d| code_of(d) == "schemaFormat")
+            .expect("expected a schemaFormat diagnostic");
+        // "not-a-date" is on 0-indexed line 2
+        assert_eq!(diag.range.start.line, 2, "third line is 0-indexed 2");
     }
 }
