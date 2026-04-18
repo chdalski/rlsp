@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress (Task 2 complete, all tasks done — pending final commit)
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -395,7 +395,7 @@ defect classes; audit allow-list unchanged at 4
 entries; workspace suite green;
 `feature-log.md` records the change.
 
-**Completed:** commit `c2aa68f` — cleanup landed.
+**Completed:** commit `52b2002` — cleanup landed.
 All 10 defect-class regressions were already present
 from Task 1 (verified by cross-reference against the
 Task 2 list); no duplicates added. Audit allow-list
