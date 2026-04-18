@@ -351,6 +351,46 @@ impl Default for YamlFormatOptions {
     }
 }
 
+/// Format a single AST node to text.
+///
+/// Renders `node` using the same `rlsp-fmt` path as `format_yaml`.
+/// The first output line starts at column 0; the caller is responsible for
+/// positioning it within the larger document.  Every continuation line
+/// (lines 2 and beyond) receives `base_indent` leading spaces so the output
+/// aligns with the surrounding structure.
+///
+/// Empty collections (`{}`, `[]`) are emitted inline regardless of their
+/// `CollectionStyle`, matching `node_to_doc`'s short-circuit behavior.
+#[must_use]
+pub fn format_subtree(
+    node: &Node<Span>,
+    options: &YamlFormatOptions,
+    base_indent: usize,
+) -> String {
+    let doc = node_to_doc(node, options, false);
+    let fmt_options = FormatOptions {
+        print_width: options.print_width,
+        tab_width: options.tab_width,
+        use_tabs: options.use_tabs,
+    };
+    let rendered = fmt_format(&doc, &fmt_options);
+    // Strip the trailing newline that fmt_format appends, then re-join lines
+    // with base_indent prepended to every continuation line.
+    let text = rendered.trim_end_matches('\n');
+    if base_indent == 0 {
+        return text.to_string();
+    }
+    let indent_str = " ".repeat(base_indent);
+    let mut lines = text.lines();
+    lines.next().map_or_else(String::new, |first| {
+        let rest = lines.fold(String::new(), |mut acc, l| {
+            let _ = write!(acc, "\n{indent_str}{l}");
+            acc
+        });
+        format!("{first}{rest}")
+    })
+}
+
 /// Format a YAML document string.
 ///
 /// Returns the formatted text. If the input fails to parse, returns the
@@ -1609,6 +1649,7 @@ fn dedup_mapping_keys(node: &mut Node<Span>) {
 }
 
 #[cfg(test)]
+#[expect(clippy::panic, clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 
@@ -2256,5 +2297,203 @@ mod tests {
             count, 2,
             "expected 2 `...` markers, got {count}: {result:?}"
         );
+    }
+
+    // ---- Group FS: format_subtree unit tests ----
+
+    fn parse_root(src: &str) -> Node<Span> {
+        rlsp_yaml_parser::load(src)
+            .expect("test input must parse")
+            .remove(0)
+            .root
+    }
+
+    // FS-1: scalar node, base_indent 0 — single line, no indent applied
+    #[test]
+    fn format_subtree_scalar_base_indent_zero() {
+        let node = parse_root("hello");
+        let result = format_subtree(&node, &default_opts(), 0);
+        assert_eq!(result, "hello");
+    }
+
+    // FS-2: scalar node, base_indent 4 — first line never indented
+    #[test]
+    fn format_subtree_scalar_base_indent_never_indents_first_line() {
+        let node = parse_root("hello");
+        let result = format_subtree(&node, &default_opts(), 4);
+        assert_eq!(result, "hello");
+    }
+
+    // FS-3: empty mapping emits `{}` — records mapping_to_doc short-circuit
+    #[test]
+    fn format_subtree_empty_mapping_emits_inline() {
+        let node = parse_root("{}");
+        let result = format_subtree(&node, &default_opts(), 0);
+        assert_eq!(result, "{}");
+    }
+
+    // FS-4: empty sequence emits `[]` — records sequence_to_doc short-circuit
+    #[test]
+    fn format_subtree_empty_sequence_emits_inline() {
+        let node = parse_root("[]");
+        let result = format_subtree(&node, &default_opts(), 0);
+        assert_eq!(result, "[]");
+    }
+
+    // FS-5 through FS-7: block mapping with various base_indent values
+    #[rstest]
+    #[case::indent_zero(0, "a: 1", "b: 2")]
+    #[case::indent_two(2, "a: 1", "  b: 2")]
+    #[case::indent_eight(8, "a: 1", "        b: 2")]
+    fn format_subtree_block_mapping_base_indent(
+        #[case] base_indent: usize,
+        #[case] expected_line0: &str,
+        #[case] expected_line1: &str,
+    ) {
+        let node = parse_root("a: 1\nb: 2\n");
+        let result = format_subtree(&node, &default_opts(), base_indent);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, ..] => {
+                assert_eq!(*line0, expected_line0, "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, expected_line1, "line 1 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 2 lines, got: {other:?}"),
+        }
+    }
+
+    // FS-8: block sequence, base_indent 2
+    #[test]
+    fn format_subtree_block_sequence_continuation_indented() {
+        let node = parse_root("- x\n- y\n");
+        let result = format_subtree(&node, &default_opts(), 2);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, ..] => {
+                assert_eq!(*line0, "- x", "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, "  - y", "line 1 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 2 lines, got: {other:?}"),
+        }
+    }
+
+    // FS-9: nested mapping inside sequence, base_indent 2
+    #[test]
+    fn format_subtree_nested_mapping_in_sequence_base_indent() {
+        let node = parse_root("- a: 1\n  b: 2\n- c: 3\n");
+        let result = format_subtree(&node, &default_opts(), 2);
+        let lines: Vec<&str> = result.lines().collect();
+        // First line has no leading spaces regardless of base_indent
+        let first = lines.first().expect("output must have at least one line");
+        assert!(
+            first.starts_with("- a: 1"),
+            "first line should start with `- a: 1`: {result:?}"
+        );
+        // The `- c: 3` item must have two leading spaces from base_indent
+        let c_line = lines
+            .iter()
+            .find(|l| l.contains("c: 3"))
+            .copied()
+            .expect("output must contain `c: 3`");
+        assert!(
+            c_line.starts_with("  - c: 3"),
+            "`- c: 3` line should have two leading spaces: {result:?}"
+        );
+    }
+
+    // FS-10: enforce_block_style option converts flow mapping to block (tests the options-flag path)
+    #[test]
+    fn format_subtree_enforce_block_style_option_converts_flow_to_block() {
+        let node = parse_root("{a: 1, b: 2}");
+        let opts = YamlFormatOptions {
+            format_enforce_block_style: true,
+            ..YamlFormatOptions::default()
+        };
+        let result = format_subtree(&node, &opts, 2);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, ..] => {
+                assert_eq!(*line0, "a: 1", "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, "  b: 2", "line 1 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 2 lines, got: {other:?}"),
+        }
+    }
+
+    // FS-11: flow mapping node → block via direct style mutation (Task 2 mechanism), base_indent 2
+    #[test]
+    fn format_subtree_flow_mapping_style_mutation_to_block() {
+        let mut node = parse_root("{a: 1, b: 2}");
+        if let Node::Mapping { style, .. } = &mut node {
+            *style = CollectionStyle::Block;
+        }
+        let result = format_subtree(&node, &default_opts(), 2);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, ..] => {
+                assert_eq!(*line0, "a: 1", "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, "  b: 2", "line 1 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 2 lines, got: {other:?}"),
+        }
+    }
+
+    // FS-12: flow sequence node → block via direct style mutation, base_indent 2
+    #[test]
+    fn format_subtree_flow_sequence_style_mutation_to_block() {
+        let mut node = parse_root("[a, b, c]");
+        if let Node::Sequence { style, .. } = &mut node {
+            *style = CollectionStyle::Block;
+        }
+        let result = format_subtree(&node, &default_opts(), 2);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, line2, ..] => {
+                assert_eq!(*line0, "- a", "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, "  - b", "line 1 mismatch: {result:?}");
+                assert_eq!(*line2, "  - c", "line 2 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 3 lines, got: {other:?}"),
+        }
+    }
+
+    // FS-13: nested flow mappings inside a flow sequence, both flipped to block via style mutation
+    #[test]
+    fn format_subtree_nested_flow_in_flow_sequence_to_block() {
+        let mut node = parse_root("[{a: 1}, {b: 2}]");
+        // Flip outer sequence and each inner mapping to Block — mimics Task 2's approach
+        if let Node::Sequence { style, items, .. } = &mut node {
+            *style = CollectionStyle::Block;
+            for item in items.iter_mut() {
+                if let Node::Mapping { style: ms, .. } = item {
+                    *ms = CollectionStyle::Block;
+                }
+            }
+        }
+        let result = format_subtree(&node, &default_opts(), 2);
+        // Each sequence item becomes a `- key: val` block entry
+        assert!(result.contains("a: 1"), "a: 1 missing: {result:?}");
+        assert!(result.contains("b: 2"), "b: 2 missing: {result:?}");
+        // Continuation lines must have 2 leading spaces
+        let second_item_line = result
+            .lines()
+            .find(|l| l.contains("b: 2"))
+            .expect("line with b: 2 must exist");
+        assert!(
+            second_item_line.starts_with("  "),
+            "second item line must be indented by 2: {result:?}"
+        );
+    }
+
+    // FS-14: multi-line flow mapping input converted to block via style mutation
+    #[test]
+    fn format_subtree_multiline_flow_mapping_to_block() {
+        let mut node = parse_root("{\n  a: 1,\n  b: 2,\n}");
+        if let Node::Mapping { style, .. } = &mut node {
+            *style = CollectionStyle::Block;
+        }
+        let result = format_subtree(&node, &default_opts(), 2);
+        match result.lines().collect::<Vec<_>>().as_slice() {
+            [line0, line1, ..] => {
+                assert_eq!(*line0, "a: 1", "line 0 mismatch: {result:?}");
+                assert_eq!(*line1, "  b: 2", "line 1 mismatch: {result:?}");
+            }
+            other => panic!("expected at least 2 lines, got: {other:?}"),
+        }
     }
 }

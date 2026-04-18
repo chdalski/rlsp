@@ -181,7 +181,7 @@ user-visible defect this plan closes.
 
 ## Steps
 
-- [ ] Add `format_subtree` public API to the formatter
+- [x] Add `format_subtree` public API to the formatter
 - [ ] Rewrite `flow_map_to_block` and
       `flow_seq_to_block` to use AST + `format_subtree`;
       change `code_actions` public signature to take
@@ -198,7 +198,7 @@ caller can use to render a single AST node to text.
 This is the enabling API for Task 2's code-action
 rewrite. Independent and unit-testable in isolation.
 
-- [ ] Add `pub fn format_subtree(node: &Node<Span>,
+- [x] Add `pub fn format_subtree(node: &Node<Span>,
       options: &YamlFormatOptions, base_indent: usize)
       -> String` to `rlsp-yaml/src/editing/formatter.rs`.
       Implementation calls the existing `node_to_doc`
@@ -207,7 +207,7 @@ rewrite. Independent and unit-testable in isolation.
       `base_indent` applied so the output's lines
       (except the first) carry `base_indent` leading
       spaces.
-- [ ] Decide first-line-indent semantics: the caller
+- [x] Decide first-line-indent semantics: the caller
       passes `base_indent` meaning "every line but the
       first gets this many leading spaces; the first
       line starts at column 0 and the caller is
@@ -217,14 +217,14 @@ rewrite. Independent and unit-testable in isolation.
       use it — the first line of the block-style
       output is emitted in place of the flow `{`,
       with trailing lines indented to match.)
-- [ ] Before writing tests, inspect `node_to_doc`'s
+- [x] Before writing tests, inspect `node_to_doc`'s
       current handling of empty collections (`{}`,
       `[]`). Record the observed behavior — does it
       emit the empty collection inline as `{}` /
       `[]`, or does it produce block-style empty
       output? This is the expected behavior the test
       below asserts against.
-- [ ] Add unit tests for `format_subtree` covering:
+- [x] Add unit tests for `format_subtree` covering:
   - Simple flow mapping node → block-style text
     with correct base indent
   - Flow sequence node → block-style text
@@ -247,6 +247,17 @@ Acceptance: `format_subtree` is callable from outside
 the formatter module; unit tests pass; rustdoc
 documents the indent semantics; full workspace suite
 stays green.
+
+**Completed:** commit `7bad8e8` — public
+`format_subtree` added to `formatter.rs` reusing
+`node_to_doc` + `fmt_format`, no new emission logic.
+Rustdoc documents first-line-col-0 semantics and
+continuation-line indentation. Empty collections
+remain inline (`{}` / `[]`) per `node_to_doc`'s
+existing short-circuit. 14 unit tests cover the
+variants from the plan plus supplementary coverage
+(parameterized base_indent, both style-conversion
+paths via options flag and direct style mutation).
 
 ### Task 2: Rewrite `flow_map_to_block` and `flow_seq_to_block` via AST + `format_subtree`
 
