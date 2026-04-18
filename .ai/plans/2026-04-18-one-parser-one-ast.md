@@ -98,10 +98,17 @@ test in Task 4 carries them on an allow-list with
 (Move 0) must land before this plan begins execution.
 Move 0 builds the invariant harness and seed corpus,
 and produces a skip-list of currently-failing
-(file, invariant) pairs. This plan's Task 2 acceptance
-cites removal of specific skip-list entries related to
-`${{ … }}` inputs as evidence the retrofit worked on
-real-world files, not just unit tests.
+(file, invariant) pairs. Move 0 is a prerequisite
+because it establishes the corpus and invariant harness
+this retrofit will run against — any regression the
+retrofit introduces on real files surfaces as a new
+harness failure rather than going undetected. This plan
+does not claim to remove any specific Move 0 skip-list
+entries; all current entries are on I4 and point at the
+destructive-code-action-fix plan, which is a separate
+follow-up. Move 1's success is judged against its own
+acceptance criteria (below), not against the skip-list
+shape.
 
 ### References
 
@@ -228,14 +235,7 @@ Acceptance: the retrofitted function uses AST only; the
 test suite passes; the GHA-expression input produces
 zero diagnostics when passed through the full pipeline;
 multi-line flow collections now emit warnings; the two
-user-facing docs reflect the new behavior. Move 0
-skip-list entries for `release-plz-workflow.yml` and
-`github-actions-matrix.yml` on invariants I1/I2/I3 that
-are caused by `validate_flow_style` false-positive
-diagnostics on `${{ … }}` inputs are removed (the
-diagnostics no longer fire, so there is nothing for the
-code-action round-trip invariant to fail on for those
-files).
+user-facing docs reflect the new behavior.
 
 ### Task 3: Add regression coverage for GHA-style expressions
 
