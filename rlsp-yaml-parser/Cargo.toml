@@ -7,6 +7,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Spec-faithful streaming YAML 1.2 parser"
+homepage = "https://github.com/chdalski/rlsp"
+keywords = ["yaml", "parser", "streaming"]
+categories = ["parser-implementations"]
 
 [dependencies]
 memchr = "2"

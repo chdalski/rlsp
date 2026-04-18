@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-18)
 **Created:** 2026-04-18
 
 ## Goal
@@ -51,18 +51,20 @@ with the sibling crates.
 
 ## Steps
 
-- [ ] Add `homepage`, `keywords`, `categories` to
+- [x] Add `homepage`, `keywords`, `categories` to
       `rlsp-yaml-parser/Cargo.toml`.
-- [ ] Verify with `cargo package --list --package
+- [x] Verify with `cargo package --list --package
       rlsp-yaml-parser` (dry-run) that the packaged
       manifest contains the new fields and no crates.io
       warnings are emitted.
-- [ ] Verify `cargo fmt`, `cargo clippy --all-targets`,
+- [x] Verify `cargo fmt`, `cargo clippy --all-targets`,
       and `cargo build` still succeed for the workspace.
 
 ## Tasks
 
 ### Task 1: Add homepage, keywords, categories to rlsp-yaml-parser/Cargo.toml
+
+**Committed:** `bf7a8330492a0126678a3412e7a4efc095c6fb61`
 
 Add the three missing crates.io metadata fields to
 `rlsp-yaml-parser/Cargo.toml` inside the existing
@@ -80,15 +82,15 @@ keywords = ["yaml", "parser", "streaming"]
 categories = ["parser-implementations"]
 ```
 
-- [ ] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
+- [x] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
       contains `homepage = "https://github.com/chdalski/rlsp"`.
-- [ ] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
+- [x] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
       contains `keywords = ["yaml", "parser", "streaming"]`
       (exactly these three strings, in this order).
-- [ ] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
+- [x] `[package]` table in `rlsp-yaml-parser/Cargo.toml`
       contains `categories = ["parser-implementations"]`
       (exactly this one string).
-- [ ] No other fields in `rlsp-yaml-parser/Cargo.toml`
+- [x] No other fields in `rlsp-yaml-parser/Cargo.toml`
       change (`name`, `version`, `edition`,
       `rust-version`, `license.workspace`,
       `authors.workspace`, `repository.workspace`,
@@ -96,14 +98,14 @@ categories = ["parser-implementations"]
       `[dev-dependencies]`, `[[bench]]` entries, and
       `[lints]` remain exactly as they are on `main`
       before this task).
-- [ ] `cargo package --list --package rlsp-yaml-parser`
+- [x] `cargo package --list --package rlsp-yaml-parser`
       exits with status 0 and prints no warnings about
       unknown categories, invalid keywords, or invalid
       homepage.
-- [ ] `cargo fmt --check` exits with status 0.
-- [ ] `cargo clippy --all-targets` exits with status 0
+- [x] `cargo fmt --check` exits with status 0.
+- [x] `cargo clippy --all-targets` exits with status 0
       (no new warnings).
-- [ ] `cargo build` for the workspace exits with status 0.
+- [x] `cargo build` for the workspace exits with status 0.
 
 ## Decisions
 
