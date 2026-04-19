@@ -5911,7 +5911,10 @@ mod tests {
             root_loc.start.line.saturating_sub(1) as u32,
             root_loc.start.column as u32,
         );
-        assert_eq!(diag.range.start, expected_start, "range must match mapping loc");
+        assert_eq!(
+            diag.range.start, expected_start,
+            "range must match mapping loc"
+        );
     }
 
     // T-R4: missing required at nested path points to nested mapping
@@ -5929,7 +5932,10 @@ mod tests {
             .find(|d| code_of(d) == "schemaRequired")
             .expect("expected a schemaRequired diagnostic");
         // The nested mapping `spec` starts at line 2 (0-indexed line 1)
-        assert_eq!(diag.range.start.line, 1, "nested mapping is on 0-indexed line 1");
+        assert_eq!(
+            diag.range.start.line, 1,
+            "nested mapping is on 0-indexed line 1"
+        );
     }
 
     // T-R6: additional property on indented key
@@ -6011,7 +6017,10 @@ mod tests {
             .find(|d| code_of(d) == "schemaType")
             .expect("expected a schemaType diagnostic");
         // Outer scalar is on line 0 — not inside the decoded content
-        assert_eq!(diag.range.start.line, 0, "must point at outer scalar, not inner content");
+        assert_eq!(
+            diag.range.start.line, 0,
+            "must point at outer scalar, not inner content"
+        );
     }
 
     // T-R13: enum violation range points to scalar node
@@ -6090,7 +6099,10 @@ mod tests {
             seq_loc.start.line.saturating_sub(1) as u32,
             seq_loc.start.column as u32,
         );
-        assert_eq!(diag.range.start, expected_start, "range must match sequence loc");
+        assert_eq!(
+            diag.range.start, expected_start,
+            "range must match sequence loc"
+        );
     }
 
     // T-R16: range uses 0-based line numbers (off-by-one regression guard)
@@ -6109,10 +6121,8 @@ mod tests {
     // T-R17: range on second line is correct
     #[test]
     fn diagnostic_range_second_line_is_correct() {
-        let schema = object_schema_with_props(vec![
-            ("ok", integer_schema()),
-            ("bad", integer_schema()),
-        ]);
+        let schema =
+            object_schema_with_props(vec![("ok", integer_schema()), ("bad", integer_schema())]);
         let docs = parse_docs("ok: 1\nbad: hello");
         let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         let diag = result
