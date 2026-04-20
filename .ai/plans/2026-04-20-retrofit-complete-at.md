@@ -208,13 +208,15 @@ section on bug-fixing policy.
 
 ## Steps
 
-- [ ] Task 1: AST-first cursor-context substrate
+- [x] Task 1: AST-first cursor-context substrate
 - [ ] Task 2: Rewire `complete_at`, delete text helpers, shrink allow-list
 - [ ] Task 3: Corpus invariant, memory queue cleanup
 
 ## Tasks
 
 ### Task 1: AST-first cursor-context substrate
+
+Committed as `dce2e19` (SHA may be superseded by an amend; the final post-amend SHA is the authoritative record).
 
 Introduce the AST-walking helpers that Task 2 consumes.
 New helpers sit alongside the existing text-scanning
@@ -279,22 +281,22 @@ Scope of new helpers (all private to `completion.rs`):
 Acceptance criteria (all must hold for Task 1 to be
 complete):
 
-- [ ] `locate_cursor` added with all six variants
+- [x] `locate_cursor` added with all six variants
       enumerated above; rustdoc on the function and
       every variant states precisely which cursor
       situation it represents.
-- [ ] `present_keys`, `collect_sibling_keys_ast`,
+- [x] `present_keys`, `collect_sibling_keys_ast`,
       `collect_sequence_sibling_keys` added with
       rustdoc describing inputs, outputs, and
       side-effect freedom.
-- [ ] A reusable `span_contains` that matches the
+- [x] A reusable `span_contains` that matches the
       existing hover/navigation implementations
       (`[start, end)` on `(line, column)` tuples) is
       either imported from an existing location or
       re-implemented locally; in either case, the
       behavior matches exactly so that cross-feature
       cursor-lookup semantics remain uniform.
-- [ ] Unit tests (rstest with `#[case::name]` naming
+- [x] Unit tests (rstest with `#[case::name]` naming
       per `lang-rust-testing.md`) covering every
       `CursorLocation` variant across representative
       shapes:
@@ -311,28 +313,28 @@ complete):
         item, cursor in a scalar `-` item
       - outside-any: empty document, cursor past EOF,
         cursor on `---`, cursor on a comment
-- [ ] Unit tests for `present_keys` assert that the
+- [x] Unit tests for `present_keys` assert that the
       entry at `cursor_line` is excluded and every
       other entry is included.
-- [ ] Unit tests for `collect_sibling_keys_ast` and
+- [x] Unit tests for `collect_sibling_keys_ast` and
       `collect_sequence_sibling_keys` assert ordering
       and deduplication rules.
-- [ ] UTF-8 coverage: one rstest case per new helper
+- [x] UTF-8 coverage: one rstest case per new helper
       uses a multi-byte key name (e.g., `café`) and
       asserts the helper handles it correctly; this
       catches byte-vs-char index mistakes at the
       column-comparison boundary.
-- [ ] `cargo test -p rlsp-yaml` passes with zero
+- [x] `cargo test -p rlsp-yaml` passes with zero
       failures — the new code compiles alongside the
       existing path, and the existing 146 completion
       tests are unchanged.
-- [ ] `cargo clippy --all-targets` passes with zero
+- [x] `cargo clippy --all-targets` passes with zero
       warnings across the workspace.
-- [ ] `cargo fmt --check` passes.
-- [ ] No change to `complete_at`'s signature or
+- [x] `cargo fmt --check` passes.
+- [x] No change to `complete_at`'s signature or
       body, and no change to the server call site —
       this task is purely additive.
-- [ ] No entries removed from
+- [x] No entries removed from
       `rlsp-yaml/tests/parser_boundary_audit.rs`
       ALLOW_LIST yet — the shrink happens in Task 2
       alongside helper deletion.
