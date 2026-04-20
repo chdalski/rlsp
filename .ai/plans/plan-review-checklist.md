@@ -211,3 +211,33 @@ different layers.
 When a split is appropriate, each resulting plan should
 list the other's scope in a Non-Goals section so the
 developer knows the boundary at implementation time.
+
+## 12. Program-Level Consolidation
+
+When several plans target the same file across a multi-plan
+program, accumulated cruft in that file is a structural
+risk no individual plan catches — each plan optimizes
+locally, and cleanup is always "a future plan." The
+plan-reviewer is the only role with visibility across
+sibling plans in the queue.
+
+- Read the plan's Tasks section to identify the primary
+  files being modified.
+- Glob the plans directory for other plan files. Read any
+  plan whose tasks target the same files.
+- If two or more other plans (completed, in progress, or
+  pending) target the same file, does *some* plan in the
+  program include a consolidation task — pruning duplicate
+  tests, merging overlapping helpers, splitting an
+  oversized file? If no plan in the program owns this,
+  flag it and recommend adding a consolidation task to
+  this plan or a separate consolidation plan.
+- Consolidation does not need to appear in every plan; it
+  needs to exist somewhere in the program. If a sibling
+  plan already covers it, note which one and pass this
+  section.
+- Why this matters: a production incident saw a single
+  file reach nearly 3× production-code size in test code
+  across four sequential retrofit plans, because no plan
+  was scoped to look at the aggregate. The pattern repeats
+  by default; only a program-level check prevents it.
