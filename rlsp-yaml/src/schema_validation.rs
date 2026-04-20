@@ -1290,6 +1290,7 @@ fn validate_mapping(
                 value: key_str.clone(),
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 loc: rlsp_yaml_parser::Span {
                     start: rlsp_yaml_parser::Pos::ORIGIN,
@@ -1346,6 +1347,7 @@ fn validate_dependencies(
                     entries: entries.to_vec(),
                     style: rlsp_yaml_parser::CollectionStyle::Block,
                     anchor: None,
+                    anchor_loc: None,
                     tag: None,
                     loc: rlsp_yaml_parser::Span {
                         start: rlsp_yaml_parser::Pos::ORIGIN,

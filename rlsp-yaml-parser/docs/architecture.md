@@ -261,6 +261,14 @@ Properties (anchors and tags) precede the node they annotate. After scanning
 `SequenceStart`, or `MappingStart` event by `try_consume_scalar` and the
 collection-open handlers.
 
+`PendingAnchor` carries the anchor name and its source `Span` (from `&` through
+the last byte of the name). When consumed, the name is placed in the event's
+`anchor` field and the span in the event's `anchor_loc: Option<Span>` field.
+The invariant `event.anchor.is_some() == event.anchor_loc.is_some()` holds for
+`Event::Scalar`, `Event::MappingStart`, and `Event::SequenceStart`. The loader
+threads `anchor_loc` through to the corresponding AST node field, maintaining
+the same invariant at the AST level: `node.anchor().is_some() == node.anchor_loc().is_some()`.
+
 `PendingAnchor` and `PendingTag` are enums with two variants — `Standalone`
 (the property was on its own line, applies to the next node of any type) and
 `Inline` (the property was inline with key content, applies to the key scalar
@@ -426,9 +434,9 @@ Document<Span>
   explicit_start: bool            -- true when document was introduced with `---`
   explicit_end: bool              -- true when document was closed with `...`
 
-Node<Span>  =  Scalar { value, style, anchor, tag, loc, leading_comments: Option<Vec<String>>, trailing_comment }
-             | Mapping { entries: Vec<(Node, Node)>, anchor, tag, loc, … }
-             | Sequence { items: Vec<Node>, anchor, tag, loc, … }
+Node<Span>  =  Scalar { value, style, anchor, anchor_loc: Option<Span>, tag, loc, leading_comments: Option<Vec<String>>, trailing_comment }
+             | Mapping { entries: Vec<(Node, Node)>, anchor, anchor_loc: Option<Span>, tag, loc, … }
+             | Sequence { items: Vec<Node>, anchor, anchor_loc: Option<Span>, tag, loc, … }
              | Alias { name, loc, … }   -- lossless mode only
 ```
 

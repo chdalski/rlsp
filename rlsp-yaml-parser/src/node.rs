@@ -41,6 +41,9 @@ pub enum Node<Loc = Span> {
         style: ScalarStyle,
         /// Anchor name defined on this node (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Source span of the `&name` anchor token — from `&` through the last byte of the
+        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
+        anchor_loc: Option<Loc>,
         /// Tag applied to this node (e.g. `!!str`), if any.
         tag: Option<String>,
         /// Source span covering this scalar in the input.
@@ -61,6 +64,9 @@ pub enum Node<Loc = Span> {
         style: CollectionStyle,
         /// Anchor name defined on this mapping (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Source span of the `&name` anchor token — from `&` through the last byte of the
+        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
+        anchor_loc: Option<Loc>,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
         tag: Option<String>,
         /// Source span from the opening indicator to the last entry.
@@ -78,6 +84,9 @@ pub enum Node<Loc = Span> {
         style: CollectionStyle,
         /// Anchor name defined on this sequence (e.g. `&anchor`), if any.
         anchor: Option<String>,
+        /// Source span of the `&name` anchor token — from `&` through the last byte of the
+        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
+        anchor_loc: Option<Loc>,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.
         tag: Option<String>,
         /// Source span from the opening indicator to the last item.
@@ -107,6 +116,22 @@ impl<Loc> Node<Loc> {
             Self::Scalar { anchor, .. }
             | Self::Mapping { anchor, .. }
             | Self::Sequence { anchor, .. } => anchor.as_deref(),
+            Self::Alias { .. } => None,
+        }
+    }
+
+    /// Returns the source span of the `&name` anchor token, if any.
+    ///
+    /// `Some(span)` when `anchor()` is `Some`; `None` otherwise.
+    /// Always `None` for [`Node::Alias`] — the alias span is in `loc`.
+    pub const fn anchor_loc(&self) -> Option<Loc>
+    where
+        Loc: Copy,
+    {
+        match self {
+            Self::Scalar { anchor_loc, .. }
+            | Self::Mapping { anchor_loc, .. }
+            | Self::Sequence { anchor_loc, .. } => *anchor_loc,
             Self::Alias { .. } => None,
         }
     }
@@ -166,6 +191,7 @@ mod tests {
             value: value.to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: None,
@@ -180,6 +206,7 @@ mod tests {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# note".to_owned()]),
@@ -196,6 +223,7 @@ mod tests {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# a".to_owned()]),
@@ -205,6 +233,7 @@ mod tests {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# b".to_owned()]),
@@ -220,6 +249,7 @@ mod tests {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# x".to_owned()]),
@@ -245,6 +275,7 @@ mod tests {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: None,
@@ -259,6 +290,7 @@ mod tests {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# x".to_owned()]),
@@ -310,5 +342,90 @@ mod tests {
         assert_eq!(doc, cloned);
         assert!(cloned.explicit_start);
         assert!(cloned.explicit_end);
+    }
+
+    // -----------------------------------------------------------------------
+    // AL-NODE: anchor_loc() accessor
+    // -----------------------------------------------------------------------
+
+    // AL-NODE-1: anchor_loc_accessor_returns_some_for_anchored_scalar
+    #[test]
+    fn anchor_loc_accessor_returns_some_for_anchored_scalar() {
+        let span = zero_span();
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: Some("a".to_owned()),
+            anchor_loc: Some(span),
+            tag: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.anchor_loc(), Some(span));
+    }
+
+    // AL-NODE-2: anchor_loc_accessor_returns_none_for_unanchored_scalar
+    #[test]
+    fn anchor_loc_accessor_returns_none_for_unanchored_scalar() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.anchor_loc(), None);
+    }
+
+    // AL-NODE-3: anchor_loc_accessor_returns_none_for_alias
+    #[test]
+    fn anchor_loc_accessor_returns_none_for_alias() {
+        let node = Node::Alias {
+            name: "x".to_owned(),
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.anchor_loc(), None);
+    }
+
+    // AL-NODE-4: anchor_loc_accessor_returns_some_for_anchored_mapping
+    #[test]
+    fn anchor_loc_accessor_returns_some_for_anchored_mapping() {
+        use crate::event::CollectionStyle;
+        let span = zero_span();
+        let node = Node::Mapping {
+            entries: vec![],
+            style: CollectionStyle::Block,
+            anchor: Some("m".to_owned()),
+            anchor_loc: Some(span),
+            tag: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.anchor_loc(), Some(span));
+    }
+
+    // AL-NODE-5: anchor_loc_accessor_returns_some_for_anchored_sequence
+    #[test]
+    fn anchor_loc_accessor_returns_some_for_anchored_sequence() {
+        use crate::event::CollectionStyle;
+        let span = zero_span();
+        let node = Node::Sequence {
+            items: vec![],
+            style: CollectionStyle::Block,
+            anchor: Some("s".to_owned()),
+            anchor_loc: Some(span),
+            tag: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.anchor_loc(), Some(span));
     }
 }

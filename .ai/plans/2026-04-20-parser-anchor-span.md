@@ -78,7 +78,7 @@ Either both are populated (the source had an `&name`) or both are
 ## Steps
 
 - [x] Task 1: extend event stream with anchor_loc
-- [ ] Task 2: extend AST nodes with anchor_loc
+- [x] Task 2: extend AST nodes with anchor_loc
 
 ## Tasks
 
@@ -136,48 +136,50 @@ when the pending anchor is consumed by the next node event.
 
 ### Task 2: Extend AST nodes with anchor_loc
 
-Add `anchor_loc: Option<Span>` to `Node::Scalar`, `Node::Mapping`,
+Committed as `2141902ebcece6eada40bfeec866b5446efda3c7` (may be
+superseded by follow-up amend for SHA recording). Add
+`anchor_loc: Option<Span>` to `Node::Scalar`, `Node::Mapping`,
 `Node::Sequence`. Populate from the event stream in `loader.rs`.
 Downstream consumers in the workspace must compile; update any
 pattern match that destructures without `..`.
 
-- [ ] Add `anchor_loc: Option<Span>` field to `Node::Scalar`,
+- [x] Add `anchor_loc: Option<Span>` field to `Node::Scalar`,
       `Node::Mapping`, `Node::Sequence` in `node.rs` with rustdoc
       matching the event-level semantics: `Some(span)` when
       `anchor` is `Some`; `None` otherwise; span covers the
       `&` indicator through the last byte of the anchor name.
-- [ ] Update `loader.rs` construction sites (`Node::Scalar { ... }`,
+- [x] Update `loader.rs` construction sites (`Node::Scalar { ... }`,
       `Node::Mapping { ... }`, `Node::Sequence { ... }` literal
       initializers) to read the new `anchor_loc` from the event
       and store it on the node.
-- [ ] Update all `Node::*` constructor helpers in `node.rs` that
+- [x] Update all `Node::*` constructor helpers in `node.rs` that
       build nodes with `anchor: None` so they initialize
       `anchor_loc: None` too.
-- [ ] Verify all destructuring pattern matches across the workspace
+- [x] Verify all destructuring pattern matches across the workspace
       (`rlsp-yaml-parser`, `rlsp-yaml`, `rlsp-fmt`) still compile.
       Patterns using `..` for un-named fields continue to work;
       patterns that enumerate all fields must add `anchor_loc`.
-- [ ] Loader tests asserting `anchor_loc` is populated correctly
+- [x] Loader tests asserting `anchor_loc` is populated correctly
       on the resulting AST for these shapes (one rstest case per
       shape, named): scalar with inline anchor; mapping with
       anchor; sequence with anchor; nested anchor on a mapping
       value that is itself a mapping; anchor-less scalar (`anchor_loc`
       is `None`); alias (still uses `Node::Alias.loc` which covers
       the `*name` token — unchanged).
-- [ ] Invariant test at the AST level: walk every node in each
+- [x] Invariant test at the AST level: walk every node in each
       conformance corpus input's resulting AST and assert
       `node_anchor.is_some() == node_anchor_loc.is_some()`. One
       test function iterating the corpus.
-- [ ] Update `rlsp-yaml-parser/docs/architecture.md` to add
+- [x] Update `rlsp-yaml-parser/docs/architecture.md` to add
       `anchor_loc` to the `Node<Span>` schema line (near line 429
       of the architecture doc). The event-level schema section
       must also gain the field on `Event::Scalar`,
       `Event::MappingStart`, `Event::SequenceStart` wherever those
       shapes are enumerated in the doc.
-- [ ] `cargo test` across the workspace passes with zero failures.
-- [ ] `cargo clippy --all-targets` across the workspace passes
+- [x] `cargo test` across the workspace passes with zero failures.
+- [x] `cargo clippy --all-targets` across the workspace passes
       with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo fmt --check` passes.
 
 ## Decisions
 

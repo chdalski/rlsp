@@ -416,13 +416,14 @@ impl<'opt> LoadState<'opt> {
                 value,
                 style,
                 anchor,
+                anchor_loc,
                 tag,
-                ..
             } => {
                 let node = Node::Scalar {
                     value: value.into_owned(),
                     style,
                     anchor: anchor.map(str::to_owned),
+                    anchor_loc,
                     tag: tag.map(std::borrow::Cow::into_owned),
                     loc: span,
                     leading_comments: None,
@@ -435,9 +436,13 @@ impl<'opt> LoadState<'opt> {
             }
 
             Event::MappingStart {
-                anchor, tag, style, ..
+                anchor,
+                anchor_loc: mapping_anchor_loc,
+                tag,
+                style,
             } => {
                 let anchor = anchor.map(str::to_owned);
+                let anchor_loc = mapping_anchor_loc;
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
                 self.depth += 1;
@@ -523,6 +528,7 @@ impl<'opt> LoadState<'opt> {
                     entries,
                     style,
                     anchor: anchor.clone(),
+                    anchor_loc,
                     tag,
                     loc: Span {
                         start: span.start,
@@ -538,9 +544,13 @@ impl<'opt> LoadState<'opt> {
             }
 
             Event::SequenceStart {
-                anchor, tag, style, ..
+                anchor,
+                anchor_loc: sequence_anchor_loc,
+                tag,
+                style,
             } => {
                 let anchor = anchor.map(str::to_owned);
+                let anchor_loc = sequence_anchor_loc;
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
                 self.depth += 1;
@@ -622,6 +632,7 @@ impl<'opt> LoadState<'opt> {
                     items,
                     style,
                     anchor: anchor.clone(),
+                    anchor_loc,
                     tag,
                     loc: Span {
                         start: span.start,
@@ -748,6 +759,7 @@ impl<'opt> LoadState<'opt> {
                 entries,
                 style,
                 anchor,
+                anchor_loc,
                 tag,
                 loc,
                 leading_comments,
@@ -763,6 +775,7 @@ impl<'opt> LoadState<'opt> {
                     entries: expanded_entries,
                     style,
                     anchor,
+                    anchor_loc,
                     tag,
                     loc,
                     leading_comments,
@@ -773,6 +786,7 @@ impl<'opt> LoadState<'opt> {
                 items,
                 style,
                 anchor,
+                anchor_loc,
                 tag,
                 loc,
                 leading_comments,
@@ -786,6 +800,7 @@ impl<'opt> LoadState<'opt> {
                     items: expanded_items,
                     style,
                     anchor,
+                    anchor_loc,
                     tag,
                     loc,
                     leading_comments,
@@ -848,6 +863,7 @@ const fn empty_scalar() -> Node<Span> {
         value: String::new(),
         style: ScalarStyle::Plain,
         anchor: None,
+        anchor_loc: None,
         tag: None,
         loc: Span {
             start: Pos::ORIGIN,
@@ -903,6 +919,7 @@ mod tests {
             value: "x".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: Span {
                 start: Pos::ORIGIN,

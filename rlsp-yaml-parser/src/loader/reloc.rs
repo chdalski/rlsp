@@ -10,6 +10,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             value,
             style,
             anchor,
+            anchor_loc,
             tag,
             leading_comments,
             trailing_comment,
@@ -18,6 +19,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             value,
             style,
             anchor,
+            anchor_loc,
             tag,
             loc,
             leading_comments,
@@ -27,6 +29,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             entries,
             style,
             anchor,
+            anchor_loc,
             tag,
             leading_comments,
             trailing_comment,
@@ -35,6 +38,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             entries,
             style,
             anchor,
+            anchor_loc,
             tag,
             loc,
             leading_comments,
@@ -44,6 +48,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             items,
             style,
             anchor,
+            anchor_loc,
             tag,
             leading_comments,
             trailing_comment,
@@ -52,6 +57,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             items,
             style,
             anchor,
+            anchor_loc,
             tag,
             loc,
             leading_comments,
@@ -97,6 +103,7 @@ mod tests {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc,
             leading_comments: None,
@@ -110,6 +117,7 @@ mod tests {
             value: "hello".to_owned(),
             style: ScalarStyle::Plain,
             anchor: Some("a".to_owned()),
+            anchor_loc: Some(span(5)),
             tag: Some("!t".to_owned()),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
@@ -121,12 +129,14 @@ mod tests {
                 value,
                 style,
                 anchor,
+                anchor_loc,
                 tag,
                 loc,
                 leading_comments,
                 trailing_comment,
             } => {
                 assert_eq!(loc, span(2));
+                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert_eq!(value, "hello");
                 assert_eq!(style, ScalarStyle::Plain);
                 assert_eq!(anchor, Some("a".to_owned()));
@@ -144,6 +154,7 @@ mod tests {
             entries: vec![],
             style: CollectionStyle::Block,
             anchor: Some("m".to_owned()),
+            anchor_loc: Some(span(5)),
             tag: Some("!m".to_owned()),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
@@ -154,6 +165,7 @@ mod tests {
             Node::Mapping {
                 entries,
                 anchor,
+                anchor_loc,
                 tag,
                 loc,
                 leading_comments,
@@ -161,6 +173,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(loc, span(3));
+                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert!(entries.is_empty());
                 assert_eq!(anchor, Some("m".to_owned()));
                 assert_eq!(tag, Some("!m".to_owned()));
@@ -176,7 +189,8 @@ mod tests {
         let node = Node::Sequence {
             items: vec![],
             style: CollectionStyle::Block,
-            anchor: None,
+            anchor: Some("s".to_owned()),
+            anchor_loc: Some(span(5)),
             tag: None,
             loc: span(1),
             leading_comments: None,
@@ -184,11 +198,42 @@ mod tests {
         };
         let result = reloc(node, span(4));
         match result {
-            Node::Sequence { items, loc, .. } => {
+            Node::Sequence {
+                items,
+                loc,
+                anchor_loc,
+                ..
+            } => {
                 assert_eq!(loc, span(4));
+                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert!(items.is_empty());
             }
             _ => panic!("expected Sequence"),
+        }
+    }
+
+    // reloc_anchor_loc_none_preserved: None anchor_loc stays None after reloc
+    #[test]
+    fn reloc_anchor_loc_none_preserved() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: None,
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(99));
+        match result {
+            Node::Scalar {
+                anchor_loc, loc, ..
+            } => {
+                assert_eq!(loc, span(99));
+                assert_eq!(anchor_loc, None, "None anchor_loc must remain None");
+            }
+            _ => panic!("expected Scalar"),
         }
     }
 
@@ -216,6 +261,7 @@ mod tests {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: span(1),
             leading_comments: Some(vec!["# hi".to_owned()]),
@@ -231,6 +277,7 @@ mod tests {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: span(1),
             leading_comments: None,
@@ -247,6 +294,7 @@ mod tests {
             entries: vec![(plain_scalar(span(10)), plain_scalar(span(10)))],
             style: CollectionStyle::Block,
             anchor: None,
+            anchor_loc: None,
             tag: None,
             loc: span(1),
             leading_comments: None,
