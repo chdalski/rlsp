@@ -153,20 +153,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "navigation/references.rs",
-        func: "goto_definition",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-goto-definition",
-        },
-    },
-    AllowEntry {
-        file: "navigation/references.rs",
-        func: "find_references",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-find-references",
-        },
-    },
-    AllowEntry {
         file: "navigation/rename.rs",
         func: "prepare_rename",
         marker: AllowMarker::TodoRetrofit {
@@ -475,23 +461,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "find_mapping_colon",
         marker: AllowMarker::HelperOf {
             root: "document_symbols",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of goto_definition / find_references
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "navigation/references.rs",
-        func: "scan_tokens",
-        marker: AllowMarker::HelperOf {
-            root: "goto_definition",
-        },
-    },
-    AllowEntry {
-        file: "navigation/references.rs",
-        func: "document_range_for_line",
-        marker: AllowMarker::HelperOf {
-            root: "goto_definition",
         },
     },
     // -----------------------------------------------------------------------

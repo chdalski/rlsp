@@ -74,18 +74,6 @@ type: project
   Replacement: remove `text` parameter; derive all symbol names, ranges, and kinds directly from AST node types and `loc` spans.
   Helpers retired when this retrofit lands: `split_document_regions` (analysis/symbols.rs), `find_sequence_item_line` (analysis/symbols.rs), `find_value_end_line` (analysis/symbols.rs), `find_mapping_colon` (analysis/symbols.rs).
 
-- **Retrofit `goto_definition` to AST-first** — `navigation/references.rs:20`:
-  `pub fn goto_definition(text: &str, uri: &Url, position: Position) -> Option<Location>`.
-  Violation: splits `text` into lines and uses `scan_tokens` to find all anchor/alias tokens through raw text pattern matching. Anchor and alias information is already in the parser AST (`Node::Scalar` has `anchor` field; alias nodes carry the aliased name).
-  Replacement: accept `documents: &[Document<Span>]`; walk the AST to collect anchors (nodes with `anchor: Some(name)`) and their spans; resolve aliases by matching name.
-  Helpers retired when this retrofit lands: `scan_tokens` (navigation/references.rs), `document_range_for_line` (navigation/references.rs). Note: `scan_tokens` and `document_range_for_line` in `navigation/references.rs` are shared with `find_references` — they are retired when both roots are retrofitted.
-
-- **Retrofit `find_references` to AST-first** — `navigation/references.rs:61`:
-  `pub fn find_references(text: &str, uri: &Url, position: Position, include_declaration: bool) -> Vec<Location>`.
-  Violation: same shape as `goto_definition` — splits `text` into lines and scans anchor/alias tokens through raw text. Shares private helpers with `goto_definition`.
-  Replacement: accept `documents: &[Document<Span>]`; walk AST for all anchor and alias nodes; match by name; use node `loc` spans for result ranges.
-  Helpers retired when this retrofit lands: `scan_tokens` (navigation/references.rs), `document_range_for_line` (navigation/references.rs) — same helpers as `goto_definition`; retired together.
-
 - **Retrofit `prepare_rename` to AST-first** — `navigation/rename.rs:21`:
   `pub fn prepare_rename(text: &str, position: Position) -> Option<Range>`.
   Violation: splits `text` into lines and uses `scan_tokens` to locate anchor/alias tokens at the cursor position through raw text scanning. AST nodes carry anchor name and span.

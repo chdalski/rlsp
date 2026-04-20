@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 
 use rlsp_yaml::editing::code_actions::code_actions;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
+use rlsp_yaml::navigation::references::{find_references, goto_definition};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::validation::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
@@ -95,6 +96,11 @@ const INVARIANTS: &[Invariant] = &[
         id: "I5",
         description: "AST anchor_loc invariant: anchor().is_some() == anchor_loc().is_some() for every node",
         check: check_i5_anchor_loc_invariant,
+    },
+    Invariant {
+        id: "I7",
+        description: "goto_definition and find_references never panic on corpus files",
+        check: check_i6_references_no_panics,
     },
 ];
 
@@ -499,6 +505,42 @@ fn check_i5_node(node: &Node<Span>) -> Result<(), String> {
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// I6: goto_definition and find_references never panic
+// ---------------------------------------------------------------------------
+
+fn check_i6_references_no_panics(path: &Path, text: &str) -> Result<(), String> {
+    let docs = rlsp_yaml_parser::load(text).unwrap_or_default();
+    let last_line = text.lines().count().saturating_sub(1) as u32;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let fake_uri = tower_lsp::lsp_types::Url::parse(&format!("file:///corpus/{file_name}"))
+        .expect("valid URI");
+
+    for line in [0u32, last_line] {
+        let pos = Position::new(line, 0);
+        catch_unwind(AssertUnwindSafe(|| goto_definition(&docs, &fake_uri, pos))).map_err(|e| {
+            format!(
+                "panic in goto_definition at line {line}: {}",
+                panic_message(&e)
+            )
+        })?;
+        catch_unwind(AssertUnwindSafe(|| {
+            find_references(&docs, &fake_uri, pos, false)
+        }))
+        .map_err(|e| {
+            format!(
+                "panic in find_references at line {line}: {}",
+                panic_message(&e)
+            )
+        })?;
+    }
+
     Ok(())
 }
 

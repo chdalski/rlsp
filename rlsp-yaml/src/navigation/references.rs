@@ -1,218 +1,185 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::{Pos, Span};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-/// A token found in the text: either an anchor (`&name`) or an alias (`*name`).
-#[derive(Debug, Clone)]
-struct Token {
-    name: String,
-    line: u32,
-    start_col: u32,
-    end_col: u32,
-    is_anchor: bool,
-}
+type NamedSpans = Vec<(String, Span)>;
 
 /// Go-to-definition: cursor on `*alias` returns the location of the matching `&anchor`.
 ///
 /// Returns `None` if the cursor is not on an alias, the anchor is not found,
-/// the position is out of bounds, or the document is empty.
+/// or `docs` is empty.
 #[must_use]
-pub fn goto_definition(text: &str, uri: &Url, position: Position) -> Option<Location> {
-    let lines: Vec<&str> = text.lines().collect();
-    let line_idx = position.line as usize;
-    let col_idx = position.character as usize;
+pub fn goto_definition(docs: &[Document<Span>], uri: &Url, position: Position) -> Option<Location> {
+    let cursor = lsp_to_pos(position);
+    let doc = containing_document(docs, cursor)?;
 
-    let line = lines.get(line_idx)?;
-    if col_idx > line.len() {
-        return None;
-    }
+    let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
-    let doc_range = document_range_for_line(&lines, line_idx);
-    let tokens = scan_tokens(&lines, doc_range.0, doc_range.1);
-
-    // Find the alias token at the cursor position
-    let alias = tokens.iter().find(|t| {
-        !t.is_anchor
-            && t.line == position.line
-            && col_idx >= t.start_col as usize
-            && col_idx < t.end_col as usize
-    })?;
-
-    // Find the matching anchor in the same document
-    let anchor = tokens
+    let alias_entry = aliases
         .iter()
-        .find(|t| t.is_anchor && t.name == alias.name)?;
+        .find(|(_, loc)| span_contains(*loc, cursor))?;
+    let alias_name = &alias_entry.0;
+
+    let anchor_entry = anchors.iter().find(|(name, _)| name == alias_name)?;
 
     Some(Location {
         uri: uri.clone(),
-        range: Range::new(
-            Position::new(anchor.line, anchor.start_col),
-            Position::new(anchor.line, anchor.end_col),
-        ),
+        range: span_to_range(anchor_entry.1),
     })
 }
 
 /// Find references: cursor on `&anchor` or `*alias` returns all `*alias` usage locations.
 ///
 /// When `include_declaration` is true, the `&anchor` definition is also included.
-/// Returns an empty list if the cursor is not on an anchor or alias, the position
-/// is out of bounds, or the document is empty.
+/// Returns an empty list if the cursor is not on an anchor or alias, or `docs` is empty.
 #[must_use]
 pub fn find_references(
-    text: &str,
+    docs: &[Document<Span>],
     uri: &Url,
     position: Position,
     include_declaration: bool,
 ) -> Vec<Location> {
-    let lines: Vec<&str> = text.lines().collect();
-    let line_idx = position.line as usize;
-    let col_idx = position.character as usize;
-
-    let Some(line) = lines.get(line_idx) else {
-        return Vec::new();
-    };
-    if col_idx > line.len() {
-        return Vec::new();
-    }
-
-    let doc_range = document_range_for_line(&lines, line_idx);
-    let tokens = scan_tokens(&lines, doc_range.0, doc_range.1);
-
-    // Find the token at the cursor position (anchor or alias)
-    let cursor_token = tokens.iter().find(|t| {
-        t.line == position.line && col_idx >= t.start_col as usize && col_idx < t.end_col as usize
-    });
-
-    let Some(cursor_token) = cursor_token else {
+    let cursor = lsp_to_pos(position);
+    let Some(doc) = containing_document(docs, cursor) else {
         return Vec::new();
     };
 
-    let name = &cursor_token.name;
+    let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
-    // Optionally include the anchor declaration
+    let name = anchors
+        .iter()
+        .find(|(_, loc)| span_contains(*loc, cursor))
+        .map(|(n, _)| n.as_str())
+        .or_else(|| {
+            aliases
+                .iter()
+                .find(|(_, loc)| span_contains(*loc, cursor))
+                .map(|(n, _)| n.as_str())
+        });
+
+    let Some(name) = name else {
+        return Vec::new();
+    };
+
     let declaration = if include_declaration {
-        tokens
+        anchors
             .iter()
-            .find(|t| t.is_anchor && t.name == *name)
-            .map(|anchor| Location {
+            .find(|(n, _)| n == name)
+            .map(|(_, loc)| Location {
                 uri: uri.clone(),
-                range: Range::new(
-                    Position::new(anchor.line, anchor.start_col),
-                    Position::new(anchor.line, anchor.end_col),
-                ),
+                range: span_to_range(*loc),
             })
     } else {
         None
     };
 
-    // Include all alias references
-    let aliases = tokens
+    let alias_locations = aliases
         .iter()
-        .filter(|t| !t.is_anchor && t.name == *name)
-        .map(|t| Location {
+        .filter(|(n, _)| n == name)
+        .map(|(_, loc)| Location {
             uri: uri.clone(),
-            range: Range::new(
-                Position::new(t.line, t.start_col),
-                Position::new(t.line, t.end_col),
-            ),
+            range: span_to_range(*loc),
         });
 
-    declaration.into_iter().chain(aliases).collect()
+    declaration.into_iter().chain(alias_locations).collect()
 }
 
-/// Determine the document boundaries for the YAML document containing the
-/// given line. Returns `(start_line, end_line)` where end is exclusive.
-/// Documents are separated by `---`.
-fn document_range_for_line(lines: &[&str], line_idx: usize) -> (usize, usize) {
-    let mut start = 0;
-    let end = lines.len();
-
-    // Walk backwards to find the start of the current document
-    for i in (0..=line_idx).rev() {
-        let trimmed = lines.get(i).map_or("", |l| l.trim());
-        if trimmed == "---" && i < line_idx {
-            start = i + 1;
-            break;
-        }
-    }
-
-    // Walk forward to find the end of the current document
-    for i in (line_idx + 1)..end {
-        let trimmed = lines.get(i).map_or("", |l| l.trim());
-        if trimmed == "---" {
-            return (start, i);
-        }
-    }
-
-    (start, end)
+/// Walk a single document and collect `(name, span)` pairs for every anchor
+/// token and every alias token.
+///
+/// Anchor spans come from `Node::*.anchor_loc` (the `&name` token span).
+/// Alias spans come from `Node::Alias.loc` (the `*name` token span).
+fn collect_anchor_alias_entries(doc: &Document<Span>) -> (NamedSpans, NamedSpans) {
+    let mut anchors = Vec::new();
+    let mut aliases = Vec::new();
+    collect_node(&doc.root, &mut anchors, &mut aliases);
+    (anchors, aliases)
 }
 
-/// Scan lines for anchor (`&name`) and alias (`*name`) tokens within the
-/// given line range. Skips comment lines.
-fn scan_tokens(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Token> {
-    let mut tokens = Vec::new();
-
-    for line_idx in start_line..end_line {
-        let Some(line) = lines.get(line_idx) else {
-            continue;
-        };
-
-        let trimmed = line.trim();
-
-        // Skip comment lines
-        if trimmed.starts_with('#') {
-            continue;
+fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut NamedSpans) {
+    match node {
+        Node::Scalar {
+            anchor, anchor_loc, ..
         }
-
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let line_num = line_idx as u32;
-
-        let mut chars = line.char_indices().peekable();
-        while let Some((i, ch)) = chars.next() {
-            if ch == '&' || ch == '*' {
-                let is_anchor = ch == '&';
-
-                // Check if followed by a valid anchor name character
-                let name_start = i + 1;
-                let mut name_end = name_start;
-
-                while let Some(&(j, next_ch)) = chars.peek() {
-                    if is_anchor_name_char(next_ch) {
-                        name_end = j + next_ch.len_utf8();
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-
-                // Must have at least one name character
-                if name_end > name_start {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    tokens.push(Token {
-                        name: line[name_start..name_end].to_string(),
-                        line: line_num,
-                        start_col: i as u32,
-                        end_col: name_end as u32,
-                        is_anchor,
-                    });
-                }
+        | Node::Mapping {
+            anchor, anchor_loc, ..
+        }
+        | Node::Sequence {
+            anchor, anchor_loc, ..
+        } => {
+            if let (Some(name), Some(loc)) = (anchor, anchor_loc) {
+                anchors.push((name.clone(), *loc));
             }
         }
+        Node::Alias { name, loc, .. } => {
+            aliases.push((name.clone(), *loc));
+        }
     }
-
-    tokens
+    match node {
+        Node::Mapping { entries, .. } => {
+            for (k, v) in entries {
+                collect_node(k, anchors, aliases);
+                collect_node(v, anchors, aliases);
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                collect_node(item, anchors, aliases);
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
+    }
 }
 
-/// Check if a character is valid in a YAML anchor/alias name.
-/// Valid characters: alphanumeric, `-`, `_`, `.`
-const fn is_anchor_name_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'
+/// Find the document whose root span contains the cursor (per-document scoping).
+fn containing_document(docs: &[Document<Span>], cursor: Pos) -> Option<&Document<Span>> {
+    docs.iter()
+        .find(|doc| span_contains(node_loc(&doc.root), cursor))
+}
+
+/// Returns the location span of a node.
+const fn node_loc(node: &Node<Span>) -> Span {
+    match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => *loc,
+    }
+}
+
+/// Returns `true` when `cursor` is within `span` using half-open `[start, end)`.
+fn span_contains(span: Span, cursor: Pos) -> bool {
+    let start = (span.start.line, span.start.column);
+    let end = (span.end.line, span.end.column);
+    let pos = (cursor.line, cursor.column);
+    pos >= start && pos < end
+}
+
+/// Convert an LSP `Position` (0-based line, 0-based character) to a parser `Pos`
+/// (1-based line, 0-based column).
+const fn lsp_to_pos(position: Position) -> Pos {
+    Pos {
+        byte_offset: 0,
+        line: position.line as usize + 1,
+        column: position.character as usize,
+    }
+}
+
+/// Convert a parser `Span` to an LSP `Range`.
+fn span_to_range(loc: Span) -> Range {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "LSP line/col are u32; always fits"
+    )]
+    Range::new(
+        Position::new(
+            loc.start.line.saturating_sub(1) as u32,
+            loc.start.column as u32,
+        ),
+        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+    )
 }
 
 #[cfg(test)]
@@ -222,6 +189,10 @@ mod tests {
 
     use super::*;
 
+    fn parse(yaml: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(yaml).unwrap_or_default()
+    }
+
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
     }
@@ -230,14 +201,46 @@ mod tests {
         Url::parse("file:///test/doc.yaml").expect("valid test URI")
     }
 
-    // ---- Go-to-Definition: Happy Path ----
+    // ---- Go-to-Definition: Returns anchor line (GT-1) ----
 
-    // Test 2
+    #[rstest]
+    #[case::jumps_to_anchor_definition(
+        "defaults: &defaults\n  adapter: postgres\nproduction:\n  <<: *defaults\n",
+        3,
+        6,
+        0
+    )]
+    #[case::multiple_anchors_jumps_to_correct_one(
+        "a: &first\n  key: val\nb: &second\n  key: val\nc:\n  ref: *second\n",
+        5,
+        7,
+        2
+    )]
+    #[case::jump_within_same_document(
+        "---\ndefaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n",
+        4,
+        6,
+        1
+    )]
+    #[case::ignores_anchor_in_comment("# &fake\nreal: &real val\nref: *real\n", 2, 5, 1)]
+    fn goto_definition_returns_anchor_line(
+        #[case] text: &str,
+        #[case] line: u32,
+        #[case] character: u32,
+        #[case] expected_anchor_line: u32,
+    ) {
+        let uri = test_uri();
+        let result = goto_definition(&parse(text), &uri, pos(line, character));
+        let loc = result.expect("should return a location");
+        assert_eq!(loc.range.start.line, expected_anchor_line);
+    }
+
+    // GT-2: exact range assertion
     #[test]
-    fn should_return_correct_range_for_anchor_definition() {
+    fn goto_definition_returns_correct_range_exact() {
         let text = "defaults: &defaults\n  adapter: postgres\nproduction:\n  <<: *defaults\n";
         let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(3, 6));
+        let result = goto_definition(&parse(text), &uri, pos(3, 6));
 
         let loc = result.expect("should return a location");
         assert_eq!(loc.range.start.line, 0);
@@ -251,81 +254,95 @@ mod tests {
         );
     }
 
-    // ---- Go-to-Definition: Returns anchor line (Tests 1, 3, 11, 22b, 22c) ----
+    // ---- Go-to-Definition: Edge Cases (returns None) — GT-3 ----
 
     #[rstest]
-    // ---- Go-to-Definition: Happy Path ----
-    #[case::jumps_to_anchor_definition(
-        "defaults: &defaults\n  adapter: postgres\nproduction:\n  <<: *defaults\n",
-        3,
-        6,
-        0
-    )]
-    #[case::multiple_anchors_jumps_to_correct_one(
-        "a: &first\n  key: val\nb: &second\n  key: val\nc:\n  ref: *second\n",
-        5,
-        7,
-        2
-    )]
-    // ---- Go-to-Definition: Multi-Document Scoping ----
-    #[case::jump_within_same_document(
-        "---\ndefaults: &defaults\n  key: val\nproduction:\n  <<: *defaults\n",
-        4,
-        6,
-        1
-    )]
-    // ---- Additional Tests ----
-    #[case::finds_anchor_in_unparseable_yaml(
-        "defaults: &defaults\n  key: [bad\nproduction:\n  <<: *defaults\n",
-        3,
-        6,
-        0
-    )]
-    #[case::ignores_anchor_in_comment("# &fake\nreal: &real val\nref: *real\n", 2, 5, 1)]
-    fn goto_definition_returns_anchor_line(
-        #[case] text: &str,
-        #[case] line: u32,
-        #[case] character: u32,
-        #[case] expected_anchor_line: u32,
-    ) {
-        let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(line, character));
-        let loc = result.expect("should return a location");
-        assert_eq!(loc.range.start.line, expected_anchor_line);
-    }
-
-    // ---- Go-to-Definition: Edge Cases (returns None) ----
-
-    #[rstest]
-    // ---- Go-to-Definition: Edge Cases ----
     #[case::cursor_not_on_alias("key: value\n", 0, 0)]
     #[case::cursor_on_anchor_not_alias("defaults: &defaults\n  key: value\n", 0, 10)]
     #[case::alias_has_no_matching_anchor("production:\n  <<: *undefined\n", 1, 6)]
     #[case::empty_document("", 0, 0)]
     #[case::beyond_document_lines("key: &anchor value\n", 10, 0)]
     #[case::beyond_line_length("key: &anchor value\n", 0, 100)]
-    // ---- Go-to-Definition: Multi-Document Scoping ----
     #[case::not_across_document_boundaries(
         "doc1: &shared\n  key: val\n---\ndoc2:\n  ref: *shared\n",
         4,
         7
     )]
-    // ---- Additional Tests ----
     #[case::ampersand_in_non_anchor_context("formula: a & b\nref: *undefined\n", 0, 11)]
     fn goto_definition_returns_none(#[case] text: &str, #[case] line: u32, #[case] character: u32) {
         let uri = test_uri();
-        let result = goto_definition(text, &uri, pos(line, character));
+        let result = goto_definition(&parse(text), &uri, pos(line, character));
         assert!(result.is_none());
+    }
+
+    // GT-4: anchor on a collection value — span is anchor token, not collection body
+    #[test]
+    fn goto_definition_anchor_on_mapping_value() {
+        let text = "base: &base\n  key: val\nchild:\n  <<: *base\n";
+        let uri = test_uri();
+        let result = goto_definition(&parse(text), &uri, pos(3, 6));
+
+        let loc = result.expect("should return a location");
+        assert_eq!(loc.range.start.line, 0);
+        assert_eq!(loc.range.start.character, 6, "&base starts at col 6");
+        assert_eq!(loc.range.end.character, 11, "&base ends at col 11");
+    }
+
+    // GT-5: cursor at first character of alias (on `*`)
+    #[test]
+    fn goto_definition_cursor_at_first_char_of_alias_name() {
+        let text = "x: &anchor\nref: *anchor\n";
+        let uri = test_uri();
+        let result = goto_definition(&parse(text), &uri, pos(1, 5));
+        let loc = result.expect("should return a location");
+        assert_eq!(loc.range.start.line, 0);
+    }
+
+    // GT-6: cursor at last character inside alias token span
+    #[test]
+    fn goto_definition_cursor_at_last_char_of_alias_name() {
+        let text = "x: &anchor\nref: *anchor\n";
+        let uri = test_uri();
+        // *anchor alias span is [5, 12) — col 11 is the last char inside the span
+        let result = goto_definition(&parse(text), &uri, pos(1, 11));
+        assert!(result.is_some());
+    }
+
+    // GT-7: cursor one past end of alias token — half-open span [start, end)
+    #[test]
+    fn goto_definition_cursor_one_past_alias_name_returns_none() {
+        let text = "x: &anchor\nref: *anchor\n";
+        let uri = test_uri();
+        // *anchor alias span is [5, 12) — col 12 is past the end (half-open)
+        let result = goto_definition(&parse(text), &uri, pos(1, 12));
+        assert!(result.is_none());
+    }
+
+    // GT-8: UTF-8 anchor name
+    #[test]
+    fn goto_definition_utf8_anchor_name() {
+        // "résumé" = 6 chars, anchor is `&résumé` at col 3 on "x: &résumé"
+        // col 3 = `&`, cols 4-9 = r,é,s,u,m,é → end col = 10
+        let text = "x: &résumé\nref: *résumé\n";
+        let uri = test_uri();
+        // alias `*résumé` is on line 1; cursor anywhere inside it
+        let result = goto_definition(&parse(text), &uri, pos(1, 5));
+        let loc = result.expect("should return a location");
+        assert_eq!(loc.range.start.line, 0);
+        assert_eq!(loc.range.start.character, 3, "&résumé starts at col 3");
+        assert_eq!(
+            loc.range.end.character, 10,
+            "&résumé ends at col 10 (3 + 7 codepoints)"
+        );
     }
 
     // ---- Find References: Happy Path ----
 
-    // Test 12
     #[test]
     fn should_find_all_alias_references_for_anchor() {
         let text = "defaults: &shared\n  key: val\ndev:\n  <<: *shared\nprod:\n  <<: *shared\n";
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 10), false);
+        let result = find_references(&parse(text), &uri, pos(0, 10), false);
 
         assert_eq!(result.len(), 2, "should find 2 alias references");
         let lines: Vec<u32> = result.iter().map(|l| l.range.start.line).collect();
@@ -333,48 +350,21 @@ mod tests {
         assert!(lines.contains(&5), "should include *shared on line 5");
     }
 
-    // Test 13
+    // Cursor-on-alias with include_declaration=false — exercises the aliases.find branch
+    // combined with the include_declaration=false path; no other test covers this combination.
     #[test]
-    fn should_find_references_when_cursor_on_alias() {
+    fn find_references_cursor_on_alias_excludes_declaration() {
         let text = "defaults: &shared\n  key: val\ndev:\n  <<: *shared\nprod:\n  <<: *shared\n";
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(3, 6), false);
+        let result = find_references(&parse(text), &uri, pos(3, 6), false);
 
-        assert_eq!(result.len(), 2, "should find 2 alias references");
+        assert_eq!(result.len(), 2);
         let lines: Vec<u32> = result.iter().map(|l| l.range.start.line).collect();
-        assert!(lines.contains(&3), "should include *shared on line 3");
-        assert!(lines.contains(&5), "should include *shared on line 5");
-    }
-
-    // Test 14
-    #[test]
-    fn should_include_declaration_when_flag_is_true() {
-        let text = "defaults: &shared\n  key: val\ndev:\n  <<: *shared\nprod:\n  <<: *shared\n";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 10), true);
-
-        assert_eq!(
-            result.len(),
-            3,
-            "should find 3 locations (1 anchor + 2 aliases)"
-        );
-        let lines: Vec<u32> = result.iter().map(|l| l.range.start.line).collect();
-        assert!(lines.contains(&0), "should include &shared on line 0");
-        assert!(lines.contains(&3), "should include *shared on line 3");
-        assert!(lines.contains(&5), "should include *shared on line 5");
-    }
-
-    // Test 15
-    #[test]
-    fn should_exclude_declaration_when_flag_is_false() {
-        let text = "defaults: &shared\n  key: val\ndev:\n  <<: *shared\nprod:\n  <<: *shared\n";
-        let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 10), false);
-
-        assert_eq!(result.len(), 2, "should find 2 alias references only");
+        assert!(lines.contains(&3));
+        assert!(lines.contains(&5));
         assert!(
-            !result.iter().any(|l| l.range.start.line == 0),
-            "should NOT include &shared anchor on line 0"
+            !lines.contains(&0),
+            "anchor excluded when include_declaration=false"
         );
     }
 
@@ -393,16 +383,20 @@ mod tests {
         #[case] include_declaration: bool,
     ) {
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(line, character), include_declaration);
+        let result = find_references(
+            &parse(text),
+            &uri,
+            pos(line, character),
+            include_declaration,
+        );
         assert!(result.is_empty());
     }
 
-    // Test 18
     #[test]
     fn should_return_only_declaration_when_anchor_has_no_usages_and_include_declaration_true() {
         let text = "defaults: &lonely\n  key: val\n";
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 10), true);
+        let result = find_references(&parse(text), &uri, pos(0, 10), true);
 
         assert_eq!(
             result.len(),
@@ -414,12 +408,11 @@ mod tests {
 
     // ---- Find References: Multi-Document Scoping ----
 
-    // Test 22
     #[test]
     fn should_scope_references_to_same_document() {
         let text = "doc1: &name\n  ref: *name\n---\ndoc2: &name\n  ref: *name\n";
         let uri = test_uri();
-        let result = find_references(text, &uri, pos(0, 6), false);
+        let result = find_references(&parse(text), &uri, pos(0, 6), false);
 
         assert_eq!(
             result.len(),
@@ -430,5 +423,74 @@ mod tests {
             result[0].range.start.line, 1,
             "the reference should be on line 1 (document 1)"
         );
+    }
+
+    // FR-9: include_declaration: true with cursor on alias
+    #[test]
+    fn find_references_include_declaration_cursor_on_alias() {
+        let text = "x: &alias\nref1: *alias\nref2: *alias\n";
+        let uri = test_uri();
+        let result = find_references(&parse(text), &uri, pos(1, 6), true);
+
+        assert_eq!(result.len(), 3, "anchor + 2 aliases");
+        let lines: Vec<u32> = result.iter().map(|l| l.range.start.line).collect();
+        assert!(lines.contains(&0), "anchor at line 0");
+        assert!(lines.contains(&1), "alias at line 1");
+        assert!(lines.contains(&2), "alias at line 2");
+    }
+
+    // FR-10: anchor on collection — anchor_loc span, not collection body
+    #[test]
+    fn find_references_anchor_on_collection_not_expanded() {
+        let text = "base: &base\n  key: val\nchild:\n  <<: *base\n";
+        let uri = test_uri();
+        let result = find_references(&parse(text), &uri, pos(0, 6), true);
+
+        assert_eq!(result.len(), 2, "anchor + 1 alias");
+        let anchor_loc = result
+            .iter()
+            .find(|l| l.range.start.line == 0)
+            .expect("anchor location");
+        assert_eq!(anchor_loc.range.start.character, 6, "&base starts at col 6");
+        assert_eq!(anchor_loc.range.end.character, 11, "&base ends at col 11");
+    }
+
+    // FR-11: cursor at first character of anchor token
+    #[test]
+    fn find_references_cursor_at_first_char_of_anchor_token() {
+        let text = "x: &anchor\nref: *anchor\n";
+        let uri = test_uri();
+        let result = find_references(&parse(text), &uri, pos(0, 3), false);
+        assert!(
+            !result.is_empty(),
+            "cursor on & of &anchor should find references"
+        );
+    }
+
+    // FR-12: cursor one past end of anchor token — should return empty
+    #[test]
+    fn find_references_cursor_one_past_anchor_token_returns_empty() {
+        let text = "x: &anchor\nref: *anchor\n";
+        let uri = test_uri();
+        // &anchor is at cols [3,10), col 10 is past the end
+        let result = find_references(&parse(text), &uri, pos(0, 10), false);
+        assert!(result.is_empty());
+    }
+
+    // FR-13: UTF-8 anchor name lookup resolves correctly
+    #[test]
+    fn find_references_utf8_anchor_lookup_resolves() {
+        let text = "x: &résumé\nref1: *résumé\nref2: *résumé\n";
+        let uri = test_uri();
+        let result = find_references(&parse(text), &uri, pos(0, 3), false);
+
+        assert_eq!(result.len(), 2, "both aliases found");
+        // Verify alias range columns use codepoint counts
+        for loc in &result {
+            // *résumé on line 1 starts at col 6 ("ref1: " = 6 chars), ends at col 13 (6 + 7)
+            // *résumé on line 2 starts at col 6 ("ref2: " = 6 chars), ends at col 13 (6 + 7)
+            assert_eq!(loc.range.start.character, 6, "alias starts at col 6");
+            assert_eq!(loc.range.end.character, 13, "alias ends at col 13");
+        }
     }
 }

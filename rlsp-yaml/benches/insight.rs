@@ -87,7 +87,7 @@ fn bench_hover_and_references(c: &mut Criterion) {
     });
 
     group.bench_function("find_references", |b| {
-        b.iter(|| find_references(&text, &uri, ref_pos, true));
+        b.iter(|| find_references(&docs, &uri, ref_pos, true));
     });
 
     group.finish();

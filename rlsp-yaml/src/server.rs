@@ -847,17 +847,23 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
+            let text_present = store.get(&uri).is_some();
+            let docs = store.get_documents(&uri).cloned();
+            (docs, text_present)
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
+        if !text_present {
+            return Ok(None);
+        }
+
+        let Some(docs) = docs else {
             return Ok(None);
         };
 
-        let location = crate::navigation::references::goto_definition(&text, &uri, position);
+        let location = crate::navigation::references::goto_definition(&docs, &uri, position);
         Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
@@ -866,18 +872,24 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
+            let text_present = store.get(&uri).is_some();
+            let docs = store.get_documents(&uri).cloned();
+            (docs, text_present)
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
+        if !text_present {
+            return Ok(None);
+        }
+
+        let Some(docs) = docs else {
             return Ok(None);
         };
 
         let locations = crate::navigation::references::find_references(
-            &text,
+            &docs,
             &uri,
             position,
             include_declaration,

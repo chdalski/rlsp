@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -104,14 +104,16 @@ something else" regressions in one check.
 
 ## Steps
 
-- [ ] Task 1: retrofit references.rs (goto_definition + find_references)
+- [x] Task 1: retrofit references.rs (goto_definition + find_references)
 - [ ] Task 2: retrofit rename.rs (prepare_rename + rename)
 
 ## Tasks
 
 ### Task 1: Retrofit navigation/references.rs to consume the AST
 
-Replace the text-scanning implementations of `goto_definition` and
+Committed as `c515ef478cc24479d053304bbbe60b5cb95b700c` (may be
+superseded by follow-up amend for SHA recording). Replace the
+text-scanning implementations of `goto_definition` and
 `find_references` with AST walks. The new signatures accept
 `docs: &[Document<Span>]` instead of `text: &str`. Introduce a
 private helper that collects `(anchor_name, anchor_loc)` pairs and
@@ -123,56 +125,56 @@ to pass the AST. Update tests to match the new signatures.
 Remove `scan_tokens`, `document_range_for_line`, `is_anchor_name_char`,
 and the private `Token` struct from this file.
 
-- [ ] New signature for `goto_definition`:
+- [x] New signature for `goto_definition`:
       `pub fn goto_definition(docs: &[Document<Span>], uri: &Url, position: Position) -> Option<Location>`.
-- [ ] New signature for `find_references`:
+- [x] New signature for `find_references`:
       `pub fn find_references(docs: &[Document<Span>], uri: &Url, position: Position, include_declaration: bool) -> Vec<Location>`.
-- [ ] Add a private helper that walks a single `Document<Span>`
+- [x] Add a private helper that walks a single `Document<Span>`
       and returns vectors of anchor entries `(name: String, loc: Span)`
       and alias entries `(name: String, loc: Span)`. Scope the walk
       to the single document containing the cursor — find it by
       checking which document's root `loc` contains the cursor's
       `Pos` (1-based line, 0-based column — same coordinate
       conversion as `hover_at`).
-- [ ] Implement `goto_definition` by locating the alias token
+- [x] Implement `goto_definition` by locating the alias token
       containing the cursor, then finding the first anchor in the
       same document with the matching name. Convert the anchor's
       `Span` to an LSP `Range` using the existing
       `loc.start.line.saturating_sub(1)` / `loc.start.column`
       pattern (see `validation/validators.rs:97`).
-- [ ] Implement `find_references` by locating the anchor OR alias
+- [x] Implement `find_references` by locating the anchor OR alias
       token containing the cursor (either position), collecting
       all aliases in the same document with that name, optionally
       prepending the anchor definition when `include_declaration`
       is true. Return empty `Vec<Location>` when the cursor is
       not on any anchor or alias.
-- [ ] Delete `scan_tokens`, `document_range_for_line`,
+- [x] Delete `scan_tokens`, `document_range_for_line`,
       `is_anchor_name_char`, and the `Token` struct from
       `navigation/references.rs`.
-- [ ] Update call sites in `server.rs` at lines ~843 and ~864 to
+- [x] Update call sites in `server.rs` at lines ~843 and ~864 to
       read `docs` from the document store (same pattern used by
       `hover_at` call site at ~1228 post-hover-retrofit) and pass
       the slice into the retrofit. Preserve the existing
       short-circuit behavior: return `Ok(None)` when no parsed
       docs are available.
-- [ ] Update every existing unit test in
+- [x] Update every existing unit test in
       `navigation/references.rs` to use the new signatures. Parse
       test-input strings via `rlsp_yaml_parser::load` and pass the
       resulting docs. No test case may be deleted unless it is
       supplanted by an equivalent case with the new signature.
       Assertions on `Location.range` start/end line and character
       values stay exact — the AST must produce identical ranges.
-- [ ] Add regression tests for behavior that only the AST can
+- [x] Add regression tests for behavior that only the AST can
       distinguish (one rstest case per, named): anchor on a
       collection value (`defaults: &d\n  k: v\nref: *d\n`) —
       cursor on `*d` jumps to the `&d` token, not the collection
       body; `include_declaration: true` with a cursor on `*alias`
       returns the anchor definition plus all aliases; UTF-8
       anchor name lookup.
-- [ ] Before making any edit, confirm the current `const
+- [x] Before making any edit, confirm the current `const
       ALLOW_LIST` length in `tests/parser_boundary_audit.rs` is
       **82**. Record this baseline in the task handoff.
-- [ ] Remove exactly 4 allow-list entries from
+- [x] Remove exactly 4 allow-list entries from
       `tests/parser_boundary_audit.rs`: the two roots
       `goto_definition` and `find_references`, plus the two
       HelperOf entries scoped to `navigation/references.rs`
@@ -181,14 +183,14 @@ and the private `Token` struct from this file.
       `ch: char`, not `text: &str`). After removal the const
       length must be **78**. Allow-list entries may only be
       removed, never added.
-- [ ] Remove the follow-up-queue entries for `goto_definition`
+- [x] Remove the follow-up-queue entries for `goto_definition`
       and `find_references` from `.ai/memory/project_followup_plans.md`.
       The file convention (stated at the top of the file) is
       that only open items stay; completed retrofits must be
       deleted from the queue.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ### Task 2: Retrofit navigation/rename.rs to consume the AST
 
