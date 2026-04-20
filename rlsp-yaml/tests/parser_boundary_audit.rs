@@ -152,20 +152,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             plan: "retrofit-document-symbols",
         },
     },
-    AllowEntry {
-        file: "navigation/rename.rs",
-        func: "prepare_rename",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-prepare-rename",
-        },
-    },
-    AllowEntry {
-        file: "navigation/rename.rs",
-        func: "rename",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-rename",
-        },
-    },
     // -----------------------------------------------------------------------
     // HelperOf — private helpers of find_document_links
     // -----------------------------------------------------------------------
@@ -461,23 +447,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "find_mapping_colon",
         marker: AllowMarker::HelperOf {
             root: "document_symbols",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of prepare_rename / rename
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "navigation/rename.rs",
-        func: "scan_tokens",
-        marker: AllowMarker::HelperOf {
-            root: "prepare_rename",
-        },
-    },
-    AllowEntry {
-        file: "navigation/rename.rs",
-        func: "document_range_for_line",
-        marker: AllowMarker::HelperOf {
-            root: "prepare_rename",
         },
     },
     // -----------------------------------------------------------------------

@@ -74,18 +74,6 @@ type: project
   Replacement: remove `text` parameter; derive all symbol names, ranges, and kinds directly from AST node types and `loc` spans.
   Helpers retired when this retrofit lands: `split_document_regions` (analysis/symbols.rs), `find_sequence_item_line` (analysis/symbols.rs), `find_value_end_line` (analysis/symbols.rs), `find_mapping_colon` (analysis/symbols.rs).
 
-- **Retrofit `prepare_rename` to AST-first** — `navigation/rename.rs:21`:
-  `pub fn prepare_rename(text: &str, position: Position) -> Option<Range>`.
-  Violation: splits `text` into lines and uses `scan_tokens` to locate anchor/alias tokens at the cursor position through raw text scanning. AST nodes carry anchor name and span.
-  Replacement: accept `documents: &[Document<Span>]`; walk AST by span containment to find the anchor or alias node at the cursor; return its name span directly.
-  Helpers retired when this retrofit lands: `scan_tokens` (navigation/rename.rs), `document_range_for_line` (navigation/rename.rs). Note: shared with `rename`; retired when both roots are retrofitted.
-
-- **Retrofit `rename` to AST-first** — `navigation/rename.rs:50`:
-  `pub fn rename(text: &str, uri: &Url, position: Position, new_name: &str) -> Option<WorkspaceEdit>`.
-  Violation: same shape as `prepare_rename` — splits `text` into lines and scans anchor/alias tokens through raw text. Shares private helpers with `prepare_rename`.
-  Replacement: accept `documents: &[Document<Span>]`; walk AST for all anchors and aliases matching the target name; produce `TextEdit`s from their `loc` spans.
-  Helpers retired when this retrofit lands: `scan_tokens` (navigation/rename.rs), `document_range_for_line` (navigation/rename.rs) — same helpers as `prepare_rename`; retired together.
-
 - **Custom tag type annotations** — RedHat's customTags supports `!include scalar`, `!ref mapping` type annotations. Ours is a plain string allowlist — add type annotation support.
 - **LSP lifecycle test rstest reduction** — ~34 tests in `lsp_lifecycle.rs` (3000 lines) follow repetitive patterns: "unknown doc returns null" (~8), diagnostic suppression (~10), flowStyle severity (3), max_items_computed (8), settings toggles (~5). Parameterize with rstest to reduce ~500-800 lines. Pure refactoring, no behavior change.
 - **`formatIndentSequences` formatter option** — add a `formatIndentSequences: bool` setting (default `true`). When true (default), always produce indented block sequences (`script:\n  - item`). When false, produce indentless sequences (`script:\n- item`). Always normalize — no preserve mode. Formatter currently hardcodes indented style in `formatter.rs:658-669` via `indent()` wrapper.

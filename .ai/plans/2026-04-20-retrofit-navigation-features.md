@@ -105,7 +105,7 @@ something else" regressions in one check.
 ## Steps
 
 - [x] Task 1: retrofit references.rs (goto_definition + find_references)
-- [ ] Task 2: retrofit rename.rs (prepare_rename + rename)
+- [x] Task 2: retrofit rename.rs (prepare_rename + rename)
 
 ## Tasks
 
@@ -194,7 +194,9 @@ and the private `Token` struct from this file.
 
 ### Task 2: Retrofit navigation/rename.rs to consume the AST
 
-Replace the text-scanning implementations of `prepare_rename` and
+Committed as `37c6c41be361009c4daa1d2a28397c0e5c87acea` (may be
+superseded by follow-up amend for SHA recording). Replace the
+text-scanning implementations of `prepare_rename` and
 `rename` with AST walks. New signatures accept
 `docs: &[Document<Span>]` instead of `text: &str`. Reuse the same
 anchor/alias collector approach as Task 1 — if Task 1 placed the
@@ -205,44 +207,44 @@ Retire the rename-specific copies of `scan_tokens`,
 Keep `is_valid_anchor_name` — it validates user-supplied `new_name`
 against YAML anchor rules and is not parser-related.
 
-- [ ] New signature for `prepare_rename`:
+- [x] New signature for `prepare_rename`:
       `pub fn prepare_rename(docs: &[Document<Span>], position: Position) -> Option<Range>`.
-- [ ] New signature for `rename`:
+- [x] New signature for `rename`:
       `pub fn rename(docs: &[Document<Span>], uri: &Url, position: Position, new_name: &str) -> Option<WorkspaceEdit>`.
-- [ ] Implement `prepare_rename` by locating the anchor OR alias
+- [x] Implement `prepare_rename` by locating the anchor OR alias
       token at the cursor and returning its exact LSP `Range`.
       Returns `None` when cursor is not on any anchor/alias.
-- [ ] Implement `rename` by locating the anchor OR alias token at
+- [x] Implement `rename` by locating the anchor OR alias token at
       the cursor, deriving the anchor name, then producing
       `TextEdit`s for every anchor and alias in the same document
       with that name. Each `TextEdit.new_text` carries the
       appropriate `&` or `*` sigil prefix: `&new_name` for the
       anchor, `*new_name` for each alias.
-- [ ] Keep the existing `is_valid_anchor_name` check on `new_name`
+- [x] Keep the existing `is_valid_anchor_name` check on `new_name`
       and its `None` return when the name is invalid. This is user
       input validation.
-- [ ] Delete `scan_tokens`, `document_range_for_line`,
+- [x] Delete `scan_tokens`, `document_range_for_line`,
       `is_anchor_name_char`, and the `Token` struct from
       `navigation/rename.rs`.
-- [ ] Update call sites in `server.rs` at lines ~1290 and ~1311
+- [x] Update call sites in `server.rs` at lines ~1290 and ~1311
       to pass `docs` instead of `text`. Preserve existing
       short-circuit behavior for missing documents.
-- [ ] Update every existing unit test in `navigation/rename.rs`
+- [x] Update every existing unit test in `navigation/rename.rs`
       to use the new signatures; parse test inputs via
       `rlsp_yaml_parser::load`. No test case may be deleted
       unless supplanted by an equivalent case with the new
       signature.
-- [ ] Add regression tests (rstest cases, named): `rename` on an
+- [x] Add regression tests (rstest cases, named): `rename` on an
       anchor that annotates a collection (`defaults: &d\n  k: v`)
       produces exactly one `&d`-to-`&new` edit at the anchor
       token span — not at the collection's `loc`; `prepare_rename`
       on a cursor in the middle of an anchor name returns the
       full `&name` range; UTF-8 anchor name rename.
-- [ ] Before making any edit, confirm the current `const
+- [x] Before making any edit, confirm the current `const
       ALLOW_LIST` length in `tests/parser_boundary_audit.rs` is
       **78** (the length that Task 1 left behind). Record this
       baseline in the task handoff.
-- [ ] Remove exactly 4 allow-list entries from
+- [x] Remove exactly 4 allow-list entries from
       `tests/parser_boundary_audit.rs`: the two roots
       `prepare_rename` and `rename`, plus the two HelperOf
       entries scoped to `navigation/rename.rs` (`scan_tokens`,
@@ -251,14 +253,14 @@ against YAML anchor rules and is not parser-related.
       take `ch: char` / `name: &str`, not `text: &str`). After
       removal the const length must be **74**. Allow-list
       entries may only be removed, never added.
-- [ ] Remove the follow-up-queue entries for `prepare_rename`
+- [x] Remove the follow-up-queue entries for `prepare_rename`
       and `rename` from `.ai/memory/project_followup_plans.md`.
       The file convention (stated at the top of the file) is
       that only open items stay; completed retrofits must be
       deleted from the queue.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ## Decisions
 
