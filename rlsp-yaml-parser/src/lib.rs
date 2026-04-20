@@ -116,6 +116,8 @@ struct EventIter<'input> {
     /// key (e.g. `!!map\n!!str key: v`), the standalone tag is saved here and
     /// consumed by the next `MappingStart`/`SequenceStart` event.
     pending_collection_tag: Option<std::borrow::Cow<'input, str>>,
+    /// Span of the tag token stored in `pending_collection_tag`.
+    pending_collection_tag_loc: Option<crate::pos::Span>,
     /// Directive scope for the current document.
     ///
     /// Accumulated from `%YAML` and `%TAG` directives seen in `BetweenDocs`
@@ -169,6 +171,7 @@ pub(crate) const fn empty_scalar_event<'input>() -> Event<'input> {
         anchor: None,
         anchor_loc: None,
         tag: None,
+        tag_loc: None,
     }
 }
 

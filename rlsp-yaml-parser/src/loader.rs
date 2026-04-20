@@ -418,6 +418,7 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc,
                 tag,
+                ..
             } => {
                 let node = Node::Scalar {
                     value: value.into_owned(),
@@ -440,6 +441,7 @@ impl<'opt> LoadState<'opt> {
                 anchor_loc: mapping_anchor_loc,
                 tag,
                 style,
+                ..
             } => {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = mapping_anchor_loc;
@@ -548,6 +550,7 @@ impl<'opt> LoadState<'opt> {
                 anchor_loc: sequence_anchor_loc,
                 tag,
                 style,
+                ..
             } => {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = sequence_anchor_loc;

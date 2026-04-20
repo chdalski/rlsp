@@ -69,6 +69,7 @@ fn comment_before_explicit_doc_start_emitted_before_document_start() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -98,6 +99,7 @@ fn comment_after_doc_start_marker_on_same_line() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -125,6 +127,7 @@ fn comment_after_second_doc_start_marker_is_inside_second_document() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::DocumentStart {
@@ -139,6 +142,7 @@ fn comment_after_second_doc_start_marker_is_inside_second_document() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -187,6 +191,7 @@ fn comment_line_inside_block_mapping() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -195,6 +200,7 @@ fn comment_line_inside_block_mapping() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "value".into(),
@@ -202,6 +208,7 @@ fn comment_line_inside_block_mapping() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment {
                 text: " inline comment"
@@ -212,6 +219,7 @@ fn comment_line_inside_block_mapping() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "val2".into(),
@@ -219,6 +227,7 @@ fn comment_line_inside_block_mapping() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::MappingEnd,
             Event::DocumentEnd { explicit: false },
@@ -244,6 +253,7 @@ fn comment_line_inside_block_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -252,6 +262,7 @@ fn comment_line_inside_block_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment {
                 text: " between items"
@@ -262,6 +273,7 @@ fn comment_line_inside_block_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -317,6 +329,7 @@ fn trailing_comment_after_plain_scalar() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment { text: " trailing" },
             Event::DocumentEnd { explicit: false },
@@ -345,6 +358,7 @@ fn hash_without_preceding_space_is_not_a_comment() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -590,6 +604,7 @@ fn comment_after_doc_start_marker_before_scalar() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -624,6 +639,7 @@ fn multiple_comments_then_scalar_all_emitted() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -652,6 +668,7 @@ fn trailing_comment_after_sequence_entry() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -660,6 +677,7 @@ fn trailing_comment_after_sequence_entry() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment { text: " note" },
             Event::SequenceEnd,
@@ -690,6 +708,7 @@ fn comment_mid_flow_mapping_second_entry_still_parsed() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Flow,
             },
             Event::Scalar {
@@ -698,6 +717,7 @@ fn comment_mid_flow_mapping_second_entry_still_parsed() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "v".into(),
@@ -705,6 +725,7 @@ fn comment_mid_flow_mapping_second_entry_still_parsed() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment { text: " remark" },
             Event::Scalar {
@@ -713,6 +734,7 @@ fn comment_mid_flow_mapping_second_entry_still_parsed() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "x".into(),
@@ -720,6 +742,7 @@ fn comment_mid_flow_mapping_second_entry_still_parsed() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::MappingEnd,
             Event::DocumentEnd { explicit: false },
@@ -752,6 +775,7 @@ fn comment_between_docs_via_dot_dot_dot_marker() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: true },
             Event::Comment {
@@ -768,6 +792,7 @@ fn comment_between_docs_via_dot_dot_dot_marker() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -798,6 +823,7 @@ fn comment_between_two_explicit_documents() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: true },
             Event::Comment {
@@ -814,6 +840,7 @@ fn comment_between_two_explicit_documents() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,
@@ -864,6 +891,7 @@ fn trailing_comment_no_trailing_newline() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Comment { text: " trailing" },
             Event::DocumentEnd { explicit: false },

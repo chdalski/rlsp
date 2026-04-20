@@ -70,13 +70,16 @@ impl<'input> EventIter<'input> {
             // (e.g. a bare `!` tag on its own line with no following node), emit
             // a null scalar so the property is properly attached.
             if self.pending_tag.is_some() || self.pending_anchor.is_some() {
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 self.queue.push_back((
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: crate::event::ScalarStyle::Plain,
                         anchor: self.pending_anchor.map(PendingAnchor::name),
                         anchor_loc: self.pending_anchor.take().map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     zero_span(end),
                 ));
@@ -358,17 +361,23 @@ impl<'input> EventIter<'input> {
                                     self.pending_collection_anchor_loc.take(),
                                 )
                             };
-                            let map_tag =
-                                if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
-                                    self.pending_tag.take().map(PendingTag::into_cow)
+                            let (map_tag, map_tag_loc) =
+                                if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
+                                    let pt = self.pending_tag.take();
+                                    let loc = pt.as_ref().map(PendingTag::loc);
+                                    (pt.map(PendingTag::into_cow), loc)
                                 } else {
-                                    self.pending_collection_tag.take()
+                                    (
+                                        self.pending_collection_tag.take(),
+                                        self.pending_collection_tag_loc.take(),
+                                    )
                                 };
                             self.queue.push_back((
                                 Event::MappingStart {
                                     anchor: map_anchor,
                                     anchor_loc: map_anchor_loc,
                                     tag: map_tag,
+                                    tag_loc: map_tag_loc,
                                     style: CollectionStyle::Block,
                                 },
                                 zero_span(star_pos),
@@ -474,7 +483,7 @@ impl<'input> EventIter<'input> {
                         // different nodes (collection vs. key scalar).
                         if self.pending_tag.is_some() {
                             let is_different_node =
-                                matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
+                                matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
                                     && had_inline
                                     && inline_contains_mapping_key(inline);
                             if !is_different_node {
@@ -494,16 +503,28 @@ impl<'input> EventIter<'input> {
                                     return StepResult::Yield(Err(e));
                                 }
                             };
+                        // Build the tag span: from `!` through the last byte of the tag token.
+                        // All YAML tag characters are ASCII, so column == byte count.
+                        let tag_span = Span {
+                            start: bang_pos,
+                            end: Pos {
+                                byte_offset: bang_pos.byte_offset + tag_token_bytes,
+                                line: bang_pos.line,
+                                column: bang_pos.column + tag_token_bytes,
+                            },
+                        };
                         self.lexer.consume_line();
                         if had_inline {
                             // If a standalone tag is already pending (for the
                             // upcoming collection), save it to the collection slot
                             // so both properties can be delivered simultaneously.
-                            if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
-                                self.pending_collection_tag =
-                                    self.pending_tag.take().map(PendingTag::into_cow);
+                            if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
+                                let displaced = self.pending_tag.take();
+                                self.pending_collection_tag_loc =
+                                    displaced.as_ref().map(PendingTag::loc);
+                                self.pending_collection_tag = displaced.map(PendingTag::into_cow);
                             }
-                            self.pending_tag = Some(PendingTag::Inline(resolved_tag));
+                            self.pending_tag = Some(PendingTag::Inline(resolved_tag, tag_span));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
@@ -543,7 +564,7 @@ impl<'input> EventIter<'input> {
                                             .into(),
                                 }));
                             }
-                            self.pending_tag = Some(PendingTag::Standalone(resolved_tag));
+                            self.pending_tag = Some(PendingTag::Standalone(resolved_tag, tag_span));
                         }
                         return StepResult::Continue;
                     }
@@ -617,7 +638,7 @@ impl<'input> EventIter<'input> {
                         // same scalar node.
                         let amp_pos2 = amp_pos;
                         let has_standalone_tag =
-                            matches!(self.pending_tag, Some(PendingTag::Standalone(_)));
+                            matches!(self.pending_tag, Some(PendingTag::Standalone(..)));
                         let is_duplicate =
                             if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..)))
                                 && !has_standalone_tag

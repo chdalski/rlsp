@@ -38,6 +38,7 @@ fn quoted_scalar_emits_full_event_sequence(
         anchor: None,
         anchor_loc: None,
         tag: None,
+        tag_loc: None,
     };
     let events = event_variants(input);
     assert_eq!(
@@ -176,6 +177,7 @@ fn single_quoted_follows_plain_scalar_fallback() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,

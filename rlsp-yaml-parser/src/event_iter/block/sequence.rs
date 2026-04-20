@@ -198,15 +198,19 @@ impl<'input> EventIter<'input> {
                     let name = self.pending_anchor.take().map(PendingAnchor::name);
                     (name, loc)
                 };
-            let seq_tag = self
-                .pending_collection_tag
-                .take()
-                .or_else(|| self.pending_tag.take().map(PendingTag::into_cow));
+            let (seq_tag, seq_tag_loc) = if let Some(tag) = self.pending_collection_tag.take() {
+                (Some(tag), self.pending_collection_tag_loc.take())
+            } else {
+                let pt = self.pending_tag.take();
+                let loc = pt.as_ref().map(PendingTag::loc);
+                (pt.map(PendingTag::into_cow), loc)
+            };
             self.queue.push_back((
                 Event::SequenceStart {
                     anchor: seq_anchor,
                     anchor_loc: seq_anchor_loc,
                     tag: seq_tag,
+                    tag_loc: seq_tag_loc,
                     style: CollectionStyle::Block,
                 },
                 zero_span(dash_pos),
@@ -227,19 +231,22 @@ impl<'input> EventIter<'input> {
         // applies to an empty scalar for the previous item.  Emit it now before
         // processing the current `-`.
         if !opens_new
-            && (matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
+            && (matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
                 || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..))))
             && (self.pending_tag.is_some() || self.pending_anchor.is_some())
         {
             let item_pos = self.lexer.current_pos();
             let pa = self.pending_anchor.take();
+            let pt = self.pending_tag.take();
+            let tag_loc = pt.as_ref().map(PendingTag::loc);
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
                     anchor: pa.map(PendingAnchor::name),
                     anchor_loc: pa.map(PendingAnchor::loc),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    tag: pt.map(PendingTag::into_cow),
+                    tag_loc,
                 },
                 zero_span(item_pos),
             ));
@@ -440,6 +447,7 @@ impl<'input> EventIter<'input> {
                                     anchor: None,
                                     anchor_loc: None,
                                     tag: None,
+                                    tag_loc: None,
                                 },
                                 span,
                             ));
@@ -471,6 +479,7 @@ impl<'input> EventIter<'input> {
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
                         tag: None,
+                        tag_loc: None,
                     },
                     zero_span(item_pos),
                 ));

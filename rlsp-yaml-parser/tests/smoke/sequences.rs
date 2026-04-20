@@ -39,6 +39,7 @@ fn single_entry_sequence_emits_correct_event_order() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -47,6 +48,7 @@ fn single_entry_sequence_emits_correct_event_order() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -71,6 +73,7 @@ fn two_entry_flat_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -79,6 +82,7 @@ fn two_entry_flat_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "bar".into(),
@@ -86,6 +90,7 @@ fn two_entry_flat_sequence() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -137,6 +142,7 @@ fn sequence_empty_item_emits_empty_plain_scalar(#[case] input: &str) {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             } if value.as_ref() == ""
         )),
         "empty sequence item must emit empty plain scalar for input: {input:?}"
@@ -186,12 +192,14 @@ fn two_level_nested_sequence_inline() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::SequenceStart {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -200,6 +208,7 @@ fn two_level_nested_sequence_inline() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::SequenceEnd,
             Event::SequenceEnd,
@@ -509,6 +518,7 @@ fn sequence_in_explicit_document() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
@@ -517,6 +527,7 @@ fn sequence_in_explicit_document() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::Scalar {
                 value: "bar".into(),
@@ -524,6 +535,7 @@ fn sequence_in_explicit_document() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -901,6 +913,7 @@ fn fast_path_plain_scalar_emits_scalar_event() {
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
             } if value.as_ref() == "hello"
         )
     });

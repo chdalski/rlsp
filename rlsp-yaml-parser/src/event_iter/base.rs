@@ -24,6 +24,7 @@ impl<'input> EventIter<'input> {
             pending_collection_anchor: None,
             pending_collection_anchor_loc: None,
             pending_collection_tag: None,
+            pending_collection_tag_loc: None,
             directive_scope: DirectiveScope::default(),
             root_node_emitted: false,
             explicit_key_pending: false,
@@ -49,13 +50,16 @@ impl<'input> EventIter<'input> {
                         // scalar now (e.g. `- !!str` at end of document).
                         if self.pending_tag.is_some() || self.pending_anchor.is_some() {
                             let pa = self.pending_anchor.take();
+                            let pt = self.pending_tag.take();
+                            let tag_loc = pt.as_ref().map(PendingTag::loc);
                             self.queue.push_back((
                                 Event::Scalar {
                                     value: std::borrow::Cow::Borrowed(""),
                                     style: ScalarStyle::Plain,
                                     anchor: pa.map(PendingAnchor::name),
                                     anchor_loc: pa.map(PendingAnchor::loc),
-                                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                    tag: pt.map(PendingTag::into_cow),
+                                    tag_loc,
                                 },
                                 zero_span(pos),
                             ));
@@ -67,13 +71,16 @@ impl<'input> EventIter<'input> {
                         // emit empty value scalar first (consumes any pending
                         // anchor/tag that was on a standalone property line).
                         let pa = self.pending_anchor.take();
+                        let pt = self.pending_tag.take();
+                        let tag_loc = pt.as_ref().map(PendingTag::loc);
                         self.queue.push_back((
                             Event::Scalar {
                                 value: std::borrow::Cow::Borrowed(""),
                                 style: ScalarStyle::Plain,
                                 anchor: pa.map(PendingAnchor::name),
                                 anchor_loc: pa.map(PendingAnchor::loc),
-                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                tag: pt.map(PendingTag::into_cow),
+                                tag_loc,
                             },
                             zero_span(pos),
                         ));
@@ -86,13 +93,16 @@ impl<'input> EventIter<'input> {
                         // both empty scalars now so the mapping is well-formed.
                         if self.complex_key_inline == Some(col) {
                             let pa = self.pending_anchor.take();
+                            let pt = self.pending_tag.take();
+                            let tag_loc = pt.as_ref().map(PendingTag::loc);
                             self.queue.push_back((
                                 Event::Scalar {
                                     value: std::borrow::Cow::Borrowed(""),
                                     style: ScalarStyle::Plain,
                                     anchor: pa.map(PendingAnchor::name),
                                     anchor_loc: pa.map(PendingAnchor::loc),
-                                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                    tag: pt.map(PendingTag::into_cow),
+                                    tag_loc,
                                 },
                                 zero_span(pos),
                             ));
@@ -103,6 +113,7 @@ impl<'input> EventIter<'input> {
                                     anchor: None,
                                     anchor_loc: None,
                                     tag: None,
+                                    tag_loc: None,
                                 },
                                 zero_span(pos),
                             ));
@@ -160,13 +171,16 @@ impl<'input> EventIter<'input> {
                     // emit a null scalar now (e.g. `- !!str` as the last item).
                     if self.pending_tag.is_some() || self.pending_anchor.is_some() {
                         let pa = self.pending_anchor.take();
+                        let pt = self.pending_tag.take();
+                        let tag_loc = pt.as_ref().map(PendingTag::loc);
                         self.queue.push_back((
                             Event::Scalar {
                                 value: std::borrow::Cow::Borrowed(""),
                                 style: ScalarStyle::Plain,
                                 anchor: pa.map(PendingAnchor::name),
                                 anchor_loc: pa.map(PendingAnchor::loc),
-                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                tag: pt.map(PendingTag::into_cow),
+                                tag_loc,
                             },
                             zero_span(pos),
                         ));
@@ -178,13 +192,16 @@ impl<'input> EventIter<'input> {
                     // Consume any pending anchor/tag so standalone properties
                     // at end of doc are properly attached to the empty value.
                     let pa = self.pending_anchor.take();
+                    let pt = self.pending_tag.take();
+                    let tag_loc = pt.as_ref().map(PendingTag::loc);
                     self.queue.push_back((
                         Event::Scalar {
                             value: std::borrow::Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
                             anchor: pa.map(PendingAnchor::name),
                             anchor_loc: pa.map(PendingAnchor::loc),
-                            tag: self.pending_tag.take().map(PendingTag::into_cow),
+                            tag: pt.map(PendingTag::into_cow),
+                            tag_loc,
                         },
                         zero_span(pos),
                     ));
@@ -197,13 +214,16 @@ impl<'input> EventIter<'input> {
                     // emit both empty scalars so the mapping is well-formed.
                     if self.complex_key_inline == Some(col) {
                         let pa = self.pending_anchor.take();
+                        let pt = self.pending_tag.take();
+                        let tag_loc = pt.as_ref().map(PendingTag::loc);
                         self.queue.push_back((
                             Event::Scalar {
                                 value: std::borrow::Cow::Borrowed(""),
                                 style: ScalarStyle::Plain,
                                 anchor: pa.map(PendingAnchor::name),
                                 anchor_loc: pa.map(PendingAnchor::loc),
-                                tag: self.pending_tag.take().map(PendingTag::into_cow),
+                                tag: pt.map(PendingTag::into_cow),
+                                tag_loc,
                             },
                             zero_span(pos),
                         ));
@@ -214,6 +234,7 @@ impl<'input> EventIter<'input> {
                                 anchor: None,
                                 anchor_loc: None,
                                 tag: None,
+                                tag_loc: None,
                             },
                             zero_span(pos),
                         ));
@@ -285,13 +306,16 @@ impl<'input> EventIter<'input> {
                 };
                 let (value, chomp, span) = result?;
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Literal(chomp),
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     span,
                 )))
@@ -305,13 +329,16 @@ impl<'input> EventIter<'input> {
                 };
                 let (value, chomp, span) = result?;
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Folded(chomp),
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     span,
                 )))
@@ -323,13 +350,16 @@ impl<'input> EventIter<'input> {
                     return Ok(None);
                 };
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::SingleQuoted,
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     span,
                 )))
@@ -375,13 +405,16 @@ impl<'input> EventIter<'input> {
                     }
                 }
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::DoubleQuoted,
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     span,
                 )))
@@ -399,13 +432,16 @@ impl<'input> EventIter<'input> {
                     return Err(e);
                 }
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Plain,
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     span,
                 )))

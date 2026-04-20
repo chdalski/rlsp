@@ -204,8 +204,10 @@ impl<'input> EventIter<'input> {
         // Seeded from any block-context tag that was pending when this flow
         // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before
         // the `[` is dispatched to handle_flow_collection).
+        let pt_seed = self.pending_tag.take();
+        let mut pending_flow_tag_loc: Option<Span> = pt_seed.as_ref().map(PendingTag::loc);
         let mut pending_flow_tag: Option<std::borrow::Cow<'input, str>> =
-            self.pending_tag.take().map(PendingTag::into_cow);
+            pt_seed.map(PendingTag::into_cow);
 
         // Re-sync `cur_content` / `cur_base_pos` from the buffer.
         // Returns false when the buffer is empty (EOF mid-flow).
@@ -422,6 +424,7 @@ impl<'input> EventIter<'input> {
                             anchor: pending_flow_anchor.take(),
                             anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
+                            tag_loc: pending_flow_tag_loc.take(),
                             style: CollectionStyle::Flow,
                         },
                         open_span,
@@ -447,6 +450,7 @@ impl<'input> EventIter<'input> {
                             anchor: pending_flow_anchor.take(),
                             anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
+                            tag_loc: pending_flow_tag_loc.take(),
                             style: CollectionStyle::Flow,
                         },
                         open_span,
@@ -719,6 +723,7 @@ impl<'input> EventIter<'input> {
                             anchor: pending_flow_anchor.take(),
                             anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
+                            tag_loc: pending_flow_tag_loc.take(),
                         },
                         zero_span(empty_pos),
                     ));
@@ -912,6 +917,7 @@ impl<'input> EventIter<'input> {
                         anchor: pending_flow_anchor.take(),
                         anchor_loc: pending_flow_anchor_loc.take(),
                         tag: pending_flow_tag.take(),
+                        tag_loc: pending_flow_tag_loc.take(),
                     },
                     span,
                 ));
@@ -1112,6 +1118,7 @@ impl<'input> EventIter<'input> {
                                                 anchor: pending_flow_anchor.take(),
                                                 anchor_loc: pending_flow_anchor_loc.take(),
                                                 tag: pending_flow_tag.take(),
+                                                tag_loc: pending_flow_tag_loc.take(),
                                             },
                                             zero_span(key_pos),
                                         ));
@@ -1152,6 +1159,7 @@ impl<'input> EventIter<'input> {
                                             anchor: None,
                                             anchor_loc: None,
                                             tag: None,
+                                            tag_loc: None,
                                             style: CollectionStyle::Flow,
                                         },
                                         zero_span(colon_pos),
@@ -1208,8 +1216,17 @@ impl<'input> EventIter<'input> {
                                     return StepResult::Yield(Err(e));
                                 }
                             };
+                        let tag_token_bytes = 1 + advance_past_bang;
+                        pending_flow_tag_loc = Some(Span {
+                            start: bang_pos,
+                            end: Pos {
+                                byte_offset: bang_pos.byte_offset + tag_token_bytes,
+                                line: bang_pos.line,
+                                column: bang_pos.column + tag_token_bytes,
+                            },
+                        });
                         pending_flow_tag = Some(resolved_flow_tag);
-                        pos_in_line += 1 + advance_past_bang;
+                        pos_in_line += tag_token_bytes;
                         // Skip any whitespace after the tag.
                         while pos_in_line < cur_content.len() {
                             match cur_content[pos_in_line..].chars().next() {
@@ -1528,6 +1545,7 @@ impl<'input> EventIter<'input> {
                                 anchor: pending_flow_anchor.take(),
                                 anchor_loc: pending_flow_anchor_loc.take(),
                                 tag: pending_flow_tag.take(),
+                                tag_loc: pending_flow_tag_loc.take(),
                             },
                             scalar_span,
                         ));
@@ -1615,6 +1633,7 @@ impl<'input> EventIter<'input> {
             let mapping_anchor = self.pending_collection_anchor.take();
             let mapping_anchor_loc = self.pending_collection_anchor_loc.take();
             let mapping_tag = self.pending_collection_tag.take();
+            let mapping_tag_loc = self.pending_collection_tag_loc.take();
             events.insert(
                 0,
                 (
@@ -1622,6 +1641,7 @@ impl<'input> EventIter<'input> {
                         anchor: mapping_anchor,
                         anchor_loc: mapping_anchor_loc,
                         tag: mapping_tag,
+                        tag_loc: mapping_tag_loc,
                         style: crate::event::CollectionStyle::Block,
                     },
                     zero_span(first_line_pos),

@@ -6,6 +6,10 @@ use crate::pos::{Pos, Span};
 use std::borrow::Cow;
 
 /// Outcome of one state-machine step inside [`crate::EventIter::next`].
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Yield carries Event<'input> which grows with each new span field; boxing would require widespread call-site changes for an internal type"
+)]
 pub enum StepResult<'input> {
     /// The step pushed to `queue` or changed state; loop again to drain.
     Continue,
@@ -120,14 +124,20 @@ impl<'input> PendingAnchor<'input> {
 ///   annotates the key scalar, not the enclosing mapping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingTag<'input> {
-    Standalone(Cow<'input, str>),
-    Inline(Cow<'input, str>),
+    Standalone(Cow<'input, str>, Span),
+    Inline(Cow<'input, str>, Span),
 }
 
 impl<'input> PendingTag<'input> {
     pub fn into_cow(self) -> Cow<'input, str> {
         match self {
-            Self::Standalone(c) | Self::Inline(c) => c,
+            Self::Standalone(c, _) | Self::Inline(c, _) => c,
+        }
+    }
+
+    pub const fn loc(&self) -> Span {
+        match self {
+            Self::Standalone(_, s) | Self::Inline(_, s) => *s,
         }
     }
 }
@@ -240,19 +250,74 @@ mod tests {
         assert_eq!(a.loc(), span);
     }
 
+    fn dummy_span() -> Span {
+        Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 1,
+                line: 1,
+                column: 1,
+            },
+        }
+    }
+
     // T-1: Standalone variant carries the tag string.
     #[test]
     fn pending_tag_standalone_carries_value() {
-        let tag = PendingTag::Standalone(Cow::Borrowed("tag:yaml.org,2002:str"));
-        assert!(matches!(&tag, PendingTag::Standalone(c) if c.as_ref() == "tag:yaml.org,2002:str"));
+        let tag = PendingTag::Standalone(Cow::Borrowed("tag:yaml.org,2002:str"), dummy_span());
+        assert!(
+            matches!(&tag, PendingTag::Standalone(c, _) if c.as_ref() == "tag:yaml.org,2002:str")
+        );
         assert_eq!(tag.into_cow().as_ref(), "tag:yaml.org,2002:str");
     }
 
     // T-2: Inline variant carries the tag string.
     #[test]
     fn pending_tag_inline_carries_value() {
-        let tag = PendingTag::Inline(Cow::Borrowed("!mytag"));
-        assert!(matches!(&tag, PendingTag::Inline(c) if c.as_ref() == "!mytag"));
+        let tag = PendingTag::Inline(Cow::Borrowed("!mytag"), dummy_span());
+        assert!(matches!(&tag, PendingTag::Inline(c, _) if c.as_ref() == "!mytag"));
         assert_eq!(tag.into_cow().as_ref(), "!mytag");
+    }
+
+    // TL-U1: Standalone variant loc() returns the stored span.
+    #[test]
+    fn pending_tag_standalone_loc_returns_span() {
+        let span = Span {
+            start: Pos {
+                byte_offset: 5,
+                line: 2,
+                column: 3,
+            },
+            end: Pos {
+                byte_offset: 12,
+                line: 2,
+                column: 10,
+            },
+        };
+        let tag = PendingTag::Standalone(Cow::Borrowed("!!str"), span);
+        assert_eq!(tag.loc(), span);
+    }
+
+    // TL-U2: Inline variant loc() returns the stored span.
+    #[test]
+    fn pending_tag_inline_loc_returns_span() {
+        let span = Span {
+            start: Pos {
+                byte_offset: 10,
+                line: 3,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 17,
+                line: 3,
+                column: 7,
+            },
+        };
+        let tag = PendingTag::Inline(Cow::Borrowed("!mytag"), span);
+        assert_eq!(tag.loc(), span);
     }
 }

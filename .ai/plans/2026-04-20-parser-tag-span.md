@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -95,27 +95,29 @@ needed.
 
 ## Steps
 
-- [ ] Task 1: extend event stream with tag_loc
+- [x] Task 1: extend event stream with tag_loc
 - [ ] Task 2: extend AST nodes with tag_loc
 
 ## Tasks
 
 ### Task 1: Extend the event stream with tag_loc
 
-Add `tag_loc: Option<Span>` to `Event::Scalar`,
+Committed as `21456579e7cf5ef230893d9dd37eb0bc50646620` (may be
+superseded by follow-up amend for SHA recording). Add
+`tag_loc: Option<Span>` to `Event::Scalar`,
 `Event::MappingStart`, and `Event::SequenceStart`. Capture the
 tag span in `event_iter/step.rs` at the `scan_tag(…, bang_pos)`
 call site, carry it through `PendingTag`, and populate the new
 event field when the pending tag is consumed by the next node
 event.
 
-- [ ] Add `tag_loc: Option<Span>` field to `Event::Scalar`,
+- [x] Add `tag_loc: Option<Span>` field to `Event::Scalar`,
       `Event::MappingStart`, `Event::SequenceStart` in `event.rs`,
       including rustdoc: `Some(span)` when `tag` is `Some`; `None`
       otherwise; span covers the leading `!` through the last byte
       of the tag token (same semantics as `Event::Alias.loc`
       covering `*name`).
-- [ ] Extend `PendingTag::Standalone` and `PendingTag::Inline` to
+- [x] Extend `PendingTag::Standalone` and `PendingTag::Inline` to
       carry the tag's `Span` in addition to the resolved `Cow`.
       Update the existing `PendingTag::into_cow()` accessor and
       add a `PendingTag::loc()` accessor returning the span. Two
@@ -124,7 +126,7 @@ event.
       (`Standalone { tag: Cow, loc: Span }`). Match whichever
       shape the existing `PendingAnchor` retrofit chose for
       consistency — read `state.rs` at task start and mirror.
-- [ ] Capture the tag span at the `!` recognition site in
+- [x] Capture the tag span at the `!` recognition site in
       `event_iter/step.rs` (around line 424, where
       `scan_tag(after_bang, tag_start, bang_pos)` is called).
       `bang_pos` is already the `Pos` of the `!` byte; the total
@@ -135,13 +137,13 @@ event.
       helper the `anchor_loc` retrofit used — matching the pattern
       for consistency. No changes to `scan_tag` in `properties.rs`
       are required.
-- [ ] Populate `tag_loc` on every node event that consumes a
+- [x] Populate `tag_loc` on every node event that consumes a
       pending tag. Call sites in `event_iter/step.rs` that read
       `self.pending_tag.take().map(PendingTag::into_cow)` also
       read the matching `.loc()` and emit it on the event.
       Handle the `pending_collection_tag` slot symmetrically
       (mirroring `pending_collection_anchor_loc`).
-- [ ] Unit tests in `event_iter` covering these shapes (one
+- [x] Unit tests in `event_iter` covering these shapes (one
       rstest case per shape, named per lang-rust-testing.md):
       primary shorthand before a scalar (`key: !!int 42`);
       primary shorthand before a block mapping (`!!map\nk: v`);
@@ -153,15 +155,15 @@ event.
       (`!!map {k: v}`); tag on a mapping key scalar (`!!str key:
       value`); UTF-8 tag handle content (verify span math on
       multi-byte bytes).
-- [ ] Invariant test: for every event produced by the parser on
+- [x] Invariant test: for every event produced by the parser on
       each yaml-test-suite corpus input,
       `event.tag.is_some() == event.tag_loc.is_some()`. One test
       function iterating the full corpus. (Standing team law —
       corpus mandatory.)
-- [ ] `cargo test -p rlsp-yaml-parser` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
-- [ ] The workspace still compiles. Consumers that destructure
+- [x] `cargo test -p rlsp-yaml-parser` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
+- [x] The workspace still compiles. Consumers that destructure
       `Event::*` with `..` continue to work; exhaustive
       destructures must add `tag_loc`.
 

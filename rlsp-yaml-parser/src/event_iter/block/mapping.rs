@@ -528,18 +528,22 @@ impl<'input> EventIter<'input> {
                 } else {
                     (None, None)
                 };
-            let mapping_tag = self.pending_collection_tag.take().or_else(|| {
-                if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
-                    self.pending_tag.take().map(PendingTag::into_cow)
+            let (mapping_tag, mapping_tag_loc) =
+                if let Some(tag) = self.pending_collection_tag.take() {
+                    (Some(tag), self.pending_collection_tag_loc.take())
+                } else if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
+                    let pt = self.pending_tag.take();
+                    let loc = pt.as_ref().map(PendingTag::loc);
+                    (pt.map(PendingTag::into_cow), loc)
                 } else {
-                    None
-                }
-            });
+                    (None, None)
+                };
             self.queue.push_back((
                 Event::MappingStart {
                     anchor: mapping_anchor,
                     anchor_loc: mapping_anchor_loc,
                     tag: mapping_tag,
+                    tag_loc: mapping_tag_loc,
                     style: CollectionStyle::Block,
                 },
                 zero_span(key_pos),
@@ -579,13 +583,16 @@ impl<'input> EventIter<'input> {
             if in_key_phase {
                 let pos = self.lexer.current_pos();
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 self.queue.push_back((
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     zero_span(pos),
                 ));
@@ -627,13 +634,16 @@ impl<'input> EventIter<'input> {
         if has_complex_key_inline {
             let pos = self.lexer.current_pos();
             let pa = self.pending_anchor.take();
+            let pt = self.pending_tag.take();
+            let tag_loc = pt.as_ref().map(PendingTag::loc);
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
                     anchor: pa.map(PendingAnchor::name),
                     anchor_loc: pa.map(PendingAnchor::loc),
-                    tag: self.pending_tag.take().map(PendingTag::into_cow),
+                    tag: pt.map(PendingTag::into_cow),
+                    tag_loc,
                 },
                 zero_span(pos),
             ));
@@ -665,6 +675,7 @@ impl<'input> EventIter<'input> {
                     anchor: null_anchor,
                     anchor_loc: null_anchor_loc,
                     tag: None,
+                    tag_loc: None,
                 },
                 zero_span(pos),
             ));
@@ -718,13 +729,16 @@ impl<'input> EventIter<'input> {
                 key_span,
             } => {
                 let pa = self.pending_anchor.take();
+                let pt = self.pending_tag.take();
+                let tag_loc = pt.as_ref().map(PendingTag::loc);
                 self.queue.push_back((
                     Event::Scalar {
                         value: key_value,
                         style: key_style,
                         anchor: pa.map(PendingAnchor::name),
                         anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: self.pending_tag.take().map(PendingTag::into_cow),
+                        tag: pt.map(PendingTag::into_cow),
+                        tag_loc,
                     },
                     key_span,
                 ));

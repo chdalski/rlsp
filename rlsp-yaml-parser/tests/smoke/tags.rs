@@ -797,3 +797,565 @@ fn inline_tag_and_anchor_on_same_scalar_both_attached() {
         "scalar must carry both tag:yaml.org,2002:str and anchor a"
     );
 }
+
+// -----------------------------------------------------------------------
+// Group TL: tag_loc span correctness
+// -----------------------------------------------------------------------
+
+// TL-1: Inline shorthand tag on scalar — tag_loc covers from `!` through last byte of token.
+#[test]
+fn tag_loc_inline_shorthand_on_scalar() {
+    // `!!str hello\n` — `!!str` is 5 bytes at byte 0, col 0, line 1.
+    let items = parse_to_vec("!!str hello\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "inline tag on scalar must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(loc, expected, "tag_loc must cover `!!str` (5 bytes)");
+    }
+}
+
+// TL-2: Verbatim tag on scalar — tag_loc covers `!<URI>` including angle brackets.
+#[test]
+fn tag_loc_verbatim_tag_on_scalar() {
+    // `!<tag:yaml.org,2002:str> hello\n` — 24 bytes: `!` + `<tag:yaml.org,2002:str>`.
+    // `<tag:yaml.org,2002:str>` = 23 chars, total token = 24 bytes.
+    let items = parse_to_vec("!<tag:yaml.org,2002:str> hello\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "verbatim tag on scalar must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        assert_eq!(loc.start.byte_offset, 0, "tag_loc must start at `!`");
+        assert_eq!(
+            loc.end.byte_offset, 24,
+            "tag_loc must end after `>` of verbatim tag (24 bytes)"
+        );
+    }
+}
+
+// TL-3: Standalone tag on scalar — tag_loc points to tag token on its own line.
+#[test]
+fn tag_loc_standalone_tag_on_scalar() {
+    // `!!str\nhello\n` — `!!str` at byte 0, col 0, line 1; 5 bytes.
+    let items = parse_to_vec("!!str\nhello\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "standalone tag on scalar must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "tag_loc for standalone `!!str` must cover 5 bytes"
+        );
+    }
+}
+
+// TL-4: Standalone tag on block sequence — SequenceStart carries tag_loc.
+#[test]
+fn tag_loc_standalone_tag_on_block_sequence() {
+    // `!!seq\n- a\n` — `!!seq` at byte 0, 5 bytes.
+    let items = parse_to_vec("!!seq\n- a\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::SequenceStart {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "tagged SequenceStart must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "SequenceStart tag_loc must cover `!!seq` (5 bytes)"
+        );
+    }
+}
+
+// TL-5: Standalone tag on block mapping — MappingStart carries tag_loc.
+#[test]
+fn tag_loc_standalone_tag_on_block_mapping() {
+    // `!!map\nkey: val\n` — `!!map` at byte 0, 5 bytes.
+    let items = parse_to_vec("!!map\nkey: val\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::MappingStart {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "tagged MappingStart must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "MappingStart tag_loc must cover `!!map` (5 bytes)"
+        );
+    }
+}
+
+// TL-6: Inline tag on flow sequence — SequenceStart carries tag_loc.
+#[test]
+fn tag_loc_inline_tag_on_flow_sequence() {
+    // `!!seq [a, b]\n` — `!!seq` at byte 0, 5 bytes.
+    let items = parse_to_vec("!!seq [a, b]\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::SequenceStart {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "flow SequenceStart with tag must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "flow SequenceStart tag_loc must cover `!!seq` (5 bytes)"
+        );
+    }
+}
+
+// TL-7: Inline tag on flow mapping — MappingStart carries tag_loc.
+#[test]
+fn tag_loc_inline_tag_on_flow_mapping() {
+    // `!!map {k: v}\n` — `!!map` at byte 0, 5 bytes.
+    let items = parse_to_vec("!!map {k: v}\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::MappingStart {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "flow MappingStart with tag must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 5,
+                line: 1,
+                column: 5,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "flow MappingStart tag_loc must cover `!!map` (5 bytes)"
+        );
+    }
+}
+
+// TL-8: Inline tag on implicit mapping key scalar — key scalar carries tag_loc.
+#[test]
+fn tag_loc_inline_tag_on_mapping_key_scalar() {
+    // `!!str key: val\n` — tag is inline before the key; tag_loc on key scalar.
+    let items = parse_to_vec("!!str key: val\n");
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "key scalar with inline tag must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        assert_eq!(loc.start.byte_offset, 0, "tag_loc must start at `!`");
+        assert_eq!(
+            loc.end.byte_offset, 5,
+            "tag_loc must end after `!!str` (5 bytes)"
+        );
+    }
+}
+
+// TL-4: Named handle via %TAG directive — tag_loc covers the token on the content line.
+#[test]
+fn tag_loc_named_handle_with_pct_tag_directive() {
+    // `%TAG !h! tag:ex,2026:\n---\n!h!s 42\n`
+    // Line 1: `%TAG !h! tag:ex,2026:\n` = 22 bytes (bytes 0-21)
+    // Line 2: `---\n`                   = 4 bytes  (bytes 22-25)
+    // Line 3: `!h!s 42\n`              starts at byte 26
+    // `!h!s` = 4 bytes → tag_loc = bytes 26..30
+    let input = "%TAG !h! tag:ex,2026:\n---\n!h!s 42\n";
+    let items = parse_to_vec(input);
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(t),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                if t.as_ref() == "tag:ex,2026:s" {
+                    Some(*s)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "named-handle scalar must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        assert_eq!(
+            loc.start.byte_offset, 26,
+            "tag_loc must start at `!` of `!h!s` (byte 26)"
+        );
+        assert_eq!(
+            loc.end.byte_offset, 30,
+            "tag_loc must end after `!h!s` (4 bytes, byte 30)"
+        );
+    }
+}
+
+// TL-9 / TL-11: No tag — tag_loc is None across all node types.
+#[rstest]
+#[case::plain_scalar("plain value\n")]
+#[case::block_sequence("- item\n")]
+#[case::block_mapping("k: v\n")]
+#[case::flow_sequence("[1, 2]\n")]
+#[case::flow_mapping("{k: v}\n")]
+fn tag_loc_none_when_no_tag(#[case] input: &str) {
+    let items = parse_to_vec(input);
+    for (ev, _) in items.iter().filter_map(|r| r.as_ref().ok()) {
+        let tag_loc_val = match ev {
+            Event::Scalar { tag_loc, .. }
+            | Event::SequenceStart { tag_loc, .. }
+            | Event::MappingStart { tag_loc, .. } => Some(tag_loc),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Comment { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::Alias { .. }
+            | Event::SequenceEnd
+            | Event::MappingEnd => None,
+        };
+        if let Some(loc) = tag_loc_val {
+            assert!(
+                loc.is_none(),
+                "untagged node must have tag_loc: None for input {input:?}, got {loc:?}"
+            );
+        }
+    }
+}
+
+// TL-10: tag_loc byte_offset is correct when multi-byte UTF-8 precedes the tag on the line.
+#[test]
+fn tag_loc_utf8_scalar_key_tag_byte_offset() {
+    // `é: !!str val\n` — `é` (U+00E9) is 2 UTF-8 bytes; `: ` is 2 bytes.
+    // `!!str` starts at byte 4, not char-index 3.
+    // tag_loc.start.byte_offset must be 4 (bytes), not 3 (chars).
+    let input = "\u{00e9}: !!str val\n";
+    let items = parse_to_vec(input);
+    let loc_opt = items.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                tag: Some(_),
+                tag_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "tagged scalar after UTF-8 key must have tag_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        assert_eq!(
+            loc.start.byte_offset, 4,
+            "tag_loc.start.byte_offset must be 4 (bytes), not 3 (chars) — é is 2 UTF-8 bytes"
+        );
+        assert_eq!(
+            loc.end.byte_offset, 9,
+            "tag_loc.end.byte_offset must be 9 (byte 4 + 5 bytes for `!!str`)"
+        );
+    }
+}
+
+// TL-10: Invariant — tag.is_some() == tag_loc.is_some() for every event.
+#[test]
+fn tag_loc_invariant_tag_some_iff_loc_some() {
+    let input = "!!str hello\n!!seq\n- a\n!!map\nk: v\n";
+    let events = parse_to_vec(input);
+    for (ev, _) in events.iter().filter_map(|r| r.as_ref().ok()) {
+        let pair = match ev {
+            Event::Scalar { tag, tag_loc, .. }
+            | Event::SequenceStart { tag, tag_loc, .. }
+            | Event::MappingStart { tag, tag_loc, .. } => Some((tag.is_some(), tag_loc.is_some())),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Comment { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::Alias { .. }
+            | Event::SequenceEnd
+            | Event::MappingEnd => None,
+        };
+        if let Some((tag_is_some, tag_loc_is_some)) = pair {
+            assert_eq!(
+                tag_is_some, tag_loc_is_some,
+                "invariant violated: tag.is_some()={tag_is_some} but tag_loc.is_some()={tag_loc_is_some} for event {ev:?}"
+            );
+        }
+    }
+}
+
+// TL-11: Two tagged scalars in same document — each gets its own tag_loc.
+#[test]
+fn tag_loc_two_tagged_scalars_each_gets_own_loc() {
+    // `!!str hello\n!!int 42\n` (two documents since standalone tags + scalars)
+    // Use a mapping to keep both in one document: `a: !!str hello\nb: !!int 42\n`
+    let input = "a: !!str hello\nb: !!int 42\n";
+    let items = parse_to_vec(input);
+    let locs: Vec<Span> = items
+        .iter()
+        .filter_map(|r| {
+            r.as_ref().ok().and_then(|(ev, _)| {
+                if let Event::Scalar {
+                    tag: Some(_),
+                    tag_loc: Some(s),
+                    ..
+                } = ev
+                {
+                    Some(*s)
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+    // `!!str` starts after `a: ` = byte 3; `!!int` starts after `b: ` on line 2.
+    // Line 1: `a: !!str hello\n` = 15 bytes. Line 2 starts at byte 15: `b: !!int 42\n`.
+    // `!!str` at byte 3; `!!int` at byte 15 + 3 = 18.
+    assert_eq!(locs.len(), 2, "must find exactly two tagged scalars");
+    if let [first, second] = locs.as_slice() {
+        assert_eq!(
+            first.start.byte_offset, 3,
+            "first tagged scalar tag_loc starts at byte 3 (`!!str`)"
+        );
+        assert_eq!(
+            first.end.byte_offset, 8,
+            "first tag_loc ends at byte 8 (after `!!str`)"
+        );
+        assert_eq!(
+            second.start.byte_offset, 18,
+            "second tagged scalar tag_loc starts at byte 18 (`!!int`)"
+        );
+        assert_eq!(
+            second.end.byte_offset, 23,
+            "second tag_loc ends at byte 23 (after `!!int`)"
+        );
+    }
+}
+
+// TL-CORPUS: tag.is_some() == tag_loc.is_some() invariant holds across yaml-test-suite.
+#[test]
+fn tag_loc_invariant_corpus_wide() {
+    let suite_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/yaml-test-suite/src");
+    let read_result = std::fs::read_dir(&suite_dir);
+    assert!(
+        read_result.is_ok(),
+        "cannot read yaml-test-suite dir {suite_dir:?}"
+    );
+    let mut file_count = 0u32;
+    for entry in read_result.into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+            continue;
+        }
+        file_count += 1;
+        let read_file = std::fs::read_to_string(&path);
+        assert!(read_file.is_ok(), "cannot read {path:?}");
+        let content = read_file.unwrap_or_default();
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        for (ev, _) in rlsp_yaml_parser::parse_events(&content).filter_map(Result::ok) {
+            let pair = match &ev {
+                Event::Scalar { tag, tag_loc, .. }
+                | Event::SequenceStart { tag, tag_loc, .. }
+                | Event::MappingStart { tag, tag_loc, .. } => {
+                    Some((tag.is_some(), tag_loc.is_some()))
+                }
+                Event::StreamStart
+                | Event::StreamEnd
+                | Event::Comment { .. }
+                | Event::DocumentStart { .. }
+                | Event::DocumentEnd { .. }
+                | Event::Alias { .. }
+                | Event::SequenceEnd
+                | Event::MappingEnd => None,
+            };
+            if let Some((tag_is_some, tag_loc_is_some)) = pair {
+                assert_eq!(
+                    tag_is_some, tag_loc_is_some,
+                    "invariant violated in {file_name}: tag.is_some()={tag_is_some} but tag_loc.is_some()={tag_loc_is_some} for event {ev:?}"
+                );
+            }
+        }
+    }
+    assert!(file_count > 0, "no .yaml files found in {suite_dir:?}");
+}

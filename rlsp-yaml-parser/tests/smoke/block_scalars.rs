@@ -10,6 +10,7 @@ fn literal(value: &str, chomp: Chomp) -> Event<'_> {
         anchor: None,
         anchor_loc: None,
         tag: None,
+        tag_loc: None,
     }
 }
 

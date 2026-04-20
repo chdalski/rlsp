@@ -138,6 +138,9 @@ pub enum Event<'input> {
         /// Verbatim tags (`!<URI>`) borrow from input.  Shorthand tags resolved
         /// via `%TAG` directives or the built-in `!!` default produce owned strings.
         tag: Option<Cow<'input, str>>,
+        /// Source span of the tag token — from `!` through the last byte of the
+        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
+        tag_loc: Option<Span>,
         /// Whether this is a block (`-` indicator) or flow (`[...]`) sequence.
         style: CollectionStyle,
     },
@@ -159,6 +162,9 @@ pub enum Event<'input> {
         ///
         /// See [`SequenceStart::tag`] for resolution semantics.
         tag: Option<Cow<'input, str>>,
+        /// Source span of the tag token — from `!` through the last byte of the
+        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
+        tag_loc: Option<Span>,
         /// Whether this is a block (indentation-based) or flow (`{...}`) mapping.
         style: CollectionStyle,
     },
@@ -185,5 +191,8 @@ pub enum Event<'input> {
         ///
         /// See [`SequenceStart::tag`] for resolution semantics.
         tag: Option<Cow<'input, str>>,
+        /// Source span of the tag token — from `!` through the last byte of the
+        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
+        tag_loc: Option<Span>,
     },
 }

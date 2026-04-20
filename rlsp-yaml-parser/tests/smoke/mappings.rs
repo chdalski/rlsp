@@ -29,7 +29,7 @@ fn single_key_value_pair_emits_correct_event_order() {
         matches!(events.as_slice(), [
                 Event::StreamStart,
                 Event::DocumentStart { explicit: false, .. },
-                Event::MappingStart { anchor: None, anchor_loc: None, tag: None, style: CollectionStyle::Block },
+                Event::MappingStart { anchor: None, anchor_loc: None, tag: None, tag_loc: None, style: CollectionStyle::Block },
                 Event::Scalar { value: k, style: ScalarStyle::Plain, .. },
                 Event::Scalar { value: v, style: ScalarStyle::Plain, .. },
                 Event::MappingEnd,
