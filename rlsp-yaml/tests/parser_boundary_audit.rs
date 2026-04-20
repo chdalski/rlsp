@@ -107,13 +107,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             plan: "retrofit-format-on-type",
         },
     },
-    AllowEntry {
-        file: "decorators/color.rs",
-        func: "find_colors",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-find-colors",
-        },
-    },
     // -----------------------------------------------------------------------
     // Feature-level violators (surfaced during reconciliation)
     // -----------------------------------------------------------------------
@@ -129,16 +122,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "semantic_tokens",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-semantic-tokens",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of find_colors
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "decorators/color.rs",
-        func: "value_start_offset",
-        marker: AllowMarker::HelperOf {
-            root: "find_colors",
         },
     },
     // -----------------------------------------------------------------------

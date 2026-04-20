@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Color, ColorPresentation, Position, Range};
 
 /// A color found at a specific range in the document.
@@ -169,26 +171,20 @@ static NAMED_COLORS: &[(&str, [u8; 3])] = &[
 // Public API
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Scan `text` for color values in YAML value positions and return all matches.
+/// Scan `docs` for color values in YAML value positions and return all matches.
+///
+/// Comments are not represented in the AST, so colors in comments are never
+/// returned (deliberate behavior change from the text-scanning predecessor).
+///
+/// For multi-line scalars, tokens that would straddle a line boundary within
+/// `node.value` are skipped; single-line tokens on any line of a block scalar
+/// are still returned.
 #[must_use]
-pub fn find_colors(text: &str) -> Vec<ColorMatch> {
+pub fn find_colors(docs: &[Document<Span>]) -> Vec<ColorMatch> {
     let mut results = Vec::new();
-
-    for (line_idx, line) in text.lines().enumerate() {
-        // Skip comment-only lines
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') && !looks_like_hex_comment(trimmed) {
-            continue;
-        }
-
-        // Determine the value portion: after first unquoted ':'
-        let value_start = value_start_offset(line);
-        let scan_str = &line[value_start..];
-        let col_offset = value_start;
-
-        scan_line_for_colors(scan_str, line_idx, col_offset, &mut results);
+    for doc in docs {
+        walk_node_value(&doc.root, &mut results);
     }
-
     results
 }
 
@@ -270,49 +266,57 @@ fn hsl_to_u32(v: f32) -> u32 {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Internal helpers
+// AST walk — value-position only
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Return true if a `#`-prefixed token looks like a hex color (3, 6, or 8 hex digits)
-/// rather than a YAML comment line.
-fn looks_like_hex_comment(trimmed: &str) -> bool {
-    let rest = &trimmed[1..]; // skip the leading '#'
-    let hex_len = rest.chars().take_while(char::is_ascii_hexdigit).count();
-    // It's a hex color candidate if immediately after '#' come 3, 6, or 8 hex digits
-    // followed by a non-hex character (or end of string).
-    matches!(hex_len, 3 | 6 | 8)
-        && rest
-            .chars()
-            .nth(hex_len)
-            .is_none_or(|c| !c.is_ascii_hexdigit() && !c.is_alphanumeric())
-}
-
-/// Return the byte offset in `line` where the value portion begins.
-/// For mapping lines (`key: value`), this is after the first `: `.
-/// For other lines (sequence items, bare scalars), it is 0.
-fn value_start_offset(line: &str) -> usize {
-    // Find first ':' not inside quotes followed by space (or end of line)
-    let bytes = line.as_bytes();
-    let mut in_single = false;
-    let mut in_double = false;
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'\'' if !in_double => in_single = !in_single,
-            b'"' if !in_single => in_double = !in_double,
-            b':' if !in_single && !in_double => {
-                let next = bytes.get(i + 1).copied();
-                if next == Some(b' ') || next == Some(b'\t') || next.is_none() {
-                    return i + 1; // include the ':' itself, value starts after
-                }
-            }
-            _ => {}
+/// Walk `node` as a VALUE position, collecting color matches.
+fn walk_node_value(node: &Node<Span>, results: &mut Vec<ColorMatch>) {
+    match node {
+        Node::Scalar { value, loc, .. } => {
+            scan_scalar_for_colors(value, *loc, results);
         }
+        Node::Mapping { entries, .. } => {
+            for (_key, value) in entries {
+                walk_node_value(value, results);
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                walk_node_value(item, results);
+            }
+        }
+        Node::Alias { .. } => {}
     }
-    0
 }
 
-/// Scan `scan_str` (a value portion of a YAML line) for color patterns.
-/// `line_idx` and `col_offset` are used to produce absolute positions.
+/// Scan a scalar's decoded `value` string for color patterns.
+///
+/// `loc` is the source span of the scalar (start column points at the opening
+/// quote character for quoted scalars, or the first content character for plain
+/// scalars). For multi-line block scalars, `node.value` may contain `\n`
+/// characters; tokens that straddle a line boundary are skipped.
+fn scan_scalar_for_colors(value: &str, loc: Span, results: &mut Vec<ColorMatch>) {
+    // Split the value on newlines so each line gets an independent scan.
+    // For single-line scalars this produces exactly one segment.
+    for (segment_idx, segment) in value.split('\n').enumerate() {
+        let line_idx = loc.start.line.saturating_sub(1) + segment_idx;
+        // Column base: first segment starts at loc.start.column; subsequent
+        // segments start at column 0 (block scalar continuation lines).
+        let col_base = if segment_idx == 0 {
+            loc.start.column
+        } else {
+            0
+        };
+        scan_line_for_colors(segment, line_idx, col_base, results);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Line-level scanner (unchanged logic, span-based coordinates)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Scan `scan_str` (a single line of a scalar value) for color patterns.
+/// `line_idx` and `col_offset` are used to produce absolute LSP positions.
 fn scan_line_for_colors(
     scan_str: &str,
     line_idx: usize,
@@ -657,10 +661,15 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 
 #[cfg(test)]
 #[expect(clippy::indexing_slicing, reason = "test code")]
+#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    fn parse_docs(yaml: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(yaml).unwrap()
+    }
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.01
@@ -675,11 +684,13 @@ mod tests {
 
     // Group: find_colors_returns_empty — assert colors.is_empty()
     #[rstest]
-    #[case::invalid_hex_gg("color: #gggggg")]
-    #[case::unknown_named_color("color: notacolor")]
-    #[case::comment_line_skipped("# this is a comment with red")]
+    #[case::invalid_hex_gg("color: #gggggg\n")]
+    #[case::unknown_named_color("color: notacolor\n")]
+    // Comments produce no AST nodes, so no matches — deliberate behavior after AST retrofit.
+    #[case::comment_line_skipped("# this is a comment with red\n")]
     fn find_colors_returns_empty(#[case] text: &str) {
-        let colors = find_colors(text);
+        let docs = parse_docs(text);
+        let colors = find_colors(&docs);
         assert!(colors.is_empty(), "expected no colors for: {text:?}");
     }
 
@@ -687,7 +698,9 @@ mod tests {
 
     #[test]
     fn hex_3_digit_expands_correctly() {
-        let colors = find_colors("color: #fff");
+        // Hex colors must be quoted in YAML — unquoted # is a comment marker.
+        let docs = parse_docs("color: '#fff'\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -702,7 +715,9 @@ mod tests {
 
     #[test]
     fn hex_6_digit_parses_correctly() {
-        let colors = find_colors("color: #FF0000");
+        // Hex colors must be quoted in YAML — unquoted # is a comment marker.
+        let docs = parse_docs("color: '#FF0000'\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -717,7 +732,9 @@ mod tests {
 
     #[test]
     fn hex_8_digit_parses_with_alpha() {
-        let colors = find_colors("color: #00ff00ff");
+        // Hex colors must be quoted in YAML — unquoted # is a comment marker.
+        let docs = parse_docs("color: '#00ff00ff'\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -734,7 +751,8 @@ mod tests {
 
     #[test]
     fn named_color_red_matched() {
-        let colors = find_colors("color: red");
+        let docs = parse_docs("color: red\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -749,7 +767,8 @@ mod tests {
 
     #[test]
     fn named_color_aliceblue_matched() {
-        let colors = find_colors("bg: aliceblue");
+        let docs = parse_docs("bg: aliceblue\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -764,7 +783,8 @@ mod tests {
 
     #[test]
     fn named_color_case_insensitive() {
-        let colors = find_colors("color: RED");
+        let docs = parse_docs("color: RED\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -781,7 +801,8 @@ mod tests {
 
     #[test]
     fn rgb_integer_parses_correctly() {
-        let colors = find_colors("color: rgb(255, 0, 0)");
+        let docs = parse_docs("color: rgb(255, 0, 0)\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -796,7 +817,8 @@ mod tests {
 
     #[test]
     fn rgb_percentage_parses_correctly() {
-        let colors = find_colors("color: rgb(100%, 0%, 0%)");
+        let docs = parse_docs("color: rgb(100%, 0%, 0%)\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -811,7 +833,8 @@ mod tests {
 
     #[test]
     fn rgba_with_alpha_parses_correctly() {
-        let colors = find_colors("color: rgba(0, 0, 0, 0.5)");
+        let docs = parse_docs("color: rgba(0, 0, 0, 0.5)\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -829,7 +852,8 @@ mod tests {
     #[test]
     fn hsl_red_parses_to_red() {
         // hsl(0, 100%, 50%) = red
-        let colors = find_colors("color: hsl(0, 100%, 50%)");
+        let docs = parse_docs("color: hsl(0, 100%, 50%)\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -845,7 +869,8 @@ mod tests {
     #[test]
     fn hsla_semi_transparent_green() {
         // hsla(120, 100%, 50%, 0.5) = semi-transparent green
-        let colors = find_colors("color: hsla(120, 100%, 50%, 0.5)");
+        let docs = parse_docs("color: hsla(120, 100%, 50%, 0.5)\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         let c = &colors[0].color;
         assert!(approx_eq(c.red, 0.0));
@@ -891,7 +916,8 @@ mod tests {
     #[test]
     fn color_in_value_detected_not_in_key() {
         // Key "red:" should not be detected; value "blue" should be
-        let colors = find_colors("red: blue");
+        let docs = parse_docs("red: blue\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -906,18 +932,153 @@ mod tests {
 
     #[test]
     fn hex_color_in_value_detected_despite_hash() {
-        // #hex in a value (not a comment line) should be detected
-        let colors = find_colors("color: #ff0000");
+        // Hex colors must be quoted in YAML — unquoted # is a comment marker.
+        let docs = parse_docs("color: '#ff0000'\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
     }
 
     #[test]
     fn range_positions_correct() {
-        let colors = find_colors("color: red");
+        let docs = parse_docs("color: red\n");
+        let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
         // "color: " is 7 chars, so "red" starts at column 7
         assert_eq!(colors[0].range.start.character, 7);
         assert_eq!(colors[0].range.end.character, 10);
+    }
+
+    // ── Required regression cases ────────────────────────────────────────────
+
+    #[test]
+    fn hex_in_value_position_produces_correct_range() {
+        // Hex must be quoted to avoid YAML treating # as comment.
+        // "color: '#ff0000'" — quoted value; node.loc.start.column = 7 (at the ').
+        // node.value = "#ff0000"; match starts at offset 0 → start_col = 7.
+        // #ff0000 is 7 chars → end_col = 7 + 7 = 14.
+        let docs = parse_docs("color: '#ff0000'\n");
+        let colors = find_colors(&docs);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].range.start.line, 0);
+        assert_eq!(colors[0].range.start.character, 7);
+        assert_eq!(colors[0].range.end.character, 14);
+        assert!(color_eq(
+            &colors[0].color,
+            &Color {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 1.0
+            }
+        ));
+    }
+
+    #[test]
+    fn css_named_color_in_value_position_is_detected() {
+        // "color: blue" — value scalar "blue" at column 7
+        let docs = parse_docs("color: blue\n");
+        let colors = find_colors(&docs);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].range.start.line, 0);
+        assert_eq!(colors[0].range.start.character, 7);
+        assert_eq!(colors[0].range.end.character, 11);
+        assert!(color_eq(
+            &colors[0].color,
+            &Color {
+                red: 0.0,
+                green: 0.0,
+                blue: 1.0,
+                alpha: 1.0
+            }
+        ));
+    }
+
+    #[test]
+    fn quoted_string_color_value_produces_correct_range() {
+        // "color: 'red'" — quoted scalar; node.loc.start.column points at the
+        // opening quote character. node.value = "red" (decoded, no quotes).
+        // Byte offset 0 in node.value → column = opening_quote_col + 0.
+        // Range: start at opening quote, end 3 chars later (length of "red").
+        let docs = parse_docs("color: 'red'\n");
+        let colors = find_colors(&docs);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].range.start.line, 0);
+        // loc.start.column for a single-quoted scalar is at the opening quote
+        assert_eq!(colors[0].range.start.character, 7);
+        assert_eq!(colors[0].range.end.character, 10);
+    }
+
+    #[test]
+    fn hex_color_in_comment_produces_no_match() {
+        // A comment-only document produces zero AST nodes; no colors can match.
+        let docs = parse_docs("# #ff0000\n");
+        let colors = find_colors(&docs);
+        assert!(colors.is_empty(), "comment colors must not be detected");
+    }
+
+    #[test]
+    fn color_pattern_as_mapping_key_is_not_matched() {
+        // "red: true" — key "red" must NOT produce a match; value "true" is not a color.
+        let docs = parse_docs("red: true\n");
+        let colors = find_colors(&docs);
+        assert!(
+            colors.is_empty(),
+            "mapping key color pattern must not be matched; got {colors:?} matches",
+            colors = colors.len()
+        );
+    }
+
+    // ── Additional regression cases ──────────────────────────────────────────
+
+    #[test]
+    fn color_in_sequence_item_is_detected() {
+        let docs = parse_docs("colors:\n  - red\n  - blue\n");
+        let colors = find_colors(&docs);
+        assert_eq!(
+            colors.len(),
+            2,
+            "both sequence item colors must be detected"
+        );
+    }
+
+    #[test]
+    fn freestanding_top_level_scalar_is_scanned() {
+        // A bare document scalar is a value and must be scanned.
+        let docs = parse_docs("red\n");
+        let colors = find_colors(&docs);
+        assert_eq!(colors.len(), 1);
+        assert!(color_eq(
+            &colors[0].color,
+            &Color {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 1.0
+            }
+        ));
+    }
+
+    #[test]
+    fn color_in_nested_mapping_value_is_detected() {
+        let docs = parse_docs("theme:\n  primary: blue\n");
+        let colors = find_colors(&docs);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].range.start.line, 1);
+        assert_eq!(colors[0].range.start.character, 11);
+        assert_eq!(colors[0].range.end.character, 15);
+    }
+
+    #[test]
+    fn multi_line_scalar_with_tokens_on_each_line() {
+        // Block literal scalar with multiple color names on separate lines.
+        // Tokens on single lines are found; none straddle a '\n' boundary.
+        let docs = parse_docs("color: |\n  red\n  blue\n");
+        let colors = find_colors(&docs);
+        assert_eq!(
+            colors.len(),
+            2,
+            "both colors on separate lines must be detected"
+        );
     }
 }

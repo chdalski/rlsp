@@ -1370,7 +1370,8 @@ impl LanguageServer for Backend {
             return Ok(Vec::new());
         };
 
-        let colors = crate::decorators::color::find_colors(&text)
+        let docs = crate::parser::parse_yaml(&text).documents;
+        let colors = crate::decorators::color::find_colors(&docs)
             .into_iter()
             .map(|m| ColorInformation {
                 range: m.range,

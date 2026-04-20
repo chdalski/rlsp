@@ -38,12 +38,6 @@ type: project
   Replacement: add a `documents: Option<&Vec<Document<Span>>>` parameter; use the AST to determine context at the trigger position (mapping vs. sequence context, current indentation level from parent node spans) rather than scanning line text.
   Helpers retired when this retrofit lands: `leading_spaces` (editing/on_type_formatting.rs), `find_mapping_colon` (editing/on_type_formatting.rs).
 
-- **Retrofit `find_colors` to AST-first** — `decorators/color.rs:174`:
-  `pub fn find_colors(text: &str) -> Vec<ColorMatch>`.
-  Violation: splits `text` into lines and scans each line with text patterns to find hex color strings. The parser AST's `Node::Scalar` nodes already carry scalar values and spans.
-  Replacement: add `documents: &[Document<Span>]`; walk the AST for `Node::Scalar` nodes; inspect `value` for color patterns; use `loc` for the result range.
-  Helpers retired when this retrofit lands: `value_start_offset` (decorators/color.rs).
-
 - **Retrofit `folding_ranges` to AST-first** — `analysis/folding.rs:10`:
   `pub fn folding_ranges(text: &str) -> Vec<FoldingRange>`.
   Violation: splits `text` into lines and reconstructs document structure entirely through indentation-based text scanning (`collect_indentation_folds`, `collect_document_section_folds`, `collect_comment_block_folds`). Does not consult the parser AST at all.

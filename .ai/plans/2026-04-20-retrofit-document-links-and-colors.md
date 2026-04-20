@@ -114,7 +114,7 @@ baseline for each task in the handoff.
 ## Steps
 
 - [x] Task 1: retrofit document_links.rs (find_document_links)
-- [ ] Task 2: retrofit color.rs (find_colors)
+- [x] Task 2: retrofit color.rs (find_colors)
 
 ## Tasks
 
@@ -191,12 +191,14 @@ scalar `tag` field.
 
 ### Task 2: Retrofit decorators/color.rs to AST-only
 
-Drop `text: &str`; walk `Node::Scalar` nodes; scan scalar values
+Committed as `d1f5b9f1e99128be16b0feec4a0ba3bdb17348ae` (may be
+superseded by follow-up amend for SHA recording). Drop
+`text: &str`; walk `Node::Scalar` nodes; scan scalar values
 for color patterns; use `node.loc` for result ranges.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn find_colors(docs: &[Document<Span>]) -> Vec<ColorMatch>`.
-- [ ] Implement: walk every `Document<Span>` recursively. For
+- [x] Implement: walk every `Document<Span>` recursively. For
       each `Node::Scalar`, run the existing color-pattern
       scanner (`scan_line_for_colors` or its equivalent — reuse
       the current matching logic) on `node.value`; for each
@@ -206,25 +208,25 @@ for color patterns; use `node.loc` for result ranges.
       scalars: if the match straddles a line boundary, map the
       offset correctly (use the existing `value_start_offset`
       logic replaced by AST coordinates).
-- [ ] Drop comment color scanning (`looks_like_hex_comment`
+- [x] Drop comment color scanning (`looks_like_hex_comment`
       branch). Update any test that asserted a color in a
       comment to instead assert no color match.
-- [ ] Delete `value_start_offset` and `looks_like_hex_comment`
+- [x] Delete `value_start_offset` and `looks_like_hex_comment`
       (if present) from `decorators/color.rs`. Keep the color
       parsing and range construction logic. `scan_line_for_colors`
       may require signature adjustment to take `&str` +
       `Span` instead of `line_idx` + `col_offset` — adapt to the
       new AST-based coordinate system.
-- [ ] Update `rlsp-yaml/src/server.rs` at line ~1371 to pass
+- [x] Update `rlsp-yaml/src/server.rs` at line ~1371 to pass
       `docs.as_deref().unwrap_or(&[])` instead of `&text`.
       Preserve the `color_decorators_enabled` gate and the
       `ColorInformation` mapping.
-- [ ] Update every existing unit test in `decorators/color.rs`
+- [x] Update every existing unit test in `decorators/color.rs`
       (and any integration test) to use the new signature. Parse
       inputs via `rlsp_yaml_parser::load`. No test case may be
       deleted unless supplanted by an equivalent case, EXCEPT
       for comment-scanning tests noted above.
-- [ ] Add rstest regression cases (named): (a) hex color in a
+- [x] Add rstest regression cases (named): (a) hex color in a
       value position produces correct range; (b) CSS named color
       in a value position is detected; (c) quoted string color
       value produces correct range; (d) hex color in a comment
@@ -233,17 +235,17 @@ for color patterns; use `node.loc` for result ranges.
       positions — AST walk naturally excludes them because keys
       are separate `Node::Scalar` entries but the retrofit must
       not accidentally pick them up; regression-gate this).
-- [ ] **Before editing:** confirm `ALLOW_LIST` length is **60**
+- [x] **Before editing:** confirm `ALLOW_LIST` length is **60**
       (after this plan's Task 1) and the set of entries with
       `file: "decorators/color.rs"` matches: `find_colors`,
       `value_start_offset` (2 total). Remove exactly those 2
       entries. After removal, `ALLOW_LIST` length must be
       exactly **58**. Allow-list may shrink only.
-- [ ] Remove the follow-up-queue entry for `find_colors` from
+- [x] Remove the follow-up-queue entry for `find_colors` from
       `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ## Decisions
 
