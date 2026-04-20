@@ -2,94 +2,33 @@
 
 use std::fmt::Write;
 
-use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::{Pos, Span};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::scalar_helpers::{self, PlainScalarKind};
 
-/// Produce a hierarchical list of document symbols for the given YAML text.
+/// Produce a hierarchical list of document symbols for the given YAML documents.
 ///
-/// Returns an empty vector if the text is empty, the AST is unavailable,
-/// or the document contains only comments.
+/// Returns an empty vector if `docs` is empty or every document root is a
+/// non-mapping node (scalar, sequence, alias).
 #[must_use]
-pub fn document_symbols(
-    text: &str,
-    documents: Option<&Vec<Document<Span>>>,
-) -> Vec<DocumentSymbol> {
-    let Some(documents) = documents else {
-        return Vec::new();
-    };
-    if documents.is_empty() {
+pub fn document_symbols(docs: &[Document<Span>]) -> Vec<DocumentSymbol> {
+    if docs.is_empty() {
         return Vec::new();
     }
 
-    let lines: Vec<&str> = text.lines().collect();
-
-    // Split the text into document regions by `---` separators
-    let doc_regions = split_document_regions(&lines);
-
-    doc_regions
-        .iter()
-        .enumerate()
-        .filter_map(|(doc_idx, region)| documents.get(doc_idx).map(|doc| (doc, region)))
-        .flat_map(|(doc, region)| yaml_to_symbols(&doc.root, &lines, region.start_line))
+    docs.iter()
+        .flat_map(|doc| yaml_to_symbols(&doc.root))
         .collect()
 }
 
-/// A region of lines belonging to a single YAML document.
-struct DocRegion {
-    start_line: usize,
-}
-
-/// Split the text into document regions based on `---` separators.
-fn split_document_regions(lines: &[&str]) -> Vec<DocRegion> {
-    let mut regions = Vec::new();
-    let mut current_start = 0;
-    let mut found_first = false;
-
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            if found_first {
-                regions.push(DocRegion {
-                    start_line: current_start,
-                });
-                current_start = i + 1;
-            } else {
-                // First separator — the first document starts at line 0
-                if i > 0 {
-                    regions.push(DocRegion {
-                        start_line: current_start,
-                    });
-                }
-                current_start = i + 1;
-                found_first = true;
-            }
-        }
-    }
-
-    // Add the last (or only) region
-    if regions.is_empty() || current_start <= lines.len() {
-        regions.push(DocRegion {
-            start_line: if regions.is_empty() { 0 } else { current_start },
-        });
-    }
-
-    // If we never found a separator, there's one region starting at line 0
-    if regions.is_empty() {
-        regions.push(DocRegion { start_line: 0 });
-    }
-
-    regions
-}
-
-/// Convert a `Node<Span>` into `DocumentSymbol` objects using the text for ranges.
-fn yaml_to_symbols(node: &Node<Span>, lines: &[&str], base_line: usize) -> Vec<DocumentSymbol> {
+/// Convert a `Node<Span>` into `DocumentSymbol` objects.
+fn yaml_to_symbols(node: &Node<Span>) -> Vec<DocumentSymbol> {
     match node {
         Node::Mapping { entries, .. } => entries
             .iter()
-            .filter_map(|(key, value)| make_symbol(&node_to_string(key), value, lines, base_line))
+            .map(|(key, value)| make_symbol(&node_to_string(key), key, value))
             .collect(),
         Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => Vec::new(),
     }
@@ -100,61 +39,18 @@ fn yaml_to_symbols(node: &Node<Span>, lines: &[&str], base_line: usize) -> Vec<D
     deprecated,
     reason = "DocumentSymbol.deprecated field is required by LSP spec"
 )]
-fn make_symbol(
-    key: &str,
-    value: &Node<Span>,
-    lines: &[&str],
-    search_from: usize,
-) -> Option<DocumentSymbol> {
-    let kind = node_symbol_kind(value);
-    let (key_line, key_col) = find_key_in_lines(key, lines, search_from)?;
+fn make_symbol(key_name: &str, key_node: &Node<Span>, value: &Node<Span>) -> DocumentSymbol {
+    let key_loc = node_loc(key_node);
+    let value_loc = node_loc(value);
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let key_line_u32 = key_line as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let key_col_u32 = key_col as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let key_end_col = (key_col + key.len()) as u32;
-
-    let selection_range = Range::new(
-        Position::new(key_line_u32, key_col_u32),
-        Position::new(key_line_u32, key_end_col),
-    );
-
-    // Determine the end of this symbol's range
-    let end_line = find_value_end_line(lines, key_line);
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_line_u32 = end_line as u32;
-    let end_col = lines.get(end_line).map_or(0, |l| l.len());
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_col_u32 = end_col as u32;
-
-    let range = Range::new(
-        Position::new(key_line_u32, key_col_u32),
-        Position::new(end_line_u32, end_col_u32),
-    );
+    let selection_range = span_to_lsp_range(key_loc);
+    let range = Range::new(pos_to_lsp(key_loc.start), pos_to_lsp(value_loc.end));
 
     let children = match value {
         Node::Mapping { entries, .. } => {
-            let child_start = key_line + 1;
             let child_symbols: Vec<DocumentSymbol> = entries
                 .iter()
-                .filter_map(|(k, v)| make_symbol(&node_to_string(k), v, lines, child_start))
+                .map(|(k, v)| make_symbol(&node_to_string(k), k, v))
                 .collect();
             if child_symbols.is_empty() {
                 None
@@ -163,8 +59,7 @@ fn make_symbol(
             }
         }
         Node::Sequence { items, .. } => {
-            let child_start = key_line + 1;
-            let child_symbols = make_sequence_children(items, lines, child_start);
+            let child_symbols = make_sequence_children(items);
             if child_symbols.is_empty() {
                 None
             } else {
@@ -174,16 +69,16 @@ fn make_symbol(
         Node::Scalar { .. } | Node::Alias { .. } => None,
     };
 
-    Some(DocumentSymbol {
-        name: key.to_string(),
+    DocumentSymbol {
+        name: key_name.to_string(),
         detail: None,
-        kind,
+        kind: node_symbol_kind(value),
         tags: None,
         deprecated: None,
         range,
         selection_range,
         children,
-    })
+    }
 }
 
 /// Create child symbols for sequence items.
@@ -191,64 +86,26 @@ fn make_symbol(
     deprecated,
     reason = "DocumentSymbol.deprecated field is required by LSP spec"
 )]
-fn make_sequence_children(
-    items: &[Node<Span>],
-    lines: &[&str],
-    search_from: usize,
-) -> Vec<DocumentSymbol> {
+fn make_sequence_children(items: &[Node<Span>]) -> Vec<DocumentSymbol> {
     let mut children = Vec::new();
-    let mut line_cursor = search_from;
 
     for (idx, item) in items.iter().enumerate() {
-        // Find the next sequence item marker "- " starting from line_cursor
-        let item_line = find_sequence_item_line(lines, line_cursor);
-        let Some(item_line) = item_line else {
-            continue;
-        };
+        let item_loc = node_loc(item);
 
         let mut name = String::new();
         let _ = write!(name, "[{idx}]");
-        let kind = node_symbol_kind(item);
 
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let item_line_u32 = item_line as u32;
-        let end_line = find_value_end_line(lines, item_line);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let end_line_u32 = end_line as u32;
-        let end_col = lines.get(end_line).map_or(0, |l| l.len());
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let end_col_u32 = end_col as u32;
-
-        let dash_col = lines.get(item_line).and_then(|l| l.find("- ")).unwrap_or(0);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "LSP line/col are u32; always fits"
-        )]
-        let dash_col_u32 = dash_col as u32;
-
-        let range = Range::new(
-            Position::new(item_line_u32, dash_col_u32),
-            Position::new(end_line_u32, end_col_u32),
-        );
-        let selection_range = Range::new(
-            Position::new(item_line_u32, dash_col_u32),
-            Position::new(item_line_u32, dash_col_u32 + 1),
-        );
+        let range = span_to_lsp_range(item_loc);
+        // selection_range is a single character at the item content start (AST-derived).
+        let start = pos_to_lsp(item_loc.start);
+        let sel_end = Position::new(start.line, start.character + 1);
+        let selection_range = Range::new(start, sel_end);
 
         let item_children = match item {
             Node::Mapping { entries, .. } => {
                 let cs: Vec<DocumentSymbol> = entries
                     .iter()
-                    .filter_map(|(k, v)| make_symbol(&node_to_string(k), v, lines, item_line))
+                    .map(|(k, v)| make_symbol(&node_to_string(k), k, v))
                     .collect();
                 if cs.is_empty() { None } else { Some(cs) }
             }
@@ -258,117 +115,40 @@ fn make_sequence_children(
         children.push(DocumentSymbol {
             name,
             detail: None,
-            kind,
+            kind: node_symbol_kind(item),
             tags: None,
             deprecated: None,
             range,
             selection_range,
             children: item_children,
         });
-
-        line_cursor = end_line + 1;
     }
 
     children
 }
 
-/// Find the next line starting with a sequence item marker (`- `).
-fn find_sequence_item_line(lines: &[&str], from: usize) -> Option<usize> {
-    (from..lines.len()).find(|&i| {
-        lines
-            .get(i)
-            .is_some_and(|l| l.trim().starts_with("- ") || l.trim() == "-")
-    })
+/// Return the `Span` for a node.
+const fn node_loc(node: &Node<Span>) -> Span {
+    match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => *loc,
+    }
 }
 
-/// Find the line and column where a key appears in the text.
-fn find_key_in_lines(key: &str, lines: &[&str], from: usize) -> Option<(usize, usize)> {
-    for i in from..lines.len() {
-        let line = lines.get(i)?;
-        let trimmed = line.trim();
-
-        // Skip comments, empty lines, separators
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "..." {
-            continue;
-        }
-
-        // Check for "key:" or "key: value" pattern
-        // Also handle "- key: value" (sequence item with mapping)
-        let search_line = trimmed.strip_prefix("- ").unwrap_or(trimmed);
-
-        if let Some(colon_pos) = find_mapping_colon(search_line) {
-            let found_key = search_line[..colon_pos].trim();
-            if found_key == key {
-                // Calculate the actual column in the original line
-                let offset = line.len() - line.trim_start().len();
-                let prefix = if trimmed.starts_with("- ") {
-                    offset + 2
-                } else {
-                    offset
-                };
-                return Some((i, prefix));
-            }
-        }
-    }
-    None
+/// Convert a parser `Span` (1-based line, 0-based column) to an LSP `Range` (both 0-based).
+fn span_to_lsp_range(span: Span) -> Range {
+    Range::new(pos_to_lsp(span.start), pos_to_lsp(span.end))
 }
 
-/// Find the position of the mapping colon in a YAML line.
-/// Skips colons inside quoted strings.
-fn find_mapping_colon(line: &str) -> Option<usize> {
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    for (i, ch) in line.char_indices() {
-        match ch {
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            ':' if !in_single_quote && !in_double_quote => {
-                let rest = &line[i + 1..];
-                if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Determine the end line for a value that starts on `key_line`.
-/// Walks forward until indentation decreases or end of document region.
-fn find_value_end_line(lines: &[&str], key_line: usize) -> usize {
-    let key_indent = lines
-        .get(key_line)
-        .map_or(0, |l| l.len() - l.trim_start().len());
-
-    let mut last_content_line = key_line;
-
-    for i in (key_line + 1)..lines.len() {
-        let Some(line) = lines.get(i) else {
-            break;
-        };
-        let trimmed = line.trim();
-
-        // Skip empty lines — they don't end a block
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Document separator ends the block
-        if trimmed == "---" || trimmed == "..." {
-            break;
-        }
-
-        let indent = line.len() - line.trim_start().len();
-        if indent <= key_indent {
-            break;
-        }
-
-        last_content_line = i;
-    }
-
-    last_content_line
+/// Convert a parser `Pos` (1-based line, 0-based column) to an LSP `Position` (both 0-based).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "LSP line/col are u32; always fits"
+)]
+fn pos_to_lsp(pos: Pos) -> Position {
+    Position::new(pos.line.saturating_sub(1) as u32, pos.column as u32)
 }
 
 /// Map a `Node<Span>` value to the appropriate `SymbolKind`.
@@ -417,7 +197,7 @@ mod tests {
     fn should_return_symbols_for_flat_mapping() {
         let text = "name: Alice\nage: 30\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 2);
         let name_sym = find_symbol(&symbols, "name").expect("should have 'name' symbol");
@@ -431,7 +211,7 @@ mod tests {
     fn should_return_symbol_with_object_kind_for_mapping() {
         let text = "server:\n  port: 8080\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let server = &symbols[0];
@@ -449,7 +229,7 @@ mod tests {
     fn should_return_symbol_with_array_kind_for_sequence() {
         let text = "items:\n  - one\n  - two\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "items");
@@ -461,7 +241,7 @@ mod tests {
     fn should_return_nested_symbols() {
         let text = "server:\n  host: localhost\n  port: 8080\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let server = &symbols[0];
@@ -477,7 +257,7 @@ mod tests {
     fn should_return_deeply_nested_symbols() {
         let text = "a:\n  b:\n    c: deep\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let a = &symbols[0];
@@ -493,7 +273,7 @@ mod tests {
     fn should_return_correct_symbol_kinds_for_scalar_types() {
         let text = "str_val: hello\nint_val: 42\nbool_val: true\nnull_val: ~\nfloat_val: 3.14\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 5);
         assert_eq!(
@@ -523,7 +303,7 @@ mod tests {
     fn should_return_symbols_for_mixed_types() {
         let text = "name: Alice\naddress:\n  city: Wonderland\nhobbies:\n  - reading\n  - chess\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 3);
         let name = find_symbol(&symbols, "name").expect("name");
@@ -541,17 +321,16 @@ mod tests {
     fn should_return_empty_for_empty_document() {
         let text = "";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert!(symbols.is_empty());
     }
 
-    // Test 9
+    // Test 9 — renamed from should_return_empty_when_ast_is_none
+    // There is no longer an "AST is None" state; the caller passes an empty slice.
     #[test]
-    fn should_return_empty_when_ast_is_none() {
-        let text = "key: [bad";
-        let symbols = document_symbols(text, None);
-
+    fn should_return_empty_for_empty_slice() {
+        let symbols = document_symbols(&[]);
         assert!(symbols.is_empty());
     }
 
@@ -560,7 +339,7 @@ mod tests {
     fn should_return_symbols_for_multi_document_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         let has_doc1 = symbols.iter().any(|s| s.name == "doc1key")
             || symbols.iter().any(|s| {
@@ -583,7 +362,7 @@ mod tests {
     fn should_set_ranges_on_symbols() {
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let sym = &symbols[0];
@@ -596,7 +375,7 @@ mod tests {
     fn should_set_selection_range_to_key_span() {
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let sym = &symbols[0];
@@ -609,7 +388,7 @@ mod tests {
     fn should_handle_sequence_of_mappings() {
         let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1);
         let users = &symbols[0];
@@ -641,7 +420,7 @@ mod tests {
     fn should_return_empty_for_comment_only_document() {
         let text = "# just a comment\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert!(symbols.is_empty());
     }
@@ -651,7 +430,7 @@ mod tests {
     fn should_handle_document_with_only_separator() {
         let text = "---\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         // Should not panic; may return empty or minimal symbols
         let _ = symbols;
@@ -663,40 +442,40 @@ mod tests {
     #[case::scalar_root("just a scalar\n")]
     fn returns_empty_for_non_mapping_root(#[case] text: &str) {
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
         assert!(
             symbols.is_empty(),
             "non-mapping root should produce no symbols, got: {symbols:?}"
         );
     }
 
-    // Test 18 — find_sequence_item_line: bare dash (no space after)
+    // Test 18 — bare dash items produce sequence children without panic
     #[test]
     fn should_produce_sequence_children_for_bare_dash_items() {
         let text = "items:\n  -\n  - two\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         // Should not panic; items symbol should still be produced
         let items = find_symbol(&symbols, "items");
         assert!(items.is_some(), "should have 'items' symbol");
     }
 
-    // Test 19 — node_to_string: integer key
+    // Test 19 — integer-keyed mappings do not panic
     #[test]
     fn should_handle_integer_keyed_mapping() {
         let text = "1: one\n2: two\n";
         let docs = parse_docs(text);
-        // Should not panic even with integer keys
-        let _symbols = document_symbols(text, docs.as_ref());
+        let _symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
     }
 
-    // Test 20 — split_document_regions: content before first ---
+    // Test 20 — renamed from should_include_pre_separator_region_when_content_precedes_first_separator
+    // Validates correct multi-doc handling through AST path (no longer tests split_document_regions).
     #[test]
-    fn should_include_pre_separator_region_when_content_precedes_first_separator() {
+    fn should_return_symbols_from_both_docs_when_content_precedes_separator() {
         let text = "before: separator\n---\nafter: separator\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         let has_before = symbols.iter().any(|s| s.name == "before");
         let has_after = symbols.iter().any(|s| s.name == "after");
@@ -704,12 +483,12 @@ mod tests {
         assert!(has_after, "should have 'after' symbol");
     }
 
-    // Test 21 — make_sequence_children: sequence item with Mapping value
+    // Test 21 — sequence item with Mapping value
     #[test]
     fn should_produce_symbols_for_sequence_of_mappings_with_multiple_keys() {
         let text = "list:\n  - a: 1\n    b: 2\n  - a: 3\n    b: 4\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         let list = find_symbol(&symbols, "list").expect("list symbol");
         assert_eq!(list.kind, SymbolKind::ARRAY);
@@ -722,12 +501,12 @@ mod tests {
         assert!(first_children.iter().any(|c| c.name == "b"));
     }
 
-    // Test 22 — find_value_end_line: value that spans multiple lines
+    // Test 22 — value that spans multiple lines
     #[test]
     fn should_extend_symbol_range_to_last_child_line() {
         let text = "root:\n  child1: a\n  child2: b\n  child3: c\n";
         let docs = parse_docs(text);
-        let symbols = document_symbols(text, docs.as_ref());
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         let root = find_symbol(&symbols, "root").expect("root symbol");
         assert!(
@@ -737,16 +516,127 @@ mod tests {
         );
     }
 
-    // Test 23 — empty documents list
+    // Test 23 — empty documents slice
     #[test]
     fn should_return_empty_for_empty_documents_vec() {
-        let text = "key: value\n";
-        let empty: Vec<Document<Span>> = Vec::new();
-        let symbols = document_symbols(text, Some(&empty));
-
+        let symbols = document_symbols(&[]);
         assert!(
             symbols.is_empty(),
             "empty documents should produce no symbols"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // New rstest regression cases (UT-NEW-A through UT-NEW-D)
+    // -----------------------------------------------------------------------
+
+    // UT-NEW-A: UTF-8 key selection_range covers the full key (codepoint-accurate)
+    #[test]
+    fn utf8_key_selection_range_covers_full_key() {
+        let text = "名前: Alice\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        assert_eq!(symbols.len(), 1, "should have exactly 1 symbol");
+        let sym = &symbols[0];
+        assert_eq!(sym.selection_range.start.character, 0);
+        assert_eq!(
+            sym.selection_range.end.character, 2,
+            "selection_range.end.character should be 2 codepoints (名前 = 2 chars)"
+        );
+    }
+
+    // UT-NEW-B: Deeply nested mapping satisfies range-enclosure invariant at every level
+    #[test]
+    fn deeply_nested_range_enclosure() {
+        let text = "a:\n  b:\n    c:\n      d: leaf\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        assert_eq!(symbols.len(), 1);
+        let a = &symbols[0];
+        assert!(
+            a.range.end.line >= 3,
+            "a.range.end.line should reach last line, got {}",
+            a.range.end.line
+        );
+
+        let b_children = a.children.as_ref().expect("a should have children");
+        let b = find_symbol(b_children, "b").expect("should have 'b'");
+        assert!(
+            b.range.end.line >= 3,
+            "b.range.end.line should reach last line, got {}",
+            b.range.end.line
+        );
+        // Enclosure: a contains b
+        assert!(
+            a.range.end >= b.range.end,
+            "a.range.end {:?} should >= b.range.end {:?}",
+            a.range.end,
+            b.range.end
+        );
+
+        let c_children = b.children.as_ref().expect("b should have children");
+        let c = find_symbol(c_children, "c").expect("should have 'c'");
+        assert!(
+            b.range.end >= c.range.end,
+            "b.range.end {:?} should >= c.range.end {:?}",
+            b.range.end,
+            c.range.end
+        );
+    }
+
+    // UT-NEW-C: Sequence-of-mappings produces [0], [1] children with mapping-key grand-children
+    // and selection_range is a single character at item content start (AST-derived)
+    #[test]
+    fn sequence_of_mappings_indexed_children_with_grandchildren() {
+        let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let users = find_symbol(&symbols, "users").expect("users symbol");
+        assert_eq!(users.kind, SymbolKind::ARRAY);
+        let children = users.children.as_ref().expect("users children");
+        assert_eq!(children.len(), 2, "should have exactly 2 sequence items");
+
+        let item0 = &children[0];
+        assert_eq!(item0.name, "[0]");
+        let item1 = &children[1];
+        assert_eq!(item1.name, "[1]");
+
+        // [0] should have name and age as grand-children
+        let gc0 = item0.children.as_ref().expect("[0] should have children");
+        assert!(gc0.iter().any(|c| c.name == "name"), "[0] missing 'name'");
+        assert!(gc0.iter().any(|c| c.name == "age"), "[0] missing 'age'");
+
+        // [1] should have name as grand-child
+        let gc1 = item1.children.as_ref().expect("[1] should have children");
+        assert!(gc1.iter().any(|c| c.name == "name"), "[1] missing 'name'");
+
+        // selection_range is exactly 1 character wide (item content start, AST-derived)
+        assert_eq!(
+            item0.selection_range.start.line, item0.selection_range.end.line,
+            "selection_range is single-line"
+        );
+        assert_eq!(
+            item0.selection_range.end.character,
+            item0.selection_range.start.character + 1,
+            "selection_range spans exactly 1 character"
+        );
+    }
+
+    // UT-NEW-D: Multi-document YAML produces symbols from every doc, each scoped to its root
+    #[test]
+    fn multi_document_symbols_scoped_per_doc() {
+        let text = "doc1: v1\n---\ndoc2: v2\n---\ndoc3: v3\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let doc1_sym = find_symbol(&symbols, "doc1").expect("should have doc1");
+        let doc3_sym = find_symbol(&symbols, "doc3").expect("should have doc3");
+        assert!(find_symbol(&symbols, "doc2").is_some(), "should have doc2");
+
+        assert_eq!(doc1_sym.range.start.line, 0, "doc1 should start at line 0");
+        assert_eq!(doc3_sym.range.start.line, 4, "doc3 should start at line 4");
     }
 }

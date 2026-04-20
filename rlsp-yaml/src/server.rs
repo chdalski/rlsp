@@ -1284,11 +1284,12 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let Some(text) = text else {
+        let Some(_text) = text else {
             return Ok(None);
         };
 
-        let mut symbols = crate::analysis::symbols::document_symbols(&text, docs.as_ref());
+        let mut symbols =
+            crate::analysis::symbols::document_symbols(docs.as_deref().unwrap_or(&[]));
         let limit = self.get_max_items_computed();
         symbols.truncate(limit);
 

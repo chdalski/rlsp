@@ -68,12 +68,6 @@ type: project
   Replacement: accept `documents: Option<&Vec<Document<Span>>>` (or parse result); walk the AST — `Node::Mapping` entries yield keys with spans, `Node::Scalar` nodes with `anchor`/`tag` fields yield their token spans; comment tokens may need a text carve-out since comments are not in the AST.
   Helpers retired when this retrofit lands: `collect_inline_markers` (analysis/semantic_tokens.rs), `char_col_of` (analysis/semantic_tokens.rs), `find_mapping_colon` (analysis/semantic_tokens.rs).
 
-- **Retrofit `document_symbols` to AST-first** — `analysis/symbols.rs:16`:
-  `pub fn document_symbols(text: &str, documents: Option<&Vec<Document<Span>>>) -> Vec<DocumentSymbol>`.
-  Violation: accepts `documents` but also passes `text` into `split_document_regions` and several line-scanning helpers to reconstruct structure that is already present in the AST nodes and their spans.
-  Replacement: remove `text` parameter; derive all symbol names, ranges, and kinds directly from AST node types and `loc` spans.
-  Helpers retired when this retrofit lands: `split_document_regions` (analysis/symbols.rs), `find_sequence_item_line` (analysis/symbols.rs), `find_value_end_line` (analysis/symbols.rs), `find_mapping_colon` (analysis/symbols.rs).
-
 - **Custom tag type annotations** — RedHat's customTags supports `!include scalar`, `!ref mapping` type annotations. Ours is a plain string allowlist — add type annotation support.
 - **LSP lifecycle test rstest reduction** — ~34 tests in `lsp_lifecycle.rs` (3000 lines) follow repetitive patterns: "unknown doc returns null" (~8), diagnostic suppression (~10), flowStyle severity (3), max_items_computed (8), settings toggles (~5). Parameterize with rstest to reduce ~500-800 lines. Pure refactoring, no behavior change.
 - **`formatIndentSequences` formatter option** — add a `formatIndentSequences: bool` setting (default `true`). When true (default), always produce indented block sequences (`script:\n  - item`). When false, produce indentless sequences (`script:\n- item`). Always normalize — no preserve mode. Formatter currently hardcodes indented style in `formatter.rs:658-669` via `indent()` wrapper.

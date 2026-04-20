@@ -145,13 +145,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             plan: "retrofit-semantic-tokens",
         },
     },
-    AllowEntry {
-        file: "analysis/symbols.rs",
-        func: "document_symbols",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-document-symbols",
-        },
-    },
     // -----------------------------------------------------------------------
     // HelperOf — private helpers of find_document_links
     // -----------------------------------------------------------------------
@@ -416,37 +409,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "find_mapping_colon",
         marker: AllowMarker::HelperOf {
             root: "semantic_tokens",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of document_symbols
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "analysis/symbols.rs",
-        func: "split_document_regions",
-        marker: AllowMarker::HelperOf {
-            root: "document_symbols",
-        },
-    },
-    AllowEntry {
-        file: "analysis/symbols.rs",
-        func: "find_sequence_item_line",
-        marker: AllowMarker::HelperOf {
-            root: "document_symbols",
-        },
-    },
-    AllowEntry {
-        file: "analysis/symbols.rs",
-        func: "find_value_end_line",
-        marker: AllowMarker::HelperOf {
-            root: "document_symbols",
-        },
-    },
-    AllowEntry {
-        file: "analysis/symbols.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf {
-            root: "document_symbols",
         },
     },
     // -----------------------------------------------------------------------

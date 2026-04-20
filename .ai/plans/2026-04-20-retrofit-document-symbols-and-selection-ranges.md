@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -117,23 +117,25 @@ verifies the exact post-edit count in the task handoff.
 
 ## Steps
 
-- [ ] Task 1: retrofit symbols.rs (document_symbols)
+- [x] Task 1: retrofit symbols.rs (document_symbols)
 - [ ] Task 2: retrofit selection.rs (selection_ranges)
 
 ## Tasks
 
 ### Task 1: Retrofit analysis/symbols.rs to AST-only
 
-Drop the `text: &str` parameter from `document_symbols`; derive
+Committed as `329d2b84610aa35c17bf507da69f79dc463d1704` (may be
+superseded by follow-up amend for SHA recording). Drop the
+`text: &str` parameter from `document_symbols`; derive
 all symbol ranges from the AST. Retire the five text-scanning
 private helpers. Update the server call site and all existing
 tests.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn document_symbols(docs: &[Document<Span>]) -> Vec<DocumentSymbol>`.
       Returns empty `Vec` when `docs` is empty. No `Option`
       wrapping — simplify to a slice.
-- [ ] Implement using direct AST walk. For each `Document<Span>`,
+- [x] Implement using direct AST walk. For each `Document<Span>`,
       walk its root: mapping entries produce parent symbols where
       `selection_range` = key `Node::Scalar.loc` (converted to
       LSP `Range`) and `range` = `(key.loc.start, value.loc.end)`.
@@ -145,7 +147,7 @@ tests.
       content rather than the dash — document this as a small
       behavior change in the plan's Decisions if any test
       enforces the dash-column choice).
-- [ ] Delete `split_document_regions`, `find_sequence_item_line`,
+- [x] Delete `split_document_regions`, `find_sequence_item_line`,
       `find_key_in_lines`, `find_mapping_colon`,
       `find_value_end_line`, and the `DocRegion` struct from
       `analysis/symbols.rs`. Note: `find_key_in_lines` has no
@@ -155,22 +157,22 @@ tests.
       verification gate. `yaml_to_symbols`, `make_symbol`,
       `make_sequence_children`, `node_symbol_kind`, and
       `node_to_string` remain but no longer take `lines`.
-- [ ] Update `rlsp-yaml/src/server.rs` at line ~1291 to pass
+- [x] Update `rlsp-yaml/src/server.rs` at line ~1291 to pass
       `docs.as_deref().unwrap_or(&[])` (or equivalent slice
       conversion) without the `&text` argument. Preserve the
       `truncate(limit)` and empty-check short-circuit behavior.
-- [ ] Update all 23 existing unit tests in `analysis/symbols.rs`
+- [x] Update all 23 existing unit tests in `analysis/symbols.rs`
       to use the new signature. Parse test-input strings via
       `rlsp_yaml_parser::load` and pass the resulting slice. No
       test case may be deleted unless supplanted by an equivalent
       case with the new signature.
-- [ ] Adjust tests whose assertions depend on the old text-walk
+- [x] Adjust tests whose assertions depend on the old text-walk
       range semantics (line 11, 12, 22, and any others that
       assert specific `range.end.line` / `selection_range.end.character`
       values). New exact values must come from the AST — update
       assertions to match AST-derived values and document the
       deltas in commit message.
-- [ ] Add rstest regression cases (named per lang-rust-testing.md):
+- [x] Add rstest regression cases (named per lang-rust-testing.md):
       (a) key with UTF-8 characters produces a symbol whose
       `selection_range` covers the full key; (b) deeply-nested
       mapping symbol chain has every level's `range` enclosing its
@@ -178,7 +180,7 @@ tests.
       children each with mapping-key grand-children; (d)
       multi-document YAML produces symbols from every document
       with ranges scoped to each document's root.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length is **74**
+- [x] **Before editing:** confirm `ALLOW_LIST` length is **74**
       and the set of entries with `file: "analysis/symbols.rs"`
       and `marker: TodoRetrofit` or `HelperOf { root:
       "document_symbols" }` matches: `document_symbols`,
@@ -188,11 +190,11 @@ tests.
       `parse_docs` test-fixture entry. After removal,
       `ALLOW_LIST` length must be exactly **69**. Allow-list
       entries may only be removed, never added.
-- [ ] Remove the follow-up-queue entry for `document_symbols` from
+- [x] Remove the follow-up-queue entry for `document_symbols` from
       `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ### Task 2: Retrofit analysis/selection.rs to AST-only
 
