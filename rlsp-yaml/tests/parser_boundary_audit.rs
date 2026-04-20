@@ -104,13 +104,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
     // Feature-level violators (surfaced during reconciliation)
     // -----------------------------------------------------------------------
     AllowEntry {
-        file: "analysis/folding.rs",
-        func: "folding_ranges",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-folding-ranges",
-        },
-    },
-    AllowEntry {
         file: "analysis/semantic_tokens.rs",
         func: "semantic_tokens",
         marker: AllowMarker::TodoRetrofit {
@@ -230,51 +223,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "suggest_values_for_key",
         marker: AllowMarker::HelperOf {
             root: "complete_at",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of folding_ranges
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "collect_indentation_folds",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "collect_document_section_folds",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "collect_comment_block_folds",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "find_last_content_line",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "find_last_content_line_in_range",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/folding.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf {
-            root: "folding_ranges",
         },
     },
     // -----------------------------------------------------------------------

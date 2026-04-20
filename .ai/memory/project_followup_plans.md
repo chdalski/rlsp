@@ -32,12 +32,6 @@ type: project
   Replacement: accept `documents: &[Document<Span>]`; walk the AST by span containment to locate the cursor position; derive key path and context from AST node types and structure instead of line-by-line text scanning.
   Helpers retired when this retrofit lands: `build_key_path` (completion.rs), `build_value_key_path` (completion.rs), `collect_present_keys_at_indent` (completion.rs), `classify_cursor` (completion.rs), `suggest_sibling_keys` (completion.rs), `is_in_sequence_item` (completion.rs), `suggest_keys_for_sequence_item` (completion.rs), `collect_current_sequence_item_keys` (completion.rs), `find_current_item_start` (completion.rs), `find_sequence_indent` (completion.rs), `collect_all_sequence_item_keys` (completion.rs), `collect_sibling_keys` (completion.rs), `find_mapping_colon` (completion.rs), `indentation_level` (completion.rs), `document_range` (completion.rs), `suggest_values_for_key` (completion.rs).
 
-- **Retrofit `folding_ranges` to AST-first** — `analysis/folding.rs:10`:
-  `pub fn folding_ranges(text: &str) -> Vec<FoldingRange>`.
-  Violation: splits `text` into lines and reconstructs document structure entirely through indentation-based text scanning (`collect_indentation_folds`, `collect_document_section_folds`, `collect_comment_block_folds`). Does not consult the parser AST at all.
-  Replacement: accept `documents: Option<&Vec<Document<Span>>>` (or `parse_result`); derive fold regions from the AST's node spans — mappings/sequences fold at their `loc`; multi-document sections fold at `---` markers from document spans. Comment-block folding may retain a text carve-out since comments are not in the AST.
-  Helpers retired when this retrofit lands: `collect_indentation_folds` (analysis/folding.rs), `collect_document_section_folds` (analysis/folding.rs), `collect_comment_block_folds` (analysis/folding.rs), `find_last_content_line` (analysis/folding.rs), `find_last_content_line_in_range` (analysis/folding.rs), `find_mapping_colon` (analysis/folding.rs).
-
 - **Retrofit `semantic_tokens` to AST-first** — `analysis/semantic_tokens.rs:51`:
   `pub fn semantic_tokens(text: &str) -> Vec<SemanticToken>`.
   Violation: iterates `text` line-by-line to find comments, mapping keys, anchors, aliases, and tags via text pattern matching. Does not consult the parser AST.

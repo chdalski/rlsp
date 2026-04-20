@@ -136,7 +136,7 @@ Shrink-only discipline. No new entries in any task.
 ## Steps
 
 - [x] Task 1: retrofit editing/on_type_formatting.rs
-- [ ] Task 2: retrofit analysis/folding.rs
+- [x] Task 2: retrofit analysis/folding.rs
 - [ ] Task 3: retrofit analysis/semantic_tokens.rs
 
 ## Tasks
@@ -203,12 +203,14 @@ handling needed.
 
 ### Task 2: Retrofit analysis/folding.rs to AST + Event::Comment
 
+Committed as `53eca662f112fb453bf558cc406a4caa9d5dc7fa` (may be
+superseded by follow-up amend for SHA recording).
 `folding_ranges` produces fold regions for mappings, sequences,
 document sections, and comment blocks. The first three come from
 the AST (`Node::Mapping.loc`, `Node::Sequence.loc`, `Document.root.loc`);
 comments come from `Event::Comment` in the parser's event stream.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange>`.
       The `text` parameter is retained ONLY to re-parse for
       `Event::Comment` extraction — it is not used for any
@@ -217,7 +219,7 @@ comments come from `Event::Comment` in the parser's event stream.
       narrow purpose. If the event iterator can be obtained
       without re-parsing (e.g. a cached events vector already
       lives in the parse pipeline), prefer that and drop `text`.
-- [ ] Implement: walk every `Document<Span>`; for each
+- [x] Implement: walk every `Document<Span>`; for each
       `Node::Mapping` and `Node::Sequence`, produce a fold spanning
       `loc.start.line..loc.end.line` (0-based after conversion).
       For document-section folds (inputs with multiple
@@ -227,40 +229,40 @@ comments come from `Event::Comment` in the parser's event stream.
       iterator), filter `Event::Comment`, group contiguous
       comments (line N ends where line N+1's comment starts),
       and produce a fold per group of ≥2 lines.
-- [ ] Delete all 6 text-walking helpers from
+- [x] Delete all 6 text-walking helpers from
       `analysis/folding.rs`: `collect_indentation_folds`,
       `collect_document_section_folds`, `collect_comment_block_folds`,
       `find_last_content_line`, `find_last_content_line_in_range`,
       `find_mapping_colon`.
-- [ ] Update the `server.rs` call site for `folding_range` (LSP
+- [x] Update the `server.rs` call site for `folding_range` (LSP
       handler for `textDocument/foldingRange`, around line 905
       pre-retrofit — verify at task start) to pass `docs` and
       `&text`. Preserve the `truncate(limit)` and empty-check
       `Ok(None)` short-circuit.
-- [ ] Update every existing unit test in `analysis/folding.rs`
+- [x] Update every existing unit test in `analysis/folding.rs`
       to use the new signature. Parse via
       `rlsp_yaml_parser::load`. Tests that assert specific line
       numbers for mapping/sequence folds must match AST-derived
       line numbers, which may differ from text-walk derivation
       at exact edge cases — update assertions accordingly.
-- [ ] Verify comment-block fold tests still pass — if the
+- [x] Verify comment-block fold tests still pass — if the
       `Event::Comment` grouping produces different fold boundaries
       from the prior text-walk, update tests with new values and
       document the drift in commit message.
-- [ ] Add 4 rstest regression cases (named): (a) mapping at top
+- [x] Add 4 rstest regression cases (named): (a) mapping at top
       level produces a fold whose range matches its AST `loc`;
       (b) nested mapping produces nested folds; (c) multi-document
       YAML produces one fold per document (plus nested folds);
       (d) contiguous block of ≥2 comments produces exactly one
       comment fold covering all consecutive comment lines.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length = 55 (post
+- [x] **Before editing:** confirm `ALLOW_LIST` length = 55 (post
       Task 1) and the `analysis/folding.rs` scoped entries match
       exactly: `folding_ranges` + 6 HelperOf (enumerated above).
-- [ ] **After editing:** remove exactly those 7 entries.
+- [x] **After editing:** remove exactly those 7 entries.
       `ALLOW_LIST` length = 48.
-- [ ] Remove the `folding_ranges` entry from
+- [x] Remove the `folding_ranges` entry from
       `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes; `cargo clippy --all-targets` zero
+- [x] `cargo test` passes; `cargo clippy --all-targets` zero
       warnings; `cargo fmt --check` clean.
 
 ### Task 3: Retrofit analysis/semantic_tokens.rs to AST + Event::Comment

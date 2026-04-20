@@ -904,8 +904,10 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -914,7 +916,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let mut ranges = crate::analysis::folding::folding_ranges(&text);
+        let mut ranges =
+            crate::analysis::folding::folding_ranges(docs.as_deref().unwrap_or(&[]), &text);
         let limit = self.get_max_items_computed();
         ranges.truncate(limit);
 
