@@ -96,7 +96,7 @@ needed.
 ## Steps
 
 - [x] Task 1: extend event stream with tag_loc
-- [ ] Task 2: extend AST nodes with tag_loc
+- [x] Task 2: extend AST nodes with tag_loc
 
 ## Tasks
 
@@ -169,49 +169,51 @@ event.
 
 ### Task 2: Extend AST nodes with tag_loc
 
-Add `tag_loc: Option<Span>` to `Node::Scalar`, `Node::Mapping`,
+Committed as `0b6f5f942141c305f477985f7ae389b4bcf42ebd` (may be
+superseded by follow-up amend for SHA recording). Add
+`tag_loc: Option<Span>` to `Node::Scalar`, `Node::Mapping`,
 `Node::Sequence`. Populate from the event stream in `loader.rs`.
 Downstream consumers in the workspace must compile.
 
-- [ ] Add `tag_loc: Option<Span>` field to `Node::Scalar`,
+- [x] Add `tag_loc: Option<Span>` field to `Node::Scalar`,
       `Node::Mapping`, `Node::Sequence` in `node.rs` with rustdoc
       matching the event-level semantics.
-- [ ] Update `loader.rs` construction sites (`Node::Scalar { ... }`,
+- [x] Update `loader.rs` construction sites (`Node::Scalar { ... }`,
       `Node::Mapping { ... }`, `Node::Sequence { ... }` literal
       initializers) to read the new `tag_loc` from the event and
       store it on the node.
-- [ ] Update the `loader/reloc.rs` helper if it relocates nodes —
+- [x] Update the `loader/reloc.rs` helper if it relocates nodes —
       `tag_loc` is preserved through reloc the same way
       `anchor_loc` is.
-- [ ] Update all `Node::*` constructor helpers in `node.rs` and
+- [x] Update all `Node::*` constructor helpers in `node.rs` and
       `loader/comments.rs` (and any other file) that build nodes
       with `tag: None` so they initialize `tag_loc: None` too.
-- [ ] Add accessor `Node::tag_loc() -> Option<Span>` mirroring
+- [x] Add accessor `Node::tag_loc() -> Option<Span>` mirroring
       the existing `Node::tag()` and `Node::anchor_loc()`
       accessors.
-- [ ] Verify all destructuring pattern matches across the
+- [x] Verify all destructuring pattern matches across the
       workspace compile. Patterns using `..` continue to work;
       exhaustive patterns must add `tag_loc`.
-- [ ] Loader tests asserting `tag_loc` is populated correctly for
+- [x] Loader tests asserting `tag_loc` is populated correctly for
       these shapes (one rstest case per, named): scalar with
       primary tag; mapping with anchor+tag; sequence with tag;
       tag-less scalar (`tag_loc` is `None`); verbatim tag on a
       scalar; handle-based tag via `%TAG` directive.
-- [ ] Corpus-wide invariant test at the AST level: walk every
+- [x] Corpus-wide invariant test at the AST level: walk every
       node in every document produced by loading each
       yaml-test-suite corpus input; assert
       `node.tag().is_some() == node.tag_loc().is_some()` for
       every node. Mandatory corpus coverage.
-- [ ] Update `rlsp-yaml-parser/docs/architecture.md`: add
+- [x] Update `rlsp-yaml-parser/docs/architecture.md`: add
       `tag_loc` to the `Node<Span>` schema diagram. Update the
       `PendingTag` description to reflect the added span. Update
       the event-level schema wherever those shapes are
       enumerated.
-- [ ] `cargo test` across the workspace passes with zero
+- [x] `cargo test` across the workspace passes with zero
       failures.
-- [ ] `cargo clippy --all-targets` across the workspace passes
+- [x] `cargo clippy --all-targets` across the workspace passes
       with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo fmt --check` passes.
 
 ## Decisions
 

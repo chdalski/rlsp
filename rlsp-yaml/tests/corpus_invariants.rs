@@ -99,6 +99,11 @@ const INVARIANTS: &[Invariant] = &[
         check: check_i5_anchor_loc_invariant,
     },
     Invariant {
+        id: "I6",
+        description: "AST tag_loc invariant: tag().is_some() == tag_loc().is_some() for every node",
+        check: check_i6_tag_loc_invariant,
+    },
+    Invariant {
         id: "I7",
         description: "goto_definition and find_references never panic on corpus files",
         check: check_i6_references_no_panics,
@@ -515,7 +520,51 @@ fn check_i5_node(node: &Node<Span>) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// I6: goto_definition and find_references never panic
+// I6: AST tag_loc invariant
+// ---------------------------------------------------------------------------
+
+fn check_i6_tag_loc_invariant(_path: &Path, text: &str) -> Result<(), String> {
+    let Ok(docs) = rlsp_yaml_parser::loader::load(text) else {
+        return Ok(()); // invalid YAML has no AST to check
+    };
+    for doc in &docs {
+        check_i6_node(&doc.root)?;
+    }
+    Ok(())
+}
+
+fn check_i6_node(node: &Node<Span>) -> Result<(), String> {
+    match node {
+        Node::Scalar { tag, tag_loc, .. }
+        | Node::Mapping { tag, tag_loc, .. }
+        | Node::Sequence { tag, tag_loc, .. } => {
+            if tag.is_some() != tag_loc.is_some() {
+                return Err(format!(
+                    "I6 invariant violated: tag={tag:?} but tag_loc={tag_loc:?}"
+                ));
+            }
+        }
+        Node::Alias { .. } => {}
+    }
+    match node {
+        Node::Mapping { entries, .. } => {
+            for (k, v) in entries {
+                check_i6_node(k)?;
+                check_i6_node(v)?;
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                check_i6_node(item)?;
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// I7: goto_definition and find_references never panic
 // ---------------------------------------------------------------------------
 
 fn check_i6_references_no_panics(path: &Path, text: &str) -> Result<(), String> {
@@ -1187,6 +1236,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -1200,6 +1250,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -1213,6 +1264,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,

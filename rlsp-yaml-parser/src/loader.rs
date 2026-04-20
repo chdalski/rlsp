@@ -418,6 +418,7 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc,
                 tag,
+                tag_loc,
                 ..
             } => {
                 let node = Node::Scalar {
@@ -426,6 +427,7 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.map(str::to_owned),
                     anchor_loc,
                     tag: tag.map(std::borrow::Cow::into_owned),
+                    tag_loc,
                     loc: span,
                     leading_comments: None,
                     trailing_comment: None,
@@ -440,11 +442,13 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc: mapping_anchor_loc,
                 tag,
+                tag_loc: mapping_tag_loc,
                 style,
                 ..
             } => {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = mapping_anchor_loc;
+                let tag_loc = mapping_tag_loc;
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
                 self.depth += 1;
@@ -532,6 +536,7 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.clone(),
                     anchor_loc,
                     tag,
+                    tag_loc,
                     loc: Span {
                         start: span.start,
                         end: end_span.end,
@@ -549,11 +554,13 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc: sequence_anchor_loc,
                 tag,
+                tag_loc: sequence_tag_loc,
                 style,
                 ..
             } => {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = sequence_anchor_loc;
+                let tag_loc = sequence_tag_loc;
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
                 self.depth += 1;
@@ -637,6 +644,7 @@ impl<'opt> LoadState<'opt> {
                     anchor: anchor.clone(),
                     anchor_loc,
                     tag,
+                    tag_loc,
                     loc: Span {
                         start: span.start,
                         end: end_span.end,
@@ -764,6 +772,7 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc,
                 tag,
+                tag_loc,
                 loc,
                 leading_comments,
                 trailing_comment,
@@ -780,6 +789,7 @@ impl<'opt> LoadState<'opt> {
                     anchor,
                     anchor_loc,
                     tag,
+                    tag_loc,
                     loc,
                     leading_comments,
                     trailing_comment,
@@ -791,6 +801,7 @@ impl<'opt> LoadState<'opt> {
                 anchor,
                 anchor_loc,
                 tag,
+                tag_loc,
                 loc,
                 leading_comments,
                 trailing_comment,
@@ -805,6 +816,7 @@ impl<'opt> LoadState<'opt> {
                     anchor,
                     anchor_loc,
                     tag,
+                    tag_loc,
                     loc,
                     leading_comments,
                     trailing_comment,
@@ -868,6 +880,7 @@ const fn empty_scalar() -> Node<Span> {
         anchor: None,
         anchor_loc: None,
         tag: None,
+        tag_loc: None,
         loc: Span {
             start: Pos::ORIGIN,
             end: Pos::ORIGIN,
@@ -924,6 +937,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: Span {
                 start: Pos::ORIGIN,
                 end: Pos::ORIGIN,

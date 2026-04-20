@@ -46,6 +46,9 @@ pub enum Node<Loc = Span> {
         anchor_loc: Option<Loc>,
         /// Tag applied to this node (e.g. `!!str`), if any.
         tag: Option<String>,
+        /// Source span of the tag token — from `!` through the last byte of the tag.
+        /// `Some` when `tag` is `Some`; `None` otherwise.
+        tag_loc: Option<Loc>,
         /// Source span covering this scalar in the input.
         loc: Loc,
         /// Comment lines that appear before this node (e.g. `# note`).
@@ -69,6 +72,9 @@ pub enum Node<Loc = Span> {
         anchor_loc: Option<Loc>,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
         tag: Option<String>,
+        /// Source span of the tag token — from `!` through the last byte of the tag.
+        /// `Some` when `tag` is `Some`; `None` otherwise.
+        tag_loc: Option<Loc>,
         /// Source span from the opening indicator to the last entry.
         loc: Loc,
         /// Comment lines that appear before this node.
@@ -89,6 +95,9 @@ pub enum Node<Loc = Span> {
         anchor_loc: Option<Loc>,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.
         tag: Option<String>,
+        /// Source span of the tag token — from `!` through the last byte of the tag.
+        /// `Some` when `tag` is `Some`; `None` otherwise.
+        tag_loc: Option<Loc>,
         /// Source span from the opening indicator to the last item.
         loc: Loc,
         /// Comment lines that appear before this node.
@@ -132,6 +141,22 @@ impl<Loc> Node<Loc> {
             Self::Scalar { anchor_loc, .. }
             | Self::Mapping { anchor_loc, .. }
             | Self::Sequence { anchor_loc, .. } => *anchor_loc,
+            Self::Alias { .. } => None,
+        }
+    }
+
+    /// Returns the source span of the tag token, if any.
+    ///
+    /// `Some(span)` when `tag()` is `Some`; `None` otherwise.
+    /// Always `None` for [`Node::Alias`].
+    pub const fn tag_loc(&self) -> Option<Loc>
+    where
+        Loc: Copy,
+    {
+        match self {
+            Self::Scalar { tag_loc, .. }
+            | Self::Mapping { tag_loc, .. }
+            | Self::Sequence { tag_loc, .. } => *tag_loc,
             Self::Alias { .. } => None,
         }
     }
@@ -193,6 +218,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -208,6 +234,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# note".to_owned()]),
             trailing_comment: None,
@@ -225,6 +252,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# a".to_owned()]),
             trailing_comment: None,
@@ -235,6 +263,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# b".to_owned()]),
             trailing_comment: None,
@@ -251,6 +280,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# x".to_owned()]),
             trailing_comment: Some("# y".to_owned()),
@@ -277,6 +307,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -292,6 +323,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: Some(vec!["# x".to_owned()]),
             trailing_comment: None,
@@ -358,6 +390,7 @@ mod tests {
             anchor: Some("a".to_owned()),
             anchor_loc: Some(span),
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -374,6 +407,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -404,6 +438,7 @@ mod tests {
             anchor: Some("m".to_owned()),
             anchor_loc: Some(span),
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
@@ -422,10 +457,100 @@ mod tests {
             anchor: Some("s".to_owned()),
             anchor_loc: Some(span),
             tag: None,
+            tag_loc: None,
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
         };
         assert_eq!(node.anchor_loc(), Some(span));
+    }
+
+    // -----------------------------------------------------------------------
+    // TL-NODE: tag_loc() accessor
+    // -----------------------------------------------------------------------
+
+    // TL-NODE-1: tag_loc_accessor_returns_some_for_tagged_scalar
+    #[test]
+    fn tag_loc_accessor_returns_some_for_tagged_scalar() {
+        let span = zero_span();
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!t".to_owned()),
+            tag_loc: Some(span),
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), Some(span));
+    }
+
+    // TL-NODE-2: tag_loc_accessor_returns_none_for_untagged_scalar
+    #[test]
+    fn tag_loc_accessor_returns_none_for_untagged_scalar() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: None,
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), None);
+    }
+
+    // TL-NODE-3: tag_loc_accessor_returns_none_for_alias
+    #[test]
+    fn tag_loc_accessor_returns_none_for_alias() {
+        let node = Node::Alias {
+            name: "x".to_owned(),
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), None);
+    }
+
+    // TL-NODE-4: tag_loc_accessor_returns_some_for_tagged_mapping
+    #[test]
+    fn tag_loc_accessor_returns_some_for_tagged_mapping() {
+        use crate::event::CollectionStyle;
+        let span = zero_span();
+        let node = Node::Mapping {
+            entries: vec![],
+            style: CollectionStyle::Block,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!!map".to_owned()),
+            tag_loc: Some(span),
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), Some(span));
+    }
+
+    // TL-NODE-5: tag_loc_accessor_returns_some_for_tagged_sequence
+    #[test]
+    fn tag_loc_accessor_returns_some_for_tagged_sequence() {
+        use crate::event::CollectionStyle;
+        let span = zero_span();
+        let node = Node::Sequence {
+            items: vec![],
+            style: CollectionStyle::Block,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!!seq".to_owned()),
+            tag_loc: Some(span),
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), Some(span));
     }
 }

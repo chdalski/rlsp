@@ -269,6 +269,14 @@ The invariant `event.anchor.is_some() == event.anchor_loc.is_some()` holds for
 threads `anchor_loc` through to the corresponding AST node field, maintaining
 the same invariant at the AST level: `node.anchor().is_some() == node.anchor_loc().is_some()`.
 
+`PendingTag` carries the resolved tag string and its source `Span` (from `!`
+through the last byte of the tag token). When consumed, the tag string is placed
+in the event's `tag` field and the span in the event's `tag_loc: Option<Span>`
+field. The invariant `event.tag.is_some() == event.tag_loc.is_some()` holds for
+`Event::Scalar`, `Event::MappingStart`, and `Event::SequenceStart`. The loader
+threads `tag_loc` through to the corresponding AST node field, maintaining the
+same invariant at the AST level: `node.tag().is_some() == node.tag_loc().is_some()`.
+
 `PendingAnchor` and `PendingTag` are enums with two variants — `Standalone`
 (the property was on its own line, applies to the next node of any type) and
 `Inline` (the property was inline with key content, applies to the key scalar
@@ -434,9 +442,9 @@ Document<Span>
   explicit_start: bool            -- true when document was introduced with `---`
   explicit_end: bool              -- true when document was closed with `...`
 
-Node<Span>  =  Scalar { value, style, anchor, anchor_loc: Option<Span>, tag, loc, leading_comments: Option<Vec<String>>, trailing_comment }
-             | Mapping { entries: Vec<(Node, Node)>, anchor, anchor_loc: Option<Span>, tag, loc, … }
-             | Sequence { items: Vec<Node>, anchor, anchor_loc: Option<Span>, tag, loc, … }
+Node<Span>  =  Scalar { value, style, anchor, anchor_loc: Option<Span>, tag, tag_loc: Option<Span>, loc, leading_comments: Option<Vec<String>>, trailing_comment }
+             | Mapping { entries: Vec<(Node, Node)>, anchor, anchor_loc: Option<Span>, tag, tag_loc: Option<Span>, loc, … }
+             | Sequence { items: Vec<Node>, anchor, anchor_loc: Option<Span>, tag, tag_loc: Option<Span>, loc, … }
              | Alias { name, loc, … }   -- lossless mode only
 ```
 

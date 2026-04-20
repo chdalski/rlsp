@@ -12,6 +12,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             leading_comments,
             trailing_comment,
             ..
@@ -21,6 +22,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             loc,
             leading_comments,
             trailing_comment,
@@ -31,6 +33,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             leading_comments,
             trailing_comment,
             ..
@@ -40,6 +43,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             loc,
             leading_comments,
             trailing_comment,
@@ -50,6 +54,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             leading_comments,
             trailing_comment,
             ..
@@ -59,6 +64,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
             anchor,
             anchor_loc,
             tag,
+            tag_loc,
             loc,
             leading_comments,
             trailing_comment,
@@ -105,6 +111,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc,
             leading_comments: None,
             trailing_comment: None,
@@ -119,6 +126,7 @@ mod tests {
             anchor: Some("a".to_owned()),
             anchor_loc: Some(span(5)),
             tag: Some("!t".to_owned()),
+            tag_loc: Some(span(6)),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
             trailing_comment: Some("# tc".to_owned()),
@@ -131,12 +139,14 @@ mod tests {
                 anchor,
                 anchor_loc,
                 tag,
+                tag_loc,
                 loc,
                 leading_comments,
                 trailing_comment,
             } => {
                 assert_eq!(loc, span(2));
                 assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
+                assert_eq!(tag_loc, Some(span(6)), "tag_loc must be preserved");
                 assert_eq!(value, "hello");
                 assert_eq!(style, ScalarStyle::Plain);
                 assert_eq!(anchor, Some("a".to_owned()));
@@ -156,6 +166,7 @@ mod tests {
             anchor: Some("m".to_owned()),
             anchor_loc: Some(span(5)),
             tag: Some("!m".to_owned()),
+            tag_loc: Some(span(6)),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
             trailing_comment: Some("# tc".to_owned()),
@@ -192,6 +203,7 @@ mod tests {
             anchor: Some("s".to_owned()),
             anchor_loc: Some(span(5)),
             tag: None,
+            tag_loc: None,
             loc: span(1),
             leading_comments: None,
             trailing_comment: None,
@@ -221,6 +233,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: span(1),
             leading_comments: None,
             trailing_comment: None,
@@ -263,6 +276,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: span(1),
             leading_comments: Some(vec!["# hi".to_owned()]),
             trailing_comment: None,
@@ -279,6 +293,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: span(1),
             leading_comments: None,
             trailing_comment: Some("# tail".to_owned()),
@@ -296,6 +311,7 @@ mod tests {
             anchor: None,
             anchor_loc: None,
             tag: None,
+            tag_loc: None,
             loc: span(1),
             leading_comments: None,
             trailing_comment: None,
@@ -315,6 +331,102 @@ mod tests {
                 }
             }
             _ => panic!("expected Mapping"),
+        }
+    }
+
+    // TL-RELOC: reloc_tag_loc_some_preserved
+    #[test]
+    fn reloc_tag_loc_some_preserved() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!t".to_owned()),
+            tag_loc: Some(span(5)),
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(2));
+        match result {
+            Node::Scalar { tag_loc, loc, .. } => {
+                assert_eq!(loc, span(2));
+                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+            }
+            _ => panic!("expected Scalar"),
+        }
+    }
+
+    // TL-RELOC: reloc_tag_loc_none_preserved
+    #[test]
+    fn reloc_tag_loc_none_preserved() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: None,
+            tag_loc: None,
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(99));
+        match result {
+            Node::Scalar { tag_loc, loc, .. } => {
+                assert_eq!(loc, span(99));
+                assert_eq!(tag_loc, None, "None tag_loc must remain None");
+            }
+            _ => panic!("expected Scalar"),
+        }
+    }
+
+    // TL-RELOC: reloc_mapping_tag_loc_preserved
+    #[test]
+    fn reloc_mapping_tag_loc_preserved() {
+        let node = Node::Mapping {
+            entries: vec![],
+            style: CollectionStyle::Block,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!m".to_owned()),
+            tag_loc: Some(span(5)),
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(3));
+        match result {
+            Node::Mapping { tag_loc, loc, .. } => {
+                assert_eq!(loc, span(3));
+                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+            }
+            _ => panic!("expected Mapping"),
+        }
+    }
+
+    // TL-RELOC: reloc_sequence_tag_loc_preserved
+    #[test]
+    fn reloc_sequence_tag_loc_preserved() {
+        let node = Node::Sequence {
+            items: vec![],
+            style: CollectionStyle::Block,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!s".to_owned()),
+            tag_loc: Some(span(5)),
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(4));
+        match result {
+            Node::Sequence { tag_loc, loc, .. } => {
+                assert_eq!(loc, span(4));
+                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+            }
+            _ => panic!("expected Sequence"),
         }
     }
 }

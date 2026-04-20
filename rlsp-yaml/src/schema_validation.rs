@@ -1292,6 +1292,7 @@ fn validate_mapping(
                 anchor: None,
                 anchor_loc: None,
                 tag: None,
+                tag_loc: None,
                 loc: rlsp_yaml_parser::Span {
                     start: rlsp_yaml_parser::Pos::ORIGIN,
                     end: rlsp_yaml_parser::Pos::ORIGIN,
@@ -1349,6 +1350,7 @@ fn validate_dependencies(
                     anchor: None,
                     anchor_loc: None,
                     tag: None,
+                    tag_loc: None,
                     loc: rlsp_yaml_parser::Span {
                         start: rlsp_yaml_parser::Pos::ORIGIN,
                         end: rlsp_yaml_parser::Pos::ORIGIN,
