@@ -43,7 +43,7 @@ fn bench_completion(c: &mut Criterion) {
     let mut group = c.benchmark_group("completion");
     for (label, pos) in positions {
         group.bench_with_input(BenchmarkId::from_parameter(label), &pos, |b, pos| {
-            b.iter(|| complete_at(&text, Some(&docs), *pos, Some(&schema)));
+            b.iter(|| complete_at(&docs, *pos, Some(&schema)));
         });
     }
     group.finish();

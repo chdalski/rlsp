@@ -805,15 +805,13 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
 
         // Lock ordering: document_store → schema_associations → schema_cache
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
+        let docs = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri);
+            if text.is_none() {
+                return Ok(None);
+            }
+            store.get_documents(&uri).cloned()
         } else {
-            return Ok(None);
-        };
-
-        let Some(text) = text else {
             return Ok(None);
         };
 
@@ -832,7 +830,11 @@ impl LanguageServer for Backend {
                 .and_then(|cache| cache.get(&url).cloned())
         });
 
-        let items = crate::completion::complete_at(&text, docs.as_ref(), position, schema.as_ref());
+        let items = crate::completion::complete_at(
+            docs.as_deref().unwrap_or(&[]),
+            position,
+            schema.as_ref(),
+        );
         if items.is_empty() {
             return Ok(None);
         }

@@ -209,7 +209,7 @@ section on bug-fixing policy.
 ## Steps
 
 - [x] Task 1: AST-first cursor-context substrate
-- [ ] Task 2: Rewire `complete_at`, delete text helpers, shrink allow-list
+- [x] Task 2: Rewire `complete_at`, delete text helpers, shrink allow-list
 - [ ] Task 3: Corpus invariant, memory queue cleanup
 
 ## Tasks
@@ -341,6 +341,8 @@ complete):
 
 ### Task 2: Rewire `complete_at`, delete text helpers, shrink allow-list
 
+Committed as `82a516d` (SHA may be superseded by an amend; the final post-amend SHA is the authoritative record).
+
 Replace the body of `complete_at` so all structural work
 routes through the Task 1 substrate, delete the 16
 text-scanning helpers (and `extract_key`, which is used
@@ -393,7 +395,7 @@ audit green.
 Acceptance criteria (all must hold for Task 2 to be
 complete):
 
-- [ ] `complete_at`'s body reconstructed to branch on
+- [x] `complete_at`'s body reconstructed to branch on
       `locate_cursor`'s `CursorLocation` result:
       - `OutsideAny` → return `Vec::new()`, unless a
         schema is present and the location is
@@ -426,14 +428,14 @@ complete):
         sibling-keys suggestion (if schema present)
         or structural union of sibling keys across
         items (if no schema).
-- [ ] `complete_at`'s signature changed to
+- [x] `complete_at`'s signature changed to
       `(docs: &[Document<Span>], position, schema)`.
       `text: &str` is removed. `Option<&Vec<...>>` is
       replaced with `&[...]`.
-- [ ] `server.rs:835` updated to pass
+- [x] `server.rs:835` updated to pass
       `docs.as_deref().unwrap_or(&[])` — no other
       server changes.
-- [ ] Schema key/value completion plumbing
+- [x] Schema key/value completion plumbing
       (`resolve_schema_path`,
       `schema_key_completions`,
       `schema_value_completions`,
@@ -444,7 +446,7 @@ complete):
       is preserved unchanged — only the calls that
       feed them shift from text-derived paths to
       AST-derived paths.
-- [ ] All 146 existing completion tests pass
+- [x] All 146 existing completion tests pass
       unchanged where they encode correct behavior.
       Tests that encoded a bug in the prior
       implementation are updated to the correct
@@ -452,8 +454,12 @@ complete):
       the Decisions section with the bug description.
       If zero tests are updated, state "no tests
       updated — no bugs surfaced" in the task's
-      completion note.
-- [ ] An integration test added to
+      completion note. **Outcome:** no bugs surfaced;
+      no existing tests were updated. Three tests for
+      retired helpers were removed
+      (`find_mapping_colon_returns_{some_with_key,none}`,
+      `classify_cursor_produces_key_context`).
+- [x] An integration test added to
       `rlsp-yaml/tests/lsp_lifecycle.rs` (or the
       existing completion-oriented integration file
       if one is closer) exercises `complete_at`
@@ -466,12 +472,12 @@ complete):
       specific expected label. This satisfies the
       `integration-testing.md` rule for user-facing
       behavior.
-- [ ] `cargo test -p rlsp-yaml` passes with zero
+- [x] `cargo test -p rlsp-yaml` passes with zero
       failures.
-- [ ] `cargo clippy --all-targets` passes with zero
+- [x] `cargo clippy --all-targets` passes with zero
       warnings across the workspace.
-- [ ] `cargo fmt --check` passes.
-- [ ] Every helper listed in the Context "The 16
+- [x] `cargo fmt --check` passes.
+- [x] Every helper listed in the Context "The 16
       helpers retired" table is deleted from
       `completion.rs` in the same commit, along with
       any `use` imports that become unused.
@@ -480,19 +486,23 @@ complete):
       at the top of the private section (before line
       526) is deleted if it has no remaining
       consumers after helper removal; otherwise left
-      unchanged.
-- [ ] No `#[allow(dead_code)]` or `#[expect(dead_code,
+      unchanged. **Also deleted:** transitively dead
+      `is_document_separator` (orphaned once its
+      callers were retired).
+- [x] No `#[allow(dead_code)]` or `#[expect(dead_code,
       ...)]` attributes are introduced at any point
       during the task — the helpers are deleted, not
       suppressed.
-- [ ] `rlsp-yaml/tests/parser_boundary_audit.rs`
+- [x] `rlsp-yaml/tests/parser_boundary_audit.rs`
       ALLOW_LIST is updated in the same commit:
       the 1 `TodoRetrofit` entry for `complete_at`
       and all 16 `HelperOf { root: "complete_at" }`
       entries (lines ~96–216) are removed. The
-      ALLOW_LIST count drops from 44 entries to 27.
-      The audit test passes end-to-end.
-- [ ] `parser_boundary_audit` test passes in this
+      ALLOW_LIST count drops by 17 (actual
+      baseline/post counts: 52 → 35; the plan's
+      44 → 27 snapshot was stale — the delta of 17
+      is correct). The audit test passes end-to-end.
+- [x] `parser_boundary_audit` test passes in this
       commit — no "DEAD ALLOW-LIST ENTRIES" failure,
       no "BOUNDARY VIOLATION" failure.
 

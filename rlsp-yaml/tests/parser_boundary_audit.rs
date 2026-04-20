@@ -91,131 +91,6 @@ impl fmt::Display for AllowEntry {
 /// Each entry must have an explicit marker. See allow-list discipline comment above.
 const ALLOW_LIST: &[AllowEntry] = &[
     // -----------------------------------------------------------------------
-    // Feature-level violators (original 5)
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "completion.rs",
-        func: "complete_at",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-complete-at",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of complete_at
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "completion.rs",
-        func: "build_key_path",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "build_value_key_path",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "collect_present_keys_at_indent",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "classify_cursor",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "suggest_sibling_keys",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "is_in_sequence_item",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "suggest_keys_for_sequence_item",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "collect_current_sequence_item_keys",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "find_current_item_start",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "find_sequence_indent",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "collect_all_sequence_item_keys",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "collect_sibling_keys",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "indentation_level",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "document_range",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    AllowEntry {
-        file: "completion.rs",
-        func: "suggest_values_for_key",
-        marker: AllowMarker::HelperOf {
-            root: "complete_at",
-        },
-    },
-    // -----------------------------------------------------------------------
     // CarveOut — pre-parse lexical concerns and whitespace
     // -----------------------------------------------------------------------
     AllowEntry {
@@ -303,7 +178,7 @@ const ALLOW_LIST: &[AllowEntry] = &[
     },
     AllowEntry {
         file: "completion.rs",
-        func: "parse_docs",
+        func: "parse",
         marker: AllowMarker::CarveOut {
             reason: "test fixture",
         },
@@ -1014,7 +889,7 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source = "pub fn complete_at(text: &str) -> Vec<Diagnostic> {\n    vec![]\n}";
+        let source = "fn parse(text: &str) -> Vec<Document<Span>> {\n    vec![]\n}";
         let violations = scan_file("completion.rs", source);
         assert_eq!(violations.len(), 1);
 
