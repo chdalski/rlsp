@@ -421,10 +421,10 @@ const ALLOW_LIST: &[AllowEntry] = &[
 
 /// Returns `true` if `line` starts any function declaration: `(pub )?fn <name>`.
 fn is_candidate_fn_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    Regex::new(r"^(?:pub\s+)?fn\s+\w")
-        .unwrap()
-        .is_match(trimmed)
+    static CANDIDATE_FN_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"^(?:pub\s+)?fn\s+\w").unwrap_or_else(|_| unreachable!("static regex is valid"))
+    });
+    CANDIDATE_FN_REGEX.is_match(line.trim_start())
 }
 
 /// Extracts the bare function name from a function declaration line.
@@ -456,13 +456,18 @@ fn extract_fn_name(line: &str) -> Option<&str> {
 /// This preserves the first-parameter anchor: `code_actions(docs: &[…], text: &str, …)`
 /// is NOT detected; `validate_foo(text: &str, …)` IS detected.
 fn has_text_str_param(param_block: &str) -> bool {
-    let re_receiver = Regex::new(r"^\s*&(?:'[a-z_]+\s+)?(?:mut\s+)?self\s*,\s*").unwrap();
-    let stripped = re_receiver.replace(param_block, "");
-    // Use &str\b for the scalar form to avoid matching &str_extra, and
-    // &\[&str\] (no word boundary needed after ]) for the slice form.
-    let re = Regex::new(r"^\s*(?:text|line|lines|content|source|input)\s*:\s*(?:&str\b|&\[&str\])")
-        .unwrap();
-    re.is_match(stripped.as_ref())
+    static SELF_RECEIVER_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"^\s*&(?:'[a-z_]+\s+)?(?:mut\s+)?self\s*,\s*")
+            .unwrap_or_else(|_| unreachable!("static regex is valid"))
+    });
+    static TEXT_PARAM_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        // Use &str\b for the scalar form to avoid matching &str_extra, and
+        // &\[&str\] (no word boundary needed after ]) for the slice form.
+        Regex::new(r"^\s*(?:text|line|lines|content|source|input)\s*:\s*(?:&str\b|&\[&str\])")
+            .unwrap_or_else(|_| unreachable!("static regex is valid"))
+    });
+    let stripped = SELF_RECEIVER_REGEX.replace(param_block, "");
+    TEXT_PARAM_REGEX.is_match(stripped.as_ref())
 }
 
 /// A detected violation: a function whose first parameter matches the text-handling shape.

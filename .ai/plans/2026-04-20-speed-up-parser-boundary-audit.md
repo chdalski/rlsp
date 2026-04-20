@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 # Speed up parser_boundary_audit test
@@ -89,27 +89,29 @@ and the YAGNI principle — no cross-function visibility needed).
 
 ## Steps
 
-- [ ] Re-measure baseline timing to confirm the ~47 s figure on a
+- [x] Re-measure baseline timing to confirm the ~47 s figure on a
   freshly-built test binary
-- [ ] Lift the three regexes into function-local `LazyLock` statics in
+- [x] Lift the three regexes into function-local `LazyLock` statics in
   `parser_boundary_audit.rs`
-- [ ] Run `cargo test -p rlsp-yaml --test parser_boundary_audit` and
+- [x] Run `cargo test -p rlsp-yaml --test parser_boundary_audit` and
   confirm all 47 tests still pass
-- [ ] Measure post-fix timing and confirm the acceptance threshold is met
-- [ ] Run `cargo fmt` and `cargo clippy --all-targets` — zero warnings
+- [x] Measure post-fix timing and confirm the acceptance threshold is met
+- [x] Run `cargo fmt` and `cargo clippy --all-targets` — zero warnings
   required per workspace lints
-- [ ] Commit the change
+- [x] Commit the change
 
 ## Tasks
 
 ### Task 1: Cache the three regexes with `LazyLock`
+
+**Completed** — commit `7b8383fa9781455ef3d6b5a12c0aff702d047442`. Measurements: `parser_boundary_audit` alone dropped from 47.79 s to 0.03 s; full `cargo test` dropped to 2.67 s.
 
 Replace the three `Regex::new(...).unwrap()` calls inside
 `is_candidate_fn_line` and `has_text_str_param` with function-local
 `static RE_*: LazyLock<Regex>` bindings so each pattern compiles once
 per test-binary run instead of once per call.
 
-- [ ] Cache the candidate-fn regex (currently `parser_boundary_audit.rs:425`):
+- [x] Cache the candidate-fn regex (currently `parser_boundary_audit.rs:425`):
 
   ```rust
   fn is_candidate_fn_line(line: &str) -> bool {
@@ -122,47 +124,48 @@ per test-binary run instead of once per call.
   }
   ```
 
-- [ ] Cache the self-receiver regex (currently `parser_boundary_audit.rs:459`):
+- [x] Cache the self-receiver regex (currently `parser_boundary_audit.rs:459`):
 
   ```rust
   static SELF_RECEIVER_REGEX: std::sync::LazyLock<Regex> = ...
       Regex::new(r"^\s*&(?:'[a-z_]+\s+)?(?:mut\s+)?self\s*,\s*")
   ```
 
-- [ ] Cache the text-param regex (currently `parser_boundary_audit.rs:463`):
+- [x] Cache the text-param regex (currently `parser_boundary_audit.rs:463`):
 
   ```rust
   static TEXT_PARAM_REGEX: std::sync::LazyLock<Regex> = ...
       Regex::new(r"^\s*(?:text|line|lines|content|source|input)\s*:\s*(?:&str\b|&\[&str\])")
   ```
 
-- [ ] `has_text_str_param` uses both `SELF_RECEIVER_REGEX` and
+- [x] `has_text_str_param` uses both `SELF_RECEIVER_REGEX` and
   `TEXT_PARAM_REGEX` — both statics live inside that function.
-- [ ] Do not introduce new dependencies (`once_cell`, `lazy_static`,
+- [x] Do not introduce new dependencies (`once_cell`, `lazy_static`,
   `regex_static`, `lazy-regex`). `std::sync::LazyLock` is stable on
   the workspace toolchain.
-- [ ] Do not change any regex pattern text, function signatures, or
+- [x] Do not change any regex pattern text, function signatures, or
   call-site wording — behavior must be identical.
 
 **Acceptance criteria (all must hold):**
 
-- [ ] All 47 tests in
+- [x] All 47 tests in
   `target/debug/deps/parser_boundary_audit-*` pass (46 `detection_tests::*`
   + `parser_boundary_audit`)
-- [ ] The `parser_boundary_audit` test alone
+- [x] The `parser_boundary_audit` test alone
   (`cargo test -p rlsp-yaml --test parser_boundary_audit -- --exact parser_boundary_audit`)
   finishes in **under 500 ms** wall time on the same machine and build
   profile that currently measures ~47 s (a ≥94× speedup; the conservative
   500 ms threshold leaves margin for I/O variance and does not lock in
-  a specific multiple)
-- [ ] Full `cargo test` workspace wall time drops from the pre-change
-  baseline (captured in Step 1) to **under 10 s** on the same machine
-- [ ] No new dependencies in any `Cargo.toml`
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets` reports zero warnings
-- [ ] `git diff --stat rlsp-yaml/tests/parser_boundary_audit.rs` shows a
+  a specific multiple) — **measured: 0.03 s**
+- [x] Full `cargo test` workspace wall time drops from the pre-change
+  baseline (captured in Step 1) to **under 10 s** on the same machine —
+  **measured: 2.67 s**
+- [x] No new dependencies in any `Cargo.toml`
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets` reports zero warnings
+- [x] `git diff --stat rlsp-yaml/tests/parser_boundary_audit.rs` shows a
   small, localized change (the three affected functions only; no
-  unrelated edits)
+  unrelated edits) — **+16/-11 lines, one file**
 
 ## Decisions
 
