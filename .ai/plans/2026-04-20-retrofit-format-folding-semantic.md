@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -135,7 +135,7 @@ Shrink-only discipline. No new entries in any task.
 
 ## Steps
 
-- [ ] Task 1: retrofit editing/on_type_formatting.rs
+- [x] Task 1: retrofit editing/on_type_formatting.rs
 - [ ] Task 2: retrofit analysis/folding.rs
 - [ ] Task 3: retrofit analysis/semantic_tokens.rs
 
@@ -143,23 +143,25 @@ Shrink-only discipline. No new entries in any task.
 
 ### Task 1: Retrofit editing/on_type_formatting.rs to AST-only
 
-Smallest retrofit. `format_on_type` produces a `TextEdit` based on
+Committed as `0d7c06d7935ec743829a9974055d4971d24f2cfd` (may be
+superseded by follow-up amend for SHA recording). Smallest
+retrofit. `format_on_type` produces a `TextEdit` based on
 the trigger character's position — indentation and colon
 detection. AST gives the node spans for context (mapping/sequence,
 current indentation level from parent node spans). No comment
 handling needed.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn format_on_type(docs: &[Document<Span>], position: Position, ch: &str, tab_size: u32) -> Vec<TextEdit>`.
       Returns empty `Vec` when `docs` is empty (no-op formatting,
       matches current behavior when text is empty).
-- [ ] Implement using AST containment: locate the node that
+- [x] Implement using AST containment: locate the node that
       contains the trigger position. Use the node's context
       (mapping key, mapping value, sequence item, scalar) to
       decide indentation. Use the parent node's `loc.start.column`
       (or equivalent) to compute the current indentation level
       instead of counting leading spaces of the previous line.
-- [ ] Keep behavior for triggers after `:` (newline in a
+- [x] Keep behavior for triggers after `:` (newline in a
       mapping value position) and after `-` (newline in a
       sequence-item position). For block-scalar indicators
       (`|`, `>`), preserve the existing extra-indent logic —
@@ -169,34 +171,34 @@ handling needed.
       and `find_prev_non_empty_line` may also be retained as
       pure helpers on strings as long as they don't perform
       structural YAML parsing (they are not allow-listed today).
-- [ ] Delete `leading_spaces` and `find_mapping_colon` from
+- [x] Delete `leading_spaces` and `find_mapping_colon` from
       `editing/on_type_formatting.rs` — the AST supplies
       indentation via `loc.start.column` and colon positions via
       mapping-entry structure.
-- [ ] Update `rlsp-yaml/src/server.rs` at the `format_on_type`
+- [x] Update `rlsp-yaml/src/server.rs` at the `format_on_type`
       call site (search for `on_type_formatting::format_on_type`
       — approximately in the handler registered for
       `textDocument/onTypeFormatting`). Pass
       `docs.as_deref().unwrap_or(&[])` instead of `&text`.
-- [ ] Update every existing unit test in
+- [x] Update every existing unit test in
       `editing/on_type_formatting.rs` to use the new signature.
       Parse inputs via `rlsp_yaml_parser::load`. No test case may
       be deleted unless supplanted by an equivalent case.
-- [ ] Add 3 rstest regression cases (named): (a) newline after `:`
+- [x] Add 3 rstest regression cases (named): (a) newline after `:`
       in a mapping value position produces correct indentation
       derived from parent node's column; (b) newline after `-` in
       a sequence item produces correct indentation; (c) block
       scalar indicator trigger (`|` or `>`) produces the expected
       extra indent.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length = 58 and
+- [x] **Before editing:** confirm `ALLOW_LIST` length = 58 and
       the `editing/on_type_formatting.rs` scoped entries match
       exactly: `format_on_type`, `leading_spaces`,
       `find_mapping_colon` (3 total).
-- [ ] **After editing:** remove exactly those 3 entries.
+- [x] **After editing:** remove exactly those 3 entries.
       `ALLOW_LIST` length = 55.
-- [ ] Remove the `format_on_type` entry from
+- [x] Remove the `format_on_type` entry from
       `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes; `cargo clippy --all-targets` zero
+- [x] `cargo test` passes; `cargo clippy --all-targets` zero
       warnings; `cargo fmt --check` clean.
 
 ### Task 2: Retrofit analysis/folding.rs to AST + Event::Comment

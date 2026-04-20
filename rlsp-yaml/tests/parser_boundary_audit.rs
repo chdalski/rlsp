@@ -100,13 +100,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             plan: "retrofit-complete-at",
         },
     },
-    AllowEntry {
-        file: "editing/on_type_formatting.rs",
-        func: "format_on_type",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-format-on-type",
-        },
-    },
     // -----------------------------------------------------------------------
     // Feature-level violators (surfaced during reconciliation)
     // -----------------------------------------------------------------------
@@ -122,23 +115,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "semantic_tokens",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-semantic-tokens",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of format_on_type
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "editing/on_type_formatting.rs",
-        func: "leading_spaces",
-        marker: AllowMarker::HelperOf {
-            root: "format_on_type",
-        },
-    },
-    AllowEntry {
-        file: "editing/on_type_formatting.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf {
-            root: "format_on_type",
         },
     },
     // -----------------------------------------------------------------------

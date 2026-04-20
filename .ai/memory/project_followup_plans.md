@@ -32,12 +32,6 @@ type: project
   Replacement: accept `documents: &[Document<Span>]`; walk the AST by span containment to locate the cursor position; derive key path and context from AST node types and structure instead of line-by-line text scanning.
   Helpers retired when this retrofit lands: `build_key_path` (completion.rs), `build_value_key_path` (completion.rs), `collect_present_keys_at_indent` (completion.rs), `classify_cursor` (completion.rs), `suggest_sibling_keys` (completion.rs), `is_in_sequence_item` (completion.rs), `suggest_keys_for_sequence_item` (completion.rs), `collect_current_sequence_item_keys` (completion.rs), `find_current_item_start` (completion.rs), `find_sequence_indent` (completion.rs), `collect_all_sequence_item_keys` (completion.rs), `collect_sibling_keys` (completion.rs), `find_mapping_colon` (completion.rs), `indentation_level` (completion.rs), `document_range` (completion.rs), `suggest_values_for_key` (completion.rs).
 
-- **Retrofit `format_on_type` to AST-first** — `editing/on_type_formatting.rs:11`:
-  `pub fn format_on_type(text: &str, position: Position, ch: &str, tab_size: u32) -> Vec<TextEdit>`.
-  Violation: scans `text` directly to determine indentation and colon positions on the trigger character's line, then produces text edits based on raw line content rather than the parsed AST structure.
-  Replacement: add a `documents: Option<&Vec<Document<Span>>>` parameter; use the AST to determine context at the trigger position (mapping vs. sequence context, current indentation level from parent node spans) rather than scanning line text.
-  Helpers retired when this retrofit lands: `leading_spaces` (editing/on_type_formatting.rs), `find_mapping_colon` (editing/on_type_formatting.rs).
-
 - **Retrofit `folding_ranges` to AST-first** — `analysis/folding.rs:10`:
   `pub fn folding_ranges(text: &str) -> Vec<FoldingRange>`.
   Violation: splits `text` into lines and reconstructs document structure entirely through indentation-based text scanning (`collect_indentation_folds`, `collect_document_section_folds`, `collect_comment_block_folds`). Does not consult the parser AST at all.

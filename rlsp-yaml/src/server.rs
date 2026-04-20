@@ -1229,18 +1229,24 @@ impl LanguageServer for Backend {
         let ch = &params.ch;
         let tab_size = params.options.tab_size;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
+            let text_present = store.get(&uri).is_some();
+            let docs = store.get_documents(&uri).cloned();
+            (docs, text_present)
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
+        if !text_present {
             return Ok(None);
-        };
+        }
 
-        let edits =
-            crate::editing::on_type_formatting::format_on_type(&text, position, ch, tab_size);
+        let edits = crate::editing::on_type_formatting::format_on_type(
+            docs.as_deref().unwrap_or(&[]),
+            position,
+            ch,
+            tab_size,
+        );
         if edits.is_empty() {
             return Ok(None);
         }
