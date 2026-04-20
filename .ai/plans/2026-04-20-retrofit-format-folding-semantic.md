@@ -137,7 +137,7 @@ Shrink-only discipline. No new entries in any task.
 
 - [x] Task 1: retrofit editing/on_type_formatting.rs
 - [x] Task 2: retrofit analysis/folding.rs
-- [ ] Task 3: retrofit analysis/semantic_tokens.rs
+- [x] Task 3: retrofit analysis/semantic_tokens.rs
 
 ## Tasks
 
@@ -267,16 +267,18 @@ comments come from `Event::Comment` in the parser's event stream.
 
 ### Task 3: Retrofit analysis/semantic_tokens.rs to AST + Event::Comment
 
+Committed as `03799b7dfb904910fe0b6acea1aadb5f9de1118a` (may be
+superseded by follow-up amend for SHA recording).
 `semantic_tokens` classifies every token in the document for
 syntax highlighting: comments, mapping keys, anchors, aliases,
 tags. Comments come from `Event::Comment`; everything else from
 the AST.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken>`.
       Same `text` caveat as Task 2: retained only for
       `Event::Comment` extraction. Document the narrow purpose.
-- [ ] Implement:
+- [x] Implement:
       - **Mapping keys.** Walk `Node::Mapping.entries`; for each
         `(key, value)` pair where `key` is a `Node::Scalar`, emit
         a key token with `key.loc` as the span. Classification
@@ -296,14 +298,14 @@ the AST.
       - **Comments.** Invoke the parser's event iterator;
         filter `Event::Comment` entries; emit a comment token per
         comment, using the event's span.
-- [ ] Delete all 3 text-walking helpers from
+- [x] Delete all 3 text-walking helpers from
       `analysis/semantic_tokens.rs`: `collect_inline_markers`,
       `char_col_of`, `find_mapping_colon`.
-- [ ] Update `rlsp-yaml/src/server.rs` at the `semantic_tokens`
+- [x] Update `rlsp-yaml/src/server.rs` at the `semantic_tokens`
       call site (LSP handler for `textDocument/semanticTokens/full`,
       around lines somewhere in server.rs — verify at task
       start). Pass `docs` and `&text`.
-- [ ] Update every existing unit test in `analysis/semantic_tokens.rs`
+- [x] Update every existing unit test in `analysis/semantic_tokens.rs`
       to use the new signature. Parse via `rlsp_yaml_parser::load`.
       Tests asserting comment token positions should still pass
       (`Event::Comment` produces the same spans as the text walk).
@@ -311,7 +313,7 @@ the AST.
       token span equals `node.tag_loc` (parser-authoritative).
       The span values may drift from the old text-walk values at
       edge cases — adopt the AST-derived values as authoritative.
-- [ ] Add 5 rstest regression cases (named): (a) mapping key
+- [x] Add 5 rstest regression cases (named): (a) mapping key
       produces a key token at key.loc; (b) scalar with anchor
       produces an anchor token at anchor_loc (NOT at the scalar's
       loc); (c) alias produces an alias token at alias.loc; (d)
@@ -319,20 +321,20 @@ the AST.
       tagged scalar produces a tag token at tag_loc (NOT at the
       scalar's loc) — verify with `!!int 42`: tag token spans
       `!!int` exactly and the scalar token starts after.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length = 48 (post
+- [x] **Before editing:** confirm `ALLOW_LIST` length = 48 (post
       Task 2) and the `analysis/semantic_tokens.rs` scoped
       entries match exactly: `semantic_tokens` + 3 HelperOf
       (enumerated above).
-- [ ] **After editing:** remove exactly those 4 entries.
+- [x] **After editing:** remove exactly those 4 entries.
       `ALLOW_LIST` length = 44.
-- [ ] Remove the `semantic_tokens` entry from
+- [x] Remove the `semantic_tokens` entry from
       `.ai/memory/project_followup_plans.md`.
-- [ ] No change to `rlsp-yaml/docs/feature-log.md` — tag tokens
+- [x] No change to `rlsp-yaml/docs/feature-log.md` — tag tokens
       remain in the highlighting set (delivered by the
       prerequisite parser plan). This retrofit is internal-only
       and per project convention (feature-log is user-facing
       feature decisions only) no entry is added.
-- [ ] `cargo test` passes; `cargo clippy --all-targets` zero
+- [x] `cargo test` passes; `cargo clippy --all-targets` zero
       warnings; `cargo fmt --check` clean.
 
 ## Decisions

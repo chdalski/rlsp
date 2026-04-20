@@ -1262,15 +1262,20 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
         let Some(text) = text else {
             return Ok(None);
         };
-        let tokens = crate::analysis::semantic_tokens::semantic_tokens(&text);
+        let tokens = crate::analysis::semantic_tokens::semantic_tokens(
+            docs.as_deref().unwrap_or(&[]),
+            &text,
+        );
         if tokens.is_empty() {
             return Ok(None);
         }

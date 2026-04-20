@@ -101,16 +101,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     // -----------------------------------------------------------------------
-    // Feature-level violators (surfaced during reconciliation)
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "analysis/semantic_tokens.rs",
-        func: "semantic_tokens",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-semantic-tokens",
-        },
-    },
-    // -----------------------------------------------------------------------
     // HelperOf — private helpers of complete_at
     // -----------------------------------------------------------------------
     AllowEntry {
@@ -223,30 +213,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "suggest_values_for_key",
         marker: AllowMarker::HelperOf {
             root: "complete_at",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of semantic_tokens
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "analysis/semantic_tokens.rs",
-        func: "collect_inline_markers",
-        marker: AllowMarker::HelperOf {
-            root: "semantic_tokens",
-        },
-    },
-    AllowEntry {
-        file: "analysis/semantic_tokens.rs",
-        func: "char_col_of",
-        marker: AllowMarker::HelperOf {
-            root: "semantic_tokens",
-        },
-    },
-    AllowEntry {
-        file: "analysis/semantic_tokens.rs",
-        func: "find_mapping_colon",
-        marker: AllowMarker::HelperOf {
-            root: "semantic_tokens",
         },
     },
     // -----------------------------------------------------------------------

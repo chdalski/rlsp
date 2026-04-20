@@ -63,7 +63,8 @@ fn bench_semantic_tokens(c: &mut Criterion) {
     let mut group = c.benchmark_group("semantic_tokens");
     for (name, text) in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
-            b.iter(|| semantic_tokens(text));
+            let docs = rlsp_yaml_parser::load(text).expect("bench fixture must parse");
+            b.iter(|| semantic_tokens(&docs, text));
         });
     }
     group.finish();
