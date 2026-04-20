@@ -2,6 +2,7 @@
 name: developer
 description: Implements all code — source and tests
 model: sonnet
+effort: high
 color: green
 tools:
   - Read

@@ -2,6 +2,7 @@
 name: reviewer
 description: Independent quality gate — reviews work against plan scope and verifies code quality
 model: opus
+effort: high
 color: purple
 tools:
   - Read

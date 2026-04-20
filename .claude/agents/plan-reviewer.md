@@ -2,6 +2,7 @@
 name: plan-reviewer
 description: Reviews draft plans against the format guide and review checklist before user presentation
 model: sonnet
+effort: high
 tools:
   - Read
   - Glob
