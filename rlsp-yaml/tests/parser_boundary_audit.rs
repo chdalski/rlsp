@@ -108,13 +108,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "decorators/document_links.rs",
-        func: "find_document_links",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-find-document-links",
-        },
-    },
-    AllowEntry {
         file: "decorators/color.rs",
         func: "find_colors",
         marker: AllowMarker::TodoRetrofit {
@@ -136,37 +129,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "semantic_tokens",
         marker: AllowMarker::TodoRetrofit {
             plan: "retrofit-semantic-tokens",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of find_document_links
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "decorators/document_links.rs",
-        func: "url_links",
-        marker: AllowMarker::HelperOf {
-            root: "find_document_links",
-        },
-    },
-    AllowEntry {
-        file: "decorators/document_links.rs",
-        func: "include_links",
-        marker: AllowMarker::HelperOf {
-            root: "find_document_links",
-        },
-    },
-    AllowEntry {
-        file: "decorators/document_links.rs",
-        func: "is_inside_quotes",
-        marker: AllowMarker::HelperOf {
-            root: "find_document_links",
-        },
-    },
-    AllowEntry {
-        file: "decorators/document_links.rs",
-        func: "trim_trailing_punctuation",
-        marker: AllowMarker::HelperOf {
-            root: "find_document_links",
         },
     },
     // -----------------------------------------------------------------------

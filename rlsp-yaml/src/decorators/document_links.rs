@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 use regex::Regex;
+use rlsp_yaml_parser::ScalarStyle;
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{DocumentLink, Position, Range, Url};
 
 /// Maximum allowed URL length to prevent `DoS` attacks.
@@ -13,144 +16,146 @@ static URL_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
         .unwrap_or_else(|_| unreachable!("static regex is valid"))
 });
 
-/// Find all document links (URLs and `!include` paths) in the given YAML text.
+/// Find all document links (URLs and `!include` paths) in the given YAML AST.
 ///
-/// Detects URLs with schemes http://, https://, and file:// in:
-/// - YAML string values (both quoted and unquoted)
-/// - Comment lines
+/// Walks every `Node::Scalar` in the AST. For each scalar:
+/// - Applies `URL_REGEX` to the decoded scalar `value`, producing `DocumentLink`s
+///   with byte-accurate ranges for single-line scalars. Multi-line scalars
+///   (literal `|` and folded `>` block styles) fall back to the full `node.loc`
+///   span as the range — precise in-value offset arithmetic across embedded
+///   newlines is not performed.
+/// - If the scalar carries a `!include` tag, treats `value` as a file path and
+///   resolves it against `base_uri` when provided.
 ///
-/// Also detects `!include <path>` tags and resolves the path against `base_uri`
-/// when provided.
+/// **Deliberate behavior change from the pre-retrofit implementation:**
+/// Comments are no longer scanned — comments are not `Node::Scalar` nodes in
+/// the AST. URLs that previously appeared only in comments will not produce
+/// links.
 ///
 /// Returns a vector of `DocumentLink` with accurate position ranges.
 /// Invalid or overly long URLs are silently skipped.
-///
-/// # Examples
-///
-/// ```
-/// use rlsp_yaml::decorators::document_links::find_document_links;
-///
-/// let text = "homepage: https://example.com\n# See https://docs.example.com\n";
-/// let links = find_document_links(text, None);
-/// assert_eq!(links.len(), 2);
-/// ```
 #[must_use]
-pub fn find_document_links(text: &str, base_uri: Option<&Url>) -> Vec<DocumentLink> {
-    text.lines()
-        .enumerate()
-        .flat_map(|(line_idx, line)| {
-            let mut links = url_links(line, line_idx);
-            links.extend(include_links(line, line_idx, base_uri));
-            links
-        })
-        .collect()
-}
-
-/// Return URL links (http/https/file scheme) found on a single line.
-fn url_links(line: &str, line_idx: usize) -> Vec<DocumentLink> {
-    URL_REGEX
-        .find_iter(line)
-        .filter_map(|mat| {
-            let matched_text = trim_trailing_punctuation(mat.as_str());
-            let byte_end = mat.start() + matched_text.len();
-
-            if matched_text.len() > MAX_URL_LENGTH {
-                return None;
-            }
-
-            let url = Url::parse(matched_text).ok()?;
-            let range = calculate_range(line_idx, mat.start(), byte_end, line);
-            Some(DocumentLink {
-                range,
-                target: Some(url),
-                tooltip: None,
-                data: None,
-            })
-        })
-        .collect()
-}
-
-/// Return `!include <path>` links found on a single line.
-///
-/// Skips occurrences inside quoted strings. Resolves relative paths against
-/// `base_uri` when provided; skips them when `base_uri` is `None`.
-fn include_links(line: &str, line_idx: usize, base_uri: Option<&Url>) -> Vec<DocumentLink> {
-    const TAG: &str = "!include ";
-
+pub fn find_document_links(docs: &[Document<Span>], base_uri: Option<&Url>) -> Vec<DocumentLink> {
     let mut links = Vec::new();
-    let mut search_from = 0;
-    while let Some(rel_pos) = line[search_from..].find(TAG) {
-        let tag_start = search_from + rel_pos;
-        let path_start = tag_start + TAG.len();
-        search_from = path_start;
-
-        // Skip if inside a quoted string
-        if is_inside_quotes(line, tag_start) {
-            continue;
-        }
-
-        // Extract path: take until first whitespace or '#' comment marker
-        let path = take_until_whitespace_or_comment(&line[path_start..]);
-
-        if path.is_empty() {
-            continue;
-        }
-
-        let Some(target_url) = resolve_include_path(path, base_uri) else {
-            continue;
-        };
-
-        let path_byte_end = path_start + path.len();
-        let range = calculate_range(line_idx, path_start, path_byte_end, line);
-
-        links.push(DocumentLink {
-            range,
-            target: Some(target_url),
-            tooltip: Some("Open included file".to_string()),
-            data: None,
-        });
+    for doc in docs {
+        collect_node_links(&doc.root, base_uri, &mut links);
     }
     links
 }
 
-/// Extract the path token from the rest of a line after `!include `.
-///
-/// Stops at the first whitespace character or a `#` comment marker.
-fn take_until_whitespace_or_comment(s: &str) -> &str {
-    let end = s
-        .char_indices()
-        .find(|(_, c)| c.is_whitespace() || *c == '#')
-        .map_or(s.len(), |(i, _)| i);
-    &s[..end]
+/// Recursively walk `node` and collect document links into `out`.
+fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<DocumentLink>) {
+    match node {
+        Node::Scalar {
+            value,
+            style,
+            tag,
+            loc,
+            ..
+        } => {
+            // !include tag: treat value as a file path.
+            if tag.as_deref() == Some("!include") {
+                // Reject empty paths and control characters that are invalid in file paths.
+                if !value.is_empty() && !value.contains(['\n', '\r', '\x00']) {
+                    if let Some(target) = resolve_include_path(value, base_uri) {
+                        out.push(DocumentLink {
+                            range: span_to_range(*loc),
+                            target: Some(target),
+                            tooltip: Some("Open included file".to_string()),
+                            data: None,
+                        });
+                    }
+                }
+                // Do not also scan the value for URLs when it's an !include tag.
+                return;
+            }
+
+            // URL detection in scalar value.
+            let is_multiline = matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_));
+            // quote_char_len: opening quote character count in the source before `value` bytes.
+            // For single/double-quoted scalars the first source byte is the quote character.
+            let quote_utf16 = match style {
+                ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => 1u32,
+                ScalarStyle::Plain | ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => 0u32,
+            };
+
+            for mat in URL_REGEX.find_iter(value) {
+                let matched = trim_trailing_punctuation(mat.as_str());
+                if matched.len() > MAX_URL_LENGTH {
+                    continue;
+                }
+                let Ok(url) = Url::parse(matched) else {
+                    continue;
+                };
+                let range = if is_multiline {
+                    // Multi-line scalar: fall back to the full node span.
+                    span_to_range(*loc)
+                } else {
+                    // Single-line scalar: compute the precise character range within the
+                    // source line. loc.start.column is the codepoint column of the scalar's
+                    // opening character (including the quote for quoted styles).
+                    let start_utf16 = u32::try_from(loc.start.column).unwrap_or(u32::MAX)
+                        + quote_utf16
+                        + byte_to_utf16_offset(value, mat.start());
+                    let end_utf16 = u32::try_from(loc.start.column).unwrap_or(u32::MAX)
+                        + quote_utf16
+                        + byte_to_utf16_offset(value, mat.start() + matched.len());
+                    let lsp_line =
+                        u32::try_from(loc.start.line.saturating_sub(1)).unwrap_or(u32::MAX);
+                    Range {
+                        start: Position {
+                            line: lsp_line,
+                            character: start_utf16,
+                        },
+                        end: Position {
+                            line: lsp_line,
+                            character: end_utf16,
+                        },
+                    }
+                };
+                out.push(DocumentLink {
+                    range,
+                    target: Some(url),
+                    tooltip: None,
+                    data: None,
+                });
+            }
+        }
+        Node::Mapping { entries, .. } => {
+            for (key, val) in entries {
+                collect_node_links(key, base_uri, out);
+                collect_node_links(val, base_uri, out);
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                collect_node_links(item, base_uri, out);
+            }
+        }
+        Node::Alias { .. } => {}
+    }
 }
 
-/// Return `true` if `pos` (byte offset) falls inside a quoted string on `line`.
+/// Convert a `Span` to an LSP `Range`.
 ///
-/// Tracks quote state as a simple three-state machine so that an apostrophe
-/// inside a double-quoted string is not mistaken for an opening single-quote,
-/// and vice versa.
-fn is_inside_quotes(line: &str, pos: usize) -> bool {
-    #[derive(PartialEq)]
-    enum State {
-        Outside,
-        InSingle,
-        InDouble,
+/// `Pos::line` is 1-based; LSP lines are 0-based — hence `saturating_sub(1)`.
+/// `Pos::column` is 0-based codepoints; used directly as LSP character offset
+/// (same limitation as `schema_validation.rs:span_to_range`).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "LSP positions are u32; documents exceeding 4 billion lines/columns are not realistic"
+)]
+const fn span_to_range(loc: Span) -> Range {
+    Range {
+        start: Position {
+            line: loc.start.line.saturating_sub(1) as u32,
+            character: loc.start.column as u32,
+        },
+        end: Position {
+            line: loc.end.line.saturating_sub(1) as u32,
+            character: loc.end.column as u32,
+        },
     }
-
-    let mut state = State::Outside;
-    let mut chars = line[..pos].chars();
-    while let Some(c) = chars.next() {
-        match (&state, c) {
-            (State::Outside, '"') => state = State::InDouble,
-            (State::Outside, '\'') => state = State::InSingle,
-            (State::InDouble, '\\') => {
-                chars.next(); // skip escaped character
-            }
-            (State::InDouble, '"') | (State::InSingle, '\'') => state = State::Outside,
-            _ => {}
-        }
-    }
-    state != State::Outside
 }
 
 /// Resolve an `!include` path to a `Url`.
@@ -178,41 +183,15 @@ fn resolve_include_path(path: &str, base_uri: Option<&Url>) -> Option<Url> {
 }
 
 /// Trim trailing punctuation characters that are commonly found after URLs in prose.
-fn trim_trailing_punctuation(text: &str) -> &str {
-    text.trim_end_matches(['.', ',', ';', ':', '!', '?'])
+fn trim_trailing_punctuation(s: &str) -> &str {
+    s.trim_end_matches(['.', ',', ';', ':', '!', '?'])
 }
 
-/// Calculate LSP Range for a URL match within a line.
+/// Convert a byte offset to a UTF-16 code unit offset within `s[..byte_offset]`.
 ///
-/// Converts byte offsets to UTF-16 code unit offsets as required by LSP.
-fn calculate_range(line: usize, byte_start: usize, byte_end: usize, line_text: &str) -> Range {
-    let start_char = byte_to_utf16_offset(line_text, byte_start);
-    let end_char = byte_to_utf16_offset(line_text, byte_end);
-
-    Range {
-        start: Position {
-            line: u32::try_from(line).unwrap_or(u32::MAX),
-            character: start_char,
-        },
-        end: Position {
-            line: u32::try_from(line).unwrap_or(u32::MAX),
-            character: end_char,
-        },
-    }
-}
-
-/// Convert a byte offset to a UTF-16 code unit offset.
-///
-/// LSP uses UTF-16 code units for character positions, so we must convert
-/// from Rust's UTF-8 byte indices to UTF-16 offsets.
-fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
-    u32::try_from(
-        line_text[..byte_offset]
-            .chars()
-            .map(char::len_utf16)
-            .sum::<usize>(),
-    )
-    .unwrap_or(u32::MAX)
+/// LSP uses UTF-16 code units for character positions.
+fn byte_to_utf16_offset(s: &str, byte_offset: usize) -> u32 {
+    u32::try_from(s[..byte_offset].chars().map(char::len_utf16).sum::<usize>()).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -223,9 +202,15 @@ fn byte_to_utf16_offset(line_text: &str, byte_offset: usize) -> u32 {
     reason = "test code"
 )]
 mod tests {
+    use rlsp_yaml_parser::Span;
+    use rlsp_yaml_parser::node::Document;
     use rstest::rstest;
 
     use super::*;
+
+    fn load_docs(yaml: &str) -> Vec<Document<Span>> {
+        rlsp_yaml_parser::load(yaml).unwrap_or_default()
+    }
 
     fn base(uri: &str) -> Url {
         Url::parse(uri).unwrap()
@@ -256,11 +241,13 @@ mod tests {
     #[case::quoted_string("homepage: \"https://example.com\"\n", 1)]
     #[case::single_quoted_string("url: 'https://example.com'\n", 1)]
     #[case::unquoted_value("homepage: https://example.com\n", 1)]
-    #[case::in_comment("# See https://example.com for details\n", 1)]
+    // Comment lines are not AST nodes — no links produced (deliberate drop).
+    #[case::in_comment("# See https://example.com for details\n", 0)]
     // ========== Multiple URLs Tests ==========
     #[case::multiple_on_same_line("urls: https://example.com https://other.com\n", 2)]
     #[case::across_multiple_lines("url1: https://example.com\nurl2: https://other.com\n", 2)]
-    #[case::inline_comment("key: value # See https://example.com\n", 1)]
+    // Inline comment: scalar value is "value"; URL is in comment — not an AST node.
+    #[case::inline_comment("key: value # See https://example.com\n", 0)]
     // ========== Multi-Document YAML Tests ==========
     #[case::first_document_section("url: https://first.com\n---\nother: content\n", 1)]
     #[case::middle_section("first: doc\n---\nurl: https://middle.com\n---\nlast: doc\n", 1)]
@@ -271,7 +258,8 @@ mod tests {
     // ========== Edge Cases Tests ==========
     #[case::empty_document("", 0)]
     #[case::no_urls("key: value\nother: data\n# comment\n", 0)]
-    #[case::url_at_line_end("# comment https://example.com\n", 1)]
+    // Comment line — no link (deliberate drop).
+    #[case::url_at_line_end("# comment https://example.com\n", 0)]
     #[case::mixed_schemes_same_line("http://a.com https://b.com file:///c\n", 3)]
     #[case::stop_at_space("url: https://exam ple.com\n", 1)]
     #[case::special_encodings("url: https://example.com/path%20with%20spaces\n", 1)]
@@ -280,7 +268,8 @@ mod tests {
     // ========== Security Tests ==========
     #[case::scheme_only_rejected("url: https://\n", 0)]
     #[case::localhost_no_tld("url: https://localhost\n", 1)]
-    #[case::comment_no_space_after_hash("#https://example.com\n", 1)]
+    // Comment — no link (deliberate drop).
+    #[case::comment_no_space_after_hash("#https://example.com\n", 0)]
     // ========== Scheme and Validation Tests ==========
     #[case::three_schemes(
         "http: http://example.com\nhttps: https://example.com\nfile: file:///path/to/file\n",
@@ -295,7 +284,7 @@ mod tests {
         2
     )]
     fn find_document_links_returns_len(#[case] text: &str, #[case] expected_len: usize) {
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
         assert_eq!(result.len(), expected_len);
     }
 
@@ -304,7 +293,7 @@ mod tests {
     #[test]
     fn should_detect_url_in_quoted_string() {
         let text = "homepage: \"https://example.com\"\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1, "should find exactly one URL");
         let tuples = links_as_tuples(&result);
@@ -316,7 +305,7 @@ mod tests {
     #[test]
     fn should_detect_url_in_single_quoted_string() {
         let text = "url: 'https://example.com'\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -326,7 +315,7 @@ mod tests {
     #[test]
     fn should_detect_url_in_unquoted_value() {
         let text = "homepage: https://example.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -334,22 +323,24 @@ mod tests {
         assert_eq!(tuples[0].3, "https://example.com/");
     }
 
+    // URL in a comment — AST walk does not visit comments; no link produced.
     #[test]
-    fn should_detect_url_in_comment() {
+    fn comment_url_produces_no_link() {
         let text = "# See https://example.com for details\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
-        assert_eq!(result.len(), 1);
-        let tuples = links_as_tuples(&result);
-        assert_eq!(tuples[0].0, 0);
-        assert_eq!(tuples[0].3, "https://example.com/");
+        assert_eq!(
+            result.len(),
+            0,
+            "comment URLs are not detected (deliberate drop)"
+        );
     }
 
     #[test]
     fn should_detect_http_and_https_and_file_schemes() {
         let text =
             "http: http://example.com\nhttps: https://example.com\nfile: file:///path/to/file\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 3, "should detect all three schemes");
         let tuples = links_as_tuples(&result);
@@ -363,7 +354,7 @@ mod tests {
     #[test]
     fn should_detect_multiple_urls_on_same_line() {
         let text = "urls: https://example.com https://other.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 2);
         let tuples = links_as_tuples(&result);
@@ -374,7 +365,7 @@ mod tests {
     #[test]
     fn should_detect_urls_across_multiple_lines() {
         let text = "url1: https://example.com\nurl2: https://other.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 2);
         let tuples = links_as_tuples(&result);
@@ -382,14 +373,17 @@ mod tests {
         assert_eq!(tuples[1].0, 1);
     }
 
+    // URL in inline comment — AST scalar value is "value", comment is not a node.
     #[test]
-    fn should_detect_url_in_inline_comment() {
+    fn inline_comment_url_produces_no_link() {
         let text = "key: value # See https://example.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
-        assert_eq!(result.len(), 1);
-        let tuples = links_as_tuples(&result);
-        assert_eq!(tuples[0].3, "https://example.com/");
+        assert_eq!(
+            result.len(),
+            0,
+            "URL in inline comment is not detected (deliberate drop)"
+        );
     }
 
     // ========== Multi-Document YAML Tests (tuple content) ==========
@@ -397,7 +391,7 @@ mod tests {
     #[test]
     fn should_detect_urls_in_first_document_section() {
         let text = "url: https://first.com\n---\nother: content\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -407,7 +401,7 @@ mod tests {
     #[test]
     fn should_detect_urls_in_middle_section() {
         let text = "first: doc\n---\nurl: https://middle.com\n---\nlast: doc\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -418,7 +412,7 @@ mod tests {
     fn should_detect_urls_in_all_sections() {
         let text =
             "url: https://first.com\n---\nurl: https://second.com\n---\nurl: https://third.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 3);
         let tuples = links_as_tuples(&result);
@@ -432,7 +426,7 @@ mod tests {
     #[test]
     fn should_detect_url_at_line_start() {
         let text = "https://example.com # comment\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -442,7 +436,7 @@ mod tests {
     #[test]
     fn should_detect_url_with_query_params() {
         let text = "url: https://example.com?foo=bar&baz=qux\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -452,7 +446,7 @@ mod tests {
     #[test]
     fn should_detect_url_with_fragment() {
         let text = "url: https://example.com#section\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -462,7 +456,7 @@ mod tests {
     #[test]
     fn should_detect_url_with_path() {
         let text = "url: https://example.com/path/to/resource\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -472,7 +466,7 @@ mod tests {
     #[test]
     fn should_detect_url_with_port() {
         let text = "url: https://example.com:8080/path\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -482,7 +476,7 @@ mod tests {
     #[test]
     fn should_detect_url_with_username() {
         let text = "url: https://user@example.com/path\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -492,7 +486,7 @@ mod tests {
     #[test]
     fn should_trim_trailing_period_in_prose() {
         let text = "See https://example.com.\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -509,7 +503,7 @@ mod tests {
     #[test]
     fn should_trim_trailing_comma() {
         let text = "urls: https://example.com, https://other.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 2);
         let tuples = links_as_tuples(&result);
@@ -519,7 +513,7 @@ mod tests {
     #[test]
     fn should_stop_at_parentheses() {
         let text = "(see https://example.com)\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -531,7 +525,7 @@ mod tests {
     #[test]
     fn should_stop_at_square_brackets() {
         let text = "[https://example.com]\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -541,7 +535,7 @@ mod tests {
     #[test]
     fn should_stop_at_curly_braces() {
         let text = "{url: https://example.com}\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -554,7 +548,7 @@ mod tests {
     fn should_skip_extremely_long_urls() {
         let long_url = format!("https://example.com/{}", "a".repeat(3000));
         let text = format!("url: {long_url}\n");
-        let result = find_document_links(&text, None);
+        let result = find_document_links(&load_docs(&text), None);
 
         assert_eq!(result.len(), 0, "URLs over 2048 chars should be skipped");
     }
@@ -565,7 +559,7 @@ mod tests {
         let path = "a".repeat(2048 - "https://example.com/".len());
         let url = format!("https://example.com/{path}");
         let text = format!("url: {url}\n");
-        let result = find_document_links(&text, None);
+        let result = find_document_links(&load_docs(&text), None);
 
         assert_eq!(
             result.len(),
@@ -577,7 +571,7 @@ mod tests {
     #[test]
     fn should_stop_at_space_in_url() {
         let text = "url: https://exam ple.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         // Regex stops at space, so "https://exam" is matched and is a valid URL
         assert_eq!(result.len(), 1, "URL up to space should be detected");
@@ -588,7 +582,7 @@ mod tests {
     #[test]
     fn should_handle_url_with_special_encodings() {
         let text = "url: https://example.com/path%20with%20spaces\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -598,7 +592,7 @@ mod tests {
     #[test]
     fn should_handle_multibyte_utf8_before_url() {
         let text = "説明: https://example.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         // UTF-16 offset calculation should handle multi-byte chars correctly
@@ -609,7 +603,7 @@ mod tests {
     #[test]
     fn should_handle_emoji_before_url() {
         let text = "🔗 https://example.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -620,7 +614,7 @@ mod tests {
     #[test]
     fn should_handle_mixed_multibyte_chars_and_urls() {
         let text = "日本語: https://example.jp 説明\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -630,7 +624,7 @@ mod tests {
     #[test]
     fn should_handle_file_url_with_triple_slash() {
         let text = "file: file:///absolute/path/to/file\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -640,7 +634,7 @@ mod tests {
     #[test]
     fn should_handle_file_url_windows_path() {
         let text = "file: file:///C:/Windows/path\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let tuples = links_as_tuples(&result);
@@ -658,7 +652,7 @@ url3: http://example.com
 url4: file:///path/to/file
 url5: javascript:alert(1)
 ";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         // Only http, https, file should be detected (ftp and javascript are not matched by regex)
         assert_eq!(
@@ -678,7 +672,7 @@ url5: javascript:alert(1)
         // Most invalid URLs are already filtered by regex, but we test edge cases.
         // Test URL with just a scheme and domain (should be valid)
         let text = "url: https://example\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         // This is actually a valid URL (no TLD required)
         assert_eq!(result.len(), 1, "simple domain should be valid");
@@ -694,7 +688,7 @@ url1: https://valid.com
 url2: https://
 url3: https://another-valid.com
 ";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         // Only the 2 valid URLs should be included (https:// with no domain fails validation)
         assert_eq!(result.len(), 2, "only validated URLs should be included");
@@ -708,7 +702,7 @@ url3: https://another-valid.com
     #[test]
     fn should_calculate_correct_positions_for_quoted_urls() {
         let text = "url: \"https://example.com\"\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         let link = &result[0];
@@ -725,7 +719,7 @@ url3: https://another-valid.com
     #[test]
     fn should_calculate_correct_line_numbers_in_multi_document() {
         let text = "first: doc\n---\nurl: https://example.com\n---\nlast: doc\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].range.start.line, 2, "URL is on line 2");
@@ -734,7 +728,7 @@ url3: https://another-valid.com
     #[test]
     fn should_have_consistent_ranges_across_lines() {
         let text = "line1: https://first.com\nline2: https://second.com\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].range.start.line, 0);
@@ -771,7 +765,7 @@ url3: https://another-valid.com
         #[case] expected_url: &str,
     ) {
         let b = base_uri.map(base);
-        let result = find_document_links(text, b.as_ref());
+        let result = find_document_links(&load_docs(text), b.as_ref());
         let include_links: Vec<_> = result
             .iter()
             .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
@@ -783,12 +777,12 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 4: !include inside quotes → no link
+    // Test 4: !include inside quotes → no link (tag-based: parser won't tag a quoted string as !include)
     #[test]
     fn should_skip_include_inside_double_quotes() {
         let text = "note: \"some text with !include in quotes\"\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         assert!(
             result
@@ -803,7 +797,7 @@ url3: https://another-valid.com
     fn should_return_only_url_links_when_no_include_present() {
         let text = "url: https://example.com\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -816,7 +810,7 @@ url3: https://another-valid.com
     #[test]
     fn should_skip_relative_include_when_no_base_uri() {
         let text = "config: !include foo.yaml\n";
-        let result = find_document_links(text, None);
+        let result = find_document_links(&load_docs(text), None);
 
         assert!(
             result
@@ -831,7 +825,7 @@ url3: https://another-valid.com
     fn should_detect_multiple_includes_on_different_lines() {
         let text = "a: !include a.yaml\nb: !include b.yaml\nc: !include c.yaml\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         let include_links: Vec<_> = result
             .iter()
@@ -857,7 +851,7 @@ url3: https://another-valid.com
     fn should_skip_include_with_no_path() {
         let text = "config: !include\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         assert!(
             result
@@ -867,28 +861,34 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 9: line with both URL and !include → both links detected
+    // Test 9: both URL and !include present — URL in comment produces no link; !include is detected
     #[test]
-    fn should_detect_both_url_and_include_on_same_line() {
+    fn should_detect_include_but_not_comment_url_on_separate_lines() {
         let text = "# https://example.com\nconfig: !include foo.yaml\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         let url_count = result.iter().filter(|l| l.tooltip.is_none()).count();
         let include_count = result
             .iter()
             .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
             .count();
-        assert_eq!(url_count, 1, "should find one URL link");
+        assert_eq!(
+            url_count, 0,
+            "comment URL produces no link (deliberate drop)"
+        );
         assert_eq!(include_count, 1, "should find one include link");
     }
 
-    // Test 10: apostrophe inside double-quoted value must not suppress a following !include
+    // Test 10: !include on a separate mapping entry following a double-quoted value with apostrophe.
+    // The old text-scanner tested that apostrophes inside double-quoted strings didn't confuse
+    // quote-tracking. With tag-based detection, the parser handles quoting; this test verifies
+    // the AST walk finds !include in the same mapping as a double-quoted scalar with apostrophes.
     #[test]
     fn should_not_suppress_include_after_double_quoted_value_with_apostrophe() {
-        let text = "note: \"it's ok\" !include foo.yaml\n";
+        let text = "note: \"it's ok\"\nconfig: !include foo.yaml\n";
         let b = base("file:///dir/doc.yaml");
-        let result = find_document_links(text, Some(&b));
+        let result = find_document_links(&load_docs(text), Some(&b));
 
         assert_eq!(
             result
@@ -896,7 +896,162 @@ url3: https://another-valid.com
                 .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
                 .count(),
             1,
-            "!include after a double-quoted value containing an apostrophe should be detected"
+            "!include on a key following a double-quoted value with apostrophe should be detected"
+        );
+    }
+
+    // ========== New rstest regression cases (5 required by dispatch) ==========
+
+    #[rstest]
+    // (a) URL in a quoted scalar produces a link inside the quoted scalar's loc
+    #[case::url_in_quoted_scalar(
+        "link: \"https://example.com/path\"\n",
+        None,
+        1,
+        "https://example.com/path"
+    )]
+    // (b) URL in a plain scalar produces a correct range (start character is after key+colon+space)
+    #[case::url_in_plain_scalar(
+        "link: https://example.com/path\n",
+        None,
+        1,
+        "https://example.com/path"
+    )]
+    // (c) !include tag on a scalar produces a link resolved against base_uri
+    #[case::include_tag_produces_link(
+        "cfg: !include config.yaml\n",
+        Some("file:///base/doc.yaml"),
+        1,
+        "file:///base/config.yaml"
+    )]
+    // (d) URL in a comment produces NO link (deliberate drop)
+    #[case::comment_url_no_link("# https://example.com\n", None, 0, "")]
+    fn regression_document_links(
+        #[case] text: &str,
+        #[case] base_uri: Option<&str>,
+        #[case] expected_count: usize,
+        #[case] expected_url: &str,
+    ) {
+        let b = base_uri.map(|u| Url::parse(u).unwrap());
+        let result = find_document_links(&load_docs(text), b.as_ref());
+        assert_eq!(result.len(), expected_count);
+        if expected_count > 0 {
+            let url = result[0].target.as_ref().map_or("", Url::as_str);
+            assert!(
+                url.starts_with(expected_url) || url == expected_url,
+                "expected URL starting with {expected_url:?}, got {url:?}"
+            );
+        }
+    }
+
+    // (e) URL exceeding MAX_URL_LENGTH is skipped — standalone because rstest cases cannot call
+    // functions to generate the long string at compile time.
+    #[test]
+    fn regression_url_over_max_length_skipped() {
+        let long_path = "a".repeat(MAX_URL_LENGTH + 1);
+        let text = format!("url: https://example.com/{long_path}\n");
+        let result = find_document_links(&load_docs(&text), None);
+        assert_eq!(result.len(), 0, "URL over MAX_URL_LENGTH must be skipped");
+    }
+
+    // ========== New tests from test-engineer list ==========
+
+    // A. URL in a mapping key scalar
+    #[test]
+    fn url_in_mapping_key_scalar_is_detected() {
+        let text = "https://example.com: value\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        assert_eq!(result.len(), 1, "URL in a mapping key should be detected");
+        let tuples = links_as_tuples(&result);
+        assert_eq!(tuples[0].3, "https://example.com/");
+        assert_eq!(tuples[0].0, 0, "URL key is on line 0");
+        assert_eq!(tuples[0].1, 0, "URL key starts at column 0");
+    }
+
+    // D. URL in literal block scalar uses full node.loc range (fallback)
+    #[test]
+    fn url_in_literal_block_scalar_detected_with_full_node_range() {
+        let text = "doc: |\n  https://example.com\n  more text\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "URL in literal block scalar should be found"
+        );
+        assert_eq!(
+            result[0].target.as_ref().unwrap().as_str(),
+            "https://example.com/"
+        );
+        // Range uses full node.loc (fallback for multi-line): start.line == 0 (doc: key line)
+        // or wherever the parser puts the block scalar start — just assert the link exists.
+    }
+
+    // E. URL in folded block scalar detected
+    #[test]
+    fn url_in_folded_block_scalar_detected() {
+        let text = "doc: >\n  https://example.com\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "URL in folded block scalar should be found"
+        );
+        assert_eq!(
+            result[0].target.as_ref().unwrap().as_str(),
+            "https://example.com/"
+        );
+    }
+
+    // J. !include with URL-scheme absolute path
+    #[test]
+    fn include_with_url_scheme_path_detected() {
+        let text = "ref: !include https://example.com/schema.yaml\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        let include_links: Vec<_> = result
+            .iter()
+            .filter(|l| l.tooltip.as_deref() == Some("Open included file"))
+            .collect();
+        assert_eq!(
+            include_links.len(),
+            1,
+            "!include with URL path should produce a link"
+        );
+        assert_eq!(
+            include_links[0].target.as_ref().unwrap().as_str(),
+            "https://example.com/schema.yaml"
+        );
+    }
+
+    // K. Non-scalar roots produce no spurious links
+    #[test]
+    fn mapping_node_without_url_value_produces_no_links() {
+        let text = "outer:\n  inner: plain text\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        assert_eq!(
+            result.len(),
+            0,
+            "mapping without URL values should produce no links"
+        );
+    }
+
+    // Security: !include with newline in value → no link
+    #[test]
+    fn include_with_newline_in_value_produces_no_link() {
+        // A literal block scalar tagged with !include — value will contain \n
+        let text = "config: !include |\n  foo\n  bar\n";
+        let b = base("file:///dir/doc.yaml");
+        let result = find_document_links(&load_docs(text), Some(&b));
+
+        assert!(
+            result
+                .iter()
+                .all(|l| l.tooltip.as_deref() != Some("Open included file")),
+            "!include with newline in scalar value must not produce a link"
         );
     }
 }

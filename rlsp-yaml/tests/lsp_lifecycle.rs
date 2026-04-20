@@ -868,10 +868,12 @@ async fn should_return_document_links_for_yaml_with_urls() {
     let result = resp.result().expect("documentLink should have a result");
     assert!(!result.is_null(), "documentLink result should not be null");
     let arr = result.as_array().expect("documentLink should be an array");
+    // After AST retrofit, comment URLs are not detected (deliberate drop).
+    // Only the scalar-value URL is returned.
     assert_eq!(
         arr.len(),
-        2,
-        "should return 2 document links for YAML with 2 URLs"
+        1,
+        "should return 1 document link (comment URL is not detected after AST retrofit)"
     );
 }
 

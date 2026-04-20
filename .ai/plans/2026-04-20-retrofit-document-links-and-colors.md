@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -113,20 +113,22 @@ baseline for each task in the handoff.
 
 ## Steps
 
-- [ ] Task 1: retrofit document_links.rs (find_document_links)
+- [x] Task 1: retrofit document_links.rs (find_document_links)
 - [ ] Task 2: retrofit color.rs (find_colors)
 
 ## Tasks
 
 ### Task 1: Retrofit decorators/document_links.rs to AST-only
 
-Drop `text: &str`; walk `Node::Scalar` nodes across all documents;
+Committed as `ee14566cba20b6272cb6c52d4633760eb75cd6c1` (may be
+superseded by follow-up amend for SHA recording). Drop
+`text: &str`; walk `Node::Scalar` nodes across all documents;
 extract URLs from scalar values and `!include` references from
 scalar `tag` field.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn find_document_links(docs: &[Document<Span>], base_uri: Option<&Url>) -> Vec<DocumentLink>`.
-- [ ] Implement: walk every `Document<Span>` recursively. For
+- [x] Implement: walk every `Document<Span>` recursively. For
       each `Node::Scalar`, examine its `value` with the existing
       `URL_REGEX`; produce `DocumentLink` with the range computed
       as an offset from `node.loc` (URL match offset within
@@ -134,7 +136,7 @@ scalar `tag` field.
       for single-line scalars; for multi-line scalars, use the
       node's full `loc` span and skip or adjust per the match's
       byte offset). Enforce `MAX_URL_LENGTH` gate.
-- [ ] `!include` handling: for each `Node::Scalar` where
+- [x] `!include` handling: for each `Node::Scalar` where
       `node.tag == Some("!include")`, treat `node.value` as the
       path; resolve against `base_uri` when provided; skip when
       `base_uri` is `None`. Link range = the full `node.loc`.
@@ -142,11 +144,11 @@ scalar `tag` field.
       text (not as a YAML tag), the retrofit switches to the
       tag-based detection — verify this produces identical
       results for the existing tests.
-- [ ] Drop comment URL scanning per this plan's decision (option
+- [x] Drop comment URL scanning per this plan's decision (option
       1). Update any test that asserted a URL in a comment line
       to instead assert no link, and note the behavior change in
       the commit message.
-- [ ] Delete `url_links`, `include_links`, `is_inside_quotes`,
+- [x] Delete `url_links`, `include_links`, `is_inside_quotes`,
       `trim_trailing_punctuation` from
       `decorators/document_links.rs`. Keep `URL_REGEX` and
       `MAX_URL_LENGTH`. For `calculate_range`: grep the crate
@@ -155,17 +157,17 @@ scalar `tag` field.
       it, keep it. Either outcome is correct; the test is
       "no dead code" (clippy's `dead_code` lint will flag a
       kept-but-unused function).
-- [ ] Update `rlsp-yaml/src/server.rs` at line ~941 to pass
+- [x] Update `rlsp-yaml/src/server.rs` at line ~941 to pass
       `docs.as_deref().unwrap_or(&[])` instead of `&text`.
       Preserve the empty-check and `Ok(None)` short-circuit.
-- [ ] Update every existing unit test in
+- [x] Update every existing unit test in
       `decorators/document_links.rs` (and any integration test)
       to use the new signature. Parse inputs via
       `rlsp_yaml_parser::load`. No test case may be deleted
       unless supplanted by an equivalent case, EXCEPT for
       comment-scanning tests as noted above — those are
       deliberately removed or inverted with a commit-message note.
-- [ ] Add rstest regression cases (named): (a) URL in a quoted
+- [x] Add rstest regression cases (named): (a) URL in a quoted
       scalar (`url: "https://example.com"`) produces a link
       whose range is inside the quoted scalar's loc; (b) URL in
       a plain scalar (`url: https://example.com`) produces a
@@ -173,7 +175,7 @@ scalar `tag` field.
       link resolved against `base_uri`; (d) URL in a comment
       line produces NO link (asserts the deliberate drop); (e)
       URL exceeding `MAX_URL_LENGTH` is skipped.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length is **65**
+- [x] **Before editing:** confirm `ALLOW_LIST` length is **65**
       (after Plan A completes) and the set of entries with
       `file: "decorators/document_links.rs"` matches:
       `find_document_links`, `url_links`, `include_links`,
@@ -181,11 +183,11 @@ scalar `tag` field.
       Remove exactly those 5 entries. After removal,
       `ALLOW_LIST` length must be exactly **60**. Allow-list
       may shrink only.
-- [ ] Remove the follow-up-queue entry for `find_document_links`
+- [x] Remove the follow-up-queue entry for `find_document_links`
       from `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ### Task 2: Retrofit decorators/color.rs to AST-only
 

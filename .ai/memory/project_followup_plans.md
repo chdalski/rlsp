@@ -38,12 +38,6 @@ type: project
   Replacement: add a `documents: Option<&Vec<Document<Span>>>` parameter; use the AST to determine context at the trigger position (mapping vs. sequence context, current indentation level from parent node spans) rather than scanning line text.
   Helpers retired when this retrofit lands: `leading_spaces` (editing/on_type_formatting.rs), `find_mapping_colon` (editing/on_type_formatting.rs).
 
-- **Retrofit `find_document_links` to AST-first** — `decorators/document_links.rs:38`:
-  `pub fn find_document_links(text: &str, base_uri: Option<&Url>) -> Vec<DocumentLink>`.
-  Violation: splits `text` into lines and scans each line with hand-rolled text logic to detect URL patterns and `!include`-style directives. The parser AST's `Node::Scalar` nodes already carry the scalar values and their spans — no raw text scanning needed to find URLs in scalar content.
-  Replacement: add `documents: &[Document<Span>]`; walk the AST for `Node::Scalar` nodes; inspect their `value` field for URL patterns; derive document links directly from node spans.
-  Helpers retired when this retrofit lands: `url_links` (decorators/document_links.rs), `include_links` (decorators/document_links.rs), `is_inside_quotes` (decorators/document_links.rs), `trim_trailing_punctuation` (decorators/document_links.rs).
-
 - **Retrofit `find_colors` to AST-first** — `decorators/color.rs:174`:
   `pub fn find_colors(text: &str) -> Vec<ColorMatch>`.
   Violation: splits `text` into lines and scans each line with text patterns to find hex color strings. The parser AST's `Node::Scalar` nodes already carry scalar values and spans.

@@ -928,17 +928,19 @@ impl LanguageServer for Backend {
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let uri = params.text_document.uri;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let docs = if let Ok(store) = self.document_store.lock() {
+            if store.get(&uri).is_none() {
+                return Ok(None);
+            }
+            store.get_documents(&uri).cloned()
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
-            return Ok(None);
-        };
-
-        let links = crate::decorators::document_links::find_document_links(&text, Some(&uri));
+        let links = crate::decorators::document_links::find_document_links(
+            docs.as_deref().unwrap_or(&[]),
+            Some(&uri),
+        );
         if links.is_empty() {
             return Ok(None);
         }
