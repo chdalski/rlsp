@@ -201,6 +201,7 @@ fn inline_anchor_on_key_does_not_annotate_mapping_start() {
             e,
             Event::MappingStart {
                 anchor: None,
+                anchor_loc: None,
                 style: CollectionStyle::Block,
                 ..
             }
@@ -1105,4 +1106,559 @@ fn anchor_followed_by_inline_dash_returns_error() {
         parse_events("&a - item\n").any(|r| r.is_err()),
         "anchor &a directly before block-sequence dash on same line must return an error"
     );
+}
+
+// -----------------------------------------------------------------------
+// Group J: anchor_loc span correctness
+// -----------------------------------------------------------------------
+
+// J-1: anchor_loc is None when no anchor is present on a scalar.
+#[test]
+fn anchor_loc_none_when_no_anchor_on_scalar() {
+    let events = parse_to_vec("value\n");
+    let scalar = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar { anchor_loc, .. } = ev {
+                Some(*anchor_loc)
+            } else {
+                None
+            }
+        })
+    });
+    assert_eq!(
+        scalar,
+        Some(None),
+        "scalar with no anchor must have anchor_loc: None"
+    );
+}
+
+// J-2: anchor_loc is Some for an anchored scalar, covering `&` through last byte of name.
+#[test]
+fn anchor_loc_some_for_anchored_plain_scalar() {
+    // `&abc val\n` — `&abc` starts at byte 0, col 0, line 1.
+    // anchor name length = 3, so end = byte 4, col 4.
+    let events = parse_to_vec("&abc val\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some("abc"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored scalar must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 4,
+                line: 1,
+                column: 4,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "anchor_loc must cover `&` through last byte of name"
+        );
+    }
+}
+
+// J-3: anchor_loc is Some for SequenceStart.
+#[test]
+fn anchor_loc_some_for_anchored_sequence_start() {
+    // `&s\n- item\n` — `&s` at byte 0, col 0, line 1; end = byte 2, col 2.
+    let events = parse_to_vec("&s\n- item\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::SequenceStart {
+                anchor: Some("s"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored SequenceStart must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 2,
+                line: 1,
+                column: 2,
+            },
+        };
+        assert_eq!(loc, expected, "SequenceStart anchor_loc must cover `&s`");
+    }
+}
+
+// J-4: anchor_loc is Some for MappingStart.
+#[test]
+fn anchor_loc_some_for_anchored_mapping_start() {
+    // `&m\nkey: val\n` — `&m` at byte 0, col 0, line 1; end = byte 2, col 2.
+    let events = parse_to_vec("&m\nkey: val\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::MappingStart {
+                anchor: Some("m"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored MappingStart must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 2,
+                line: 1,
+                column: 2,
+            },
+        };
+        assert_eq!(loc, expected, "MappingStart anchor_loc must cover `&m`");
+    }
+}
+
+// J-5: anchor_loc for an inline anchor on a mapping key covers `&` through last byte of name.
+#[test]
+fn anchor_loc_inline_anchor_on_mapping_key_scalar() {
+    // `&k key: val\n` — inline anchor before key; `&k` at byte 0, col 0, line 1.
+    let events = parse_to_vec("&k key: val\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some("k"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "key scalar with inline anchor must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 2,
+                line: 1,
+                column: 2,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "inline anchor on key: anchor_loc must cover `&k`"
+        );
+    }
+}
+
+// J-6: anchor_loc for a multibyte anchor name covers the correct byte range.
+#[test]
+fn anchor_loc_multibyte_anchor_name_byte_range() {
+    // `&\u{00E9}n val\n` — é (U+00E9) = 2 bytes; anchor name = `én` (3 bytes total).
+    // `&` at byte 0 col 0; end byte = 1 + 2 + 1 = 4; end col = 1 + 1 + 1 = 3.
+    let input = "&\u{00E9}n val\n";
+    let events = parse_to_vec(input);
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some(_),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "multibyte-anchored scalar must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        // `&` = 1 byte at col 0; `é` = 2 bytes at col 1; `n` = 1 byte at col 2;
+        // end byte = 0 + 1 + 2 + 1 = 4; end col = 0 + 1 + 1 + 1 = 3.
+        assert_eq!(loc.start.byte_offset, 0, "anchor start byte must be 0");
+        assert_eq!(loc.start.column, 0, "anchor start col must be 0");
+        assert_eq!(
+            loc.end.byte_offset, 4,
+            "anchor end byte must cover ampersand + 2-byte + 1-byte"
+        );
+        assert_eq!(
+            loc.end.column, 3,
+            "anchor end col must be 3 (1 + 1 + 1 codepoints)"
+        );
+    }
+}
+
+// J-7: anchor_loc start matches the `&` byte position when anchor is not at column 0.
+#[test]
+fn anchor_loc_start_at_ampersand_mid_line() {
+    // `key: &v val\n` — `&v` is at byte offset 5, col 5, line 1.
+    let events = parse_to_vec("key: &v val\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some("v"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "value-anchored scalar must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        // `key: ` = 5 bytes; `&` at byte 5, col 5.
+        assert_eq!(loc.start.byte_offset, 5, "anchor start byte must be 5");
+        assert_eq!(loc.start.column, 5, "anchor start col must be 5");
+        assert_eq!(
+            loc.end.byte_offset, 7,
+            "anchor end byte must be 7 (`&v` = 2 bytes)"
+        );
+        assert_eq!(loc.end.column, 7, "anchor end col must be 7");
+    }
+}
+
+// J-8: anchor_loc is None for SequenceStart when no anchor present.
+#[test]
+fn anchor_loc_none_for_sequence_start_without_anchor() {
+    let events = parse_to_vec("- item\n");
+    let loc = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::SequenceStart { anchor_loc, .. } = ev {
+                Some(*anchor_loc)
+            } else {
+                None
+            }
+        })
+    });
+    assert_eq!(
+        loc,
+        Some(None),
+        "SequenceStart without anchor must have anchor_loc: None"
+    );
+}
+
+// J-9: anchor_loc is None for MappingStart when no anchor present.
+#[test]
+fn anchor_loc_none_for_mapping_start_without_anchor() {
+    let events = parse_to_vec("key: val\n");
+    let loc = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::MappingStart { anchor_loc, .. } = ev {
+                Some(*anchor_loc)
+            } else {
+                None
+            }
+        })
+    });
+    assert_eq!(
+        loc,
+        Some(None),
+        "MappingStart without anchor must have anchor_loc: None"
+    );
+}
+
+// J-10: anchor_loc start line matches the physical line of the `&` token.
+#[test]
+fn anchor_loc_start_line_matches_anchor_line() {
+    // Standalone anchor on line 2: `---\n&a val\n`
+    // `&a` is on line 2, byte offset = len("---\n") = 4.
+    let events = parse_to_vec("---\n&a val\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some("a"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored scalar on line 2 must have anchor_loc"
+    );
+    if let Some(loc) = loc_opt {
+        assert_eq!(loc.start.line, 2, "anchor_loc.start.line must be 2");
+        assert_eq!(
+            loc.start.byte_offset, 4,
+            "anchor_loc.start.byte_offset must be 4 (after `---\\n`)"
+        );
+    }
+}
+
+// J-11: anchor_loc for an anchor before a flow mapping.
+#[test]
+fn anchor_loc_some_for_anchored_flow_mapping() {
+    // `&a {k: v}\n` — `&a` at byte 0, col 0, line 1; end = byte 2, col 2.
+    let events = parse_to_vec("&a {k: v}\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::MappingStart {
+                anchor: Some("a"),
+                anchor_loc: Some(s),
+                style: CollectionStyle::Flow,
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored flow MappingStart must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 2,
+                line: 1,
+                column: 2,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "flow MappingStart anchor_loc must cover `&a`"
+        );
+    }
+}
+
+// J-12: anchor_loc for an anchor before a flow sequence.
+#[test]
+fn anchor_loc_some_for_anchored_flow_sequence() {
+    // `&a [item]\n` — `&a` at byte 0, col 0, line 1; end = byte 2, col 2.
+    let events = parse_to_vec("&a [item]\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::SequenceStart {
+                anchor: Some("a"),
+                anchor_loc: Some(s),
+                style: CollectionStyle::Flow,
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "anchored flow SequenceStart must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 2,
+                line: 1,
+                column: 2,
+            },
+        };
+        assert_eq!(
+            loc, expected,
+            "flow SequenceStart anchor_loc must cover `&a`"
+        );
+    }
+}
+
+// J-13: anchor_loc for a dotted anchor name covers all bytes of `&a.b.c`.
+#[test]
+fn anchor_loc_dotted_anchor_name_full_span() {
+    // `&a.b.c value\n` — `&a.b.c` at byte 0, col 0; end = byte 6, col 6.
+    let events = parse_to_vec("&a.b.c value\n");
+    let loc_opt = events.iter().find_map(|r| {
+        r.as_ref().ok().and_then(|(ev, _)| {
+            if let Event::Scalar {
+                anchor: Some("a.b.c"),
+                anchor_loc: Some(s),
+                ..
+            } = ev
+            {
+                Some(*s)
+            } else {
+                None
+            }
+        })
+    });
+    assert!(
+        loc_opt.is_some(),
+        "dotted-anchor scalar must have anchor_loc = Some(...)"
+    );
+    if let Some(loc) = loc_opt {
+        let expected = Span {
+            start: Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 6,
+                line: 1,
+                column: 6,
+            },
+        };
+        assert_eq!(loc, expected, "anchor_loc must cover `&a.b.c` (6 bytes)");
+    }
+}
+
+// J-INV-CORPUS: invariant — anchor.is_some() == anchor_loc.is_some() for every Ok event
+// across every yaml-test-suite .yaml file.
+#[test]
+fn anchor_loc_invariant_corpus_wide() {
+    let suite_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/yaml-test-suite/src");
+    let read_result = std::fs::read_dir(&suite_dir);
+    assert!(
+        read_result.is_ok(),
+        "cannot read yaml-test-suite dir {suite_dir:?}"
+    );
+    let mut file_count = 0u32;
+    for entry in read_result.into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+            continue;
+        }
+        file_count += 1;
+        let read_file = std::fs::read_to_string(&path);
+        assert!(read_file.is_ok(), "cannot read {path:?}");
+        let content = read_file.unwrap_or_default();
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        for (ev, _) in rlsp_yaml_parser::parse_events(&content).filter_map(Result::ok) {
+            let anchor_pair = match &ev {
+                Event::Scalar {
+                    anchor, anchor_loc, ..
+                }
+                | Event::SequenceStart {
+                    anchor, anchor_loc, ..
+                }
+                | Event::MappingStart {
+                    anchor, anchor_loc, ..
+                } => Some((anchor.is_some(), anchor_loc.is_some())),
+                Event::StreamStart
+                | Event::StreamEnd
+                | Event::Comment { .. }
+                | Event::DocumentStart { .. }
+                | Event::DocumentEnd { .. }
+                | Event::Alias { .. }
+                | Event::SequenceEnd
+                | Event::MappingEnd => None,
+            };
+            if let Some((anchor_is_some, anchor_loc_is_some)) = anchor_pair {
+                assert_eq!(
+                    anchor_is_some, anchor_loc_is_some,
+                    "invariant violated in {file_name}: anchor.is_some()={anchor_is_some} but anchor_loc.is_some()={anchor_loc_is_some} for event {ev:?}"
+                );
+            }
+        }
+    }
+    assert!(file_count > 0, "no .yaml files found in {suite_dir:?}");
+}
+
+// J-INV: invariant — anchor.is_some() == anchor_loc.is_some() for every event in a complex document.
+#[test]
+fn anchor_loc_invariant_anchor_some_iff_loc_some() {
+    let input = "&seq\n- &item val\n- plain\n&map\nkey: &v val2\n";
+    let events = parse_to_vec(input);
+    for (ev, _) in events.iter().filter_map(|r| r.as_ref().ok()) {
+        let anchor_pair = match ev {
+            Event::Scalar {
+                anchor, anchor_loc, ..
+            }
+            | Event::SequenceStart {
+                anchor, anchor_loc, ..
+            }
+            | Event::MappingStart {
+                anchor, anchor_loc, ..
+            } => Some((anchor.is_some(), anchor_loc.is_some())),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Comment { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::Alias { .. }
+            | Event::SequenceEnd
+            | Event::MappingEnd => None,
+        };
+        if let Some((anchor_is_some, anchor_loc_is_some)) = anchor_pair {
+            assert_eq!(
+                anchor_is_some, anchor_loc_is_some,
+                "invariant violated: anchor.is_some()={anchor_is_some} but anchor_loc.is_some()={anchor_loc_is_some} for event {ev:?}"
+            );
+        }
+    }
 }

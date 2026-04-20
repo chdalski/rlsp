@@ -12,6 +12,8 @@
 
 use std::borrow::Cow;
 
+use crate::pos::Span;
+
 /// Block scalar chomping mode per YAML 1.2 §8.1.1.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Chomp {
@@ -128,6 +130,9 @@ pub enum Event<'input> {
     SequenceStart {
         /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
+        /// Source span of the `&name` anchor token — from `&` through the last
+        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
+        anchor_loc: Option<Span>,
         /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:seq"` for `!!seq`).
         ///
         /// Verbatim tags (`!<URI>`) borrow from input.  Shorthand tags resolved
@@ -147,6 +152,9 @@ pub enum Event<'input> {
     MappingStart {
         /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
+        /// Source span of the `&name` anchor token — from `&` through the last
+        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
+        anchor_loc: Option<Span>,
         /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:map"` for `!!map`).
         ///
         /// See [`SequenceStart::tag`] for resolution semantics.
@@ -170,6 +178,9 @@ pub enum Event<'input> {
         style: ScalarStyle,
         /// The anchor name, if any (e.g. `&foo`).
         anchor: Option<&'input str>,
+        /// Source span of the `&name` anchor token — from `&` through the last
+        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
+        anchor_loc: Option<Span>,
         /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:str"` for `!!str`).
         ///
         /// See [`SequenceStart::tag`] for resolution semantics.

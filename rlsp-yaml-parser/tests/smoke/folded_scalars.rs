@@ -8,6 +8,7 @@ fn folded(value: &str, chomp: Chomp) -> Event<'_> {
         value: value.into(),
         style: ScalarStyle::Folded(chomp),
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }

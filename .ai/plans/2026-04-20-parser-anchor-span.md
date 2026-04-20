@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -77,30 +77,32 @@ Either both are populated (the source had an `&name`) or both are
 
 ## Steps
 
-- [ ] Task 1: extend event stream with anchor_loc
+- [x] Task 1: extend event stream with anchor_loc
 - [ ] Task 2: extend AST nodes with anchor_loc
 
 ## Tasks
 
 ### Task 1: Extend the event stream with anchor_loc
 
-Add `anchor_loc: Option<Span>` to `Event::Scalar`,
+Committed as `bfae6930bb84d04f419c4b7705655f856996d273` (may be
+superseded by follow-up amend for SHA recording). Add
+`anchor_loc: Option<Span>` to `Event::Scalar`,
 `Event::MappingStart`, and `Event::SequenceStart`. Capture the
 `&name` span in the lexer when the anchor indicator is parsed,
 carry it through `PendingAnchor`, and populate the new event field
 when the pending anchor is consumed by the next node event.
 
-- [ ] Add `anchor_loc: Option<Span>` field to `Event::Scalar`,
+- [x] Add `anchor_loc: Option<Span>` field to `Event::Scalar`,
       `Event::MappingStart`, `Event::SequenceStart` in `event.rs`,
       including rustdoc that describes the semantics: `Some(span)`
       when `anchor` is `Some`; `None` otherwise; span covers the
       `&` indicator through the last byte of the anchor name.
-- [ ] Extend `PendingAnchor::Standalone` and `PendingAnchor::Inline`
+- [x] Extend `PendingAnchor::Standalone` and `PendingAnchor::Inline`
       to carry the anchor's `Span` in addition to the borrowed name
       (e.g. `Standalone { name: &'input str, loc: Span }`). Update
       the existing `PendingAnchor::name()` accessor and add a
       `PendingAnchor::loc()` accessor returning the span.
-- [ ] Capture the anchor span at the `&` recognition site in
+- [x] Capture the anchor span at the `&` recognition site in
       `event_iter/step.rs` (around line 571, where
       `scan_anchor_name(after_amp, amp_pos)` is called).
       `amp_pos` is already the `Pos` of the `&` byte; compute the
@@ -110,11 +112,11 @@ when the pending anchor is consumed by the next node event.
       site and store it on `PendingAnchor`. No changes to
       `scan_anchor_name` in `properties.rs` are required — the
       call site already has both halves.
-- [ ] Populate `anchor_loc` on every node event that consumes a
+- [x] Populate `anchor_loc` on every node event that consumes a
       pending anchor. Call sites in `event_iter/step.rs` that
       currently read `self.pending_anchor.take().map(PendingAnchor::name)`
       also read the matching `.loc()` and emit it on the event.
-- [ ] Unit tests in `event_iter` / `lexer` verifying the anchor
+- [x] Unit tests in `event_iter` / `lexer` verifying the anchor
       span for these shapes (one rstest case per shape, named):
       inline anchor before a plain scalar (`key: &a value`);
       standalone anchor before a scalar on a new line
@@ -125,12 +127,12 @@ when the pending anchor is consumed by the next node event.
       (`&a [item]`); anchor on a mapping key scalar
       (`&a key: value`); UTF-8 anchor name (`&αβγ value`);
       dotted anchor name (`&a.b.c value`).
-- [ ] Invariant test: for every event produced by the parser on
+- [x] Invariant test: for every event produced by the parser on
       a corpus sample, `event.anchor.is_some() == event.anchor_loc.is_some()`.
       Add one test function that iterates all conformance corpus
       inputs and asserts the invariant.
-- [ ] `cargo test -p rlsp-yaml-parser` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo test -p rlsp-yaml-parser` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
 
 ### Task 2: Extend AST nodes with anchor_loc
 

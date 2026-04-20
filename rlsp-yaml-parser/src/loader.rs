@@ -417,6 +417,7 @@ impl<'opt> LoadState<'opt> {
                 style,
                 anchor,
                 tag,
+                ..
             } => {
                 let node = Node::Scalar {
                     value: value.into_owned(),
@@ -433,7 +434,9 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::MappingStart { anchor, tag, style } => {
+            Event::MappingStart {
+                anchor, tag, style, ..
+            } => {
                 let anchor = anchor.map(str::to_owned);
                 let tag = tag.map(std::borrow::Cow::into_owned);
 
@@ -534,7 +537,9 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::SequenceStart { anchor, tag, style } => {
+            Event::SequenceStart {
+                anchor, tag, style, ..
+            } => {
                 let anchor = anchor.map(str::to_owned);
                 let tag = tag.map(std::borrow::Cow::into_owned);
 

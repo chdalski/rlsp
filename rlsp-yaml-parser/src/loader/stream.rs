@@ -266,6 +266,7 @@ mod tests {
                 value: "x".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             sp,

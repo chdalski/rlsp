@@ -74,7 +74,8 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: crate::event::ScalarStyle::Plain,
-                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        anchor: self.pending_anchor.map(PendingAnchor::name),
+                        anchor_loc: self.pending_anchor.take().map(PendingAnchor::loc),
                         tag: self.pending_tag.take().map(PendingTag::into_cow),
                     },
                     zero_span(end),
@@ -296,7 +297,7 @@ impl<'input> EventIter<'input> {
                 // An Inline anchor preceding `*alias` is an error — it would annotate
                 // the alias node, which is illegal.  A Standalone anchor belongs to
                 // the surrounding collection, not the alias, so it is not an error here.
-                if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_))) {
+                if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..))) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error {
                         pos: star_pos,
@@ -344,13 +345,18 @@ impl<'input> EventIter<'input> {
                                 matches!(e, CollectionEntry::Mapping(col, _, _) if *col == line_indent)
                             });
                         if is_value_indicator && !already_in_mapping_here {
-                            let map_anchor = if matches!(
+                            let (map_anchor, map_anchor_loc) = if matches!(
                                 self.pending_anchor,
-                                Some(PendingAnchor::Standalone(_))
+                                Some(PendingAnchor::Standalone(_, _))
                             ) {
-                                self.pending_anchor.take().map(PendingAnchor::name)
+                                let loc = self.pending_anchor.map(PendingAnchor::loc);
+                                let name = self.pending_anchor.take().map(PendingAnchor::name);
+                                (name, loc)
                             } else {
-                                self.pending_collection_anchor.take()
+                                (
+                                    self.pending_collection_anchor.take(),
+                                    self.pending_collection_anchor_loc.take(),
+                                )
                             };
                             let map_tag =
                                 if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
@@ -361,6 +367,7 @@ impl<'input> EventIter<'input> {
                             self.queue.push_back((
                                 Event::MappingStart {
                                     anchor: map_anchor,
+                                    anchor_loc: map_anchor_loc,
                                     tag: map_tag,
                                     style: CollectionStyle::Block,
                                 },
@@ -585,6 +592,16 @@ impl<'input> EventIter<'input> {
                         // following line, not the comment.
                         let had_inline = !inline.is_empty() && !inline.starts_with('#');
                         let name_char_count = name.chars().count();
+                        // Compute the anchor span: from `&` through the last byte of the name.
+                        let anchor_end = Pos {
+                            byte_offset: amp_pos.byte_offset + 1 + name.len(),
+                            line: amp_pos.line,
+                            column: amp_pos.column + 1 + name_char_count,
+                        };
+                        let anchor_span = Span {
+                            start: amp_pos,
+                            end: anchor_end,
+                        };
                         let inline_offset =
                             line_pos.byte_offset + leading + 1 + name.len() + spaces;
                         let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;
@@ -602,13 +619,13 @@ impl<'input> EventIter<'input> {
                         let has_standalone_tag =
                             matches!(self.pending_tag, Some(PendingTag::Standalone(_)));
                         let is_duplicate =
-                            if matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
+                            if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..)))
                                 && !has_standalone_tag
                             {
                                 true
                             } else if matches!(
                                 self.pending_anchor,
-                                Some(PendingAnchor::Standalone(_))
+                                Some(PendingAnchor::Standalone(..))
                             ) && had_inline
                                 && !has_standalone_tag
                             {
@@ -675,14 +692,16 @@ impl<'input> EventIter<'input> {
                             // standalone tag (`&a4 !!map` + `&a5 key: v`), the
                             // inline anchor was paired with the collection tag — save
                             // it to the collection slot so it reaches MappingStart.
-                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_)))
-                                || (matches!(self.pending_anchor, Some(PendingAnchor::Inline(_)))
+                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..)))
+                                || (matches!(self.pending_anchor, Some(PendingAnchor::Inline(..)))
                                     && has_standalone_tag)
                             {
-                                self.pending_collection_anchor =
-                                    self.pending_anchor.take().map(PendingAnchor::name);
+                                let displaced = self.pending_anchor.take();
+                                self.pending_collection_anchor = displaced.map(PendingAnchor::name);
+                                self.pending_collection_anchor_loc =
+                                    displaced.map(PendingAnchor::loc);
                             }
-                            self.pending_anchor = Some(PendingAnchor::Inline(name));
+                            self.pending_anchor = Some(PendingAnchor::Inline(name, anchor_span));
                             // Record the original physical line's indent so that
                             // handle_mapping_entry can open the mapping at the correct
                             // indent when the key is on a synthetic (offset) line.
@@ -726,7 +745,8 @@ impl<'input> EventIter<'input> {
                                             .into(),
                                 }));
                             }
-                            self.pending_anchor = Some(PendingAnchor::Standalone(name));
+                            self.pending_anchor =
+                                Some(PendingAnchor::Standalone(name, anchor_span));
                         }
                         // Let the next iteration handle whatever follows.
                         return StepResult::Continue;

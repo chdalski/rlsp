@@ -197,6 +197,7 @@ impl<'input> EventIter<'input> {
         // Seeded from any block-context anchor that was pending when this flow
         // collection was entered (e.g. `&seq [a, b]` sets pending_anchor before
         // the `[` is dispatched to handle_flow_collection).
+        let mut pending_flow_anchor_loc: Option<Span> = self.pending_anchor.map(PendingAnchor::loc);
         let mut pending_flow_anchor: Option<&'input str> =
             self.pending_anchor.take().map(PendingAnchor::name);
         // Pending tag for the next node in this flow collection.
@@ -419,6 +420,7 @@ impl<'input> EventIter<'input> {
                     events.push((
                         Event::SequenceStart {
                             anchor: pending_flow_anchor.take(),
+                            anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
                             style: CollectionStyle::Flow,
                         },
@@ -443,6 +445,7 @@ impl<'input> EventIter<'input> {
                     events.push((
                         Event::MappingStart {
                             anchor: pending_flow_anchor.take(),
+                            anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
                             style: CollectionStyle::Flow,
                         },
@@ -714,6 +717,7 @@ impl<'input> EventIter<'input> {
                             value: Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
                             anchor: pending_flow_anchor.take(),
+                            anchor_loc: pending_flow_anchor_loc.take(),
                             tag: pending_flow_tag.take(),
                         },
                         zero_span(empty_pos),
@@ -906,6 +910,7 @@ impl<'input> EventIter<'input> {
                         value,
                         style,
                         anchor: pending_flow_anchor.take(),
+                        anchor_loc: pending_flow_anchor_loc.take(),
                         tag: pending_flow_tag.take(),
                     },
                     span,
@@ -1105,6 +1110,7 @@ impl<'input> EventIter<'input> {
                                                 value: Cow::Borrowed(""),
                                                 style: ScalarStyle::Plain,
                                                 anchor: pending_flow_anchor.take(),
+                                                anchor_loc: pending_flow_anchor_loc.take(),
                                                 tag: pending_flow_tag.take(),
                                             },
                                             zero_span(key_pos),
@@ -1144,6 +1150,7 @@ impl<'input> EventIter<'input> {
                                     (
                                         Event::MappingStart {
                                             anchor: None,
+                                            anchor_loc: None,
                                             tag: None,
                                             style: CollectionStyle::Flow,
                                         },
@@ -1236,6 +1243,12 @@ impl<'input> EventIter<'input> {
                                 message: "a node may not have more than one anchor".into(),
                             }));
                         }
+                        let anchor_end =
+                            crate::pos::advance_within_line(amp_pos.advance('&'), name);
+                        pending_flow_anchor_loc = Some(Span {
+                            start: amp_pos,
+                            end: anchor_end,
+                        });
                         pending_flow_anchor = Some(name);
                         pos_in_line += 1 + name.len();
                         // Skip any whitespace after the anchor name.
@@ -1513,6 +1526,7 @@ impl<'input> EventIter<'input> {
                                 value: Cow::Borrowed(scanned),
                                 style: ScalarStyle::Plain,
                                 anchor: pending_flow_anchor.take(),
+                                anchor_loc: pending_flow_anchor_loc.take(),
                                 tag: pending_flow_tag.take(),
                             },
                             scalar_span,
@@ -1599,12 +1613,14 @@ impl<'input> EventIter<'input> {
         // (consumed if a key, unused otherwise).
         if let Some(map_col) = implicit_key_mapping_indent {
             let mapping_anchor = self.pending_collection_anchor.take();
+            let mapping_anchor_loc = self.pending_collection_anchor_loc.take();
             let mapping_tag = self.pending_collection_tag.take();
             events.insert(
                 0,
                 (
                     Event::MappingStart {
                         anchor: mapping_anchor,
+                        anchor_loc: mapping_anchor_loc,
                         tag: mapping_tag,
                         style: crate::event::CollectionStyle::Block,
                     },

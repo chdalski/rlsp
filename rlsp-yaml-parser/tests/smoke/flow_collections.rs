@@ -8,6 +8,7 @@ use rstest::rstest;
 const fn seq_start_flow() -> Event<'static> {
     Event::SequenceStart {
         anchor: None,
+        anchor_loc: None,
         tag: None,
         style: CollectionStyle::Flow,
     }
@@ -16,6 +17,7 @@ const fn seq_start_flow() -> Event<'static> {
 const fn map_start_flow() -> Event<'static> {
     Event::MappingStart {
         anchor: None,
+        anchor_loc: None,
         tag: None,
         style: CollectionStyle::Flow,
     }
@@ -26,6 +28,7 @@ const fn plain(v: &'static str) -> Event<'static> {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::Plain,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }
@@ -35,6 +38,7 @@ const fn single_quoted(v: &'static str) -> Event<'static> {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::SingleQuoted,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }
@@ -44,6 +48,7 @@ const fn double_quoted(v: &'static str) -> Event<'static> {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::DoubleQuoted,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }

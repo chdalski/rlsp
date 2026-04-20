@@ -518,13 +518,16 @@ impl<'input> EventIter<'input> {
             // mapping (YAML test suite 9KAX).  The pending anchor/tag stays on
             // `self.pending_anchor`/`self.pending_tag` and is consumed by
             // `consume_mapping_entry` when it emits the key scalar.
-            let mapping_anchor = self.pending_collection_anchor.take().or_else(|| {
-                if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
-                    self.pending_anchor.take().map(PendingAnchor::name)
+            let (mapping_anchor, mapping_anchor_loc) =
+                if let Some(name) = self.pending_collection_anchor.take() {
+                    (Some(name), self.pending_collection_anchor_loc.take())
+                } else if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_, _))) {
+                    let loc = self.pending_anchor.map(PendingAnchor::loc);
+                    let name = self.pending_anchor.take().map(PendingAnchor::name);
+                    (name, loc)
                 } else {
-                    None
-                }
-            });
+                    (None, None)
+                };
             let mapping_tag = self.pending_collection_tag.take().or_else(|| {
                 if matches!(self.pending_tag, Some(PendingTag::Standalone(_))) {
                     self.pending_tag.take().map(PendingTag::into_cow)
@@ -535,6 +538,7 @@ impl<'input> EventIter<'input> {
             self.queue.push_back((
                 Event::MappingStart {
                     anchor: mapping_anchor,
+                    anchor_loc: mapping_anchor_loc,
                     tag: mapping_tag,
                     style: CollectionStyle::Block,
                 },
@@ -574,11 +578,13 @@ impl<'input> EventIter<'input> {
             // belong to the empty key scalar.
             if in_key_phase {
                 let pos = self.lexer.current_pos();
+                let pa = self.pending_anchor.take();
                 self.queue.push_back((
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
-                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        anchor: pa.map(PendingAnchor::name),
+                        anchor_loc: pa.map(PendingAnchor::loc),
                         tag: self.pending_tag.take().map(PendingTag::into_cow),
                     },
                     zero_span(pos),
@@ -620,11 +626,13 @@ impl<'input> EventIter<'input> {
         // iteration will detect Value phase + new key and emit the empty value scalar.
         if has_complex_key_inline {
             let pos = self.lexer.current_pos();
+            let pa = self.pending_anchor.take();
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                    anchor: pa.map(PendingAnchor::name),
+                    anchor_loc: pa.map(PendingAnchor::loc),
                     tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 zero_span(pos),
@@ -642,16 +650,20 @@ impl<'input> EventIter<'input> {
             // Only consume a Standalone anchor as the null value's anchor.
             // An Inline anchor (e.g. `&anchor c: 3`) belongs to the next key
             // scalar, not to this null value.
-            let null_anchor = if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))) {
-                self.pending_anchor.take().map(PendingAnchor::name)
-            } else {
-                None
-            };
+            let (null_anchor, null_anchor_loc) =
+                if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_, _))) {
+                    let loc = self.pending_anchor.map(PendingAnchor::loc);
+                    let name = self.pending_anchor.take().map(PendingAnchor::name);
+                    (name, loc)
+                } else {
+                    (None, None)
+                };
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
                     anchor: null_anchor,
+                    anchor_loc: null_anchor_loc,
                     tag: None,
                 },
                 zero_span(pos),
@@ -705,11 +717,13 @@ impl<'input> EventIter<'input> {
                 key_style,
                 key_span,
             } => {
+                let pa = self.pending_anchor.take();
                 self.queue.push_back((
                     Event::Scalar {
                         value: key_value,
                         style: key_style,
-                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        anchor: pa.map(PendingAnchor::name),
+                        anchor_loc: pa.map(PendingAnchor::loc),
                         tag: self.pending_tag.take().map(PendingTag::into_cow),
                     },
                     key_span,

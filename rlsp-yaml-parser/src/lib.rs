@@ -108,6 +108,8 @@ struct EventIter<'input> {
     /// collection-level anchor when both a collection property and a key
     /// property must be delivered simultaneously.
     pending_collection_anchor: Option<&'input str>,
+    /// Span of the anchor token stored in `pending_collection_anchor`.
+    pending_collection_anchor_loc: Option<crate::pos::Span>,
     /// Parallel to `pending_collection_anchor` but for tags.
     ///
     /// When a `Standalone` tag is displaced by an `Inline` tag for a mapping
@@ -165,6 +167,7 @@ pub(crate) const fn empty_scalar_event<'input>() -> Event<'input> {
         value: std::borrow::Cow::Borrowed(""),
         style: ScalarStyle::Plain,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }

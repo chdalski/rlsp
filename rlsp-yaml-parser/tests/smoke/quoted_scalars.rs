@@ -36,6 +36,7 @@ fn quoted_scalar_emits_full_event_sequence(
         value: expected_value.into(),
         style: expected_style,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     };
     let events = event_variants(input);
@@ -173,6 +174,7 @@ fn single_quoted_follows_plain_scalar_fallback() {
                 value: "plain".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::DocumentEnd { explicit: false },

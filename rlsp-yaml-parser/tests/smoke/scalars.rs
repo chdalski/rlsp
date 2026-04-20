@@ -7,6 +7,7 @@ fn plain(value: &str) -> Event<'_> {
         value: value.into(),
         style: ScalarStyle::Plain,
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }

@@ -90,14 +90,20 @@ pub enum FlowMappingPhase {
 ///   annotates the key scalar, not the enclosing mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingAnchor<'input> {
-    Standalone(&'input str),
-    Inline(&'input str),
+    Standalone(&'input str, Span),
+    Inline(&'input str, Span),
 }
 
 impl<'input> PendingAnchor<'input> {
     pub const fn name(self) -> &'input str {
         match self {
-            Self::Standalone(n) | Self::Inline(n) => n,
+            Self::Standalone(n, _) | Self::Inline(n, _) => n,
+        }
+    }
+
+    pub const fn loc(self) -> Span {
+        match self {
+            Self::Standalone(_, s) | Self::Inline(_, s) => s,
         }
     }
 }
@@ -155,22 +161,36 @@ pub enum ConsumedMapping<'input> {
 #[cfg(test)]
 mod tests {
     use super::{PendingAnchor, PendingTag};
+    use crate::pos::{Pos, Span};
     use std::borrow::Cow;
+
+    const TEST_SPAN: Span = Span {
+        start: Pos {
+            byte_offset: 0,
+            line: 1,
+            column: 0,
+        },
+        end: Pos {
+            byte_offset: 7,
+            line: 1,
+            column: 7,
+        },
+    };
 
     // A-1: Standalone variant carries the anchor name.
     #[test]
     fn pending_anchor_standalone_carries_name() {
-        let a = PendingAnchor::Standalone("myanchor");
+        let a = PendingAnchor::Standalone("myanchor", TEST_SPAN);
         assert_eq!(a.name(), "myanchor");
-        assert!(matches!(a, PendingAnchor::Standalone("myanchor")));
+        assert!(matches!(a, PendingAnchor::Standalone("myanchor", _)));
     }
 
     // A-2: Inline variant carries the anchor name.
     #[test]
     fn pending_anchor_inline_carries_name() {
-        let a = PendingAnchor::Inline("inlineanchor");
+        let a = PendingAnchor::Inline("inlineanchor", TEST_SPAN);
         assert_eq!(a.name(), "inlineanchor");
-        assert!(matches!(a, PendingAnchor::Inline("inlineanchor")));
+        assert!(matches!(a, PendingAnchor::Inline("inlineanchor", _)));
     }
 
     // A-3: None::<PendingAnchor> matches the None arm (documents cleared state).
@@ -178,8 +198,46 @@ mod tests {
     fn pending_anchor_none_matches_none_arm() {
         let a: Option<PendingAnchor<'_>> = None;
         assert!(a.is_none());
-        assert!(!matches!(a, Some(PendingAnchor::Standalone(_))));
-        assert!(!matches!(a, Some(PendingAnchor::Inline(_))));
+        assert!(!matches!(a, Some(PendingAnchor::Standalone(..))));
+        assert!(!matches!(a, Some(PendingAnchor::Inline(..))));
+    }
+
+    // SA-1: Standalone variant loc() returns the stored span.
+    #[test]
+    fn pending_anchor_standalone_loc_returns_span() {
+        let span = Span {
+            start: Pos {
+                byte_offset: 5,
+                line: 2,
+                column: 3,
+            },
+            end: Pos {
+                byte_offset: 12,
+                line: 2,
+                column: 10,
+            },
+        };
+        let a = PendingAnchor::Standalone("anchor", span);
+        assert_eq!(a.loc(), span);
+    }
+
+    // SA-2: Inline variant loc() returns the stored span.
+    #[test]
+    fn pending_anchor_inline_loc_returns_span() {
+        let span = Span {
+            start: Pos {
+                byte_offset: 10,
+                line: 3,
+                column: 0,
+            },
+            end: Pos {
+                byte_offset: 17,
+                line: 3,
+                column: 7,
+            },
+        };
+        let a = PendingAnchor::Inline("anchor", span);
+        assert_eq!(a.loc(), span);
     }
 
     // T-1: Standalone variant carries the tag string.

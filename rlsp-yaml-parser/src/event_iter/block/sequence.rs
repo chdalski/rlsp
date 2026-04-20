@@ -190,10 +190,14 @@ impl<'input> EventIter<'input> {
             }
             self.coll_stack
                 .push(CollectionEntry::Sequence(dash_indent, false));
-            let seq_anchor = self
-                .pending_collection_anchor
-                .take()
-                .or_else(|| self.pending_anchor.take().map(PendingAnchor::name));
+            let (seq_anchor, seq_anchor_loc) =
+                if let Some(name) = self.pending_collection_anchor.take() {
+                    (Some(name), self.pending_collection_anchor_loc.take())
+                } else {
+                    let loc = self.pending_anchor.map(PendingAnchor::loc);
+                    let name = self.pending_anchor.take().map(PendingAnchor::name);
+                    (name, loc)
+                };
             let seq_tag = self
                 .pending_collection_tag
                 .take()
@@ -201,6 +205,7 @@ impl<'input> EventIter<'input> {
             self.queue.push_back((
                 Event::SequenceStart {
                     anchor: seq_anchor,
+                    anchor_loc: seq_anchor_loc,
                     tag: seq_tag,
                     style: CollectionStyle::Block,
                 },
@@ -223,15 +228,17 @@ impl<'input> EventIter<'input> {
         // processing the current `-`.
         if !opens_new
             && (matches!(self.pending_tag, Some(PendingTag::Standalone(_)))
-                || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_))))
+                || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..))))
             && (self.pending_tag.is_some() || self.pending_anchor.is_some())
         {
             let item_pos = self.lexer.current_pos();
+            let pa = self.pending_anchor.take();
             self.queue.push_back((
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                    anchor: pa.map(PendingAnchor::name),
+                    anchor_loc: pa.map(PendingAnchor::loc),
                     tag: self.pending_tag.take().map(PendingTag::into_cow),
                 },
                 zero_span(item_pos),
@@ -431,6 +438,7 @@ impl<'input> EventIter<'input> {
                                     value: Cow::Borrowed(value),
                                     style: ScalarStyle::Plain,
                                     anchor: None,
+                                    anchor_loc: None,
                                     tag: None,
                                 },
                                 span,
@@ -455,11 +463,13 @@ impl<'input> EventIter<'input> {
             let next_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
             if next_indent <= dash_indent {
                 let item_pos = self.lexer.current_pos();
+                let pa = self.pending_anchor.take();
                 self.queue.push_back((
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
-                        anchor: self.pending_anchor.take().map(PendingAnchor::name),
+                        anchor: pa.map(PendingAnchor::name),
+                        anchor_loc: pa.map(PendingAnchor::loc),
                         tag: None,
                     },
                     zero_span(item_pos),

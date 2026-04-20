@@ -37,6 +37,7 @@ fn single_entry_sequence_emits_correct_event_order() {
             },
             Event::SequenceStart {
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 style: CollectionStyle::Block,
             },
@@ -44,6 +45,7 @@ fn single_entry_sequence_emits_correct_event_order() {
                 value: "hello".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::SequenceEnd,
@@ -67,6 +69,7 @@ fn two_entry_flat_sequence() {
             },
             Event::SequenceStart {
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 style: CollectionStyle::Block,
             },
@@ -74,12 +77,14 @@ fn two_entry_flat_sequence() {
                 value: "foo".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::Scalar {
                 value: "bar".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::SequenceEnd,
@@ -130,6 +135,7 @@ fn sequence_empty_item_emits_empty_plain_scalar(#[case] input: &str) {
                 value,
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             } if value.as_ref() == ""
         )),
@@ -178,11 +184,13 @@ fn two_level_nested_sequence_inline() {
             },
             Event::SequenceStart {
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 style: CollectionStyle::Block,
             },
             Event::SequenceStart {
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 style: CollectionStyle::Block,
             },
@@ -190,6 +198,7 @@ fn two_level_nested_sequence_inline() {
                 value: "inner".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::SequenceEnd,
@@ -498,6 +507,7 @@ fn sequence_in_explicit_document() {
             },
             Event::SequenceStart {
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
                 style: CollectionStyle::Block,
             },
@@ -505,12 +515,14 @@ fn sequence_in_explicit_document() {
                 value: "foo".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::Scalar {
                 value: "bar".into(),
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             },
             Event::SequenceEnd,
@@ -887,6 +899,7 @@ fn fast_path_plain_scalar_emits_scalar_event() {
                 value,
                 style: ScalarStyle::Plain,
                 anchor: None,
+                anchor_loc: None,
                 tag: None,
             } if value.as_ref() == "hello"
         )
@@ -920,6 +933,7 @@ fn fast_path_plain_scalar_with_trailing_comment() {
         style,
         anchor,
         tag,
+        ..
     }) = scalar
     {
         assert_eq!(value.as_ref(), "value");

@@ -8,6 +8,7 @@ fn literal(value: &str, chomp: Chomp) -> Event<'_> {
         value: value.into(),
         style: ScalarStyle::Literal(chomp),
         anchor: None,
+        anchor_loc: None,
         tag: None,
     }
 }
