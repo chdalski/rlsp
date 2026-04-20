@@ -41,6 +41,7 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
+use rlsp_yaml::analysis::selection::selection_ranges;
 use rlsp_yaml::editing::code_actions::code_actions;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::navigation::references::{find_references, goto_definition};
@@ -101,6 +102,11 @@ const INVARIANTS: &[Invariant] = &[
         id: "I7",
         description: "goto_definition and find_references never panic on corpus files",
         check: check_i6_references_no_panics,
+    },
+    Invariant {
+        id: "I8",
+        description: "selection_ranges never panics and outermost range starts at line 0 for non-empty result at (0,0)",
+        check: check_i8_selection_no_panic,
     },
 ];
 
@@ -539,6 +545,33 @@ fn check_i6_references_no_panics(path: &Path, text: &str) -> Result<(), String> 
                 panic_message(&e)
             )
         })?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// I8: selection_ranges never panics; outermost range valid for (0,0)
+// ---------------------------------------------------------------------------
+
+fn check_i8_selection_no_panic(_path: &Path, text: &str) -> Result<(), String> {
+    let docs = rlsp_yaml_parser::load(text).unwrap_or_default();
+    let pos = Position::new(0, 0);
+
+    let result = catch_unwind(AssertUnwindSafe(|| selection_ranges(&docs, &[pos])))
+        .map_err(|e| format!("panic in selection_ranges: {}", panic_message(&e)))?;
+
+    if let Some(sr) = result.first() {
+        let mut outermost = sr;
+        while let Some(ref p) = outermost.parent {
+            outermost = p;
+        }
+        if outermost.range.start.line != 0 {
+            return Err(format!(
+                "outermost range start.line is {} (expected 0) for position (0,0)",
+                outermost.range.start.line
+            ));
+        }
     }
 
     Ok(())

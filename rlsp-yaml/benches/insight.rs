@@ -115,7 +115,7 @@ fn bench_selection_ranges(c: &mut Criterion) {
             BenchmarkId::from_parameter(label),
             positions,
             |b, positions| {
-                b.iter(|| selection_ranges(&text, Some(&docs), positions));
+                b.iter(|| selection_ranges(&docs, positions));
             },
         );
     }

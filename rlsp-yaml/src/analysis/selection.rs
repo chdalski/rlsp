@@ -4,52 +4,39 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
-/// Compute selection ranges for the given YAML text and cursor positions.
+/// Compute selection ranges for the given YAML documents and cursor positions.
 ///
 /// For each position, returns a `SelectionRange` whose parent chain expands
 /// from innermost node to outermost document root.
-/// Returns an empty `Vec` if the AST is unavailable.
+/// Returns an empty `Vec` if `docs` or `positions` is empty.
 #[must_use]
-pub fn selection_ranges(
-    text: &str,
-    documents: Option<&Vec<Document<Span>>>,
-    positions: &[Position],
-) -> Vec<SelectionRange> {
-    let Some(documents) = documents else {
-        return Vec::new();
-    };
-    if positions.is_empty() || documents.is_empty() {
+pub fn selection_ranges(docs: &[Document<Span>], positions: &[Position]) -> Vec<SelectionRange> {
+    if docs.is_empty() || positions.is_empty() {
         return Vec::new();
     }
 
-    let lines: Vec<&str> = text.lines().collect();
-
     positions
         .iter()
-        .filter_map(|pos| selection_range_for_position(&lines, documents, *pos))
+        .filter_map(|pos| selection_range_for_position(docs, *pos))
         .collect()
 }
 
 /// Build a `SelectionRange` chain for a single cursor position.
 fn selection_range_for_position(
-    lines: &[&str],
-    documents: &[Document<Span>],
+    docs: &[Document<Span>],
     position: Position,
 ) -> Option<SelectionRange> {
     let line = position.line as usize;
     let col = position.character as usize;
 
-    // Skip positions on document separator or comment lines — no AST node
-    if let Some(l) = lines.get(line) {
-        let trimmed = l.trim();
-        if trimmed == "---" || trimmed == "..." || trimmed.starts_with('#') {
-            return None;
-        }
-    }
-
-    // Find which document contains this line (based on --- separators)
-    let (doc_idx, doc_start_line) = find_document_for_line(lines, line);
-    let doc = documents.get(doc_idx)?;
+    // Find the document whose root span contains this cursor position.
+    // Pos convention: line is 1-based, column is 0-based.
+    let doc = docs.iter().find(|d| {
+        let loc = node_span(&d.root);
+        let start_line_0 = loc.start.line.saturating_sub(1);
+        let end_line_0 = loc.end.line.saturating_sub(1);
+        line >= start_line_0 && line <= end_line_0
+    })?;
 
     // Collect ancestor spans innermost-first from the AST walk
     let mut ancestor_spans: Vec<Span> = Vec::new();
@@ -59,9 +46,9 @@ fn selection_range_for_position(
         return None;
     }
 
-    // Add document root as the outermost range if the last span doesn't already cover it.
-    let doc_end_line = find_document_end(lines, doc_start_line);
-    let doc_root = make_line_range(doc_start_line, doc_end_line);
+    // Derive doc root range from AST span directly
+    let doc_root_span = node_span(&doc.root);
+    let doc_root = span_to_lsp_range(&doc_root_span);
 
     // Build the SelectionRange chain: innermost first in ancestor_spans,
     // outermost (doc root) is the final parent.
@@ -86,48 +73,6 @@ fn selection_range_for_position(
     }
 
     current.map(|b| *b)
-}
-
-/// Find which document index a given line belongs to, and the start line of that document.
-fn find_document_for_line(lines: &[&str], target_line: usize) -> (usize, usize) {
-    let mut doc_idx = 0;
-    let mut doc_start = 0;
-
-    for (i, line) in lines.iter().enumerate() {
-        if i >= target_line {
-            break;
-        }
-        if line.trim() == "---" {
-            doc_idx += 1;
-            doc_start = i + 1;
-        }
-    }
-
-    (doc_idx, doc_start)
-}
-
-/// Find the last line of a document starting at `doc_start` (exclusive of the next `---`).
-fn find_document_end(lines: &[&str], doc_start: usize) -> usize {
-    let mut last = doc_start;
-    for (i, line) in lines.iter().enumerate().skip(doc_start) {
-        if line.trim() == "---" || line.trim() == "..." {
-            break;
-        }
-        last = i;
-    }
-    last
-}
-
-/// Build an LSP `Range` spanning full lines from `start_line` to `end_line` (0-based).
-fn make_line_range(start_line: usize, end_line: usize) -> Range {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    Range::new(
-        Position::new(start_line as u32, 0),
-        Position::new(end_line as u32, u32::MAX),
-    )
 }
 
 /// Extract the `Span` (loc) from a `Node<Span>`.
@@ -293,7 +238,7 @@ mod tests {
     fn should_return_value_range_expanding_to_key_value_then_document() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 6)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
 
         assert_eq!(
             result.len(),
@@ -318,7 +263,7 @@ mod tests {
     fn should_return_key_range_expanding_to_key_value_then_document() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 1)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 1)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -336,7 +281,7 @@ mod tests {
     fn should_return_sequence_item_expanding_to_sequence_then_document() {
         let text = "items:\n  - one\n  - two\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 5)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 5)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -352,21 +297,17 @@ mod tests {
     fn should_handle_nested_mapping() {
         let text = "server:\n  host: localhost\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 8)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
         assert_eq!(sr.range.start.line, 1);
         assert!(sr.parent.is_some(), "should have parent (host: localhost)");
         let parent = sr.parent.as_ref().expect("parent");
+        // Grandparent is the server mapping, which is also the doc root — no further parent.
         assert!(
             parent.parent.is_some(),
-            "should have grandparent (server mapping)"
-        );
-        let grandparent = parent.parent.as_ref().expect("grandparent");
-        assert!(
-            grandparent.parent.is_some(),
-            "should have great-grandparent (document root)"
+            "should have grandparent (server mapping = doc root)"
         );
     }
 
@@ -375,7 +316,7 @@ mod tests {
         let text = "name: Alice\nage: 30\n";
         let docs = parse_docs(text);
         let positions = [pos(0, 6), pos(1, 5)];
-        let result = selection_ranges(text, docs.as_ref(), &positions);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &positions);
 
         assert_eq!(
             result.len(),
@@ -390,7 +331,7 @@ mod tests {
     fn should_handle_sequence_of_mappings() {
         let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 10)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 10)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -402,7 +343,7 @@ mod tests {
     fn should_scope_selection_to_current_document_in_multi_doc_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 0)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 0)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -422,7 +363,7 @@ mod tests {
     fn should_handle_first_document_in_multi_doc_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 0)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 0)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -441,14 +382,8 @@ mod tests {
     // ---- Safety / edge case tests ----
 
     #[test]
-    fn should_return_empty_when_ast_is_none() {
-        let result = selection_ranges("key: [bad", None, &[pos(0, 0)]);
-        let _ = result;
-    }
-
-    #[test]
     fn should_return_empty_for_empty_document() {
-        let result = selection_ranges("", None, &[pos(0, 0)]);
+        let result = selection_ranges(&[], &[pos(0, 0)]);
         assert!(
             result.is_empty(),
             "should return empty Vec for empty document"
@@ -459,7 +394,7 @@ mod tests {
     fn should_handle_empty_positions_slice() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[]);
         assert!(
             result.is_empty(),
             "should return empty Vec for empty positions slice"
@@ -470,7 +405,7 @@ mod tests {
     fn should_return_empty_for_cursor_on_dot_dot_dot_line() {
         let text = "key: value\n...\nother: val\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 0)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 0)]);
         assert!(
             result.is_empty(),
             "cursor on '...' line should produce no selection range"
@@ -493,7 +428,7 @@ mod tests {
     #[case::alias_in_sequence("base: &anchor value\ncopy:\n  - *anchor\n", pos(2, 4))]
     fn selection_ranges_does_not_panic(#[case] text: &str, #[case] position: Position) {
         let docs = parse_docs(text);
-        let _ = selection_ranges(text, docs.as_ref(), &[position]);
+        let _ = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
     }
 
     #[test]
@@ -508,7 +443,10 @@ mod tests {
         writeln!(text, "{leaf_indent}leaf: deep").unwrap();
 
         let docs = parse_docs(&text);
-        let result = selection_ranges(&text, docs.as_ref(), &[pos(64, leaf_indent.len() as u32)]);
+        let result = selection_ranges(
+            docs.as_deref().unwrap_or(&[]),
+            &[pos(64, leaf_indent.len() as u32)],
+        );
 
         let mut depth = 0usize;
         if let Some(sr) = result.first() {
@@ -530,7 +468,7 @@ mod tests {
     fn should_scope_document_end_at_dot_dot_dot_terminator() {
         let text = "key: value\n...\nafter: end\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 5)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
 
         if let Some(sr) = result.first() {
             let mut outermost = sr;
@@ -549,7 +487,7 @@ mod tests {
     fn should_handle_single_line_document() {
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 5)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
         if let Some(sr) = result.first() {
             let mut outermost = sr;
             while let Some(ref p) = outermost.parent {
@@ -563,7 +501,7 @@ mod tests {
     fn should_correctly_find_document_for_line_after_separator() {
         let text = "a: 1\n---\nb: 2\n---\nc: 3\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(4, 3)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(4, 3)]);
         if let Some(sr) = result.first() {
             let mut outermost = sr;
             while let Some(ref p) = outermost.parent {
@@ -587,7 +525,7 @@ mod tests {
     fn nested_mapping_value_selection_has_correct_line_bounds() {
         let text = "server:\n  host: localhost\n  port: 8080\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 8)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -624,7 +562,7 @@ mod tests {
     fn sequence_item_selection_has_correct_line_bounds() {
         let text = "items:\n  - alpha\n  - beta\n  - gamma\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(3, 5)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(3, 5)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -651,7 +589,7 @@ mod tests {
     fn cursor_on_key_of_nested_mapping_expands_correctly() {
         let text = "outer:\n  inner: leaf\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 2)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 2)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -680,7 +618,7 @@ mod tests {
     fn deeply_nested_sequence_selection_chain_depth() {
         let text = "list:\n  - nested:\n      - leaf\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(2, 8)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -702,7 +640,7 @@ mod tests {
     fn regression_value_range_start_line_is_zero_for_top_level_key() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(0, 6)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -728,7 +666,7 @@ mod tests {
     fn regression_nested_mapping_host_line_is_one() {
         let text = "server:\n  host: localhost\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(text, docs.as_ref(), &[pos(1, 8)]);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -747,15 +685,97 @@ mod tests {
         let grandparent = parent
             .parent
             .as_ref()
-            .expect("should have grandparent (server mapping)");
+            .expect("should have grandparent (server mapping = doc root)");
         assert_eq!(
             grandparent.range.start.line, 0,
             "server mapping should start at line 0 (has real span now)"
         );
+        // grandparent IS the doc root (the server mapping is the top-level node);
+        // no further parent is expected.
+    }
 
-        assert!(
-            grandparent.parent.is_some(),
-            "should have great-grandparent (document root)"
-        );
+    // ---- Regression cases (AST-based scoping) ----
+
+    #[rstest]
+    #[case::key_expands_to_entry_to_mapping_to_root(
+        "server:\n  host: localhost\n  port: 8080\n",
+        pos(1, 2)
+    )]
+    #[case::nested_leaf_scalar_produces_full_chain(
+        "outer:\n  inner:\n    leaf: deep\n",
+        pos(2, 10)
+    )]
+    #[case::multi_doc_cursor_in_doc2_excludes_doc1_ranges(
+        "doc1key: value1\n---\ndoc2key: value2\n",
+        pos(2, 0)
+    )]
+    #[case::comment_line_returns_no_selection_range(
+        "key: value\n# a comment\nother: data\n",
+        pos(1, 5)
+    )]
+    fn selection_ranges_regression(#[case] text: &str, #[case] position: Position) {
+        let docs = parse_docs(text);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
+
+        match position {
+            // case (a): key expands to entry → mapping → doc root; at least 4 levels
+            p if p == pos(1, 2) && text.starts_with("server:") => {
+                assert_eq!(result.len(), 1, "case (a): should return one range");
+                let sr = &result[0];
+                assert_eq!(sr.range.start.line, 1, "case (a): innermost on line 1");
+                // Walk to outermost and verify it starts at line 0
+                let mut outermost = sr;
+                let mut depth = 1usize;
+                while let Some(ref p) = outermost.parent {
+                    depth += 1;
+                    outermost = p;
+                }
+                assert!(depth >= 3, "case (a): expected >= 3 levels, got {depth}");
+                assert_eq!(
+                    outermost.range.start.line, 0,
+                    "case (a): outermost (doc root) starts at line 0"
+                );
+            }
+            // case (b): nested leaf scalar produces full chain; depth >= 5
+            p if p == pos(2, 10) => {
+                assert_eq!(result.len(), 1, "case (b): should return one range");
+                let sr = &result[0];
+                assert_eq!(sr.range.start.line, 2, "case (b): innermost on line 2");
+                let mut depth = 1usize;
+                let mut current = sr;
+                while let Some(ref p) = current.parent {
+                    depth += 1;
+                    current = p;
+                }
+                assert!(depth >= 4, "case (b): expected >= 4 levels, got {depth}");
+            }
+            // case (c): cursor in doc 2 — outermost must be scoped to doc 2
+            p if p == pos(2, 0) && text.starts_with("doc1key") => {
+                assert_eq!(result.len(), 1, "case (c): should return one range");
+                let sr = &result[0];
+                let mut outermost = sr;
+                while let Some(ref p) = outermost.parent {
+                    outermost = p;
+                }
+                assert!(
+                    outermost.range.start.line >= 2,
+                    "case (c): outermost start must be >= 2 (doc 2), got {}",
+                    outermost.range.start.line
+                );
+                assert!(
+                    outermost.range.end.line >= 2,
+                    "case (c): outermost end must be >= 2 (doc 2), got {}",
+                    outermost.range.end.line
+                );
+            }
+            // case (d): comment line returns no selection range
+            p if p == pos(1, 5) => {
+                assert!(
+                    result.is_empty(),
+                    "case (d): comment line should return empty"
+                );
+            }
+            _ => {}
+        }
     }
 }

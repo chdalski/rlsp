@@ -952,20 +952,19 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<SelectionRange>>> {
         let uri = params.text_document.uri;
 
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
+        let docs = if let Ok(store) = self.document_store.lock() {
+            if store.get(&uri).is_none() {
+                return Ok(None);
+            }
+            store.get_documents(&uri).cloned()
         } else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
-            return Ok(None);
-        };
-
-        let result =
-            crate::analysis::selection::selection_ranges(&text, docs.as_ref(), &params.positions);
+        let result = crate::analysis::selection::selection_ranges(
+            docs.as_deref().unwrap_or(&[]),
+            &params.positions,
+        );
         if result.is_empty() {
             return Ok(None);
         }

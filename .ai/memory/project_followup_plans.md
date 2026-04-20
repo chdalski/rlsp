@@ -56,12 +56,6 @@ type: project
   Replacement: accept `documents: Option<&Vec<Document<Span>>>` (or `parse_result`); derive fold regions from the AST's node spans — mappings/sequences fold at their `loc`; multi-document sections fold at `---` markers from document spans. Comment-block folding may retain a text carve-out since comments are not in the AST.
   Helpers retired when this retrofit lands: `collect_indentation_folds` (analysis/folding.rs), `collect_document_section_folds` (analysis/folding.rs), `collect_comment_block_folds` (analysis/folding.rs), `find_last_content_line` (analysis/folding.rs), `find_last_content_line_in_range` (analysis/folding.rs), `find_mapping_colon` (analysis/folding.rs).
 
-- **Retrofit `selection_ranges` to AST-first** — `analysis/selection.rs:13`:
-  `pub fn selection_ranges(text: &str, documents: Option<&Vec<Document<Span>>>, positions: &[Position]) -> Vec<SelectionRange>`.
-  Violation: accepts `documents` but also splits `text` into `lines` and passes them to private helpers that scan text to find document boundaries and map line positions back to document regions. The parser AST's `loc: Span` on every node already encodes all containment boundaries.
-  Replacement: remove `text` parameter; use only `documents`; resolve cursor positions purely by span containment walk.
-  Helpers retired when this retrofit lands: `selection_range_for_position` (analysis/selection.rs), `find_document_for_line` (analysis/selection.rs), `find_document_end` (analysis/selection.rs).
-
 - **Retrofit `semantic_tokens` to AST-first** — `analysis/semantic_tokens.rs:51`:
   `pub fn semantic_tokens(text: &str) -> Vec<SemanticToken>`.
   Violation: iterates `text` line-by-line to find comments, mapping keys, anchors, aliases, and tags via text pattern matching. Does not consult the parser AST.

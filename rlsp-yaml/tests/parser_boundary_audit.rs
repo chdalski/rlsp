@@ -132,13 +132,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "analysis/selection.rs",
-        func: "selection_ranges",
-        marker: AllowMarker::TodoRetrofit {
-            plan: "retrofit-selection-ranges",
-        },
-    },
-    AllowEntry {
         file: "analysis/semantic_tokens.rs",
         func: "semantic_tokens",
         marker: AllowMarker::TodoRetrofit {
@@ -361,30 +354,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "find_mapping_colon",
         marker: AllowMarker::HelperOf {
             root: "folding_ranges",
-        },
-    },
-    // -----------------------------------------------------------------------
-    // HelperOf — private helpers of selection_ranges
-    // -----------------------------------------------------------------------
-    AllowEntry {
-        file: "analysis/selection.rs",
-        func: "selection_range_for_position",
-        marker: AllowMarker::HelperOf {
-            root: "selection_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/selection.rs",
-        func: "find_document_for_line",
-        marker: AllowMarker::HelperOf {
-            root: "selection_ranges",
-        },
-    },
-    AllowEntry {
-        file: "analysis/selection.rs",
-        func: "find_document_end",
-        marker: AllowMarker::HelperOf {
-            root: "selection_ranges",
         },
     },
     // -----------------------------------------------------------------------

@@ -118,7 +118,7 @@ verifies the exact post-edit count in the task handoff.
 ## Steps
 
 - [x] Task 1: retrofit symbols.rs (document_symbols)
-- [ ] Task 2: retrofit selection.rs (selection_ranges)
+- [x] Task 2: retrofit selection.rs (selection_ranges)
 
 ## Tasks
 
@@ -198,14 +198,16 @@ tests.
 
 ### Task 2: Retrofit analysis/selection.rs to AST-only
 
-Drop the `text: &str` parameter from `selection_ranges`; resolve
+Committed as `42a221240aad5e8129803c58fc007a08c81cda33` (may be
+superseded by follow-up amend for SHA recording). Drop the
+`text: &str` parameter from `selection_ranges`; resolve
 the cursor's document via root-span containment; retire the text-
 scanning helpers.
 
-- [ ] New signature:
+- [x] New signature:
       `pub fn selection_ranges(docs: &[Document<Span>], positions: &[Position]) -> Vec<SelectionRange>`.
       Returns empty `Vec` when `docs` or `positions` is empty.
-- [ ] Implement: for each cursor position, find the `Document<Span>`
+- [x] Implement: for each cursor position, find the `Document<Span>`
       whose `root.loc` contains the cursor (by 1-based line +
       0-based column conversion — see `hover_at` and
       `validation/validators.rs`). Walk that document's AST to
@@ -214,34 +216,34 @@ scanning helpers.
       Build the `SelectionRange` chain innermost-first; the
       outermost parent is the document root range derived from
       `doc.root.loc`.
-- [ ] Skip positions on comment lines and document separators by
+- [x] Skip positions on comment lines and document separators by
       checking whether any `Document.root.loc` contains the
       cursor — positions outside all document locs return `None`
       (consistent with current "skip comment/separator" behavior
       which also excluded out-of-AST positions).
-- [ ] Delete `selection_range_for_position`, `find_document_for_line`,
+- [x] Delete `selection_range_for_position`, `find_document_for_line`,
       `find_document_end` from `analysis/selection.rs`.
       `collect_ancestor_spans`, `node_span`, `span_to_lsp_range`,
       and `make_line_range` remain.
-- [ ] Update `rlsp-yaml/src/server.rs` at line ~968 to drop the
+- [x] Update `rlsp-yaml/src/server.rs` at line ~968 to drop the
       `&text` argument. Call site becomes
       `selection_ranges(docs.as_deref().unwrap_or(&[]), &params.positions)`
       or equivalent. Preserve the empty-check and `Ok(None)`
       short-circuit.
-- [ ] Update every existing unit test in `analysis/selection.rs`
+- [x] Update every existing unit test in `analysis/selection.rs`
       to use the new signature; parse test input via
       `rlsp_yaml_parser::load`. No test case may be deleted
       unless supplanted by an equivalent case. Adjust any
       assertion whose exact range depended on the old text-walk
       behavior (e.g. `make_line_range` using `u32::MAX` end
       columns vs. AST-derived end columns).
-- [ ] Add rstest regression cases (named): (a) cursor on a key
+- [x] Add rstest regression cases (named): (a) cursor on a key
       returns a chain (key → entry → mapping → doc root); (b)
       cursor inside a nested mapping's leaf scalar produces the
       full nested chain; (c) multi-document: cursor in doc 2
       does not include doc 1's ranges; (d) cursor on a comment
       line returns no `SelectionRange` for that position.
-- [ ] **Before editing:** confirm `ALLOW_LIST` length is **69**
+- [x] **Before editing:** confirm `ALLOW_LIST` length is **69**
       (after Task 1) and the set of entries with
       `file: "analysis/selection.rs"` and `marker: TodoRetrofit`
       or `HelperOf { root: "selection_ranges" }` matches:
@@ -250,11 +252,11 @@ scanning helpers.
       Remove exactly those 4 entries. Keep the `parse_docs`
       test-fixture entry. After removal, `ALLOW_LIST` length
       must be exactly **65**. Allow-list may shrink only.
-- [ ] Remove the follow-up-queue entry for `selection_ranges` from
+- [x] Remove the follow-up-queue entry for `selection_ranges` from
       `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test` passes with zero failures.
-- [ ] `cargo clippy --all-targets` passes with zero warnings.
-- [ ] `cargo fmt --check` passes.
+- [x] `cargo test` passes with zero failures.
+- [x] `cargo clippy --all-targets` passes with zero warnings.
+- [x] `cargo fmt --check` passes.
 
 ## Decisions
 
