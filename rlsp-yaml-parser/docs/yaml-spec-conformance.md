@@ -24,9 +24,16 @@ is classified using the strict entry format defined below.
   (source: `https://raw.githubusercontent.com/yaml/yaml-spec/main/spec/1.2.2/spec.md`,
   fetched 2026-04-21, 211 productions [1]–[211] across §5–§9; §10 uses tables only)
 
-All spec quotes in this document are verbatim from the cached copy, with one
-normalization: markdown cross-reference brackets (`[…]`) and emphasis underscores
-(`_…_`) are stripped from quoted text so the rendered document reads cleanly.
+All spec quotes in this document are verbatim from the cached copy, with the
+following normalizations:
+
+- Markdown cross-reference brackets (`[…]`) and emphasis underscores (`_…_`)
+  are stripped from quoted text so the rendered document reads cleanly.
+- When a quote omits intervening spec text (e.g. skips a sentence between two
+  quoted sentences), the omission is marked with an explicit ellipsis marker
+  `[…]`. This applies whether the skipped text is mid-passage or at the end of
+  the quoted passage.
+
 All other characters are reproduced character-for-character from the cache.
 
 ### Strict Entry Format
@@ -131,9 +138,9 @@ BNF: `nb-json ::= x09 | [x20-x10FFFF]`
 BNF: `c-byte-order-mark ::= xFEFF`
 
 - Classification: Strict
-- Spec (§5.2): "If a character stream begins with a byte order mark, the character encoding will be taken to be as indicated by the byte order mark. Otherwise, the stream must begin with an ASCII character. Byte order marks may appear at the start of any document, however all documents in the same stream must use the same character encoding. To allow for JSON compatibility, byte order marks are also allowed inside quoted scalars."
+- Spec (§5.2): "If a character stream begins with a byte order mark, the character encoding will be taken to be as indicated by the byte order mark. Otherwise, the stream must begin with an ASCII character. […] Byte order marks may appear at the start of any document, however all documents in the same stream must use the same character encoding. To allow for JSON compatibility, byte order marks are also allowed inside quoted scalars."
 - Implementation: `rlsp-yaml-parser/src/lines.rs:115–127` (BOM stripped from first line only — `is_first == true` guard); `rlsp-yaml-parser/src/encoding.rs:88–96` (`decode` handles BOM at byte-stream level, before parsing); `rlsp-yaml-parser/src/lexer/plain.rs:103–106` (mid-stream BOM in a plain-scalar suffix is treated as an error)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`decode_ok` case `utf8_strips_bom`, `utf16_le_strips_bom`)
+- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`decode_bom_stripping` cases `utf8_bom`, `utf16_le_bom`; `parse_events_accepts_bom_at_stream_start`; `parse_events_rejects_bom_mid_stream`)
 - Discrepancy: The spec permits a BOM at the start of any document within a multi-document stream, but the implementation only strips the BOM on the first line of input (`is_first == true`); a BOM at the start of the second or subsequent document is treated as an invalid character.
 
 ### [4] c-sequence-entry
@@ -312,7 +319,7 @@ BNF: `c-indicator ::= c-sequence-entry | c-mapping-key | c-mapping-value | c-col
 BNF: `c-flow-indicator ::= c-collect-entry | c-sequence-start | c-sequence-end | c-mapping-start | c-mapping-end`
 
 - Classification: Conformant
-- Spec (§5.3): "The \"[\", \"]\", \"{\", \"}\" and \",\" indicators denote structure in flow collections. They are therefore forbidden in some cases, to avoid ambiguity in several constructs."
+- Spec (§5.3): "The \"[\", \"]\", \"{\", \"}\" and \",\" indicators denote structure in flow collections. They are therefore forbidden in some cases, to avoid ambiguity in several constructs. […]"
 - Implementation: `rlsp-yaml-parser/src/chars.rs:58–60` (`is_c_flow_indicator`)
 - Test coverage: `rlsp-yaml-parser/src/chars.rs:284–298` (unit tests `c_flow_indicator_accepts_exactly_five_chars`, `c_flow_indicator_rejects_non_flow_indicators`)
 
@@ -323,7 +330,7 @@ BNF: `b-line-feed ::= x0A`
 - Classification: Conformant
 - Spec (§5.4): "YAML recognizes the following ASCII line break characters."
 - Implementation: `rlsp-yaml-parser/src/lines.rs:98–101` (`detect_break` matches `'\n'`)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`normalize_line_breaks_cases` — lf-only case)
+- Test coverage: `rlsp-yaml-parser/src/encoding.rs` (`normalize_line_breaks_cases` — lf-only case)
 
 ### [25] b-carriage-return
 
@@ -332,7 +339,7 @@ BNF: `b-carriage-return ::= x0D`
 - Classification: Conformant
 - Spec (§5.4): "YAML recognizes the following ASCII line break characters."
 - Implementation: `rlsp-yaml-parser/src/lines.rs:94–97` (`detect_break` matches `'\r'`)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`normalize_line_breaks_cases` — lone-cr and crlf cases)
+- Test coverage: `rlsp-yaml-parser/src/encoding.rs` (`normalize_line_breaks_cases` — lone-cr and crlf cases)
 
 ### [26] b-char
 
@@ -341,7 +348,7 @@ BNF: `b-char ::= b-line-feed | b-carriage-return`
 - Classification: Conformant
 - Spec (§5.4): "YAML recognizes the following ASCII line break characters."
 - Implementation: `rlsp-yaml-parser/src/lines.rs:130–132` — `find(['\n', '\r'])` locates end of line content, matching exactly `b-char`
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`normalize_line_breaks_cases`)
+- Test coverage: `rlsp-yaml-parser/src/encoding.rs` (`normalize_line_breaks_cases`)
 
 ### [27] nb-char
 
@@ -359,7 +366,7 @@ BNF: `b-break ::= ( b-carriage-return b-line-feed ) | b-carriage-return | b-line
 - Classification: Conformant
 - Spec (§5.4): "Line breaks are interpreted differently by different systems and have multiple widely used formats."
 - Implementation: `rlsp-yaml-parser/src/lines.rs:91–102` (`detect_break` — CRLF checked first, then bare CR, then LF)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`normalize_line_breaks_cases` covers CRLF, lone CR, LF)
+- Test coverage: `rlsp-yaml-parser/src/encoding.rs` (`normalize_line_breaks_cases` covers CRLF, lone CR, LF)
 
 ### [29] b-as-line-feed
 
@@ -368,7 +375,7 @@ BNF: `b-as-line-feed ::= b-break`
 - Classification: Conformant
 - Spec (§5.4): "Line breaks inside scalar content must be normalized by the YAML processor. Each such line break must be parsed into a single line feed character. The original line break format is a presentation detail and must not be used to convey content information."
 - Implementation: `rlsp-yaml-parser/src/encoding.rs:179–197` (`normalize_line_breaks` — CRLF and lone CR both become LF before the string is handed to the parser)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`normalize_line_breaks_cases`)
+- Test coverage: `rlsp-yaml-parser/src/encoding.rs` (`normalize_line_breaks_cases`)
 
 ### [30] b-non-content
 
@@ -421,7 +428,7 @@ BNF: `ns-dec-digit ::= [x30-x39]`
 
 - Classification: Conformant
 - Spec (§5.6): "A decimal digit for numbers:"
-- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:517` — block scalar header uses `.is_ascii_digit()` for indentation indicator; `.is_ascii_digit()` is Rust's equivalent to `[x30-x39]`
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:568–592` — block scalar header matches indentation indicator digits via `'0'` (rejected as invalid at line 568) and `ch @ '1'..='9'` (accepted at line 579); range pattern `'1'..='9'` is Rust's equivalent to `[x31-x39]`
 - Test coverage: `rlsp-yaml-parser/tests/smoke/block_scalars.rs` (block scalars with explicit indentation indicators)
 
 ### [36] ns-hex-digit

@@ -188,7 +188,7 @@ Test coverage fields may be empty with the explicit text
       with Methodology and entry-format reference
 - [x] Task 2 — draft §3 + §4 + §5 chapter entries under
       the strict format
-- [ ] Task 3 — verify §3 + §4 + §5 entries against
+- [x] Task 3 — verify §3 + §4 + §5 entries against
       cached spec and cited source (independent pass)
 - [ ] Task 4 — draft §6 chapter entries
 - [ ] Task 5 — verify §6 entries
@@ -327,18 +327,18 @@ Mismatches are corrected in-place during this task —
 the verification phase is not a review; it's an editing
 phase with an independent reviewer-style mindset.
 
-- [ ] Every §3, §4, §5 entry has its spec quote
+- [x] Every §3, §4, §5 entry has its spec quote
       character-compared against the cached spec. Any
       discrepancy (missing text, paraphrase, added
       words) is corrected to a verbatim quote.
-- [ ] Every §3, §4, §5 entry has its Implementation
+- [x] Every §3, §4, §5 entry has its Implementation
       citation opened and inspected. Any citation whose
       lines do not match the claim is corrected (new
       file+line) or the classification is adjusted.
-- [ ] Every §3, §4, §5 classification is re-derived
+- [x] Every §3, §4, §5 classification is re-derived
       from the verified quote + implementation under
       the decision-rule table. Mismatches are corrected.
-- [ ] Every §3, §4, §5 test-coverage claim is verified
+- [x] Every §3, §4, §5 test-coverage claim is verified
       exhaustively: yaml-test-suite case IDs are opened
       in `rlsp-yaml-parser/tests/yaml-test-suite/` (or
       wherever the suite is symlinked in this repo)
@@ -347,15 +347,17 @@ phase with an independent reviewer-style mindset.
       exist; every "no direct test" claim is confirmed
       by a `grep` pass that finds no project test whose
       name or body references the production.
-- [ ] The task's commit message lists every entry that
+- [x] The task's commit message lists every entry that
       was corrected during the verification pass
       (production number + nature of the correction).
       An empty list is acceptable and must be stated
       explicitly.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `4f932e675adebe99e1714154a32803b9f05c0c67`
 
 ### Task 4: Draft §6 entries
 
