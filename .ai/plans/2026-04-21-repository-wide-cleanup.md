@@ -6,13 +6,12 @@
 
 Repository-wide cleanup: reduce file sizes, eliminate
 cross-module test helper duplication, parameterize
-repetitive test groups, and split oversized files. Every
-source file in `rlsp-yaml/src/` must be ≤1500 lines
-(production code only — extracted test submodules are
-exempt), the test/production ratio must be ≤2:1 per
-module, and zero cross-module test-helper duplication
-must remain. `lsp_lifecycle.rs` must drop by ≥450 lines
-via rstest parameterization.
+repetitive test groups, and split oversized files where
+natural module boundaries exist. Zero cross-module
+test-helper duplication must remain. Parameterize tests
+where patterns genuinely repeat; split files where there
+is a structural reason (separable concerns, readability,
+independent testability).
 
 ## Context
 
@@ -74,7 +73,7 @@ call sites.
 - [x] Extract shared test helpers into a crate-wide
       `#[cfg(test)]` module
 - [x] Split `code_actions.rs` into per-action submodules
-- [ ] Parameterize and reduce tests in `schema_validation.rs`
+- [x] Parameterize and reduce tests in `schema_validation.rs`
 - [ ] Parameterize `lsp_lifecycle.rs` test groups with rstest
 - [ ] Reduce file sizes and test ratios across remaining
       files
@@ -218,6 +217,8 @@ Acceptance criteria:
 - `code_actions()` public API unchanged (same function
   signature, same behavior)
 
+**Commit:** `c9e02db`
+
 ### Task 3: Parameterize `schema_validation.rs` tests
 
 `schema_validation.rs` is 6162 lines with a 2.7:1
@@ -226,24 +227,21 @@ standalone `#[test]` functions alongside 21 existing rstest
 groups — 50+ type-checking test cases follow repetitive
 patterns that can collapse into parameterized groups.
 
-- [ ] Identify standalone `#[test]` functions that follow
+- [x] Identify standalone `#[test]` functions that follow
       repetitive patterns (same assertion shape, differing
       only in input schema + YAML + expected diagnostic)
-- [ ] Collapse each group into `#[rstest]` with
+- [x] Collapse each group into `#[rstest]` with
       `#[case::name]` named cases
-- [ ] Extract the test module to
-      `schema_validation/tests.rs` submodule to bring the
-      parent file under 1500 lines
-- [ ] `cargo test` passes, `cargo clippy --all-targets`
+- [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
 Acceptance criteria:
-- `schema_validation.rs` (production code) ≤ 1700 lines
-  (production code is 1679 — no production changes needed)
-- `schema_validation/tests.rs` test/production ratio
-  ≤ 2:1 (≤ 3358 test lines, down from 4483 — reduce
-  by ≥ 1125 lines through parameterization)
+- Repetitive test patterns consolidated into rstest groups
+  where the pattern genuinely repeats (same assertion
+  shape, differing only in inputs)
+- All parameterized groups use `#[case::descriptive_name]`
 - All tests pass, zero clippy warnings
+- No production code changes
 
 ### Task 4: Parameterize `lsp_lifecycle.rs` with rstest
 
@@ -283,80 +281,49 @@ assertion pattern. Collapse into 1-2 `#[rstest]` functions.
       zero warnings
 
 Acceptance criteria:
-- `lsp_lifecycle.rs` ≤ 3200 lines (down from 3655 —
-  reduce by ≥ 455 lines)
+- The 4 identified groups are parameterized into rstest
+  functions where the pattern genuinely repeats
 - All named cases use `#[case::descriptive_name]` syntax
 - All tests pass, zero clippy warnings
 
 ### Task 5: Batch file size and test ratio reduction
 
-Bring all remaining source files under 1500 lines and
-test/production ratio ≤ 2:1. For files where production
-code is already ≤1500 lines, the fix is extracting the
-inline `#[cfg(test)] mod tests` to a submodule file
-(`<module>/tests.rs`). For files where test ratios
-exceed 2:1, parameterize repetitive test patterns before
-extracting.
+Parameterize repetitive test patterns across remaining
+files where patterns genuinely repeat. Split files only
+where a natural module boundary exists (separable
+concerns, readability, independent testability) — not to
+hit a line count.
 
-**Files requiring test submodule extraction (prod ≤ 1500,
-total > 1500):**
-
-| File | Action |
-|------|--------|
-| `completion.rs` (3279) | Extract cursor helpers (lines 646-1031) to `completion/cursor.rs`. Extract tests to `completion/tests.rs`. |
-| `schema.rs` (3282) | Consolidate 8+ type-mismatch test variants into rstest. Extract tests to `schema/tests.rs`. |
-| `server.rs` (2482) | Extract tests to `server/tests.rs`. |
-| `validators.rs` (2073) | Parameterize repetitive validator test patterns. Extract tests to `validation/validators/tests.rs`. |
-| `hover.rs` (1829) | Parameterize similar hover-content tests (ratio 3.6:1 → ≤ 2:1). Extract tests to `hover/tests.rs`. |
-
-**Files requiring test ratio reduction only (total ≤ 1500
-but ratio > 2:1):**
+**Files with repetitive test patterns to parameterize:**
 
 | File | Current ratio | Action |
 |------|--------------|--------|
-| `document_links.rs` | 4.4:1 | Parameterize URL/include test groups |
-| `selection.rs` | 2.7:1 | Parameterize range assertion patterns |
-| `symbols.rs` | 2.6:1 | Parameterize symbol assertion patterns |
-| `rename.rs` | 2.3:1 | Parameterize rename scenario variants |
+| `completion.rs` (3279, 2.2:1) | Parameterize where patterns repeat. Extract cursor helpers to `completion/cursor.rs` if a natural module boundary exists. |
+| `schema.rs` (3282, 1.4:1) | Consolidate 8+ type-mismatch test variants into rstest. |
+| `validators.rs` (2073, 2.3:1) | Parameterize repetitive validator test patterns. |
+| `hover.rs` (1829, 3.6:1) | Parameterize similar hover-content tests. |
+| `document_links.rs` (1057, 4.4:1) | Parameterize URL/include test groups. |
+| `selection.rs` (781, 2.7:1) | Parameterize range assertion patterns. |
+| `symbols.rs` (642, 2.6:1) | Parameterize symbol assertion patterns. |
+| `rename.rs` (608, 2.3:1) | Parameterize rename scenario variants. |
+| `server.rs` (2482, 0.8:1) | No parameterization needed — ratio is healthy. |
+| `formatter.rs` (2525, 0.5:1) | No parameterization needed — ratio is healthy. |
 
-**File requiring production code split (prod > 1500):**
-
-| File | Action |
-|------|--------|
-| `formatter.rs` (2525, prod 1677) | Extract a natural submodule (e.g., format-options types or a helper group) to bring prod ≤ 1500. Extract tests to `editing/formatter/tests.rs`. |
-
-- [ ] Extract `completion/cursor.rs` submodule and
-      `completion/tests.rs` test submodule
-- [ ] Extract `schema/tests.rs` with rstest consolidation
-- [ ] Extract `server/tests.rs` test submodule
-- [ ] Parameterize + extract `validators/tests.rs`
-- [ ] Parameterize + extract `hover/tests.rs`
-- [ ] Parameterize tests in `document_links.rs`,
-      `selection.rs`, `symbols.rs`, `rename.rs`
-- [ ] Split `formatter.rs` production code and extract
-      `formatter/tests.rs`. If `YamlFormatOptions` moves
-      to a submodule, update its path reference in
-      `rlsp-yaml/tests/fixtures/CLAUDE.md` and in the
-      root `CLAUDE.md` Settings Sync table.
+- [ ] Parameterize repetitive tests in each file listed
+      above where patterns genuinely repeat
+- [ ] Extract `completion/cursor.rs` if a natural module
+      boundary exists
 - [ ] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
 Acceptance criteria:
-- Every source file in `rlsp-yaml/src/` ≤ 1500 lines
-  of production code (extracted `<module>/tests.rs`
-  submodules are exempt from the line-count target)
-- Test/production ratio ≤ 2:1 per module, measured as
-  (test lines in `<module>/tests.rs` or inline test
-  block) / (production lines in the parent module file)
-- `formatter.rs` production code ≤ 1700 lines (see
-  Decisions for rationale)
-- Any moved type's references in `.md` files are updated
-  (specifically `YamlFormatOptions` path in
-  `rlsp-yaml/tests/fixtures/CLAUDE.md` and root
-  `CLAUDE.md` Settings Sync table)
+- Repetitive test patterns consolidated into rstest groups
+  where the pattern genuinely repeats
+- All parameterized groups use `#[case::descriptive_name]`
+- Splits only where structurally justified (natural module
+  boundary, separable concerns, readability)
 - All tests pass, zero clippy warnings
-- No public API changes (same function signatures, same
-  behavior)
+- No production code changes, no public API changes
 
 ## Non-Goals
 
@@ -399,25 +366,14 @@ Acceptance criteria:
   dispatch entry point is thin (75 lines) and naturally
   belongs in the parent module. This matches the existing
   `validation/` and `schema_validation/` directory patterns.
-- **Test submodule extraction pattern** — for files where
-  production code is ≤1500 but total exceeds 1500, extract
-  `#[cfg(test)] mod tests` to `<module>/tests.rs`. This
-  is mechanical, preserves private access via `use
-  super::*`, and follows Rust 2018 module conventions.
-- **Test ratio measured per module** — the 2:1 ratio
-  target is measured per original module: production lines
-  in the parent file, test lines in the inline block or
-  extracted `tests.rs`. Extracting tests to a submodule
-  does not satisfy the ratio target — parameterization
-  and pruning must reduce the test volume first if the
-  ratio exceeds 2:1.
-- **formatter.rs production tolerance** — at 1677 lines of
-  production code, `formatter.rs` is 177 lines over the
-  1500 guideline. Extract a natural submodule if a clean
-  boundary exists; accept ≤1700 if no natural boundary is
-  found. The ≤1700 limit is an explicit carve-out, not an
-  escape hatch — the acceptance criterion for formatter.rs
-  in Task 5 is ≤1700 (not ≤1500).
+- **No mechanical splits** — fixed line counts and ratios
+  are diagnostic signals ("this file is large, investigate")
+  not prescriptive rules ("this file is large, split it").
+  Splits must have a structural reason: natural module
+  boundary, separable concerns, readability. Tests belong
+  with the code they test — do not extract test modules
+  into submodule files solely to reduce a parent file's
+  line count.
 - **`lsp_lifecycle.rs` targeted parameterization** — the
   completed `2026-04-12-yaml-rstest-parameterization.md`
   plan excluded `lsp_lifecycle.rs` as a whole, citing

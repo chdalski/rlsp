@@ -2354,51 +2354,40 @@ mod tests {
         );
     }
 
-    // Test 42
-    #[test]
-    fn should_set_correct_code_for_required_violation() {
-        let schema = JsonSchema {
+    // Tests 42–44: correct diagnostic code for each violation type
+    #[rstest]
+    #[case::required_violation(
+        JsonSchema {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
-        };
-        let docs = parse_docs("age: 30");
+        },
+        "age: 30",
+        "schemaRequired"
+    )]
+    #[case::type_violation(
+        object_schema_with_props(vec![("count", integer_schema())]),
+        "count: hello",
+        "schemaType"
+    )]
+    #[case::enum_violation(
+        object_schema_with_props(vec![("env", JsonSchema {
+            enum_values: Some(vec![json!("prod"), json!("staging")]),
+            ..JsonSchema::default()
+        })]),
+        "env: testing",
+        "schemaEnum"
+    )]
+    fn violation_produces_correct_code(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
+        let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
-            Some(NumberOrString::String("schemaRequired".to_string()))
-        );
-    }
-
-    // Test 43
-    #[test]
-    fn should_set_correct_code_for_type_violation() {
-        let schema = object_schema_with_props(vec![("count", integer_schema())]);
-        let docs = parse_docs("count: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(!result.is_empty());
-        assert_eq!(
-            result[0].code,
-            Some(NumberOrString::String("schemaType".to_string()))
-        );
-    }
-
-    // Test 44
-    #[test]
-    fn should_set_correct_code_for_enum_violation() {
-        let schema = object_schema_with_props(vec![(
-            "env",
-            JsonSchema {
-                enum_values: Some(vec![json!("prod"), json!("staging")]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("env: testing");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(!result.is_empty());
-        assert_eq!(
-            result[0].code,
-            Some(NumberOrString::String("schemaEnum".to_string()))
+            Some(NumberOrString::String(expected_code.to_string()))
         );
     }
 
@@ -2425,40 +2414,28 @@ mod tests {
         );
     }
 
-    // Test 46
-    #[test]
-    fn should_set_error_severity_for_required_violation() {
-        let schema = JsonSchema {
+    // Tests 46–48: ERROR severity for core violation types
+    #[rstest]
+    #[case::required_violation(
+        JsonSchema {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
-        };
-        let docs = parse_docs("age: 30");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(!result.is_empty());
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 47
-    #[test]
-    fn should_set_error_severity_for_type_violation() {
-        let schema = object_schema_with_props(vec![("count", integer_schema())]);
-        let docs = parse_docs("count: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(!result.is_empty());
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 48
-    #[test]
-    fn should_set_error_severity_for_enum_violation() {
-        let schema = object_schema_with_props(vec![(
-            "env",
-            JsonSchema {
-                enum_values: Some(vec![json!("prod")]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let docs = parse_docs("env: testing");
+        },
+        "age: 30"
+    )]
+    #[case::type_violation(
+        object_schema_with_props(vec![("count", integer_schema())]),
+        "count: hello"
+    )]
+    #[case::enum_violation(
+        object_schema_with_props(vec![("env", JsonSchema {
+            enum_values: Some(vec![json!("prod")]),
+            ..JsonSchema::default()
+        })]),
+        "env: testing"
+    )]
+    fn violation_produces_error_severity(#[case] schema: JsonSchema, #[case] text: &str) {
+        let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -3516,78 +3493,57 @@ mod tests {
         }
     }
 
-    // Test 106
-    #[test]
-    fn should_produce_error_when_array_has_fewer_items_than_min_items() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
-        let text = "tags:\n  - a";
+    // Tests 106, 108, 110: array constraint violation → error with specific code
+    #[rstest]
+    #[case::fewer_than_min_items(
+        object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]),
+        "tags:\n  - a",
+        "schemaMinItems"
+    )]
+    #[case::exceeds_max_items(
+        object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]),
+        "tags:\n  - a\n  - b\n  - c",
+        "schemaMaxItems"
+    )]
+    #[case::duplicate_items_when_unique_required(
+        object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]),
+        "tags:\n  - foo\n  - bar\n  - foo",
+        "schemaUniqueItems"
+    )]
+    fn array_constraint_violated_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
         let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinItems");
+        assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 107
-    #[test]
-    fn should_produce_no_diagnostics_when_array_meets_min_items() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]);
-        let text = "tags:\n  - a\n  - b";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(result.is_empty());
-    }
-
-    // Test 108
-    #[test]
-    fn should_produce_error_when_array_exceeds_max_items() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
-        let text = "tags:\n  - a\n  - b\n  - c";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaxItems");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 109
-    #[test]
-    fn should_produce_no_diagnostics_when_array_meets_max_items() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]);
-        let text = "tags:\n  - a\n  - b";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(result.is_empty());
-    }
-
-    // Test 110
-    #[test]
-    fn should_produce_error_when_array_has_duplicate_items_and_unique_items_true() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
-        let text = "tags:\n  - foo\n  - bar\n  - foo";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaUniqueItems");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 111
-    #[test]
-    fn should_produce_no_diagnostics_when_all_items_unique_and_unique_items_true() {
-        let schema = object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]);
-        let text = "tags:\n  - foo\n  - bar\n  - baz";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(result.is_empty());
-    }
-
-    // Test 112
-    #[test]
-    fn should_produce_no_diagnostics_when_unique_items_false_even_with_duplicates() {
-        let schema =
-            object_schema_with_props(vec![("tags", array_schema(None, None, Some(false)))]);
-        let text = "tags:\n  - foo\n  - foo";
+    // Tests 107, 109, 111, 112: array constraint satisfied → no diagnostics
+    #[rstest]
+    #[case::meets_min_items(
+        object_schema_with_props(vec![("tags", array_schema(Some(2), None, None))]),
+        "tags:\n  - a\n  - b"
+    )]
+    #[case::meets_max_items(
+        object_schema_with_props(vec![("tags", array_schema(None, Some(2), None))]),
+        "tags:\n  - a\n  - b"
+    )]
+    #[case::all_unique_with_unique_items_true(
+        object_schema_with_props(vec![("tags", array_schema(None, None, Some(true)))]),
+        "tags:\n  - foo\n  - bar\n  - baz"
+    )]
+    #[case::duplicates_allowed_when_unique_items_false(
+        object_schema_with_props(vec![("tags", array_schema(None, None, Some(false)))]),
+        "tags:\n  - foo\n  - foo"
+    )]
+    fn array_constraint_satisfied_produces_no_diagnostics(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+    ) {
         let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
@@ -4818,45 +4774,44 @@ mod tests {
         }
     }
 
-    // Test 203
-    #[test]
-    fn should_produce_error_when_object_has_fewer_properties_than_min_properties() {
-        let schema = object_schema_with_cardinality(Some(2), None);
-        let text = "name: Alice";
+    // Tests 203, 205: object property count violation → error with specific code
+    #[rstest]
+    #[case::fewer_than_min_properties(
+        object_schema_with_cardinality(Some(2), None),
+        "name: Alice",
+        "schemaMinProperties"
+    )]
+    #[case::exceeds_max_properties(
+        object_schema_with_cardinality(None, Some(1)),
+        "name: Alice\nage: 30",
+        "schemaMaxProperties"
+    )]
+    fn object_property_count_violated_produces_error(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+        #[case] expected_code: &str,
+    ) {
         let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMinProperties");
+        assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 204
-    #[test]
-    fn should_produce_no_diagnostics_when_object_meets_min_properties() {
-        let schema = object_schema_with_cardinality(Some(2), None);
-        let text = "name: Alice\nage: 30";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(result.is_empty());
-    }
-
-    // Test 205
-    #[test]
-    fn should_produce_error_when_object_exceeds_max_properties() {
-        let schema = object_schema_with_cardinality(None, Some(1));
-        let text = "name: Alice\nage: 30";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaMaxProperties");
-        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
-    // Test 206
-    #[test]
-    fn should_produce_no_diagnostics_when_object_meets_max_properties() {
-        let schema = object_schema_with_cardinality(None, Some(2));
-        let text = "name: Alice\nage: 30";
+    // Tests 204, 206: object property count within bounds → no diagnostics
+    #[rstest]
+    #[case::meets_min_properties(
+        object_schema_with_cardinality(Some(2), None),
+        "name: Alice\nage: 30"
+    )]
+    #[case::meets_max_properties(
+        object_schema_with_cardinality(None, Some(2)),
+        "name: Alice\nage: 30"
+    )]
+    fn object_property_count_satisfied_produces_no_diagnostics(
+        #[case] schema: JsonSchema,
+        #[case] text: &str,
+    ) {
         let docs = parse_docs(text);
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert!(result.is_empty());
