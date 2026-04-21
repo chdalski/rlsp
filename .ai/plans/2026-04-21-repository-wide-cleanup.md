@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-21)
 **Created:** 2026-04-21
 
 ## Goal
@@ -311,6 +311,8 @@ hit a line count.
       repetition found.)
 - [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
+
+**Commit:** `36be760`
 
 Acceptance criteria:
 - Repetitive test patterns consolidated into rstest groups
