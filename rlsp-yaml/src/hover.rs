@@ -409,6 +409,7 @@ mod tests {
 
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
+    use crate::test_utils::parse_docs;
 
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
@@ -419,10 +420,6 @@ mod tests {
             HoverContents::Markup(m) => &m.value,
             HoverContents::Scalar(_) | HoverContents::Array(_) => panic!("expected MarkupContent"),
         }
-    }
-
-    fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     fn schema_with_description(description: &str) -> JsonSchema {

@@ -159,6 +159,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::parse_docs;
 
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
@@ -166,10 +167,6 @@ mod tests {
 
     fn indent_of(edit: &TextEdit) -> usize {
         edit.new_text.len()
-    }
-
-    fn parse_docs(yaml: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(yaml).unwrap_or_default()
     }
 
     // Group: format_on_type_produces_indent — single edit, assert indent size

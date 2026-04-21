@@ -330,10 +330,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-
-    fn parse_docs(yaml: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(yaml).unwrap()
-    }
+    use crate::test_utils::parse_docs;
 
     /// Decode delta-encoded tokens into `(abs_line, abs_start, length, token_type, modifiers)`.
     fn absolute(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32, u32, u32)> {

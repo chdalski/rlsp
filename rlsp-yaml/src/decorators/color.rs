@@ -661,15 +661,11 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 
 #[cfg(test)]
 #[expect(clippy::indexing_slicing, reason = "test code")]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 
     use super::*;
-
-    fn parse_docs(yaml: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(yaml).unwrap()
-    }
+    use crate::test_utils::parse_docs;
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.01

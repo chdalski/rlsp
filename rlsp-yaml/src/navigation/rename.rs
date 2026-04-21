@@ -188,17 +188,14 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::{parse_docs, test_uri};
 
     fn parse(yaml: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(yaml).unwrap_or_default()
+        parse_docs(yaml)
     }
 
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
-    }
-
-    fn test_uri() -> Url {
-        Url::parse("file:///test/doc.yaml").expect("valid test URI")
     }
 
     // ---- prepare_rename: Happy Path ----

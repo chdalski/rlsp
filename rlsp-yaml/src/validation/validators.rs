@@ -642,10 +642,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-
-    fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap()
-    }
+    use crate::test_utils::parse_docs;
 
     fn parse_anchors(yaml: &str) -> Vec<super::Diagnostic> {
         validate_unused_anchors(&parse_docs(yaml))

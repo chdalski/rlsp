@@ -442,12 +442,7 @@ mod tests {
     use crate::schema::{JsonSchema, SchemaType};
     use crate::schema_validation::validate_schema;
     use crate::server::YamlVersion;
-    use rlsp_yaml_parser::Span;
-    use rlsp_yaml_parser::node::Document;
-
-    fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap_or_default()
-    }
+    use crate::test_utils::parse_docs;
 
     fn code_of(d: &Diagnostic) -> &str {
         match &d.code {

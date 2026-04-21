@@ -32,3 +32,7 @@ pub mod schema_validation;
 pub mod server;
 /// Diagnostic validation: suppression and validators.
 pub mod validation;
+
+/// Shared test helpers (parse, test URIs) used across crate-internal test modules.
+#[cfg(test)]
+pub mod test_utils;

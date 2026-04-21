@@ -1393,10 +1393,7 @@ mod tests {
 
     use super::*;
     use crate::parser::parse_yaml;
-
-    fn test_uri() -> tower_lsp::lsp_types::Url {
-        tower_lsp::lsp_types::Url::parse("file:///test.yaml").unwrap()
-    }
+    use crate::test_utils::{parse_docs, test_uri};
 
     fn cursor_range(line: u32, col: u32) -> Range {
         Range::new(Position::new(line, col), Position::new(line, col))
@@ -1429,7 +1426,7 @@ mod tests {
     }
 
     fn docs_for(text: &str) -> Vec<Document<Span>> {
-        parse_yaml(text).documents
+        parse_docs(text)
     }
 
     /// Apply the first block-to-flow edit to `text` and return the resulting string.

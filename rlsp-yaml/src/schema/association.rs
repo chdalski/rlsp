@@ -237,6 +237,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::parse_docs;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -447,10 +448,6 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════════════
     // detect_kubernetes_resource + kubernetes_schema_url
     // ══════════════════════════════════════════════════════════════════════════
-
-    fn parse_docs(text: &str) -> Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>> {
-        rlsp_yaml_parser::load(text).unwrap_or_default()
-    }
 
     #[rstest]
     #[case::core_api_pod("apiVersion: v1\nkind: Pod\n", ("v1", "Pod"))]

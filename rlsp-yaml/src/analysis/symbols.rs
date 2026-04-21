@@ -182,10 +182,12 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::parse_docs as parse_docs_inner;
     use tower_lsp::lsp_types::SymbolKind;
 
+    #[expect(clippy::unnecessary_wraps, reason = "callers use Option API")]
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
-        rlsp_yaml_parser::load(text).ok()
+        Some(parse_docs_inner(text))
     }
 
     fn find_symbol<'a>(symbols: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {

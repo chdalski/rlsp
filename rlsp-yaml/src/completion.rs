@@ -1044,15 +1044,12 @@ mod tests {
 
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
+    use crate::test_utils::parse_docs;
     use serde_json::json;
     use tower_lsp::lsp_types::Documentation;
 
     fn pos(line: u32, character: u32) -> Position {
         Position::new(line, character)
-    }
-
-    fn parse(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap_or_default()
     }
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
@@ -1124,7 +1121,7 @@ mod tests {
         #[case] expected: &[&str],
         #[case] absent: &[&str],
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, None);
         let ls = labels(&result);
         for key in expected {
@@ -1145,7 +1142,7 @@ mod tests {
     #[test]
     fn should_not_suggest_keys_already_present_in_mapping() {
         let text = "name: Alice\nage: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), None);
 
         let labels = labels(&result);
@@ -1159,7 +1156,7 @@ mod tests {
     #[test]
     fn should_not_suggest_keys_already_in_current_sequence_item() {
         let text = "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 4), None);
 
         let labels = labels(&result);
@@ -1173,7 +1170,7 @@ mod tests {
     #[test]
     fn should_suggest_values_seen_for_same_key_name() {
         let text = "items:\n  - env: production\n  - env: staging\n  - env: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 10), None);
 
         let labels = labels(&result);
@@ -1197,7 +1194,7 @@ mod tests {
     #[test]
     fn should_not_suggest_duplicate_values() {
         let text = "items:\n  - env: production\n  - env: production\n  - env: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 10), None);
 
         let labels = labels(&result);
@@ -1227,7 +1224,7 @@ mod tests {
     #[case::position_beyond_lines("key: value\n", pos(10, 0))]
     #[case::position_beyond_line_length("key: value\n", pos(0, 100))]
     fn returns_empty_for_structural_no_schema(#[case] text: &str, #[case] cursor: Position) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, None);
         assert!(result.is_empty(), "should return empty, got: {result:?}");
     }
@@ -1253,7 +1250,7 @@ mod tests {
     fn should_suggest_schema_properties_at_top_level_key_position() {
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
         let text = "name: Alice\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let labels = labels(&result);
@@ -1286,7 +1283,7 @@ mod tests {
         )]);
         // Use a real document with a different key so schema suggests "name".
         let text = "age: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result.iter().find(|i| i.label == "name");
@@ -1321,7 +1318,7 @@ mod tests {
             ("timeout", JsonSchema::default()),
         ]);
         let text = "host: localhost\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let labels = labels(&result);
@@ -1342,7 +1339,7 @@ mod tests {
             ("c", JsonSchema::default()),
         ]);
         let text = "a: 1\nb: 2\nc: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on line 2 ("c:"), key position
         let result = complete_at(&docs, pos(2, 0), Some(&schema));
 
@@ -1369,7 +1366,7 @@ mod tests {
             object_schema(vec![("host", string_schema()), ("port", integer_schema())]),
         )]);
         let text = "server:\n  host: localhost\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 2), Some(&schema));
 
         let labels = labels(&result);
@@ -1389,7 +1386,7 @@ mod tests {
     fn should_merge_schema_and_structural_suggestions() {
         let schema = object_schema(vec![("kind", string_schema())]);
         let text = "name: Alice\nkind: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor at key position on line 0 ("name:")
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
@@ -1409,7 +1406,7 @@ mod tests {
     fn should_deduplicate_when_schema_and_structure_both_suggest_same_key() {
         let schema = object_schema(vec![("env", string_schema())]);
         let text = "env: production\nregion: us-east\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor at key position on line 1 ("region:")
         let result = complete_at(&docs, pos(1, 0), Some(&schema));
 
@@ -1440,7 +1437,7 @@ mod tests {
             },
         )]);
         let text = "env: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 5), Some(&schema));
 
         let labels = labels(&result);
@@ -1474,7 +1471,7 @@ mod tests {
             },
         )]);
         let text = "env: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 5), Some(&schema));
 
         assert!(!result.is_empty(), "should have enum suggestions");
@@ -1497,7 +1494,7 @@ mod tests {
             },
         )]);
         let text = "env: production\nenv: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 5), Some(&schema));
 
         let labels = labels(&result);
@@ -1510,7 +1507,7 @@ mod tests {
     fn should_fall_back_to_structural_value_suggestions_when_no_schema_enum() {
         let schema = object_schema(vec![("env", string_schema())]);
         let text = "env: production\nenv: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 5), Some(&schema));
 
         let labels = labels(&result);
@@ -1525,7 +1522,7 @@ mod tests {
     fn should_suggest_boolean_values_for_boolean_schema_type() {
         let schema = object_schema(vec![("enabled", boolean_schema())]);
         let text = "enabled: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 9), Some(&schema));
 
         let labels = labels(&result);
@@ -1577,7 +1574,7 @@ mod tests {
         #[case] expected: &str,
         #[case] absent: &str,
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, Some(&schema));
         let ls = labels(&result);
         assert!(
@@ -1620,7 +1617,7 @@ mod tests {
         #[case] cursor: Position,
         #[case] expected: &str,
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, Some(&schema));
         let ls = labels(&result);
         assert!(
@@ -1637,7 +1634,7 @@ mod tests {
     #[test]
     fn should_fall_back_to_structural_completion_when_schema_is_none() {
         let text = "name: Alice\nage: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), None);
 
         let labels = labels(&result);
@@ -1652,7 +1649,7 @@ mod tests {
     fn should_fall_back_to_structural_when_schema_has_no_properties() {
         let schema = JsonSchema::default();
         let text = "name: Alice\nage: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let labels = labels(&result);
@@ -1668,7 +1665,7 @@ mod tests {
         // Schema has "unrelated"; document only has "name" (no siblings for structural).
         let schema = object_schema(vec![("unrelated", JsonSchema::default())]);
         let text = "name: Alice\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor at key position on the only key "name"; no structural siblings, but schema
         // offers "unrelated"
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
@@ -1698,7 +1695,7 @@ mod tests {
     fn should_return_empty_for_schema_completion_on_comment_line() {
         let schema = object_schema(vec![("name", string_schema())]);
         let text = "# comment\nkey: value\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         assert!(result.is_empty(), "should return empty for comment line");
@@ -1709,7 +1706,7 @@ mod tests {
     fn should_return_empty_for_schema_completion_on_document_separator() {
         let schema = object_schema(vec![("name", string_schema())]);
         let text = "key1: v1\n---\nkey2: v2\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 0), Some(&schema));
 
         assert!(
@@ -1723,7 +1720,7 @@ mod tests {
     fn should_handle_schema_property_with_no_type_gracefully() {
         let schema = object_schema(vec![("data", JsonSchema::default())]);
         let text = "name: Alice\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result.iter().find(|i| i.label == "data");
@@ -1750,7 +1747,7 @@ mod tests {
         )]);
         // Cursor within "pro" — value position with partial input
         let text = "env: pro\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 7), Some(&schema));
 
         let labels = labels(&result);
@@ -1777,7 +1774,7 @@ mod tests {
             },
         )]);
         let text = "age: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result.iter().find(|i| i.label == "name");
@@ -1807,7 +1804,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let text = "prop_000: x\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         assert!(
@@ -1834,7 +1831,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let text = "irrelevant: x\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         // At most 20 branches walked → at most 20 distinct schema-sourced properties
@@ -1860,7 +1857,7 @@ mod tests {
             },
         )]);
         let text = "key: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 5), Some(&schema));
 
         assert!(!result.is_empty(), "should have enum suggestion");
@@ -1885,7 +1882,7 @@ mod tests {
             },
         )]);
         let text = "enabled: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 9), Some(&schema));
 
         let labels = labels(&result);
@@ -1914,7 +1911,7 @@ mod tests {
         // The path walker runs out of properties before reaching the cursor — must bail cleanly.
         let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
         let text = "a:\n  b:\n    c:\n      d:\n        e: v\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // Must not panic or hang regardless of result
         let _result = complete_at(&docs, pos(4, 8), Some(&schema));
     }
@@ -1928,7 +1925,7 @@ mod tests {
             ("c", JsonSchema::default()),
         ]);
         let text = "a: 1\nb: 2\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on a new blank line at indent 0, key position after "b"
         let result = complete_at(&docs, pos(1, 0), Some(&schema));
 
@@ -1964,7 +1961,7 @@ mod tests {
         #[case] schema: Option<&JsonSchema>,
         #[case] absent_label: &str,
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, schema);
         let ls = labels(&result);
         assert!(
@@ -1981,7 +1978,7 @@ mod tests {
         // it is not present in doc2.
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
         let text = "name: Alice\n---\nage: 30\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on "age:" in doc2
         let result = complete_at(&docs, pos(2, 0), Some(&schema));
 
@@ -1998,7 +1995,7 @@ mod tests {
         // doc1 has a sequence item "- name: Alice"; doc2 has a plain mapping "host: local".
         // Completion in doc2 should use mapping-sibling logic, not sequence-item logic.
         let text = "items:\n  - name: Alice\n---\nhost: local\nport: 8080\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on "host:" in doc2
         let result = complete_at(&docs, pos(3, 0), None);
 
@@ -2017,7 +2014,7 @@ mod tests {
     #[test]
     fn should_handle_cursor_on_first_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on "alpha:" — first line, no separator before it
         let result = complete_at(&docs, pos(0, 0), None);
 
@@ -2032,7 +2029,7 @@ mod tests {
     #[test]
     fn should_handle_cursor_on_last_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\ngamma: 3\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on last line "gamma:"
         let result = complete_at(&docs, pos(3, 0), None);
 
@@ -2051,7 +2048,7 @@ mod tests {
     #[test]
     fn should_handle_consecutive_document_separators() {
         let text = "alpha: 1\n---\n---\nbeta: 2\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on "beta:" — the document between the two --- lines is empty
         let result = complete_at(&docs, pos(3, 0), None);
 
@@ -2073,7 +2070,7 @@ mod tests {
             },
         )]);
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result
@@ -2105,7 +2102,7 @@ mod tests {
             },
         )]);
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result
@@ -2142,7 +2139,7 @@ mod tests {
             ),
         ]);
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let new_item = result
@@ -2190,7 +2187,7 @@ mod tests {
             vec!["name", "age", "enabled"],
         );
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let snippet = result
@@ -2249,7 +2246,7 @@ mod tests {
         #[case] text: &str,
         #[case] cursor: Position,
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, Some(&schema));
         let has_snippet = result.iter().any(|i| i.label == "(all required)");
         assert!(!has_snippet, "should not offer '(all required)' snippet");
@@ -2271,7 +2268,7 @@ mod tests {
             vec!["title", "count", "active"],
         );
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let snippet = result
@@ -2310,7 +2307,7 @@ mod tests {
             vec!["name", "age"],
         );
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let snippet = result
@@ -2333,7 +2330,7 @@ mod tests {
             vec!["name", "age"],
         );
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let snippet = result
@@ -2361,7 +2358,7 @@ mod tests {
         #[case] cursor: Position,
         #[case] schema: Option<JsonSchema>,
     ) {
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, schema.as_ref());
         assert!(
             result.is_empty(),
@@ -2387,7 +2384,7 @@ mod tests {
         )]);
         // Bare sequence item "- " with no inline key, then indented key below it
         let text = "servers:\n  -\n    host: localhost\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(2, 4), Some(&schema));
 
         let ls = labels(&result);
@@ -2429,7 +2426,7 @@ mod tests {
         );
 
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
 
         let result1 = complete_at(&docs, pos(0, 0), Some(&schema));
         let snippet1 = result1.iter().find(|i| i.label == "(all required)");
@@ -2465,7 +2462,7 @@ mod tests {
             vec!["data", "name"],
         );
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let snippet = result.iter().find(|i| i.label == "(all required)");
@@ -2494,7 +2491,7 @@ mod tests {
         // 25 levels deep — exceeds MAX_BRANCH_COUNT (20)
         let schema = deep_schema(25);
         let text = "placeholder: null\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // Must not panic or hang
         let _result = complete_at(&docs, pos(0, 0), Some(&schema));
     }
@@ -2519,7 +2516,7 @@ mod tests {
         )]);
         // "value: " is 7 chars; colon at index 5; col=6 puts cursor in value position
         let text = "value: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 6), Some(&schema));
 
         let ls = labels(&result);
@@ -2546,7 +2543,7 @@ mod tests {
         )]);
         // col=6: cursor in value position (after "value: ")
         let text = "value: \n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 6), Some(&schema));
 
         let ls = labels(&result);
@@ -2575,7 +2572,7 @@ mod tests {
             },
         )]);
         let text = "name: x\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
         let item = result.iter().find(|i| i.label == "value");
@@ -2592,7 +2589,7 @@ mod tests {
     #[test]
     fn should_not_detect_sequence_context_across_document_separator() {
         let text = "items:\n  - name: Alice\n---\nhost: local\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // "host:" is in a plain mapping in doc2; is_in_sequence_item should return false
         let result = complete_at(&docs, pos(3, 0), None);
         let ls = labels(&result);
@@ -2608,7 +2605,7 @@ mod tests {
     fn should_not_detect_sequence_context_when_parent_is_plain_mapping() {
         // "server:\n  host:" — parent is a plain mapping key, not a sequence item
         let text = "server:\n  host: localhost\n  port: 8080\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 2), None);
         let ls = labels(&result);
         assert!(
@@ -2624,7 +2621,7 @@ mod tests {
         // Sequence items indented under a parent key
         // cursor on "  - name: Bob" (second item, which starts with "- ")
         let text = "people:\n  - name: Alice\n    age: 30\n  - name: Bob\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on "  - name: Bob" (line 3), col=4 (inside key area)
         let result = complete_at(&docs, pos(3, 4), None);
         let ls = labels(&result);
@@ -2640,7 +2637,7 @@ mod tests {
         // Sequence item spans multiple lines; cursor is inside an item
         // (not the first "- " line)
         let text = "items:\n  - name: Alice\n    age: 30\n    city: NY\n  - name: Bob\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on line 4 ("  - name: Bob"), which is itself a "- " line
         let result = complete_at(&docs, pos(4, 4), None);
         let ls = labels(&result);
@@ -2656,7 +2653,7 @@ mod tests {
         // The sibling item has "score" which the current item doesn't — exercises
         // find_sequence_indent walking back from a non-"- " line.
         let text = "list:\n  - id: 1\n    label: a\n  - id: 2\n    score: 99\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         // cursor on line 2 ("    label: a") — inside the first sequence item
         let result = complete_at(&docs, pos(2, 4), None);
         let ls = labels(&result);
@@ -2672,7 +2669,7 @@ mod tests {
     fn should_collect_keys_from_all_sequence_items_including_those_before_cursor() {
         // Three sequence items; cursor on third. Keys from items 1 and 2 should appear.
         let text = "- kind: A\n  color: red\n- kind: B\n  size: large\n- kind: C\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(4, 2), None);
         let ls = labels(&result);
         assert!(
@@ -2686,7 +2683,7 @@ mod tests {
     fn should_suggest_schema_keys_on_blank_line_when_schema_is_present() {
         let schema = object_schema(vec![("host", string_schema()), ("port", integer_schema())]);
         let text = "host: localhost\n\n";
-        let docs = parse(text);
+        let docs = parse_docs(text);
         let result = complete_at(&docs, pos(1, 0), Some(&schema));
 
         let ls = labels(&result);
@@ -2724,7 +2721,7 @@ mod tests {
         #[case] expected_key: &str,
         #[case] expected_path: Vec<String>,
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         match loc {
             CursorLocation::OnKey {
@@ -2754,7 +2751,7 @@ mod tests {
         #[case] expected_key: &str,
         #[case] expected_path: Vec<String>,
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         match loc {
             CursorLocation::OnValue {
@@ -2789,7 +2786,7 @@ mod tests {
         #[case] position: Position,
         #[case] expected_path: Vec<String>,
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         match loc {
             CursorLocation::InBlankMapping {
@@ -2820,7 +2817,7 @@ mod tests {
         #[case] position: Position,
         #[case] expected_path: Vec<String>,
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         match loc {
             CursorLocation::InBlankSequence {
@@ -2855,7 +2852,7 @@ mod tests {
         #[case] position: Position,
         #[case] expected_path: Vec<String>,
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         match loc {
             CursorLocation::InSequenceItem {
@@ -2895,7 +2892,7 @@ mod tests {
     #[test]
     fn locate_cursor_in_sequence_item_scalar() {
         let yaml = "tags:\n  - rust\n  - yaml\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, pos(1, 4));
         match loc {
             CursorLocation::InSequenceItem {
@@ -2925,7 +2922,7 @@ mod tests {
     #[case::on_separator("key1: v1\n---\nkey2: v2\n", pos(1, 0))]
     #[case::on_comment("# comment\nkey: val\n", pos(0, 2))]
     fn locate_cursor_outside_any(#[case] yaml: &str, #[case] position: Position) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
         assert!(
             matches!(loc, CursorLocation::OutsideAny),
@@ -2940,7 +2937,7 @@ mod tests {
         // The scalar "Alice" ends at some position; cursor exactly at span.end
         // should NOT be contained. We use a position clearly past any node.
         let yaml = "name: Alice\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         // Parser line 1, column 11 is one past "Alice" (col 6 start + 5 chars).
         // Use LSP pos(0, 11) to hit the boundary.
         let loc = locate_cursor(&docs, pos(0, 11));
@@ -2955,7 +2952,7 @@ mod tests {
     fn locate_cursor_span_boundary_at_start_is_contained() {
         // Cursor at span.start should be contained.
         let yaml = "name: Alice\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         // "name" key starts at parser line=1, col=0 → LSP pos(0, 0)
         let loc = locate_cursor(&docs, pos(0, 0));
         assert!(
@@ -2981,7 +2978,7 @@ mod tests {
         #[case] expected_present: &[&str],
         #[case] expected_absent: &[&str],
     ) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let Node::Mapping { .. } = &docs[0].root else {
             panic!("expected mapping root");
         };
@@ -3003,7 +3000,7 @@ mod tests {
     #[test]
     fn present_keys_sequence_item() {
         let yaml = "items:\n  - name: foo\n    age: 1\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         // Navigate to the sequence item mapping
         let Node::Mapping { entries, .. } = &docs[0].root else {
             panic!("expected mapping root");
@@ -3029,7 +3026,7 @@ mod tests {
     #[case::single_key("only: val\n", vec!["only"])]
     #[case::utf8("café: 1\ntea: 2\n", vec!["café", "tea"])]
     fn collect_sibling_keys_ast_test(#[case] yaml: &str, #[case] expected: Vec<&str>) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let keys = collect_sibling_keys_ast(&docs[0].root);
         assert_eq!(
             keys, expected,
@@ -3043,7 +3040,7 @@ mod tests {
         // The simplest approach: parse a YAML that won't have complex keys, and
         // verify that the function only returns string keys.
         let yaml = "x: 1\ny: 2\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let keys = collect_sibling_keys_ast(&docs[0].root);
         assert_eq!(keys, vec!["x", "y"]);
     }
@@ -3057,7 +3054,7 @@ mod tests {
     #[case::dedup("- name: foo\n- name: bar\n", &["name"])]
     #[case::single_item("- x: 1\n  y: 2\n", &["x", "y"])]
     fn collect_sequence_sibling_keys_test(#[case] yaml: &str, #[case] expected: &[&str]) {
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         // The root is a sequence in these test cases.
         let keys = collect_sequence_sibling_keys(&docs[0].root);
         let expected_set: HashSet<&str> = expected.iter().copied().collect();
@@ -3073,7 +3070,7 @@ mod tests {
         // Parse a sequence with no items — the root is a scalar for "[]" YAML
         // but an empty block sequence has no items.
         // Use an inline flow empty sequence to get an actual Sequence node.
-        let docs2 = parse("[]\n");
+        let docs2 = parse_docs("[]\n");
         let keys = collect_sequence_sibling_keys(&docs2[0].root);
         assert!(keys.is_empty(), "empty sequence should return empty set");
     }
@@ -3084,7 +3081,7 @@ mod tests {
     fn locate_cursor_on_key_at_end_of_key_token() {
         // LC-2: cursor at last char of "name" key token
         let yaml = "name: Alice\n";
-        let docs = parse(yaml);
+        let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, pos(0, 3));
         assert!(
             matches!(loc, CursorLocation::OnKey { ref key, .. } if key == "name"),
@@ -3097,7 +3094,7 @@ mod tests {
     // C-1: OutsideAny returns empty
     #[test]
     fn complete_at_outside_any_returns_empty() {
-        let docs = parse("name: Alice\n");
+        let docs = parse_docs("name: Alice\n");
         let result = complete_at(&docs, pos(5, 0), None);
         assert!(
             result.is_empty(),
@@ -3108,7 +3105,7 @@ mod tests {
     // C-2: OnKey no schema, no siblings
     #[test]
     fn complete_at_on_key_with_no_siblings_returns_empty() {
-        let docs = parse("only: val\n");
+        let docs = parse_docs("only: val\n");
         let result = complete_at(&docs, pos(0, 0), None);
         assert!(
             result.is_empty(),
@@ -3119,7 +3116,7 @@ mod tests {
     // C-3: OnKey with schema, present key excluded
     #[test]
     fn complete_at_on_key_schema_excludes_present_keys() {
-        let docs = parse("name: Alice\nage: 30\n");
+        let docs = parse_docs("name: Alice\nage: 30\n");
         let schema = object_schema(vec![
             ("name", string_schema()),
             ("age", integer_schema()),
@@ -3141,7 +3138,7 @@ mod tests {
     // C-4: OnValue with schema enum
     #[test]
     fn complete_at_on_value_schema_enum() {
-        let docs = parse("env: \n");
+        let docs = parse_docs("env: \n");
         let schema = object_schema(vec![(
             "env",
             JsonSchema {
@@ -3167,7 +3164,7 @@ mod tests {
     // C-5: OnValue no schema, structural fallback
     #[test]
     fn complete_at_on_value_no_schema_structural_fallback() {
-        let docs = parse("kind: app\nkind: \n");
+        let docs = parse_docs("kind: app\nkind: \n");
         let result = complete_at(&docs, pos(1, 6), None);
         let ls = labels(&result);
         assert!(
@@ -3185,7 +3182,7 @@ mod tests {
     // C-6: InSequenceItem, sibling keys minus current-item keys
     #[test]
     fn complete_at_in_sequence_item_suggests_missing_sibling_keys() {
-        let docs = parse("items:\n  - name: Alice\n    age: 30\n  - name: Bob\n");
+        let docs = parse_docs("items:\n  - name: Alice\n    age: 30\n  - name: Bob\n");
         let result = complete_at(&docs, pos(3, 4), None);
         let ls = labels(&result);
         assert!(
@@ -3201,7 +3198,7 @@ mod tests {
     // C-7: InBlankMapping with schema suggests missing schema key
     #[test]
     fn complete_at_in_blank_mapping_with_schema_suggests_keys() {
-        let docs = parse("server:\n  host: localhost\n  \n");
+        let docs = parse_docs("server:\n  host: localhost\n  \n");
         let schema = object_schema(vec![(
             "server",
             object_schema(vec![("host", string_schema()), ("port", integer_schema())]),
@@ -3223,7 +3220,7 @@ mod tests {
     // keys already in the document. When all keys are present, the result is empty.
     #[test]
     fn complete_at_in_blank_mapping_no_schema_structural_keys() {
-        let docs = parse("name: Alice\nage: 30\n\n");
+        let docs = parse_docs("name: Alice\nage: 30\n\n");
         let result = complete_at(&docs, pos(2, 0), None);
         assert!(
             result.is_empty(),
@@ -3234,7 +3231,7 @@ mod tests {
     // C-9: InBlankSequence with schema descends via [] sentinel
     #[test]
     fn complete_at_in_blank_sequence_with_schema_descends_items() {
-        let docs = parse("servers:\n  - host: localhost\n  \n");
+        let docs = parse_docs("servers:\n  - host: localhost\n  \n");
         let schema = object_schema(vec![(
             "servers",
             JsonSchema {
@@ -3260,7 +3257,8 @@ mod tests {
     // line between items routes to InSequenceItem for the preceding item.)
     #[test]
     fn complete_at_in_blank_sequence_no_schema_union_of_sibling_keys() {
-        let docs = parse("items:\n  - name: Alice\n    age: 30\n  \n  - name: Bob\n    city: NY\n");
+        let docs =
+            parse_docs("items:\n  - name: Alice\n    age: 30\n  \n  - name: Bob\n    city: NY\n");
         let result = complete_at(&docs, pos(3, 2), None);
         let ls = labels(&result);
         // Cursor is inside item 1 (name+age); item 2 has name+city.

@@ -71,7 +71,7 @@ call sites.
 
 ## Steps
 
-- [ ] Extract shared test helpers into a crate-wide
+- [x] Extract shared test helpers into a crate-wide
       `#[cfg(test)]` module
 - [ ] Split `code_actions.rs` into per-action submodules
 - [ ] Parameterize and reduce tests in `schema_validation.rs`
@@ -129,19 +129,19 @@ differently. If the wrapper differs from the shared version,
 keep a local adapter that calls the shared helper, do not
 force all callers into the same return type.
 
-- [ ] Verify starting-point duplication count: grep the
+- [x] Verify starting-point duplication count: grep the
       codebase for all definitions of `parse_docs`,
       `docs_for`, `parse`, and `test_uri` in `#[cfg(test)]`
       blocks and confirm the count matches the 14+3 list
       above. Update the list if it differs.
-- [ ] Create `rlsp-yaml/src/test_utils.rs` with
+- [x] Create `rlsp-yaml/src/test_utils.rs` with
       `parse_docs` and `test_uri`
-- [ ] Declare `#[cfg(test)] mod test_utils` in `lib.rs`
-- [ ] Replace all 14 local `parse_docs` variants with
+- [x] Declare `#[cfg(test)] mod test_utils` in `lib.rs`
+- [x] Replace all 14 local `parse_docs` variants with
       imports from `test_utils`
-- [ ] Replace all 3 local `test_uri` definitions with
+- [x] Replace all 3 local `test_uri` definitions with
       imports from `test_utils`
-- [ ] `cargo test` passes, `cargo clippy --all-targets`
+- [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
 Acceptance criteria:

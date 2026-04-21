@@ -223,9 +223,11 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::parse_docs as parse_docs_inner;
 
+    #[expect(clippy::unnecessary_wraps, reason = "callers use Option API")]
     fn parse_docs(text: &str) -> Option<Vec<Document<Span>>> {
-        rlsp_yaml_parser::load(text).ok()
+        Some(parse_docs_inner(text))
     }
 
     fn pos(line: u32, character: u32) -> Position {

@@ -177,10 +177,10 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "completion.rs",
-        func: "parse",
+        file: "test_utils.rs",
+        func: "parse_docs",
         marker: AllowMarker::CarveOut {
-            reason: "test fixture",
+            reason: "shared test fixture — single definition used by all in-crate test modules",
         },
     },
     AllowEntry {
@@ -226,27 +226,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "hover.rs",
-        func: "parse_docs",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "schema/association.rs",
-        func: "parse_docs",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "schema_validation.rs",
-        func: "parse_docs",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
         file: "schema_validation.rs",
         func: "run_content",
         marker: AllowMarker::CarveOut {
@@ -255,21 +234,7 @@ const ALLOW_LIST: &[AllowEntry] = &[
     },
     AllowEntry {
         file: "schema_validation/formats.rs",
-        func: "parse_docs",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "schema_validation/formats.rs",
         func: "run_format",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "validation/validators.rs",
-        func: "parse_docs",
         marker: AllowMarker::CarveOut {
             reason: "test fixture",
         },
@@ -889,8 +854,8 @@ mod detection_tests {
 
     #[test]
     fn allowed_entry_suppresses_violation() {
-        let source = "fn parse(text: &str) -> Vec<Document<Span>> {\n    vec![]\n}";
-        let violations = scan_file("completion.rs", source);
+        let source = "pub fn parse_docs(text: &str) -> Vec<Document<Span>> {\n    vec![]\n}";
+        let violations = scan_file("test_utils.rs", source);
         assert_eq!(violations.len(), 1);
 
         let new_violations: Vec<&Violation> = violations

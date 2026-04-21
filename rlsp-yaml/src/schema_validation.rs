@@ -1689,11 +1689,8 @@ mod tests {
 
     use super::*;
     use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+    use crate::test_utils::parse_docs;
     use serde_json::json;
-
-    fn parse_docs(text: &str) -> Vec<Document<Span>> {
-        rlsp_yaml_parser::load(text).unwrap_or_default()
-    }
 
     fn string_schema() -> JsonSchema {
         JsonSchema {
