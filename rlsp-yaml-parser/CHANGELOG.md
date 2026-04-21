@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Features
+
+- Expose anchor_loc span on node events (265cb5a)
+- Expose anchor_loc span on AST nodes (0ca3083)
+- Expose tag_loc span on node events (521e3b5)
+- Propagate tag_loc through AST nodes (a7870c9)
+
 ## Bug Fixes
 
 - Rewrite while_let_loop sites and remove trailing commas (60202c2)
