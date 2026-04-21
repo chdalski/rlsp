@@ -186,7 +186,7 @@ Test coverage fields may be empty with the explicit text
       `.ai/references/yaml-1.2.2-spec.md`, verify
       completeness, write conformance-document scaffold
       with Methodology and entry-format reference
-- [ ] Task 2 — draft §3 + §4 + §5 chapter entries under
+- [x] Task 2 — draft §3 + §4 + §5 chapter entries under
       the strict format
 - [ ] Task 3 — verify §3 + §4 + §5 entries against
       cached spec and cited source (independent pass)
@@ -269,28 +269,28 @@ the character productions (character set, encodings,
 indicators, line breaks, whitespace, misc, escaped
 characters) and contains tens of numbered productions.
 
-- [ ] Every numbered production in §3 is recorded. A
+- [x] Every numbered production in §3 is recorded. A
       production with no normative obligation on the
       implementation (purely descriptive) is classified
       `Not Applicable (descriptive)` with a one-sentence
       rationale and an empty Implementation / Test
       coverage pair.
-- [ ] §4 is classified per the same rule. If §4 is
+- [x] §4 is classified per the same rule. If §4 is
       entirely meta-notation with no implementation
       obligation, record a single `Not Applicable
       (meta-notation)` entry with a one-sentence
       rationale.
-- [ ] Every numbered production in §5 has an entry in
+- [x] Every numbered production in §5 has an entry in
       the strict format, with: BNF, classification,
       verbatim spec quote from
       `.ai/references/yaml-1.2.2-spec.md`, implementation
       file+line, test coverage reference, and (for
       Lenient/Strict) a discrepancy sentence.
-- [ ] The classification of every §5 entry follows from
+- [x] The classification of every §5 entry follows from
       the spec quote + implementation fact per the
       decision-rule table; no entry classifies without
       those artifacts.
-- [ ] Within this task's chapter block (text between
+- [x] Within this task's chapter block (text between
       the `## §N` header and the next `## ` header of
       the same level), every `### [` entry has a
       `- Test coverage:` line. Verify by extracting
@@ -306,10 +306,12 @@ characters) and contains tens of numbered productions.
       Equal counts is a pass; any mismatch is a defect.
       "No direct test" is a permitted value for the
       field.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `93c5a46bf28e00bedf7619bb8acb8d8ad2462526`
 
 ### Task 3: Verify §3 + §4 + §5 entries (independent pass)
 
