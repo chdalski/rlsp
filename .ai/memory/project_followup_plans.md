@@ -28,12 +28,6 @@ type: project
      These were surfaced and allow-listed in commit c70f642 under
      .ai/plans/2026-04-18-parser-boundary-audit-v2.md Task 1. -->
 
-- **Retrofit `complete_at` to AST-first** — `completion.rs:32`:
-  `pub fn complete_at(text: &str, documents: Option<&Vec<Document<Span>>>, position: Position, schema: Option<&JsonSchema>) -> Vec<CompletionItem>`.
-  Violation: splits `text` into `lines` and uses a large family of private text-scanning helpers to reconstruct the YAML structural context at the cursor (key path, sibling keys, sequence context, indentation). All structural information is already in the parser AST.
-  Replacement: accept `documents: &[Document<Span>]`; walk the AST by span containment to locate the cursor position; derive key path and context from AST node types and structure instead of line-by-line text scanning.
-  Helpers retired when this retrofit lands: `build_key_path` (completion.rs), `build_value_key_path` (completion.rs), `collect_present_keys_at_indent` (completion.rs), `classify_cursor` (completion.rs), `suggest_sibling_keys` (completion.rs), `is_in_sequence_item` (completion.rs), `suggest_keys_for_sequence_item` (completion.rs), `collect_current_sequence_item_keys` (completion.rs), `find_current_item_start` (completion.rs), `find_sequence_indent` (completion.rs), `collect_all_sequence_item_keys` (completion.rs), `collect_sibling_keys` (completion.rs), `find_mapping_colon` (completion.rs), `indentation_level` (completion.rs), `document_range` (completion.rs), `suggest_values_for_key` (completion.rs).
-
 - **Custom tag type annotations** — RedHat's customTags supports `!include scalar`, `!ref mapping` type annotations. Ours is a plain string allowlist — add type annotation support.
 - **LSP lifecycle test rstest reduction** — ~34 tests in `lsp_lifecycle.rs` (3000 lines) follow repetitive patterns: "unknown doc returns null" (~8), diagnostic suppression (~10), flowStyle severity (3), max_items_computed (8), settings toggles (~5). Parameterize with rstest to reduce ~500-800 lines. Pure refactoring, no behavior change.
 - **`formatIndentSequences` formatter option** — add a `formatIndentSequences: bool` setting (default `true`). When true (default), always produce indented block sequences (`script:\n  - item`). When false, produce indentless sequences (`script:\n- item`). Always normalize — no preserve mode. Formatter currently hardcodes indented style in `formatter.rs:658-669` via `indent()` wrapper.

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-20
 
 ## Goal
@@ -210,7 +210,7 @@ section on bug-fixing policy.
 
 - [x] Task 1: AST-first cursor-context substrate
 - [x] Task 2: Rewire `complete_at`, delete text helpers, shrink allow-list
-- [ ] Task 3: Corpus invariant, memory queue cleanup
+- [x] Task 3: Corpus invariant, memory queue cleanup
 
 ## Tasks
 
@@ -508,6 +508,7 @@ complete):
 
 ### Task 3: Corpus invariant, memory queue cleanup
 
+Committed as `a08267c481297063c2e1f4432155de2f49ffdd04`.
 Add the corpus-wide invariant test and scrub stale
 references from the project follow-up queue. Code
 cleanup (helper deletion, allow-list shrink) already

@@ -36,7 +36,7 @@ pub fn complete_at(
     schema: Option<&JsonSchema>,
 ) -> Vec<CompletionItem> {
     let cursor_line = position.line as usize;
-    match locate_cursor(docs, position) {
+    let mut items = match locate_cursor(docs, position) {
         CursorLocation::OutsideAny => Vec::new(),
         CursorLocation::OnKey {
             key,
@@ -91,7 +91,9 @@ pub fn complete_at(
                     .collect(),
             )
         }
-    }
+    };
+    items.truncate(MAX_COMPLETION_ITEMS);
+    items
 }
 
 fn complete_on_key<'a>(
