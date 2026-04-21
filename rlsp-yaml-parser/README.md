@@ -104,6 +104,7 @@ realistic YAML inputs, competitive with libfyaml.
 ## Documentation
 
 - [Architecture](docs/architecture.md) — streaming state-machine design, O(1) latency, comment attachment, security limits
+- [YAML 1.2.2 Conformance](docs/yaml-spec-conformance.md) — per-production classification against the spec, with source citations and test coverage
 - [Feature Log](docs/feature-log.md) — implemented capabilities and design decisions
 - [Benchmarks](docs/benchmarks.md) — performance measurements and methodology
 

@@ -182,7 +182,7 @@ Test coverage fields may be empty with the explicit text
 
 ## Steps
 
-- [ ] Task 1 — cache the YAML 1.2.2 spec locally at
+- [x] Task 1 — cache the YAML 1.2.2 spec locally at
       `.ai/references/yaml-1.2.2-spec.md`, verify
       completeness, write conformance-document scaffold
       with Methodology and entry-format reference
@@ -213,7 +213,7 @@ Create `rlsp-yaml-parser/docs/yaml-spec-conformance.md`
 with a Methodology section and the strict entry-format
 reference reproduced inline.
 
-- [ ] `.ai/references/yaml-1.2.2-spec.md` exists and
+- [x] `.ai/references/yaml-1.2.2-spec.md` exists and
       contains the full YAML 1.2.2 specification through
       the end of §10. Completeness is verified by two
       checks: (1) extract every production number `[N]`
@@ -224,10 +224,10 @@ reference reproduced inline.
       with content from that chapter (not truncated
       mid-production). Both checks are recorded in the
       commit message.
-- [ ] The cached file records its source URL and fetch
+- [x] The cached file records its source URL and fetch
       date in a comment at the top so future readers can
       re-fetch if needed.
-- [ ] `rlsp-yaml-parser/docs/yaml-spec-conformance.md` is
+- [x] `rlsp-yaml-parser/docs/yaml-spec-conformance.md` is
       created and opens with a Methodology section
       containing:
       - The spec reference (URL + cached-copy path).
@@ -238,24 +238,26 @@ reference reproduced inline.
       - A statement that the audit is documentation-only,
         parser-scoped, and that remediation and
         downstream ramifications are out of scope.
-- [ ] `rlsp-yaml-parser/docs/yaml-spec-conformance.md`
+- [x] `rlsp-yaml-parser/docs/yaml-spec-conformance.md`
       contains placeholder chapter headers `## §3`,
       `## §4`, `## §5`, `## §6`, `## §7`, `## §8`, `## §9`,
       `## §10`, `## Summary` — in that order, empty
       bodies, so subsequent draft tasks know exactly
       where their entries go.
-- [ ] `rlsp-yaml-parser/README.md` is updated under its
+- [x] `rlsp-yaml-parser/README.md` is updated under its
       `## Documentation` section to add an entry for
       the new conformance doc, e.g.:
       `- [YAML 1.2.2 Conformance](docs/yaml-spec-conformance.md) — per-production classification against the spec, with source citations and test coverage`.
       Placement: immediately after the existing
       `Architecture` entry. Without this entry the doc
       is orphaned from the crate's documentation index.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes (sanity — nothing
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes (sanity — nothing
       changed).
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `97bb19adea36225009da408d9ba57d3f02d226b2`
 
 ### Task 2: Draft §3 + §4 + §5 entries
 
