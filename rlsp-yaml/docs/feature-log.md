@@ -31,55 +31,6 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
-### AST-Based String-to-Block-Scalar Code Action [completed]
-
-**Description:** Replaced the text-surgery implementation of the `string_to_block_scalar` code action with an AST+formatter approach. The action now walks the `rlsp-yaml-parser` document tree to find a qualifying `Node::Scalar` whose span starts on the cursor line, verifies it is a mapping value in a block mapping with style Plain, SingleQuoted, or DoubleQuoted, and whose parsed value meets the 40-char threshold. It clones the node with `ScalarStyle::Literal`, calls `format_subtree` with `base_indent = key_col`, and emits a `TextEdit` covering only the scalar's `loc` span. This eliminates six defect classes from the old text-parsing implementation: (1) heuristic key detection via `line.find(':')` that broke on URLs and quoted keys with embedded colons; (2) naïve escape handling that only resolved `\n` and left `\t`, `\\`, `\"`, and other YAML escape sequences as raw two-character sequences; (3) full-line replacement that destroyed trailing comments; (4) no detection of already-block scalars, which could cause mis-conversion; (5) threshold measured on raw text rather than the parsed scalar value; (6) heuristic exclusions for anchors, flow collections, and other structural markers that are now handled by AST node type.
-**Complexity:** Medium
-**Comment:** The edit range covers the scalar's `loc` span only (not the full line), so trailing comments and whitespace after the scalar are preserved by the caller. Anchors are preserved automatically — they live on the AST node and `format_subtree` emits them. `base_indent = key_col` (not `key_col + 2`) because the formatter's `repr_block_to_doc` applies `tab_width` internally; adding +2 at the call site would over-indent.
-**Tier:** 1
-
-### AST-Based Block-to-Flow Code Action [completed]
-
-**Description:** Replaced the text-surgery implementation of the `block_to_flow` code action with an AST+formatter approach. The action now walks the `rlsp-yaml-parser` document tree to find the innermost block collection whose key starts on the cursor line, flips `CollectionStyle` to `Flow`, and re-emits via `format_subtree`. This eliminates four defect classes from the old implementation: (1) heuristic key detection via first-colon scan, which failed on URLs and quoted keys with embedded colons; (2) no flow-unsafe escaping on mapping values — values containing `,`, `[`, `]`, `{`, `}` now get correctly double-quoted; (3) quoting applied only to sequence items, leaving mapping values unescaped; (4) heuristic indent-walking that could misclassify structure near comments or unusual indentation. Anchors on block collections are correctly preserved in the flow output. The `quote_flow_item` helper function was removed.
-**Complexity:** Medium
-**Comment:** The edit range starts after the key's colon rather than at the end of the full key line, preventing the formatter-emitted anchor from being duplicated on top of an existing `key: &anchor` prefix in source. Refuse-nested behavior is preserved.
-**Tier:** 1
-
-### AST-Based Flow-to-Block Quick Fixes [completed]
-
-**Description:** Replaced the text-surgery implementations of the `flow_map_to_block` and `flow_seq_to_block` quick fixes with an AST+formatter approach. Both quick fixes now find the target node by matching the diagnostic's range against parser AST spans, flip the node's `CollectionStyle` to `Block`, and re-emit the subtree via `format_subtree`. Previously the text-surgery path had three classes of destructive failures: (a) sequence-item flow mappings like `- { target: linux, os: ubuntu }` had the `-` and leading whitespace overwritten; (b) multi-line flow mappings were never correctly extracted; (c) key reconstruction via `prefix.trim_end().ends_with(':')` discarded key structure when the prefix was anything other than a mapping key, dropping scalar content. All three defect classes are resolved. The `code_actions` public entry point now takes `&[Document<Span>]` as its first parameter, removing the last edit-path function from the parser boundary audit allow-list.
-**Complexity:** Medium
-**Comment:** Enabling API `format_subtree(node, options, base_indent)` was added to the formatter, wrapping the existing `node_to_doc` internal function. The code action produces a `TextEdit` covering the AST node's span (not the diagnostic's line), so surrounding content — sequence item prefix, mapping key — is preserved by the caller. Default `YamlFormatOptions` are used; matching the user's formatter settings is a follow-up.
-**Tier:** 1
-
-### AST-Based Flow Style Validator [completed]
-
-**Description:** Replaced the text-scanning implementation of `validate_flow_style` with an AST walker that consumes the `rlsp-yaml-parser` document tree. Two user-visible behavior changes: (a) plain scalars containing `{` or `[` — including GitHub Actions template expressions such as `${{ secrets.GITHUB_TOKEN }}` — no longer produce false-positive `flowMap`/`flowSeq` diagnostics; (b) multi-line flow collections (where `{` or `[` opens on one line and `}` or `]` closes on a later line) are now detected, where the old line-by-line scanner missed them.
-**Complexity:** Low
-**Comment:** Closes the false-positive class caused by `${{ … }}` in GHA workflows. The AST carries `CollectionStyle::Flow` directly on `Node::Mapping` and `Node::Sequence`, making the fix a straightforward tree walk. Diagnostic codes (`flowMap`, `flowSeq`), severity, source, and message text are unchanged so existing `flowStyle` severity overrides continue to work.
-**Tier:** 1
-
-### Corpus Invariant Harness [completed]
-
-**Description:** A real-world corpus of 4 YAML files (`release-plz-workflow.yml`,
-`kubernetes-deployment.yaml`, `docker-compose.yml`, `github-actions-matrix.yml`)
-paired with a broad-invariant test harness (`rlsp-yaml/tests/corpus_invariants.rs`)
-that runs every registered invariant over every corpus file. Four foundational
-invariants are registered: I1 (no panics on full LSP pipeline), I2 (diagnostic
-range validity per LSP §3.17 UTF-16 semantics), I3 (code-action output introduces
-no new Error diagnostics), and I4 (refactor code actions preserve all pre-existing
-scalar content). A shrink-only skip-list is maintained for any currently-failing
-(file, invariant) pairs; the skip-list is empty at steady state — all four corpus
-files pass all four invariants. [`tests/corpus/WORKLIST.md`](../tests/corpus/WORKLIST.md)
-tracks any active failures if the skip-list grows again.
-**Complexity:** Medium
-**Comment:** Motivated by a user-reported bug that passed every existing unit test
-but broke on first contact with a real GitHub Actions workflow. The harness
-provides regression protection over representative real-world files; the skip-list
-surfaces the failure worklist for retrofit plans rather than hiding failures behind
-disabled tests.
-**Tier:** 1
-
 ### YAML 1.1 Compatibility Diagnostics [completed]
 
 **Description:** Warn when plain scalars would be interpreted differently by YAML 1.1 parsers (Kubernetes, Ansible, GitLab CI, etc.). `yaml11Boolean` (warning) fires for the 16 YAML 1.1 boolean forms not in YAML 1.2 (`yes`, `no`, `on`, `off`, `y`, `n`, and case variants); `yaml11Octal` (info) fires for C-style octal literals (`0777`). Schema-aware variants (`schemaYaml11Boolean`, `schemaYaml11Octal`) escalate severity when the field is schema-typed as `string` — the 1.2 parser accepts the value but downstream 1.1 tools will silently corrupt it; `schemaType` messages are enhanced when a boolean-typed field receives a 1.1 boolean form. Quick fixes: quote value (universally safe, listed first) or convert to canonical 1.2 form (`true`/`false`, `0o777`). All four diagnostics are suppressed when `yamlVersion` is `"1.1"`. The VS Code extension now exposes `rlsp-yaml.yamlVersion` and `rlsp-yaml.validate` settings.

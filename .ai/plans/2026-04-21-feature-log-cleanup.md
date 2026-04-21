@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-21)
 **Created:** 2026-04-21
 
 ## Goal
@@ -53,11 +53,11 @@ features, and violate the file's stated scope.
 
 ## Steps
 
-- [ ] Remove the 5 internal-refactor entries from
+- [x] Remove the 5 internal-refactor entries from
       `rlsp-yaml/docs/feature-log.md`
-- [ ] Remove the corresponding bullet from
+- [x] Remove the corresponding bullet from
       `.ai/memory/project_followup_plans.md`
-- [ ] Verify the remaining file structure is intact and
+- [x] Verify the remaining file structure is intact and
       the build is green
 
 ## Tasks
@@ -68,25 +68,25 @@ Delete the five internal-refactor entries from
 `rlsp-yaml/docs/feature-log.md` and the matching pointer
 in the follow-up queue.
 
-- [ ] Delete the entry titled "AST-Based String-to-Block-
+- [x] Delete the entry titled "AST-Based String-to-Block-
       Scalar Code Action" in full (`###` heading,
       `**Description:**`, `**Complexity:**`, `**Comment:**`,
       `**Tier:**`, and the blank line separating it from
       the next entry)
-- [ ] Delete the entry titled "AST-Based Block-to-Flow
+- [x] Delete the entry titled "AST-Based Block-to-Flow
       Code Action" in full
-- [ ] Delete the entry titled "AST-Based Flow-to-Block
+- [x] Delete the entry titled "AST-Based Flow-to-Block
       Quick Fixes" in full
-- [ ] Delete the entry titled "AST-Based Flow Style
+- [x] Delete the entry titled "AST-Based Flow Style
       Validator" in full
-- [ ] Delete the entry titled "Corpus Invariant Harness"
+- [x] Delete the entry titled "Corpus Invariant Harness"
       in full, including its inline link to
       `../tests/corpus/WORKLIST.md`
-- [ ] Delete the bullet starting
+- [x] Delete the bullet starting
       "**Clean internal-refactor entries out of
       `rlsp-yaml/docs/feature-log.md`**" from
       `.ai/memory/project_followup_plans.md`
-- [ ] Grep the repository for other references to the
+- [x] Grep the repository for other references to the
       removed entry titles (`grep -rn "AST-Based
       String-to-Block-Scalar\|AST-Based Block-to-Flow\|
       AST-Based Flow-to-Block\|AST-Based Flow Style\|
@@ -94,8 +94,10 @@ in the follow-up queue.
       repository root); confirm the only remaining hits
       are in plan files under `.ai/plans/` (historical
       record, expected) and in this plan
-- [ ] Run `cargo test -p rlsp-yaml` and
+- [x] Run `cargo test -p rlsp-yaml` and
       `cargo clippy --all-targets`
+
+**Commit:** `c8d1580`
 
 Acceptance criteria:
 - `rlsp-yaml/docs/feature-log.md` contains zero `###`
