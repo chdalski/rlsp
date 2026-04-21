@@ -3,6 +3,61 @@
 
 ## Bug Fixes
 
+- Add complete_at corpus invariant and cap structural completions (aef054d)
+
+## Documentation
+
+- Document formatPreserveQuotes option (e2ad316)
+- Add corpus-invariants WORKLIST and feature-log entry (1b9ffbb)
+- Add feature-log entry for string_to_block_scalar AST retrofit (52b2002)
+- Clarify feature-log.md is user-facing only (1feb3df)
+- Move feature-log agent guidance to hidden HTML comment (9860187)
+
+## Features
+
+- Add preserve_quotes formatter option plumbing (b844105)
+- Honor preserveQuotes in scalar emission (5a6677a)
+- Add format_subtree public API to formatter (8dfe0e0)
+- Rewrite flow-to-block code actions via AST + format_subtree (957c80f)
+- Rewrite block_to_flow via AST + format_subtree (173f838)
+- Expose anchor_loc span on AST nodes (0ca3083)
+- Propagate tag_loc through AST nodes (a7870c9)
+- Add AST cursor-context substrate for complete_at (1f93709)
+
+## Performance
+
+- Cache boundary-audit regexes with LazyLock (4b81a87)
+
+## Refactoring
+
+- Retrofit validate_flow_style to consume AST (9c5a6e1)
+- Retire quote_flow_item and cover block_to_flow defect classes (b752319)
+- Retrofit string_to_block_scalar to AST + format_subtree (370b8c4)
+- Retrofit quoted_bool_to_unquoted to AST + format_subtree (c423caa)
+- Retrofit yaml11_bool_actions and schema_yaml11_bool_type_actions to AST + format_subtree (5a7d793)
+- Retrofit yaml11_octal_actions to AST + format_subtree (a7ab9ff)
+- Retrofit delete_unused_anchor to AST + format_subtree (e2fde09)
+- Retrofit validate_unused_anchors to AST-only (0848168)
+- Retrofit custom-tags and key-ordering validators to AST (2733893)
+- Retrofit validate_schema to AST-only position lookup (eab7e32)
+- Retrofit hover_at to AST span-containment walk (d3a0d79)
+- Retrofit navigation/references.rs to AST walk (947d07b)
+- Retrofit rename to AST span-containment walk (1f607c5)
+- Retrofit document_symbols to AST-only (5b85651)
+- Retrofit selection_ranges to AST-only (c7094eb)
+- Retrofit find_document_links to AST-only walk (90eecea)
+- Retrofit find_colors to AST-only walk (273628c)
+- Retrofit format_on_type to AST-only indentation (56c2771)
+- Retrofit folding_ranges to AST + Event::Comment (82d76da)
+- Retrofit semantic_tokens to AST + Event::Comment (4f71961)
+- Retrofit complete_at to AST-first cursor location (011b79e)
+- Consolidate test helpers into shared test_utils module (00a8e38)
+- Split code_actions.rs into per-action submodules (99da38b)
+- Parameterize repetitive schema_validation tests with rstest (6820481)
+- Parameterize schema URL validation tests (8431d9a)
+
+## Bug Fixes
+
 - Rewrite while_let_loop sites and remove trailing commas (60202c2)
 
 ## Performance
