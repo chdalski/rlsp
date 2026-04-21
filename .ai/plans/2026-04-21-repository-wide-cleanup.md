@@ -74,8 +74,9 @@ call sites.
       `#[cfg(test)]` module
 - [x] Split `code_actions.rs` into per-action submodules
 - [x] Parameterize and reduce tests in `schema_validation.rs`
-- [ ] Parameterize `lsp_lifecycle.rs` test groups with rstest
-- [ ] Reduce file sizes and test ratios across remaining
+- [x] Parameterize `lsp_lifecycle.rs` test groups with rstest
+      (investigated — no groups are genuinely parameterizable)
+- [x] Reduce file sizes and test ratios across remaining
       files
 
 ## Tasks
@@ -235,6 +236,8 @@ patterns that can collapse into parameterized groups.
 - [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
+**Commit:** `3219493`
+
 Acceptance criteria:
 - Repetitive test patterns consolidated into rstest groups
   where the pattern genuinely repeats (same assertion
@@ -271,20 +274,12 @@ pattern with different LSP methods. Collapse into 1
 Tests toggling features on/off via settings. Same
 assertion pattern. Collapse into 1-2 `#[rstest]` functions.
 
-- [ ] Add `rstest` to `[dev-dependencies]` if not already
-      present
-- [ ] Parameterize Group 1 (unknown doc → null)
-- [ ] Parameterize Group 2 (severity toggles)
-- [ ] Parameterize Group 3 (max items computed)
-- [ ] Parameterize Group 4 (feature disable toggles)
-- [ ] `cargo test` passes, `cargo clippy --all-targets`
-      zero warnings
+- [x] Investigate all 4 groups for parameterization
+- [x] Result: no changes — all 4 groups have heterogeneous
+      request signatures, assertion shapes, or setup
+      sequences that prevent clean rstest parameterization
 
-Acceptance criteria:
-- The 4 identified groups are parameterized into rstest
-  functions where the pattern genuinely repeats
-- All named cases use `#[case::descriptive_name]` syntax
-- All tests pass, zero clippy warnings
+**No commit — no code changes.**
 
 ### Task 5: Batch file size and test ratio reduction
 
@@ -309,11 +304,12 @@ hit a line count.
 | `server.rs` (2482, 0.8:1) | No parameterization needed — ratio is healthy. |
 | `formatter.rs` (2525, 0.5:1) | No parameterization needed — ratio is healthy. |
 
-- [ ] Parameterize repetitive tests in each file listed
+- [x] Parameterize repetitive tests in each file listed
       above where patterns genuinely repeat
-- [ ] Extract `completion/cursor.rs` if a natural module
-      boundary exists
-- [ ] `cargo test` passes, `cargo clippy --all-targets`
+      (schema.rs: 19 URL tests → 2 rstest groups + 4
+      duplicates removed. Other 7 files: no genuine
+      repetition found.)
+- [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
 Acceptance criteria:

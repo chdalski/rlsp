@@ -1798,27 +1798,6 @@ mod tests {
     // Security tests (from Security Engineer assessment)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Sec-1: file:// scheme is rejected
-    #[test]
-    fn should_reject_file_scheme_url() {
-        let result = validate_and_normalize_url("file:///etc/passwd");
-        assert!(result.is_err());
-    }
-
-    // Sec-2: localhost is rejected
-    #[test]
-    fn should_reject_localhost_url() {
-        let result = validate_and_normalize_url("http://localhost/schema.json");
-        assert!(result.is_err());
-    }
-
-    // Sec-3: AWS metadata IP is rejected
-    #[test]
-    fn should_reject_link_local_ip_url() {
-        let result = validate_and_normalize_url("http://169.254.169.254/latest/meta-data/");
-        assert!(result.is_err());
-    }
-
     // Sec-4: fetch_schema_raw rejects 127.0.0.1 before making a network call
     #[test]
     fn should_reject_loopback_ip_in_fetch() {
@@ -1826,12 +1805,19 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Sec-5: URL exceeding 2048 chars is rejected
+    // Sec-5: URL exceeding 2048 chars is rejected (uses runtime format!, cannot be rstest literal)
     #[test]
     fn should_reject_url_exceeding_max_length() {
         let long_url = format!("https://example.com/{}", "a".repeat(2050));
         let result = validate_and_normalize_url(&long_url);
         assert!(result.is_err());
+    }
+
+    // Test 52 — URL exceeding max length rejected (uses runtime format!, cannot be rstest literal)
+    #[test]
+    fn should_reject_url_exceeding_max_length_52() {
+        let long_url = format!("https://example.com/{}", "a".repeat(2048));
+        assert!(validate_and_normalize_url(&long_url).is_err());
     }
 
     // Sec-6: cache key normalisation — scheme+host lowercased
@@ -1853,62 +1839,56 @@ mod tests {
         let _ = parse_schema(&v);
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // Security tests addendum (Tests 47–61)
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // Test 47 — file:// scheme rejected at validation layer (duplicate coverage
-    // of Sec-1 under the numbered scheme for completeness)
+    // ftp:// scheme — kept standalone: extra assertion on error message text
     #[test]
-    fn should_reject_file_scheme_url_47() {
-        assert!(validate_and_normalize_url("file:///etc/passwd").is_err());
-    }
-
-    // Test 48 — localhost rejected (symbolic hostname)
-    #[test]
-    fn should_reject_localhost_url_48() {
-        assert!(validate_and_normalize_url("http://localhost/schema.json").is_err());
-    }
-
-    // Test 49 — 127.0.0.1 rejected at validation layer (IP form)
-    #[test]
-    fn should_reject_loopback_ip_url() {
-        assert!(validate_and_normalize_url("http://127.0.0.1/schema.json").is_err());
-    }
-
-    // Test 50 — IPv6 loopback [::1] rejected
-    #[test]
-    fn should_reject_ipv6_loopback_url() {
-        assert!(validate_and_normalize_url("http://[::1]/schema.json").is_err());
-    }
-
-    // Test 51 — AWS metadata endpoint rejected (link-local)
-    #[test]
-    fn should_reject_link_local_aws_metadata_url() {
-        assert!(validate_and_normalize_url("http://169.254.169.254/latest/meta-data/").is_err());
-    }
-
-    // Test 52 — URL exceeding max length rejected
-    #[test]
-    fn should_reject_url_exceeding_max_length_52() {
-        let long_url = format!("https://example.com/{}", "a".repeat(2048));
-        assert!(validate_and_normalize_url(&long_url).is_err());
-    }
-
-    // Test 53 — valid https URL passes validation
-    #[test]
-    fn should_accept_valid_https_url() {
-        let result = validate_and_normalize_url(
-            "https://schemastore.azurewebsites.net/schemas/json/package.json",
+    fn should_reject_ftp_scheme() {
+        let result = validate_and_normalize_url("ftp://example.com/schema.json");
+        assert!(result.is_err(), "ftp:// scheme must be rejected");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("ftp"),
+            "error message should mention the scheme, got: {msg}"
         );
-        assert!(result.is_ok(), "valid https URL should be accepted");
     }
 
-    // Test 54 — valid http URL passes validation
-    #[test]
-    fn should_accept_valid_http_url() {
-        let result = validate_and_normalize_url("http://json.schemastore.org/package");
-        assert!(result.is_ok(), "valid http URL should be accepted");
+    // All validate_and_normalize_url() calls that must return Err, differing only
+    // in the URL string.  Duplicates from the earlier Sec-* and Test-4X groups
+    // are merged here; the duplicate entries (Sec-1/Test-47, Sec-2/Test-48,
+    // Sec-3/Test-51) appear once each.
+    #[rstest]
+    #[case::file_scheme("file:///etc/passwd")]
+    #[case::localhost("http://localhost/schema.json")]
+    #[case::link_local_aws_metadata("http://169.254.169.254/latest/meta-data/")]
+    #[case::loopback_ip("http://127.0.0.1/schema.json")]
+    #[case::ipv6_loopback("http://[::1]/schema.json")]
+    #[case::private_ipv4_10_range("http://10.0.0.1/schema.json")]
+    #[case::private_ipv4_192_168_range("http://192.168.1.1/schema.json")]
+    #[case::private_ipv4_172_16_range("http://172.16.0.1/schema.json")]
+    #[case::unspecified_ipv4_0_0_0_0("http://0.0.0.0/schema.json")]
+    #[case::ipv6_unspecified_double_colon("http://[::]/schema.json")]
+    #[case::ipv6_link_local_fe80("http://[fe80::1]/schema.json")]
+    #[case::unparseable_url("not a url at all")]
+    #[case::ipv6_ula_fd00("http://[fd00::1]/schema.json")]
+    #[case::ipv6_ula_fc00("http://[fc00::1]/schema.json")]
+    #[case::ipv4_mapped_private("http://[::ffff:192.168.1.1]/schema.json")]
+    #[case::ipv4_mapped_loopback("http://[::ffff:127.0.0.1]/schema.json")]
+    fn validate_and_normalize_url_rejects(#[case] url: &str) {
+        assert!(
+            validate_and_normalize_url(url).is_err(),
+            "must reject: {url}"
+        );
+    }
+
+    // All validate_and_normalize_url() calls that must return Ok.
+    #[rstest]
+    #[case::valid_https_url("https://schemastore.azurewebsites.net/schemas/json/package.json")]
+    #[case::valid_http_url("http://json.schemastore.org/package")]
+    #[case::ipv4_mapped_public("http://[::ffff:8.8.8.8]/schema.json")]
+    fn validate_and_normalize_url_accepts(#[case] url: &str) {
+        assert!(
+            validate_and_normalize_url(url).is_ok(),
+            "must accept: {url}"
+        );
     }
 
     // Test 55 — response of exactly MAX_SCHEMA_BYTES bytes is accepted.
@@ -2084,101 +2064,6 @@ mod tests {
         let e = SchemaError::UrlNotPermitted("ftp://bad".to_string());
         let msg = e.to_string();
         assert!(msg.contains("not permitted"), "got: {msg}");
-    }
-
-    // ── SSRF guard — additional IP ranges ────────────────────────────────────
-
-    #[test]
-    fn should_reject_private_ipv4_10_range() {
-        let result = validate_and_normalize_url("http://10.0.0.1/schema.json");
-        assert!(result.is_err(), "private 10.x.x.x must be rejected");
-    }
-
-    #[test]
-    fn should_reject_private_ipv4_192_168_range() {
-        let result = validate_and_normalize_url("http://192.168.1.1/schema.json");
-        assert!(result.is_err(), "private 192.168.x.x must be rejected");
-    }
-
-    #[test]
-    fn should_reject_private_ipv4_172_16_range() {
-        let result = validate_and_normalize_url("http://172.16.0.1/schema.json");
-        assert!(result.is_err(), "private 172.16.x.x must be rejected");
-    }
-
-    #[test]
-    fn should_reject_unspecified_ipv4_0_0_0_0() {
-        let result = validate_and_normalize_url("http://0.0.0.0/schema.json");
-        assert!(result.is_err(), "unspecified 0.0.0.0 must be rejected");
-    }
-
-    #[test]
-    fn should_reject_ipv6_unspecified_double_colon() {
-        let result = validate_and_normalize_url("http://[::]/schema.json");
-        assert!(result.is_err(), "IPv6 unspecified :: must be rejected");
-    }
-
-    #[test]
-    fn should_reject_ipv6_link_local_fe80() {
-        let result = validate_and_normalize_url("http://[fe80::1]/schema.json");
-        assert!(result.is_err(), "IPv6 link-local fe80:: must be rejected");
-    }
-
-    #[test]
-    fn should_reject_ftp_scheme() {
-        let result = validate_and_normalize_url("ftp://example.com/schema.json");
-        assert!(result.is_err(), "ftp:// scheme must be rejected");
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("ftp"),
-            "error message should mention the scheme, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn should_reject_unparseable_url() {
-        let result = validate_and_normalize_url("not a url at all");
-        assert!(result.is_err(), "unparseable string must be rejected");
-    }
-
-    // IPv6 ULA (fc00::/7) and IPv4-mapped SSRF gaps
-    #[test]
-    fn should_reject_ipv6_ula_fd00() {
-        let result = validate_and_normalize_url("http://[fd00::1]/schema.json");
-        assert!(result.is_err(), "IPv6 ULA fd00:: must be rejected");
-    }
-
-    #[test]
-    fn should_reject_ipv6_ula_fc00() {
-        let result = validate_and_normalize_url("http://[fc00::1]/schema.json");
-        assert!(result.is_err(), "IPv6 ULA fc00:: must be rejected");
-    }
-
-    #[test]
-    fn should_reject_ipv4_mapped_private() {
-        let result = validate_and_normalize_url("http://[::ffff:192.168.1.1]/schema.json");
-        assert!(
-            result.is_err(),
-            "IPv4-mapped private address must be rejected"
-        );
-    }
-
-    #[test]
-    fn should_reject_ipv4_mapped_loopback() {
-        let result = validate_and_normalize_url("http://[::ffff:127.0.0.1]/schema.json");
-        assert!(
-            result.is_err(),
-            "IPv4-mapped loopback address must be rejected"
-        );
-    }
-
-    #[test]
-    fn should_allow_ipv4_mapped_public() {
-        let result = validate_and_normalize_url("http://[::ffff:8.8.8.8]/schema.json");
-        assert!(
-            result.is_ok(),
-            "IPv4-mapped public address must be allowed: {result:?}"
-        );
     }
 
     // ── parse_type edge cases ─────────────────────────────────────────────────
