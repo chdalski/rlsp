@@ -1,19 +1,13 @@
-# This workflow gates on successful CI: it triggers only when the "CI"
-# workflow completes on main, and every job has an explicit condition
-# requiring CI to have concluded with success. This ensures releases
-# only fire after format, lint, and test checks pass.
 name: Release-plz
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches:
+      - main
 
 jobs:
   release-plz-release-pr:
     name: Release-plz release PR
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,7 +16,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_branch }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: MarcoIeni/release-plz-action@v0.5
         with:
@@ -32,7 +25,6 @@ jobs:
 
   release-plz-release:
     name: Release-plz release
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -44,7 +36,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_branch }}
       - uses: dtolnay/rust-toolchain@stable
       - id: release
         uses: MarcoIeni/release-plz-action@v0.5
@@ -56,15 +47,13 @@ jobs:
   trigger-vscode:
     name: Trigger VS Code extension release
     needs: release-plz-release
-    if: github.event.workflow_run.conclusion == 'success' && needs.release-plz-release.outputs.releases_created == 'true'
+    if: needs.release-plz-release.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Check if rlsp-yaml was released
         id: check
@@ -83,7 +72,7 @@ jobs:
   filter-binaries:
     name: Filter binary releases
     needs: release-plz-release
-    if: github.event.workflow_run.conclusion == 'success' && needs.release-plz-release.outputs.releases_created == 'true'
+    if: needs.release-plz-release.outputs.releases_created == 'true'
     permissions: {}
     runs-on: ubuntu-latest
     outputs:
@@ -105,7 +94,7 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.crate.crate }} (${{ matrix.target.target }})
     needs: filter-binaries
-    if: github.event.workflow_run.conclusion == 'success' && needs.filter-binaries.outputs.matrix != '[]'
+    if: needs.filter-binaries.outputs.matrix != '[]'
     runs-on: ${{ matrix.target.os }}
     permissions:
       contents: write
