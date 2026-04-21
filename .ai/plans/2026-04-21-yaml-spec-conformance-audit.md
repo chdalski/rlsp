@@ -190,7 +190,7 @@ Test coverage fields may be empty with the explicit text
       the strict format
 - [x] Task 3 — verify §3 + §4 + §5 entries against
       cached spec and cited source (independent pass)
-- [ ] Task 4 — draft §6 chapter entries
+- [x] Task 4 — draft §6 chapter entries
 - [ ] Task 5 — verify §6 entries
 - [ ] Task 6 — draft §7 chapter entries
 - [ ] Task 7 — verify §7 entries
@@ -367,21 +367,23 @@ indentation, separation spaces, line prefixes, empty
 lines, line folding, comments, separation lines,
 directives, node properties), using the strict format.
 
-- [ ] Every numbered production in §6.1 through §6.9
+- [x] Every numbered production in §6.1 through §6.9
       has an entry in the strict format, with all
       required fields plus (for Lenient/Strict) a
       discrepancy sentence.
-- [ ] Classifications follow from the spec quote +
+- [x] Classifications follow from the spec quote +
       implementation fact under the decision-rule
       table.
-- [ ] Within this task's chapter block, every `### [`
+- [x] Within this task's chapter block, every `### [`
       entry has a `- Test coverage:` line (same
       chapter-scoped awk+grep check as Task 2, with
       `§6` substituted for `§N`).
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `32131930bda98b84491a33724f06345390466e58`
 
 ### Task 5: Verify §6 entries (independent pass)
 

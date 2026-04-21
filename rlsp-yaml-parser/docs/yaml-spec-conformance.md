@@ -679,7 +679,375 @@ BNF: `c-ns-esc-char ::= c-escape ( ns-esc-null | ns-esc-bell | ns-esc-backspace 
 
 ## §6
 
-<!-- Task 4: draft §6 entries -->
+### [63] s-indent(n)
+
+BNF: `s-indent(0) ::= <empty>` / `s-indent(n+1) ::= s-space s-indent(n)`
+
+- Classification: Conformant
+- Spec (§6.1): "In YAML block styles, structure is determined by indentation. In general, indentation is defined as a zero or more space characters at the start of a line. To maintain portability, tab characters must not be used in indentation, since different systems treat tabs differently."
+- Implementation: `rlsp-yaml-parser/src/lines.rs:142` — `ch == ' '` loop counts only leading space characters for `Line::indent`; tab characters are explicitly excluded from the indent count and the indent value is used throughout block structure comparisons
+- Test coverage: `rlsp-yaml-parser/tests/smoke/block_scalars.rs`; `rlsp-yaml-parser/tests/smoke/mappings.rs`; `rlsp-yaml-parser/src/lines.rs:790–796` (unit tests `indent_counts_only_leading_spaces`, `leading_tab_does_not_count_toward_indent`, `tab_after_spaces_does_not_count`)
+
+### [64] s-indent-less-than(n)
+
+BNF: `s-indent-less-than(1) ::= <empty>` / `s-indent-less-than(n+1) ::= s-space s-indent-less-than(n) | <empty>`
+
+- Classification: Conformant
+- Spec (§6.1): "A block style construct is terminated when encountering a line which is less indented than the construct."
+- Implementation: `rlsp-yaml-parser/src/lines.rs:340` — `line.indent <= base_indent` check in `peek_until_dedent` halts lookahead at the first non-blank line whose indent is not strictly greater than the base, implementing the less-than-n termination rule; same guard applied in block-sequence and block-mapping parsers
+- Test coverage: `rlsp-yaml-parser/src/lines.rs:848–854` (unit test `peek_until_dedent_returns_lines_until_indent_le_base`)
+
+### [65] s-indent-less-or-equal(n)
+
+BNF: `s-indent-less-or-equal(0) ::= <empty>` / `s-indent-less-or-equal(n+1) ::= s-space s-indent-less-or-equal(n) | <empty>`
+
+- Classification: Conformant
+- Spec (§6.1): "The productions use the notation `s-indent-less-than(n)` and `s-indent-less-or-equal(n)` to express this."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:181–200` — `if next.indent >= content_indent` guard (line 181) determines whether a continuation line meets the content threshold; the complement (`< content_indent`) terminates the scalar; `is_content_line` (line 198) further constrains with `>= content_indent && !after_indent.is_empty()`; `rlsp-yaml-parser/src/event_iter/block/sequence.rs` and `mapping.rs` apply `<= n` guards for flow-key and block-key termination
+- Test coverage: `rlsp-yaml-parser/tests/smoke/block_scalars.rs` (indentation-indicator cases)
+
+### [66] s-separate-in-line
+
+BNF: `s-separate-in-line ::= s-white+ | <start-of-line>`
+
+- Classification: Conformant
+- Spec (§6.2): "Outside indentation and scalar content, YAML uses white space characters for separation between tokens within a line. Note that such white space may safely include tab characters. Separation spaces are a presentation detail and must not be used to convey content information."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:110` — `trim_start_matches([' ', '\t'])` strips leading spaces and tabs before flow scalar continuation content (single-quoted); `rlsp-yaml-parser/src/lexer/quoted.rs:294` — same for double-quoted continuations; `rlsp-yaml-parser/src/event_iter/directives.rs:89–93` (`find([' ', '\t'])` separates directive name from parameters; whitespace trimmed with `trim_start_matches([' ', '\t'])`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`; `rlsp-yaml-parser/tests/smoke/comments.rs`
+
+### [67] s-line-prefix(n,c)
+
+BNF: `s-line-prefix(n,BLOCK-OUT) ::= s-block-line-prefix(n)` / `s-line-prefix(n,BLOCK-IN) ::= s-block-line-prefix(n)` / `s-line-prefix(n,FLOW-OUT) ::= s-flow-line-prefix(n)` / `s-line-prefix(n,FLOW-IN) ::= s-flow-line-prefix(n)`
+
+- Classification: Conformant
+- Spec (§6.3): "Inside scalar content, each line begins with a non-content line prefix. This prefix always includes the indentation. For flow scalar styles it additionally includes all leading white space, which may contain tab characters. Line prefixes are a presentation detail and must not be used to convey content information."
+- Implementation: Block context: `rlsp-yaml-parser/src/lexer/block.rs` — continuation lines validated against the block's indent level. Flow context: `rlsp-yaml-parser/src/lexer/quoted.rs:110` — `trim_start_matches([' ', '\t'])` strips both spaces and tabs as line prefix in flow scalar continuations
+- Test coverage: `rlsp-yaml-parser/tests/smoke/block_scalars.rs`; `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [68] s-block-line-prefix(n)
+
+BNF: `s-block-line-prefix(n) ::= s-indent(n)`
+
+- Classification: Conformant
+- Spec (§6.3): "Inside scalar content, each line begins with a non-content line prefix. This prefix always includes the indentation."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:41–274` — literal block scalar consumes continuation lines and validates that each non-empty line has indent >= the block's `content_indent`; the indent prefix itself is stripped structurally through the line buffer
+- Test coverage: `rlsp-yaml-parser/tests/smoke/block_scalars.rs`
+
+### [69] s-flow-line-prefix(n)
+
+BNF: `s-flow-line-prefix(n) ::= s-indent(n) s-separate-in-line?`
+
+- Classification: Conformant
+- Spec (§6.3): "For flow scalar styles it additionally includes all leading white space, which may contain tab characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:110` — `trim_start_matches([' ', '\t'])` strips both spaces and tabs as flow line prefix on each continuation line; `rlsp-yaml-parser/src/lexer/quoted.rs:294` — same for double-quoted continuations
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [70] l-empty(n,c)
+
+BNF: `l-empty(n,c) ::= ( s-line-prefix(n,c) | s-indent-less-than(n) ) b-as-line-feed`
+
+- Classification: Conformant
+- Spec (§6.4): "An empty line line consists of the non-content prefix followed by a line break. The semantics of empty lines depend on the scalar style they appear in."
+- Implementation: `rlsp-yaml-parser/src/lexer.rs:103–116` (`skip_empty_lines` — consumes lines where `trim_start_matches([' ', '\t'])` is empty); `rlsp-yaml-parser/src/lexer/quoted.rs:112–116` — blank continuation lines inside single-quoted scalars push a literal `'\n'` into the value; `rlsp-yaml-parser/src/lexer/quoted.rs:311–319` — same for double-quoted scalars (counted as `pending_blanks`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `rlsp-yaml-parser/tests/smoke/block_scalars.rs`
+
+### [71] b-l-trimmed(n,c)
+
+BNF: `b-l-trimmed(n,c) ::= b-non-content l-empty(n,c)+`
+
+- Classification: Conformant
+- Spec (§6.5): "If a line break is followed by an empty line, it is trimmed; the first line break is discarded and the rest are retained as content."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:311–329` — in double-quoted continuations, blank lines are accumulated in `pending_blanks`; when a non-blank line follows, N blank lines produce N literal newlines in the output (the originating break is discarded, the empty-line breaks are retained)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [72] b-as-space
+
+BNF: `b-as-space ::= b-break`
+
+- Classification: Conformant
+- Spec (§6.5): "Otherwise (the following line is not empty), the line break is converted to a single space (x20)."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:331–332` — `owned.push(' ')` when `pending_blanks == 0` and `line_continuation` is false (normal non-blank fold); `rlsp-yaml-parser/src/lexer/quoted.rs:120–122` — same for single-quoted continuation folds
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [73] b-l-folded(n,c)
+
+BNF: `b-l-folded(n,c) ::= b-l-trimmed(n,c) | b-as-space`
+
+- Classification: Conformant
+- Spec (§6.5): "A folded non-empty line may end with either of the above line breaks."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:274–340` (`collect_double_quoted_continuations`) — the `pending_blanks` counter selects between `b-l-trimmed` (N>0) and `b-as-space` (N==0) on each fold boundary; `rlsp-yaml-parser/src/lexer/quoted.rs:82–162` — same two-branch logic for single-quoted scalars
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [74] s-flow-folded(n)
+
+BNF: `s-flow-folded(n) ::= s-separate-in-line? b-l-folded(n,FLOW-IN) s-flow-line-prefix(n)`
+
+- Classification: Conformant
+- Spec (§6.5): "Folding in flow styles provides more relaxed semantics. Flow styles typically depend on explicit indicators rather than indentation to convey structure. Hence spaces preceding or following the text in a line are a presentation detail and must not be used to convey content information. Once all such spaces have been discarded, all line breaks are folded without exception."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:79–80` — trailing whitespace trimmed from each partial line before fold; `rlsp-yaml-parser/src/lexer/quoted.rs:110` — leading whitespace trimmed from each continuation line; `rlsp-yaml-parser/src/lexer/quoted.rs:112–122` — fold space or newline inserted between
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+
+### [75] c-nb-comment-text
+
+BNF: `c-nb-comment-text ::= c-comment nb-char*`
+
+- Classification: Conformant
+- Spec (§6.6): "An explicit comment is marked by a `#` indicator. Comments are a presentation detail and must not be used to convey content information. Comments must be separated from other tokens by white space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/comment.rs:30–33` — `starts_with('#')` check after optional leading whitespace; `rlsp-yaml-parser/src/lexer/comment.rs:50–51` — text slice is everything after the `#` on the line
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`; `rlsp-yaml-parser/src/lexer/comment.rs:108–121` (unit tests `happy_path_text`)
+
+### [76] b-comment
+
+BNF: `b-comment ::= b-non-content | <end-of-input>`
+
+- Classification: Conformant
+- Spec (§6.6): "Note: To ensure JSON compatibility, YAML processors must allow for the omission of the final comment line break of the input stream."
+- Implementation: `rlsp-yaml-parser/src/lexer/comment.rs:66–76` — the consumed line's full content (up to but not including the terminator) is returned; end-of-input is handled by the `LineBuffer` returning `BreakType::Eof` for the final line, which is consumed and accepted
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`
+
+### [77] s-b-comment
+
+BNF: `s-b-comment ::= ( s-separate-in-line c-nb-comment-text? )? b-comment`
+
+- Classification: Conformant
+- Spec (§6.6): "Comments must be separated from other tokens by white space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer.rs:353–382` (`handle_plain_scalar_inline`) — trailing comment handling for inline plain scalar on `---` marker lines: residual content after token value must start with `#` (preceded by implicit whitespace); residual that is non-empty and does not start with `#` is an error; `rlsp-yaml-parser/src/event_iter/directives.rs:126–133` — trailing content after YAML version checked for empty or `#` prefix
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`; `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [78] l-comment
+
+BNF: `l-comment ::= s-separate-in-line c-nb-comment-text? b-comment`
+
+- Classification: Conformant
+- Spec (§6.6): "Outside scalar content, comments may appear on a line of their own, independent of the indentation level. Note that outside scalar content, a line containing only white space characters is taken to be a comment line."
+- Implementation: `rlsp-yaml-parser/src/lexer/comment.rs:30–31` — `trim_start_matches([' ', '\t'])` followed by `starts_with('#')` — whitespace-only lines return `None` (not a comment), not consumed as comments; `rlsp-yaml-parser/src/lexer.rs:519–524` (`is_blank_not_comment`) — blank-but-not-comment lines are distinguished from comment lines
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`
+
+### [79] s-l-comments
+
+BNF: `s-l-comments ::= ( s-b-comment | <start-of-line> ) l-comment*`
+
+- Classification: Conformant
+- Spec (§6.6): "In most cases, when a line may end with a comment, YAML allows it to be followed by additional comment lines. The only exception is a comment ending a block scalar header."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:33–64` (`consume_preamble_between_docs`) — loops consuming blank and comment lines in sequence; `rlsp-yaml-parser/src/event_iter/directives.rs:237–256` (`skip_and_collect_comments_in_doc`) — same in-document loop; block scalar header explicitly stops at the comment on its header line and does not consume trailing comment lines (enforced in `rlsp-yaml-parser/src/lexer/block.rs`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`
+
+### [80] s-separate(n,c)
+
+BNF: `s-separate(n,BLOCK-OUT) ::= s-separate-lines(n)` / `s-separate(n,BLOCK-IN) ::= s-separate-lines(n)` / `s-separate(n,FLOW-OUT) ::= s-separate-lines(n)` / `s-separate(n,FLOW-IN) ::= s-separate-lines(n)` / `s-separate(n,BLOCK-KEY) ::= s-separate-in-line` / `s-separate(n,FLOW-KEY) ::= s-separate-in-line`
+
+- Classification: Conformant
+- Spec (§6.7): "Implicit keys are restricted to a single line. In all other cases, YAML allows tokens to be separated by multi-line (possibly empty) comments."
+- Implementation: Block context: `rlsp-yaml-parser/src/event_iter/directives.rs:237–256` — multi-line comment separation between block tokens; flow/key context: `rlsp-yaml-parser/src/event_iter/flow.rs:168` — single-line whitespace separation for flow keys
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`; `rlsp-yaml-parser/tests/smoke/flow_collections.rs`
+
+### [81] s-separate-lines(n)
+
+BNF: `s-separate-lines(n) ::= ( s-l-comments s-flow-line-prefix(n) ) | s-separate-in-line`
+
+- Classification: Conformant
+- Spec (§6.7): "Note that structures following multi-line comment separation must be properly indented, even though there is no such restriction on the separation comment lines themselves."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:33–64` — comment-then-indent path; `rlsp-yaml-parser/src/lexer.rs:156–180` — inline whitespace path for single-line separation
+- Test coverage: `rlsp-yaml-parser/tests/smoke/comments.rs`
+
+### [82] l-directive
+
+BNF: `l-directive ::= c-directive ( ns-yaml-directive | ns-tag-directive | ns-reserved-directive ) s-l-comments`
+
+- Classification: Conformant
+- Spec (§6.8): "Directives are instructions to the YAML processor. This specification defines two directives, `YAML` and `TAG`, and reserves all other directives for future use. There is no way to define private directives. Directives are a presentation detail and must not be used to convey content information."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:70–104` (`parse_directive`) — dispatches on directive name to `parse_yaml_directive`, `parse_tag_directive`, or ignores unknown directives; lexer: `rlsp-yaml-parser/src/lexer.rs:142–146` (`is_directive_line` — `starts_with('%')`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [83] ns-reserved-directive
+
+BNF: `ns-reserved-directive ::= ns-directive-name ( s-separate-in-line ns-directive-parameter )*`
+
+- Classification: Conformant
+- Spec (§6.8): "Each directive is specified on a separate non-indented line starting with the `%` indicator, followed by the directive name and a list of parameters. The semantics of these parameters depends on the specific directive. A YAML processor should ignore unknown directives with an appropriate warning."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:97–103` — unknown directive names silently increment `directive_count` and return `Ok(())`; no warning is emitted (spec says "should", not "must")
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [84] ns-directive-name
+
+BNF: `ns-directive-name ::= ns-char+`
+
+- Classification: Conformant
+- Spec (§6.8): "Each directive is specified on a separate non-indented line starting with the `%` indicator, followed by the directive name."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:88–92` — `find([' ', '\t'])` extracts the directive name as a contiguous run of non-whitespace characters after `%`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [85] ns-directive-parameter
+
+BNF: `ns-directive-parameter ::= ns-char+`
+
+- Classification: Conformant
+- Spec (§6.8): "Each directive is specified on a separate non-indented line starting with the `%` indicator, followed by the directive name and a list of parameters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:93` — `trim_start_matches([' ', '\t'])` extracts `rest` (everything after the directive name); individual parameter extraction in `parse_yaml_directive` (`find('.')` splits version) and `parse_tag_directive` (`find([' ', '\t'])` splits handle from prefix)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [86] ns-yaml-directive
+
+BNF: `ns-yaml-directive ::= "YAML" s-separate-in-line ns-yaml-version`
+
+- Classification: Conformant
+- Spec (§6.8.1): "The `YAML` directive specifies the version of YAML the document conforms to. A version 1.2 YAML processor must accept documents with an explicit `%YAML 1.2` directive, as well as documents lacking a `YAML` directive. Such documents are assumed to conform to the 1.2 version specification."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:107–156` (`parse_yaml_directive`) — matches name `"YAML"`, splits on `.` for major/minor, accepts 1.x, rejects major ≥ 2
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [87] ns-yaml-version
+
+BNF: `ns-yaml-version ::= ns-dec-digit+ '.' ns-dec-digit+`
+
+- Classification: Conformant
+- Spec (§6.8.1): "A version 1.2 YAML processor must also accept documents with an explicit `%YAML 1.1` directive."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:116–143` — `find('.')` splits on `.`; `parse::<u8>()` validates that major and minor are decimal digit sequences
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [88] ns-tag-directive
+
+BNF: `ns-tag-directive ::= "TAG" s-separate-in-line c-tag-handle s-separate-in-line ns-tag-prefix`
+
+- Classification: Conformant
+- Spec (§6.8.2): "The `TAG` directive establishes a tag shorthand notation for specifying node tags. Each `TAG` directive associates a handle with a prefix. This allows for compact and readable tag notation."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:158–229` (`parse_tag_directive`) — splits on whitespace for handle and prefix, validates handle via `is_valid_tag_handle`, stores in `directive_scope.tag_handles`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`; `rlsp-yaml-parser/tests/smoke/tags.rs`
+
+### [89] c-tag-handle
+
+BNF: `c-tag-handle ::= c-named-tag-handle | c-secondary-tag-handle | c-primary-tag-handle`
+
+- Classification: Conformant
+- Spec (§6.8.2.1): "The tag handle exactly matches the prefix of the affected tag shorthand. There are three tag handle variants."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:281–295` (`is_valid_tag_handle`) — recognises `!`, `!!`, and `!word-chars!` forms
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:461–513` (unit tests `is_valid_tag_handle_*`)
+
+### [90] c-primary-tag-handle
+
+BNF: `c-primary-tag-handle ::= '!'`
+
+- Classification: Conformant
+- Spec (§6.8.2.1): "The primary tag handle is a single `!` character. This allows using the most compact possible notation for a single `primary` name space. By default, the prefix associated with this handle is `!`."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:282–283` — `"!" => true` branch in `is_valid_tag_handle`
+- Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:461–463` (unit test `is_valid_tag_handle_primary`)
+
+### [91] c-secondary-tag-handle
+
+BNF: `c-secondary-tag-handle ::= "!!"`
+
+- Classification: Conformant
+- Spec (§6.8.2.1): "The secondary tag handle is written as `!!`. This allows using a compact notation for a single `secondary` name space. By default, the prefix associated with this handle is `tag:yaml.org,2002:`."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:283` — `"!!" => true` branch in `is_valid_tag_handle`; `rlsp-yaml-parser/src/event_iter/directive_scope.rs:93–108` — `!!suffix` resolved using custom `"!!"` handle or default prefix `"tag:yaml.org,2002:"`
+- Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:465–467` (unit test `is_valid_tag_handle_secondary`)
+
+### [92] c-named-tag-handle
+
+BNF: `c-named-tag-handle ::= c-tag ns-word-char+ c-tag`
+
+- Classification: Lenient
+- Spec (§6.8.2.1): "A named tag handle surrounds a non-empty name with `!` characters. A handle name must not be used in a tag shorthand unless an explicit `TAG` directive has associated some prefix with it."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:285–293` — named handle inner word validated with `.is_ascii_alphanumeric() || c == '-' || c == '_'`; the spec's `ns-word-char` is `[a-zA-Z0-9] | '-'` but the implementation also permits `'_'`
+- Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:482–490` (unit tests including `is_valid_tag_handle_named_with_hyphen_and_underscore`)
+- Discrepancy: The spec's `ns-word-char` production excludes `'_'`, but `is_valid_tag_handle` accepts `'_'` as a valid character in named tag handle names.
+
+### [93] ns-tag-prefix
+
+BNF: `ns-tag-prefix ::= c-ns-local-tag-prefix | ns-global-tag-prefix`
+
+- Classification: Conformant
+- Spec (§6.8.2.2): "There are two tag prefix variants."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:172–215` — prefix extracted by whitespace split; validated for control characters and length but not strictly checked against local vs global tag prefix grammar (both forms accepted)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [94] c-ns-local-tag-prefix
+
+BNF: `c-ns-local-tag-prefix ::= c-tag ns-uri-char*`
+
+- Classification: Conformant
+- Spec (§6.8.2.2): "If the prefix begins with a `!` character, shorthands using the handle are expanded to a local tag."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:172–215` — prefix stored as-is; `rlsp-yaml-parser/src/event_iter/directive_scope.rs:134–151` — `!suffix` local-tag shorthand expansion preserves local prefix verbatim
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
+
+### [95] ns-global-tag-prefix
+
+BNF: `ns-global-tag-prefix ::= ns-tag-char ns-uri-char*`
+
+- Classification: Conformant
+- Spec (§6.8.2.2): "If the prefix begins with a character other than `!`, it must be a valid URI prefix, and should contain at least the scheme. Shorthands using the associated handle are expanded to globally unique URI tags."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:92–109` — `!!suffix` and named-handle expansions concatenate the stored URI prefix with the percent-decoded suffix; URI validity is enforced by control-character rejection in `parse_tag_directive`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
+
+### [96] c-ns-properties(n,c)
+
+BNF: `c-ns-properties(n,c) ::= ( c-ns-tag-property ( s-separate(n,c) c-ns-anchor-property )? ) | ( c-ns-anchor-property ( s-separate(n,c) c-ns-tag-property )? )`
+
+- Classification: Conformant
+- Spec (§6.9): "Each node may have two optional properties, anchor and tag, in addition to its content. Node properties may be specified in any order before the node's content. Either or both may be omitted."
+- Implementation: `rlsp-yaml-parser/src/event_iter/` — `pending_tag` and `pending_anchor` fields accumulate both properties in either order; both are emitted before the node scalar/sequence/mapping event
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`
+
+### [97] c-ns-tag-property
+
+BNF: `c-ns-tag-property ::= c-verbatim-tag | c-ns-shorthand-tag | c-non-specific-tag`
+
+- Classification: Conformant
+- Spec (§6.9.1): "The tag property identifies the type of the native data structure presented by the node. A tag is denoted by the `!` indicator."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:85–233` (`scan_tag`) — dispatches on character after `!`: `<` → verbatim, `!` → secondary/primary shorthand, tag-chars → named/secondary shorthand, empty/non-tag → non-specific
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
+
+### [98] c-verbatim-tag
+
+BNF: `c-verbatim-tag ::= "!<" ns-uri-char+ '>'`
+
+- Classification: Conformant
+- Spec (§6.9.1): "A tag may be written verbatim by surrounding it with the `<` and `>` characters. In this case, the YAML processor must deliver the verbatim tag as-is to the application. In particular, verbatim tags are not subject to tag resolution. A verbatim tag must either begin with a `!` (a local tag) or be a valid URI (a global tag)."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:91–164` — `strip_prefix('<')` branch scans URI body byte-by-byte validating against `is_ns_uri_char_single` and `%HH` sequences; empty URI rejected
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:592–769` (unit tests `scan_tag_verbatim_*`)
+
+### [99] c-ns-shorthand-tag
+
+BNF: `c-ns-shorthand-tag ::= c-tag-handle ns-tag-char+`
+
+- Classification: Conformant
+- Spec (§6.9.1): "A tag shorthand consists of a valid tag handle followed by a non-empty suffix. The tag handle must be associated with a prefix, either by default or by using a `TAG` directive."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:166–233` — primary `!!suffix`, named `!handle!suffix`, and secondary `!suffix` branches all scan via `scan_tag_suffix` which validates against `is_ns_tag_char_single` and `%HH`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:541–588` (unit tests `scan_tag_secondary_*`, `scan_tag_named_handle*`)
+
+### [100] c-non-specific-tag
+
+BNF: `c-non-specific-tag ::= '!'`
+
+- Classification: Conformant
+- Spec (§6.9.1): "If a node has no tag property, it is assigned a non-specific tag that needs to be resolved to a specific one. This non-specific tag is `!` for non-plain scalars and `?` for all other nodes."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:184–189` — when `scan_tag_suffix` returns 0 and content does not start with `<` or `!`, the tag is the bare `!` one-byte slice from `tag_start`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:529–537` (unit tests `scan_tag_non_specific_*`)
+
+### [101] c-ns-anchor-property
+
+BNF: `c-ns-anchor-property ::= c-anchor ns-anchor-name`
+
+- Classification: Conformant
+- Spec (§6.9.2): "An anchor is denoted by the `&` indicator. It marks a node for future reference. An alias node can then be used to indicate additional inclusions of the anchored node. […] Anchor names must not contain the `[`, `]`, `{`, `}` and `,` characters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:22–45` (`scan_anchor_name`) — called after `&` indicator; scans `ns-anchor-char` characters until whitespace, flow indicator, or end
+- Test coverage: `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`
+
+### [102] ns-anchor-char
+
+BNF: `ns-anchor-char ::= ns-char - c-flow-indicator`
+
+- Classification: Conformant
+- Spec (§6.9.2): "Anchor names must not contain the `[`, `]`, `{`, `}` and `,` characters. These characters would cause ambiguity with flow collection structures."
+- Implementation: `rlsp-yaml-parser/src/chars.rs:149–159` (`is_ns_anchor_char`) — `ns-char` range excluding `c-flow-indicator` characters `[`, `]`, `{`, `}`, `,`
+- Test coverage: `rlsp-yaml-parser/src/chars.rs:322–348` (unit tests `ns_anchor_char_accepts`, `ns_anchor_char_rejects_flow_indicators`, `ns_anchor_char_rejects`)
+
+### [103] ns-anchor-name
+
+BNF: `ns-anchor-name ::= ns-anchor-char+`
+
+- Classification: Conformant
+- Spec (§6.9.2): "An alias node can then be used to indicate additional inclusions of the anchored node. An anchored node need not be referenced by any alias nodes."
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:27–31` — `.take_while(|&(_, ch)| is_ns_anchor_char(ch))` scans one or more `ns-anchor-char`; empty result → error
+- Test coverage: `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:310–389` (unit tests `scan_anchor_name_*`)
 
 ## §7
 
