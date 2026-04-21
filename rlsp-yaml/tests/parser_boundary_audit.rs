@@ -128,13 +128,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
             reason: "pre-parse lexical: helper of find_comment_on_line",
         },
     },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "tab_to_spaces",
-        marker: AllowMarker::CarveOut {
-            reason: "whitespace normalization: tabs are YAML 1.2 §6.1 pre-parse lexical",
-        },
-    },
     // -----------------------------------------------------------------------
     // CarveOut — schema association modeline extraction
     // -----------------------------------------------------------------------
@@ -181,48 +174,6 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "parse_docs",
         marker: AllowMarker::CarveOut {
             reason: "shared test fixture — single definition used by all in-crate test modules",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "flow_map_action",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "flow_seq_action",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "apply_block_to_flow_edit",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "apply_block_scalar_edit",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "docs_for",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
-        },
-    },
-    AllowEntry {
-        file: "editing/code_actions.rs",
-        func: "flow_diags_for",
-        marker: AllowMarker::CarveOut {
-            reason: "test fixture",
         },
     },
     AllowEntry {

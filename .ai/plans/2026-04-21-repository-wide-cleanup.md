@@ -73,7 +73,7 @@ call sites.
 
 - [x] Extract shared test helpers into a crate-wide
       `#[cfg(test)]` module
-- [ ] Split `code_actions.rs` into per-action submodules
+- [x] Split `code_actions.rs` into per-action submodules
 - [ ] Parameterize and reduce tests in `schema_validation.rs`
 - [ ] Parameterize `lsp_lifecycle.rs` test groups with rstest
 - [ ] Reduce file sizes and test ratios across remaining
@@ -144,6 +144,8 @@ force all callers into the same return type.
 - [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
+**Commit:** `30df41b`
+
 Acceptance criteria:
 - Zero duplicate `parse_docs` / `docs_for` / `parse`
   definitions across the crate (grep confirms single
@@ -192,21 +194,21 @@ Shared test helpers (`cursor_range`, `line_range`,
 module's test block or move to `test_utils.rs` if used
 across submodules. `docs_for` is already handled by Task 1.
 
-- [ ] Create `editing/code_actions/` directory
-- [ ] Extract `flow_to_block.rs` (flow_map_to_block +
+- [x] Create `editing/code_actions/` directory
+- [x] Extract `flow_to_block.rs` (flow_map_to_block +
       flow_seq_to_block + tests)
-- [ ] Extract `block_to_flow.rs` (block_to_flow +
+- [x] Extract `block_to_flow.rs` (block_to_flow +
       helpers + tests)
-- [ ] Extract `tab_to_spaces.rs` + tests
-- [ ] Extract `delete_anchor.rs` + tests
-- [ ] Extract `quoted_bool.rs` + tests
-- [ ] Extract `block_scalar.rs` + tests
-- [ ] Extract `yaml11_bool.rs` (both yaml11 + schema
+- [x] Extract `tab_to_spaces.rs` + tests
+- [x] Extract `delete_anchor.rs` + tests
+- [x] Extract `quoted_bool.rs` + tests
+- [x] Extract `block_scalar.rs` + tests
+- [x] Extract `yaml11_bool.rs` (both yaml11 + schema
       variant) + tests
-- [ ] Extract `yaml11_octal.rs` + tests
-- [ ] Parent `code_actions.rs` retains entry point +
+- [x] Extract `yaml11_octal.rs` + tests
+- [x] Parent `code_actions.rs` retains entry point +
       shared helpers only
-- [ ] `cargo test` passes, `cargo clippy --all-targets`
+- [x] `cargo test` passes, `cargo clippy --all-targets`
       zero warnings
 
 Acceptance criteria:
