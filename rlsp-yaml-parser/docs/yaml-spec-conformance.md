@@ -747,7 +747,7 @@ BNF: `s-flow-line-prefix(n) ::= s-indent(n) s-separate-in-line?`
 BNF: `l-empty(n,c) ::= ( s-line-prefix(n,c) | s-indent-less-than(n) ) b-as-line-feed`
 
 - Classification: Conformant
-- Spec (§6.4): "An empty line line consists of the non-content prefix followed by a line break. The semantics of empty lines depend on the scalar style they appear in."
+- Spec (§6.4): "An empty line line consists of the non-content prefix followed by a line break. […] The semantics of empty lines depend on the scalar style they appear in."
 - Implementation: `rlsp-yaml-parser/src/lexer.rs:103–116` (`skip_empty_lines` — consumes lines where `trim_start_matches([' ', '\t'])` is empty); `rlsp-yaml-parser/src/lexer/quoted.rs:112–116` — blank continuation lines inside single-quoted scalars push a literal `'\n'` into the value; `rlsp-yaml-parser/src/lexer/quoted.rs:311–319` — same for double-quoted scalars (counted as `pending_blanks`)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `rlsp-yaml-parser/tests/smoke/block_scalars.rs`
 
@@ -855,7 +855,7 @@ BNF: `s-separate-lines(n) ::= ( s-l-comments s-flow-line-prefix(n) ) | s-separat
 BNF: `l-directive ::= c-directive ( ns-yaml-directive | ns-tag-directive | ns-reserved-directive ) s-l-comments`
 
 - Classification: Conformant
-- Spec (§6.8): "Directives are instructions to the YAML processor. This specification defines two directives, `YAML` and `TAG`, and reserves all other directives for future use. There is no way to define private directives. Directives are a presentation detail and must not be used to convey content information."
+- Spec (§6.8): "Directives are instructions to the YAML processor. This specification defines two directives, `YAML` and `TAG`, and reserves all other directives for future use. There is no way to define private directives. […] Directives are a presentation detail and must not be used to convey content information."
 - Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:70–104` (`parse_directive`) — dispatches on directive name to `parse_yaml_directive`, `parse_tag_directive`, or ignores unknown directives; lexer: `rlsp-yaml-parser/src/lexer.rs:142–146` (`is_directive_line` — `starts_with('%')`)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
 
@@ -891,7 +891,7 @@ BNF: `ns-directive-parameter ::= ns-char+`
 BNF: `ns-yaml-directive ::= "YAML" s-separate-in-line ns-yaml-version`
 
 - Classification: Conformant
-- Spec (§6.8.1): "The `YAML` directive specifies the version of YAML the document conforms to. A version 1.2 YAML processor must accept documents with an explicit `%YAML 1.2` directive, as well as documents lacking a `YAML` directive. Such documents are assumed to conform to the 1.2 version specification."
+- Spec (§6.8.1): "The `YAML` directive specifies the version of YAML the document conforms to. […] A version 1.2 YAML processor must accept documents with an explicit `%YAML 1.2` directive, as well as documents lacking a `YAML` directive. Such documents are assumed to conform to the 1.2 version specification."
 - Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:107–156` (`parse_yaml_directive`) — matches name `"YAML"`, splits on `.` for major/minor, accepts 1.x, rejects major ≥ 2
 - Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs`
 
@@ -918,7 +918,7 @@ BNF: `ns-tag-directive ::= "TAG" s-separate-in-line c-tag-handle s-separate-in-l
 BNF: `c-tag-handle ::= c-named-tag-handle | c-secondary-tag-handle | c-primary-tag-handle`
 
 - Classification: Conformant
-- Spec (§6.8.2.1): "The tag handle exactly matches the prefix of the affected tag shorthand. There are three tag handle variants."
+- Spec (§6.8.2.1): "The tag handle exactly matches the prefix of the affected tag shorthand. There are three tag handle variants:"
 - Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:281–295` (`is_valid_tag_handle`) — recognises `!`, `!!`, and `!word-chars!` forms
 - Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:461–513` (unit tests `is_valid_tag_handle_*`)
 
@@ -927,7 +927,7 @@ BNF: `c-tag-handle ::= c-named-tag-handle | c-secondary-tag-handle | c-primary-t
 BNF: `c-primary-tag-handle ::= '!'`
 
 - Classification: Conformant
-- Spec (§6.8.2.1): "The primary tag handle is a single `!` character. This allows using the most compact possible notation for a single `primary` name space. By default, the prefix associated with this handle is `!`."
+- Spec (§6.8.2.1): "The primary tag handle is a single `!` character. This allows using the most compact possible notation for a single "primary" name space. By default, the prefix associated with this handle is `!`. […]"
 - Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:282–283` — `"!" => true` branch in `is_valid_tag_handle`
 - Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:461–463` (unit test `is_valid_tag_handle_primary`)
 
@@ -936,7 +936,7 @@ BNF: `c-primary-tag-handle ::= '!'`
 BNF: `c-secondary-tag-handle ::= "!!"`
 
 - Classification: Conformant
-- Spec (§6.8.2.1): "The secondary tag handle is written as `!!`. This allows using a compact notation for a single `secondary` name space. By default, the prefix associated with this handle is `tag:yaml.org,2002:`."
+- Spec (§6.8.2.1): "The secondary tag handle is written as `!!`. This allows using a compact notation for a single "secondary" name space. By default, the prefix associated with this handle is `tag:yaml.org,2002:`."
 - Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:283` — `"!!" => true` branch in `is_valid_tag_handle`; `rlsp-yaml-parser/src/event_iter/directive_scope.rs:93–108` — `!!suffix` resolved using custom `"!!"` handle or default prefix `"tag:yaml.org,2002:"`
 - Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:465–467` (unit test `is_valid_tag_handle_secondary`)
 
@@ -974,7 +974,7 @@ BNF: `ns-global-tag-prefix ::= ns-tag-char ns-uri-char*`
 
 - Classification: Conformant
 - Spec (§6.8.2.2): "If the prefix begins with a character other than `!`, it must be a valid URI prefix, and should contain at least the scheme. Shorthands using the associated handle are expanded to globally unique URI tags."
-- Implementation: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:92–109` — `!!suffix` and named-handle expansions concatenate the stored URI prefix with the percent-decoded suffix; URI validity is enforced by control-character rejection in `parse_tag_directive`
+- Implementation: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:92–132` — `!!suffix` (lines 93–109) and named-handle (lines 112–132) expansions concatenate the stored URI prefix with the percent-decoded suffix; URI validity is enforced by control-character rejection in `parse_tag_directive`
 - Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
 
 ### [96] c-ns-properties(n,c)
@@ -1045,7 +1045,7 @@ BNF: `ns-anchor-char ::= ns-char - c-flow-indicator`
 BNF: `ns-anchor-name ::= ns-anchor-char+`
 
 - Classification: Conformant
-- Spec (§6.9.2): "An alias node can then be used to indicate additional inclusions of the anchored node. An anchored node need not be referenced by any alias nodes."
+- Spec (§6.9.2): "An alias node can then be used to indicate additional inclusions of the anchored node. An anchored node need not be referenced by any alias nodes; in particular, it is valid for all nodes to be anchored."
 - Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:27–31` — `.take_while(|&(_, ch)| is_ns_anchor_char(ch))` scans one or more `ns-anchor-char`; empty result → error
 - Test coverage: `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:310–389` (unit tests `scan_anchor_name_*`)
 
