@@ -197,7 +197,7 @@ Test coverage fields may be empty with the explicit text
 - [x] Task 8 — draft §8 chapter entries
 - [x] Task 9 — verify §8 entries
 - [x] Task 10 — draft §9 chapter entries
-- [ ] Task 11 — verify §9 entries
+- [x] Task 11 — verify §9 entries
 - [ ] Task 12 — draft §10 chapter entries
 - [ ] Task 13 — verify §10 entries + append consolidated
       Summary table
@@ -530,14 +530,14 @@ re-derived from the verbatim §5.2 text — if this
 verification cycle lands the same wrong classification
 again, the plan itself is broken.
 
-- [ ] Every §9 entry's spec quote is character-compared
+- [x] Every §9 entry's spec quote is character-compared
       against the cached spec; mismatches corrected.
-- [ ] Every §9 entry's Implementation citation is
+- [x] Every §9 entry's Implementation citation is
       opened and inspected; mismatches corrected.
-- [ ] Every §9 classification is re-derived; mismatches
+- [x] Every §9 classification is re-derived; mismatches
       corrected.
-- [ ] Every §9 test-coverage claim is verified.
-- [ ] §5 [3] `c-byte-order-mark` and §9 [202]
+- [x] Every §9 test-coverage claim is verified.
+- [x] §5 [3] `c-byte-order-mark` and §9 [202]
       `l-document-prefix` classifications each carry a
       verbatim §5.2 quote drawn from the cached spec at
       `.ai/references/yaml-1.2.2-spec.md`. The
@@ -550,12 +550,14 @@ again, the plan itself is broken.
       the commit message (the cache may be incomplete —
       a possible Task 1 defect that must be surfaced,
       not silently dismissed).
-- [ ] The task's commit message lists every §9
+- [x] The task's commit message lists every §9
       correction.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `1444d7f13b28a7ad6ed21f1a40b978bd7339ce20`
 
 ### Task 12: Draft §10 entries
 

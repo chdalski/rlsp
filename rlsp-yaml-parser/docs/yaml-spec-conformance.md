@@ -1956,7 +1956,7 @@ BNF: `l-document-prefix ::= c-byte-order-mark? l-comment*`
 BNF: `c-directives-end ::= "---"`
 
 - Classification: Conformant
-- Spec (§9.1.2): "The solution is the use of two special marker lines to control the processing of directives, one at the start of a document and one at the end. At the start of a document, lines beginning with a '%' character are assumed to be directives. The (possibly empty) list of directives is terminated by a directives end marker line."
+- Spec (§9.1.2): "The solution is the use of two special marker lines to control the processing of directives, one at the start of a document and one at the end. At the start of a document, lines beginning with a \"%\" character are assumed to be directives. The (possibly empty) list of directives is terminated by a directives end marker line."
 - Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:137–178` — `lexer.is_directives_end()` detects `---` at column 0; `lexer.consume_marker_line(false)` consumes the line and captures any inline scalar
 - Test coverage: `tests/yaml-test-suite/src/FTA2.yaml` (Single block sequence with anchor and explicit document start); `tests/yaml-test-suite/src/2LFX.yaml` (directive + `---` marker); `rlsp-yaml-parser/tests/smoke/directives.rs:459–471` (explicit_document_start_span_covers_dashes)
 
@@ -1992,7 +1992,7 @@ BNF: `c-forbidden ::= <start-of-line> ( c-directives-end | c-document-end ) ( b-
 BNF: `l-bare-document ::= s-l+block-node(-1,BLOCK-IN)  /* Excluding c-forbidden content */`
 
 - Classification: Conformant
-- Spec (§9.1.3): "A bare document does not begin with any directives or marker lines. Such documents are very 'clean' as they contain nothing other than the content. In this case, the first non-comment line may not start with a '%' first character."
+- Spec (§9.1.3): "A bare document does not begin with any directives or marker lines. Such documents are very \"clean\" as they contain nothing other than the content. In this case, the first non-comment line may not start with a \"%\" first character."
 - Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:338–355` — in `step_between_docs`, when no directives were accumulated and the next token is not `---` or `...`, a `DocumentStart { explicit: false }` event is emitted and state transitions to `InDocument`; `step_in_document` then parses the block node content
 - Test coverage: `tests/yaml-test-suite/src/9KBC.yaml` (bare document, error); `rlsp-yaml-parser/tests/smoke/directives.rs:395–407` (bare_document_sets_explicit_false)
 
