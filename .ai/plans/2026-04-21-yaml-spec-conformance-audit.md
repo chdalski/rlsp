@@ -192,7 +192,7 @@ Test coverage fields may be empty with the explicit text
       cached spec and cited source (independent pass)
 - [x] Task 4 — draft §6 chapter entries
 - [x] Task 5 — verify §6 entries
-- [ ] Task 6 — draft §7 chapter entries
+- [x] Task 6 — draft §7 chapter entries
 - [ ] Task 7 — verify §7 entries
 - [ ] Task 8 — draft §8 chapter entries
 - [ ] Task 9 — verify §8 entries
@@ -415,19 +415,21 @@ single-quoted, double-quoted], flow collection styles
 [flow sequence, flow mapping, pairs], flow nodes),
 using the strict format.
 
-- [ ] Every numbered production in §7 has an entry in
+- [x] Every numbered production in §7 has an entry in
       the strict format.
-- [ ] Classifications follow from the spec quote +
+- [x] Classifications follow from the spec quote +
       implementation fact under the decision-rule
       table.
-- [ ] Within this task's chapter block, every `### [`
+- [x] Within this task's chapter block, every `### [`
       entry has a `- Test coverage:` line (same
       chapter-scoped awk+grep check as Task 2, with
       `§7` substituted for `§N`).
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `83b0ff05d3b038c22b72b7da571cda613816d9a6`
 
 ### Task 7: Verify §7 entries (independent pass)
 

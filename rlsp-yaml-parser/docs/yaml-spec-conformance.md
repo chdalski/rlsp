@@ -1051,7 +1051,529 @@ BNF: `ns-anchor-name ::= ns-anchor-char+`
 
 ## §7
 
-<!-- Task 6: draft §7 entries -->
+### [104] c-ns-alias-node
+
+BNF: `c-ns-alias-node ::= c-alias ns-anchor-name`
+
+- Classification: Conformant
+- Spec (§7.1): "An alias node is denoted by the \"*\" indicator. The alias refers to the most recent preceding node having the same anchor. It is an error for an alias node to use an anchor that does not previously occur in the document. […] Note that an alias node must not specify any properties or content, as these were already specified at the first occurrence of the node."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1286–1356` (flow context: `*` consumed, `scan_anchor_name` called, `Event::Alias` pushed; tag/anchor-on-alias rejected as errors); `rlsp-yaml-parser/src/event_iter/properties.rs:22–45` (block context alias scanning via `scan_anchor_name`); `rlsp-yaml-parser/src/loader.rs:661–762` (`resolve_alias` handles lossless and resolved modes; undefined alias → `LoadError::UndefinedAlias`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `tests/yaml-test-suite/src/3GZX.yaml` (Spec Example 7.1. Alias Nodes)
+
+### [105] e-scalar
+
+BNF: `e-scalar ::= ""`
+
+- Classification: Conformant
+- Spec (§7.2): "YAML allows the node content to be omitted in many cases. Nodes with empty content are interpreted as if they were plain scalars with an empty value. Such nodes are commonly resolved to a \"null\" value."
+- Implementation: `rlsp-yaml-parser/src/lib.rs:167–176` (`empty_scalar_event()` builds `Event::Scalar { value: Cow::Borrowed(""), style: Plain, … }`); emitted at `rlsp-yaml-parser/src/event_iter/flow.rs:502–507` (flow: `}` in `explicit_key_pending` state), `rlsp-yaml-parser/src/event_iter/flow.rs:1152` (flow: empty value after `:`), `rlsp-yaml-parser/src/event_iter/block/mapping.rs:590,641,673` (block mapping empty values), `rlsp-yaml-parser/src/event_iter/block/sequence.rs:244,477` (block sequence bare `-`), `rlsp-yaml-parser/src/event_iter/base.rs:57–178` (document-root empty nodes)
+- Test coverage: `tests/yaml-test-suite/src/WZ62.yaml` (Spec Example 7.2. Empty Content); `tests/yaml-test-suite/src/FRK4.yaml` (Spec Example 7.3. Completely Empty Flow Nodes)
+
+### [106] e-node
+
+BNF: `e-node ::= e-scalar`
+
+- Classification: Conformant
+- Spec (§7.2): "Both the node's properties and node content are optional. This allows for a completely empty node. Completely empty nodes are only valid when following some explicit indication for their existence."
+- Implementation: `rlsp-yaml-parser/src/lib.rs:167–176` (`empty_scalar_event()` — `e-node` collapses to `e-scalar`; the parser emits it at all sites listed for [105])
+- Test coverage: `tests/yaml-test-suite/src/FRK4.yaml` (Spec Example 7.3. Completely Empty Flow Nodes)
+
+### [107] nb-double-char
+
+BNF: `nb-double-char ::= c-ns-esc-char | ( nb-json - c-escape - c-double-quote )`
+
+- Classification: Conformant
+- Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators. This is the only style capable of expressing arbitrary strings, by using '\\' escape sequences. This comes at the cost of having to escape the '\\' and '\"' characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (`try_consume_double_quoted` — `memchr2` scans for `\` and `"`, escape sequences decoded via `decode_escape`; all `nb-json` characters other than `\` and `"` pass through unmodified)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [108] ns-double-char
+
+BNF: `ns-double-char ::= nb-double-char - s-white`
+
+- Classification: Conformant
+- Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators. This is the only style capable of expressing arbitrary strings, by using '\\' escape sequences."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (whitespace trimming of leading/trailing spaces on each continuation line implements `ns-double-char` in multi-line context; single-space folding via `s-flow-folded`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [109] c-double-quoted(n,c)
+
+BNF: `c-double-quoted(n,c) ::= c-double-quote nb-double-text(n,c) c-double-quote`
+
+- Classification: Conformant
+- Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (`try_consume_double_quoted` — opening `"` detected, body consumed via `nb-double-text` logic, closing `"` required)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys)
+
+### [110] nb-double-text(n,c)
+
+BNF: `nb-double-text(n,FLOW-OUT) ::= nb-double-multi-line(n)` / `nb-double-text(n,FLOW-IN) ::= nb-double-multi-line(n)` / `nb-double-text(n,BLOCK-KEY) ::= nb-double-one-line` / `nb-double-text(n,FLOW-KEY) ::= nb-double-one-line`
+
+- Classification: Conformant
+- Spec (§7.3.1): "Double-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line path taken when a closing `"` is not found on the first line; implicit-key context enforces single-line via the block and flow parsers' key-detection logic)
+- Test coverage: `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys — single-line); `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines — multi-line)
+
+### [111] nb-double-one-line
+
+BNF: `nb-double-one-line ::= nb-double-char*`
+
+- Classification: Conformant
+- Spec (§7.3.1): "Double-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (single-line fast path: scanning stops at closing `"` without consuming a newline)
+- Test coverage: `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys)
+
+### [112] s-double-escaped(n)
+
+BNF: `s-double-escaped(n) ::= s-white* c-escape b-non-content l-empty(n,FLOW-IN)* s-flow-line-prefix(n)`
+
+- Classification: Conformant
+- Spec (§7.3.1): "It is also possible to escape the line break character. In this case, the escaped line break is excluded from the content and any trailing white space characters that precede the escaped line break are preserved."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (escaped-newline handling: `\` at end of line with optional trailing whitespace before it is consumed, newline is excluded from the value, leading whitespace on the next line is preserved)
+- Test coverage: `tests/yaml-test-suite/src/NP9H.yaml` (Spec Example 7.5. Double Quoted Line Breaks)
+
+### [113] s-double-break(n)
+
+BNF: `s-double-break(n) ::= s-double-escaped(n) | s-flow-folded(n)`
+
+- Classification: Conformant
+- Spec (§7.3.1): "In a multi-line double-quoted scalar, line breaks are subject to flow line folding, which discards any trailing white space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (both branches: `\\\n` escape handled as `s-double-escaped`; plain newline handled as `s-flow-folded` — trailing whitespace stripped, leading whitespace stripped on next line, blank lines become literal `\n`)
+- Test coverage: `tests/yaml-test-suite/src/NP9H.yaml` (Spec Example 7.5. Double Quoted Line Breaks); `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [114] nb-ns-double-in-line
+
+BNF: `nb-ns-double-in-line ::= ( s-white* ns-double-char )*`
+
+- Classification: Conformant
+- Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (inner-line scanning: whitespace between non-whitespace characters preserved; trailing whitespace excluded when line ends)
+- Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [115] s-double-next-line(n)
+
+BNF: `s-double-next-line(n) ::= s-double-break(n) ( ns-double-char nb-ns-double-in-line ( s-double-next-line(n) | s-white* ) )?`
+
+- Classification: Conformant
+- Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line loop: each new line after a break is checked for non-space content; empty lines accumulated as folded newlines)
+- Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [116] nb-double-multi-line(n)
+
+BNF: `nb-double-multi-line(n) ::= nb-ns-double-in-line ( s-double-next-line(n) | s-white* )`
+
+- Classification: Conformant
+- Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line double-quoted path: `nb-ns-double-in-line` on first line, then continuation via `s-double-break` loop)
+- Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
+
+### [117] c-quoted-quote
+
+BNF: `c-quoted-quote ::= "''"`
+
+- Classification: Conformant
+- Spec (§7.3.2): "The single-quoted style is specified by surrounding \"'\" indicators. Therefore, within a single-quoted scalar, such characters need to be repeated. This is the only form of escaping performed in single-quoted scalars."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (`try_consume_single_quoted` — `scan_single_quoted_line` detects `''` as an escaped `'` and includes one `'` in the output)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/4GC6.yaml` (Spec Example 7.7. Single Quoted Characters)
+
+### [118] nb-single-char
+
+BNF: `nb-single-char ::= c-quoted-quote | ( nb-json - c-single-quote )`
+
+- Classification: Conformant
+- Spec (§7.3.2): "The single-quoted style is specified by surrounding \"'\" indicators. Therefore, within a single-quoted scalar, such characters need to be repeated. This is the only form of escaping performed in single-quoted scalars. In particular, the '\\' and '\"' characters may be freely used. This restricts single-quoted scalars to printable characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (`try_consume_single_quoted` — body scanning: all `nb-json` chars except `'` pass through; `''` decoded to `'`)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/4GC6.yaml` (Spec Example 7.7. Single Quoted Characters)
+
+### [119] ns-single-char
+
+BNF: `ns-single-char ::= nb-single-char - s-white`
+
+- Classification: Conformant
+- Spec (§7.3.2): "In addition, it is only possible to break a long single-quoted line where a space character is surrounded by non-spaces."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (continuation-line scanning: leading/trailing whitespace stripped; only non-whitespace characters initiate next-line content)
+- Test coverage: `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines)
+
+### [120] c-single-quoted(n,c)
+
+BNF: `c-single-quoted(n,c) ::= c-single-quote nb-single-text(n,c) c-single-quote`
+
+- Classification: Conformant
+- Spec (§7.3.2): "The single-quoted style is specified by surrounding \"'\" indicators."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (`try_consume_single_quoted` — opening `'` detected, body consumed, closing `'` required)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
+
+### [121] nb-single-text(n,c)
+
+BNF: `nb-single-text(FLOW-OUT) ::= nb-single-multi-line(n)` / `nb-single-text(FLOW-IN) ::= nb-single-multi-line(n)` / `nb-single-text(BLOCK-KEY) ::= nb-single-one-line` / `nb-single-text(FLOW-KEY) ::= nb-single-one-line`
+
+- Classification: Conformant
+- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (multi-line path taken when closing `'` not found on first line; implicit-key context enforced by flow/block parsers)
+- Test coverage: `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys — single-line); `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines — multi-line)
+
+### [122] nb-single-one-line
+
+BNF: `nb-single-one-line ::= nb-single-char*`
+
+- Classification: Conformant
+- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (single-line fast path: scanning stops at closing `'` without consuming a newline)
+- Test coverage: `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
+
+### [123] nb-ns-single-in-line
+
+BNF: `nb-ns-single-in-line ::= ( s-white* ns-single-char )*`
+
+- Classification: Conformant
+- Spec (§7.3.2): "All leading and trailing white space characters are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (inner-line whitespace between non-whitespace characters preserved; trailing whitespace excluded)
+- Test coverage: `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines)
+
+### [124] s-single-next-line(n)
+
+BNF: `s-single-next-line(n) ::= s-flow-folded(n) ( ns-single-char nb-ns-single-in-line ( s-single-next-line(n) | s-white* ) )?`
+
+- Classification: Conformant
+- Spec (§7.3.2): "All leading and trailing white space characters are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (multi-line loop: each continuation line after `s-flow-folded` folding checked for non-space content)
+- Test coverage: `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines)
+
+### [125] nb-single-multi-line(n)
+
+BNF: `nb-single-multi-line(n) ::= nb-ns-single-in-line ( s-single-next-line(n) | s-white* )`
+
+- Classification: Conformant
+- Spec (§7.3.2): "All leading and trailing white space characters are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (multi-line single-quoted path: `nb-ns-single-in-line` on first line, then continuation via `s-flow-folded` loop)
+- Test coverage: `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines)
+
+### [126] ns-plain-first(c)
+
+BNF: `ns-plain-first(c) ::= ( ns-char - c-indicator ) | ( ( c-mapping-key | c-mapping-value | c-sequence-entry ) [ lookahead = ns-plain-safe(c) ] )`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars must not begin with most indicators, as this would cause ambiguity with other YAML constructs. However, the ':', '?' and '-' indicators may be used as the first character if followed by a non-space 'safe' character, as this causes no ambiguity."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:298–313` (`ns_plain_first_block` — `is_c_indicator` check; `?`, `:`, `-` allowed if followed by `ns_plain_safe_block`); flow context: `scan_plain_line_flow` at `rlsp-yaml-parser/src/lexer/plain.rs:442–513` (same first-char policy, callers enforce flow indicator exclusion)
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters); `rlsp-yaml-parser/src/lexer/plain.rs:563–576` (unit tests `scan_plain_line_block_cases`)
+
+### [127] ns-plain-safe(c)
+
+BNF: `ns-plain-safe(FLOW-OUT) ::= ns-plain-safe-out` / `ns-plain-safe(FLOW-IN) ::= ns-plain-safe-in` / `ns-plain-safe(BLOCK-KEY) ::= ns-plain-safe-out` / `ns-plain-safe(FLOW-KEY) ::= ns-plain-safe-in`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars must never contain the ': ' and ' #' character combinations. […] In addition, inside flow collections, or when used as implicit keys, plain scalars must not contain the '[', ']', '{', '}' and ',' characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:315–319` (`ns_plain_safe_block` — any `ns-char` for block/BLOCK-KEY context); `scan_plain_line_flow` at `rlsp-yaml-parser/src/lexer/plain.rs:442–513` (flow: additionally stops at `,`, `[`, `]`, `{`, `}`)
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters — inside and outside flow)
+
+### [128] ns-plain-safe-out
+
+BNF: `ns-plain-safe-out ::= ns-char`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars must never contain the ': ' and ' #' character combinations. Such combinations would cause ambiguity with mapping key/value pairs and comments."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:315–319` (`ns_plain_safe_block` delegates to `is_ns_char`)
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters)
+
+### [129] ns-plain-safe-in
+
+BNF: `ns-plain-safe-in ::= ns-char - c-flow-indicator`
+
+- Classification: Conformant
+- Spec (§7.3.3): "In addition, inside flow collections, or when used as implicit keys, plain scalars must not contain the '[', ']', '{', '}' and ',' characters. These characters would cause ambiguity with flow collection structures."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:442–513` (`scan_plain_line_flow` — terminates at `,`, `[`, `]`, `{`, `}` in addition to block-context terminators)
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters — inside flow collection)
+
+### [130] ns-plain-char(c)
+
+BNF: `ns-plain-char(c) ::= ( ns-plain-safe(c) - c-mapping-value - c-comment ) | ( [ lookbehind = ns-char ] c-comment ) | ( c-mapping-value [ lookahead = ns-plain-safe(c) ] )`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars must never contain the ': ' and ' #' character combinations."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:322–341` (`ns_plain_char_block` — `#` allowed only when NOT preceded by whitespace; `:` allowed only when followed by `ns_plain_safe_block`); `scan_plain_line_flow` uses same logic at `rlsp-yaml-parser/src/lexer/plain.rs:442–513`
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters); `rlsp-yaml-parser/src/lexer/plain.rs:563–576` (unit tests `scan_plain_line_block_cases`)
+
+### [131] ns-plain(n,c)
+
+BNF: `ns-plain(n,FLOW-OUT) ::= ns-plain-multi-line(n,FLOW-OUT)` / `ns-plain(n,FLOW-IN) ::= ns-plain-multi-line(n,FLOW-IN)` / `ns-plain(n,BLOCK-KEY) ::= ns-plain-one-line(BLOCK-KEY)` / `ns-plain(n,FLOW-KEY) ::= ns-plain-one-line(FLOW-KEY)`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars are further restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:31–154` (`try_consume_plain_scalar` for block multi-line; `scan_plain_line_flow` for flow single-line in key/flow context; multi-line in FLOW-OUT/FLOW-IN via `collect_plain_continuations`)
+- Test coverage: `tests/yaml-test-suite/src/L9U5.yaml` (Spec Example 7.11. Plain Implicit Keys); `tests/yaml-test-suite/src/HS5T.yaml` (Spec Example 7.12. Plain Lines)
+
+### [132] nb-ns-plain-in-line(c)
+
+BNF: `nb-ns-plain-in-line(c) ::= ( s-white* ns-plain-char(c) )*`
+
+- Classification: Conformant
+- Spec (§7.3.3): "In addition to a restricted character set, a plain scalar must not be empty or contain leading or trailing white space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:351–427` (`scan_plain_line_block` — inner loop: whitespace between tokens preserved; trailing whitespace excluded via `committed_end`); `scan_plain_line_flow` at `rlsp-yaml-parser/src/lexer/plain.rs:442–513` (same pattern, flow terminator set)
+- Test coverage: `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters)
+
+### [133] ns-plain-one-line(c)
+
+BNF: `ns-plain-one-line(c) ::= ns-plain-first(c) nb-ns-plain-in-line(c)`
+
+- Classification: Conformant
+- Spec (§7.3.3): "Plain scalars are further restricted to a single line when contained inside an implicit key."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:253–283` (`peek_plain_scalar_first_line` — first char checked via `ns_plain_first_block`, remaining scanned via `scan_plain_line_block`); same pattern in `scan_plain_line_flow` for flow-key context
+- Test coverage: `tests/yaml-test-suite/src/L9U5.yaml` (Spec Example 7.11. Plain Implicit Keys)
+
+### [134] s-ns-plain-next-line(n,c)
+
+BNF: `s-ns-plain-next-line(n,c) ::= s-flow-folded(n) ns-plain-char(c) nb-ns-plain-in-line(c)`
+
+- Classification: Conformant
+- Spec (§7.3.3): "All leading and trailing white space characters are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:160–241` (`collect_plain_continuations` — blank lines accumulated as pending newlines; non-empty continuation line must have `scan_plain_line_block` produce a non-empty result)
+- Test coverage: `tests/yaml-test-suite/src/HS5T.yaml` (Spec Example 7.12. Plain Lines)
+
+### [135] ns-plain-multi-line(n,c)
+
+BNF: `ns-plain-multi-line(n,c) ::= ns-plain-one-line(c) s-ns-plain-next-line(n,c)*`
+
+- Classification: Conformant
+- Spec (§7.3.3): "It is only possible to break a long plain line where a space character is surrounded by non-spaces."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:31–154` (`try_consume_plain_scalar` — first line via `peek_plain_scalar_first_line`, then zero or more continuation lines via `collect_plain_continuations`)
+- Test coverage: `tests/yaml-test-suite/src/HS5T.yaml` (Spec Example 7.12. Plain Lines)
+
+### [136] in-flow(n,c)
+
+BNF: `in-flow(n,FLOW-OUT) ::= ns-s-flow-seq-entries(n,FLOW-IN)` / `in-flow(n,FLOW-IN) ::= ns-s-flow-seq-entries(n,FLOW-IN)` / `in-flow(n,BLOCK-KEY) ::= ns-s-flow-seq-entries(n,FLOW-KEY)` / `in-flow(n,FLOW-KEY) ::= ns-s-flow-seq-entries(n,FLOW-KEY)`
+
+- Classification: Not Applicable (descriptive)
+- Spec (§7.4): "A flow collection may be nested within a block collection (FLOW-OUT context), nested within another flow collection (FLOW-IN context) or be a part of an implicit key (FLOW-KEY context or BLOCK-KEY context). Flow collection entries are terminated by the ',' indicator."
+- Implementation: (no implementation obligation)
+- Test coverage: (no implementation obligation)
+
+### [137] c-flow-sequence(n,c)
+
+BNF: `c-flow-sequence(n,c) ::= c-sequence-start s-separate(n,c)? in-flow(n,c)? c-sequence-end`
+
+- Classification: Conformant
+- Spec (§7.4.1): "Flow sequence content is denoted by surrounding '[' and ']' characters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–459` (`'['` branch pushes `FlowFrame::Sequence`, emits `SequenceStart`; `rlsp-yaml-parser/src/event_iter/flow.rs:465–559` (`']'` branch pops `FlowFrame::Sequence`, emits `SequenceEnd`)
+- Test coverage: `tests/yaml-test-suite/src/5KJE.yaml` (Spec Example 7.13. Flow Sequence)
+
+### [138] ns-s-flow-seq-entries(n,c)
+
+BNF: `ns-s-flow-seq-entries(n,c) ::= ns-flow-seq-entry(n,c) s-separate(n,c)? ( c-collect-entry s-separate(n,c)? ns-s-flow-seq-entries(n,c)? )?`
+
+- Classification: Conformant
+- Spec (§7.4.1): "Sequence entries are separated by a ',' character."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:652–730` (`,` branch inside `FlowFrame::Sequence` — advances `has_value`, permits trailing comma before `]`)
+- Test coverage: `tests/yaml-test-suite/src/5KJE.yaml` (Spec Example 7.13. Flow Sequence); `tests/yaml-test-suite/src/8UDB.yaml` (Spec Example 7.14. Flow Sequence Entries)
+
+### [139] ns-flow-seq-entry(n,c)
+
+BNF: `ns-flow-seq-entry(n,c) ::= ns-flow-pair(n,c) | ns-flow-node(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.1): "Any flow node may be used as a flow sequence entry. In addition, YAML provides a compact notation for the case where a flow sequence entry is a mapping with a single key/value pair."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–559` (sequence item dispatch: scalars, nested collections, and single-pair implicit mappings via `:` detection within `FlowFrame::Sequence`)
+- Test coverage: `tests/yaml-test-suite/src/8UDB.yaml` (Spec Example 7.14. Flow Sequence Entries)
+
+### [140] c-flow-mapping(n,c)
+
+BNF: `c-flow-mapping(n,c) ::= c-mapping-start s-separate(n,c)? ns-s-flow-map-entries(n,in-flow(c))? c-mapping-end`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Flow mappings are denoted by surrounding '{' and '}' characters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–459` (`'{'` branch pushes `FlowFrame::Mapping`, emits `MappingStart`); `rlsp-yaml-parser/src/event_iter/flow.rs:465–559` (`'}'` branch pops `FlowFrame::Mapping`, emits `MappingEnd`)
+- Test coverage: `tests/yaml-test-suite/src/5C5M.yaml` (Spec Example 7.15. Flow Mappings)
+
+### [141] ns-s-flow-map-entries(n,c)
+
+BNF: `ns-s-flow-map-entries(n,c) ::= ns-flow-map-entry(n,c) s-separate(n,c)? ( c-collect-entry s-separate(n,c)? ns-s-flow-map-entries(n,c)? )?`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Mapping entries are separated by a ',' character."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:652–730` (`,` branch inside `FlowFrame::Mapping` — resets to Key phase, permits trailing comma before `}`)
+- Test coverage: `tests/yaml-test-suite/src/5C5M.yaml` (Spec Example 7.15. Flow Mappings); `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [142] ns-flow-map-entry(n,c)
+
+BNF: `ns-flow-map-entry(n,c) ::= ( c-mapping-key s-separate(n,c) ns-flow-map-explicit-entry(n,c) ) | ns-flow-map-implicit-entry(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.2): "If the optional '?' mapping key indicator is specified, the rest of the entry may be completely empty."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1011–1043` (`'?'` explicit-key indicator branch inside `FlowFrame::Mapping`; implicit-key entry falls through to the scalar/collection dispatch)
+- Test coverage: `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [143] ns-flow-map-explicit-entry(n,c)
+
+BNF: `ns-flow-map-explicit-entry(n,c) ::= ns-flow-map-implicit-entry(n,c) | ( e-node e-node )`
+
+- Classification: Conformant
+- Spec (§7.4.2): "If the optional '?' mapping key indicator is specified, the rest of the entry may be completely empty."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:495–511` (when `}` arrives with `explicit_key_pending = true` in Key phase, two `empty_scalar_event()` pushed — empty key and empty value)
+- Test coverage: `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [144] ns-flow-map-implicit-entry(n,c)
+
+BNF: `ns-flow-map-implicit-entry(n,c) ::= ns-flow-map-yaml-key-entry(n,c) | c-ns-flow-map-empty-key-entry(n,c) | c-ns-flow-map-json-key-entry(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Normally, YAML insists the ':' mapping value indicator be separated from the value by white space."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:730–1200` (dispatch on current char: `:` alone → empty key entry; quoted scalar → JSON-key entry; plain scalar or nested collection → YAML-key entry)
+- Test coverage: `tests/yaml-test-suite/src/4ABK.yaml`; `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [145] ns-flow-map-yaml-key-entry(n,c)
+
+BNF: `ns-flow-map-yaml-key-entry(n,c) ::= ns-flow-yaml-node(n,c) ( ( s-separate(n,c)? c-ns-flow-map-separate-value(n,c) ) | e-node )`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Normally, YAML insists the ':' mapping value indicator be separated from the value by white space. A benefit of this restriction is that the ':' character can be used inside plain scalars, as long as it is not followed by white space."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:730–1200` (plain scalar or nested collection as key in `FlowFrame::Mapping` Key phase; `:` with trailing space or flow indicator consumed in Value phase)
+- Test coverage: `tests/yaml-test-suite/src/4ABK.yaml`; `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [146] c-ns-flow-map-empty-key-entry(n,c)
+
+BNF: `c-ns-flow-map-empty-key-entry(n,c) ::= e-node c-ns-flow-map-separate-value(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Note that the value may be completely empty since its existence is indicated by the ':'."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1109–1165` (`:` at start of key position in `FlowFrame::Mapping` → `empty_scalar_event()` pushed for empty key, then value consumed)
+- Test coverage: `tests/yaml-test-suite/src/4ABK.yaml`; `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [147] c-ns-flow-map-separate-value(n,c)
+
+BNF: `c-ns-flow-map-separate-value(n,c) ::= c-mapping-value [ lookahead ≠ ns-plain-safe(c) ] ( ( s-separate(n,c) ns-flow-node(n,c) ) | e-node )`
+
+- Classification: Conformant
+- Spec (§7.4.2): "Normally, YAML insists the ':' mapping value indicator be separated from the value by white space. A benefit of this restriction is that the ':' character can be used inside plain scalars, as long as it is not followed by white space. This allows for unquoted URLs and timestamps."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:730–850` (`:` in Value phase checked for trailing space/flow-indicator via `ns_plain_safe_block` lookahead; `:x` treated as plain-scalar content not a separator)
+- Test coverage: `tests/yaml-test-suite/src/4ABK.yaml` (flow mapping separate values); `tests/yaml-test-suite/src/DFF7.yaml` (Spec Example 7.16. Flow Mapping Entries)
+
+### [148] c-ns-flow-map-json-key-entry(n,c)
+
+BNF: `c-ns-flow-map-json-key-entry(n,c) ::= c-flow-json-node(n,c) ( ( s-separate(n,c)? c-ns-flow-map-adjacent-value(n,c) ) | e-node )`
+
+- Classification: Conformant
+- Spec (§7.4.2): "To ensure JSON compatibility, if a key inside a flow mapping is JSON-like, YAML allows the following value to be specified adjacent to the ':'. This causes no ambiguity, as all JSON-like keys are surrounded by indicators."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:730–1200` (quoted scalar as key in `FlowFrame::Mapping` Key phase; `:` without mandatory preceding space allowed immediately after closing `"` or `'`)
+- Test coverage: `tests/yaml-test-suite/src/C2DT.yaml` (Spec Example 7.18. Flow Mapping Adjacent Values)
+
+### [149] c-ns-flow-map-adjacent-value(n,c)
+
+BNF: `c-ns-flow-map-adjacent-value(n,c) ::= c-mapping-value ( ( s-separate(n,c)? ns-flow-node(n,c) ) | e-node )`
+
+- Classification: Conformant
+- Spec (§7.4.2): "To ensure JSON compatibility, if a key inside a flow mapping is JSON-like, YAML allows the following value to be specified adjacent to the ':'."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:730–850` (`:` in Value phase after a JSON-like key: space before value is optional; value may be omitted → `empty_scalar_event()`)
+- Test coverage: `tests/yaml-test-suite/src/C2DT.yaml` (Spec Example 7.18. Flow Mapping Adjacent Values)
+
+### [150] ns-flow-pair(n,c)
+
+BNF: `ns-flow-pair(n,c) ::= ( c-mapping-key s-separate(n,c) ns-flow-map-explicit-entry(n,c) ) | ns-flow-pair-entry(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.3): "A more compact notation is usable inside flow sequences, if the mapping contains a single key/value pair. This notation does not require the surrounding '{' and '}' characters. Note that it is not possible to specify any node properties for the mapping in this case."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (`:` value separator inside `FlowFrame::Sequence` triggers single-pair implicit mapping: `MappingStart` inserted before the key, `MappingEnd` emitted before the next `,` or `]`)
+- Test coverage: `tests/yaml-test-suite/src/QF4Y.yaml` (Spec Example 7.19. Single Pair Flow Mappings); `tests/yaml-test-suite/src/CT4Q.yaml` (Spec Example 7.20. Single Pair Explicit Entry)
+
+### [151] ns-flow-pair-entry(n,c)
+
+BNF: `ns-flow-pair-entry(n,c) ::= ns-flow-pair-yaml-key-entry(n,c) | c-ns-flow-map-empty-key-entry(n,c) | c-ns-flow-pair-json-key-entry(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.3): "A more compact notation is usable inside flow sequences, if the mapping contains a single key/value pair."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (dispatch within `FlowFrame::Sequence` after `:` detected: plain/alias key, empty-key, or quoted-JSON key)
+- Test coverage: `tests/yaml-test-suite/src/9MMW.yaml` (Single Pair Implicit Entries)
+
+### [152] ns-flow-pair-yaml-key-entry(n,c)
+
+BNF: `ns-flow-pair-yaml-key-entry(n,c) ::= ns-s-implicit-yaml-key(FLOW-KEY) c-ns-flow-map-separate-value(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.3): "A more compact notation is usable inside flow sequences, if the mapping contains a single key/value pair."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (plain scalar key in sequence entry followed by `:` separator)
+- Test coverage: `tests/yaml-test-suite/src/9MMW.yaml` (Single Pair Implicit Entries)
+
+### [153] c-ns-flow-pair-json-key-entry(n,c)
+
+BNF: `c-ns-flow-pair-json-key-entry(n,c) ::= c-s-implicit-json-key(FLOW-KEY) c-ns-flow-map-adjacent-value(n,c)`
+
+- Classification: Conformant
+- Spec (§7.4.3): "A more compact notation is usable inside flow sequences, if the mapping contains a single key/value pair."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (quoted scalar as key in sequence entry, adjacent `:` separator)
+- Test coverage: `tests/yaml-test-suite/src/9MMW.yaml` (Single Pair Implicit Entries — `{JSON: like}:adjacent` case)
+
+### [154] ns-s-implicit-yaml-key(c)
+
+BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
+
+- Classification: Strict
+- Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key. In addition, the key is restricted to a single line."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1077–1093` (single-line restriction enforced — multi-line implicit key in flow sequence rejected at `rlsp-yaml-parser/src/event_iter/flow.rs:1089`); no 1024-character length check implemented
+- Test coverage: no direct test for the 1024-character limit
+- Discrepancy: The spec requires rejecting an implicit key whose `:` appears more than 1024 Unicode characters from the key start; the implementation enforces the single-line restriction but does not enforce the 1024-character limit.
+
+### [155] c-s-implicit-json-key(c)
+
+BNF: `c-s-implicit-json-key(c) ::= c-flow-json-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
+
+- Classification: Strict
+- Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (quoted-scalar JSON key in flow pair: single-line inherited from quoted-scalar scanning; no 1024-character length check implemented)
+- Test coverage: no direct test for the 1024-character limit
+- Discrepancy: Same as [154] — 1024-character limit for JSON-like implicit keys is not enforced.
+
+### [156] ns-flow-yaml-content(n,c)
+
+BNF: `ns-flow-yaml-content(n,c) ::= ns-plain(n,c)`
+
+- Classification: Conformant
+- Spec (§7.5): "JSON-like flow styles all have explicit start and end indicators. The only flow style that does not have this property is the plain scalar."
+- Implementation: `rlsp-yaml-parser/src/lexer/plain.rs:429–513` (`scan_plain_line_flow` for flow context); `rlsp-yaml-parser/src/lexer/plain.rs:31–154` (block context plain scalars)
+- Test coverage: `tests/yaml-test-suite/src/Q88A.yaml` (Spec Example 7.23. Flow Content — plain case)
+
+### [157] c-flow-json-content(n,c)
+
+BNF: `c-flow-json-content(n,c) ::= c-flow-sequence(n,c) | c-flow-mapping(n,c) | c-single-quoted(n,c) | c-double-quoted(n,c)`
+
+- Classification: Conformant
+- Spec (§7.5): "JSON-like flow styles all have explicit start and end indicators."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–1620` (all four: `[`, `{`, `'`, `"` dispatch to their respective handlers)
+- Test coverage: `tests/yaml-test-suite/src/Q88A.yaml` (Spec Example 7.23. Flow Content)
+
+### [158] ns-flow-content(n,c)
+
+BNF: `ns-flow-content(n,c) ::= ns-flow-yaml-content(n,c) | c-flow-json-content(n,c)`
+
+- Classification: Conformant
+- Spec (§7.5): "JSON-like flow styles all have explicit start and end indicators. The only flow style that does not have this property is the plain scalar."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–1620` (unified dispatch: all flow-content forms handled in the main character-dispatch loop)
+- Test coverage: `tests/yaml-test-suite/src/Q88A.yaml` (Spec Example 7.23. Flow Content)
+
+### [159] ns-flow-yaml-node(n,c)
+
+BNF: `ns-flow-yaml-node(n,c) ::= c-ns-alias-node | ns-flow-yaml-content(n,c) | ( c-ns-properties(n,c) ( ( s-separate(n,c) ns-flow-yaml-content(n,c) ) | e-scalar ) )`
+
+- Classification: Conformant
+- Spec (§7.5): "A complete flow node also has optional node properties, except for alias nodes which refer to the anchored node properties."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1242–1357` (alias at `*`, anchor/tag properties at `&`/`!`, then plain scalar or nested collection; empty scalar when properties present but no content follows)
+- Test coverage: `tests/yaml-test-suite/src/LE5A.yaml` (Spec Example 7.24. Flow Nodes)
+
+### [160] c-flow-json-node(n,c)
+
+BNF: `c-flow-json-node(n,c) ::= ( c-ns-properties(n,c) s-separate(n,c) )? c-flow-json-content(n,c)`
+
+- Classification: Conformant
+- Spec (§7.5): "A complete flow node also has optional node properties, except for alias nodes which refer to the anchored node properties."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1199–1240` (tag/anchor properties scanned before `"`, `'`, `[`, `{` dispatch)
+- Test coverage: `tests/yaml-test-suite/src/LE5A.yaml` (Spec Example 7.24. Flow Nodes — `!!str "a"`, `&anchor "c"` cases)
+
+### [161] ns-flow-node(n,c)
+
+BNF: `ns-flow-node(n,c) ::= c-ns-alias-node | ns-flow-content(n,c) | ( c-ns-properties(n,c) ( ( s-separate(n,c) ns-flow-content(n,c) ) | e-scalar ) )`
+
+- Classification: Conformant
+- Spec (§7.5): "A complete flow node also has optional node properties, except for alias nodes which refer to the anchored node properties."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–1620` (top-level dispatch in the flow parser loop: alias, properties + content, or bare content; empty scalar when properties present but content absent)
+- Test coverage: `tests/yaml-test-suite/src/LE5A.yaml` (Spec Example 7.24. Flow Nodes)
 
 ## §8
 
