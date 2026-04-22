@@ -2035,7 +2035,79 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## §10
 
-<!-- Task 12: draft §10 entries -->
+### Failsafe Schema — tag resolution for `!` non-specific tag
+
+- Classification: Not Implemented
+- Spec (§10.1.2): "All [nodes] with the '`!`' non-specific tag are [resolved], by the standard [convention], to '`tag:yaml.org,2002:seq`', '`tag:yaml.org,2002:map`' or '`tag:yaml.org,2002:str`', according to their [kind]."
+- Implementation: The parser is a structural/presentation-layer parser. When a node carries an explicit `!` tag (bare non-specific), `scan_tag` in `rlsp-yaml-parser/src/event_iter/properties.rs:184–190` returns it as the one-byte slice `"!"`. That raw value is stored in the event's `tag` field and passed through to the AST's `tag` field unchanged (e.g. `Node::Scalar { tag: Some("!"), .. }`). The parser performs no kind-based resolution of the `!` non-specific tag to `!!seq`, `!!map`, or `!!str`. That semantic step is the responsibility of the consuming application.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:194` (`non_specific_tag_on_plain_scalar`) — confirms `!` is preserved as-is, not resolved.
+
+### Failsafe Schema — `?` non-specific tag left unresolved
+
+- Classification: Conformant
+- Spec (§10.1.2): "All [nodes] with the '`?`' non-specific tag are left [unresolved]. This constrains the [application] to deal with a [partial representation]."
+- Implementation: Nodes with no explicit tag in the source have `tag: None` in the event stream and AST. The parser never synthesises a `?` tag token nor resolves it. Untagged scalars, sequences, and mappings all yield `tag: None`. For example, an untagged scalar `hello` produces `Event::Scalar { tag: None, .. }` and the loader stores `Node::Scalar { tag: None, .. }`. Yielding `tag: None` is the parser's representation of an unresolved node — the application deals with a partial representation, as the spec requires.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs` (lines 557, 638, 651, 678, 742) — confirms `tag: None` for untagged mappings and scalars. `rlsp-yaml-parser/tests/smoke/tags.rs:1169–1195` (TL-9/TL-11) — verifies `tag_loc: None` for untagged nodes of all kinds.
+
+### Failsafe Schema — `!!map` (tag:yaml.org,2002:map)
+
+- Classification: Conformant
+- Spec (§10.1.1): "URI: `tag:yaml.org,2002:map`. Kind: [Mapping]. Definition: [Represents] an associative container, where each [key] is unique in the association and mapped to exactly one [value]. YAML places no restrictions on the type of [keys]; in particular, they are not restricted to being [scalars]."
+- Implementation: The parser recognises the `!!map` shorthand via `DirectiveScope::resolve_tag` in `rlsp-yaml-parser/src/event_iter/directive_scope.rs:93–109`, expanding it to `"tag:yaml.org,2002:map"` using the default `!!` prefix `"tag:yaml.org,2002:"`. The tag is stored on `MappingStart` events and on `Node::Mapping { tag: Some("tag:yaml.org,2002:map"), .. }` in the AST.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs` (`resolve_tag_double_bang_uses_default_yaml_prefix` via `!!str`; same expansion applies to `!!map`). `rlsp-yaml-parser/src/event_iter/directive_scope.rs:208–212` (unit test confirming `!!str` → `tag:yaml.org,2002:str`; the same code path handles `!!map`).
+
+### Failsafe Schema — `!!seq` (tag:yaml.org,2002:seq)
+
+- Classification: Conformant
+- Spec (§10.1.1): "URI: `tag:yaml.org,2002:seq`. Kind: [Sequence]. Definition: [Represents] a collection indexed by sequential integers starting with zero."
+- Implementation: The `!!seq` shorthand is expanded by `DirectiveScope::resolve_tag` (`rlsp-yaml-parser/src/event_iter/directive_scope.rs:93–109`) to `"tag:yaml.org,2002:seq"`. The tag is stored on `SequenceStart` events and on `Node::Sequence { tag: Some("tag:yaml.org,2002:seq"), .. }` in the AST. Untagged sequences have `tag: None`.
+- Test coverage: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:208–212` (unit test for `!!`-prefix expansion; applies equally to `!!seq`).
+
+### Failsafe Schema — `!!str` (tag:yaml.org,2002:str)
+
+- Classification: Conformant
+- Spec (§10.1.1): "URI: `tag:yaml.org,2002:str`. Kind: [Scalar]. Definition: [Represents] a Unicode string, a sequence of zero or more Unicode characters. Canonical Form: The obvious."
+- Implementation: The `!!str` shorthand is expanded by `DirectiveScope::resolve_tag` (`rlsp-yaml-parser/src/event_iter/directive_scope.rs:93–109`) to `"tag:yaml.org,2002:str"`. The tag is stored on `Scalar` events and on `Node::Scalar { tag: Some("tag:yaml.org,2002:str"), .. }` in the AST. Unquoted and quoted scalars without an explicit tag have `tag: None`.
+- Test coverage: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:208–212` (`resolve_tag_double_bang_uses_default_yaml_prefix` — confirms `!!str` → `"tag:yaml.org,2002:str"`). `rlsp-yaml-parser/tests/smoke/tags.rs` (groups A–D exercise shorthand tag scanning and resolve path).
+
+### JSON Schema — tag resolution for plain scalars
+
+- Classification: Lenient
+- Spec (§10.2.2): "[Scalars] with the '`?`' non-specific tag (that is, [plain scalars]) are matched with a list of regular expressions (first match wins, e.g. `0` is resolved as `!!int`). In principle, JSON files should not contain any [scalars] that do not match at least one of these. Hence the YAML [processor] should consider them to be an error. | Regular expression | Resolved to tag | | `null` | tag:yaml.org,2002:null | | `true \| false` | tag:yaml.org,2002:bool | | `-? ( 0 \| [1-9] [0-9]* )` | tag:yaml.org,2002:int | | `-? ( 0 \| [1-9] [0-9]* ) ( \\. [0-9]* )? ( [eE] [-+]? [0-9]+ )?` | tag:yaml.org,2002:float | | `*` | Error |"
+- Implementation: The parser does not implement JSON schema plain-scalar type inference. Untagged plain scalars — regardless of their content — produce `tag: None` in both the event stream and the AST. No regex matching is performed against scalar content, and non-matching plain scalars are not treated as errors. This applies uniformly: `null`, `true`, `42`, and `3.14` all yield `tag: None` when untagged.
+- Test coverage: No direct test — the parser intentionally omits schema-level type inference; this is a structural parser only.
+- Discrepancy: The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches. The parser does not implement this rule; schema-level type resolution is delegated to callers.
+
+### JSON Schema — tag resolution for untagged collections
+
+- Classification: Lenient
+- Spec (§10.2.2): "[Collections] with the '`?`' non-specific tag (that is, [untagged] [collections]) are [resolved] to '`tag:yaml.org,2002:seq`' or '`tag:yaml.org,2002:map`' according to their [kind]."
+- Implementation: Untagged sequences produce `Event::SequenceStart { tag: None, .. }` and `Node::Sequence { tag: None, .. }`. Untagged mappings produce `Event::MappingStart { tag: None, .. }` and `Node::Mapping { tag: None, .. }`. The parser does not resolve untagged collections to their kind's JSON schema tag.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:557` (`tag: None` for untagged `MappingStart`) and `:651` (same). No test specifically for untagged `SequenceStart`; the absence of resolution is the invariant.
+- Discrepancy: The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`. The parser does not implement this; `tag: None` is always emitted for untagged collections.
+
+### Core Schema — tag resolution for plain scalars
+
+- Classification: Lenient
+- Spec (§10.3.2): "[Scalars] with the '`?`' non-specific tag (that is, [plain scalars]) are matched with an extended list of regular expressions. However, in this case, if none of the regular expressions matches, the [scalar] is [resolved] to `tag:yaml.org,2002:str` (that is, considered to be a string). | Regular expression | Resolved to tag | | `null \| Null \| NULL \| ~` | tag:yaml.org,2002:null | | `/* Empty */` | tag:yaml.org,2002:null | | `true \| True \| TRUE \| false \| False \| FALSE` | tag:yaml.org,2002:bool | | `[-+]? [0-9]+` | tag:yaml.org,2002:int (Base 10) | | `0o [0-7]+` | tag:yaml.org,2002:int (Base 8) | | `0x [0-9a-fA-F]+` | tag:yaml.org,2002:int (Base 16) | | `[-+]? ( \\. [0-9]+ \| [0-9]+ ( \\. [0-9]* )? ) ( [eE] [-+]? [0-9]+ )?` | tag:yaml.org,2002:float (Number) | | `[-+]? ( \\.inf \| \\.Inf \| \\.INF )` | tag:yaml.org,2002:float (Infinity) | | `\\.nan \| \\.NaN \| \\.NAN` | tag:yaml.org,2002:float (Not a number) | | `*` | tag:yaml.org,2002:str (Default) |"
+- Implementation: The parser does not implement Core schema plain-scalar type inference. All untagged plain scalars yield `tag: None` regardless of content — no regex matching occurs, no `!!null`, `!!bool`, `!!int`, `!!float`, or `!!str` tag is synthesised. The spec's "recommended default schema" type inference is entirely absent from the parser.
+- Test coverage: No direct test — the parser intentionally omits schema-level type inference; this is a structural parser only.
+- Discrepancy: The spec designates the Core schema as the recommended default that YAML processors should use. The parser does not apply it. Schema-level type resolution — including the `tag:yaml.org,2002:str` fallback for unmatched plain scalars — is delegated to callers.
+
+### Core Schema — tag resolution for untagged collections
+
+- Classification: Lenient
+- Spec (§10.3.2): "[Collections] with the '`?`' non-specific tag (that is, [untagged] [collections]) are [resolved] to '`tag:yaml.org,2002:seq`' or '`tag:yaml.org,2002:map`' according to their [kind]." (Same rule as JSON schema, inherited by Core schema extension.)
+- Implementation: Identical to the JSON schema position — untagged collections yield `tag: None` in both the event stream and the AST. No resolution to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map` is performed.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:557` and `:651` (`tag: None` for untagged mappings).
+- Discrepancy: Same as JSON schema — untagged collections are not resolved to kind-appropriate Core schema tags.
+
+### Other Schemas
+
+- Classification: Not Applicable (descriptive)
+- Spec (§10.4): "None of the above recommended [schemas] preclude the use of arbitrary explicit [tags]. Hence YAML [processors] for a particular programming language typically provide some form of [local tags] that map directly to the language's [native data structures] (e.g., `!ruby/object:Set`). […] It is strongly recommended that such [schemas] be based on the [core schema] defined above."
+- Implementation: The parser supports arbitrary explicit tags syntactically. Local tags (`!suffix` with no registered primary handle) pass through as-is via `DirectiveScope::resolve_tag` (`rlsp-yaml-parser/src/event_iter/directive_scope.rs:153–154`). Named handles (`!handle!suffix`) and secondary handles (`!!suffix`) expand to their registered or default prefixes. No language-native schema (Ruby, Python, etc.) is implemented — the parser is language-agnostic at the schema level.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs` (groups B and C: local tags `!local`, named handles `!yaml!str`). `rlsp-yaml-parser/src/event_iter/directive_scope.rs:287–299` (`resolve_tag_local_tag_returns_as_is`, `resolve_tag_bare_bang_returns_as_is`).
 
 ## Summary
 

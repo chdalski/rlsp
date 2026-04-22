@@ -198,7 +198,7 @@ Test coverage fields may be empty with the explicit text
 - [x] Task 9 — verify §8 entries
 - [x] Task 10 — draft §9 chapter entries
 - [x] Task 11 — verify §9 entries
-- [ ] Task 12 — draft §10 chapter entries
+- [x] Task 12 — draft §10 chapter entries
 - [ ] Task 13 — verify §10 entries + append consolidated
       Summary table
 
@@ -567,21 +567,23 @@ other schemas the spec lists), using the strict format.
 Each schema entry classifies parser tag-resolution and
 plain-scalar type-inference.
 
-- [ ] Every schema in §10 has an entry (or entries)
+- [x] Every schema in §10 has an entry (or entries)
       covering tag-resolution and plain-scalar
       type-inference as the parser implements them, in
       the strict format.
-- [ ] Classifications follow from the spec quote +
+- [x] Classifications follow from the spec quote +
       implementation fact under the decision-rule
       table.
-- [ ] Within this task's chapter block, every `### [`
+- [x] Within this task's chapter block, every `### [`
       entry has a `- Test coverage:` line (same
       chapter-scoped awk+grep check as Task 2, with
       `§10` substituted for `§N`).
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `7ebd84588662031609bad6fd8826434d31caf1a8`
 
 ### Task 13: Verify §10 entries and append consolidated Summary
 
