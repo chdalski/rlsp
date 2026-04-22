@@ -199,7 +199,7 @@ Test coverage fields may be empty with the explicit text
 - [x] Task 10 — draft §9 chapter entries
 - [x] Task 11 — verify §9 entries
 - [x] Task 12 — draft §10 chapter entries
-- [ ] Task 13 — verify §10 entries + append consolidated
+- [x] Task 13 — verify §10 entries + append consolidated
       Summary table
 
 ## Tasks
@@ -592,36 +592,36 @@ append a `## Summary` section listing every Lenient and
 Strict finding from §3–§10 in a single table sorted by
 spec section and production number.
 
-- [ ] Every §10 entry's spec quote is character-compared
+- [x] Every §10 entry's spec quote is character-compared
       against the cached spec; mismatches corrected.
-- [ ] Every §10 entry's Implementation citation is
+- [x] Every §10 entry's Implementation citation is
       opened and inspected; mismatches corrected.
-- [ ] Every §10 classification is re-derived;
+- [x] Every §10 classification is re-derived;
       mismatches corrected.
-- [ ] Every §10 test-coverage claim is verified.
-- [ ] `rlsp-yaml-parser/docs/yaml-spec-conformance.md`
+- [x] Every §10 test-coverage claim is verified.
+- [x] `rlsp-yaml-parser/docs/yaml-spec-conformance.md`
       ends with a `## Summary` section listing every
       `Lenient` and `Strict` finding from §3–§10 in a
       single table with columns: spec production,
       classification, source file+line, one-sentence
       discrepancy, and test coverage.
-- [ ] The summary table is sorted by spec section
+- [x] The summary table is sorted by spec section
       (§3, §4, §5, §6, §7, §8, §9, §10), then by
       production number within each section.
-- [ ] The Summary section opens with a headline count:
+- [x] The Summary section opens with a headline count:
       "N Lenient findings, M Strict findings, total K
       entries."
-- [ ] Every Lenient/Strict entry in the chapter bodies
+- [x] Every Lenient/Strict entry in the chapter bodies
       (§3–§10) is represented in the Summary; every
       Summary row has a corresponding chapter-body
       entry. Bidirectional consistency is verified.
-- [ ] The task's commit message lists every §10
+- [x] The task's commit message lists every §10
       correction made during the verification phase
       and notes whether any body-Summary consistency
       mismatch was caught and corrected.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
 
 ## Decisions
