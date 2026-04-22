@@ -89,6 +89,25 @@ documents rarely exceed 20 levels deep; tags are under 30 bytes) while
 bounding worst-case CPU and memory usage.
 **Tier:** 1
 
+### Hex Escape Security Hardening [completed]
+
+**Description:** The double-quoted scalar lexer applies two security checks to
+hex escapes (`\x`, `\u`, `\U`) that go beyond what YAML 1.2.2 §5.7 requires:
+(1) `quoted.rs:594-606` — the decoded character must be a `c-printable`
+codepoint; non-printable hex-escape sequences are rejected with a parse error;
+(2) `quoted.rs:608-618` — hex escapes that decode to a bidi-override character
+(U+202A–U+202E, U+2066–U+2069) are rejected. Named escapes (`\0`, `\a`, `\b`,
+`\e`, `\N`, etc.) are intentionally exempt from both checks — they produce
+well-known control characters whose semantics are unambiguous. This is a
+deliberate divergence from the spec, recorded as `Strict (security-hardened)`
+in `docs/yaml-spec-conformance.md` entries [59]–[61].
+**Complexity:** Low
+**Comment:** The spec permits any codepoint via hex escapes, but accepting
+arbitrary non-printable or bidi-override codepoints through a YAML file is a
+security risk in LSP and pipeline contexts. Named escapes are exempt because
+their output is predictable; hex escapes are not.
+**Tier:** 1
+
 ### Encoding Detection and Decoding [completed]
 
 **Description:** The `encoding` module implements YAML 1.2 §5.2

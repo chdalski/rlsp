@@ -649,31 +649,34 @@ BNF: `ns-esc-paragraph-separator ::= 'P'`
 
 BNF: `ns-esc-8-bit ::= 'x' ns-hex-digit{2}`
 
-- Classification: Strict
+- Classification: Strict (security-hardened)
 - Spec (§5.7): "Escaped 8-bit Unicode character."
 - Implementation: `rlsp-yaml-parser/src/chars.rs:194` (`decode_escape` — `'x' => decode_hex_escape(input, 1, 2)`); `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` — if the decoded character is not `c-printable`, the escape is rejected with an error
 - Test coverage: `tests/yaml-test-suite/src/G4RS.yaml` (`\x0d\x0a` in hex-esc string); `rlsp-yaml-parser/src/chars.rs:391` (unit test `hex_2digit`)
-- Discrepancy: The spec defines `\xHH` as producing any 8-bit Unicode codepoint, but the implementation rejects `\xHH` forms whose decoded character falls outside `c-printable` (e.g. `\x01`), even though the spec lists `ns-esc-null` (`\0`) as a valid named escape that produces the same non-printable U+0000.
+- Discrepancy: The implementation rejects hex escapes whose decoded character falls outside `c-printable` (`quoted.rs:594-606`); it additionally rejects hex escapes whose decoded character is in the bidi-override range (U+202A–U+202E, U+2066–U+2069) via the bidi-control check at `quoted.rs:608-618`. Named escapes like `\0`, `\a`, `\e`, `\N` are exempt from the c-printable check by design — they produce well-known control characters and are documented as intentional in the source comment at `quoted.rs:594`.
+- Rationale: Source comment at `quoted.rs:594`: "Security: for hex escapes (\x, \u, \U), the decoded character must be a YAML c-printable character. Named escapes (\0, \a, \b, …) produce well-known control chars and are exempt from this check." Source comment at `quoted.rs:608`: "Security: reject bidi override characters produced by numeric escapes (\u and \U can reach the bidi range; \x max is U+00FF)."
 
 ### [60] ns-esc-16-bit
 
 BNF: `ns-esc-16-bit ::= 'u' ns-hex-digit{4}`
 
-- Classification: Strict
+- Classification: Strict (security-hardened)
 - Spec (§5.7): "Escaped 16-bit Unicode character."
 - Implementation: `rlsp-yaml-parser/src/chars.rs:195` (`decode_escape` — `'u' => decode_hex_escape(input, 1, 4)`); same non-printable rejection applies via `rlsp-yaml-parser/src/lexer/quoted.rs:596–605`
 - Test coverage: `tests/yaml-test-suite/src/G4RS.yaml` (`☺`); `rlsp-yaml-parser/src/chars.rs:392` (unit test `hex_4digit`)
-- Discrepancy: The spec defines `\uHHHH` as producing any 16-bit Unicode codepoint, but the implementation rejects `\uHHHH` forms whose decoded character is not `c-printable`.
+- Discrepancy: The implementation rejects hex escapes whose decoded character falls outside `c-printable` (`quoted.rs:594-606`); it additionally rejects hex escapes whose decoded character is in the bidi-override range (U+202A–U+202E, U+2066–U+2069) via the bidi-control check at `quoted.rs:608-618`. Named escapes like `\0`, `\a`, `\e`, `\N` are exempt from the c-printable check by design — they produce well-known control characters and are documented as intentional in the source comment at `quoted.rs:594`.
+- Rationale: Source comment at `quoted.rs:594`: "Security: for hex escapes (\x, \u, \U), the decoded character must be a YAML c-printable character. Named escapes (\0, \a, \b, …) produce well-known control chars and are exempt from this check." Source comment at `quoted.rs:608`: "Security: reject bidi override characters produced by numeric escapes (\u and \U can reach the bidi range; \x max is U+00FF)."
 
 ### [61] ns-esc-32-bit
 
 BNF: `ns-esc-32-bit ::= 'U' ns-hex-digit{8}`
 
-- Classification: Strict
+- Classification: Strict (security-hardened)
 - Spec (§5.7): "Escaped 32-bit Unicode character."
 - Implementation: `rlsp-yaml-parser/src/chars.rs:196` (`decode_escape` — `'U' => decode_hex_escape(input, 1, 8)`); same non-printable rejection applies via `rlsp-yaml-parser/src/lexer/quoted.rs:596–605`
 - Test coverage: `rlsp-yaml-parser/src/chars.rs:393` (unit test `hex_8digit`); `rlsp-yaml-parser/src/chars.rs:394` (unit test `high_plane_codepoint`)
-- Discrepancy: The spec defines `\UHHHHHHHH` as producing any 32-bit Unicode codepoint, but the implementation rejects `\UHHHHHHHH` forms whose decoded character is not `c-printable`.
+- Discrepancy: The implementation rejects hex escapes whose decoded character falls outside `c-printable` (`quoted.rs:594-606`); it additionally rejects hex escapes whose decoded character is in the bidi-override range (U+202A–U+202E, U+2066–U+2069) via the bidi-control check at `quoted.rs:608-618`. Named escapes like `\0`, `\a`, `\e`, `\N` are exempt from the c-printable check by design — they produce well-known control characters and are documented as intentional in the source comment at `quoted.rs:594`.
+- Rationale: Source comment at `quoted.rs:594`: "Security: for hex escapes (\x, \u, \U), the decoded character must be a YAML c-printable character. Named escapes (\0, \a, \b, …) produce well-known control chars and are exempt from this check." Source comment at `quoted.rs:608`: "Security: reject bidi override characters produced by numeric escapes (\u and \U can reach the bidi range; \x max is U+00FF)."
 
 ### [62] c-ns-esc-char
 
@@ -2116,13 +2119,13 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## Summary
 
-9 Lenient findings, 3 Strict findings, total 12 entries.
+9 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 12 entries.
 
 | Spec production | Classification | Source file:line | Discrepancy (one sentence) | Test coverage |
 |---|---|---|---|---|
-| §5 [59] `ns-esc-8-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\xHH` as producing any 8-bit Unicode codepoint, but the implementation rejects `\xHH` forms whose decoded character falls outside `c-printable`. | `tests/yaml-test-suite/src/G4RS.yaml` |
-| §5 [60] `ns-esc-16-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\uHHHH` as producing any 16-bit Unicode codepoint, but the implementation rejects `\uHHHH` forms whose decoded character is not `c-printable`. | `tests/yaml-test-suite/src/G4RS.yaml` |
-| §5 [61] `ns-esc-32-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\UHHHHHHHH` as producing any 32-bit Unicode codepoint, but the implementation rejects `\UHHHHHHHH` forms whose decoded character is not `c-printable`. | `rlsp-yaml-parser/src/chars.rs:393–394` |
+| §5 [59] `ns-esc-8-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
+| §5 [60] `ns-esc-16-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
+| §5 [61] `ns-esc-32-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `rlsp-yaml-parser/src/chars.rs:393–394` |
 | §6 [92] `c-named-tag-handle` | Lenient | `rlsp-yaml-parser/src/event_iter/properties.rs:285–293` | The spec's `ns-word-char` production excludes `'_'`, but `is_valid_tag_handle` accepts `'_'` as a valid character in named tag handle names. | `rlsp-yaml-parser/src/event_iter/properties.rs:482–490` |
 | §7 [154] `ns-s-implicit-yaml-key(c)` | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs:1077–1093` | The spec requires rejecting an implicit key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | no direct test for the 1024-character limit |
 | §7 [155] `c-s-implicit-json-key(c)` | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` | The spec requires rejecting an implicit JSON-like key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | no direct test for the 1024-character limit |

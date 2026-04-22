@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-22)
 **Created:** 2026-04-22
 
 # Reclassify hex-escape security hardening as deliberate divergence ([59], [60], [61])
@@ -106,7 +106,7 @@ a bug" from "strict because the project chose to be."
 
 - [x] Task 1 — extend the conformance doc's Methodology with the
       `Strict (security-hardened)` sub-class and Rationale field
-- [ ] Task 2 — reclassify [59], [60], [61] and update their Discrepancy
+- [x] Task 2 — reclassify [59], [60], [61] and update their Discrepancy
       text to cover both rejection layers; update Summary table and
       headline; update feature-log
 
@@ -154,7 +154,7 @@ Discrepancy text to cover the bidi-control layer, add Rationale lines
 citing the source comments, update the Summary table, and note the
 project convention in the feature-log.
 
-- [ ] Update the §5 [59] `ns-esc-8-bit` entry:
+- [x] Update the §5 [59] `ns-esc-8-bit` entry:
       - Change Classification from `Strict` to `Strict
         (security-hardened)`.
       - Expand the Discrepancy line to cover BOTH rejection layers:
@@ -173,11 +173,11 @@ project convention in the feature-log.
         `\a`, `\e`, `\N` are exempt from the c-printable check by
         design; this is documented in the source comment at
         `quoted.rs:594`.
-- [ ] Update the §5 [60] `ns-esc-16-bit` entry: same reclassification,
+- [x] Update the §5 [60] `ns-esc-16-bit` entry: same reclassification,
       same Discrepancy expansion, same Rationale addition.
-- [ ] Update the §5 [61] `ns-esc-32-bit` entry: same reclassification,
+- [x] Update the §5 [61] `ns-esc-32-bit` entry: same reclassification,
       same Discrepancy expansion, same Rationale addition.
-- [ ] Update the `## Summary` table:
+- [x] Update the `## Summary` table:
       - The three entries stay in the table (they are still
         divergences from the spec, just deliberate ones).
       - **Rewrite the Classification cell of rows [59], [60], [61]
@@ -192,13 +192,13 @@ project convention in the feature-log.
         Strict (security-hardened) findings, total 12 entries." The
         intent is that the "still to fix" Strict count and the
         "deliberate divergence" Strict count are visibly separated.
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md`: add an entry (or
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md`: add an entry (or
       extend an existing encoding/security entry) documenting the
       hex-escape security hardening as a deliberate divergence from
       YAML 1.2.2 §5.7. Cite the two source locations
       (`quoted.rs:594-606` and `quoted.rs:608-618`) and note that
       named escapes are exempt by design.
-- [ ] Remove the stale follow-up queue entry. In
+- [x] Remove the stale follow-up queue entry. In
       `.ai/memory/project_followup_plans.md`, delete the
       `[Strict] Hex escape codepoint validation ([59], [60], [61])`
       bullet — the item was filed as remediation work but this plan
@@ -207,9 +207,9 @@ project convention in the feature-log.
       `chars.rs`") is also inaccurate (actual rejection is at
       `lexer/quoted.rs:594-618`); removing the whole entry resolves
       both issues.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run clean.
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run clean.
 
 ## Decisions
 
