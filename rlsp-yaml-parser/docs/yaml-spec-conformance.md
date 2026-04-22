@@ -137,11 +137,10 @@ BNF: `nb-json ::= x09 | [x20-x10FFFF]`
 
 BNF: `c-byte-order-mark ::= xFEFF`
 
-- Classification: Strict
+- Classification: Conformant
 - Spec (§5.2): "If a character stream begins with a byte order mark, the character encoding will be taken to be as indicated by the byte order mark. Otherwise, the stream must begin with an ASCII character. […] Byte order marks may appear at the start of any document, however all documents in the same stream must use the same character encoding. To allow for JSON compatibility, byte order marks are also allowed inside quoted scalars."
-- Implementation: `rlsp-yaml-parser/src/lines.rs:115–127` (BOM stripped from first line only — `is_first == true` guard); `rlsp-yaml-parser/src/encoding.rs:88–96` (`decode` handles BOM at byte-stream level, before parsing); `rlsp-yaml-parser/src/lexer/plain.rs:103–106` (mid-stream BOM in a plain-scalar suffix is treated as an error)
-- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`decode_bom_stripping` cases `utf8_bom`, `utf16_le_bom`; `parse_events_accepts_bom_at_stream_start`; `parse_events_rejects_bom_mid_stream`)
-- Discrepancy: The spec permits a BOM at the start of any document within a multi-document stream, but the implementation only strips the BOM on the first line of input (`is_first == true`); a BOM at the start of the second or subsequent document is treated as an invalid character.
+- Implementation: `rlsp-yaml-parser/src/encoding.rs:88–96` (`decode` handles BOM at byte-stream level, before parsing); `rlsp-yaml-parser/src/lines.rs:292–303` (`signal_document_boundary()` strips a leading BOM from the already-primed next line at document-prefix positions); `rlsp-yaml-parser/src/lexer.rs:141` (calls `signal_document_boundary()` from `skip_blank_lines_between_docs()`); `rlsp-yaml-parser/src/event_iter/step.rs:64–79` (BOM inside document body after `---` or mid-stream is rejected as invalid)
+- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`decode_bom_stripping` cases `utf8_bom`, `utf16_le_bom`; `parse_events_accepts_bom_at_stream_start`; `parse_events_accepts_bom_immediately_after_document_end_marker`; `parse_events_accepts_bom_after_doc_end_then_blank_lines`; `parse_events_accepts_bom_after_doc_end_then_comment`; `parse_events_accepts_multiple_docs_each_with_bom`; `parse_events_rejects_bom_mid_scalar_regression`; `parse_events_bom_after_directives_end_marker_is_error`; `parse_events_rejects_double_bom_at_document_prefix`); `rlsp-yaml-parser/src/lines.rs` (`bom_stripped_after_document_boundary_signal`; `signal_document_boundary_strips_bom_from_primed_next_line`; `bom_stripped_line_offset_correct_after_boundary_signal`)
 
 ### [4] c-sequence-entry
 
@@ -1945,11 +1944,10 @@ BNF: `seq-space(n,BLOCK-OUT) ::= l+block-sequence(n-1)` / `seq-space(n,BLOCK-IN)
 
 BNF: `l-document-prefix ::= c-byte-order-mark? l-comment*`
 
-- Classification: Strict
+- Classification: Conformant
 - Spec (§9.1.1): "A document may be preceded by a prefix specifying the character encoding and optional comment lines. Note that all documents in a stream must use the same character encoding. However it is valid to re-specify the encoding using a byte order mark for each document in the stream."
-- Implementation: `rlsp-yaml-parser/src/lines.rs:115–127` — BOM (`U+FEFF`) is stripped only when processing the first line of the input (`is_first=true`); a BOM at the start of a second or later document is preserved as data in the `Line::content` field. `rlsp-yaml-parser/src/event_iter/step.rs:917–930` — a BOM in document body is rejected as an invalid character (`"invalid character U+FEFF in document"`). `rlsp-yaml-parser/src/event_iter/directives.rs:33–63` — `consume_preamble_between_docs` processes comments but has no BOM-skipping path.
-- Test coverage: `rlsp-yaml-parser/tests/smoke/stream.rs` (stream start/end); `rlsp-yaml-parser/src/lines.rs:751–783` (unit tests: BOM stripped from first line only); no yaml-test-suite case exercises inter-document BOM
-- Discrepancy: The spec permits an optional BOM at the start of each document in the stream; the parser strips BOM only at byte offset 0 (stream start) and rejects a BOM at the start of any subsequent document.
+- Implementation: `rlsp-yaml-parser/src/lines.rs:292–303` (`signal_document_boundary()` strips a leading BOM from the already-primed next line at document-prefix positions, implementing the optional `c-byte-order-mark?` at the start of each document); `rlsp-yaml-parser/src/lexer.rs:141` (calls `signal_document_boundary()` from `skip_blank_lines_between_docs()`); `rlsp-yaml-parser/src/event_iter/directives.rs:33–63` (`consume_preamble_between_docs` processes the `l-comment*` portion of the prefix)
+- Test coverage: `rlsp-yaml-parser/tests/encoding.rs` (`parse_events_accepts_bom_immediately_after_document_end_marker`; `parse_events_accepts_bom_after_doc_end_then_blank_lines`; `parse_events_accepts_bom_after_doc_end_then_comment`; `parse_events_accepts_multiple_docs_each_with_bom`; `load_multidoc_with_bom_between_docs_produces_correct_ast`); `rlsp-yaml-parser/src/lines.rs` (`bom_stripped_after_document_boundary_signal`; `signal_document_boundary_strips_bom_from_primed_next_line`)
 
 ### [203] c-directives-end
 
@@ -2027,11 +2025,10 @@ BNF: `l-any-document ::= l-directive-document | l-explicit-document | l-bare-doc
 
 BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix+ l-document-prefix* l-any-document? ) | c-byte-order-mark | l-comment | l-explicit-document )*`
 
-- Classification: Strict
+- Classification: Conformant
 - Spec (§9.2): "A YAML stream consists of zero or more documents. Subsequent documents require some sort of separation marker line. If a document is not terminated by a document end marker line, then the following document must begin with a directives end marker line. […] A sequence of bytes is a well-formed stream if, taken as a whole, it complies with the above l-yaml-stream production."
-- Implementation: `rlsp-yaml-parser/src/event_iter/base.rs:491–514` — state machine: `BeforeStream` → emits `StreamStart`; `BetweenDocs` → `step_between_docs`; `InDocument` → `step_in_document`; `Done` → emits nothing. The stream structure (prefix, documents, suffixes, inter-doc comments) is correctly dispatched. The `c-byte-order-mark` alternative in the outer `(...)*` loop of `l-yaml-stream` is not implemented: a BOM between documents is rejected as an invalid character by `step.rs:917–930` rather than silently consumed.
-- Test coverage: `rlsp-yaml-parser/tests/smoke/stream.rs` (full stream lifecycle: empty, whitespace, multi-doc, comment-only); `rlsp-yaml-parser/tests/conformance/stream.rs` (yaml-test-suite parameterized suite)
-- Discrepancy: The spec permits a bare `c-byte-order-mark` as a separator alternative between documents in the outer loop of `l-yaml-stream`; the parser rejects a BOM occurring after the first line of the stream as an invalid character.
+- Implementation: `rlsp-yaml-parser/src/event_iter/base.rs:491–514` — state machine: `BeforeStream` → emits `StreamStart`; `BetweenDocs` → `step_between_docs`; `InDocument` → `step_in_document`; `Done` → emits nothing. The stream structure (prefix, documents, suffixes, inter-doc comments) is correctly dispatched. The `c-byte-order-mark` alternative in the outer `(...)*` loop of `l-yaml-stream` is handled via `signal_document_boundary()` in `lines.rs:292–303`, called from `skip_blank_lines_between_docs()` in `lexer.rs:141` — a BOM at a document-prefix position is stripped before the stream parser sees it.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/stream.rs` (full stream lifecycle: empty, whitespace, multi-doc, comment-only); `rlsp-yaml-parser/tests/conformance/stream.rs` (yaml-test-suite parameterized suite); `rlsp-yaml-parser/tests/encoding.rs` (`parse_events_accepts_bom_immediately_after_document_end_marker`; `parse_events_accepts_multiple_docs_each_with_bom`; `parse_events_bom_after_directives_end_marker_is_error`)
 
 ## §10
 
@@ -2111,11 +2108,10 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## Summary
 
-9 Lenient findings, 6 Strict findings, total 15 entries.
+9 Lenient findings, 3 Strict findings, total 12 entries.
 
 | Spec production | Classification | Source file:line | Discrepancy (one sentence) | Test coverage |
 |---|---|---|---|---|
-| §5 [3] `c-byte-order-mark` | Strict | `rlsp-yaml-parser/src/lines.rs:115–127` | The spec permits a BOM at the start of any document within a multi-document stream, but the parser strips BOM only at byte offset 0 (stream start) and rejects a BOM at the start of any subsequent document. | `rlsp-yaml-parser/tests/encoding.rs` (`parse_events_rejects_bom_mid_stream`) |
 | §5 [59] `ns-esc-8-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\xHH` as producing any 8-bit Unicode codepoint, but the implementation rejects `\xHH` forms whose decoded character falls outside `c-printable`. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [60] `ns-esc-16-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\uHHHH` as producing any 16-bit Unicode codepoint, but the implementation rejects `\uHHHH` forms whose decoded character is not `c-printable`. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [61] `ns-esc-32-bit` | Strict | `rlsp-yaml-parser/src/lexer/quoted.rs:596–605` | The spec defines `\UHHHHHHHH` as producing any 32-bit Unicode codepoint, but the implementation rejects `\UHHHHHHHH` forms whose decoded character is not `c-printable`. | `rlsp-yaml-parser/src/chars.rs:393–394` |
@@ -2124,8 +2120,6 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 | §7 [155] `c-s-implicit-json-key(c)` | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` | The spec requires rejecting an implicit JSON-like key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | no direct test for the 1024-character limit |
 | §8 [192] `ns-l-block-map-implicit-entry(n)` | Lenient | `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` | The spec requires rejecting an implicit block mapping key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | `tests/yaml-test-suite/src/S3PD.yaml` |
 | §8 [193] `ns-s-block-map-implicit-key` | Lenient | `rlsp-yaml-parser/src/event_iter/block/mapping.rs:214–259` | The spec requires rejecting an implicit block mapping key exceeding 1024 Unicode characters; only the single-line restriction is enforced. | `tests/yaml-test-suite/src/S3PD.yaml` |
-| §9 [202] `l-document-prefix` | Strict | `rlsp-yaml-parser/src/lines.rs:115–127` | The spec permits an optional BOM at the start of each document in the stream; the parser strips BOM only at byte offset 0 (stream start) and rejects a BOM at the start of any subsequent document. | `rlsp-yaml-parser/src/lines.rs:751–783` |
-| §9 [211] `l-yaml-stream` | Strict | `rlsp-yaml-parser/src/event_iter/step.rs:917–930` | The spec permits a bare `c-byte-order-mark` as a separator alternative between documents in the outer loop of `l-yaml-stream`; the parser rejects a BOM occurring after the first line of the stream as an invalid character. | `rlsp-yaml-parser/tests/smoke/stream.rs` |
 | §10 JSON Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches; the parser does not implement this rule, passing all untagged plain scalars through as `tag: None`. | no direct test |
 | §10 JSON Schema — untagged collections | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs` / `block/` (no resolution) | The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`; the parser always emits `tag: None` for untagged collections. | `rlsp-yaml-parser/tests/smoke/tags.rs:557,651` |
 | §10 Core Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The Core schema (the recommended default) requires plain scalars to be matched against an extended regex table; the parser does not implement this rule, yielding `tag: None` for all untagged plain scalars. | no direct test |

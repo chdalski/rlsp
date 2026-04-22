@@ -94,7 +94,11 @@ bounding worst-case CPU and memory usage.
 **Description:** The `encoding` module implements YAML 1.2 §5.2
 encoding detection. Detects UTF-8, UTF-16 LE/BE, and UTF-32 LE/BE
 via BOM and null-byte heuristic. Decodes any supported encoding to
-UTF-8 and strips the BOM. Normalizes CRLF and lone CR to LF.
+UTF-8 and strips the BOM at stream start. Normalizes CRLF and lone CR
+to LF. BOM is also accepted (stripped) at document-prefix positions
+within a multi-document stream, implementing the `c-byte-order-mark?`
+component of `l-document-prefix` (§9.1.1) via `signal_document_boundary()`
+in `lines.rs`.
 **Complexity:** Medium
 **Comment:** UTF-32 BOM detection precedes UTF-16 because the UTF-32
 LE BOM (`FF FE 00 00`) is a prefix of the UTF-16 LE BOM (`FF FE`).

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-22)
 **Created:** 2026-04-22
 
 # Fix BOM between documents ([3], [202], [211])
@@ -75,7 +75,7 @@ classifications flip from Strict to Conformant.
       and add tests
 Commit: `b997fd959d44cc4006781d3079a0a1b8dfdceadb`
 
-- [ ] Task 2 — update conformance doc and verify
+- [x] Task 2 — update conformance doc and verify
       yaml-test-suite baseline
 
 ## Non-Goals
