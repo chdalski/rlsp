@@ -101,7 +101,7 @@ classifications flip from Lenient to Conformant.
 
 - [x] Task 1 — enforce 1024-char limit for block-context implicit
       keys ([192], [193])
-- [ ] Task 2 — enforce 1024-char limit for flow-context implicit
+- [x] Task 2 — enforce 1024-char limit for flow-context implicit
       keys ([154], [155])
 - [ ] Task 3 — update conformance doc, feature-log, follow-up queue
 
@@ -170,41 +170,43 @@ implicit-key handling so flow-context implicit keys ([154] and
 [155]) that exceed 1024 characters produce a parse error, while
 explicit `?`-introduced flow keys remain unrestricted.
 
-- [ ] In `rlsp-yaml-parser/src/event_iter/flow.rs:1077-1093` (the
+- [x] In `rlsp-yaml-parser/src/event_iter/flow.rs:1077-1093` (the
       `:`-separator branch for single-pair flow-sequence implicit
       keys), add a Unicode-character length check that counts from
       the start of the key to the `:` indicator. Emit a parse
       error if the count exceeds 1024. Error position is the `:`
       indicator.
-- [ ] Extend the same check to the flow-mapping implicit-key
+- [x] Extend the same check to the flow-mapping implicit-key
       handling elsewhere in `flow.rs` so both [154] (plain
       YAML-key) and [155] (quoted JSON-key) paths are covered.
       The implementor identifies the exact call-sites during
       implementation; the plan does not prescribe a single line
       range beyond 1077-1093 because the JSON-key path at lines
       1359-1620 may also need the check.
-- [ ] The error message follows the project style and cites the
+- [x] The error message follows the project style and cites the
       spec section: `"implicit flow key exceeds 1024 Unicode
       characters (YAML 1.2 §7.4.3)"` (exact wording at
       implementor's discretion as long as it names the limit, the
       count unit, and the spec section).
-- [ ] The check does NOT apply to explicit `?`-introduced flow
+- [x] The check does NOT apply to explicit `?`-introduced flow
       keys. A flow `{? long-key : value}` with an explicit-key
       indicator longer than 1024 characters continues to parse
       successfully.
-- [ ] Regression tests mirror Task 1's cases (a)–(e) adapted to
+- [x] Regression tests mirror Task 1's cases (a)–(e) adapted to
       flow context: both `{key: value}` flow-mapping and `[key:
       value]` flow-sequence single-pair forms, plus one test each
       for the quoted-key (JSON-key) path.
-- [ ] The existing single-line restriction (the `"implicit flow
+- [x] The existing single-line restriction (the `"implicit flow
       mapping key must be on a single line"` error at
       `flow.rs:1089`) is unchanged; both restrictions now fire at
       the same point but the single-line check fires first.
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance` passes;
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test -p rlsp-yaml-parser --test conformance` passes;
       record flips in the commit message as in Task 1.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run
       clean.
+
+Commit: `9b17e164cbf493255b23db646afd25120b88cb86`
 
 ### Task 3: Update conformance doc, feature-log, and follow-up queue
 

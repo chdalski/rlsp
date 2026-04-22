@@ -181,6 +181,15 @@ impl<'input> EventIter<'input> {
         // Suppresses the DK4H single-line check for the corresponding `:` separator —
         // explicit keys in flow sequences may span multiple lines (YAML 1.2 §7.4.2).
         let mut explicit_key_in_seq = false;
+        // Byte offset in `self.input` where the current implicit flow key started.
+        // Updated whenever a scalar (plain or quoted) starts in a key position.
+        // Used to slice `self.input[key_start_byte..colon_byte]` and count chars for
+        // the YAML 1.2 §7.4.3 1024-char limit check.
+        let mut key_start_byte: usize = first_line.pos.byte_offset;
+        // Set when a `?` explicit-key indicator introduced the current key (either
+        // in a flow sequence or a flow mapping).  The 1024-char limit does not apply
+        // to explicit keys (YAML 1.2 §7.4.3 applies only to implicit keys).
+        let mut key_is_explicit: bool = false;
 
         // Stack for tracking open flow collections (nested via explicit iteration,
         // not recursion — security requirement).
@@ -812,6 +821,8 @@ impl<'input> EventIter<'input> {
                 // on the same line as the comma (or any subsequent line) without
                 // triggering the multi-line implicit key error.
                 last_token_line = cur_base_pos.line;
+                // Reset explicit-key tracking; the next entry starts fresh.
+                key_is_explicit = false;
 
                 continue 'outer;
             }
@@ -865,6 +876,24 @@ impl<'input> EventIter<'input> {
                 // We capture it before touching the lexer buffer.
                 let remaining: &'input str = &cur_content[pos_in_line..];
                 let cur_abs_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+
+                // Record key start for §7.4.3 when this quoted scalar is in a key
+                // position. The opening quote is included in the lookahead count.
+                let is_key_pos = matches!(
+                    flow_stack.last(),
+                    Some(
+                        FlowFrame::Mapping {
+                            phase: FlowMappingPhase::Key,
+                            ..
+                        } | FlowFrame::Sequence {
+                            has_value: false,
+                            ..
+                        }
+                    )
+                );
+                if is_key_pos {
+                    key_start_byte = cur_abs_pos.byte_offset;
+                }
 
                 // Consume the current line from the buffer and replace it with
                 // a synthetic line that starts at the quote character.  The
@@ -1032,6 +1061,9 @@ impl<'input> EventIter<'input> {
                     {
                         *explicit_key_pending = true;
                     }
+                    // Mark the upcoming key as explicit so the 1024-char length
+                    // check is suppressed (YAML 1.2 §7.4.3 limits implicit keys only).
+                    key_is_explicit = true;
                     pos_in_line += 1;
                     continue 'outer;
                 }
@@ -1089,6 +1121,33 @@ impl<'input> EventIter<'input> {
                             message: "implicit flow mapping key must be on a single line".into(),
                         }));
                     }
+                    // YAML 1.2 §7.4.3: implicit flow keys are limited to 1024 Unicode
+                    // characters. The check applies to both [154] plain YAML-key and
+                    // [155] quoted JSON-key forms. Explicit `?`-introduced keys are exempt.
+                    let has_key = matches!(
+                        flow_stack.last(),
+                        Some(
+                            FlowFrame::Sequence {
+                                has_value: true,
+                                ..
+                            } | FlowFrame::Mapping {
+                                has_value: true,
+                                ..
+                            }
+                        )
+                    );
+                    if has_key && !key_is_explicit && !explicit_key_in_seq {
+                        let colon_byte = cur_base_pos.byte_offset + pos_in_line;
+                        if self.input[key_start_byte..colon_byte].chars().count() > 1024 {
+                            let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(Error {
+                                pos: colon_pos,
+                                message: "implicit flow key exceeds 1024 Unicode characters (YAML 1.2 §7.4.3)".into(),
+                            }));
+                        }
+                    }
+                    key_is_explicit = false;
                     explicit_key_in_seq = false;
                     if let Some(frame) = flow_stack.last_mut() {
                         match frame {
@@ -1537,6 +1596,25 @@ impl<'input> EventIter<'input> {
                             start: scalar_start,
                             end: scalar_end,
                         };
+
+                        // Record key start for the §7.4.3 1024-char check when this
+                        // scalar is in a key position (Mapping Key phase, or the first
+                        // scalar in a Sequence entry).
+                        let is_key_pos = matches!(
+                            flow_stack.last(),
+                            Some(
+                                FlowFrame::Mapping {
+                                    phase: FlowMappingPhase::Key,
+                                    ..
+                                } | FlowFrame::Sequence {
+                                    has_value: false,
+                                    ..
+                                }
+                            )
+                        );
+                        if is_key_pos {
+                            key_start_byte = scalar_start.byte_offset;
+                        }
 
                         events.push((
                             Event::Scalar {

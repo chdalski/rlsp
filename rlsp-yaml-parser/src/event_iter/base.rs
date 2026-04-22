@@ -16,6 +16,7 @@ impl<'input> EventIter<'input> {
     pub(crate) fn new(input: &'input str) -> Self {
         Self {
             lexer: Lexer::new(input),
+            input,
             state: IterState::BeforeStream,
             queue: VecDeque::new(),
             coll_stack: Vec::new(),

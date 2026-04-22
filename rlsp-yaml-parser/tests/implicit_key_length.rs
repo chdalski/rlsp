@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Tests for the YAML 1.2 §8.2.2 / §7.4.3 limit: implicit mapping keys must
-// not exceed 1024 Unicode characters.  This file covers block-context only;
-// flow-context tests live in a separate file (Task 2).
+// not exceed 1024 Unicode characters.  Groups A–G cover block context;
+// groups H–N cover flow context (both §7.4.3 [154] and [155]).
 
 #![expect(
     clippy::unwrap_used,
@@ -312,5 +312,432 @@ fn g1_multiline_flow_collection_key_fires_multiline_error_not_length_error() {
     assert!(
         !msg.contains("1024"),
         "length-limit error must not fire for a short multi-line key; got: {msg}"
+    );
+}
+
+// ===========================================================================
+// Group H: Flow-mapping boundary acceptance — plain ASCII keys
+//          `{key: value}` form (YAML 1.2 §7.4.3 [154])
+// ===========================================================================
+
+#[test]
+fn h1_flow_map_1024_ascii_plain_key_parses_successfully() {
+    let key = "a".repeat(1024);
+    let input = format!("{{{key}: value}}");
+    assert!(
+        parses_clean(&input),
+        "1024-char ASCII key in flow mapping should parse without error"
+    );
+}
+
+#[test]
+fn h2_flow_map_1025_ascii_plain_key_produces_error() {
+    let key = "a".repeat(1025);
+    let input = format!("{{{key}: value}}");
+    assert!(
+        has_parse_error(&input),
+        "1025-char ASCII key in flow mapping should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+    assert!(
+        msg.contains("§7.4.3"),
+        "error message should cite §7.4.3, got: {msg}"
+    );
+}
+
+#[test]
+fn h3_flow_map_short_key_parses_successfully() {
+    assert!(
+        parses_clean("{k: v}"),
+        "short key in flow mapping should parse"
+    );
+}
+
+#[test]
+fn h4_flow_map_empty_key_parses_successfully() {
+    assert!(
+        parses_clean("{: v}"),
+        "empty (zero-char) key in flow mapping should parse"
+    );
+}
+
+// ===========================================================================
+// Group I: Flow-sequence single-pair boundary — plain ASCII keys
+//          `[key: value]` form (YAML 1.2 §7.4.3 [154])
+// ===========================================================================
+
+#[test]
+fn i1_flow_seq_1024_ascii_plain_key_parses_successfully() {
+    let key = "a".repeat(1024);
+    let input = format!("[{key}: value]");
+    assert!(
+        parses_clean(&input),
+        "1024-char ASCII key in flow sequence should parse without error"
+    );
+}
+
+#[test]
+fn i2_flow_seq_1025_ascii_plain_key_produces_error() {
+    let key = "a".repeat(1025);
+    let input = format!("[{key}: value]");
+    assert!(
+        has_parse_error(&input),
+        "1025-char ASCII key in flow sequence should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+    assert!(
+        msg.contains("§7.4.3"),
+        "error message should cite §7.4.3, got: {msg}"
+    );
+}
+
+#[test]
+fn i3_flow_seq_short_key_parses_successfully() {
+    assert!(
+        parses_clean("[k: v]"),
+        "short key in flow sequence should parse"
+    );
+}
+
+// ===========================================================================
+// Group J: Flow context Unicode / multibyte boundary
+// ===========================================================================
+
+#[test]
+fn j1_flow_map_1024_two_byte_chars_parse_successfully() {
+    let key = "é".repeat(1024);
+    let input = format!("{{{key}: value}}");
+    assert!(
+        parses_clean(&input),
+        "1024 two-byte chars in flow mapping should parse — limit is chars not bytes"
+    );
+}
+
+#[test]
+fn j2_flow_map_1025_two_byte_chars_produce_error() {
+    let key = "é".repeat(1025);
+    let input = format!("{{{key}: value}}");
+    assert!(
+        has_parse_error(&input),
+        "1025 two-byte chars in flow mapping should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+}
+
+#[test]
+fn j3_flow_seq_1024_three_byte_chars_parse_successfully() {
+    let key = "中".repeat(1024);
+    let input = format!("[{key}: value]");
+    assert!(
+        parses_clean(&input),
+        "1024 three-byte chars in flow sequence should parse"
+    );
+}
+
+#[test]
+fn j4_flow_seq_1025_four_byte_chars_produce_error() {
+    let key = "\u{1D11E}".repeat(1025);
+    let input = format!("[{key}: value]");
+    assert!(
+        has_parse_error(&input),
+        "1025 four-byte chars in flow sequence should produce a parse error"
+    );
+}
+
+// ===========================================================================
+// Group K: Quoted (JSON-key) implicit keys in flow context
+//          Both `{"key": value}` (double-quoted) and `{'key': value}` (single-quoted)
+//          forms (YAML 1.2 §7.4.3 [155]).
+//
+// Quote-inclusive measurement: `"content"` counts as len(content)+2 chars.
+// A 1022-content-char quoted key has a 1024-char slice — at the limit.
+// A 1023-content-char quoted key has a 1025-char slice — over the limit.
+// ===========================================================================
+
+#[test]
+fn k1_flow_map_double_quoted_key_at_limit_parses_successfully() {
+    let content = "a".repeat(1022);
+    let input = format!("{{\"{content}\": value}}");
+    assert!(
+        parses_clean(&input),
+        "double-quoted key with 1024-char slice in flow mapping should parse"
+    );
+}
+
+#[test]
+fn k2_flow_map_double_quoted_key_over_limit_produces_error() {
+    let content = "a".repeat(1023);
+    let input = format!("{{\"{content}\": value}}");
+    assert!(
+        has_parse_error(&input),
+        "double-quoted key with 1025-char slice in flow mapping should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+}
+
+#[test]
+fn k3_flow_map_single_quoted_key_at_limit_parses_successfully() {
+    let content = "a".repeat(1022);
+    let input = format!("{{'{content}': value}}");
+    assert!(
+        parses_clean(&input),
+        "single-quoted key with 1024-char slice in flow mapping should parse"
+    );
+}
+
+#[test]
+fn k4_flow_map_single_quoted_key_over_limit_produces_error() {
+    let content = "a".repeat(1023);
+    let input = format!("{{'{content}': value}}");
+    assert!(
+        has_parse_error(&input),
+        "single-quoted key with 1025-char slice in flow mapping should produce a parse error"
+    );
+}
+
+#[test]
+fn k5_flow_seq_double_quoted_key_at_limit_parses_successfully() {
+    let content = "a".repeat(1022);
+    let input = format!("[\"{content}\": value]");
+    assert!(
+        parses_clean(&input),
+        "double-quoted key with 1024-char slice in flow sequence should parse"
+    );
+}
+
+#[test]
+fn k6_flow_seq_double_quoted_key_over_limit_produces_error() {
+    let content = "a".repeat(1023);
+    let input = format!("[\"{content}\": value]");
+    assert!(
+        has_parse_error(&input),
+        "double-quoted key with 1025-char slice in flow sequence should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+}
+
+#[test]
+fn k7_flow_seq_single_quoted_key_at_limit_parses_successfully() {
+    let content = "a".repeat(1022);
+    let input = format!("['{content}': value]");
+    assert!(
+        parses_clean(&input),
+        "single-quoted key with 1024-char slice in flow sequence should parse"
+    );
+}
+
+#[test]
+fn k8_flow_seq_single_quoted_key_over_limit_produces_error() {
+    let content = "a".repeat(1023);
+    let input = format!("['{content}': value]");
+    assert!(
+        has_parse_error(&input),
+        "single-quoted key with 1025-char slice in flow sequence should produce a parse error"
+    );
+}
+
+// ===========================================================================
+// Group L: Explicit key exemption in flow context
+// ===========================================================================
+
+#[test]
+fn l1_explicit_key_in_flow_mapping_with_long_key_parses_successfully() {
+    // `{? <1025-char key>: value}` — explicit `?` form is not subject to the limit.
+    let key = "a".repeat(1025);
+    let input = format!("{{? {key}: value}}");
+    assert!(
+        parses_clean(&input),
+        "explicit '?' key in flow mapping with >1024 chars should not be limited"
+    );
+}
+
+#[test]
+fn l2_explicit_key_in_flow_sequence_with_long_key_parses_successfully() {
+    // `[? <1025-char key>: value]` — explicit `?` form is not subject to the limit.
+    let key = "a".repeat(1025);
+    let input = format!("[? {key}: value]");
+    assert!(
+        parses_clean(&input),
+        "explicit '?' key in flow sequence with >1024 chars should not be limited"
+    );
+}
+
+// ===========================================================================
+// Group M: Error position and message in flow context
+// ===========================================================================
+
+#[test]
+fn m1_flow_map_error_position_points_to_colon_indicator() {
+    // `{` at byte 0, 1025-char key at bytes 1–1025, `:` at byte 1026.
+    let key = "a".repeat(1025);
+    let input = format!("{{{key}: value}}");
+    let err = parse_events(&input)
+        .find_map(std::result::Result::err)
+        .expect("expected a parse error");
+    assert_eq!(
+        err.pos.byte_offset, 1026,
+        "error byte_offset should point to the ':' at byte 1026"
+    );
+    assert_eq!(
+        err.pos.column, 1026,
+        "error column should point to the ':' at column 1026"
+    );
+}
+
+#[test]
+fn m2_flow_seq_error_position_points_to_colon_indicator() {
+    // `[` at byte 0, 1025-char key at bytes 1–1025, `:` at byte 1026.
+    let key = "a".repeat(1025);
+    let input = format!("[{key}: value]");
+    let err = parse_events(&input)
+        .find_map(std::result::Result::err)
+        .expect("expected a parse error");
+    assert_eq!(
+        err.pos.byte_offset, 1026,
+        "error byte_offset should point to the ':' at byte 1026"
+    );
+}
+
+#[test]
+fn m3_flow_error_message_contains_expected_substrings() {
+    let key = "a".repeat(1025);
+    let input = format!("{{{key}: value}}");
+    let msg = first_error_message(&input).expect("expected a parse error");
+    assert!(
+        msg.contains("1024 Unicode characters"),
+        "error message should contain '1024 Unicode characters', got: {msg}"
+    );
+    assert!(
+        msg.contains("§7.4.3"),
+        "error message should cite §7.4.3, got: {msg}"
+    );
+}
+
+// ===========================================================================
+// Group N: Integration via load() in flow context
+// ===========================================================================
+
+#[test]
+fn n1_load_flow_map_overlong_key_returns_err() {
+    let key = "a".repeat(1025);
+    let input = format!("{{{key}: value}}");
+    let result = load(&input);
+    assert!(
+        result.is_err(),
+        "load() should return Err for overlong implicit key in flow mapping"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("1024"),
+        "load() error should mention '1024', got: {err_msg}"
+    );
+}
+
+#[test]
+fn n2_load_flow_seq_overlong_key_returns_err() {
+    let key = "a".repeat(1025);
+    let input = format!("[{key}: value]");
+    let result = load(&input);
+    assert!(
+        result.is_err(),
+        "load() should return Err for overlong implicit key in flow sequence"
+    );
+}
+
+// ===========================================================================
+// Group H (continued): Interaction with other flow-context restrictions
+// ===========================================================================
+
+#[test]
+fn h5_flow_seq_single_line_restriction_fires_before_length_check() {
+    // Key `aaa` ends on line 1; `:` is on line 2 with no continuation on line 2.
+    // The single-line restriction must fire, not the length-limit error.
+    let input = "[aaa\n: v]";
+    assert!(
+        has_parse_error(input),
+        "flow-seq key with colon on a different line should produce a parse error"
+    );
+    let msg = first_error_message(input).expect("expected an error");
+    assert!(
+        msg.contains("single line"),
+        "error should mention 'single line', got: {msg}"
+    );
+    assert!(
+        !msg.contains("1024"),
+        "length-limit error must not fire for a short key; got: {msg}"
+    );
+}
+
+#[test]
+fn h6_second_key_in_multi_entry_flow_map_also_checked() {
+    // First key is short and valid; second key is overlong — the error must fire.
+    let long_key = "a".repeat(1025);
+    let input = format!("{{ok: v, {long_key}: v}}");
+    assert!(
+        has_parse_error(&input),
+        "overlong second key in multi-entry flow mapping should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+}
+
+#[test]
+fn h7_nested_flow_map_inner_overlong_key_caught() {
+    // Outer key is short; inner key is overlong — the inner error must fire.
+    let long_key = "a".repeat(1025);
+    let input = format!("{{outer: {{{long_key}: v}}}}");
+    assert!(
+        has_parse_error(&input),
+        "overlong key in nested flow mapping should produce a parse error"
+    );
+    let msg = first_error_message(&input).unwrap();
+    assert!(
+        msg.contains("1024"),
+        "error message should mention '1024', got: {msg}"
+    );
+}
+
+#[test]
+fn h8_flow_seq_overlong_multiline_key_fires_single_line_error_not_length_error() {
+    // A 1025-char key ends on line 1; `:` is on line 2.
+    // The single-line restriction must fire before the length check so the error
+    // message cites the line restriction, not the character limit.
+    let key = "a".repeat(1025);
+    let input = format!("[{key}\n: v]");
+    assert!(
+        has_parse_error(&input),
+        "overlong flow-seq key with colon on next line should produce a parse error"
+    );
+    let msg = first_error_message(&input).expect("expected an error");
+    assert!(
+        msg.contains("single line"),
+        "error should cite the single-line restriction, got: {msg}"
+    );
+    assert!(
+        !msg.contains("1024"),
+        "length-limit error must not fire when single-line restriction fires first; got: {msg}"
     );
 }

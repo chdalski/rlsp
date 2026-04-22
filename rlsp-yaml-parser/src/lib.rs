@@ -62,6 +62,9 @@ pub fn parse_events(input: &str) -> impl Iterator<Item = Result<(Event<'_>, Span
 /// Lazy iterator that yields events by walking a [`Lexer`].
 struct EventIter<'input> {
     lexer: Lexer<'input>,
+    /// Full input slice, used for byte-range-to-char-count conversion in the
+    /// flow implicit-key length check (YAML 1.2 §7.4.3).
+    input: &'input str,
     state: IterState,
     /// Queued events to emit before resuming normal state dispatch.
     ///
