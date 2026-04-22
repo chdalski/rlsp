@@ -45,11 +45,12 @@ Every production, regardless of classification, uses this format:
 
 BNF: <exact BNF from the spec>
 
-- Classification: Conformant | Lenient | Strict | Not Implemented | Not Applicable (descriptive) | Not Applicable (meta-notation)
+- Classification: Conformant | Lenient | Strict | Strict (security-hardened) | Not Implemented | Not Applicable (descriptive) | Not Applicable (meta-notation)
 - Spec (§X.Y): "<verbatim quote of the normative text>"
 - Implementation: <crate>/<path>:<line-range>
 - Test coverage: <yaml-test-suite case ID(s)> | <project test path> | no direct test
 - Discrepancy: <one-sentence gap — Lenient/Strict only; omit for other classes>
+- Rationale: <one-sentence reference to the source comment, feature-log entry, or design doc that marks the divergence as deliberate — required for Strict (security-hardened); optional for other classifications>
 ```
 
 For `Not Applicable` entries: the Spec quote is still required (it establishes that the
@@ -63,6 +64,7 @@ the explicit text `(no implementation obligation)`.
 | requires X | does X | **Conformant** |
 | requires X | does X **and also** Y (Y not permitted) | **Lenient** |
 | permits X | rejects X | **Strict** |
+| permits X | rejects X as part of a documented security policy | **Strict (security-hardened)** |
 | requires X | does not implement X | **Not Implemented** |
 | entry has no normative obligation on the implementation (purely descriptive) | — | **Not Applicable (descriptive)** |
 | entry is meta-notation for the grammar itself | — | **Not Applicable (meta-notation)** |
@@ -70,6 +72,12 @@ the explicit text `(no implementation obligation)`.
 The classification is the output of applying these rules to the spec quote and the
 implementation fact recorded in the entry. A classification that does not follow from
 the recorded evidence is a reviewer-rejectable defect.
+
+`Strict (security-hardened)` is a sub-class of `Strict`: the parser still rejects
+spec-permitted input, but the rejection is deliberate and documented rather than
+incidental or undecided. A `Rationale` citation is mandatory for this sub-class —
+without it the security motivation is unverifiable. Plain `Strict` (no marker) means
+the rejection is a bug or the deliberateness has not yet been assessed.
 
 ### Test-Coverage Conventions
 

@@ -104,7 +104,7 @@ a bug" from "strict because the project chose to be."
 
 ## Steps
 
-- [ ] Task 1 — extend the conformance doc's Methodology with the
+- [x] Task 1 — extend the conformance doc's Methodology with the
       `Strict (security-hardened)` sub-class and Rationale field
 - [ ] Task 2 — reclassify [59], [60], [61] and update their Discrepancy
       text to cover both rejection layers; update Summary table and
@@ -118,32 +118,34 @@ Extend the conformance document's Methodology section to define the new
 sub-class, its required Rationale line, and the decision-rule row. This
 task adds the vocabulary; Task 2 uses it.
 
-- [ ] In `rlsp-yaml-parser/docs/yaml-spec-conformance.md`, update the
+- [x] In `rlsp-yaml-parser/docs/yaml-spec-conformance.md`, update the
       Strict Entry Format classification list to include `Strict
       (security-hardened)` as a valid value.
-- [ ] Add a new field `Rationale` to the entry format, required for
+- [x] Add a new field `Rationale` to the entry format, required for
       `Strict (security-hardened)` entries: a one-sentence reference to
       the source comment, feature-log entry, or design doc that marks
       the divergence as deliberate. Document that `Rationale` is
       optional for other classifications and mandatory for
       security-hardened ones.
-- [ ] Extend the decision-rule table with a new row:
+- [x] Extend the decision-rule table with a new row:
       `permits X | rejects X as part of a documented security policy`
       → `Strict (security-hardened)`.
-- [ ] Add a short prose note immediately under the decision-rule
+- [x] Add a short prose note immediately under the decision-rule
       table explaining that `Strict (security-hardened)` is a
       sub-class of Strict, not a separate top-level class — it still
       means the parser rejects spec-permitted input, but the rejection
       is deliberate and the code or documentation explains why. Without
       a Rationale citation, a classifier cannot use this sub-class.
-- [ ] The existing `Strict` classification (without the sub-class
+- [x] The existing `Strict` classification (without the sub-class
       marker) continues to mean "rejects spec-permitted input,
       unintentional or undecided" — the default Strict is a bug until
       proven otherwise.
-- [ ] No other entries in the doc are modified in this task — only
+- [x] No other entries in the doc are modified in this task — only
       the Methodology section.
-- [ ] `cargo test --workspace` passes (sanity — nothing changed).
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run clean.
+- [x] `cargo test --workspace` passes (sanity — nothing changed).
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run clean.
+
+Commit: `985127e907e2176057a7762dd408c43633553acb`
 
 ### Task 2: Reclassify [59], [60], [61] and update Summary
 
