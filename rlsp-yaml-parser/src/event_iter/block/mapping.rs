@@ -158,6 +158,19 @@ impl<'input> EventIter<'input> {
             unreachable!("consume_mapping_entry: implicit key line has no value indicator")
         };
 
+        // YAML 1.2 §8.2.2: implicit block keys are limited to 1024 Unicode
+        // characters. Count chars in trimmed[..colon_offset] (includes quotes
+        // for quoted keys). Error position is the `:` indicator.
+        if trimmed[..colon_offset].chars().count() > 1024 {
+            let colon_pos = Pos {
+                byte_offset: line_pos.byte_offset + leading_spaces + colon_offset,
+                line: line_pos.line,
+                column: line_pos.column + leading_spaces + trimmed[..colon_offset].chars().count(),
+            };
+            self.lexer.consume_line();
+            return ConsumedMapping::ImplicitKeyTooLongError { pos: colon_pos };
+        }
+
         let key_content = trimmed[..colon_offset].trim_end_matches([' ', '\t']);
         let after_colon = &trimmed[colon_offset + 1..]; // skip ':'
         let value_content = after_colon.trim_start_matches([' ', '\t']);
@@ -758,6 +771,14 @@ impl<'input> EventIter<'input> {
                     message:
                         "block node cannot appear as inline value; use a new line or a flow node"
                             .into(),
+                }));
+            }
+            ConsumedMapping::ImplicitKeyTooLongError { pos } => {
+                self.state = IterState::Done;
+                return StepResult::Yield(Err(Error {
+                    pos,
+                    message: "implicit block key exceeds 1024 Unicode characters (YAML 1.2 §8.2.2)"
+                        .into(),
                 }));
             }
         }

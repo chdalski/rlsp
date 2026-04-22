@@ -99,7 +99,7 @@ classifications flip from Lenient to Conformant.
 
 ## Steps
 
-- [ ] Task 1 — enforce 1024-char limit for block-context implicit
+- [x] Task 1 — enforce 1024-char limit for block-context implicit
       keys ([192], [193])
 - [ ] Task 2 — enforce 1024-char limit for flow-context implicit
       keys ([154], [155])
@@ -115,25 +115,25 @@ a parse error, while explicit (`?`-introduced) keys remain
 unrestricted. Add regression tests covering both boundary and
 multi-byte codepoint cases.
 
-- [ ] In `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88-300`
+- [x] In `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88-300`
       (`consume_mapping_entry`, implicit-key branch), after
       `find_value_indicator_offset` returns the `:` byte offset,
       compute the Unicode-character count of the key slice
       (`trimmed[..offset].chars().count()`) and emit a parse error
       if it exceeds 1024. The error position is the `:` indicator
       (same as the single-line error at `flow.rs:1089`).
-- [ ] The error message matches the project's style and cites the
+- [x] The error message matches the project's style and cites the
       spec section: `"implicit block key exceeds 1024 Unicode
       characters (YAML 1.2 §8.2.2)"` (exact wording at implementor's
       discretion as long as it names the limit, the count unit, and
       the spec section).
-- [ ] The check applies to BOTH plain (YAML-key) and quoted
+- [x] The check applies to BOTH plain (YAML-key) and quoted
       (JSON-key) implicit keys in block context, covering both
       [192] and [193].
-- [ ] The check does NOT apply to explicit `?`-introduced keys.
+- [x] The check does NOT apply to explicit `?`-introduced keys.
       A `? ` key with >1024 characters continues to parse
       successfully.
-- [ ] Regression tests in `rlsp-yaml-parser/tests/` (new file or
+- [x] Regression tests in `rlsp-yaml-parser/tests/` (new file or
       appropriate existing file) cover:
       (a) 1024-ASCII-character implicit key → parses successfully
       (b) 1025-ASCII-character implicit key → parse error with the
@@ -148,18 +148,20 @@ multi-byte codepoint cases.
           multi-document or nested input where an over-length
           implicit key is nested several levels deep still produces
           the correct error at the correct position.
-- [ ] The existing single-line restriction at the same code path is
+- [x] The existing single-line restriction at the same code path is
       unchanged; both restrictions now fire at the same point but
       the single-line check fires first (a multi-line implicit key
       is malformed regardless of length).
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test -p rlsp-yaml-parser --test conformance` passes;
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test -p rlsp-yaml-parser --test conformance` passes;
       if any yaml-test-suite cases flip status, record the
       before/after counts in the commit message and update the
       conformance-test baseline only if the flip is correct (a case
       that previously passed leniently now correctly errors).
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run
       clean.
+
+Commit: `b052f44ba0696de93f1807b41d668e2a6951aa86`
 
 ### Task 2: Enforce 1024-char limit for flow-context implicit keys
 
