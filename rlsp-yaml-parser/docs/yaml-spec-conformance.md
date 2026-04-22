@@ -1577,7 +1577,367 @@ BNF: `ns-flow-node(n,c) ::= c-ns-alias-node | ns-flow-content(n,c) | ( c-ns-prop
 
 ## §8
 
-<!-- Task 8: draft §8 entries -->
+### [162] c-b-block-header(t)
+
+BNF: `c-b-block-header(t) ::= ( ( c-indentation-indicator c-chomping-indicator(t) ) | ( c-chomping-indicator(t) c-indentation-indicator ) ) s-b-comment`
+
+- Classification: Conformant
+- Spec (§8.1.1): "Block scalars are controlled by a few indicators given in a header preceding the content itself. This header is followed by a non-content line break with an optional comment. This is the only case where a comment must not be followed by additional comment lines."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:506–625` (`parse_block_header` parses either order of indicators, validates that only optional whitespace + comment follow, and enforces no trailing non-comment content)
+- Test coverage: `tests/yaml-test-suite/src/P2AD.yaml` (Spec Example 8.1. Block Scalar Header); `rlsp-yaml-parser/src/lexer/block.rs:726–759` (unit tests H-A: header parsing happy path)
+
+### [163] c-indentation-indicator
+
+BNF: `c-indentation-indicator ::= [x31-x39]    # 1-9`
+
+- Classification: Conformant
+- Spec (§8.1.1.1): "If a block scalar has an indentation indicator, then the content indentation level of the block scalar is equal to the indentation level of the block scalar plus the integer value of the indentation indicator character. […] It is an error if any non-empty line does not begin with a number of spaces greater than or equal to the content indentation level."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:579–593` (digits `'1'..='9'` map to explicit indent; `'0'` is rejected as invalid)
+- Test coverage: `tests/yaml-test-suite/src/R4YG.yaml` (Spec Example 8.2. Block Indentation Indicator); `rlsp-yaml-parser/src/lexer/block.rs:870–893` (unit tests H-E: explicit indent indicator)
+
+### [164] c-chomping-indicator(t)
+
+BNF: `c-chomping-indicator(STRIP) ::= '-'` / `c-chomping-indicator(KEEP) ::= '+'` / `c-chomping-indicator(CLIP) ::= ""`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "Stripping is specified by the '-' chomping indicator. […] Clipping is the default behavior used if no explicit chomping indicator is specified. […] Keeping is specified by the '+' chomping indicator."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:538–565` (`'+'` → `Chomp::Keep`; `'-'` → `Chomp::Strip`; absent → `Chomp::Clip` default at line 624)
+- Test coverage: `tests/yaml-test-suite/src/A6F9.yaml` (Spec Example 8.4. Chomping Final Line Break); `rlsp-yaml-parser/src/lexer/block.rs:726–759` (unit tests H-A)
+
+### [165] b-chomped-last(t)
+
+BNF: `b-chomped-last(STRIP) ::= b-non-content | <end-of-input>` / `b-chomped-last(CLIP) ::= b-as-line-feed | <end-of-input>` / `b-chomped-last(KEEP) ::= b-as-line-feed | <end-of-input>`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "The interpretation of the final line break of a block scalar is controlled by the chomping indicator specified in the block scalar header."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:640–670` (`apply_chomping`: Strip removes the trailing `\n`; Clip preserves exactly one `\n`; Keep preserves the `\n` from the last content line before appending blank lines)
+- Test coverage: `tests/yaml-test-suite/src/A6F9.yaml` (Spec Example 8.4. Chomping Final Line Break); `rlsp-yaml-parser/src/lexer/block.rs:836–865` (unit tests H-D)
+
+### [166] l-chomped-empty(n,t)
+
+BNF: `l-chomped-empty(n,STRIP) ::= l-strip-empty(n)` / `l-chomped-empty(n,CLIP) ::= l-strip-empty(n)` / `l-chomped-empty(n,KEEP) ::= l-keep-empty(n)`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "The interpretation of the trailing empty lines following a block scalar is also controlled by the chomping indicator specified in the block scalar header."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:640–670` (`apply_chomping`: Strip and Clip discard trailing blank lines (`trailing_blank_count` ignored); Keep appends `trailing_blank_count` newlines via `repeat_n`)
+- Test coverage: `tests/yaml-test-suite/src/F8F9.yaml` (Spec Example 8.5. Chomping Trailing Lines); `tests/yaml-test-suite/src/K858.yaml` (Spec Example 8.6. Empty Scalar Chomping)
+
+### [167] l-strip-empty(n)
+
+BNF: `l-strip-empty(n) ::= ( s-indent-less-or-equal(n) b-non-content )* l-trail-comments(n)?`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "The interpretation of the trailing empty lines following a block scalar is also controlled by the chomping indicator specified in the block scalar header."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:246–260` (whitespace-only blank lines below `content_indent` are consumed and counted in `trailing_newlines`; they are discarded by `apply_chomping` for Strip/Clip)
+- Test coverage: `tests/yaml-test-suite/src/F8F9.yaml` (Spec Example 8.5. Chomping Trailing Lines)
+
+### [168] l-keep-empty(n)
+
+BNF: `l-keep-empty(n) ::= l-empty(n,BLOCK-IN)* l-trail-comments(n)?`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "Keeping is specified by the '+' chomping indicator. In this case, the final line break and any trailing empty lines are considered to be part of the scalar's content."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:246–260` (blank lines counted into `trailing_newlines`); `rlsp-yaml-parser/src/lexer/block.rs:664–668` (`Chomp::Keep` branch in `apply_chomping` appends all trailing newlines)
+- Test coverage: `tests/yaml-test-suite/src/F8F9.yaml` (Spec Example 8.5. Chomping Trailing Lines); `tests/yaml-test-suite/src/K858.yaml` (Spec Example 8.6. Empty Scalar Chomping)
+
+### [169] l-trail-comments(n)
+
+BNF: `l-trail-comments(n) ::= s-indent-less-than(n) c-nb-comment-text b-comment l-comment*`
+
+- Classification: Conformant
+- Spec (§8.1.1.2): "Explicit comment lines may follow the trailing empty lines. To prevent ambiguity, the first such comment line must be less indented than the block scalar content. Additional comment lines, if any, are not so restricted. This is the only case where the indentation of comment lines is constrained."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:246–260` (dedented non-whitespace terminates the scalar; comments at dedented positions are not consumed as scalar content — they terminate via the non-whitespace dedent branch); trailing comment extraction via `rlsp-yaml-parser/src/lexer/comment.rs`
+- Test coverage: `tests/yaml-test-suite/src/F8F9.yaml` (Spec Example 8.5. Chomping Trailing Lines — comment lines following block scalar)
+
+### [170] c-l+literal(n)
+
+BNF: `c-l+literal(n) ::= c-literal c-b-block-header(t) l-literal-content(n+m,t)`
+
+- Classification: Conformant
+- Spec (§8.1.2): "The literal style is denoted by the '|' indicator. It is the simplest, most restricted and most readable scalar style."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:41–274` (`try_consume_literal_block_scalar`: dispatches on `|`, parses header via `parse_block_header`, collects literal content lines)
+- Test coverage: `tests/yaml-test-suite/src/M9B4.yaml` (Spec Example 8.7. Literal Scalar); `tests/yaml-test-suite/src/DWX9.yaml` (Spec Example 8.8. Literal Content); `rlsp-yaml-parser/tests/smoke/block_scalars.rs`
+
+### [171] l-nb-literal-text(n)
+
+BNF: `l-nb-literal-text(n) ::= l-empty(n,BLOCK-IN)* s-indent(n) nb-char+`
+
+- Classification: Conformant
+- Spec (§8.1.2): "Inside literal scalars, all (indented) characters are considered to be content, including white space characters. Note that all line break characters are normalized."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:181–244` (content line detection: `indent >= content_indent` and non-empty after stripping indent prefix; leading blank lines (`l-empty`) accumulated before first real content)
+- Test coverage: `tests/yaml-test-suite/src/DWX9.yaml` (Spec Example 8.8. Literal Content); `rlsp-yaml-parser/src/lexer/block.rs:798–817` (unit tests H-C: clip content collection)
+
+### [172] b-nb-literal-next(n)
+
+BNF: `b-nb-literal-next(n) ::= b-as-line-feed l-nb-literal-text(n)`
+
+- Classification: Conformant
+- Spec (§8.1.2): "Inside literal scalars, all (indented) characters are considered to be content, including white space characters. Note that all line break characters are normalized."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:228–244` (each content line adds `\n` via `out.push('\n')` when `break_type != BreakType::Eof`, then the next line is collected as literal text)
+- Test coverage: `tests/yaml-test-suite/src/DWX9.yaml` (Spec Example 8.8. Literal Content)
+
+### [173] l-literal-content(n,t)
+
+BNF: `l-literal-content(n,t) ::= ( l-nb-literal-text(n) b-nb-literal-next(n)* b-chomped-last(t) )? l-chomped-empty(n,t)`
+
+- Classification: Conformant
+- Spec (§8.1.2): "In addition, empty lines are not folded, though final line breaks and trailing empty lines are chomped."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:117–274` (full content collection loop); `rlsp-yaml-parser/src/lexer/block.rs:263–267` (`apply_chomping` call applying the chomping rules to the assembled content)
+- Test coverage: `tests/yaml-test-suite/src/DWX9.yaml` (Spec Example 8.8. Literal Content); `tests/yaml-test-suite/src/A6F9.yaml` (Spec Example 8.4. Chomping Final Line Break)
+
+### [174] c-l+folded(n)
+
+BNF: `c-l+folded(n) ::= c-folded c-b-block-header(t) l-folded-content(n+m,t)`
+
+- Classification: Conformant
+- Spec (§8.1.3): "The folded style is denoted by the '>' indicator. It is similar to the literal style; however, folded scalars are subject to line folding."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:288–351` (`try_consume_folded_block_scalar`: dispatches on `>`, parses header via `parse_block_header`, collects folded content via `collect_folded_lines`)
+- Test coverage: `tests/yaml-test-suite/src/G992.yaml` (Spec Example 8.9. Folded Scalar); `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.10–8.13. Folded Lines — Final Empty Lines); `rlsp-yaml-parser/tests/smoke/folded_scalars.rs`
+
+### [175] s-nb-folded-text(n)
+
+BNF: `s-nb-folded-text(n) ::= s-indent(n) ns-char nb-char*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Folding allows long lines to be broken anywhere a single space character separates two non-space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:412–413` (`is_content_line`: content line requires `indent >= content_indent` and non-whitespace content — `!after_indent.trim_end_matches(' ').is_empty()`)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.10. Folded Lines)
+
+### [176] l-nb-folded-lines(n)
+
+BNF: `l-nb-folded-lines(n) ::= s-nb-folded-text(n) ( b-l-folded(n,BLOCK-IN) s-nb-folded-text(n) )*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Folding allows long lines to be broken anywhere a single space character separates two non-space characters."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:415–452` (equally-indented non-spaced consecutive content lines are joined with a single space `out.push(' ')`)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.10. Folded Lines)
+
+### [177] s-nb-spaced-text(n)
+
+BNF: `s-nb-spaced-text(n) ::= s-indent(n) s-white nb-char*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Lines starting with white space characters (more-indented lines) are not folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:419–421` (`is_more_indented`: `next.indent > content_indent || after_indent.starts_with([' ', '\t'])` — lines whose content after the indent prefix starts with whitespace are classified as spaced/more-indented and not folded)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.11. More Indented Lines)
+
+### [178] b-l-spaced(n)
+
+BNF: `b-l-spaced(n) ::= b-as-line-feed l-empty(n,BLOCK-IN)*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Lines starting with white space characters (more-indented lines) are not folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:423–435` (when preceding or current line is `is_more_indented`, the break is preserved as `\n` rather than folded to a space)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.11. More Indented Lines)
+
+### [179] l-nb-spaced-lines(n)
+
+BNF: `l-nb-spaced-lines(n) ::= s-nb-spaced-text(n) ( b-l-spaced(n) s-nb-spaced-text(n) )*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Lines starting with white space characters (more-indented lines) are not folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:415–452` (spaced lines: consecutive `is_more_indented` content lines joined with `\n`, not space)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.11. More Indented Lines)
+
+### [180] l-nb-same-lines(n)
+
+BNF: `l-nb-same-lines(n) ::= l-empty(n,BLOCK-IN)* ( l-nb-folded-lines(n) | l-nb-spaced-lines(n) )`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Line breaks and empty lines separating folded and more-indented lines are also not folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:415–452` (empty lines between content blocks accumulated in `trailing_newlines`; when a content line is reached after blank lines, the classification of the surrounding lines determines folding vs preservation)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.12. Empty Separation Lines)
+
+### [181] l-nb-diff-lines(n)
+
+BNF: `l-nb-diff-lines(n) ::= l-nb-same-lines(n) ( b-as-line-feed l-nb-same-lines(n) )*`
+
+- Classification: Conformant
+- Spec (§8.1.3): "Line breaks and empty lines separating folded and more-indented lines are also not folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:415–452` (the full `collect_folded_lines` loop handles sequences of same-group blocks separated by blank lines, with `trailing_newlines + extra` logic for transitions between folded and spaced groups)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.12. Empty Separation Lines)
+
+### [182] l-folded-content(n,t)
+
+BNF: `l-folded-content(n,t) ::= ( l-nb-diff-lines(n) b-chomped-last(t) )? l-chomped-empty(n,t)`
+
+- Classification: Conformant
+- Spec (§8.1.3): "The final line break and trailing empty lines if any, are subject to chomping and are never folded."
+- Implementation: `rlsp-yaml-parser/src/lexer/block.rs:340–351` (`collect_folded_lines` returns `(content, trailing_newlines)`; `apply_chomping` applies the chomp indicator to the assembled content)
+- Test coverage: `tests/yaml-test-suite/src/7T8X.yaml` (Spec Example 8.13. Final Empty Lines)
+
+### [183] l+block-sequence(n)
+
+BNF: `l+block-sequence(n) ::= ( s-indent(n+1+m) c-l-block-seq-entry(n+1+m) )+`
+
+- Classification: Conformant
+- Spec (§8.2.1): "A block sequence is simply a series of nodes, each denoted by a leading '-' indicator. The '-' indicator must be separated from the node by white space."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:129–218` (`handle_sequence_entry`: opens a new `CollectionEntry::Sequence` when `dash_indent > parent_col`, requiring sequences to be strictly more indented than their enclosing block node)
+- Test coverage: `tests/yaml-test-suite/src/JQ4R.yaml` (Spec Example 8.14. Block Sequence); `rlsp-yaml-parser/tests/smoke/sequences.rs`
+
+### [184] c-l-block-seq-entry(n)
+
+BNF: `c-l-block-seq-entry(n) ::= c-sequence-entry [ lookahead ≠ ns-char ] s-l+block-indented(n,BLOCK-IN)`
+
+- Classification: Conformant
+- Spec (§8.2.1): "A block sequence is simply a series of nodes, each denoted by a leading '-' indicator. The '-' indicator must be separated from the node by white space. This allows '-' to be used as the first character in a plain scalar if followed by a non-space character (e.g. '-42')."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:37–53` (`peek_sequence_entry`: requires the character after `-` to be empty, space, or tab — rejects `-` followed by non-space so that `-42` is a plain scalar, not a sequence entry)
+- Test coverage: `tests/yaml-test-suite/src/W42U.yaml` (Spec Example 8.15. Block Sequence Entry Types); `tests/yaml-test-suite/src/JQ4R.yaml` (Spec Example 8.14. Block Sequence)
+
+### [185] s-l+block-indented(n,c)
+
+BNF: `s-l+block-indented(n,c) ::= ( s-indent(m) ( ns-l-compact-sequence(n+1+m) | ns-l-compact-mapping(n+1+m) ) ) | s-l+block-node(n,c) | ( e-node s-l-comments )`
+
+- Classification: Conformant
+- Spec (§8.2.1): "The entry node may be either completely empty, be a nested block node or use a compact in-line notation. The compact notation may be used when the entry is itself a nested block collection."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:276–487` (`consume_sequence_dash` + `handle_sequence_entry` continuation: inline compact mapping/sequence dispatched via subsequent `step_in_document` calls; empty scalar emitted when no inline content and next line is not more indented)
+- Test coverage: `tests/yaml-test-suite/src/W42U.yaml` (Spec Example 8.15. Block Sequence Entry Types)
+
+### [186] ns-l-compact-sequence(n)
+
+BNF: `ns-l-compact-sequence(n) ::= c-l-block-seq-entry(n) ( s-indent(n) c-l-block-seq-entry(n) )*`
+
+- Classification: Conformant
+- Spec (§8.2.1): "The compact notation may be used when the entry is itself a nested block collection. In this case, both the '-' indicator and the following spaces are considered to be part of the indentation of the nested collection. Note that it is not possible to specify node properties for such a collection."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:129–218` (when a `-` appears as inline content after another `-`, the compact sequence opens at the column of the nested `-`)
+- Test coverage: `tests/yaml-test-suite/src/W42U.yaml` (Spec Example 8.15. Block Sequence Entry Types — compact sequence case)
+
+### [187] l+block-mapping(n)
+
+BNF: `l+block-mapping(n) ::= ( s-indent(n+1+m) ns-l-block-map-entry(n+1+m) )+`
+
+- Classification: Conformant
+- Spec (§8.2.2): "A Block mapping is a series of entries, each presenting a key/value pair."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:361–535` (`handle_mapping_entry`: opens a new `CollectionEntry::Mapping` when not already in a mapping at this indent)
+- Test coverage: `tests/yaml-test-suite/src/TE2A.yaml` (Spec Example 8.16. Block Mappings); `rlsp-yaml-parser/tests/smoke/mappings.rs`
+
+### [188] ns-l-block-map-entry(n)
+
+BNF: `ns-l-block-map-entry(n) ::= c-l-block-map-explicit-entry(n) | ns-l-block-map-implicit-entry(n)`
+
+- Classification: Conformant
+- Spec (§8.2.2): "If the '?' indicator is specified, the optional value node must be specified on a separate line, denoted by the ':' indicator. Note that YAML allows here the same compact in-line notation described above for block sequence entries."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:34–70` (`peek_mapping_entry`: recognises both explicit `?` key and implicit `key: value` forms)
+- Test coverage: `tests/yaml-test-suite/src/5WE3.yaml` (Spec Example 8.17. Explicit Block Mapping Entries); `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries)
+
+### [189] c-l-block-map-explicit-entry(n)
+
+BNF: `c-l-block-map-explicit-entry(n) ::= c-l-block-map-explicit-key(n) ( l-block-map-explicit-value(n) | e-node )`
+
+- Classification: Conformant
+- Spec (§8.2.2): "If the '?' indicator is specified, the optional value node must be specified on a separate line, denoted by the ':' indicator."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:107–151` (explicit key branch: `?` followed by optional inline key content; absent value produces `e-node` / empty scalar)
+- Test coverage: `tests/yaml-test-suite/src/5WE3.yaml` (Spec Example 8.17. Explicit Block Mapping Entries)
+
+### [190] c-l-block-map-explicit-key(n)
+
+BNF: `c-l-block-map-explicit-key(n) ::= c-mapping-key s-l+block-indented(n,BLOCK-OUT)`
+
+- Classification: Conformant
+- Spec (§8.2.2): "If the '?' indicator is specified, the optional value node must be specified on a separate line, denoted by the ':' indicator."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:115–151` (`?` followed by whitespace or end-of-line is parsed as explicit key; inline key content is prepended as a synthetic line for `s-l+block-indented` handling)
+- Test coverage: `tests/yaml-test-suite/src/5WE3.yaml` (Spec Example 8.17. Explicit Block Mapping Entries)
+
+### [191] l-block-map-explicit-value(n)
+
+BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-indented(n,BLOCK-OUT)`
+
+- Classification: Conformant
+- Spec (§8.2.2): "If the '?' indicator is specified, the optional value node must be specified on a separate line, denoted by the ':' indicator."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:536–600` (`consume_explicit_value_line`: a line that is solely a `:` value indicator advances the mapping to Value phase; inline value content is prepended as a synthetic line)
+- Test coverage: `tests/yaml-test-suite/src/5WE3.yaml` (Spec Example 8.17. Explicit Block Mapping Entries)
+
+### [192] ns-l-block-map-implicit-entry(n)
+
+BNF: `ns-l-block-map-implicit-entry(n) ::= ( ns-s-block-map-implicit-key | e-node ) c-l-block-map-implicit-value(n)`
+
+- Classification: Lenient
+- Spec (§8.2.2): "If the '?' indicator is omitted, parsing needs to see past the implicit key, in the same way as in the single key/value pair flow mapping. Hence, such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` (`consume_mapping_entry`: implicit key branch — `find_value_indicator_offset` locates `:` on the same line; key is single-line only; 1024-character limit is NOT enforced)
+- Test coverage: `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries)
+- Discrepancy: The spec requires rejecting an implicit block mapping key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced.
+
+### [193] ns-s-block-map-implicit-key
+
+BNF: `ns-s-block-map-implicit-key ::= c-s-implicit-json-key(BLOCK-KEY) | ns-s-implicit-yaml-key(BLOCK-KEY)`
+
+- Classification: Lenient
+- Spec (§8.2.2): "Hence, such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` (implicit key is extracted from the current line by `find_value_indicator_offset`; both plain (YAML-key) and quoted (JSON-key) forms are handled at `rlsp-yaml-parser/src/event_iter/block/mapping.rs:214–259`)
+- Test coverage: `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries — plain key, quoted key, and null key cases)
+- Discrepancy: The spec requires rejecting an implicit block mapping key exceeding 1024 Unicode characters; only the single-line restriction is enforced.
+
+### [194] c-l-block-map-implicit-value(n)
+
+BNF: `c-l-block-map-implicit-value(n) ::= c-mapping-value ( s-l+block-node(n,BLOCK-OUT) | ( e-node s-l-comments ) )`
+
+- Classification: Conformant
+- Spec (§8.2.2): "In this case, the value may be specified on the same line as the implicit key. Note however that in block mappings the value must never be adjacent to the ':', as this greatly reduces readability and is not required for JSON compatibility (unlike the case in flow mappings). There is no compact notation for in-line values. Also, while both the implicit key and the value following it may be empty, the ':' indicator is mandatory. This prevents a potential ambiguity with multi-line plain scalars."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:260–300` (value content after `: ` / `:\t` is prepended as a synthetic inline line; absent value content produces empty scalar via `e-node` path)
+- Test coverage: `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries)
+
+### [195] ns-l-compact-mapping(n)
+
+BNF: `ns-l-compact-mapping(n) ::= ns-l-block-map-entry(n) ( s-indent(n) ns-l-block-map-entry(n) )*`
+
+- Classification: Conformant
+- Spec (§8.2.2): "A compact in-line notation is also available. This compact notation may be nested inside block sequences and explicit block mapping entries. Note that it is not possible to specify node properties for such a nested mapping."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:361–535` (compact mapping opened when a `key: value` pair appears inline after `-` or after `? ` indicator)
+- Test coverage: `tests/yaml-test-suite/src/V9D5.yaml` (Spec Example 8.19. Compact Block Mappings); `tests/yaml-test-suite/src/W42U.yaml` (Spec Example 8.15. Block Sequence Entry Types — compact mapping case)
+
+### [196] s-l+block-node(n,c)
+
+BNF: `s-l+block-node(n,c) ::= s-l+block-in-block(n,c) | s-l+flow-in-block(n)`
+
+- Classification: Conformant
+- Spec (§8.3): "YAML allows flow nodes to be embedded inside block collections (but not vice-versa). Flow nodes must be indented by at least one more space than the parent block collection. Note that flow nodes may begin on a following line."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:25–` (`step_in_document` dispatches to flow or block handling based on first character of the next line: `[`, `{`, `'`, `"` → flow; `|`, `>` → block scalar; plain/mapping/sequence → block collection)
+- Test coverage: `tests/yaml-test-suite/src/735Y.yaml` (Spec Example 8.20. Block Node Types)
+
+### [197] s-l+flow-in-block(n)
+
+BNF: `s-l+flow-in-block(n) ::= s-separate(n+1,FLOW-OUT) ns-flow-node(n+1,FLOW-OUT) s-l-comments`
+
+- Classification: Conformant
+- Spec (§8.3): "YAML allows flow nodes to be embedded inside block collections (but not vice-versa). Flow nodes must be indented by at least one more space than the parent block collection."
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:388–1620` (flow nodes dispatched from `step_in_document` when first character is a flow indicator; indentation relative to parent enforced by `close_collections_at_or_above`)
+- Test coverage: `tests/yaml-test-suite/src/735Y.yaml` (Spec Example 8.20. Block Node Types — `"flow in block"` case)
+
+### [198] s-l+block-in-block(n,c)
+
+BNF: `s-l+block-in-block(n,c) ::= s-l+block-scalar(n,c) | s-l+block-collection(n,c)`
+
+- Classification: Conformant
+- Spec (§8.3): "The block node's properties may span across several lines. In this case, they must be indented by at least one more space than the block collection, regardless of the indentation of the block collection entries."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:25–` (dispatch: `|` / `>` first character → `try_consume_literal_block_scalar` / `try_consume_folded_block_scalar`; otherwise → block collection handling in `step_in_document`)
+- Test coverage: `tests/yaml-test-suite/src/735Y.yaml` (Spec Example 8.20. Block Node Types); `tests/yaml-test-suite/src/M5C3.yaml` (Spec Example 8.21. Block Scalar Nodes)
+
+### [199] s-l+block-scalar(n,c)
+
+BNF: `s-l+block-scalar(n,c) ::= s-separate(n+1,c) ( c-ns-properties(n+1,c) s-separate(n+1,c) )? ( c-l+literal(n) | c-l+folded(n) )`
+
+- Classification: Conformant
+- Spec (§8.3): "The block node's properties may span across several lines. In this case, they must be indented by at least one more space than the block collection, regardless of the indentation of the block collection entries."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:25–` (tag/anchor properties scanned before `|`/`>` dispatch via `step_in_document` property-handling path; `rlsp-yaml-parser/src/lexer/block.rs:41–351` handles literal and folded)
+- Test coverage: `tests/yaml-test-suite/src/M5C3.yaml` (Spec Example 8.21. Block Scalar Nodes); `tests/yaml-test-suite/src/Z67P.yaml` (Spec Example 8.21. Block Scalar Nodes [1.3])
+
+### [200] s-l+block-collection(n,c)
+
+BNF: `s-l+block-collection(n,c) ::= ( s-separate(n+1,c) c-ns-properties(n+1,c) )? s-l-comments ( seq-space(n,c) | l+block-mapping(n) )`
+
+- Classification: Conformant
+- Spec (§8.3): "Since people perceive the '-' indicator as indentation, nested block sequences may be indented by one less space to compensate, except, of course, if nested inside another block sequence (BLOCK-OUT context versus BLOCK-IN context)."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:120–144` (`seq-space` rule: `CollectionEntry::Mapping(col, MappingPhase::Value, _)` allows a sequence to open at `dash_indent >= col`, implementing the one-less-indent compensation for `BLOCK-OUT` context)
+- Test coverage: `tests/yaml-test-suite/src/57H4.yaml` (Spec Example 8.22. Block Collection Nodes)
+
+### [201] seq-space(n,c)
+
+BNF: `seq-space(n,BLOCK-OUT) ::= l+block-sequence(n-1)` / `seq-space(n,BLOCK-IN) ::= l+block-sequence(n)`
+
+- Classification: Conformant
+- Spec (§8.3): "Since people perceive the '-' indicator as indentation, nested block sequences may be indented by one less space to compensate, except, of course, if nested inside another block sequence (BLOCK-OUT context versus BLOCK-IN context)."
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/sequence.rs:120–144` (`seq-space` is implemented implicitly: when `MappingPhase::Value`, `dash_indent >= col` is accepted (n-1 case); when `CollectionEntry::Sequence`, only `dash_indent > parent_col` opens a new sequence (n case))
+- Test coverage: `tests/yaml-test-suite/src/57H4.yaml` (Spec Example 8.22. Block Collection Nodes); `rlsp-yaml-parser/tests/smoke/sequences.rs`
 
 ## §9
 
