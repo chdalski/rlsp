@@ -130,7 +130,7 @@ BNF: `nb-json ::= x09 | [x20-x10FFFF]`
 
 - Classification: Conformant
 - Spec (§5.1): "To ensure JSON compatibility, YAML processors must allow all non-C0 characters inside quoted scalars. To ensure readability, non-printable characters should be escaped on output, even inside such scalars."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (double-quoted scanner accepts tab and all non-C0 characters inside quoted scalars; `is_c_printable` gating applies to escape-decoded characters only, not to literal stream characters)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (double-quoted scanner accepts tab and all non-C0 characters inside quoted scalars; `is_c_printable` gating applies to escape-decoded characters only, not to literal stream characters)
 - Test coverage: `tests/yaml-test-suite/src/G4RS.yaml` (spec example 2.17 exercising tab and Unicode inside double-quoted scalars)
 
 ### [3] c-byte-order-mark
@@ -284,7 +284,7 @@ BNF: `c-double-quote ::= '"'`
 
 - Classification: Conformant
 - Spec (§5.3): "\"\"\" (x22, double quote) surrounds a double-quoted flow scalar."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (`try_consume_double_quoted`)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (`try_consume_double_quoted`)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
 
 ### [20] c-directive
@@ -1084,7 +1084,7 @@ BNF: `nb-double-char ::= c-ns-esc-char | ( nb-json - c-escape - c-double-quote )
 
 - Classification: Conformant
 - Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators. This is the only style capable of expressing arbitrary strings, by using '\\' escape sequences. This comes at the cost of having to escape the '\\' and '\"' characters."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (`try_consume_double_quoted` — `memchr2` scans for `\` and `"`, escape sequences decoded via `decode_escape`; all `nb-json` characters other than `\` and `"` pass through unmodified)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (`try_consume_double_quoted` — `memchr2` scans for `\` and `"`, escape sequences decoded via `decode_escape`; all `nb-json` characters other than `\` and `"` pass through unmodified)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [108] ns-double-char
@@ -1093,7 +1093,7 @@ BNF: `ns-double-char ::= nb-double-char - s-white`
 
 - Classification: Conformant
 - Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators. This is the only style capable of expressing arbitrary strings, by using '\\' escape sequences."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (whitespace trimming of leading/trailing spaces on each continuation line implements `ns-double-char` in multi-line context; single-space folding via `s-flow-folded`)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (whitespace trimming of leading/trailing spaces on each continuation line implements `ns-double-char` in multi-line context; single-space folding via `s-flow-folded`)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [109] c-double-quoted(n,c)
@@ -1102,7 +1102,7 @@ BNF: `c-double-quoted(n,c) ::= c-double-quote nb-double-text(n,c) c-double-quote
 
 - Classification: Conformant
 - Spec (§7.3.1): "The double-quoted style is specified by surrounding '\"' indicators."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (`try_consume_double_quoted` — opening `"` detected, body consumed via `nb-double-text` logic, closing `"` required)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (`try_consume_double_quoted` — opening `"` detected, body consumed via `nb-double-text` logic, closing `"` required)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys)
 
 ### [110] nb-double-text(n,c)
@@ -1111,7 +1111,7 @@ BNF: `nb-double-text(n,FLOW-OUT) ::= nb-double-multi-line(n)` / `nb-double-text(
 
 - Classification: Conformant
 - Spec (§7.3.1): "Double-quoted scalars are restricted to a single line when contained inside an implicit key."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line path taken when a closing `"` is not found on the first line; implicit-key context enforces single-line via the block and flow parsers' key-detection logic)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (multi-line path taken when a closing `"` is not found on the first line; implicit-key context enforces single-line via the block and flow parsers' key-detection logic)
 - Test coverage: `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys — single-line); `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines — multi-line)
 
 ### [111] nb-double-one-line
@@ -1120,7 +1120,7 @@ BNF: `nb-double-one-line ::= nb-double-char*`
 
 - Classification: Conformant
 - Spec (§7.3.1): "Double-quoted scalars are restricted to a single line when contained inside an implicit key."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (single-line fast path: scanning stops at closing `"` without consuming a newline)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (single-line fast path: scanning stops at closing `"` without consuming a newline)
 - Test coverage: `tests/yaml-test-suite/src/LQZ7.yaml` (Spec Example 7.4. Double Quoted Implicit Keys)
 
 ### [112] s-double-escaped(n)
@@ -1129,7 +1129,7 @@ BNF: `s-double-escaped(n) ::= s-white* c-escape b-non-content l-empty(n,FLOW-IN)
 
 - Classification: Conformant
 - Spec (§7.3.1): "It is also possible to escape the line break character. In this case, the escaped line break is excluded from the content and any trailing white space characters that precede the escaped line break are preserved."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (escaped-newline handling: `\` at end of line with optional trailing whitespace before it is consumed, newline is excluded from the value, leading whitespace on the next line is preserved)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (escaped-newline handling: `\` at end of line with optional trailing whitespace before it is consumed, newline is excluded from the value, leading whitespace on the next line is preserved)
 - Test coverage: `tests/yaml-test-suite/src/NP9H.yaml` (Spec Example 7.5. Double Quoted Line Breaks)
 
 ### [113] s-double-break(n)
@@ -1138,7 +1138,7 @@ BNF: `s-double-break(n) ::= s-double-escaped(n) | s-flow-folded(n)`
 
 - Classification: Conformant
 - Spec (§7.3.1): "In a multi-line double-quoted scalar, line breaks are subject to flow line folding, which discards any trailing white space characters."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (both branches: `\\\n` escape handled as `s-double-escaped`; plain newline handled as `s-flow-folded` — trailing whitespace stripped, leading whitespace stripped on next line, blank lines become literal `\n`)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (both branches: `\\\n` escape handled as `s-double-escaped`; plain newline handled as `s-flow-folded` — trailing whitespace stripped, leading whitespace stripped on next line, blank lines become literal `\n`)
 - Test coverage: `tests/yaml-test-suite/src/NP9H.yaml` (Spec Example 7.5. Double Quoted Line Breaks); `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [114] nb-ns-double-in-line
@@ -1147,7 +1147,7 @@ BNF: `nb-ns-double-in-line ::= ( s-white* ns-double-char )*`
 
 - Classification: Conformant
 - Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (inner-line scanning: whitespace between non-whitespace characters preserved; trailing whitespace excluded when line ends)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (inner-line scanning: whitespace between non-whitespace characters preserved; trailing whitespace excluded when line ends)
 - Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [115] s-double-next-line(n)
@@ -1156,7 +1156,7 @@ BNF: `s-double-next-line(n) ::= s-double-break(n) ( ns-double-char nb-ns-double-
 
 - Classification: Conformant
 - Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line loop: each new line after a break is checked for non-space content; empty lines accumulated as folded newlines)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (multi-line loop: each new line after a break is checked for non-space content; empty lines accumulated as folded newlines)
 - Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [116] nb-double-multi-line(n)
@@ -1165,7 +1165,7 @@ BNF: `nb-double-multi-line(n) ::= nb-ns-double-in-line ( s-double-next-line(n) |
 
 - Classification: Conformant
 - Spec (§7.3.1): "All leading and trailing white space characters on each line are excluded from the content. Each continuation line must therefore contain at least one non-space character. Empty lines, if any, are consumed as part of the line folding."
-- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–500` (multi-line double-quoted path: `nb-ns-double-in-line` on first line, then continuation via `s-double-break` loop)
+- Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:165–371` (multi-line double-quoted path: `nb-ns-double-in-line` on first line, then continuation via `s-double-break` loop)
 - Test coverage: `tests/yaml-test-suite/src/7A4E.yaml` (Spec Example 7.6. Double Quoted Lines)
 
 ### [117] c-quoted-quote
@@ -1209,7 +1209,7 @@ BNF: `c-single-quoted(n,c) ::= c-single-quote nb-single-text(n,c) c-single-quote
 BNF: `nb-single-text(FLOW-OUT) ::= nb-single-multi-line(n)` / `nb-single-text(FLOW-IN) ::= nb-single-multi-line(n)` / `nb-single-text(BLOCK-KEY) ::= nb-single-one-line` / `nb-single-text(FLOW-KEY) ::= nb-single-one-line`
 
 - Classification: Conformant
-- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside a implicit key."
 - Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (multi-line path taken when closing `'` not found on first line; implicit-key context enforced by flow/block parsers)
 - Test coverage: `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys — single-line); `tests/yaml-test-suite/src/PRH3.yaml` (Spec Example 7.9. Single Quoted Lines — multi-line)
 
@@ -1218,7 +1218,7 @@ BNF: `nb-single-text(FLOW-OUT) ::= nb-single-multi-line(n)` / `nb-single-text(FL
 BNF: `nb-single-one-line ::= nb-single-char*`
 
 - Classification: Conformant
-- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside an implicit key."
+- Spec (§7.3.2): "Single-quoted scalars are restricted to a single line when contained inside a implicit key."
 - Implementation: `rlsp-yaml-parser/src/lexer/quoted.rs:27–163` (single-line fast path: scanning stops at closing `'` without consuming a newline)
 - Test coverage: `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
 
@@ -1505,7 +1505,7 @@ BNF: `c-ns-flow-pair-json-key-entry(n,c) ::= c-s-implicit-json-key(FLOW-KEY) c-n
 
 BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
 
-- Classification: Strict
+- Classification: Lenient
 - Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key. In addition, the key is restricted to a single line."
 - Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1077–1093` (single-line restriction enforced — multi-line implicit key in flow sequence rejected at `rlsp-yaml-parser/src/event_iter/flow.rs:1089`); no 1024-character length check implemented
 - Test coverage: no direct test for the 1024-character limit
@@ -1515,7 +1515,7 @@ BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /
 
 BNF: `c-s-implicit-json-key(c) ::= c-flow-json-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
 
-- Classification: Strict
+- Classification: Lenient
 - Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key."
 - Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (quoted-scalar JSON key in flow pair: single-line inherited from quoted-scalar scanning; no 1024-character length check implemented)
 - Test coverage: no direct test for the 1024-character limit

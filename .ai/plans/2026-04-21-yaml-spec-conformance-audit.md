@@ -193,7 +193,7 @@ Test coverage fields may be empty with the explicit text
 - [x] Task 4 — draft §6 chapter entries
 - [x] Task 5 — verify §6 entries
 - [x] Task 6 — draft §7 chapter entries
-- [ ] Task 7 — verify §7 entries
+- [x] Task 7 — verify §7 entries
 - [ ] Task 8 — draft §8 chapter entries
 - [ ] Task 9 — verify §8 entries
 - [ ] Task 10 — draft §9 chapter entries
@@ -436,19 +436,21 @@ Commit: `83b0ff05d3b038c22b72b7da571cda613816d9a6`
 Same three-check protocol as Task 3, applied to every
 §7 entry.
 
-- [ ] Every §7 entry's spec quote is character-compared
+- [x] Every §7 entry's spec quote is character-compared
       against the cached spec; mismatches corrected.
-- [ ] Every §7 entry's Implementation citation is
+- [x] Every §7 entry's Implementation citation is
       opened and inspected; mismatches corrected.
-- [ ] Every §7 classification is re-derived; mismatches
+- [x] Every §7 classification is re-derived; mismatches
       corrected.
-- [ ] Every §7 test-coverage claim is verified.
-- [ ] The task's commit message lists every §7
+- [x] Every §7 test-coverage claim is verified.
+- [x] The task's commit message lists every §7
       correction.
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `3e32c75fbba934da8d9fe7694f30e54762159346`
 
 ### Task 8: Draft §8 entries
 
