@@ -115,6 +115,22 @@ checklist obscures status rather than revealing it.
      "zero" state, add a sub-task to remove the tracking
      mechanism — leaving it invites regression. -->
 
+<!-- agent: Do NOT use fixed numeric thresholds (line
+     counts, file sizes, ratios) as hard acceptance
+     criteria that mechanically dictate code structure.
+     A criterion like "every file ≤ 800 lines" produces
+     splits with no readability or logic value — moving
+     a test block to a submodule file just to satisfy a
+     number is busywork that makes the code harder to
+     navigate. Numeric thresholds are diagnostic signals
+     ("this file is large, investigate"), not prescriptive
+     rules ("this file is large, split it"). Decisions to
+     split code must have a structural reason: a natural
+     module boundary, separable concerns, independent
+     testability, or improved readability. State the
+     structural reason in the task description; if you
+     cannot articulate one, the split is not justified. -->
+
 Vertical task slices decomposed from the steps above. Each
 task is a committable unit of work with clear acceptance
 criteria.
