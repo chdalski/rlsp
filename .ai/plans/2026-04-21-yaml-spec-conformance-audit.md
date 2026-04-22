@@ -196,7 +196,7 @@ Test coverage fields may be empty with the explicit text
 - [x] Task 7 — verify §7 entries
 - [x] Task 8 — draft §8 chapter entries
 - [x] Task 9 — verify §8 entries
-- [ ] Task 10 — draft §9 chapter entries
+- [x] Task 10 — draft §9 chapter entries
 - [ ] Task 11 — verify §9 entries
 - [ ] Task 12 — draft §10 chapter entries
 - [ ] Task 13 — verify §10 entries + append consolidated
@@ -505,19 +505,21 @@ bare documents, explicit documents with `---`/`...`
 markers, directive documents, streams, stream-level
 concatenation rules), using the strict format.
 
-- [ ] Every numbered production in §9 has an entry in
+- [x] Every numbered production in §9 has an entry in
       the strict format.
-- [ ] Classifications follow from the spec quote +
+- [x] Classifications follow from the spec quote +
       implementation fact under the decision-rule
       table.
-- [ ] Within this task's chapter block, every `### [`
+- [x] Within this task's chapter block, every `### [`
       entry has a `- Test coverage:` line (same
       chapter-scoped awk+grep check as Task 2, with
       `§9` substituted for `§N`).
-- [ ] No source code is modified.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+Commit: `ac7c295e4efbab5a22dac05d2fcb00dfc8ea5016`
 
 ### Task 11: Verify §9 entries (independent pass)
 

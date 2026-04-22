@@ -1941,7 +1941,97 @@ BNF: `seq-space(n,BLOCK-OUT) ::= l+block-sequence(n-1)` / `seq-space(n,BLOCK-IN)
 
 ## §9
 
-<!-- Task 10: draft §9 entries -->
+### [202] l-document-prefix
+
+BNF: `l-document-prefix ::= c-byte-order-mark? l-comment*`
+
+- Classification: Strict
+- Spec (§9.1.1): "A document may be preceded by a prefix specifying the character encoding and optional comment lines. Note that all documents in a stream must use the same character encoding. However it is valid to re-specify the encoding using a byte order mark for each document in the stream."
+- Implementation: `rlsp-yaml-parser/src/lines.rs:115–127` — BOM (`U+FEFF`) is stripped only when processing the first line of the input (`is_first=true`); a BOM at the start of a second or later document is preserved as data in the `Line::content` field. `rlsp-yaml-parser/src/event_iter/step.rs:917–930` — a BOM in document body is rejected as an invalid character (`"invalid character U+FEFF in document"`). `rlsp-yaml-parser/src/event_iter/directives.rs:33–63` — `consume_preamble_between_docs` processes comments but has no BOM-skipping path.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/stream.rs` (stream start/end); `rlsp-yaml-parser/src/lines.rs:751–783` (unit tests: BOM stripped from first line only); no yaml-test-suite case exercises inter-document BOM
+- Discrepancy: The spec permits an optional BOM at the start of each document in the stream; the parser strips BOM only at byte offset 0 (stream start) and rejects a BOM at the start of any subsequent document.
+
+### [203] c-directives-end
+
+BNF: `c-directives-end ::= "---"`
+
+- Classification: Conformant
+- Spec (§9.1.2): "The solution is the use of two special marker lines to control the processing of directives, one at the start of a document and one at the end. At the start of a document, lines beginning with a '%' character are assumed to be directives. The (possibly empty) list of directives is terminated by a directives end marker line."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:137–178` — `lexer.is_directives_end()` detects `---` at column 0; `lexer.consume_marker_line(false)` consumes the line and captures any inline scalar
+- Test coverage: `tests/yaml-test-suite/src/FTA2.yaml` (Single block sequence with anchor and explicit document start); `tests/yaml-test-suite/src/2LFX.yaml` (directive + `---` marker); `rlsp-yaml-parser/tests/smoke/directives.rs:459–471` (explicit_document_start_span_covers_dashes)
+
+### [204] c-document-end
+
+BNF: `c-document-end ::= "..."    # (not followed by non-ws char)`
+
+- Classification: Conformant
+- Spec (§9.1.2): "At the end of a document, a document end marker line is used to signal the parser to begin scanning for directives again. The existence of this optional document suffix does not necessarily indicate the existence of an actual following document."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:118–136` — `lexer.is_document_end()` detects `...` at column 0 (not followed by non-ws content enforced by `consume_marker_line(true)` which sets `marker_inline_error` for inline content after `...`)
+- Test coverage: `tests/yaml-test-suite/src/3HFZ.yaml` (error: bad footer); `rlsp-yaml-parser/tests/smoke/directives.rs:706–717` (yaml_directive_followed_by_document_end_returns_error)
+
+### [205] l-document-suffix
+
+BNF: `l-document-suffix ::= c-document-end s-l-comments`
+
+- Classification: Conformant
+- Spec (§9.1.2): "At the end of a document, a document end marker line is used to signal the parser to begin scanning for directives again. The existence of this optional document suffix does not necessarily indicate the existence of an actual following document."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:118–136` — `...` marker detected and consumed via `consume_marker_line(true)`; trailing comments after `...` drained by `drain_trailing_comment()` before emitting `DocumentEnd { explicit: true }`
+- Test coverage: `tests/yaml-test-suite/src/2LFX.yaml` (document with suffix); `rlsp-yaml-parser/tests/smoke/directives.rs` (multi-doc stream tests)
+
+### [206] c-forbidden
+
+BNF: `c-forbidden ::= <start-of-line> ( c-directives-end | c-document-end ) ( b-char | s-white | <end-of-input> )`
+
+- Classification: Conformant
+- Spec (§9.1.2): "Obviously, the actual content lines are therefore forbidden to begin with either of these markers."
+- Implementation: `rlsp-yaml-parser/src/event_iter/step.rs:110–111` — comment: "Document markers (`---`/`...`) must be at column 0 (YAML 1.2 §9.1). Any line with indent > 0 cannot be a marker — skip the function call." `step.rs:118` and `step.rs:137` — both marker checks require `peeked_indent == 0`. `rlsp-yaml-parser/src/lexer.rs:is_directives_end` and `is_document_end` check for column-0 `---`/`...` not followed by non-ws content.
+- Test coverage: `tests/yaml-test-suite/src/N782.yaml` (Invalid document markers in flow style — `---` inside flow collection is not at start-of-line); `rlsp-yaml-parser/tests/smoke/directives.rs`
+
+### [207] l-bare-document
+
+BNF: `l-bare-document ::= s-l+block-node(-1,BLOCK-IN)  /* Excluding c-forbidden content */`
+
+- Classification: Conformant
+- Spec (§9.1.3): "A bare document does not begin with any directives or marker lines. Such documents are very 'clean' as they contain nothing other than the content. In this case, the first non-comment line may not start with a '%' first character."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:338–355` — in `step_between_docs`, when no directives were accumulated and the next token is not `---` or `...`, a `DocumentStart { explicit: false }` event is emitted and state transitions to `InDocument`; `step_in_document` then parses the block node content
+- Test coverage: `tests/yaml-test-suite/src/9KBC.yaml` (bare document, error); `rlsp-yaml-parser/tests/smoke/directives.rs:395–407` (bare_document_sets_explicit_false)
+
+### [208] l-explicit-document
+
+BNF: `l-explicit-document ::= c-directives-end ( l-bare-document | ( e-node s-l-comments ) )`
+
+- Classification: Conformant
+- Spec (§9.1.4): "An explicit document begins with an explicit directives end marker line but no directives. Since the existence of the document is indicated by this marker, the document itself may be completely empty."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:287–307` — `step_between_docs`: when `lexer.is_directives_end()`, emits `DocumentStart { explicit: true, version, tag_directives }` and transitions to `InDocument`; the empty-document case (`e-node`) is handled when `step_in_document` immediately hits EOF or `...`
+- Test coverage: `tests/yaml-test-suite/src/FTA2.yaml` (explicit document start); `rlsp-yaml-parser/tests/smoke/directives.rs:383–393` (explicit_document_marker_sets_explicit_true); `rlsp-yaml-parser/src/loader.rs` (UT-D2, UT-D6)
+
+### [209] l-directive-document
+
+BNF: `l-directive-document ::= l-directive+ l-explicit-document`
+
+- Classification: Conformant
+- Spec (§9.1.5): "A directives document begins with some directives followed by an explicit directives end marker line."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:33–63` — `consume_preamble_between_docs` accumulates `%YAML`/`%TAG` directives into `self.directive_scope`; `directives.rs:272–337` — if directives were accumulated but no `---` follows (EOF, `...`, or bare content), an error is returned ("directives must be followed by a '---' document-start marker"); when `---` does follow, `DocumentStart` includes the accumulated `version` and `tag_directives`
+- Test coverage: `tests/yaml-test-suite/src/B63P.yaml` (directive without document — error); `tests/yaml-test-suite/src/2LFX.yaml` (directive + document); `rlsp-yaml-parser/tests/smoke/directives.rs:289–337` (directive scope per-document)
+
+### [210] l-any-document
+
+BNF: `l-any-document ::= l-directive-document | l-explicit-document | l-bare-document`
+
+- Classification: Conformant
+- Spec (§9.2): "A YAML stream consists of zero or more documents. Subsequent documents require some sort of separation marker line. If a document is not terminated by a document end marker line, then the following document must begin with a directives end marker line."
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:259–355` — `step_between_docs` implements the three-way dispatch: if directives were seen, require `---` (directive document); if `---` is next without directives, emit explicit document; otherwise emit bare document start. The ordering of checks in `step_between_docs` implements the priority of `l-directive-document` > `l-explicit-document` > `l-bare-document`
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs:342–403` (multi-doc stream, bare, explicit document variants)
+
+### [211] l-yaml-stream
+
+BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix+ l-document-prefix* l-any-document? ) | c-byte-order-mark | l-comment | l-explicit-document )*`
+
+- Classification: Strict
+- Spec (§9.2): "A YAML stream consists of zero or more documents. Subsequent documents require some sort of separation marker line. If a document is not terminated by a document end marker line, then the following document must begin with a directives end marker line. […] A sequence of bytes is a well-formed stream if, taken as a whole, it complies with the above l-yaml-stream production."
+- Implementation: `rlsp-yaml-parser/src/event_iter/base.rs:491–514` — state machine: `BeforeStream` → emits `StreamStart`; `BetweenDocs` → `step_between_docs`; `InDocument` → `step_in_document`; `Done` → emits nothing. The stream structure (prefix, documents, suffixes, inter-doc comments) is correctly dispatched. The `c-byte-order-mark` alternative in the outer `(...)*` loop of `l-yaml-stream` is not implemented: a BOM between documents is rejected as an invalid character by `step.rs:917–930` rather than silently consumed.
+- Test coverage: `rlsp-yaml-parser/tests/smoke/stream.rs` (full stream lifecycle: empty, whitespace, multi-doc, comment-only); `rlsp-yaml-parser/tests/conformance/stream.rs` (yaml-test-suite parameterized suite)
+- Discrepancy: The spec permits a bare `c-byte-order-mark` as a separator alternative between documents in the outer loop of `l-yaml-stream`; the parser rejects a BOM occurring after the first line of the stream as an invalid character.
 
 ## §10
 
