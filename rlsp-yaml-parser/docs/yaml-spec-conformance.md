@@ -1515,21 +1515,19 @@ BNF: `c-ns-flow-pair-json-key-entry(n,c) ::= c-s-implicit-json-key(FLOW-KEY) c-n
 
 BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key. In addition, the key is restricted to a single line."
-- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1077–1093` (single-line restriction enforced — multi-line implicit key in flow sequence rejected at `rlsp-yaml-parser/src/event_iter/flow.rs:1089`); no 1024-character length check implemented
-- Test coverage: no direct test for the 1024-character limit
-- Discrepancy: The spec requires rejecting an implicit key whose `:` appears more than 1024 Unicode characters from the key start; the implementation enforces the single-line restriction but does not enforce the 1024-character limit.
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1124–1149` (single-line restriction and 1024-Unicode-character limit both enforced; plain YAML-key and quoted JSON-key forms share the same check via `key_start_byte` tracking)
+- Test coverage: `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
 
 ### [155] c-s-implicit-json-key(c)
 
 BNF: `c-s-implicit-json-key(c) ::= c-flow-json-node(0,c) s-separate-in-line? /* At most 1024 characters altogether */`
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§7.4.3): "To limit the amount of lookahead required, the ':' indicator must appear at most 1024 Unicode characters beyond the start of the key."
-- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` (quoted-scalar JSON key in flow pair: single-line inherited from quoted-scalar scanning; no 1024-character length check implemented)
-- Test coverage: no direct test for the 1024-character limit
-- Discrepancy: Same as [154] — 1024-character limit for JSON-like implicit keys is not enforced.
+- Implementation: `rlsp-yaml-parser/src/event_iter/flow.rs:1124–1149` (quoted JSON-key start byte recorded at `flow.rs:1616`; the shared 1024-char check at the `:` separator covers both plain and quoted implicit keys)
+- Test coverage: `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
 
 ### [156] ns-flow-yaml-content(n,c)
 
@@ -1861,21 +1859,19 @@ BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-in
 
 BNF: `ns-l-block-map-implicit-entry(n) ::= ( ns-s-block-map-implicit-key | e-node ) c-l-block-map-implicit-value(n)`
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§8.2.2): "If the '?' indicator is omitted, parsing needs to see past the implicit key, in the same way as in the single key/value pair flow mapping. Hence, such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
-- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` (`consume_mapping_entry`: implicit key branch — `find_value_indicator_offset` locates `:` on the same line; key is single-line only; 1024-character limit is NOT enforced)
-- Test coverage: `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries)
-- Discrepancy: The spec requires rejecting an implicit block mapping key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced.
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:161–172` (`consume_mapping_entry`: 1024-Unicode-character limit checked against `trimmed[..colon_offset]` before the key span is built; returns `ConsumedMapping::ImplicitKeyTooLongError` on violation)
+- Test coverage: `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
 
 ### [193] ns-s-block-map-implicit-key
 
 BNF: `ns-s-block-map-implicit-key ::= c-s-implicit-json-key(BLOCK-KEY) | ns-s-implicit-yaml-key(BLOCK-KEY)`
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§8.2.2): "Hence, such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
-- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` (implicit key is extracted from the current line by `find_value_indicator_offset`; both plain (YAML-key) and quoted (JSON-key) forms are handled at `rlsp-yaml-parser/src/event_iter/block/mapping.rs:214–259`)
-- Test coverage: `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries — plain key, quoted key, and null key cases)
-- Discrepancy: The spec requires rejecting an implicit block mapping key exceeding 1024 Unicode characters; only the single-line restriction is enforced.
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:161–172` (the 1024-char check precedes key extraction at `mapping.rs:214–259`; both plain YAML-key and quoted JSON-key forms are covered by the same guard)
+- Test coverage: `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
 
 ### [194] c-l-block-map-implicit-value(n)
 
@@ -2119,7 +2115,7 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## Summary
 
-9 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 12 entries.
+5 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 8 entries.
 
 | Spec production | Classification | Source file:line | Discrepancy (one sentence) | Test coverage |
 |---|---|---|---|---|
@@ -2127,10 +2123,6 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 | §5 [60] `ns-esc-16-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [61] `ns-esc-32-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `rlsp-yaml-parser/src/chars.rs:393–394` |
 | §6 [92] `c-named-tag-handle` | Lenient | `rlsp-yaml-parser/src/event_iter/properties.rs:285–293` | The spec's `ns-word-char` production excludes `'_'`, but `is_valid_tag_handle` accepts `'_'` as a valid character in named tag handle names. | `rlsp-yaml-parser/src/event_iter/properties.rs:482–490` |
-| §7 [154] `ns-s-implicit-yaml-key(c)` | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs:1077–1093` | The spec requires rejecting an implicit key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | no direct test for the 1024-character limit |
-| §7 [155] `c-s-implicit-json-key(c)` | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs:1359–1620` | The spec requires rejecting an implicit JSON-like key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | no direct test for the 1024-character limit |
-| §8 [192] `ns-l-block-map-implicit-entry(n)` | Lenient | `rlsp-yaml-parser/src/event_iter/block/mapping.rs:88–300` | The spec requires rejecting an implicit block mapping key whose `:` appears more than 1024 Unicode characters from the key start; only the single-line restriction is enforced. | `tests/yaml-test-suite/src/S3PD.yaml` |
-| §8 [193] `ns-s-block-map-implicit-key` | Lenient | `rlsp-yaml-parser/src/event_iter/block/mapping.rs:214–259` | The spec requires rejecting an implicit block mapping key exceeding 1024 Unicode characters; only the single-line restriction is enforced. | `tests/yaml-test-suite/src/S3PD.yaml` |
 | §10 JSON Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches; the parser does not implement this rule, passing all untagged plain scalars through as `tag: None`. | no direct test |
 | §10 JSON Schema — untagged collections | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs` / `block/` (no resolution) | The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`; the parser always emits `tag: None` for untagged collections. | `rlsp-yaml-parser/tests/smoke/tags.rs:557,651` |
 | §10 Core Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The Core schema (the recommended default) requires plain scalars to be matched against an extended regex table; the parser does not implement this rule, yielding `tag: None` for all untagged plain scalars. | no direct test |

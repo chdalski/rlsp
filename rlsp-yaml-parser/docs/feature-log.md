@@ -108,6 +108,20 @@ security risk in LSP and pipeline contexts. Named escapes are exempt because
 their output is predictable; hex escapes are not.
 **Tier:** 1
 
+### Implicit Mapping Key Length Limit [completed]
+
+**Description:** Implicit mapping keys (those without a leading `?` indicator) are
+capped at 1024 Unicode characters in both flow context (YAML 1.2 §7.4.3) and block
+context (§8.2.2). A key whose `:` value indicator appears more than 1024 characters
+from the key start is rejected with a parse error. Explicit `?`-introduced keys are
+not subject to this limit.
+**Complexity:** Low
+**Comment:** The spec mandates this limit to bound parser lookahead. Enforcement
+closes four previously-Lenient conformance entries ([154], [155], [192], [193]) and
+brings the parser to full conformance on this point. Only implicit keys are affected;
+explicit key content remains unrestricted.
+**Tier:** 1
+
 ### Encoding Detection and Decoding [completed]
 
 **Description:** The `encoding` module implements YAML 1.2 §5.2

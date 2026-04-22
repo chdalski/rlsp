@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-22)
 **Created:** 2026-04-22
 
 # Enforce 1024-character implicit key limit ([154], [155], [192], [193])
@@ -103,7 +103,7 @@ classifications flip from Lenient to Conformant.
       keys ([192], [193])
 - [x] Task 2 — enforce 1024-char limit for flow-context implicit
       keys ([154], [155])
-- [ ] Task 3 — update conformance doc, feature-log, follow-up queue
+- [x] Task 3 — update conformance doc, feature-log, follow-up queue
 
 ## Tasks
 
@@ -213,21 +213,21 @@ Commit: `9b17e164cbf493255b23db646afd25120b88cb86`
 Reflect the enforcement in the conformance audit and user-facing
 feature log, and close the follow-up queue item.
 
-- [ ] Update the §7 [154] `ns-s-implicit-yaml-key` entry in
+- [x] Update the §7 [154] `ns-s-implicit-yaml-key` entry in
       `rlsp-yaml-parser/docs/yaml-spec-conformance.md`: change
       Classification from `Lenient` to `Conformant`, update the
       Implementation citation to reference the new 1024-char
       check's location, remove the Discrepancy line, and update
       the Test coverage field to cite the new tests added in
       Task 2.
-- [ ] Update the §7 [155] `c-s-implicit-json-key` entry: same
+- [x] Update the §7 [155] `c-s-implicit-json-key` entry: same
       changes — Lenient → Conformant, updated Implementation
       citation, Discrepancy removed, Test coverage updated.
-- [ ] Update the §8 [192] `ns-l-block-map-implicit-entry` entry:
+- [x] Update the §8 [192] `ns-l-block-map-implicit-entry` entry:
       same changes, citing the Task 1 check location.
-- [ ] Update the §8 [193] `ns-s-block-map-implicit-key` entry:
+- [x] Update the §8 [193] `ns-s-block-map-implicit-key` entry:
       same changes, citing the Task 1 check location.
-- [ ] Update the `## Summary` table: remove the four entries for
+- [x] Update the `## Summary` table: remove the four entries for
       [154], [155], [192], [193]. Update the headline count. The
       current headline (after the hex-escape reclassification) is
       "9 Lenient findings, 0 Strict findings (bug-class), 3
@@ -235,20 +235,22 @@ feature log, and close the follow-up queue item.
       After this plan removes four Lenient entries, it becomes
       "5 Lenient findings, 0 Strict findings (bug-class), 3
       Strict (security-hardened) findings, total 8 entries."
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
       user-facing entry (or extend an existing mapping-related
       entry) documenting that implicit mapping keys are now
       capped at 1024 Unicode characters, citing §7.4.3 and §8.2.2
       and noting that explicit `?`-introduced keys are unaffected.
-- [ ] Remove the stale follow-up queue entry. In
+- [x] Remove the stale follow-up queue entry. In
       `.ai/memory/project_followup_plans.md`, delete the
       `[Lenient] 1024-character implicit key limit ([154], [155],
       [192], [193])` bullet — the work is now complete.
-- [ ] No source code is modified in this task (documentation
+- [x] No source code is modified in this task (documentation
       only).
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run
       clean.
+
+Commit: `99bd09fe652085f31fadd7ab22ab817a1be66a1d`
 
 ## Decisions
 
