@@ -9,7 +9,15 @@
 // NUL (0x00) is valid UTF-8 but excluded from YAML's c-printable production,
 // so it is tested via `parse_events` at the semantic level.
 
-#![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::wildcard_enum_match_arm,
+    missing_docs,
+    reason = "test code"
+)]
 
 use rstest::rstest;
 
@@ -177,6 +185,143 @@ fn parse_events_rejects_bom_mid_stream() {
     // because it breaks plain scalar parsing — the tokenizer does not
     // recognize BOM as valid scalar content in flow context.
     assert!(has_parse_error("key: val\u{FEFF}ue\n"));
+}
+
+// ===========================================================================
+// parse_events() — BOM at document-prefix positions (YAML 1.2 §5.2)
+// ===========================================================================
+//
+// YAML 1.2 §5.2 / production [202] l-document-prefix = c-byte-order-mark? l-comment*
+// A BOM is valid at the start of any document prefix — not only at stream start.
+
+#[test]
+fn parse_events_accepts_bom_immediately_after_document_end_marker() {
+    // BOM at the start of the second document's prefix (no blank lines between).
+    let input = "key: a\n...\n\u{FEFF}key: b\n";
+    assert!(
+        !has_parse_error(input),
+        "BOM immediately after '...' must be accepted"
+    );
+    let values = scalar_values(input);
+    assert!(
+        values.contains(&"a".to_string()),
+        "first doc scalar 'a' present"
+    );
+    assert!(
+        values.contains(&"b".to_string()),
+        "second doc scalar 'b' present"
+    );
+}
+
+#[test]
+fn parse_events_accepts_bom_after_doc_end_then_blank_lines() {
+    // BOM after a blank line that follows the `...` marker.
+    let input = "key: a\n...\n\n\u{FEFF}key: b\n";
+    assert!(
+        !has_parse_error(input),
+        "BOM after blank line after '...' must be accepted"
+    );
+    let values = scalar_values(input);
+    assert!(values.contains(&"a".to_string()));
+    assert!(values.contains(&"b".to_string()));
+}
+
+#[test]
+fn parse_events_accepts_bom_after_doc_end_then_comment() {
+    // BOM after a trail comment that follows the `...` marker.
+    let input = "key: a\n...\n# comment\n\u{FEFF}key: b\n";
+    assert!(
+        !has_parse_error(input),
+        "BOM after comment after '...' must be accepted"
+    );
+    let values = scalar_values(input);
+    assert!(values.contains(&"a".to_string()));
+    assert!(values.contains(&"b".to_string()));
+    // The comment event must also be present.
+    let has_comment = parse_events(input)
+        .filter_map(Result::ok)
+        .any(|(event, _)| matches!(event, Event::Comment { text } if text.trim() == "comment"));
+    assert!(has_comment, "expected Comment event with text 'comment'");
+}
+
+#[test]
+fn parse_events_accepts_multiple_docs_each_with_bom() {
+    // Each document in the stream starts with a BOM at its prefix position.
+    let input = "\u{FEFF}a: 1\n...\n\u{FEFF}b: 2\n...\n\u{FEFF}c: 3\n";
+    assert!(
+        !has_parse_error(input),
+        "multiple docs each with BOM must be accepted"
+    );
+    let values = scalar_values(input);
+    assert!(values.contains(&"1".to_string()));
+    assert!(values.contains(&"2".to_string()));
+    assert!(values.contains(&"3".to_string()));
+}
+
+#[test]
+fn parse_events_bom_at_stream_start_still_accepted() {
+    // Regression: stream-start BOM handling must not be broken by the fix.
+    let input = "\u{FEFF}key: value\n";
+    assert!(!has_parse_error(input));
+    let values = scalar_values(input);
+    assert!(values.contains(&"value".to_string()));
+}
+
+#[test]
+fn parse_events_rejects_bom_mid_scalar_regression() {
+    // Regression: BOM embedded mid-scalar must still produce a parse error.
+    assert!(has_parse_error("key: val\u{FEFF}ue\n"));
+}
+
+#[test]
+fn load_multidoc_with_bom_between_docs_produces_correct_ast() {
+    // The `load()` API (loader layer) must independently handle inter-document BOM.
+    let input = "key: a\n...\n\u{FEFF}key: b\n";
+    let docs = rlsp_yaml_parser::load(input).expect("load must succeed");
+    assert_eq!(docs.len(), 2, "expected two documents");
+    // First document: root is a mapping with key→"a".
+    match &docs[0].root {
+        rlsp_yaml_parser::Node::Mapping { entries, .. } => {
+            assert_eq!(entries.len(), 1);
+            let (k, v) = &entries[0];
+            assert!(matches!(k, rlsp_yaml_parser::Node::Scalar { value, .. } if value == "key"));
+            assert!(matches!(v, rlsp_yaml_parser::Node::Scalar { value, .. } if value == "a"));
+        }
+        other => panic!("expected mapping, got {other:?}"),
+    }
+    // Second document: root is a mapping with key→"b".
+    match &docs[1].root {
+        rlsp_yaml_parser::Node::Mapping { entries, .. } => {
+            assert_eq!(entries.len(), 1);
+            let (k, v) = &entries[0];
+            assert!(matches!(k, rlsp_yaml_parser::Node::Scalar { value, .. } if value == "key"));
+            assert!(matches!(v, rlsp_yaml_parser::Node::Scalar { value, .. } if value == "b"));
+        }
+        other => panic!("expected mapping, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_events_bom_after_directives_end_marker_is_error() {
+    // After `---`, the document body begins immediately — there is no
+    // `l-document-prefix` between `---` and content.  A BOM here is
+    // inside the document body and is not a valid character.
+    let input = "key: a\n...\n---\n\u{FEFF}key: b\n";
+    assert!(
+        has_parse_error(input),
+        "BOM after '---' is inside the document body and must produce a parse error"
+    );
+}
+
+#[test]
+fn parse_events_rejects_double_bom_at_document_prefix() {
+    // Only one BOM is stripped at a document prefix position.
+    // A second consecutive BOM is illegal content.
+    let input = "key: a\n...\n\u{FEFF}\u{FEFF}key: b\n";
+    assert!(
+        has_parse_error(input),
+        "double BOM at document prefix must produce a parse error"
+    );
 }
 
 // ===========================================================================

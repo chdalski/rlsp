@@ -121,6 +121,12 @@ impl<'input> Lexer<'input> {
     ///
     /// Use this between documents (`BetweenDocs`) after directive and comment
     /// lines have already been consumed by the caller.
+    ///
+    /// After consuming blank lines, strips a leading BOM from the primed next
+    /// line if present.  Per YAML 1.2 §5.2 / production [202]
+    /// `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is valid at
+    /// the start of any document prefix, which may follow blank lines or
+    /// comments that trail a `...` marker.
     pub fn skip_blank_lines_between_docs(&mut self) -> Pos {
         loop {
             let skip = self
@@ -132,6 +138,7 @@ impl<'input> Lexer<'input> {
                     self.current_pos = pos_after_line(&line);
                 }
             } else {
+                self.buf.signal_document_boundary();
                 return self.current_pos;
             }
         }

@@ -176,8 +176,10 @@ pub struct LineBuffer<'input> {
     next: Option<Line<'input>>,
     /// Position at the start of `remaining`.
     remaining_pos: Pos,
-    /// Whether the next line to be parsed from `remaining` is the first line
-    /// of input (used for BOM detection after the initial prime).
+    /// Whether the next line to be parsed from `remaining` is a document-prefix
+    /// position — the first line of input or the first line after a `...`
+    /// document-end marker.  When `true`, `scan_line` strips a leading BOM per
+    /// YAML 1.2 §5.2 / production [202] `l-document-prefix`.
     remaining_is_first: bool,
     /// Lookahead buffer for [`Self::peek_until_dedent`].
     lookahead: Vec<Line<'input>>,
@@ -275,6 +277,31 @@ impl<'input> LineBuffer<'input> {
     #[must_use]
     pub fn at_eof(&self) -> bool {
         self.prepend.is_empty() && self.next.is_none()
+    }
+
+    /// Strip a leading BOM from the already-primed `next` line if present.
+    ///
+    /// Called after each blank-line-skip in the inter-document preamble
+    /// (`skip_blank_lines_between_docs`).  Per YAML 1.2 §5.2 / production [202]
+    /// `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is valid at
+    /// the start of any document prefix — not only at stream start.
+    ///
+    /// If `next` starts with U+FEFF, content, offset, and byte position are
+    /// advanced past the 3-byte UTF-8 encoding.  Only the first BOM is stripped;
+    /// a second consecutive BOM in the same line is left as illegal content.
+    pub fn signal_document_boundary(&mut self) {
+        // Strip at most one BOM from the already-primed next line.
+        if let Some(ref mut next) = self.next {
+            if next.content.starts_with('\u{FEFF}') {
+                let bom_len = '\u{FEFF}'.len_utf8(); // 3 bytes
+                next.content = &next.content[bom_len..];
+                next.offset += bom_len;
+                next.pos.byte_offset += bom_len;
+                // Column is unchanged: BOM is zero-width in column terms.
+            }
+        }
+        // Invalidate lookahead that may have peeked the unstripped BOM line.
+        self.lookahead.clear();
     }
 
     /// Scan forward without consuming to collect all lines with
@@ -771,9 +798,9 @@ mod tests {
     }
 
     #[test]
-    fn bom_only_stripped_from_first_line() {
-        // A BOM in a non-first line is preserved as data (the lexer will
-        // report it as an error).
+    fn bom_not_stripped_on_non_boundary_mid_content_line() {
+        // A BOM in a non-first, non-boundary line is preserved as data —
+        // `signal_document_boundary` was never called, so it is an error.
         let input = "foo\n\u{FEFF}bar\n";
         let mut buf = LineBuffer::new(input);
         buf.consume_next(); // consume "foo"
@@ -781,6 +808,80 @@ mod tests {
             unreachable!("expected second");
         };
         assert_eq!(second.content, "\u{FEFF}bar");
+    }
+
+    #[test]
+    fn bom_stripped_after_document_boundary_signal() {
+        // After signal_document_boundary(), the primed next line has its
+        // leading BOM stripped.
+        let input = "foo\n\u{FEFF}bar\n";
+        let mut buf = LineBuffer::new(input);
+        buf.consume_next(); // consume "foo"; primes "\u{FEFF}bar"
+        buf.signal_document_boundary();
+        let Some(second) = buf.peek_next() else {
+            unreachable!("expected second");
+        };
+        assert_eq!(second.content, "bar");
+        assert_eq!(second.offset, 4 + 3); // "foo\n" = 4 bytes + 3-byte BOM
+        assert_eq!(second.pos.byte_offset, 4 + 3);
+    }
+
+    #[test]
+    #[expect(clippy::expect_used, reason = "test code")]
+    fn signal_document_boundary_strips_bom_from_primed_next_line() {
+        // signal_document_boundary() strips the BOM from the already-primed
+        // next line only.  Subsequent lines are not affected — the signal is
+        // a one-shot strip of the primed next slot.
+        let input = "...\n\u{FEFF}doc1\n\u{FEFF}doc2\n";
+        let mut buf = LineBuffer::new(input);
+        buf.consume_next(); // consume "..."; primes "\u{FEFF}doc1" into next
+
+        buf.signal_document_boundary();
+
+        // The already-primed next line has its BOM stripped.
+        let first = buf.consume_next().expect("first line");
+        assert_eq!(
+            first.content, "doc1",
+            "BOM stripped from primed next by signal"
+        );
+
+        // The following line was scanned by prime() with remaining_is_first=false,
+        // so its BOM is NOT stripped — it is illegal content (as in a real stream,
+        // signal_document_boundary would be called again for the next boundary).
+        let second = buf.peek_next().expect("second line");
+        assert_eq!(
+            second.content, "\u{FEFF}doc2",
+            "BOM on subsequent line preserved — not affected by one-shot signal"
+        );
+    }
+
+    #[test]
+    fn bom_stripped_line_offset_correct_after_boundary_signal() {
+        // After signal_document_boundary(), offset and pos.byte_offset advance
+        // past the 3-byte BOM.
+        let input = "\u{FEFF}key: value\n";
+        let buf = LineBuffer::new(input);
+        // Stream start: BOM already stripped by remaining_is_first=true at new().
+        // Verify the offset is 3 (past the BOM).
+        let Some(line) = buf.peek_next() else {
+            unreachable!("expected line");
+        };
+        assert_eq!(line.offset, 3);
+        assert_eq!(line.pos.byte_offset, 3);
+        assert_eq!(line.content, "key: value");
+
+        // Now test via explicit signal on a second document.
+        let input2 = "...\n\u{FEFF}key: value\n";
+        let mut buf2 = LineBuffer::new(input2);
+        buf2.consume_next(); // consume "..."
+        buf2.signal_document_boundary();
+        let Some(line2) = buf2.peek_next() else {
+            unreachable!("expected line2");
+        };
+        // "...\n" is 4 bytes; BOM is 3 bytes → content starts at offset 7.
+        assert_eq!(line2.offset, 4 + 3);
+        assert_eq!(line2.pos.byte_offset, 4 + 3);
+        assert_eq!(line2.content, "key: value");
     }
 
     // -----------------------------------------------------------------------

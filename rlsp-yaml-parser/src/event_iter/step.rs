@@ -61,6 +61,26 @@ impl<'input> EventIter<'input> {
             }
         }
 
+        // ---- BOM-in-document-body check ----
+        //
+        // U+FEFF is valid only at document-prefix positions (YAML 1.2 §5.2 /
+        // production [202]).  Inside a document body it is not a printable
+        // character (excluded from c-printable [1]) and must be rejected.
+        // This check runs before mapping/sequence/flow detection so that a
+        // BOM-prefixed line (e.g. `\u{FEFF}key: val`) is not mistakenly parsed
+        // as a valid mapping entry.
+        if let Some(line) = self.lexer.peek_next_line() {
+            if line.content.starts_with('\u{FEFF}') {
+                let err_pos = line.pos;
+                self.state = IterState::Done;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error {
+                    pos: err_pos,
+                    message: "invalid character U+FEFF in document".into(),
+                }));
+            }
+        }
+
         // ---- Document / stream boundaries ----
 
         if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
