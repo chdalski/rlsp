@@ -1844,7 +1844,7 @@ BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-in
 
 - Classification: Conformant
 - Spec (§8.2.2): "If the '?' indicator is specified, the optional value node must be specified on a separate line, denoted by the ':' indicator."
-- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:536–600` (`consume_explicit_value_line`: a line that is solely a `:` value indicator advances the mapping to Value phase; inline value content is prepended as a synthetic line)
+- Implementation: `rlsp-yaml-parser/src/event_iter/block/mapping.rs:789–836` (`consume_explicit_value_line`: a line that is solely a `:` value indicator advances the mapping to Value phase; inline value content is prepended as a synthetic line)
 - Test coverage: `tests/yaml-test-suite/src/5WE3.yaml` (Spec Example 8.17. Explicit Block Mapping Entries)
 
 ### [192] ns-l-block-map-implicit-entry(n)
