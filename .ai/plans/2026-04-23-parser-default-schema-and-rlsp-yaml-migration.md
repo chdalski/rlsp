@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-23)
 **Created:** 2026-04-23
 
 # Make Core schema the loader default and migrate rlsp-yaml
