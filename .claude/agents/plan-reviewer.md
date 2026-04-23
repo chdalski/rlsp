@@ -107,21 +107,21 @@ Return a structured findings report:
 No issues found
 ```
 
-The phrase "No issues found" signals to the lead that the
-review cycle is complete. Do not use this phrase if any
-issues remain — even minor ones. The lead uses this exact
-phrase to decide whether to re-launch the review or
+The phrase "No issues found" signals to the requester that
+the review cycle is complete. Do not use this phrase if any
+issues remain — even minor ones. The requester uses this
+exact phrase to decide whether to re-launch the review or
 proceed to user presentation.
 
 ## Judgment Calls
 
 - **Flag, don't fix.** Your job is to identify problems,
   not to rewrite the plan. State what's wrong and what
-  needs to change; the lead makes the edits.
+  needs to change; the requester makes the edits.
 - **Quote specifically.** Don't say "the goal is vague" —
   say "the goal says 'improve conformance' without a
   target number."
-- **Err toward flagging.** A false positive costs the lead
-  a few seconds of reading. A false negative lets a
-  defective plan reach the user and then the execution
+- **Err toward flagging.** A false positive costs the
+  requester a few seconds of reading. A false negative lets
+  a defective plan reach the user and then the execution
   pipeline.

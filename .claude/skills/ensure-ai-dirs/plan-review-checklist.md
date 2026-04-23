@@ -241,3 +241,38 @@ sibling plans in the queue.
   across four sequential retrofit plans, because no plan
   was scoped to look at the aggregate. The pattern repeats
   by default; only a program-level check prevents it.
+
+## 13. Default / Data-Shape Changes
+
+When a task changes the shape of data returned from a
+widely-used function — adding a field, populating a
+previously-empty field, changing an optional value to a
+required one, altering an enum/union layout, widening a
+type — every reader of the affected data may break, not
+only the callsites the plan intends to migrate.
+
+- Does any task change a function's return shape, a
+  field's default value, or the layout of a widely-used
+  type?
+- If yes, does the Context or Research section enumerate
+  **all readers** of the affected data — not just the
+  callsites being migrated? Readers include any code
+  that inspects the field or consumes the output:
+  formatters, serializers, validators, assertions,
+  invariant checks, logging, diagnostics, downstream
+  transforms.
+- A search scoped to one helper function's callers is
+  insufficient when the data is also read by code that
+  does not call that helper. The research must cover
+  direct reads of the affected field or value — by
+  whatever access mechanism the language uses (property
+  access, getter methods, destructuring, pattern
+  matching) — across the entire codebase.
+- Why this matters: a production incident shipped two
+  broken components (an output formatter and a
+  consistency invariant) because the plan's research
+  identified only the callers of one classification
+  helper, missing two other components that read the
+  same field directly through different code paths.
+  Both readers broke immediately; neither was in the
+  migrated callsite set.

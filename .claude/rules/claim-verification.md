@@ -76,6 +76,42 @@ A plan with blocked items is not Completed; it stays
 InProgress or gets follow-up tasks that address the
 blocker.
 
+### Verify test-failure categorization
+
+When a handoff reports test failures as "expected" for a
+later task, "pre-existing at baseline," or otherwise out
+of scope for the current work, verify each failure
+individually before accepting. Batch categorization is
+the same scope-reduction bias as unverified infeasibility
+claims — a set of failures is labeled "not in scope" and
+moves through review unchallenged, even when one failure
+has a different root cause that *is* in scope.
+
+**For "expected failure" claims.** The claim must name
+each failure and cite its specific root cause, mapped to
+the expected category. "17 failures all map to Task 2"
+is not sufficient — the claim must state, for each
+failure, why its root cause matches Task 2's scope.
+Reviewers read enough of each failure message to confirm
+the mapping, not infer it from the aggregate count. A
+failure whose root cause does not match the stated
+category is a bug introduced by the current work, not
+deferred work — treat it as a review finding, not a
+known issue.
+
+**For "pre-existing at baseline" claims.** The claim
+must cite the baseline commit SHA and the exact test
+command. Verifiers (reviewer at review time, lead at
+spot-check) run that command at that SHA before
+accepting the claim. Inferring "pre-existing" from
+memory or from code reading is not verification — a
+production incident had a reviewer mark a failure
+pre-existing across three consecutive tasks without
+running the test, and the claim was verifiably false at
+the cited baseline. The failure was a bug introduced in
+Task 1 that shipped to `main` because each subsequent
+task carried the unverified claim forward.
+
 ## Why This Matters
 
 Each instance of unverified infeasibility compounds:
