@@ -19,12 +19,15 @@ mod lines;
 pub mod loader;
 pub mod node;
 mod pos;
+/// YAML 1.2.2 §10 schema tag resolution.
+pub mod schema;
 pub use error::Error;
 pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
 pub use node::{Document, Node};
 pub use pos::{Pos, Span};
+pub use schema::{ResolvedTag, Schema};
 
 pub use limits::{
     MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH, MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC,

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-23
 
 # Add opt-in schema tag resolution to the loader (§10)
@@ -118,7 +118,7 @@ audit without breaking any existing consumer.
 
 ## Steps
 
-- [ ] Task 1 — add `Schema` enum and Core schema regex
+- [x] Task 1 — add `Schema` enum and Core schema regex
       module with unit tests
 - [ ] Task 2 — wire schema resolution into the loader and
       add integration tests
@@ -135,7 +135,7 @@ module containing the Core schema regex-matching functions.
 This task builds the classification infrastructure; Task 2
 wires it into the loader.
 
-- [ ] Create `rlsp-yaml-parser/src/schema.rs` with:
+- [x] Create `rlsp-yaml-parser/src/schema.rs` with:
   - A public `Schema` enum with variants `Failsafe`, `Json`,
     `Core`. No `None` variant — the absence of schema
     resolution is represented by `Option<Schema>` in the
@@ -168,10 +168,10 @@ wires it into the loader.
     patterns overlap and have their own where they differ
     (JSON int is `0 | -? [1-9] [0-9]*`; Core int adds
     `+`, octal `0o`, hex `0x`).
-- [ ] Register the module in `lib.rs` with `pub mod schema;`
+- [x] Register the module in `lib.rs` with `pub mod schema;`
       and re-export `Schema` and `ResolvedTag` from the crate
       root.
-- [ ] Unit tests in `schema.rs` (inline `#[cfg(test)]`
+- [x] Unit tests in `schema.rs` (inline `#[cfg(test)]`
       module) cover every row of both the Core and JSON regex
       tables — each regex pattern gets at least one positive
       and one negative case. Include edge cases: empty string
@@ -180,9 +180,11 @@ wires it into the loader.
       float), `.nan`/`.NaN`/`.NAN` (Core float), leading
       zeros rejected for decimal (`007`), sign-only strings
       (`+`, `-`).
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `bf79f31`
 
 ### Task 2: Wire schema resolution into the loader
 
