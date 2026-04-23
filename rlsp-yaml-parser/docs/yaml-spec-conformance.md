@@ -462,7 +462,7 @@ BNF: `ns-word-char ::= ns-dec-digit | ns-ascii-letter | '-'`
 
 - Classification: Conformant
 - Spec (§5.6): "Word (alphanumeric) characters for identifiers:"
-- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:290` — tag handle validation uses `.is_ascii_alphanumeric() || c == '-' || c == '_'`; `rlsp-yaml-parser/src/chars.rs:89–113` (`is_ns_uri_char_single` includes alphanumeric and `-`)
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:289` — tag handle validation uses `.is_ascii_alphanumeric() || c == '-'`; `rlsp-yaml-parser/src/chars.rs:89–113` (`is_ns_uri_char_single` includes alphanumeric and `-`)
 - Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
 
 ### [39] ns-uri-char
@@ -954,11 +954,10 @@ BNF: `c-secondary-tag-handle ::= "!!"`
 
 BNF: `c-named-tag-handle ::= c-tag ns-word-char+ c-tag`
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§6.8.2.1): "A named tag handle surrounds a non-empty name with `!` characters. A handle name must not be used in a tag shorthand unless an explicit `TAG` directive has associated some prefix with it."
-- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:285–293` — named handle inner word validated with `.is_ascii_alphanumeric() || c == '-' || c == '_'`; the spec's `ns-word-char` is `[a-zA-Z0-9] | '-'` but the implementation also permits `'_'`
-- Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:482–490` (unit tests including `is_valid_tag_handle_named_with_hyphen_and_underscore`)
-- Discrepancy: The spec's `ns-word-char` production excludes `'_'`, but `is_valid_tag_handle` accepts `'_'` as a valid character in named tag handle names.
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:285–294` — named handle inner word validated with `.is_ascii_alphanumeric() || c == '-'`; matches `ns-word-char` exactly (`[a-zA-Z0-9] | '-'`). Note: inline tag suffixes (`!!my_type`) accept `_` because `ns-uri-char` explicitly includes it; the restriction applies only to `%TAG` directive handle names.
+- Test coverage: `rlsp-yaml-parser/src/event_iter/properties.rs:482–533` (unit tests: `is_valid_tag_handle_named_with_hyphen`, `is_valid_tag_handle_rejects_named_with_underscore`, `is_valid_tag_handle_rejects_underscore_only`, `is_valid_tag_handle_rejects_trailing_underscore`, `is_valid_tag_handle_rejects_leading_underscore`); `rlsp-yaml-parser/tests/smoke/directives.rs:827–860` (Group N integration tests: N-1 `tag_handle_named_with_hyphen_is_accepted`, N-2 `tag_handle_named_with_underscore_is_rejected`, N-3 `inline_tag_suffix_with_underscore_is_accepted`)
 
 ### [93] ns-tag-prefix
 
@@ -2115,14 +2114,13 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## Summary
 
-5 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 8 entries.
+4 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 7 entries.
 
 | Spec production | Classification | Source file:line | Discrepancy (one sentence) | Test coverage |
 |---|---|---|---|---|
 | §5 [59] `ns-esc-8-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [60] `ns-esc-16-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [61] `ns-esc-32-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `rlsp-yaml-parser/src/chars.rs:393–394` |
-| §6 [92] `c-named-tag-handle` | Lenient | `rlsp-yaml-parser/src/event_iter/properties.rs:285–293` | The spec's `ns-word-char` production excludes `'_'`, but `is_valid_tag_handle` accepts `'_'` as a valid character in named tag handle names. | `rlsp-yaml-parser/src/event_iter/properties.rs:482–490` |
 | §10 JSON Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches; the parser does not implement this rule, passing all untagged plain scalars through as `tag: None`. | no direct test |
 | §10 JSON Schema — untagged collections | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs` / `block/` (no resolution) | The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`; the parser always emits `tag: None` for untagged collections. | `rlsp-yaml-parser/tests/smoke/tags.rs:557,651` |
 | §10 Core Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The Core schema (the recommended default) requires plain scalars to be matched against an extended regex table; the parser does not implement this rule, yielding `tag: None` for all untagged plain scalars. | no direct test |

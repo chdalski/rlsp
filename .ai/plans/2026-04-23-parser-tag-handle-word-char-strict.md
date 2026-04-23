@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-23)
 **Created:** 2026-04-23
 
 # Reject underscore in named tag handle names ([92])
@@ -94,7 +94,7 @@ and the audit Summary drops from 5 Lenient entries to 4.
 
 - [x] Task 1 — remove `_` from `is_valid_tag_handle`; update
       tests and stale source comments
-- [ ] Task 2 — update conformance doc, feature-log, follow-up
+- [x] Task 2 — update conformance doc, feature-log, follow-up
       queue
 
 ## Tasks
@@ -180,7 +180,7 @@ Commit: `29732b61c029f51b1e115c84c05e8f22091dc983`
 Reflect the tightened validation in the audit document and the
 user-facing feature log, and close the follow-up queue item.
 
-- [ ] Update the §6 [92] `c-named-tag-handle` entry in
+- [x] Update the §6 [92] `c-named-tag-handle` entry in
       `rlsp-yaml-parser/docs/yaml-spec-conformance.md`: change
       Classification from `Lenient` to `Conformant`, update the
       Implementation citation to quote the fixed code
@@ -189,14 +189,14 @@ user-facing feature log, and close the follow-up queue item.
       (Conformant entries have no discrepancy), and update the
       Test coverage field to cite the new regression tests from
       Task 1 (both unit and integration-level).
-- [ ] Update the §5 [38] `ns-word-char` entry in the same file:
+- [x] Update the §5 [38] `ns-word-char` entry in the same file:
       Classification stays `Conformant`, but the Implementation
       text currently quotes `.is_ascii_alphanumeric() || c ==
       '-' || c == '_'` — replace that snippet with the fixed
       form `.is_ascii_alphanumeric() || c == '-'` so the audit
       text matches the post-fix code. No other changes to the
       [38] entry.
-- [ ] Update the `## Summary` table in
+- [x] Update the `## Summary` table in
       `rlsp-yaml-parser/docs/yaml-spec-conformance.md`: remove
       the row for `§6 [92] c-named-tag-handle`. Update the
       headline count. The current headline (after the 1024-char
@@ -206,22 +206,24 @@ user-facing feature log, and close the follow-up queue item.
       becomes "4 Lenient findings, 0 Strict findings
       (bug-class), 3 Strict (security-hardened) findings, total
       7 entries."
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
       user-facing entry documenting that named tag handles now
       reject `_` per YAML 1.2.2 §5.6 (production [38]) and
       §6.8.1 (production [92]). Note that only `%TAG` directive
       handle names are affected — inline tag suffixes (e.g.,
       `!!my_type`) continue to accept `_` because the spec's
       `ns-uri-char` production explicitly permits it.
-- [ ] Remove the stale follow-up queue entry. In
+- [x] Remove the stale follow-up queue entry. In
       `.ai/memory/project_followup_plans.md`, delete the
       `[Lenient] Named tag handle underscore ([92])` bullet
       under `## Open: rlsp-yaml-parser` — the work is complete.
-- [ ] No source code is modified in this task (documentation
+- [x] No source code is modified in this task (documentation
       only).
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run
       clean.
+
+Commit: `52c3104e20ef4dd4ab99900b313a2d3e9c79879a`
 
 ## Decisions
 

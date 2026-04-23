@@ -12,6 +12,21 @@ with existing infrastructure.
 
 ---
 
+### Named Tag Handle `_` Rejection [completed]
+
+**Description:** Named `%TAG` directive handle names now reject `_` per YAML 1.2.2
+§5.6 (production [38] `ns-word-char ::= ns-dec-digit | ns-ascii-letter | '-'`) and
+§6.8.1 (production [92] `c-named-tag-handle ::= c-tag ns-word-char+ c-tag`). A
+`%TAG` line such as `%TAG !my_handle! tag:example.org,2024:` is now a parse error.
+Only `%TAG` directive handle names are affected — inline tag suffixes (e.g.,
+`!!my_type`) continue to accept `_` because `ns-uri-char` (production [39])
+explicitly permits it.
+**Complexity:** Low
+**Comment:** Previously the parser accepted `_` in named handle names, silently
+diverging from the spec alphabet. The fix aligns the `is_valid_tag_handle` predicate
+with `ns-word-char` exactly.
+**Tier:** 1
+
 ### Flow Collections (`[...]` and `{...}`) [completed]
 
 **Description:** Parse flow sequences and flow mappings. The parser
