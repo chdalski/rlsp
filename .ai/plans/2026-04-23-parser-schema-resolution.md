@@ -120,7 +120,7 @@ audit without breaking any existing consumer.
 
 - [x] Task 1 — add `Schema` enum and Core schema regex
       module with unit tests
-- [ ] Task 2 — wire schema resolution into the loader and
+- [x] Task 2 — wire schema resolution into the loader and
       add integration tests
 - [ ] Task 3 — add JSON and Failsafe schema variants
 - [ ] Task 4 — update conformance doc, feature-log,
@@ -192,12 +192,12 @@ Add a `schema` option to `LoaderBuilder`/`LoaderOptions`,
 call the resolver from `parse_node`, and add integration
 tests through the `load()` entry point.
 
-- [ ] Add `schema: Option<Schema>` field to `LoaderOptions`
+- [x] Add `schema: Option<Schema>` field to `LoaderOptions`
       (default `None` — no resolution, preserving current
       behavior).
-- [ ] Add `LoaderBuilder::schema(mut self, s: Schema) ->
+- [x] Add `LoaderBuilder::schema(mut self, s: Schema) ->
       Self` method.
-- [ ] In `LoadState::parse_node`, after constructing each
+- [x] In `LoadState::parse_node`, after constructing each
       `Node` variant, if `self.options.schema` is `Some`:
   - For `Node::Scalar`: call `resolve_scalar(schema,
     style, &value, tag.as_deref())`. On `Ok(Some(t))`,
@@ -213,15 +213,15 @@ tests through the `load()` entry point.
     `Some(t)`, set `tag = Some(t.as_str().to_owned())`.
   - For `Node::Sequence`: same with
     `CollectionKind::Sequence`.
-- [ ] `tag_loc` stays `None` for resolved tags — resolved
+- [x] `tag_loc` stays `None` for resolved tags — resolved
       tags have no source position. Only explicitly-written
       tags have a location.
-- [ ] Add a convenience function `load_with_schema(input,
+- [x] Add a convenience function `load_with_schema(input,
       schema)` in the `loader` module that calls
       `LoaderBuilder::new().lossless().schema(schema)
       .build().load(input)`.
-- [ ] Re-export `load_with_schema` from the crate root.
-- [ ] Integration tests in
+- [x] Re-export `load_with_schema` from the crate root.
+- [x] Integration tests in
       `rlsp-yaml-parser/tests/schema_resolution.rs` cover:
   - Core schema: plain `42` → `tag:yaml.org,2002:int`,
     plain `true` → `!!bool`, plain `hello` → `!!str`,
@@ -244,10 +244,12 @@ tests through the `load()` entry point.
     regression test confirming no behavior change.
   - `load_with_schema` convenience function produces the
     same results as the builder chain.
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `5a7e5b3`
 
 ### Task 3: Add JSON and Failsafe schema variants
 

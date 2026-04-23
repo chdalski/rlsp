@@ -47,6 +47,7 @@ use crate::error::Error;
 use crate::event::{Event, ScalarStyle};
 use crate::node::{Document, Node};
 use crate::pos::{Pos, Span};
+use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 
 // ---------------------------------------------------------------------------
 // Public error type
@@ -138,6 +139,12 @@ pub struct LoaderOptions {
     pub max_expanded_nodes: usize,
     /// Controls how alias references are handled during loading.
     pub mode: LoadMode,
+    /// Optional YAML 1.2.2 §10 schema to apply during loading.
+    ///
+    /// When `Some`, each node's tag is resolved according to the schema after
+    /// the node is constructed.  When `None` (the default), tags are left as
+    /// the parser emitted them — `None` for untagged nodes.
+    pub schema: Option<Schema>,
 }
 
 impl Default for LoaderOptions {
@@ -147,6 +154,7 @@ impl Default for LoaderOptions {
             max_anchors: 10_000,
             max_expanded_nodes: 1_000_000,
             mode: LoadMode::Lossless,
+            schema: None,
         }
     }
 }
@@ -211,6 +219,16 @@ impl LoaderBuilder {
         self
     }
 
+    /// Enable YAML 1.2.2 §10 schema tag resolution during loading.
+    ///
+    /// When set, untagged nodes receive resolved tag URIs in the AST.  Nodes
+    /// with explicit source tags are not modified.
+    #[must_use]
+    pub const fn schema(mut self, s: Schema) -> Self {
+        self.options.schema = Some(s);
+        self
+    }
+
     /// Consume the builder and produce a [`Loader`].
     #[must_use]
     pub const fn build(self) -> Loader {
@@ -271,6 +289,37 @@ impl Loader {
 /// ```
 pub fn load(input: &str) -> std::result::Result<Vec<Document<Span>>, LoadError> {
     LoaderBuilder::new().lossless().build().load(input)
+}
+
+/// Load YAML text with YAML 1.2.2 §10 schema tag resolution applied.
+///
+/// Equivalent to `LoaderBuilder::new().lossless().schema(schema).build().load(input)`.
+///
+/// Untagged nodes receive resolved tag URIs according to `schema`.  Nodes with
+/// explicit source tags are left unchanged.
+///
+/// # Errors
+///
+/// Returns `Err` if the input contains a parse error or exceeds a security
+/// limit (nesting depth or anchor count).
+///
+/// ```
+/// use rlsp_yaml_parser::loader::load_with_schema;
+/// use rlsp_yaml_parser::{Node, Schema};
+///
+/// let docs = load_with_schema("42\n", Schema::Core).unwrap();
+/// let Node::Scalar { tag, .. } = &docs[0].root else { panic!() };
+/// assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
+/// ```
+pub fn load_with_schema(
+    input: &str,
+    schema: Schema,
+) -> std::result::Result<Vec<Document<Span>>, LoadError> {
+    LoaderBuilder::new()
+        .lossless()
+        .schema(schema)
+        .build()
+        .load(input)
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +402,11 @@ impl<'opt> LoadState<'opt> {
                     // Parse root node (may be absent for empty documents).
                     let root = if is_document_end(stream.peek()) {
                         // Empty document — emit an empty scalar as root.
-                        empty_scalar()
+                        let mut node = empty_scalar();
+                        if let Some(schema) = self.options.schema {
+                            apply_schema_to_node(&mut node, schema);
+                        }
+                        node
                     } else {
                         self.parse_node(&mut stream)?
                     };
@@ -421,7 +474,7 @@ impl<'opt> LoadState<'opt> {
                 tag_loc,
                 ..
             } => {
-                let node = Node::Scalar {
+                let mut node = Node::Scalar {
                     value: value.into_owned(),
                     style,
                     anchor: anchor.map(str::to_owned),
@@ -432,6 +485,9 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
+                if let Some(schema) = self.options.schema {
+                    apply_schema_to_node(&mut node, schema);
+                }
                 if let Some(name) = node.anchor() {
                     self.register_anchor(name.to_owned(), &node)?;
                 }
@@ -530,7 +586,7 @@ impl<'opt> LoadState<'opt> {
                 }
                 self.depth -= 1;
 
-                let node = Node::Mapping {
+                let mut node = Node::Mapping {
                     entries,
                     style,
                     anchor: anchor.clone(),
@@ -544,6 +600,9 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
+                if let Some(schema) = self.options.schema {
+                    apply_schema_to_node(&mut node, schema);
+                }
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
                 }
@@ -638,7 +697,7 @@ impl<'opt> LoadState<'opt> {
                 }
                 self.depth -= 1;
 
-                let node = Node::Sequence {
+                let mut node = Node::Sequence {
                     items,
                     style,
                     anchor: anchor.clone(),
@@ -652,6 +711,9 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
+                if let Some(schema) = self.options.schema {
+                    apply_schema_to_node(&mut node, schema);
+                }
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
                 }
@@ -867,6 +929,76 @@ const fn is_block_scalar(node: &Node<Span>) -> bool {
             ..
         }
     )
+}
+
+// ---------------------------------------------------------------------------
+// Schema resolution helpers
+// ---------------------------------------------------------------------------
+
+/// Apply schema tag resolution to a freshly-constructed node.
+///
+/// - For scalars: translates bare `!` to `None` (non-specific), then calls
+///   `resolve_scalar`.
+/// - For mappings/sequences: translates bare `!` to `None`, then calls
+///   `resolve_collection`.
+/// - On `Ok(Some(tag))`: overwrites `node.tag`; `tag_loc` is left `None`
+///   (no source position for a resolved tag).
+/// - On `Ok(None)` (explicit tag present): leaves `node.tag` unchanged.
+///
+/// The `Err(UnresolvedScalar)` branch is only reachable with `Schema::Json`.
+/// Until Task 3 adds `LoadError::UnresolvedScalar`, it is treated as
+/// unreachable — the JSON schema is not exercised in this task.
+fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) {
+    match node {
+        Node::Scalar {
+            value,
+            style,
+            tag,
+            tag_loc,
+            ..
+        } => {
+            // Bare `!` on a scalar is the non-specific scalar tag — it resolves
+            // unconditionally to !!str regardless of content (YAML 1.2.2 §10.2.1,
+            // §10.3.2: "non-specific" tag for scalars = Failsafe str).  We handle
+            // it before calling the schema resolver so Core doesn't pattern-match
+            // the value.
+            if tag.as_deref() == Some("!") {
+                *tag = Some(crate::schema::ResolvedTag::Str.as_str().to_owned());
+                *tag_loc = None;
+                return;
+            }
+            // All other tags: pass through as-is (Some(non-!) = explicit tag → Ok(None)).
+            match resolve_scalar(schema, *style, value, tag.as_deref()) {
+                Ok(Some(resolved)) => {
+                    *tag = Some(resolved.as_str().to_owned());
+                    *tag_loc = None;
+                }
+                Ok(None) => {}
+                Err(_) => unreachable!("UnresolvedScalar only reachable with JSON schema"),
+            }
+        }
+        Node::Mapping { tag, tag_loc, .. } => {
+            // Bare `!` on a collection means non-specific collection tag — translate
+            // to None so the resolver returns the kind-based tag (!!map / !!seq).
+            let effective_tag = tag.as_deref().filter(|t| *t != "!");
+            if let Some(resolved) =
+                resolve_collection(schema, CollectionKind::Mapping, effective_tag)
+            {
+                *tag = Some(resolved.as_str().to_owned());
+                *tag_loc = None;
+            }
+        }
+        Node::Sequence { tag, tag_loc, .. } => {
+            let effective_tag = tag.as_deref().filter(|t| *t != "!");
+            if let Some(resolved) =
+                resolve_collection(schema, CollectionKind::Sequence, effective_tag)
+            {
+                *tag = Some(resolved.as_str().to_owned());
+                *tag_loc = None;
+            }
+        }
+        Node::Alias { .. } => {}
+    }
 }
 
 // ---------------------------------------------------------------------------
