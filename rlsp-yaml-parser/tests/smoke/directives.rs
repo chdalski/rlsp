@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use rstest::rstest;
 
 use super::*;
@@ -505,7 +507,6 @@ fn tag_directive_with_double_quote_prefix_is_accepted() {
 #[test]
 fn directive_count_at_limit_is_accepted() {
     // Build exactly MAX_DIRECTIVES_PER_DOC directives with distinct handles.
-    use std::fmt::Write as _;
     let mut input = String::new();
     for i in 0..MAX_DIRECTIVES_PER_DOC {
         let _ = writeln!(input, "%TAG !h{i}! prefix{i}:");
@@ -520,7 +521,6 @@ fn directive_count_at_limit_is_accepted() {
 // K-4: Directive count exceeding limit returns error.
 #[test]
 fn directive_count_exceeding_limit_returns_error() {
-    use std::fmt::Write as _;
     let mut input = String::new();
     for i in 0..=MAX_DIRECTIVES_PER_DOC {
         let _ = writeln!(input, "%TAG !h{i}! prefix{i}:");

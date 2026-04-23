@@ -63,9 +63,9 @@ zero warnings, `cargo test`) after each task.
 - [x] Fix the 27 module-scope violations across 7 files
       (Task 1) — mechanical hoisting and reordering.
       *(commit `5b81387`)*
-- [ ] Classify and fix the 14 function-body `use`
+- [x] Classify and fix the 14 function-body `use`
       statements in `rlsp-yaml-parser/` across 7 files
-      (Task 2).
+      (Task 2). *(commit `fffe9d8`)*
 - [ ] Classify and fix the 35 function-body `use`
       statements in `rlsp-yaml/` across 11 files, and
       confirm zero violations remain across the workspace
@@ -174,47 +174,47 @@ the `use` against the rule's allowed exceptions, and act:
 
 File-and-line targets (14):
 
-- [ ] `rlsp-yaml-parser/src/event_iter/base.rs:598` —
+- [x] `rlsp-yaml-parser/src/event_iter/base.rs:598` —
       `use std::borrow::Cow;`
-- [ ] `rlsp-yaml-parser/src/event_iter/flow.rs:47` —
+- [x] `rlsp-yaml-parser/src/event_iter/flow.rs:47` —
       `use crate::lexer::scan_plain_line_flow;`
-- [ ] `rlsp-yaml-parser/src/event_iter/flow.rs:48` —
+- [x] `rlsp-yaml-parser/src/event_iter/flow.rs:48` —
       `use std::borrow::Cow;`
-- [ ] `rlsp-yaml-parser/src/event_iter/properties.rs:26` —
+- [x] `rlsp-yaml-parser/src/event_iter/properties.rs:26` —
       `use crate::chars::is_ns_anchor_char;`
-- [ ] `rlsp-yaml-parser/src/lexer.rs:500` —
+- [x] `rlsp-yaml-parser/src/lexer.rs:500` —
       `use crate::chars::is_ns_anchor_char;`
-- [ ] `rlsp-yaml-parser/src/node.rs:433` —
+- [x] `rlsp-yaml-parser/src/node.rs:433` —
       `use crate::event::CollectionStyle;`
-- [ ] `rlsp-yaml-parser/src/node.rs:452` —
+- [x] `rlsp-yaml-parser/src/node.rs:452` —
       `use crate::event::CollectionStyle;`
-- [ ] `rlsp-yaml-parser/src/node.rs:522` —
+- [x] `rlsp-yaml-parser/src/node.rs:522` —
       `use crate::event::CollectionStyle;`
-- [ ] `rlsp-yaml-parser/src/node.rs:541` —
+- [x] `rlsp-yaml-parser/src/node.rs:541` —
       `use crate::event::CollectionStyle;`
-- [ ] `rlsp-yaml-parser/tests/schema_resolution.rs:703` —
+- [x] `rlsp-yaml-parser/tests/schema_resolution.rs:703` —
       `use rlsp_yaml_parser::LoadError;`
-- [ ] `rlsp-yaml-parser/tests/schema_resolution.rs:720` —
+- [x] `rlsp-yaml-parser/tests/schema_resolution.rs:720` —
       `use rlsp_yaml_parser::LoadError;`
-- [ ] `rlsp-yaml-parser/tests/schema_resolution.rs:735` —
+- [x] `rlsp-yaml-parser/tests/schema_resolution.rs:735` —
       `use rlsp_yaml_parser::LoadError;`
-- [ ] `rlsp-yaml-parser/tests/smoke/directives.rs:508` —
+- [x] `rlsp-yaml-parser/tests/smoke/directives.rs:508` —
       `use std::fmt::Write as _;`
-- [ ] `rlsp-yaml-parser/tests/smoke/directives.rs:523` —
+- [x] `rlsp-yaml-parser/tests/smoke/directives.rs:523` —
       `use std::fmt::Write as _;`
 
 **Verification:**
 
-- [ ] Every listed line is either removed, unchanged (with
+- [x] Every listed line is either removed, unchanged (with
       justifying comment if it was a keep-for-exception
       case), or has its `use` relocated to the enclosing
       module or test module's header `use` block.
-- [ ] `cargo fmt --check` clean.
-- [ ] `cargo clippy --all-targets -p rlsp-yaml-parser` zero
+- [x] `cargo fmt --check` clean.
+- [x] `cargo clippy --all-targets -p rlsp-yaml-parser` zero
       warnings; workspace-wide clippy also zero warnings.
-- [ ] `cargo test -p rlsp-yaml-parser` passes; workspace
+- [x] `cargo test -p rlsp-yaml-parser` passes; workspace
       tests still pass.
-- [ ] If the scanner at `/tmp/import-scan/` is still
+- [x] If the scanner at `/tmp/import-scan/` is still
       available, re-running it against `rlsp-yaml-parser/`
       reports zero `UseAtTopOfFnBody` violations that are
       not documented exceptions. Otherwise the verification

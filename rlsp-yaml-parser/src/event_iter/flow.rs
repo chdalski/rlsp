@@ -8,6 +8,8 @@
 //! preserved verbatim through any future edits. See the design note in
 //! the function body for the rationale.
 
+use std::borrow::Cow;
+
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
     CollectionEntry, FlowMappingPhase, IterState, MappingPhase, PendingAnchor, PendingTag,
@@ -15,6 +17,7 @@ use super::state::{
 };
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle};
+use crate::lexer::scan_plain_line_flow;
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::pos::{Pos, Span};
 use crate::{EventIter, empty_scalar_event, zero_span};
@@ -44,9 +47,6 @@ impl<'input> EventIter<'input> {
         reason = "match-on-event-type; splitting would obscure flow"
     )]
     pub(crate) fn handle_flow_collection(&mut self) -> StepResult<'input> {
-        use crate::lexer::scan_plain_line_flow;
-        use std::borrow::Cow;
-
         // -----------------------------------------------------------------------
         // Local types for the explicit flow-parser stack.
         // -----------------------------------------------------------------------

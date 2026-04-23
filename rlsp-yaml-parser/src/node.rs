@@ -201,7 +201,7 @@ impl<Loc> Node<Loc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::ScalarStyle;
+    use crate::event::{CollectionStyle, ScalarStyle};
     use crate::pos::{Pos, Span};
 
     fn zero_span() -> Span {
@@ -430,7 +430,6 @@ mod tests {
     // AL-NODE-4: anchor_loc_accessor_returns_some_for_anchored_mapping
     #[test]
     fn anchor_loc_accessor_returns_some_for_anchored_mapping() {
-        use crate::event::CollectionStyle;
         let span = zero_span();
         let node = Node::Mapping {
             entries: vec![],
@@ -449,7 +448,6 @@ mod tests {
     // AL-NODE-5: anchor_loc_accessor_returns_some_for_anchored_sequence
     #[test]
     fn anchor_loc_accessor_returns_some_for_anchored_sequence() {
-        use crate::event::CollectionStyle;
         let span = zero_span();
         let node = Node::Sequence {
             items: vec![],
@@ -519,7 +517,6 @@ mod tests {
     // TL-NODE-4: tag_loc_accessor_returns_some_for_tagged_mapping
     #[test]
     fn tag_loc_accessor_returns_some_for_tagged_mapping() {
-        use crate::event::CollectionStyle;
         let span = zero_span();
         let node = Node::Mapping {
             entries: vec![],
@@ -538,7 +535,6 @@ mod tests {
     // TL-NODE-5: tag_loc_accessor_returns_some_for_tagged_sequence
     #[test]
     fn tag_loc_accessor_returns_some_for_tagged_sequence() {
-        use crate::event::CollectionStyle;
         let span = zero_span();
         let node = Node::Sequence {
             items: vec![],

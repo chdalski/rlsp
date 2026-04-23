@@ -517,6 +517,8 @@ impl<'input> Iterator for EventIter<'input> {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::EventIter;
 
@@ -595,7 +597,6 @@ mod tests {
 
     #[test]
     fn inline_scalar_short_circuits_to_plain_before_peek() {
-        use std::borrow::Cow;
         let mut iter = EventIter::new("");
         let span = crate::zero_span(crate::pos::Pos::ORIGIN);
         iter.lexer

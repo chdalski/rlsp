@@ -14,7 +14,7 @@
 //! `LoaderBuilder::new().schema(s).build().load(input)` and `load()`.
 
 use rlsp_yaml_parser::loader::LoaderBuilder;
-use rlsp_yaml_parser::{Node, Schema};
+use rlsp_yaml_parser::{LoadError, Node, Schema};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -700,7 +700,6 @@ fn json_unresolved_scalar_display_message_is_exact() {
 // has pos.line > 1.
 #[test]
 fn json_unresolved_scalar_pos_reflects_actual_position() {
-    use rlsp_yaml_parser::LoadError;
     // `42\n---\nhello\n`: first doc has `42` (resolves to !!int), second doc
     // has `hello` (fails JSON resolution on a later line).
     let err =
@@ -717,7 +716,6 @@ fn json_unresolved_scalar_pos_reflects_actual_position() {
 // IT-59: value field of UnresolvedScalar contains the failing scalar content
 #[test]
 fn json_unresolved_scalar_value_field_contains_scalar_content() {
-    use rlsp_yaml_parser::LoadError;
     let err = load_with_schema("hello\n", Schema::Json).expect_err("expected error");
     let LoadError::UnresolvedScalar { value, .. } = err else {
         panic!("expected UnresolvedScalar, got: {err:?}");
@@ -732,7 +730,6 @@ fn json_unresolved_scalar_value_field_contains_scalar_content() {
 // IT-60: very long plain scalar value is truncated at 128 chars with ellipsis
 #[test]
 fn json_unresolved_scalar_truncates_long_value() {
-    use rlsp_yaml_parser::LoadError;
     // 200 lowercase 'a' chars — unresolvable under JSON schema.
     let long_value = "a".repeat(200);
     let input = format!("{long_value}\n");

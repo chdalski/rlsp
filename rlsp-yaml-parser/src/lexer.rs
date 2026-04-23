@@ -8,6 +8,7 @@
 
 use std::borrow::Cow;
 
+use crate::chars::is_ns_anchor_char;
 use crate::error::Error;
 use crate::lines::{Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
@@ -497,7 +498,6 @@ impl<'input> Lexer<'input> {
 /// Used by [`Lexer::consume_marker_line`] to reject `--- &anchor key: val`
 /// (block mapping entries cannot appear inline on the document-start line).
 fn anchor_followed_by_block_mapping(inline: &str) -> bool {
-    use crate::chars::is_ns_anchor_char;
     let after_amp = &inline[1..]; // caller ensures inline starts with '&'
     let name_end = after_amp
         .char_indices()

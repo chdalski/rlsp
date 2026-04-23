@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use crate::chars::is_ns_anchor_char;
 use crate::error::Error;
 use crate::limits::{MAX_ANCHOR_NAME_BYTES, MAX_TAG_LEN};
 use crate::pos::Pos;
@@ -23,7 +24,6 @@ pub(in crate::event_iter) fn scan_anchor_name(
     content: &str,
     indicator_pos: Pos,
 ) -> Result<&str, Error> {
-    use crate::chars::is_ns_anchor_char;
     let end = content
         .char_indices()
         .take_while(|&(_, ch)| is_ns_anchor_char(ch))
