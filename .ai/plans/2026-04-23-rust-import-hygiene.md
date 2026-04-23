@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-23
 
 # Rust Import Placement — Workspace-Wide Cleanup
@@ -60,8 +60,9 @@ zero warnings, `cargo test`) after each task.
 
 ## Steps
 
-- [ ] Fix the 27 module-scope violations across 7 files
+- [x] Fix the 27 module-scope violations across 7 files
       (Task 1) — mechanical hoisting and reordering.
+      *(commit `5b81387`)*
 - [ ] Classify and fix the 14 function-body `use`
       statements in `rlsp-yaml-parser/` across 7 files
       (Task 2).
@@ -80,33 +81,33 @@ two-tier convention.
 
 **`rlsp-yaml/src/schema_validation.rs` (sub-module — `use` → `mod` → items):**
 
-- [ ] `:39` hoist `use crate::scalar_helpers;` into the
+- [x] `:39` hoist `use crate::scalar_helpers;` into the
       top-of-file `use crate::...` group.
-- [ ] `:40` hoist `use crate::schema::{AdditionalProperties,
+- [x] `:40` hoist `use crate::schema::{AdditionalProperties,
       JsonSchema, SchemaType};` into the same group.
-- [ ] `:41` hoist `use crate::server::YamlVersion;` into the
+- [x] `:41` hoist `use crate::server::YamlVersion;` into the
       same group.
-- [ ] `:43` hoist `mod formats;` to the module's `mod`
+- [x] `:43` hoist `mod formats;` to the module's `mod`
       group directly after the `use` block (create the
       group if none exists).
 
 **`rlsp-yaml/src/editing/code_actions/yaml11_octal.rs` (sub-module):**
 
-- [ ] `:556` hoist `use rstest::rstest;` to the top of the
+- [x] `:556` hoist `use rstest::rstest;` to the top of the
       enclosing `#[cfg(test)] mod tests { ... }` block (the
       block is the test module, not the file; `use` must
       precede any `#[test] fn` in the block).
 
 **`rlsp-yaml/tests/corpus_invariants.rs` (test-crate root — `mod` → `use` → items):**
 
-- [ ] `:1305` hoist `use rlsp_yaml_parser::{CollectionStyle,
+- [x] `:1305` hoist `use rlsp_yaml_parser::{CollectionStyle,
       Pos, ScalarStyle, Span as TestSpan};` into the
       top-of-file `use` block (after any `mod`
       declarations).
 
 **`rlsp-yaml-parser/tests/smoke/main.rs` (test-crate root — `mod` → `use` → items):**
 
-- [ ] `:96–:113` move all 18 `mod X;` declarations
+- [x] `:96–:113` move all 18 `mod X;` declarations
       (`anchors_and_aliases`, `block_scalars`, `comments`,
       `conformance`, `directives`, `documents`,
       `flow_collections`, `folded_scalars`, `mappings`,
@@ -114,36 +115,36 @@ two-tier convention.
       `probe_dispatch`, `quoted_scalars`, `scalar_dispatch`,
       `scalars`, `sequences`, `stream`, `tags`) to the very
       top of the file, above the existing `use` block.
-- [ ] Remove the `// Submodules` banner comment — it
+- [x] Remove the `// Submodules` banner comment — it
       was compensating for the misplaced location.
-- [ ] Final file order: SPDX/doc → `mod` declarations →
+- [x] Final file order: SPDX/doc → `mod` declarations →
       `use` statements → helper fns (`event_variants`,
       `parse_to_vec`, `evs`, `has_error`, `scalar_values`,
       `count`) → `#[test]` functions.
 
 **`rlsp-yaml-parser/benches/latency.rs` (bench-crate root):**
 
-- [ ] `:23` move `mod fixtures;` above the `use` block at
+- [x] `:23` move `mod fixtures;` above the `use` block at
       the top of the file (crate-root order: `mod` → `use`).
 
 **`rlsp-yaml-parser/benches/memory.rs` (bench-crate root):**
 
-- [ ] `:20` same — move `mod fixtures;` above the `use`
+- [x] `:20` same — move `mod fixtures;` above the `use`
       block.
 
 **`rlsp-yaml-parser/benches/throughput.rs` (bench-crate root):**
 
-- [ ] `:23` same — move `mod fixtures;` above the `use`
+- [x] `:23` same — move `mod fixtures;` above the `use`
       block.
 
 **Verification:**
 
-- [ ] `cargo fmt` applied to every modified file.
-- [ ] `cargo fmt --check` clean across the workspace.
-- [ ] `cargo clippy --all-targets` zero warnings across the
+- [x] `cargo fmt` applied to every modified file.
+- [x] `cargo fmt --check` clean across the workspace.
+- [x] `cargo clippy --all-targets` zero warnings across the
       workspace.
-- [ ] `cargo test` passes across the workspace.
-- [ ] Verify each listed checkbox above by inspecting the
+- [x] `cargo test` passes across the workspace.
+- [x] Verify each listed checkbox above by inspecting the
       modified file's header block against the two-tier
       convention. If the scanner at `/tmp/import-scan/` is
       still available, re-running it against the 7 files

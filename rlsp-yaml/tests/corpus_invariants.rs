@@ -978,6 +978,7 @@ fn corpus_invariants() {
 mod tests {
     use std::io::Write as _;
 
+    use rlsp_yaml_parser::{CollectionStyle, Pos, ScalarStyle, Span as TestSpan};
     use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
     use super::*;
@@ -1301,8 +1302,6 @@ mod tests {
     // ---------------------------------------------------------------------------
     // I4 unit tests — collect_scalar_values and missing_scalars helpers
     // ---------------------------------------------------------------------------
-
-    use rlsp_yaml_parser::{CollectionStyle, Pos, ScalarStyle, Span as TestSpan};
 
     fn zero_span() -> TestSpan {
         TestSpan {

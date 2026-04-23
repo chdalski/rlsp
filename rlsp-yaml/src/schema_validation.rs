@@ -8,6 +8,12 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+use crate::scalar_helpers;
+use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+use crate::server::YamlVersion;
+
+mod formats;
+
 /// Convert a parser `Span` to an LSP `Range`.
 ///
 /// `Pos::line` is 1-based; LSP lines are 0-based — hence the `saturating_sub(1)`.
@@ -35,12 +41,6 @@ const fn node_loc(node: &Node<Span>) -> Span {
         | Node::Alias { loc, .. } => *loc,
     }
 }
-
-use crate::scalar_helpers;
-use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
-use crate::server::YamlVersion;
-
-mod formats;
 
 /// Helper: check if a mapping's entries contain a key with the given string value.
 fn entries_contains_key(entries: &[(Node<Span>, Node<Span>)], key: &str) -> bool {

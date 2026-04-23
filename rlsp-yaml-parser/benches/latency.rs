@@ -16,16 +16,16 @@
     reason = "Criterion BenchmarkGroup must stay alive until finish()"
 )]
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
-use std::os::raw::{c_char, c_int, c_uint};
-
 #[path = "fixtures.rs"]
 #[expect(
     dead_code,
     reason = "bench fixture; each binary uses a subset of functions"
 )]
 mod fixtures;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
+use std::os::raw::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------------
 // libfyaml FFI

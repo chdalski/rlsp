@@ -16,12 +16,12 @@
     reason = "Criterion BenchmarkGroup must stay alive until finish()"
 )]
 
+#[path = "fixtures.rs"]
+mod fixtures;
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::os::raw::{c_char, c_int, c_uint};
-
-#[path = "fixtures.rs"]
-mod fixtures;
 
 // ---------------------------------------------------------------------------
 // libfyaml FFI — minimal event API

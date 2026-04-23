@@ -215,6 +215,8 @@ fn find_yaml11_octal_in_node<'a>(
 mod tests {
     use tower_lsp::lsp_types::NumberOrString;
 
+    use rstest::rstest;
+
     use super::super::code_actions;
     use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
     use crate::test_utils::test_uri;
@@ -552,8 +554,6 @@ mod tests {
             );
         }
     }
-
-    use rstest::rstest;
 
     #[rstest]
     #[case::yaml11_octal_code("yaml11Octal")]

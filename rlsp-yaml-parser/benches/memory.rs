@@ -11,18 +11,18 @@
     reason = "custom allocator wrapper requires unsafe GlobalAlloc impl"
 )]
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::hint::black_box;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
-
 #[path = "fixtures.rs"]
 #[expect(
     dead_code,
     reason = "bench fixture; each binary uses a subset of functions"
 )]
 mod fixtures;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::hint::black_box;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Counting allocator

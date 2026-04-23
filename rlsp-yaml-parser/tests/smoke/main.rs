@@ -11,6 +11,25 @@
 //! [`parse_to_vec`] collects the full event stream into a `Vec` without
 //! hiding errors.  It is the canonical test helper for all grammar tasks.
 
+mod anchors_and_aliases;
+mod block_scalars;
+mod comments;
+mod conformance;
+mod directives;
+mod documents;
+mod flow_collections;
+mod folded_scalars;
+mod mappings;
+mod nested_collections;
+mod nested_flow_block_mixing;
+mod probe_dispatch;
+mod quoted_scalars;
+mod scalar_dispatch;
+mod scalars;
+mod sequences;
+mod stream;
+mod tags;
+
 use rlsp_yaml_parser::{
     Chomp, CollectionStyle, Error, Event, MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH,
     MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN, Pos, ScalarStyle,
@@ -88,26 +107,3 @@ fn scalar_values<'a>(events: &'a [Event<'a>]) -> Vec<&'a str> {
 fn count<'a>(events: &[Event<'a>], pred: impl Fn(&Event<'a>) -> bool) -> usize {
     events.iter().filter(|e| pred(e)).count()
 }
-
-// ---------------------------------------------------------------------------
-// Submodules
-// ---------------------------------------------------------------------------
-
-mod anchors_and_aliases;
-mod block_scalars;
-mod comments;
-mod conformance;
-mod directives;
-mod documents;
-mod flow_collections;
-mod folded_scalars;
-mod mappings;
-mod nested_collections;
-mod nested_flow_block_mixing;
-mod probe_dispatch;
-mod quoted_scalars;
-mod scalar_dispatch;
-mod scalars;
-mod sequences;
-mod stream;
-mod tags;
