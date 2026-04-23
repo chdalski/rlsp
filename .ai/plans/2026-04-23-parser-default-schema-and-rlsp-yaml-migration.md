@@ -90,7 +90,7 @@ cannot be replaced by tag comparisons.
 
 - [x] Task 1 — make `Schema::Core` the loader default and
       drop `Option<Schema>`
-- [ ] Task 2 — migrate `rlsp-yaml` type-inference callsites
+- [x] Task 2 — migrate `rlsp-yaml` type-inference callsites
       to tag-URI comparisons
 - [ ] Task 3 — thin `scalar_helpers.rs` and update docs
 
@@ -167,7 +167,7 @@ tests.
 Replace `scalar_helpers` type-classification calls with
 tag-URI string comparisons on the AST node's `tag` field.
 
-- [ ] In `schema_validation.rs`: replace
+- [x] In `schema_validation.rs`: replace
       `classify_plain_scalar(value)` at line ~1543 with a
       match on `tag.as_deref()`:
       `Some("tag:yaml.org,2002:null")` → `"null"`,
@@ -175,32 +175,34 @@ tag-URI string comparisons on the AST node's `tag` field.
       `Some("tag:yaml.org,2002:int")` → `"integer"`,
       `Some("tag:yaml.org,2002:float")` → `"number"`,
       `_` → `"string"`.
-- [ ] In `schema_validation.rs`: replace the
+- [x] In `schema_validation.rs`: replace the
       `!is_null && !is_bool && !is_integer && !is_float`
       check at line ~795 with
       `tag.as_deref() == Some("tag:yaml.org,2002:str")`.
-- [ ] In `schema_validation.rs`: replace `is_null(value)`
+- [x] In `schema_validation.rs`: replace `is_null(value)`
       and `is_bool(value)` at lines ~1603-1605 with tag
       comparisons. Keep `parse_integer` / `parse_float`
       calls at lines ~1610-1612 for value extraction.
-- [ ] In `analysis/symbols.rs`: replace
+- [x] In `analysis/symbols.rs`: replace
       `classify_plain_scalar(value)` at line ~159 with a
       match on `tag.as_deref()` for `SymbolKind` mapping.
       The destructuring pattern needs to add `tag` to the
       `Node::Scalar { value, .. }` arm.
-- [ ] In `validation/validators.rs`: replace
+- [x] In `validation/validators.rs`: replace
       `!is_null(value)` at line ~373 with
       `tag.as_deref() != Some("tag:yaml.org,2002:null")`.
-- [ ] Verify the `style` checks in YAML 1.1 warning code
+- [x] Verify the `style` checks in YAML 1.1 warning code
       still work correctly — those check
       `style == ScalarStyle::Plain` before calling
       `is_yaml11_bool(value)`. These are not affected by
       tag migration since they test 1.1-specific forms,
       not Core schema types.
-- [ ] `cargo test -p rlsp-yaml` passes.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo test -p rlsp-yaml` passes.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `08a84fd`
 
 ### Task 3: Thin `scalar_helpers.rs` and update docs
 

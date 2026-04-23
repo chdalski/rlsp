@@ -809,7 +809,6 @@ fn flow_item_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool
             value,
             style: ScalarStyle::Plain,
             anchor: None,
-            tag: None,
             ..
         } if needs_flow_quoting(value) => text(format!("\"{}\"", escape_double_quoted(value))),
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {

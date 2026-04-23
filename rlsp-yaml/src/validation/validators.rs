@@ -301,7 +301,10 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
         Node::Alias { .. } => None,
     };
     if let Some((tag_str, loc)) = tag_and_loc {
-        if !allowed_tags.contains(tag_str) {
+        // Skip tags injected by the Core schema resolver — these are never user-supplied.
+        if tag_str.starts_with("tag:yaml.org,2002:") {
+            // Fall through to child recursion only.
+        } else if !allowed_tags.contains(tag_str) {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "LSP line/col are u32; always fits"
@@ -370,7 +373,9 @@ fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, dep
             let keys: Vec<(&str, &Span)> = entries
                 .iter()
                 .filter_map(|(k, _)| match k {
-                    Node::Scalar { value, loc, .. } if !crate::scalar_helpers::is_null(value) => {
+                    Node::Scalar {
+                        tag, value, loc, ..
+                    } if tag.as_deref() != Some("tag:yaml.org,2002:null") => {
                         Some((value.as_str(), loc))
                     }
                     Node::Scalar { .. }
@@ -1325,6 +1330,36 @@ jobs:
         assert_eq!(result[0].range.start.line, 1, "apple is on line 1");
         assert_eq!(result[0].range.start.character, 0, "apple starts at col 0");
         assert_eq!(result[0].range.end.character, 5, "apple is 5 chars long");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group 7: check_yaml_ordering — tag-based null key filtering
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // T7.1 — null key is excluded from ordering check with tag-based null detection
+    #[test]
+    fn tag_driven_null_key_excluded_from_ordering_check() {
+        // ~ is null; zebra and alpha are out of order — only 1 ordering diagnostic expected
+        let text = "~: value\nzebra: 1\nalpha: 2\n";
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let result = validate_key_ordering(&docs);
+        assert_eq!(
+            result.len(),
+            1,
+            "null key must be excluded; only alpha is out of order"
+        );
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "mapKeyOrder")
+        );
+    }
+
+    // T7.2 — non-null plain scalar key is included in ordering check (baseline)
+    #[test]
+    fn tag_driven_non_null_key_included_in_ordering_check() {
+        let text = "banana: 2\napple: 1\n";
+        let docs = rlsp_yaml_parser::load(text).unwrap();
+        let result = validate_key_ordering(&docs);
+        assert_eq!(result.len(), 1, "apple is out of order and must be flagged");
     }
 
     // ---- Custom Tags Validator: Happy Paths / Multi-document / Nested ----

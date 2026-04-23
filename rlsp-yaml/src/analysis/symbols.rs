@@ -6,8 +6,6 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{Pos, Span};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
-use crate::scalar_helpers::{self, PlainScalarKind};
-
 /// Produce a hierarchical list of document symbols for the given YAML documents.
 ///
 /// Returns an empty vector if `docs` is empty or every document root is a
@@ -156,11 +154,11 @@ fn node_symbol_kind(node: &Node<Span>) -> SymbolKind {
     match node {
         Node::Mapping { .. } => SymbolKind::OBJECT,
         Node::Sequence { .. } => SymbolKind::ARRAY,
-        Node::Scalar { value, .. } => match scalar_helpers::classify_plain_scalar(value) {
-            PlainScalarKind::Null => SymbolKind::NULL,
-            PlainScalarKind::Bool => SymbolKind::BOOLEAN,
-            PlainScalarKind::Integer | PlainScalarKind::Float => SymbolKind::NUMBER,
-            PlainScalarKind::String => SymbolKind::STRING,
+        Node::Scalar { tag, .. } => match tag.as_deref() {
+            Some("tag:yaml.org,2002:null") => SymbolKind::NULL,
+            Some("tag:yaml.org,2002:bool") => SymbolKind::BOOLEAN,
+            Some("tag:yaml.org,2002:int" | "tag:yaml.org,2002:float") => SymbolKind::NUMBER,
+            _ => SymbolKind::STRING,
         },
         Node::Alias { .. } => SymbolKind::STRING,
     }
@@ -640,5 +638,37 @@ mod tests {
 
         assert_eq!(doc1_sym.range.start.line, 0, "doc1 should start at line 0");
         assert_eq!(doc3_sym.range.start.line, 4, "doc3 should start at line 4");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group 4: node_symbol_kind — tag-URI-driven SymbolKind mapping
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // T4.1 — quoted integer-looking value gets STRING kind, not NUMBER
+    #[test]
+    fn tag_driven_quoted_integer_gets_string_symbol_kind() {
+        let text = "count: \"42\"\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let sym = find_symbol(&symbols, "count").expect("should have 'count'");
+        assert_eq!(
+            sym.kind,
+            SymbolKind::STRING,
+            "quoted '42' has str tag — must be STRING, not NUMBER"
+        );
+    }
+
+    // T4.2 — explicit !!null on a non-null-looking value gets NULL kind
+    #[test]
+    fn tag_driven_explicit_null_tag_gives_null_symbol_kind() {
+        let text = "key: !!null foo\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let sym = find_symbol(&symbols, "key").expect("should have 'key'");
+        assert_eq!(
+            sym.kind,
+            SymbolKind::NULL,
+            "!!null tag must produce NULL symbol kind regardless of value content"
+        );
     }
 }

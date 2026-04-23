@@ -783,20 +783,18 @@ fn validate_scalar_constraints(
 ) {
     use rlsp_yaml_parser::ScalarStyle;
     if let Node::Scalar {
-        value, style, loc, ..
+        value,
+        style,
+        tag,
+        loc,
+        ..
     } = node
     {
         let is_plain = matches!(style, ScalarStyle::Plain);
 
-        // String constraints apply to all scalars that resolve to string type.
-        // Quoted/block scalars are always strings; plain scalars are strings
-        // only if they don't match null/bool/int/float patterns.
-        if !is_plain
-            || (!scalar_helpers::is_null(value)
-                && !scalar_helpers::is_bool(value)
-                && !scalar_helpers::is_integer(value)
-                && !scalar_helpers::is_float(value))
-        {
+        // String constraints apply to scalars that resolve to string type.
+        // A scalar is a string when its resolved tag is str (or unrecognised).
+        if tag.as_deref() == Some("tag:yaml.org,2002:str") {
             validate_string_constraints(value, *loc, schema, path, ctx);
         }
 
@@ -1286,12 +1284,13 @@ fn validate_mapping(
         // propertyNames — validate each key as a string node against the schema
         if let Some(pn_schema) = &schema.property_names {
             // Create a temporary scalar node for the key string.
+            // Keys are always strings, so tag must be set accordingly.
             let key_node = Node::Scalar {
                 value: key_str.clone(),
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
                 anchor: None,
                 anchor_loc: None,
-                tag: None,
+                tag: Some("tag:yaml.org,2002:str".to_string()),
                 tag_loc: None,
                 loc: rlsp_yaml_parser::Span {
                     start: rlsp_yaml_parser::Pos::ORIGIN,
@@ -1531,23 +1530,14 @@ fn validate_composition(
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn yaml_type_name(node: &Node<Span>) -> &'static str {
-    use rlsp_yaml_parser::ScalarStyle;
-    use scalar_helpers::PlainScalarKind;
     match node {
-        Node::Scalar { value, style, .. } => {
-            // Only plain (unquoted) scalars undergo type inference.
-            // Quoted and block scalars are always strings.
-            if !matches!(style, ScalarStyle::Plain) {
-                return "string";
-            }
-            match scalar_helpers::classify_plain_scalar(value) {
-                PlainScalarKind::Null => "null",
-                PlainScalarKind::Bool => "boolean",
-                PlainScalarKind::Integer => "integer",
-                PlainScalarKind::Float => "number",
-                PlainScalarKind::String => "string",
-            }
-        }
+        Node::Scalar { tag, .. } => match tag.as_deref() {
+            Some("tag:yaml.org,2002:null") => "null",
+            Some("tag:yaml.org,2002:bool") => "boolean",
+            Some("tag:yaml.org,2002:int") => "integer",
+            Some("tag:yaml.org,2002:float") => "number",
+            _ => "string",
+        },
         Node::Mapping { .. } => "object",
         Node::Sequence { .. } => "array",
         Node::Alias { .. } => "unknown",
@@ -1593,28 +1583,21 @@ fn display_schema_type(schema_type: &SchemaType) -> String {
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn yaml_to_json(node: &Node<Span>) -> Option<serde_json::Value> {
-    use rlsp_yaml_parser::ScalarStyle;
     match node {
-        Node::Scalar { value, style, .. } => {
-            // Quoted/block scalars are always strings — skip type inference.
-            if !matches!(style, ScalarStyle::Plain) {
-                return Some(serde_json::Value::String(value.clone()));
+        Node::Scalar { value, tag, .. } => match tag.as_deref() {
+            Some("tag:yaml.org,2002:null") => Some(serde_json::Value::Null),
+            Some("tag:yaml.org,2002:bool") => Some(serde_json::Value::Bool(matches!(
+                value.as_str(),
+                "true" | "True" | "TRUE"
+            ))),
+            Some("tag:yaml.org,2002:int") => {
+                scalar_helpers::parse_integer(value).map(|i| serde_json::Value::Number(i.into()))
             }
-            if scalar_helpers::is_null(value) {
-                Some(serde_json::Value::Null)
-            } else if scalar_helpers::is_bool(value) {
-                Some(serde_json::Value::Bool(matches!(
-                    value.as_str(),
-                    "true" | "True" | "TRUE"
-                )))
-            } else if let Some(i) = scalar_helpers::parse_integer(value) {
-                Some(serde_json::Value::Number(i.into()))
-            } else if let Some(f) = scalar_helpers::parse_float(value) {
-                serde_json::Number::from_f64(f).map(serde_json::Value::Number)
-            } else {
-                Some(serde_json::Value::String(value.clone()))
-            }
-        }
+            Some("tag:yaml.org,2002:float") => scalar_helpers::parse_float(value)
+                .and_then(serde_json::Number::from_f64)
+                .map(serde_json::Value::Number),
+            _ => Some(serde_json::Value::String(value.clone())),
+        },
         Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
     }
 }
@@ -6110,5 +6093,267 @@ mod tests {
             .expect("expected a schemaFormat diagnostic");
         // "not-a-date" is on 0-indexed line 2
         assert_eq!(diag.range.start.line, 2, "third line is 0-indexed 2");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group 1: yaml_type_name — tag-URI-driven classification
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // T1.1 — plain null tagged as null → "null"
+    #[test]
+    fn tag_driven_null_classified_as_null_type() {
+        let schema = object_schema_with_props(vec![("value", string_schema())]);
+        let docs = parse_docs("value: ~");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("null"),
+            "expected 'null' in message"
+        );
+    }
+
+    // T1.2 — plain bool tagged as bool → "boolean"
+    #[test]
+    fn tag_driven_bool_classified_as_boolean_type() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: true");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("boolean"),
+            "expected 'boolean' in message"
+        );
+    }
+
+    // T1.3 — plain integer tagged as int → "integer"
+    #[test]
+    fn tag_driven_integer_classified_as_integer_type() {
+        let schema = object_schema_with_props(vec![("value", string_schema())]);
+        let docs = parse_docs("value: 42");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("integer"),
+            "expected 'integer' in message"
+        );
+    }
+
+    // T1.4 — plain float tagged as float → "number"
+    #[test]
+    fn tag_driven_float_classified_as_number_type() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: 3.14");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("number"),
+            "expected 'number' in message"
+        );
+    }
+
+    // T1.5 — plain string tagged as str → "string"
+    #[test]
+    fn tag_driven_string_classified_as_string_type() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: hello");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("string"),
+            "expected 'string' in message"
+        );
+    }
+
+    // T1.6 — double-quoted scalar → always "string" regardless of content
+    #[test]
+    fn tag_driven_quoted_integer_looking_value_classified_as_string() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: \"42\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("string"),
+            "quoted scalar must resolve as string"
+        );
+    }
+
+    // T1.7 — explicit !!bool on an otherwise-string value → "boolean"
+    #[test]
+    fn tag_driven_explicit_bool_tag_overrides_value_content() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: !!bool \"yes\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("boolean"),
+            "!!bool tag must drive classification"
+        );
+    }
+
+    // T1.8 — explicit !!str on a value that looks like a number → "string"
+    #[test]
+    fn tag_driven_explicit_str_tag_on_integer_looking_value() {
+        let schema = object_schema_with_props(vec![("value", integer_schema())]);
+        let docs = parse_docs("value: !!str 42");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.len(), 1);
+        assert_eq!(code_of(&result[0]), "schemaType");
+        assert!(
+            result[0].message.contains("string"),
+            "!!str tag must override to string"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group 2: validate_scalar_constraints — string constraints gate
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn min_length_schema(min: u64) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            min_length: Some(min),
+            ..JsonSchema::default()
+        }
+    }
+
+    // T2.1 — plain string scalar applies string constraints
+    #[test]
+    fn tag_driven_string_scalar_applies_min_length() {
+        let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
+        let docs = parse_docs("value: hi");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaMinLength"),
+            "string scalar must have minLength applied"
+        );
+    }
+
+    // T2.2 — plain null scalar skips string constraints
+    #[test]
+    fn tag_driven_null_scalar_skips_min_length() {
+        let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
+        let docs = parse_docs("value: ~");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().all(|d| code_of(d) != "schemaMinLength"),
+            "null scalar must not have string constraints applied"
+        );
+    }
+
+    // T2.3 — plain bool scalar skips string constraints
+    #[test]
+    fn tag_driven_bool_scalar_skips_min_length() {
+        let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
+        let docs = parse_docs("value: true");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().all(|d| code_of(d) != "schemaMinLength"),
+            "bool scalar must not have string constraints applied"
+        );
+    }
+
+    // T2.4 — plain integer scalar skips string constraints
+    #[test]
+    fn tag_driven_integer_scalar_skips_min_length() {
+        let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
+        let docs = parse_docs("value: 42");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().all(|d| code_of(d) != "schemaMinLength"),
+            "integer scalar must not have string constraints applied"
+        );
+    }
+
+    // T2.5 — double-quoted scalar applies string constraints
+    #[test]
+    fn tag_driven_quoted_scalar_applies_min_length() {
+        let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
+        let docs = parse_docs("value: \"hi\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaMinLength"),
+            "quoted scalar is always a string — minLength must apply"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Group 3: yaml_to_json — tag-URI-driven JSON conversion for const/enum
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn const_schema(val: serde_json::Value) -> JsonSchema {
+        JsonSchema {
+            const_value: Some(val),
+            ..JsonSchema::default()
+        }
+    }
+
+    // T3.1 — null-tagged scalar converts to JSON null
+    #[test]
+    fn tag_driven_null_tagged_scalar_matches_const_null() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
+        let docs = parse_docs("value: ~");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(result.is_empty(), "null scalar must match const: null");
+    }
+
+    // T3.2 — bool-tagged scalar converts to correct JSON bool (true)
+    #[test]
+    fn tag_driven_true_bool_matches_const_true() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
+        let docs = parse_docs("value: true");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(result.is_empty(), "true scalar must match const: true");
+    }
+
+    // T3.3 — bool-tagged scalar (false) does not match const: true
+    #[test]
+    fn tag_driven_false_bool_does_not_match_const_true() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
+        let docs = parse_docs("value: false");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaConst"),
+            "false scalar must not match const: true"
+        );
+    }
+
+    // T3.4 — integer-tagged scalar converts to JSON number
+    #[test]
+    fn tag_driven_integer_scalar_matches_const_number() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(42)))]);
+        let docs = parse_docs("value: 42");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(result.is_empty(), "integer 42 must match const: 42");
+    }
+
+    // T3.5 — quoted scalar whose content looks like null is a JSON string, not null
+    #[test]
+    fn tag_driven_quoted_null_looking_scalar_is_string_not_null() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
+        let docs = parse_docs("value: \"~\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaConst"),
+            "quoted '~' is a string, not null — must not match const: null"
+        );
+    }
+
+    // T3.6 — quoted scalar whose content looks like bool is a JSON string
+    #[test]
+    fn tag_driven_quoted_bool_looking_scalar_is_string_not_bool() {
+        let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
+        let docs = parse_docs("value: \"true\"");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert!(
+            result.iter().any(|d| code_of(d) == "schemaConst"),
+            "quoted 'true' is a string, not bool — must not match const: true"
+        );
     }
 }
