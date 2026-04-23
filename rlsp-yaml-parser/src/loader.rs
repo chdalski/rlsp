@@ -103,6 +103,23 @@ pub enum LoadError {
         /// The alias name that had no corresponding anchor definition.
         name: String,
     },
+
+    /// A plain scalar could not be resolved under the JSON schema.
+    ///
+    /// The JSON schema has no fallback: every untagged plain scalar must match
+    /// one of its patterns (null, bool, int, float).  If none match, the scalar
+    /// is an error per YAML 1.2.2 §10.2.
+    ///
+    /// `value` is truncated to 128 Unicode scalar values and ASCII control
+    /// characters (U+0000–U+001F, U+007F) are replaced with `\uXXXX` escapes
+    /// to prevent log injection via the `Display` impl.
+    #[error("JSON schema: plain scalar does not match any type pattern")]
+    UnresolvedScalar {
+        /// The sanitized, truncated scalar value that failed resolution.
+        value: String,
+        /// Source position of the scalar.
+        pos: Pos,
+    },
 }
 
 // Convenience alias used inside the module.
@@ -404,7 +421,7 @@ impl<'opt> LoadState<'opt> {
                         // Empty document — emit an empty scalar as root.
                         let mut node = empty_scalar();
                         if let Some(schema) = self.options.schema {
-                            apply_schema_to_node(&mut node, schema);
+                            apply_schema_to_node(&mut node, schema)?;
                         }
                         node
                     } else {
@@ -486,7 +503,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema);
+                    apply_schema_to_node(&mut node, schema)?;
                 }
                 if let Some(name) = node.anchor() {
                     self.register_anchor(name.to_owned(), &node)?;
@@ -601,7 +618,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema);
+                    apply_schema_to_node(&mut node, schema)?;
                 }
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
@@ -712,7 +729,7 @@ impl<'opt> LoadState<'opt> {
                     trailing_comment: None,
                 };
                 if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema);
+                    apply_schema_to_node(&mut node, schema)?;
                 }
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
@@ -935,6 +952,41 @@ const fn is_block_scalar(node: &Node<Span>) -> bool {
 // Schema resolution helpers
 // ---------------------------------------------------------------------------
 
+/// Maximum number of Unicode scalar values kept in [`LoadError::UnresolvedScalar`]
+/// value field.  Prevents unbounded allocation when storing user-supplied input
+/// in error messages.
+const UNRESOLVED_VALUE_MAX_CHARS: usize = 128;
+
+/// Sanitize a raw scalar value for inclusion in an error message.
+///
+/// - Truncates to [`UNRESOLVED_VALUE_MAX_CHARS`] Unicode scalar values,
+///   appending `"..."` when truncated.
+/// - Replaces ASCII control characters (U+0000–U+001F and U+007F) with
+///   `\uXXXX` hex escapes to prevent log injection via the `Display` impl.
+fn sanitize_scalar_for_error(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(UNRESOLVED_VALUE_MAX_CHARS * 2));
+    let mut truncated = false;
+
+    for (i, ch) in raw.chars().enumerate() {
+        if i >= UNRESOLVED_VALUE_MAX_CHARS {
+            truncated = true;
+            break;
+        }
+        if ch.is_ascii_control() {
+            // Replace control chars with \uXXXX escape to prevent log injection.
+            let escaped = format!("\\u{:04X}", ch as u32);
+            out.push_str(&escaped);
+        } else {
+            out.push(ch);
+        }
+    }
+
+    if truncated {
+        out.push_str("...");
+    }
+    out
+}
+
 /// Apply schema tag resolution to a freshly-constructed node.
 ///
 /// - For scalars: translates bare `!` to `None` (non-specific), then calls
@@ -945,16 +997,18 @@ const fn is_block_scalar(node: &Node<Span>) -> bool {
 ///   (no source position for a resolved tag).
 /// - On `Ok(None)` (explicit tag present): leaves `node.tag` unchanged.
 ///
-/// The `Err(UnresolvedScalar)` branch is only reachable with `Schema::Json`.
-/// Until Task 3 adds `LoadError::UnresolvedScalar`, it is treated as
-/// unreachable — the JSON schema is not exercised in this task.
-fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) {
+/// # Errors
+///
+/// Returns [`LoadError::UnresolvedScalar`] when `schema` is [`Schema::Json`]
+/// and a plain scalar does not match any JSON type pattern.
+fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
     match node {
         Node::Scalar {
             value,
             style,
             tag,
             tag_loc,
+            loc,
             ..
         } => {
             // Bare `!` on a scalar is the non-specific scalar tag — it resolves
@@ -965,7 +1019,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) {
             if tag.as_deref() == Some("!") {
                 *tag = Some(crate::schema::ResolvedTag::Str.as_str().to_owned());
                 *tag_loc = None;
-                return;
+                return Ok(());
             }
             // All other tags: pass through as-is (Some(non-!) = explicit tag → Ok(None)).
             match resolve_scalar(schema, *style, value, tag.as_deref()) {
@@ -974,7 +1028,12 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) {
                     *tag_loc = None;
                 }
                 Ok(None) => {}
-                Err(_) => unreachable!("UnresolvedScalar only reachable with JSON schema"),
+                Err(_) => {
+                    return Err(LoadError::UnresolvedScalar {
+                        value: sanitize_scalar_for_error(value),
+                        pos: loc.start,
+                    });
+                }
             }
         }
         Node::Mapping { tag, tag_loc, .. } => {
@@ -999,6 +1058,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) {
         }
         Node::Alias { .. } => {}
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1503,5 +1563,121 @@ mod tests {
         assert_eq!(docs.len(), 1);
         assert!(docs[0].explicit_start, "expected explicit_start=true");
         assert!(docs[0].explicit_end, "expected explicit_end=true");
+    }
+
+    // -----------------------------------------------------------------------
+    // UT-S: sanitize_scalar_for_error unit tests
+    // -----------------------------------------------------------------------
+
+    // UT-S1: newline replaced with \u000A escape (no raw newline in output)
+    #[test]
+    fn sanitize_newline_replaced_with_escape() {
+        let result = sanitize_scalar_for_error("foo\nbar");
+        assert!(
+            !result.contains('\n'),
+            "output must not contain a raw newline"
+        );
+        assert!(
+            result.contains("\\u000A"),
+            "output must contain \\u000A escape, got: {result:?}"
+        );
+        assert_eq!(result, "foo\\u000Abar");
+    }
+
+    // UT-S2: carriage return replaced with \u000D escape
+    #[test]
+    fn sanitize_carriage_return_replaced_with_escape() {
+        let result = sanitize_scalar_for_error("foo\rbar");
+        assert!(
+            !result.contains('\r'),
+            "output must not contain a raw carriage return"
+        );
+        assert!(
+            result.contains("\\u000D"),
+            "output must contain \\u000D escape, got: {result:?}"
+        );
+        assert_eq!(result, "foo\\u000Dbar");
+    }
+
+    // UT-S3: null byte replaced with \u0000 escape
+    #[test]
+    fn sanitize_null_byte_replaced_with_escape() {
+        let result = sanitize_scalar_for_error("foo\0bar");
+        assert!(
+            !result.contains('\0'),
+            "output must not contain a raw null byte"
+        );
+        assert!(
+            result.contains("\\u0000"),
+            "output must contain \\u0000 escape, got: {result:?}"
+        );
+        assert_eq!(result, "foo\\u0000bar");
+    }
+
+    // UT-S4: short value (≤128 chars) stored verbatim without ellipsis
+    #[test]
+    fn sanitize_short_value_stored_verbatim() {
+        let input = "hello";
+        let result = sanitize_scalar_for_error(input);
+        assert_eq!(result, "hello");
+        assert!(
+            !result.ends_with("..."),
+            "short value must not be truncated"
+        );
+    }
+
+    // UT-S5: value at exactly 128 chars stored verbatim, no ellipsis
+    #[test]
+    fn sanitize_value_at_exact_limit_not_truncated() {
+        let input = "a".repeat(128);
+        let result = sanitize_scalar_for_error(&input);
+        assert_eq!(
+            result.len(),
+            128,
+            "128-char input must produce 128-char output"
+        );
+        assert!(
+            !result.ends_with("..."),
+            "value at exact limit must not be truncated"
+        );
+    }
+
+    // UT-S6: value of 129 chars truncated to 128 chars + "..."
+    #[test]
+    fn sanitize_value_over_limit_truncated() {
+        let input = "a".repeat(129);
+        let result = sanitize_scalar_for_error(&input);
+        assert!(
+            result.ends_with("..."),
+            "value over limit must end with '...'"
+        );
+        assert_eq!(
+            result.len(),
+            128 + 3,
+            "truncated output must be 128 chars + 3 ellipsis chars"
+        );
+    }
+
+    // UT-S7: multibyte chars are counted by Unicode scalar value, not bytes;
+    // truncation at 128 chars does not split a multibyte sequence or produce invalid UTF-8.
+    #[test]
+    fn sanitize_multibyte_char_boundary_not_split() {
+        // Each '中' is 3 bytes. 127 of them = 127 Unicode scalar values, under limit.
+        // Adding one more ASCII char pushes to 128 (at limit, no truncation).
+        // Adding yet another pushes to 129 → truncation after 128 chars.
+        let input: String = "中".repeat(127) + "ab"; // 129 chars total
+        let result = sanitize_scalar_for_error(&input);
+        // Must be valid UTF-8 (String guarantees this if we don't split bytes).
+        assert!(
+            result.ends_with("..."),
+            "129-char multibyte input should be truncated"
+        );
+        // The result up to the ellipsis must be valid UTF-8 — verified by the
+        // fact that it's a String. Also check char count = 128.
+        let char_count = result.trim_end_matches("...").chars().count();
+        assert_eq!(
+            char_count, 128,
+            "truncated portion must be exactly 128 chars"
+        );
     }
 }

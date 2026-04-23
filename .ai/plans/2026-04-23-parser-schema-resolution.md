@@ -122,7 +122,7 @@ audit without breaking any existing consumer.
       module with unit tests
 - [x] Task 2 — wire schema resolution into the loader and
       add integration tests
-- [ ] Task 3 — add JSON and Failsafe schema variants
+- [x] Task 3 — add JSON and Failsafe schema variants
 - [ ] Task 4 — update conformance doc, feature-log,
       follow-up queue
 
@@ -257,26 +257,26 @@ Extend the loader integration tests to cover JSON and
 Failsafe schema resolution. JSON schema's error-on-no-match
 behavior requires a new `LoadError` variant.
 
-- [ ] Add `LoadError::UnresolvedScalar { value: String, pos:
+- [x] Add `LoadError::UnresolvedScalar { value: String, pos:
       Pos }` variant for the JSON schema no-match case.
       Error message: `"JSON schema: plain scalar does not
       match any type pattern"`.
-- [ ] Wire the `Err(UnresolvedScalar)` branch in
+- [x] Wire the `Err(UnresolvedScalar)` branch in
       `LoadState::parse_node`'s scalar arm to return
       `LoadError::UnresolvedScalar { value, pos }`. This
       branch was left unreachable in Task 2 (Core and
       Failsafe never produce it); Task 3 makes it live.
-- [ ] Verify the Failsafe path: `resolve_scalar` with
+- [x] Verify the Failsafe path: `resolve_scalar` with
       `Schema::Failsafe` resolves every scalar to `!!str`
       regardless of content or style. Collections resolve by
       kind.
-- [ ] Verify the JSON path: `resolve_scalar` with
+- [x] Verify the JSON path: `resolve_scalar` with
       `Schema::Json` matches `null`, `true|false`,
       `-? (0 | [1-9][0-9]*)`, and the float pattern;
       unmatched plain scalars return
       `Err(UnresolvedScalar)`. Quoted/block scalars →
       `!!str`. Collections → by kind.
-- [ ] Integration tests in the same
+- [x] Integration tests in the same
       `tests/schema_resolution.rs` file:
   - JSON schema: plain `42` → `!!int`, plain `true` →
     `!!bool`, plain `null` → `!!null`, plain `3.14` →
@@ -291,10 +291,12 @@ behavior requires a new `LoadError` variant.
   - Failsafe schema: untagged sequence → `!!seq`, untagged
     mapping → `!!map`.
   - Failsafe schema: bare `!` tag → resolved by kind.
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `9a0acad`
 
 ### Task 4: Update conformance doc, feature-log, and follow-up queue
 

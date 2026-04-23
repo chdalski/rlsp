@@ -36,6 +36,9 @@ pub fn parse_yaml(text: &str) -> ParseResult {
                 rlsp_yaml_parser::loader::LoadError::Parse { pos, message } => {
                     (*pos, message.clone())
                 }
+                rlsp_yaml_parser::loader::LoadError::UnresolvedScalar { pos, .. } => {
+                    (*pos, err.to_string())
+                }
                 rlsp_yaml_parser::loader::LoadError::NestingDepthLimitExceeded { .. }
                 | rlsp_yaml_parser::loader::LoadError::AnchorCountLimitExceeded { .. }
                 | rlsp_yaml_parser::loader::LoadError::AliasExpansionLimitExceeded { .. }
