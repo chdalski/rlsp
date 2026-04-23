@@ -982,9 +982,13 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             // §10.3.2: "non-specific" tag for scalars = Failsafe str).  We handle
             // it before calling the schema resolver so Core doesn't pattern-match
             // the value.
+            //
+            // `tag_loc` is preserved here (NOT cleared) because `!` is explicitly
+            // written in the source.  Preserving `tag_loc` lets downstream consumers
+            // (e.g. the formatter) distinguish user-authored tags from resolver-injected
+            // ones, which is critical for correct idempotent output.
             if tag.as_deref() == Some("!") {
                 *tag = Some(crate::schema::ResolvedTag::Str.as_str().to_owned());
-                *tag_loc = None;
                 return Ok(());
             }
             // All other tags: pass through as-is (Some(non-!) = explicit tag → Ok(None)).

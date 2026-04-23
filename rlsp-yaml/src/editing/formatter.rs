@@ -524,22 +524,33 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             style,
             anchor,
             tag,
+            tag_loc,
             ..
         } => {
             // Prefix with a tag if present.
             //
-            // Core schema tags (`tag:yaml.org,2002:*`) are normally stripped —
-            // the type can be inferred from the value.  The exception: when the
-            // scalar is **empty**, the tag carries semantic meaning that cannot
-            // be inferred (`!!str` → empty string; `!!null` → null; etc.), so
-            // it must be preserved as its short form (e.g. `!!str`).
+            // Core schema tags (`tag:yaml.org,2002:*`) are handled as follows:
+            //
+            // - **Resolver-injected** (`tag_loc: None`): always stripped — the resolver
+            //   injects these automatically and re-emitting them breaks idempotency.
+            //
+            // - **User-authored on a non-empty scalar** (`tag_loc: Some`, `value` non-empty):
+            //   stripped — the type can be inferred from the value, so the tag adds
+            //   no information and round-trips without it.
+            //
+            // - **User-authored on an empty scalar** (`tag_loc: Some`, `value` empty):
+            //   emitted in short form (`!!str`, `!!null`, etc.) — the tag carries
+            //   semantic meaning that cannot be inferred from an absent value.
+            //
+            // Non-core tags (user tags) are always emitted as-is.
             let tag_prefix = tag.as_ref().and_then(|t| {
                 if is_core_schema_tag(t) {
-                    if value.is_empty() {
-                        // Convert full URI to short form: `tag:yaml.org,2002:str` → `!!str`
+                    if tag_loc.is_some() && value.is_empty() {
+                        // User-authored explicit core tag on empty scalar: emit in short form.
                         let suffix = t.trim_start_matches("tag:yaml.org,2002:");
                         Some(format!("!!{suffix}"))
                     } else {
+                        // Resolver-injected, or user-authored on non-empty scalar: suppress.
                         None
                     }
                 } else {
@@ -1208,27 +1219,60 @@ const fn needs_explicit_key(key: &Node<Span>) -> bool {
     }
 }
 
-/// Returns `true` when a mapping key is an untagged empty scalar (the implicit empty key `:`).
+/// Returns `true` when a mapping key is an effectively-untagged empty scalar
+/// (the implicit empty key `:`).
 ///
-/// A tagged empty scalar (e.g. `!!null :`) is **not** an empty key — the tag carries
-/// semantic meaning and must be emitted, so it routes through the normal key path.
-const fn is_empty_key(key: &Node<Span>) -> bool {
-    matches!(key, Node::Scalar { value, tag: None, .. } if value.is_empty())
+/// An empty scalar with a **resolver-injected** core schema tag (`tag_loc: None`)
+/// is treated as an empty key because the tag will not be emitted — resolvers inject
+/// these automatically and the formatter suppresses them to maintain idempotency.
+///
+/// An empty scalar with a **user-authored** explicit tag (`tag_loc: Some(_)`) is
+/// **not** an empty key — the tag carries semantic meaning and must be emitted, so it
+/// routes through the normal key path.
+fn is_empty_key(key: &Node<Span>) -> bool {
+    match key {
+        Node::Scalar {
+            value, tag: None, ..
+        } if value.is_empty() => true,
+        Node::Scalar {
+            value,
+            tag: Some(t),
+            tag_loc: None,
+            ..
+        } if value.is_empty() && is_core_schema_tag(t) => true,
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+            false
+        }
+    }
 }
 
 /// Returns `true` when a mapping key requires a space before the `:` separator.
 ///
 /// Two key forms need ` : ` rather than `: `:
 ///
-/// 1. **Tagged empty scalar** (`!!null`, `!mytag`, etc.) — the rendered key ends
-///    with a tag; `:` is a valid URI character, so `!!null:` would be parsed as
-///    tag `tag:yaml.org,2002:null:` rather than key `!!null` + separator.
+/// 1. **Tagged empty scalar** (`!!null`, `!mytag`, etc.) where the tag will actually
+///    be emitted — the rendered key ends with a tag; `:` is a valid URI character,
+///    so `!!null:` would be parsed as tag `tag:yaml.org,2002:null:` rather than key
+///    `!!null` + separator.  Resolver-injected core tags are suppressed (not emitted),
+///    so they do not need the extra space.
 ///
 /// 2. **Alias** (`*name`) — `*name:` is parsed as alias name `name:`, breaking
 ///    idempotency. A space before `:` keeps the alias name and separator distinct.
-const fn key_needs_space_before_colon(key: &Node<Span>) -> bool {
-    matches!(key, Node::Scalar { value, tag: Some(_), .. } if value.is_empty())
-        || matches!(key, Node::Alias { .. })
+fn key_needs_space_before_colon(key: &Node<Span>) -> bool {
+    match key {
+        Node::Scalar {
+            value,
+            tag: Some(t),
+            tag_loc,
+            ..
+        } if value.is_empty() => {
+            // Only need a space if the tag will actually be emitted.
+            // Resolver-injected core tags are suppressed → no space needed.
+            !(is_core_schema_tag(t) && tag_loc.is_none())
+        }
+        Node::Alias { .. } => true,
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => false,
+    }
 }
 
 /// Render a mapping entry that uses explicit key form: `? key\n: value`.

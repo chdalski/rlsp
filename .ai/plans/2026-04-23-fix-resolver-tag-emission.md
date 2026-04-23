@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-23)
 **Created:** 2026-04-23
 
 # Fix resolver-injected tag emission in formatter and corpus invariant
@@ -48,7 +48,7 @@ corpus invariant rejects resolver-injected tags that have
 
 ## Steps
 
-- [ ] Task 1 — fix formatter empty-scalar tag emission and
+- [x] Task 1 — fix formatter empty-scalar tag emission and
       I6 corpus invariant
 
 ## Tasks
@@ -58,7 +58,7 @@ corpus invariant rejects resolver-injected tags that have
 Both fixes are small, tightly coupled (same root cause),
 and belong in one commit.
 
-- [ ] In `editing/formatter.rs` (lines 536-555): change the
+- [x] In `editing/formatter.rs` (lines 536-555): change the
       empty-scalar branch of the `tag_prefix` logic to
       suppress core schema tags for empty scalars, matching
       the existing behavior for non-empty scalars and
@@ -67,38 +67,40 @@ and belong in one commit.
       emitting `!!<suffix>`. The resolver re-injects the tag
       on the next `load()`, so emitting it is redundant and
       breaks idempotency.
-- [ ] Verify the formatter still emits explicit user tags on
+- [x] Verify the formatter still emits explicit user tags on
       empty scalars (non-core-schema tags like `!custom` or
       `!<tag:example.com:shape>`). The `else` branch already
       handles this — confirm with a test case.
-- [ ] In `corpus_invariants.rs` (line 547): update the I6
+- [x] In `corpus_invariants.rs` (line 547): update the I6
       assertion to allow resolver-injected tags without
       `tag_loc`. Resolver-injected tags start with
       `"tag:yaml.org,2002:"` — when the tag matches that
       prefix and `tag_loc` is `None`, the invariant holds.
       The assertion should only fail when a non-resolver tag
       has mismatched `tag`/`tag_loc` presence.
-- [ ] Update the I6 invariant description string in the
+- [x] Update the I6 invariant description string in the
       `INVARIANTS` array to reflect the narrowed assertion
       (e.g., "tag_loc invariant: explicit tags have tag_loc;
       resolver-injected core-schema tags may have
       tag_loc: None").
-- [ ] Confirm whether the 4 I6 failures are currently in
+- [x] Confirm whether the 4 I6 failures are currently in
       the `SKIP_LIST` constant in `corpus_invariants.rs`.
       If they are, remove those entries and update
       `WORKLIST.md` to match. If no skip-list entries exist
       (failures are live), no action needed.
-- [ ] All 4 formatter conformance failures pass: paths 070
+- [x] All 4 formatter conformance failures pass: paths 070
       (6KGN), 079 (6XDY), 213 (JEF9), 225 (K858).
-- [ ] All 4 corpus invariant I6 checks pass.
-- [ ] No regressions: `cargo test --workspace` passes with
+- [x] All 4 corpus invariant I6 checks pass.
+- [x] No regressions: `cargo test --workspace` passes with
       zero failures.
-- [ ] Append a "Resolved" note to the incident report at
+- [x] Append a "Resolved" note to the incident report at
       `.ai/reports/2026-04-23-resolver-tag-emission-in-formatter.md`
       with the fix commit SHA so future readers know the
       issue is closed.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `dc5b8b4`
 
 ## Decisions
 

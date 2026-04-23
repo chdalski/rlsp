@@ -101,7 +101,7 @@ const INVARIANTS: &[Invariant] = &[
     },
     Invariant {
         id: "I6",
-        description: "AST tag_loc invariant: tag().is_some() == tag_loc().is_some() for every node",
+        description: "AST tag_loc invariant: for every node, if tag is Some and NOT a resolver-injected core schema tag, tag_loc must also be Some",
         check: check_i6_tag_loc_invariant,
     },
     Invariant {
@@ -544,7 +544,14 @@ fn check_i6_node(node: &Node<Span>) -> Result<(), String> {
         Node::Scalar { tag, tag_loc, .. }
         | Node::Mapping { tag, tag_loc, .. }
         | Node::Sequence { tag, tag_loc, .. } => {
-            if tag.is_some() != tag_loc.is_some() {
+            // Resolver-injected core schema tags (`tag:yaml.org,2002:*`) have no source
+            // position (`tag_loc: None`) by design — they were inferred, not written in
+            // the source.  Allow those through.  Any other tag that is present must have
+            // a corresponding source location.
+            let is_resolver_injected = tag
+                .as_deref()
+                .is_some_and(|t| t.starts_with("tag:yaml.org,2002:"));
+            if tag.is_some() && tag_loc.is_none() && !is_resolver_injected {
                 return Err(format!(
                     "I6 invariant violated: tag={tag:?} but tag_loc={tag_loc:?}"
                 ));
@@ -1633,6 +1640,71 @@ mod tests {
             writeln!(yaml, "k{i}: v").expect("write to String is infallible");
         }
         assert!(run_i9(&yaml).is_ok());
+    }
+
+    // ---------------------------------------------------------------------------
+    // I6 unit tests
+    // ---------------------------------------------------------------------------
+
+    // UT-I6-1: plain mapping YAML — resolver injects tag:yaml.org,2002:map with
+    // no tag_loc.  The narrowed I6 assertion must pass for this case.
+    #[test]
+    fn i6_resolver_injected_tag_no_tag_loc_passes() {
+        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "key: value\n");
+        assert!(
+            result.is_ok(),
+            "resolver-injected core tag with tag_loc=None should pass I6: {result:?}"
+        );
+    }
+
+    // UT-I6-2: explicit user tag on a scalar — tag_loc is Some (source position
+    // from the `!custom` token).  The invariant must pass.
+    #[test]
+    fn i6_explicit_user_tag_with_tag_loc_passes() {
+        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "!custom value\n");
+        assert!(
+            result.is_ok(),
+            "explicit user tag with tag_loc=Some should pass I6: {result:?}"
+        );
+    }
+
+    // UT-I6-3: synthetically constructed node with a non-core tag but no tag_loc —
+    // simulates a hypothetical loader bug.  The narrowed assertion must still catch
+    // this case.
+    #[test]
+    fn i6_missing_tag_loc_for_non_core_tag_fails() {
+        use rlsp_yaml_parser::{Pos, ScalarStyle};
+
+        let origin = Span {
+            start: Pos::ORIGIN,
+            end: Pos::ORIGIN,
+        };
+        let node = Node::Scalar {
+            value: String::new(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some("!custom".to_string()),
+            tag_loc: None, // Simulated loader bug: user tag with no source position.
+            loc: origin,
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = check_i6_node(&node);
+        assert!(
+            result.is_err(),
+            "non-core tag with tag_loc=None should fail I6"
+        );
+    }
+
+    // UT-I6-4: no tag, no tag_loc — the zero-tag baseline must pass I6.
+    #[test]
+    fn i6_no_tag_no_tag_loc_passes() {
+        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "key: value\n");
+        assert!(
+            result.is_ok(),
+            "node with no tag and no tag_loc should pass I6: {result:?}"
+        );
     }
 
     // Validates that zero invariants × N files = 0 checks, which is the
