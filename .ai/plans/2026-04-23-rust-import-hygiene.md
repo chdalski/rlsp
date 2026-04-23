@@ -8,13 +8,16 @@
 
 Bring the entire Rust workspace into compliance with the
 `.claude/rules/lang-rust-imports.md` rule (already committed
-at `7ef996a`). A full `syn`-based AST scan at plan-start
-identified **76 violations across 23 files**. This plan
-enumerates every violation by file and line so the
-developer does not re-discover them, and decomposes the
-work into vertical task slices that leave the workspace
-green (`cargo fmt --check`, `cargo clippy --all-targets`
-zero warnings, `cargo test`) after each task.
+at `7ef996a`). The initial `syn`-based AST scan identified
+76 violations; a scanner fix after Task 2 uncovered 17
+more that the first version missed (sub-module `use` after
+`mod` at module scope). **Total: 93 violations across 24
+files.** This plan enumerates every violation by file and
+line so the developer does not re-discover them, and
+decomposes the work into vertical task slices that leave
+the workspace green (`cargo fmt --check`, `cargo clippy
+--all-targets` zero warnings, `cargo test`) after each
+task.
 
 ## Context
 
@@ -29,23 +32,45 @@ zero warnings, `cargo test`) after each task.
   `rlsp-fmt/`, `rlsp-yaml/`, `rlsp-yaml-parser/`
   (excluding `target/`). Scanner source:
   `/tmp/import-scan/src/main.rs`; can be re-run to verify
-  zero violations after each task. Violation kinds:
+  zero violations after each task.
+- **Scanner gap discovered after Task 2 (2026-04-23).** The
+  initial scanner only flagged `use` after a non-import item
+  at module scope. It did NOT flag `use` appearing after a
+  `mod X;` declaration at module scope — a violation of the
+  sub-module `use` → `mod` → items rule (crate roots are
+  exempt, they order `mod` → `use`). The reviewer spotted
+  one such case in `lexer.rs` during Task 2 review. Fixing
+  the scanner surfaced 17 cases total across 4 files:
+  `rlsp-yaml-parser/src/event_iter.rs` (2),
+  `rlsp-yaml-parser/src/lexer.rs` (4),
+  `rlsp-yaml-parser/src/loader.rs` (10),
+  `rlsp-yaml/src/schema.rs` (1). These are covered by the
+  new Task 4 below.
+- **Violation kinds** (totals include the scanner-gap
+  additions):
   - `UseAfterItem` — module-scope `use` after a non-import
-    item. **Count: 5.**
+    item. **Count: 5.** *(All fixed in Task 1.)*
+  - `UseAfterItem` (sub-module `use` after `mod X;`) —
+    **Count: 17.** *(Newly surfaced; covered by Task 4.)*
   - `ModAfterItem` — module-scope `mod X;` after a
-    non-import item. **Count: 19.**
+    non-import item. **Count: 19.** *(All fixed in Task 1.)*
   - `ModAfterUseInCrateRoot` — crate-root `mod X;` after a
-    `use` statement (no intervening items). **Count: 3.**
+    `use` statement. **Count: 3.** *(All fixed in Task 1.)*
   - `UseAtTopOfFnBody` — `use` inside a function body at the
     top of the block; needs classification against the
-    three allowed exceptions or hoisting. **Count: 49.**
+    three allowed exceptions or hoisting. **Count: 49** (14
+    fixed in Task 2, 35 remaining for Task 3).
   - `UseAfterStmtInFnBody` — `use` inside a function body
-    after another statement (definite violation).
-    **Count: 0.** No such cases in the workspace.
+    after another statement. **Count: 0.** No such cases in
+    the workspace.
 - **Scope:**
   - `rlsp-fmt/` — zero violations; no task needed.
-  - `rlsp-yaml-parser/` — 35 violations across 11 files.
-  - `rlsp-yaml/` — 41 violations across 12 files.
+  - `rlsp-yaml-parser/` — 21 module-scope (Task 1) +
+    14 fn-body (Task 2) + 16 sub-module header (Task 4) =
+    51 violations across 14 files.
+  - `rlsp-yaml/` — 6 module-scope (Task 1) + 35 fn-body
+    (Task 3) + 1 sub-module header (Task 4) = 42
+    violations across 13 files.
   - VS Code extension (`rlsp-yaml/integrations/vscode/`)
     out of scope (TypeScript).
 - **Per-task verification:** `cargo fmt --check`,
@@ -67,9 +92,10 @@ zero warnings, `cargo test`) after each task.
       statements in `rlsp-yaml-parser/` across 7 files
       (Task 2). *(commit `fffe9d8`)*
 - [ ] Classify and fix the 35 function-body `use`
-      statements in `rlsp-yaml/` across 11 files, and
-      confirm zero violations remain across the workspace
-      (Task 3).
+      statements in `rlsp-yaml/` across 11 files (Task 3).
+- [ ] Fix the 17 sub-module `use`-after-`mod` header
+      violations across 4 files (Task 4), then confirm zero
+      violations remain across the workspace.
 
 ## Tasks
 
@@ -293,9 +319,9 @@ File-and-line targets (35):
       `use tower_lsp::lsp_types::{PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams};`
 - [ ] `rlsp-yaml/src/server.rs:2186` —
       `use tower_lsp::lsp_types::{PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1637` —
+- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1636` —
       `use std::fmt::Write as _;`
-- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1676` —
+- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1675` —
       `use rlsp_yaml_parser::{Pos, ScalarStyle};`
 - [ ] `rlsp-yaml/tests/lsp_lifecycle.rs:78` —
       `use tower::Service;`
@@ -311,17 +337,94 @@ File-and-line targets (35):
       warnings; workspace-wide clippy also zero warnings.
 - [ ] `cargo test -p rlsp-yaml` passes; workspace tests
       still pass.
+
+### Task 4: Fix sub-module `use`-after-`mod` header violations (17 cases across 4 files)
+
+Pure mechanical work — reorder module-scope `use` and
+`pub use` declarations that currently appear AFTER `mod X;`
+declarations so that every sub-module header follows the
+rule's convention: `use` → `mod` → items. Rust's name
+resolution is order-independent at module scope, so
+moving `use submod::Thing;` before `mod submod;` compiles
+and runs identically.
+
+**`rlsp-yaml-parser/src/event_iter.rs` (sub-module):**
+
+- [ ] `:13` move `pub use directive_scope::DirectiveScope;`
+      above the `mod` declaration group at the top of the
+      file.
+- [ ] `:14` move `pub use state::{CollectionEntry, IterState,
+      PendingAnchor, PendingTag};` to the same `use` group.
+
+**`rlsp-yaml-parser/src/lexer.rs` (sub-module):**
+
+- [ ] `:21` move `pub use crate::chars::is_ns_char;` above
+      the `mod` declaration group (joining the existing
+      top-of-file `use` block or a new `pub use` group
+      immediately after it).
+- [ ] `:22` move `pub use plain::scan_plain_line_flow;` to
+      the same group.
+- [ ] `:24` move `use block::parse_block_header;` to the
+      top-of-file `use` block.
+- [ ] `:25` move `use plain::scan_plain_line_block;` to the
+      same block.
+
+**`rlsp-yaml-parser/src/loader.rs` (sub-module):**
+
+- [ ] `:36` move `use comments::{attach_leading_comments,
+      attach_trailing_comment};` above the `mod`
+      declaration group at line 32.
+- [ ] `:37` move `use reloc::reloc;` to the same block.
+- [ ] `:38` move `use stream::{consume_leading_comments,
+      consume_leading_doc_comments, next_from,
+      peek_trailing_comment, with_hash_prefix};` to the same
+      block.
+- [ ] `:43` move `use std::collections::{HashMap, HashSet};`
+      above the `mod` group (it is a std import, so it
+      belongs in the std group of the file's `use` block).
+- [ ] `:44` move `use std::iter::Peekable;` to the same std
+      group.
+- [ ] `:46` move `use crate::error::Error;` into the
+      `crate::` group.
+- [ ] `:47` move `use crate::event::{Event, ScalarStyle};`
+      to the same group.
+- [ ] `:48` move `use crate::node::{Document, Node};` to
+      the same group.
+- [ ] `:49` move `use crate::pos::{Pos, Span};` to the same
+      group.
+- [ ] `:50` move `use crate::schema::{CollectionKind,
+      Schema, resolve_collection, resolve_scalar};` to the
+      same group.
+
+**`rlsp-yaml/src/schema.rs` (sub-module):**
+
+- [ ] `:10` move `pub use association::*;` above the `mod
+      association;` declaration at line 9. The final order
+      at the file header is `use` / `pub use` first, then
+      `mod`, then items.
+
+**Verification:**
+
+- [ ] Every listed line has been relocated; each sub-module
+      file's header now follows `use` → `mod` → items
+      (submodule tier) with rustfmt's grouping of std /
+      external / crate applied.
+- [ ] `cargo fmt --check` clean.
+- [ ] `cargo clippy --all-targets` zero warnings across
+      the workspace.
+- [ ] `cargo test` passes across the workspace.
 - [ ] If the scanner at `/tmp/import-scan/` is still
-      available, re-running it against the full workspace
-      (`rlsp-fmt rlsp-yaml rlsp-yaml-parser`) reports
-      **zero violations** across all kinds (other than
-      `UseAtTopOfFnBody` entries that are documented
-      exceptions — variant globs, collision resolvers with
-      comments, cfg-gated with comments). Otherwise the
-      verification is the aggregate of every per-line
-      checkbox across Tasks 1, 2, and 3 being marked done
-      plus workspace-wide `cargo clippy --all-targets` and
-      `cargo test` clean.
+      available (rebuild with `cargo build --release` in
+      `/tmp/import-scan` if `/tmp` was cleared —
+      source is a single `src/main.rs`), re-running it
+      against the full workspace reports **zero violations**
+      across all kinds other than `UseAtTopOfFnBody`
+      entries kept as documented exceptions (variant globs,
+      collision resolvers with comments, cfg-gated with
+      comments). Otherwise the verification is the aggregate
+      of every per-line checkbox across Tasks 1–4 being
+      marked done plus workspace-wide `cargo clippy
+      --all-targets` and `cargo test` clean.
 
 ## Decisions
 
@@ -332,7 +435,10 @@ File-and-line targets (35):
   faster than three tiny per-crate commits. Tasks 2 and 3
   split the 49 fn-body cases per crate because each case
   needs classification judgment, and per-crate review is
-  the right granularity to keep commits focused.
+  the right granularity to keep commits focused. Task 4
+  (scanner-gap follow-up) bundles sub-module header
+  reorders across both remaining crates because the work
+  is mechanical and the violations were surfaced together.
 - **No Task 1 for "create the rule."** The rule file
   `.claude/rules/lang-rust-imports.md` was drafted by the
   lead during planning, edited by the user, and committed
@@ -343,11 +449,18 @@ File-and-line targets (35):
   reason (variant glob, collision, cfg), the rule requires
   a justifying comment above the `use` — that comment IS
   the record. No central `KNOWN_FN_BODY_USES` list.
-- **Scanner is disposable.** The scanner lives at
-  `/tmp/import-scan/` and is a planning tool, not a
-  maintained artifact. It does not ship to the workspace
-  and is not a Task 1 or 4. Re-run it locally from `/tmp`
-  when needed.
+- **Scanner is disposable but was updated mid-plan.** The
+  scanner lives at `/tmp/import-scan/` and is a planning
+  tool, not a maintained artifact. Between Task 2 and
+  Task 3, the scanner was patched to also flag sub-module
+  `use` after `mod X;` at module scope — a violation class
+  the initial scanner missed, surfaced by the reviewer
+  during Task 2. The patch added a `seen_mod_decl` flag
+  that, combined with `!is_crate_root`, reports `use` /
+  `pub use` after a `mod X;` declaration. That update
+  produced the 17 additional violations Task 4 addresses.
+  Re-run the scanner locally from `/tmp/import-scan/`
+  when needed; source is a single `src/main.rs`.
 - **Dead-local deletion preferred over hoist.** If a
   fn-body `use` is dead (body uses fully-qualified names),
   delete it rather than hoisting — adding a module-level
