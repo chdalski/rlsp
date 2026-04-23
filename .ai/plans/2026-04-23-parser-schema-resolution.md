@@ -123,7 +123,7 @@ audit without breaking any existing consumer.
 - [x] Task 2 — wire schema resolution into the loader and
       add integration tests
 - [x] Task 3 — add JSON and Failsafe schema variants
-- [ ] Task 4 — update conformance doc, feature-log,
+- [x] Task 4 — update conformance doc, feature-log,
       follow-up queue
 
 ## Tasks
@@ -303,18 +303,18 @@ behavior requires a new `LoadError` variant.
 Reflect the new schema resolution capability in the
 conformance audit and the user-facing feature log.
 
-- [ ] Update the §10 Failsafe `!` non-specific tag entry:
+- [x] Update the §10 Failsafe `!` non-specific tag entry:
       Classification from `Not Implemented` to `Conformant`.
       Update Implementation to cite the schema resolver and
       the `Schema::Failsafe` / `Schema::Core` / `Schema::Json`
       paths. Remove the "structural parser only" framing.
       Update Test coverage to cite the new integration tests.
-- [ ] Update the four Lenient §10 entries (JSON plain
+- [x] Update the four Lenient §10 entries (JSON plain
       scalars, JSON collections, Core plain scalars, Core
       collections): Classification from `Lenient` to
       `Conformant`. Same pattern — updated Implementation,
       removed Discrepancy, updated Test coverage.
-- [ ] Update the `## Summary` table: remove the four §10
+- [x] Update the `## Summary` table: remove the four §10
       Lenient rows (the Not Implemented Failsafe entry is
       a chapter-body entry only — the Summary table tracks
       Lenient and Strict findings). Update the headline
@@ -325,19 +325,21 @@ conformance audit and the user-facing feature log.
       becomes "0 Lenient findings, 0 Strict findings
       (bug-class), 3 Strict (security-hardened) findings,
       total 3 entries."
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md`: add a
       user-facing entry documenting opt-in schema resolution
       via `LoaderBuilder::schema()` and
       `load_with_schema()`, covering Failsafe, JSON, and
       Core schemas per §10.
-- [ ] Remove the stale follow-up queue entry. In
+- [x] Remove the stale follow-up queue entry. In
       `.ai/memory/project_followup_plans.md`, delete the
       `[Lenient] Schema resolution not implemented (§10)`
       bullet under `## Open: rlsp-yaml-parser`.
-- [ ] No source code is modified in this task.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] No source code is modified in this task.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `260c166`
 
 ## Decisions
 

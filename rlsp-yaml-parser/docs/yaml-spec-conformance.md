@@ -2040,10 +2040,10 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ### Failsafe Schema — tag resolution for `!` non-specific tag
 
-- Classification: Not Implemented
+- Classification: Conformant
 - Spec (§10.1.2): "All [nodes] with the "`!`" non-specific tag are [resolved], by the standard [convention], to "`tag:yaml.org,2002:seq`", "`tag:yaml.org,2002:map`" or "`tag:yaml.org,2002:str`", according to their [kind]."
-- Implementation: The parser is a structural/presentation-layer parser. When a node carries an explicit `!` tag (bare non-specific), `scan_tag` in `rlsp-yaml-parser/src/event_iter/properties.rs:184–190` returns it as the one-byte slice `"!"`. That raw value is stored in the event's `tag` field and passed through to the AST's `tag` field unchanged (e.g. `Node::Scalar { tag: Some("!"), .. }`). The parser performs no kind-based resolution of the `!` non-specific tag to `!!seq`, `!!map`, or `!!str`. That semantic step is the responsibility of the consuming application.
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:194` (`non_specific_tag_on_plain_scalar`) — confirms `!` is preserved as-is, not resolved.
+- Implementation: Schema resolution is provided by `rlsp-yaml-parser/src/schema.rs` via `resolve_scalar` and `resolve_collection`. When `Schema::Failsafe` is active, `!`-tagged scalars resolve to `tag:yaml.org,2002:str`, `!`-tagged sequences resolve to `tag:yaml.org,2002:seq`, and `!`-tagged mappings resolve to `tag:yaml.org,2002:map`. The schema is applied in the loader (`rlsp-yaml-parser/src/loader.rs:280` — `Loader::load`) when a schema is configured via `LoaderBuilder::schema(Schema::Failsafe)` or `load_with_schema(input, Schema::Failsafe)`. All three schema paths (`Schema::Failsafe`, `Schema::Json`, `Schema::Core`) resolve `!` non-specific tags.
+- Test coverage: `rlsp-yaml-parser/tests/schema_resolution.rs` — `failsafe_bare_excl_on_scalar_resolves_to_str`, `failsafe_bare_excl_on_sequence_resolves_to_seq`, `core_bare_excl_on_plain_scalar_resolves_to_str`, `core_bare_excl_on_bool_value_resolves_to_str`, `core_bare_excl_on_sequence_resolves_to_seq`, `core_bare_excl_on_mapping_resolves_to_map`.
 
 ### Failsafe Schema — `?` non-specific tag left unresolved
 
@@ -2075,35 +2075,31 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ### JSON Schema — tag resolution for plain scalars
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§10.2.2): "[Scalars] with the "`?`" non-specific tag (that is, [plain scalars]) are matched with a list of regular expressions (first match wins, e.g. `0` is resolved as `!!int`). In principle, JSON files should not contain any [scalars] that do not match at least one of these. Hence the YAML [processor] should consider them to be an error. | Regular expression | Resolved to tag | | `null` | tag:yaml.org,2002:null | | `true \| false` | tag:yaml.org,2002:bool | | `-? ( 0 \| [1-9] [0-9]* )` | tag:yaml.org,2002:int | | `-? ( 0 \| [1-9] [0-9]* ) ( \\. [0-9]* )? ( [eE] [-+]? [0-9]+ )?` | tag:yaml.org,2002:float | | `*` | Error |"
-- Implementation: The parser does not implement JSON schema plain-scalar type inference. Untagged plain scalars — regardless of their content — produce `tag: None` in both the event stream and the AST. No regex matching is performed against scalar content, and non-matching plain scalars are not treated as errors. This applies uniformly: `null`, `true`, `42`, and `3.14` all yield `tag: None` when untagged.
-- Test coverage: No direct test — the parser intentionally omits schema-level type inference; this is a structural parser only.
-- Discrepancy: The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches. The parser does not implement this rule; schema-level type resolution is delegated to callers.
+- Implementation: `rlsp-yaml-parser/src/schema.rs` (`resolve_scalar`) — when `Schema::Json` is active, untagged plain scalars are matched against the four JSON regex patterns. Matching scalars resolve to the appropriate tag URI. Non-matching plain scalars produce `LoadError::UnresolvedScalar`. Non-plain scalars (quoted, literal, folded) always resolve to `tag:yaml.org,2002:str`. The schema is applied in the loader via `LoaderBuilder::schema(Schema::Json)` or `load_with_schema(input, Schema::Json)`.
+- Test coverage: `rlsp-yaml-parser/tests/schema_resolution.rs` — `json_plain_int_resolves_to_int`, `json_plain_bool_resolves_to_bool`, `json_plain_null_resolves_to_null`, `json_plain_float_resolves_to_float`, `json_plain_false_resolves_to_bool`, `json_plain_zero_resolves_to_int`, `json_plain_string_returns_unresolved_scalar_error`, `json_octal_plain_returns_unresolved_scalar_error`, `json_plus_prefix_int_returns_unresolved_scalar_error`, `json_tilde_returns_unresolved_scalar_error`, `json_uppercase_bool_returns_unresolved_scalar_error`, `json_inf_notation_returns_unresolved_scalar_error`, `json_nan_notation_returns_unresolved_scalar_error`, `json_double_quoted_string_resolves_to_str`, `json_empty_document_returns_unresolved_scalar_error`, `json_unresolved_scalar_propagates_from_nested_sequence_item`, `json_unresolved_scalar_propagates_from_nested_mapping_value`, `json_unresolved_scalar_display_message_is_exact`, `json_unresolved_scalar_pos_reflects_actual_position`, `json_unresolved_scalar_value_field_contains_scalar_content`, `json_unresolved_scalar_truncates_long_value`.
 
 ### JSON Schema — tag resolution for untagged collections
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§10.2.2): "[Collections] with the "`?`" non-specific tag (that is, [untagged] [collections]) are [resolved] to "`tag:yaml.org,2002:seq`" or "`tag:yaml.org,2002:map`" according to their [kind]."
-- Implementation: Untagged sequences produce `Event::SequenceStart { tag: None, .. }` and `Node::Sequence { tag: None, .. }`. Untagged mappings produce `Event::MappingStart { tag: None, .. }` and `Node::Mapping { tag: None, .. }`. The parser does not resolve untagged collections to their kind's JSON schema tag.
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:557` (`tag: None` for untagged `MappingStart`) and `:651` (same). No test specifically for untagged `SequenceStart`; the absence of resolution is the invariant.
-- Discrepancy: The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`. The parser does not implement this; `tag: None` is always emitted for untagged collections.
+- Implementation: `rlsp-yaml-parser/src/schema.rs` (`resolve_collection`) — when `Schema::Json` is active, untagged sequences resolve to `tag:yaml.org,2002:seq` and untagged mappings resolve to `tag:yaml.org,2002:map`. The resolution is applied in the loader for both `SequenceStart` and `MappingStart` events.
+- Test coverage: `rlsp-yaml-parser/tests/schema_resolution.rs` — `json_untagged_sequence_resolves_to_seq`, `json_untagged_mapping_resolves_to_map`.
 
 ### Core Schema — tag resolution for plain scalars
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§10.3.2): "[Scalars] with the "`?`" non-specific tag (that is, [plain scalars]) are matched with an extended list of regular expressions. However, in this case, if none of the regular expressions matches, the [scalar] is [resolved] to `tag:yaml.org,2002:str` (that is, considered to be a string). | Regular expression | Resolved to tag | | `null \| Null \| NULL \| ~` | tag:yaml.org,2002:null | | `/* Empty */` | tag:yaml.org,2002:null | | `true \| True \| TRUE \| false \| False \| FALSE` | tag:yaml.org,2002:bool | | `[-+]? [0-9]+` | tag:yaml.org,2002:int (Base 10) | | `0o [0-7]+` | tag:yaml.org,2002:int (Base 8) | | `0x [0-9a-fA-F]+` | tag:yaml.org,2002:int (Base 16) | | `[-+]? ( \\. [0-9]+ \| [0-9]+ ( \\. [0-9]* )? ) ( [eE] [-+]? [0-9]+ )?` | tag:yaml.org,2002:float (Number) | | `[-+]? ( \\.inf \| \\.Inf \| \\.INF )` | tag:yaml.org,2002:float (Infinity) | | `\\.nan \| \\.NaN \| \\.NAN` | tag:yaml.org,2002:float (Not a number) | | `*` | tag:yaml.org,2002:str (Default) |"
-- Implementation: The parser does not implement Core schema plain-scalar type inference. All untagged plain scalars yield `tag: None` regardless of content — no regex matching occurs, no `!!null`, `!!bool`, `!!int`, `!!float`, or `!!str` tag is synthesised. The spec's "recommended default schema" type inference is entirely absent from the parser.
-- Test coverage: No direct test — the parser intentionally omits schema-level type inference; this is a structural parser only.
-- Discrepancy: The spec designates the Core schema as the recommended default that YAML processors should use. The parser does not apply it. Schema-level type resolution — including the `tag:yaml.org,2002:str` fallback for unmatched plain scalars — is delegated to callers.
+- Implementation: `rlsp-yaml-parser/src/schema.rs` (`resolve_scalar`) — when `Schema::Core` is active, untagged plain scalars are matched against the extended regex table covering null, bool, int (decimal, octal, hex), float (number, infinity, NaN), with `tag:yaml.org,2002:str` as the fallback for any unmatched value. Non-plain scalars (quoted, literal, folded) always resolve to `tag:yaml.org,2002:str`. The schema is applied in the loader via `LoaderBuilder::schema(Schema::Core)` or `load_with_schema(input, Schema::Core)`.
+- Test coverage: `rlsp-yaml-parser/tests/schema_resolution.rs` — `core_plain_integer_resolves_to_int`, `core_plain_bool_resolves_to_bool`, `core_plain_string_resolves_to_str`, `core_plain_float_resolves_to_float`, `core_plain_null_lowercase_resolves_to_null`, `core_plain_tilde_resolves_to_null`, `core_plain_empty_resolves_to_null`, `core_double_quoted_integer_resolves_to_str`, `core_block_literal_resolves_to_str`, `core_explicit_str_tag_on_integer_value_preserved`, `core_explicit_int_tag_on_quoted_string_preserved`, `core_octal_resolves_to_int`, `core_hex_resolves_to_int`, `core_inf_resolves_to_float`, `core_nan_resolves_to_float`, `core_positive_signed_int_resolves_to_int`, `core_negative_zero_resolves_to_int`.
 
 ### Core Schema — tag resolution for untagged collections
 
-- Classification: Lenient
+- Classification: Conformant
 - Spec (§10.3.2): "[Collections] with the "`?`" non-specific tag (that is, [untagged] [collections]) are [resolved] to "`tag:yaml.org,2002:seq`" or "`tag:yaml.org,2002:map`" according to their [kind]." (Same rule as JSON schema, inherited by Core schema extension.)
-- Implementation: Identical to the JSON schema position — untagged collections yield `tag: None` in both the event stream and the AST. No resolution to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map` is performed.
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs:557` and `:651` (`tag: None` for untagged mappings).
-- Discrepancy: Same as JSON schema — untagged collections are not resolved to kind-appropriate Core schema tags.
+- Implementation: `rlsp-yaml-parser/src/schema.rs` (`resolve_collection`) — when `Schema::Core` is active, untagged sequences resolve to `tag:yaml.org,2002:seq` and untagged mappings resolve to `tag:yaml.org,2002:map`. Same resolution path as JSON schema; the Core schema inherits collection resolution from JSON.
+- Test coverage: `rlsp-yaml-parser/tests/schema_resolution.rs` — `core_untagged_mapping_resolves_to_map`, `core_untagged_sequence_resolves_to_seq`, `core_nested_structure_all_tags_resolved`.
 
 ### Other Schemas
 
@@ -2114,14 +2110,10 @@ BNF: `l-yaml-stream ::= l-document-prefix* l-any-document? ( ( l-document-suffix
 
 ## Summary
 
-4 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 7 entries.
+0 Lenient findings, 0 Strict findings (bug-class), 3 Strict (security-hardened) findings, total 3 entries.
 
 | Spec production | Classification | Source file:line | Discrepancy (one sentence) | Test coverage |
 |---|---|---|---|---|
 | §5 [59] `ns-esc-8-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [60] `ns-esc-16-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `tests/yaml-test-suite/src/G4RS.yaml` |
 | §5 [61] `ns-esc-32-bit` | Strict (security-hardened) | `rlsp-yaml-parser/src/lexer/quoted.rs:594–618` | The implementation rejects hex escapes whose decoded character falls outside `c-printable` and additionally rejects hex escapes in the bidi-override range; named escapes are exempt by design. | `rlsp-yaml-parser/src/chars.rs:393–394` |
-| §10 JSON Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The JSON schema requires plain scalars to be matched against a fixed regex table and rejected if no pattern matches; the parser does not implement this rule, passing all untagged plain scalars through as `tag: None`. | no direct test |
-| §10 JSON Schema — untagged collections | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs` / `block/` (no resolution) | The JSON schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`; the parser always emits `tag: None` for untagged collections. | `rlsp-yaml-parser/tests/smoke/tags.rs:557,651` |
-| §10 Core Schema — plain scalars | Lenient | `rlsp-yaml-parser/src/lexer/plain.rs` (no type inference) | The Core schema (the recommended default) requires plain scalars to be matched against an extended regex table; the parser does not implement this rule, yielding `tag: None` for all untagged plain scalars. | no direct test |
-| §10 Core Schema — untagged collections | Lenient | `rlsp-yaml-parser/src/event_iter/flow.rs` / `block/` (no resolution) | The Core schema requires untagged collections to resolve to `tag:yaml.org,2002:seq` or `tag:yaml.org,2002:map`; the parser always emits `tag: None` for untagged collections. | `rlsp-yaml-parser/tests/smoke/tags.rs:557,651` |
