@@ -277,7 +277,7 @@ pub(in crate::event_iter) fn scan_tag_suffix(s: &str) -> usize {
 /// Valid forms per YAML 1.2 §6.8.1 productions [89]–[92]:
 /// - `!`   — primary tag handle
 /// - `!!`  — secondary tag handle
-/// - `!<word-chars>!` — named tag handle, where word chars are `[a-zA-Z0-9_-]`
+/// - `!<word-chars>!` — named tag handle, where word chars are `[a-zA-Z0-9-]`
 pub(in crate::event_iter) fn is_valid_tag_handle(handle: &str) -> bool {
     match handle {
         "!" | "!!" => true,
@@ -285,9 +285,9 @@ pub(in crate::event_iter) fn is_valid_tag_handle(handle: &str) -> bool {
             // Named handle: starts and ends with `!`, interior non-empty word chars.
             let inner = handle.strip_prefix('!').and_then(|s| s.strip_suffix('!'));
             match inner {
-                Some(word) if !word.is_empty() => word
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                Some(word) if !word.is_empty() => {
+                    word.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                }
                 _ => false,
             }
         }
@@ -479,8 +479,28 @@ mod tests {
     }
 
     #[test]
-    fn is_valid_tag_handle_named_with_hyphen_and_underscore() {
-        assert!(is_valid_tag_handle("!my-handle_1!"));
+    fn is_valid_tag_handle_named_with_hyphen() {
+        assert!(is_valid_tag_handle("!my-handle-1!"));
+    }
+
+    #[test]
+    fn is_valid_tag_handle_rejects_named_with_underscore() {
+        assert!(!is_valid_tag_handle("!my_handle!"));
+    }
+
+    #[test]
+    fn is_valid_tag_handle_rejects_underscore_only() {
+        assert!(!is_valid_tag_handle("!_!"));
+    }
+
+    #[test]
+    fn is_valid_tag_handle_rejects_trailing_underscore() {
+        assert!(!is_valid_tag_handle("!abc_!"));
+    }
+
+    #[test]
+    fn is_valid_tag_handle_rejects_leading_underscore() {
+        assert!(!is_valid_tag_handle("!_abc!"));
     }
 
     #[test]

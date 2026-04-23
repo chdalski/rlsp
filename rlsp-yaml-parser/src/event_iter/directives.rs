@@ -177,7 +177,7 @@ impl<'input> EventIter<'input> {
         }
 
         // Validate handle shape: must be `!`, `!!`, or `!<word-chars>!`
-        // where word chars are ASCII alphanumeric, `-`, or `_`
+        // where word chars are ASCII alphanumeric or `-`
         // (YAML 1.2 §6.8.1 productions [89]–[92]).
         if !is_valid_tag_handle(handle) {
             return Err(Error {

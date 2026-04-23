@@ -92,7 +92,7 @@ and the audit Summary drops from 5 Lenient entries to 4.
 
 ## Steps
 
-- [ ] Task 1 — remove `_` from `is_valid_tag_handle`; update
+- [x] Task 1 — remove `_` from `is_valid_tag_handle`; update
       tests and stale source comments
 - [ ] Task 2 — update conformance doc, feature-log, follow-up
       queue
@@ -107,23 +107,23 @@ grammar, flip the existing unit test that asserts the Lenient
 behavior, and add regression tests covering the tightened
 acceptance at both unit and integration levels.
 
-- [ ] In `rlsp-yaml-parser/src/event_iter/properties.rs:288-290`
+- [x] In `rlsp-yaml-parser/src/event_iter/properties.rs:288-290`
       (`is_valid_tag_handle`, named-handle branch), replace the
       closure body so the inner-word check becomes
       `|c| c.is_ascii_alphanumeric() || c == '-'`. No other
       changes to the function.
-- [ ] Update the doc comment at
+- [x] Update the doc comment at
       `rlsp-yaml-parser/src/event_iter/properties.rs:275-280` so
       the description of the named-handle word-char alphabet
       matches the fixed code (e.g., "word chars are
       `[a-zA-Z0-9-]`"). Do not introduce new wording beyond
       aligning the existing comment with the fix.
-- [ ] Update the comment at
+- [x] Update the comment at
       `rlsp-yaml-parser/src/event_iter/directives.rs:179-180` so
       the paraphrased grammar matches the fixed code (e.g.,
       "word chars are ASCII alphanumeric or `-`"). Do not
       introduce new wording beyond aligning with the fix.
-- [ ] Flip the existing unit test at
+- [x] Flip the existing unit test at
       `rlsp-yaml-parser/src/event_iter/properties.rs:482-485`.
       Rename the test function to
       `is_valid_tag_handle_named_with_hyphen` and assert that
@@ -131,7 +131,7 @@ acceptance at both unit and integration levels.
       replacement preserves the hyphen case the original test
       was also covering; the underscore case moves to a new
       dedicated test (next sub-task).
-- [ ] Add a new unit test
+- [x] Add a new unit test
       `is_valid_tag_handle_rejects_named_with_underscore` in the
       same `tests` module that asserts
       `is_valid_tag_handle("!my_handle!")` is `false`. Add
@@ -140,7 +140,7 @@ acceptance at both unit and integration levels.
       `is_valid_tag_handle_rejects_trailing_underscore` for
       `!abc_!`, and `is_valid_tag_handle_rejects_leading_underscore`
       for `!_abc!`. Each asserts `false`.
-- [ ] Add integration-level regression tests (in the same test
+- [x] Add integration-level regression tests (in the same test
       file used by existing `%TAG` directive coverage, or a new
       file if that is the closer fit — implementor's choice so
       long as the tests run under
@@ -159,19 +159,21 @@ acceptance at both unit and integration levels.
           `!my-handle!my_suffix scalar` paired with a matching
           handle — still parses successfully. This verifies the
           fix did not leak into `scan_tag`.
-- [ ] Run `cargo test -p rlsp-yaml-parser --test conformance` and
+- [x] Run `cargo test -p rlsp-yaml-parser --test conformance` and
       record the before/after counts in the commit message. If
       yaml-test-suite cases flip status (previously Lenient
       acceptance that now errors), update the conformance-test
       baseline only for correct flips — a flip where the suite
       expects the parser to succeed on `%TAG !x_y! ...` would
       indicate the plan is wrong, not the baseline.
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test --workspace` passes (verifies no downstream
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test --workspace` passes (verifies no downstream
       consumer — `rlsp-yaml`, integration crates — relies on the
       previously-accepted underscore form).
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` run
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` run
       clean.
+
+Commit: `29732b61c029f51b1e115c84c05e8f22091dc983`
 
 ### Task 2: Update conformance doc, feature-log, and follow-up queue
 

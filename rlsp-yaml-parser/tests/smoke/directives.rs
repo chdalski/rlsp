@@ -817,3 +817,44 @@ fn tag_handle_named_is_accepted() {
         "%TAG named handle !foo! must be accepted"
     );
 }
+
+// -----------------------------------------------------------------------
+// Group N — Named handle word-char alphabet (ns-word-char = [a-zA-Z0-9-])
+// -----------------------------------------------------------------------
+
+// N-1: Named handle with hyphen is accepted (regression: hyphen must remain valid).
+#[test]
+fn tag_handle_named_with_hyphen_is_accepted() {
+    let events = evs("%TAG !my-handle! tag:example.org,2024:\n---\n!my-handle!scalar\n");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::Scalar { tag: Some(t), .. }
+                if t.as_ref() == "tag:example.org,2024:scalar"
+        )),
+        "%TAG !my-handle! must be accepted and resolve the scalar tag"
+    );
+}
+
+// N-2: Named handle with underscore is rejected (ns-word-char excludes `_`).
+#[test]
+fn tag_handle_named_with_underscore_is_rejected() {
+    assert!(
+        has_error("%TAG !my_handle! tag:example.org,2024:\n---\nscalar\n"),
+        "%TAG handle with underscore must be rejected as malformed"
+    );
+}
+
+// N-3: Inline tag suffix containing `_` still parses (fix must not leak into scan_tag).
+#[test]
+fn inline_tag_suffix_with_underscore_is_accepted() {
+    let events = evs("!!my_type scalar\n");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::Scalar { tag: Some(t), .. }
+                if t.as_ref() == "tag:yaml.org,2002:my_type"
+        )),
+        "inline tag !!my_type must be accepted; underscore is valid in tag suffixes (ns-tag-char)"
+    );
+}
