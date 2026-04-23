@@ -92,7 +92,7 @@ cannot be replaced by tag comparisons.
       drop `Option<Schema>`
 - [x] Task 2 — migrate `rlsp-yaml` type-inference callsites
       to tag-URI comparisons
-- [ ] Task 3 — thin `scalar_helpers.rs` and update docs
+- [x] Task 3 — thin `scalar_helpers.rs` and update docs
 
 ## Tasks
 
@@ -210,24 +210,26 @@ Remove the now-unused type-classification functions from
 `scalar_helpers.rs`. Update the module doc and the
 follow-up queue.
 
-- [ ] Remove `classify_plain_scalar`, `PlainScalarKind`,
+- [x] Remove `classify_plain_scalar`, `PlainScalarKind`,
       `is_null`, `is_bool`, `is_integer`, `is_float` from
       `scalar_helpers.rs`. Keep `parse_integer`,
       `parse_float`, `is_yaml11_bool`,
       `yaml11_bool_canonical`, `is_yaml11_octal`.
-- [ ] Update the module doc comment — it currently says
+- [x] Update the module doc comment — it currently says
       "Scalar type inference helpers for YAML 1.2 Core
       schema." Change to reflect the remaining scope (value
       parsing + YAML 1.1 compatibility).
-- [ ] Remove the unit tests for deleted functions from the
+- [x] Remove the unit tests for deleted functions from the
       `#[cfg(test)]` module in `scalar_helpers.rs`.
-- [ ] Verify no remaining imports of the deleted items
+- [x] Verify no remaining imports of the deleted items
       anywhere in the workspace.
-- [ ] Update the follow-up queue: remove the Plan 2 bullet
+- [x] Update the follow-up queue: remove the Plan 2 bullet
       from `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo test --workspace` passes.
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `a21a07f`
 
 ## Decisions
 
