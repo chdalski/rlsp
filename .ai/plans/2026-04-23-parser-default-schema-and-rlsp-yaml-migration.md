@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-23
 
 # Make Core schema the loader default and migrate rlsp-yaml
@@ -88,7 +88,7 @@ cannot be replaced by tag comparisons.
 
 ## Steps
 
-- [ ] Task 1 — make `Schema::Core` the loader default and
+- [x] Task 1 — make `Schema::Core` the loader default and
       drop `Option<Schema>`
 - [ ] Task 2 — migrate `rlsp-yaml` type-inference callsites
       to tag-URI comparisons
@@ -103,38 +103,38 @@ Change `LoaderOptions.schema` from `Option<Schema>` to
 `load_with_schema()` (redundant). Update all parser-crate
 tests.
 
-- [ ] In `loader.rs`: change `schema: Option<Schema>` to
+- [x] In `loader.rs`: change `schema: Option<Schema>` to
       `schema: Schema` in `LoaderOptions`. Default to
       `Schema::Core` in `Default` impl.
-- [ ] In `loader.rs`: update `LoaderBuilder::schema()` to
+- [x] In `loader.rs`: update `LoaderBuilder::schema()` to
       take `Schema` directly (drop the `Option` wrapping).
-- [ ] In `loader.rs`: update `apply_schema_to_node` call
+- [x] In `loader.rs`: update `apply_schema_to_node` call
       site — currently guarded by
       `if self.options.schema.is_some()`; change to always
       call (schema is always present).
-- [ ] In `loader.rs`: remove `load_with_schema()` function.
-- [ ] In `lib.rs`: remove `load_with_schema` from
+- [x] In `loader.rs`: remove `load_with_schema()` function.
+- [x] In `lib.rs`: remove `load_with_schema` from
       `pub use loader::{ ... }` re-export.
-- [ ] In `schema_resolution.rs`: delete IT-25/26/27
+- [x] In `schema_resolution.rs`: delete IT-25/26/27
       (regression tests for `tag: None` under default
       `load()`). Update IT-28/29 (convenience-vs-builder
       equivalence) to use `LoaderBuilder::schema()` instead
       of `load_with_schema()`.
-- [ ] Update `tests/robustness.rs`: calls to `load()` and
+- [x] Update `tests/robustness.rs`: calls to `load()` and
       `LoaderBuilder::new()...build().load()` now produce
       resolved tags — update any assertions on `tag` fields.
-- [ ] Update `tests/loader_spans.rs`: same — update tag
+- [x] Update `tests/loader_spans.rs`: same — update tag
       assertions if present.
-- [ ] Update `tests/encoding.rs`: same.
-- [ ] Update `tests/implicit_key_length.rs`: same.
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md`: the
+- [x] Update `tests/encoding.rs`: same.
+- [x] Update `tests/implicit_key_length.rs`: same.
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md`: the
       §10 Schema Resolution entry currently describes
       `load_with_schema()` as the API and states `load()`
       preserves `tag: None`. Replace with: `Schema::Core`
       is the default for `load()`, `Failsafe`/`JSON`/`Core`
       are selectable via `LoaderBuilder::schema()`,
       `parse_events()` is the path for raw representation.
-- [ ] Update `rlsp-yaml-parser/docs/yaml-spec-conformance.md`:
+- [x] Update `rlsp-yaml-parser/docs/yaml-spec-conformance.md`:
       six §10 entries reference `load_with_schema()` or
       claim `tag: None` for untagged AST nodes — both
       become false after this task. Specifically:
@@ -152,13 +152,15 @@ tests.
         nodes receive a resolved tag URI from Core by
         default; `tag: None` remains accurate only for the
         event stream.
-- [ ] `cargo test -p rlsp-yaml-parser` passes.
-- [ ] `cargo test --workspace` passes (rlsp-yaml's
+- [x] `cargo test -p rlsp-yaml-parser` passes.
+- [x] `cargo test --workspace` passes (rlsp-yaml's
       `parser.rs` already handles `LoadError::UnresolvedScalar`;
       other rlsp-yaml code reads `value` not `tag`, so it
       should compile — but tests may assert `tag: None`).
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets`
+- [x] `cargo fmt --check` and `cargo clippy --all-targets`
       run clean.
+
+**Commit:** `60469fb`
 
 ### Task 2: Migrate rlsp-yaml type-inference callsites to tag-URI comparisons
 

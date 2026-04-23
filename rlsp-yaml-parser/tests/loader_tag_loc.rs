@@ -100,7 +100,7 @@ fn tl_3_sequence_with_tag_has_tag_loc_some() {
     );
 }
 
-// TL-4: tagless_scalar_has_tag_loc_none
+// TL-4: untagged scalar has schema-resolved tag but no tag_loc (no source position)
 #[test]
 fn tl_4_tagless_scalar_has_tag_loc_none() {
     let docs = load("plain value\n").unwrap();
@@ -108,14 +108,20 @@ fn tl_4_tagless_scalar_has_tag_loc_none() {
     let Node::Scalar { tag, tag_loc, .. } = root else {
         panic!("expected root Scalar; got: {root:?}");
     };
-    assert!(tag.is_none(), "tag must be None");
+    // Core schema resolves untagged plain scalar to !!str; tag_loc stays None
+    // because the tag was not present in the source.
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:str"),
+        "untagged scalar must have Core-resolved !!str tag"
+    );
     assert!(
         tag_loc.is_none(),
-        "tag_loc must be None for untagged scalar"
+        "tag_loc must be None for schema-resolved (not source-tagged) scalar"
     );
 }
 
-// TL-5: tagless_mapping_has_tag_loc_none
+// TL-5: untagged mapping has schema-resolved tag but no tag_loc
 #[test]
 fn tl_5_tagless_mapping_has_tag_loc_none() {
     let docs = load("k: v\n").unwrap();
@@ -123,14 +129,18 @@ fn tl_5_tagless_mapping_has_tag_loc_none() {
     let Node::Mapping { tag, tag_loc, .. } = root else {
         panic!("expected root Mapping; got: {root:?}");
     };
-    assert!(tag.is_none(), "tag must be None");
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:map"),
+        "untagged mapping must have Core-resolved !!map tag"
+    );
     assert!(
         tag_loc.is_none(),
-        "tag_loc must be None for untagged mapping"
+        "tag_loc must be None for schema-resolved (not source-tagged) mapping"
     );
 }
 
-// TL-6: tagless_sequence_has_tag_loc_none
+// TL-6: untagged sequence has schema-resolved tag but no tag_loc
 #[test]
 fn tl_6_tagless_sequence_has_tag_loc_none() {
     let docs = load("- item\n").unwrap();
@@ -138,10 +148,14 @@ fn tl_6_tagless_sequence_has_tag_loc_none() {
     let Node::Sequence { tag, tag_loc, .. } = root else {
         panic!("expected root Sequence; got: {root:?}");
     };
-    assert!(tag.is_none(), "tag must be None");
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:seq"),
+        "untagged sequence must have Core-resolved !!seq tag"
+    );
     assert!(
         tag_loc.is_none(),
-        "tag_loc must be None for untagged sequence"
+        "tag_loc must be None for schema-resolved (not source-tagged) sequence"
     );
 }
 
@@ -209,11 +223,16 @@ fn check_tag_loc_invariant(node: &Node) {
         Node::Scalar { tag, tag_loc, .. }
         | Node::Mapping { tag, tag_loc, .. }
         | Node::Sequence { tag, tag_loc, .. } => {
-            assert_eq!(
-                tag.is_some(),
-                tag_loc.is_some(),
-                "tag_loc invariant violated: tag={tag:?} tag_loc={tag_loc:?}"
-            );
+            // When a source tag is present (tag_loc: Some), the resolved tag
+            // must also be present.  Schema-resolved tags (tag_loc: None) may
+            // have tag: Some — this is correct and expected with the Core
+            // schema default.
+            if tag_loc.is_some() {
+                assert!(
+                    tag.is_some(),
+                    "tag_loc invariant violated: tag_loc=Some but tag=None; tag={tag:?} tag_loc={tag_loc:?}"
+                );
+            }
         }
         Node::Alias { .. } => {}
     }

@@ -11,9 +11,9 @@
 //! loader.
 //!
 //! All tests exercise the public API through the production entry points:
-//! `load_with_schema` and `LoaderBuilder::new().lossless().schema(s).build().load(input)`.
+//! `LoaderBuilder::new().schema(s).build().load(input)` and `load()`.
 
-use rlsp_yaml_parser::loader::{LoaderBuilder, load_with_schema};
+use rlsp_yaml_parser::loader::LoaderBuilder;
 use rlsp_yaml_parser::{Node, Schema};
 
 // ---------------------------------------------------------------------------
@@ -23,7 +23,11 @@ use rlsp_yaml_parser::{Node, Schema};
 /// Extract the tag from the root scalar of a single-document YAML string
 /// loaded with the given schema.
 fn scalar_tag(input: &str, schema: Schema) -> Option<String> {
-    let docs = load_with_schema(input, schema).expect("load failed");
+    let docs = LoaderBuilder::new()
+        .schema(schema)
+        .build()
+        .load(input)
+        .expect("load failed");
     assert_eq!(docs.len(), 1, "expected exactly one document");
     match &docs[0].root {
         Node::Scalar { tag, .. } => tag.clone(),
@@ -33,7 +37,11 @@ fn scalar_tag(input: &str, schema: Schema) -> Option<String> {
 
 /// Extract the tag from the root mapping of a single-document YAML string.
 fn mapping_tag(input: &str, schema: Schema) -> Option<String> {
-    let docs = load_with_schema(input, schema).expect("load failed");
+    let docs = LoaderBuilder::new()
+        .schema(schema)
+        .build()
+        .load(input)
+        .expect("load failed");
     assert_eq!(docs.len(), 1, "expected exactly one document");
     match &docs[0].root {
         Node::Mapping { tag, .. } => tag.clone(),
@@ -43,12 +51,25 @@ fn mapping_tag(input: &str, schema: Schema) -> Option<String> {
 
 /// Extract the tag from the root sequence of a single-document YAML string.
 fn sequence_tag(input: &str, schema: Schema) -> Option<String> {
-    let docs = load_with_schema(input, schema).expect("load failed");
+    let docs = LoaderBuilder::new()
+        .schema(schema)
+        .build()
+        .load(input)
+        .expect("load failed");
     assert_eq!(docs.len(), 1, "expected exactly one document");
     match &docs[0].root {
         Node::Sequence { tag, .. } => tag.clone(),
         other => panic!("expected root sequence, got: {other:?}"),
     }
+}
+
+/// Load YAML text with the given schema.  File-local replacement for the
+/// removed `load_with_schema` public convenience function.
+fn load_with_schema(
+    input: &str,
+    schema: Schema,
+) -> Result<Vec<rlsp_yaml_parser::Document<rlsp_yaml_parser::Span>>, rlsp_yaml_parser::LoadError> {
+    LoaderBuilder::new().schema(schema).build().load(input)
 }
 
 // ---------------------------------------------------------------------------
@@ -292,70 +313,76 @@ fn core_negative_zero_resolves_to_int() {
 }
 
 // ---------------------------------------------------------------------------
-// Group 8 — Regression: default `load()` leaves all tags None (IT-25–IT-27)
+// Group 8 — Default `load()` uses Core schema (IT-25r through IT-new)
 // ---------------------------------------------------------------------------
 
-// IT-25: default load() — plain integer tag stays None
+// IT-25r: default load() — plain integer resolves to !!int
 #[test]
-fn no_schema_plain_integer_tag_is_none() {
+fn load_default_plain_integer_resolves_to_int() {
     let docs = rlsp_yaml_parser::loader::load("42\n").expect("load failed");
     let Node::Scalar { tag, .. } = &docs[0].root else {
         panic!("expected scalar");
     };
-    assert_eq!(*tag, None, "default load must not resolve tags");
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
 }
 
-// IT-26: default load() — plain `null` tag stays None
+// IT-26r: default load() — plain `null` resolves to !!null
 #[test]
-fn no_schema_plain_null_tag_is_none() {
+fn load_default_plain_null_resolves_to_null() {
     let docs = rlsp_yaml_parser::loader::load("null\n").expect("load failed");
     let Node::Scalar { tag, .. } = &docs[0].root else {
         panic!("expected scalar");
     };
-    assert_eq!(*tag, None, "default load must not resolve tags");
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:null"));
 }
 
-// IT-27: default load() — mapping tag stays None
+// IT-27r: default load() — untagged mapping resolves to !!map
 #[test]
-fn no_schema_mapping_tag_is_none() {
+fn load_default_mapping_resolves_to_map() {
     let docs = rlsp_yaml_parser::loader::load("a: 1\n").expect("load failed");
     let Node::Mapping { tag, .. } = &docs[0].root else {
         panic!("expected mapping");
     };
-    assert_eq!(*tag, None, "default load must not resolve tags");
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:map"));
 }
 
-// ---------------------------------------------------------------------------
-// Group 9 — `load_with_schema` convenience vs. builder chain equivalence
-// (IT-28, IT-29)
-// ---------------------------------------------------------------------------
-
-// IT-28: load_with_schema convenience produces same tag as builder chain (scalar)
+// IT-28r: LoaderBuilder default (no .schema() call) uses Core schema
 #[test]
-fn load_with_schema_equivalent_to_builder_chain_scalar() {
-    let input = "42\n";
-    let via_convenience = load_with_schema(input, Schema::Core).expect("convenience failed");
-    let via_builder = LoaderBuilder::new()
-        .lossless()
+fn loader_builder_default_uses_core_schema() {
+    let docs = LoaderBuilder::new()
+        .build()
+        .load("42\n")
+        .expect("load failed");
+    let Node::Scalar { tag, .. } = &docs[0].root else {
+        panic!("expected scalar");
+    };
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
+}
+
+// IT-29r: LoaderBuilder default and explicit Core schema produce identical ASTs
+#[test]
+fn loader_builder_explicit_core_same_as_default() {
+    let input = "true\n";
+    let via_default = LoaderBuilder::new()
+        .build()
+        .load(input)
+        .expect("default failed");
+    let via_explicit = LoaderBuilder::new()
         .schema(Schema::Core)
         .build()
         .load(input)
-        .expect("builder failed");
-    assert_eq!(via_convenience, via_builder);
+        .expect("explicit failed");
+    assert_eq!(via_default, via_explicit);
 }
 
-// IT-29: load_with_schema convenience produces same result as builder chain (mapping)
+// IT-new: default load() — empty document (distinct code path) resolves to !!null
 #[test]
-fn load_with_schema_equivalent_to_builder_chain_mapping() {
-    let input = "a: 1\nb: true\n";
-    let via_convenience = load_with_schema(input, Schema::Core).expect("convenience failed");
-    let via_builder = LoaderBuilder::new()
-        .lossless()
-        .schema(Schema::Core)
-        .build()
-        .load(input)
-        .expect("builder failed");
-    assert_eq!(via_convenience, via_builder);
+fn load_default_empty_document_resolves_to_null() {
+    let docs = rlsp_yaml_parser::loader::load("---\n").expect("load failed");
+    let Node::Scalar { tag, .. } = &docs[0].root else {
+        panic!("expected scalar");
+    };
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:null"));
 }
 
 // ---------------------------------------------------------------------------

@@ -444,11 +444,18 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 exp_anchor.as_deref(),
                 "{path}: scalar anchor mismatch: got {anchor:?}, expected {exp_anchor:?}"
             );
-            assert_eq!(
-                tag.as_deref(),
-                exp_tag.as_deref(),
-                "{path}: scalar tag mismatch: got {tag:?}, expected {exp_tag:?}"
-            );
+            // When the event tree records a tag, it must match exactly —
+            // with one exception: the bare `!` non-specific scalar tag is
+            // resolved by the loader to `tag:yaml.org,2002:str` per YAML
+            // 1.2.2 §10. Accept either form when the event tree records `!`.
+            if let Some(exp) = exp_tag {
+                let tag_ok = tag.as_deref() == Some(exp.as_str())
+                    || (exp == "!" && tag.as_deref() == Some("tag:yaml.org,2002:str"));
+                assert!(
+                    tag_ok,
+                    "{path}: scalar tag mismatch: got {tag:?}, expected {exp_tag:?}"
+                );
+            }
         }
         (Node::Alias { name, .. }, ExpectedNode::Alias { name: exp_name }) => {
             assert_eq!(
@@ -480,11 +487,16 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 exp_anchor.as_deref(),
                 "{path}: sequence anchor mismatch"
             );
-            assert_eq!(
-                tag.as_deref(),
-                exp_tag.as_deref(),
-                "{path}: sequence tag mismatch"
-            );
+            // When the event tree records a tag, it must match exactly.
+            // When the event tree has no tag, the loader may have applied
+            // schema resolution — skip the assertion.
+            if let Some(exp) = exp_tag {
+                assert_eq!(
+                    tag.as_deref(),
+                    Some(exp.as_str()),
+                    "{path}: sequence tag mismatch"
+                );
+            }
             assert_eq!(
                 items.len(),
                 exp_items.len(),
@@ -520,11 +532,16 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 exp_anchor.as_deref(),
                 "{path}: mapping anchor mismatch"
             );
-            assert_eq!(
-                tag.as_deref(),
-                exp_tag.as_deref(),
-                "{path}: mapping tag mismatch"
-            );
+            // When the event tree records a tag, it must match exactly.
+            // When the event tree has no tag, the loader may have applied
+            // schema resolution — skip the assertion.
+            if let Some(exp) = exp_tag {
+                assert_eq!(
+                    tag.as_deref(),
+                    Some(exp.as_str()),
+                    "{path}: mapping tag mismatch"
+                );
+            }
             assert_eq!(
                 entries.len(),
                 exp_entries.len(),

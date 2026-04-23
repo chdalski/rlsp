@@ -24,9 +24,7 @@ pub mod schema;
 pub use error::Error;
 pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
-pub use loader::{
-    LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load, load_with_schema,
-};
+pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
 pub use node::{Document, Node};
 pub use pos::{Pos, Span};
 pub use schema::{ResolvedTag, Schema};

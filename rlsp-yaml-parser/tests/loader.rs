@@ -555,7 +555,12 @@ fn inline_tag_before_key_annotates_key_scalar() {
     let Node::Mapping { entries, tag, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
-    assert!(tag.is_none(), "mapping must have no tag; got: {tag:?}");
+    // The mapping has no source tag; Core schema resolution gives it !!map.
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:map"),
+        "mapping must have schema-resolved !!map tag; got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
     let (k, v) = &entries[0];
     let Node::Scalar {
@@ -589,7 +594,12 @@ fn inline_anchor_and_tag_before_key_annotate_key_scalar() {
         anchor.is_none(),
         "mapping must have no anchor; got: {anchor:?}"
     );
-    assert!(tag.is_none(), "mapping must have no tag; got: {tag:?}");
+    // The mapping has no source tag; Core schema resolution gives it !!map.
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:map"),
+        "mapping must have schema-resolved !!map tag; got: {tag:?}"
+    );
     assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
     let (k, v) = &entries[0];
     let Node::Scalar {

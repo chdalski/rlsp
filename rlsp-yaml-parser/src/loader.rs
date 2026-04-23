@@ -156,12 +156,11 @@ pub struct LoaderOptions {
     pub max_expanded_nodes: usize,
     /// Controls how alias references are handled during loading.
     pub mode: LoadMode,
-    /// Optional YAML 1.2.2 §10 schema to apply during loading.
+    /// YAML 1.2.2 §10 schema to apply during loading (default: [`Schema::Core`]).
     ///
-    /// When `Some`, each node's tag is resolved according to the schema after
-    /// the node is constructed.  When `None` (the default), tags are left as
-    /// the parser emitted them — `None` for untagged nodes.
-    pub schema: Option<Schema>,
+    /// Each node's tag is resolved according to this schema after the node is
+    /// constructed.  Nodes with explicit source tags are left unchanged.
+    pub schema: Schema,
 }
 
 impl Default for LoaderOptions {
@@ -171,7 +170,7 @@ impl Default for LoaderOptions {
             max_anchors: 10_000,
             max_expanded_nodes: 1_000_000,
             mode: LoadMode::Lossless,
-            schema: None,
+            schema: Schema::Core,
         }
     }
 }
@@ -236,13 +235,13 @@ impl LoaderBuilder {
         self
     }
 
-    /// Enable YAML 1.2.2 §10 schema tag resolution during loading.
+    /// Override the YAML 1.2.2 §10 schema used for tag resolution during loading.
     ///
-    /// When set, untagged nodes receive resolved tag URIs in the AST.  Nodes
-    /// with explicit source tags are not modified.
+    /// The default is [`Schema::Core`].  Untagged nodes receive resolved tag URIs
+    /// in the AST; nodes with explicit source tags are not modified.
     #[must_use]
     pub const fn schema(mut self, s: Schema) -> Self {
-        self.options.schema = Some(s);
+        self.options.schema = s;
         self
     }
 
@@ -289,9 +288,12 @@ impl Loader {
 // Convenience entry point
 // ---------------------------------------------------------------------------
 
-/// Load YAML text using lossless mode and default security limits.
+/// Load YAML text using lossless mode, default security limits, and Core schema tag
+/// resolution (YAML 1.2.2 §10.3).
 ///
-/// Returns one `Document<Span>` per YAML document in the stream.
+/// Returns one `Document<Span>` per YAML document in the stream.  Untagged nodes
+/// receive resolved tag URIs according to the Core schema; nodes with explicit source
+/// tags are left unchanged.
 ///
 /// # Errors
 ///
@@ -300,43 +302,15 @@ impl Loader {
 ///
 /// ```
 /// use rlsp_yaml_parser::loader::load;
+/// use rlsp_yaml_parser::Node;
 ///
 /// let docs = load("hello\n").unwrap();
 /// assert_eq!(docs.len(), 1);
+/// let Node::Scalar { tag, .. } = &docs[0].root else { panic!() };
+/// assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:str"));
 /// ```
 pub fn load(input: &str) -> std::result::Result<Vec<Document<Span>>, LoadError> {
     LoaderBuilder::new().lossless().build().load(input)
-}
-
-/// Load YAML text with YAML 1.2.2 §10 schema tag resolution applied.
-///
-/// Equivalent to `LoaderBuilder::new().lossless().schema(schema).build().load(input)`.
-///
-/// Untagged nodes receive resolved tag URIs according to `schema`.  Nodes with
-/// explicit source tags are left unchanged.
-///
-/// # Errors
-///
-/// Returns `Err` if the input contains a parse error or exceeds a security
-/// limit (nesting depth or anchor count).
-///
-/// ```
-/// use rlsp_yaml_parser::loader::load_with_schema;
-/// use rlsp_yaml_parser::{Node, Schema};
-///
-/// let docs = load_with_schema("42\n", Schema::Core).unwrap();
-/// let Node::Scalar { tag, .. } = &docs[0].root else { panic!() };
-/// assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
-/// ```
-pub fn load_with_schema(
-    input: &str,
-    schema: Schema,
-) -> std::result::Result<Vec<Document<Span>>, LoadError> {
-    LoaderBuilder::new()
-        .lossless()
-        .schema(schema)
-        .build()
-        .load(input)
 }
 
 // ---------------------------------------------------------------------------
@@ -420,9 +394,7 @@ impl<'opt> LoadState<'opt> {
                     let root = if is_document_end(stream.peek()) {
                         // Empty document — emit an empty scalar as root.
                         let mut node = empty_scalar();
-                        if let Some(schema) = self.options.schema {
-                            apply_schema_to_node(&mut node, schema)?;
-                        }
+                        apply_schema_to_node(&mut node, self.options.schema)?;
                         node
                     } else {
                         self.parse_node(&mut stream)?
@@ -502,9 +474,7 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
-                if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema)?;
-                }
+                apply_schema_to_node(&mut node, self.options.schema)?;
                 if let Some(name) = node.anchor() {
                     self.register_anchor(name.to_owned(), &node)?;
                 }
@@ -617,9 +587,7 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
-                if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema)?;
-                }
+                apply_schema_to_node(&mut node, self.options.schema)?;
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
                 }
@@ -728,9 +696,7 @@ impl<'opt> LoadState<'opt> {
                     leading_comments: None,
                     trailing_comment: None,
                 };
-                if let Some(schema) = self.options.schema {
-                    apply_schema_to_node(&mut node, schema)?;
-                }
+                apply_schema_to_node(&mut node, self.options.schema)?;
                 if let Some(name) = anchor {
                     self.register_anchor(name, &node)?;
                 }

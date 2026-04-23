@@ -306,9 +306,9 @@ state.
 
 ### §10 Schema Resolution [completed]
 
-**Description:** The loader supports opt-in YAML 1.2.2 §10 schema resolution via
-`LoaderBuilder::schema(schema)` and the convenience function `load_with_schema(input, schema)`.
-Three schemas are available:
+**Description:** The loader applies YAML 1.2.2 §10 schema tag resolution to every `load()` call.
+`Schema::Core` (§10.3) is the default, matching the YAML spec recommendation for processors.
+Three schemas are selectable via `LoaderBuilder::schema(schema)`:
 - `Schema::Failsafe` (§10.1) — all untagged scalars resolve to `tag:yaml.org,2002:str`; all
   untagged sequences to `tag:yaml.org,2002:seq`; all untagged mappings to `tag:yaml.org,2002:map`.
   The `!` non-specific tag resolves by kind.
@@ -316,16 +316,16 @@ Three schemas are available:
   (`null`, `true|false`, integer, float); non-matching plain scalars are rejected with
   `LoadError::UnresolvedScalar`. Non-plain scalars resolve to `str`. Untagged collections resolve
   by kind.
-- `Schema::Core` (§10.3) — superset of JSON; unmatched plain scalars fall back to
-  `tag:yaml.org,2002:str` instead of being rejected. The recommended YAML processor default.
+- `Schema::Core` (§10.3, default) — superset of JSON; unmatched plain scalars fall back to
+  `tag:yaml.org,2002:str` instead of being rejected.
 
-Explicit source tags always take precedence over schema-derived resolution. When no schema is
-configured (`load()` without a schema), the loader preserves `tag: None` for untagged nodes —
-schema resolution is fully opt-in.
+Explicit source tags always take precedence over schema-derived resolution. Schema-resolved tags
+have `tag_loc: None` (no source position); source-tagged nodes have `tag_loc: Some`. Callers
+that need raw unresolved tags should use `parse_events()`, which is schema-agnostic.
 **Complexity:** Medium
-**Comment:** Schema resolution is decoupled from the streaming event layer and lives entirely in
-the loader, keeping the event API schema-agnostic. This allows callers that only need structural
-parsing to pay no cost for schema logic.
+**Comment:** `Schema::Core` as the default follows YAML 1.2.2 §10.3 ("The Core Schema is the
+recommended default schema that YAML [processors] should use unless instructed otherwise").
+Schema resolution is decoupled from the streaming event layer and lives entirely in the loader.
 **Tier:** 1
 
 ### Block-Sequence Plain Scalar Fast Path [completed]
