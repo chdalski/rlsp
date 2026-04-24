@@ -19,6 +19,7 @@ export interface ServerSettings {
   formatEnforceBlockStyle: boolean;
   duplicateKeys: string;
   formatRemoveDuplicateKeys: boolean;
+  formatIndentSequences: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -42,5 +43,6 @@ export function getConfig(): ServerSettings {
     formatEnforceBlockStyle: cfg.get<boolean>('formatEnforceBlockStyle', false),
     duplicateKeys: cfg.get<string>('duplicateKeys', 'error'),
     formatRemoveDuplicateKeys: cfg.get<boolean>('formatRemoveDuplicateKeys', false),
+    formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true),
   };
 }

@@ -119,6 +119,11 @@
           "default": false,
           "description": "Remove duplicate mapping keys when formatting. Keeps the last occurrence (YAML spec behavior). When false (default), duplicate keys are preserved."
         },
+        "rlsp-yaml.formatIndentSequences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Indent block sequences under mapping keys. When true (default), sequences are indented: `key:\\n  - item`. When false, sequences start at the key's indent level: `key:\\n- item`."
+        },
         "rlsp-yaml.httpProxy": {
           "type": "string",
           "default": "",

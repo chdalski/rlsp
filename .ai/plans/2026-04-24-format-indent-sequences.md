@@ -34,7 +34,7 @@ Add a `formatIndentSequences` boolean setting (default `true`) to rlsp-yaml's fo
 
 - [x] Add `format_indent_sequences` field to `YamlFormatOptions` and `Settings`
 - [x] Wire the setting through server formatting handlers
-- [ ] Add VS Code extension configuration and config sync
+- [x] Add VS Code extension configuration and config sync
 - [x] Implement conditional indentation in formatter logic
 - [ ] Add fixture tests for both modes and setting interactions
 - [ ] Update documentation (`configuration.md`, `feature-log.md`)
@@ -55,14 +55,14 @@ Add the `format_indent_sequences` field through the Rust settings pipeline and i
 - [x] Do NOT modify the sequence-in-sequence branch (lines 1614-1621) — nested sequences always indent
 - [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` all pass with zero warnings/failures
 
-### Task 2: Add VS Code extension settings and TypeScript config sync
+### Task 2: Add VS Code extension settings and TypeScript config sync — commit 7bb551b
 
 Wire the new setting through the VS Code extension so it appears in the settings UI and is sent to the LSP server.
 
-- [ ] Add `formatIndentSequences` to the `ServerSettings` interface in `config.ts`
-- [ ] Add `formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true)` to `getConfig()` in `config.ts`
-- [ ] Add `rlsp-yaml.formatIndentSequences` to `package.json` `contributes.configuration.properties` with type `boolean`, default `true`, and description: "Indent block sequences under mapping keys. When true (default), sequences are indented: `key:\\n  - item`. When false, sequences start at the key's indent level: `key:\\n- item`."
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run test` all pass in `rlsp-yaml/integrations/vscode/`
+- [x] Add `formatIndentSequences` to the `ServerSettings` interface in `config.ts`
+- [x] Add `formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true)` to `getConfig()` in `config.ts`
+- [x] Add `rlsp-yaml.formatIndentSequences` to `package.json` `contributes.configuration.properties` with type `boolean`, default `true`, and description: "Indent block sequences under mapping keys. When true (default), sequences are indented: `key:\\n  - item`. When false, sequences start at the key's indent level: `key:\\n- item`."
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run test` all pass in `rlsp-yaml/integrations/vscode/`
 
 ### Task 3: Add fixture tests for indentless mode and setting interactions
 
