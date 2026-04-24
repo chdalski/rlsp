@@ -95,6 +95,8 @@ pub struct Settings {
     pub format_remove_duplicate_keys: Option<bool>,
     /// Add spaces inside flow braces: `{ a: 1 }` vs `{a: 1}`. Defaults to `true` when absent.
     pub format_bracket_spacing: Option<bool>,
+    /// Indent block sequences that are values of mapping keys. Defaults to `true` when absent.
+    pub format_indent_sequences: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -1077,6 +1079,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_remove_duplicate_keys)
                 .unwrap_or(false),
+            format_indent_sequences: settings
+                .as_ref()
+                .and_then(|s| s.format_indent_sequences)
+                .unwrap_or(true),
         };
         drop(settings);
 
@@ -1163,6 +1169,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_remove_duplicate_keys)
                 .unwrap_or(false),
+            format_indent_sequences: settings
+                .as_ref()
+                .and_then(|s| s.format_indent_sequences)
+                .unwrap_or(true),
         };
         drop(settings);
 

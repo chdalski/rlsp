@@ -32,28 +32,28 @@ Add a `formatIndentSequences` boolean setting (default `true`) to rlsp-yaml's fo
 
 ## Steps
 
-- [ ] Add `format_indent_sequences` field to `YamlFormatOptions` and `Settings`
-- [ ] Wire the setting through server formatting handlers
+- [x] Add `format_indent_sequences` field to `YamlFormatOptions` and `Settings`
+- [x] Wire the setting through server formatting handlers
 - [ ] Add VS Code extension configuration and config sync
-- [ ] Implement conditional indentation in formatter logic
+- [x] Implement conditional indentation in formatter logic
 - [ ] Add fixture tests for both modes and setting interactions
 - [ ] Update documentation (`configuration.md`, `feature-log.md`)
 - [ ] Update follow-up queue
 
 ## Tasks
 
-### Task 1: Add setting to Rust structs, server wiring, and formatter logic
+### Task 1: Add setting to Rust structs, server wiring, and formatter logic — commit 575080e
 
 Add the `format_indent_sequences` field through the Rust settings pipeline and implement the conditional indentation.
 
-- [ ] Add `pub format_indent_sequences: bool` to `YamlFormatOptions` in `formatter.rs` with doc comment: "Indent block sequences that are values of mapping keys. Default: true."
-- [ ] Add `format_indent_sequences: true` to the `Default` impl
-- [ ] Add `pub format_indent_sequences: Option<bool>` to `Settings` in `server.rs` with doc comment
-- [ ] Wire the setting in both formatting handlers in `server.rs` (~lines 1053 and 1139) using the same `.and_then().unwrap_or(true)` pattern as other bool settings
-- [ ] In `formatter.rs`, modify the explicit-key block-sequence branch (lines 1340-1346): when `options.format_indent_sequences` is `false`, emit `hard_line()` + `sequence_to_doc()` without wrapping in `indent()`
-- [ ] In `formatter.rs`, modify the implicit-key block-sequence branch (lines 1451-1458): same conditional — skip the `indent()` wrapper when `format_indent_sequences` is `false`
-- [ ] Do NOT modify the sequence-in-sequence branch (lines 1614-1621) — nested sequences always indent
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` all pass with zero warnings/failures
+- [x] Add `pub format_indent_sequences: bool` to `YamlFormatOptions` in `formatter.rs` with doc comment: "Indent block sequences that are values of mapping keys. Default: true."
+- [x] Add `format_indent_sequences: true` to the `Default` impl
+- [x] Add `pub format_indent_sequences: Option<bool>` to `Settings` in `server.rs` with doc comment
+- [x] Wire the setting in both formatting handlers in `server.rs` (~lines 1053 and 1139) using the same `.and_then().unwrap_or(true)` pattern as other bool settings
+- [x] In `formatter.rs`, modify the explicit-key block-sequence branch (lines 1340-1346): when `options.format_indent_sequences` is `false`, emit `hard_line()` + `sequence_to_doc()` without wrapping in `indent()`
+- [x] In `formatter.rs`, modify the implicit-key block-sequence branch (lines 1451-1458): same conditional — skip the `indent()` wrapper when `format_indent_sequences` is `false`
+- [x] Do NOT modify the sequence-in-sequence branch (lines 1614-1621) — nested sequences always indent
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` all pass with zero warnings/failures
 
 ### Task 2: Add VS Code extension settings and TypeScript config sync
 

@@ -332,6 +332,8 @@ pub struct YamlFormatOptions {
     /// Remove duplicate mapping keys before formatting, keeping the last
     /// occurrence (YAML spec: last value wins). Default: false.
     pub format_remove_duplicate_keys: bool,
+    /// Indent block sequences that are values of mapping keys. Default: true.
+    pub format_indent_sequences: bool,
 }
 
 impl Default for YamlFormatOptions {
@@ -345,6 +347,7 @@ impl Default for YamlFormatOptions {
             yaml_version: YamlVersion::V1_2,
             format_enforce_block_style: false,
             format_remove_duplicate_keys: false,
+            format_indent_sequences: true,
         }
     }
 }
@@ -1322,7 +1325,7 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
                     ])),
                 ])
             }
-            // Block sequence value: `:\n  - item`.
+            // Block sequence value: `:\n  - item` (or `:\n- item` when indentless).
             Node::Sequence {
                 items,
                 style,
@@ -1337,13 +1340,15 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
                     (None, Some(t)) => format!(": {}", format_tag(t)),
                     (None, None) => ":".to_string(),
                 };
-                concat(vec![
-                    text(colon_prefix),
-                    indent(concat(vec![
-                        hard_line(),
-                        sequence_to_doc(items, *style, options),
-                    ])),
-                ])
+                let seq_doc = sequence_to_doc(items, *style, options);
+                if options.format_indent_sequences {
+                    concat(vec![
+                        text(colon_prefix),
+                        indent(concat(vec![hard_line(), seq_doc])),
+                    ])
+                } else {
+                    concat(vec![text(colon_prefix), hard_line(), seq_doc])
+                }
             }
             // Inline value (scalar, flow collection, empty collection, alias).
             Node::Scalar { .. }
@@ -1426,8 +1431,8 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                     ])),
                 ])
             }
-            // Block sequences: indented block items under key.
-            // With anchor: `key: &anchor\n  - item`.
+            // Block sequences: block items under key, indented or indentless.
+            // With anchor: `key: &anchor\n  - item` (or `key: &anchor\n- item`).
             // With tag: `key: !tag\n  - item` (anchor before tag per formatter convention).
             Node::Sequence {
                 items,
@@ -1448,14 +1453,16 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                     (None, Some(t)) => text(format!(": {}", format_tag(t))),
                     (None, None) => text(bare_colon),
                 };
-                concat(vec![
-                    key_doc,
-                    colon,
-                    indent(concat(vec![
-                        hard_line(),
-                        sequence_to_doc(items, *style, options),
-                    ])),
-                ])
+                let seq_doc = sequence_to_doc(items, *style, options);
+                if options.format_indent_sequences {
+                    concat(vec![
+                        key_doc,
+                        colon,
+                        indent(concat(vec![hard_line(), seq_doc])),
+                    ])
+                } else {
+                    concat(vec![key_doc, colon, hard_line(), seq_doc])
+                }
             }
             // Flow collections, scalars, empty collections, aliases — all inline.
             Node::Scalar { .. }
