@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: MIT
 
+//! Tab-to-spaces code action — operates on raw text, not the AST.
+//!
+//! Tabs are a pre-parse lexical concern (YAML 1.2 §6.1 forbids them for
+//! indentation); the parser normalises or rejects them, so they are not
+//! represented in the AST. This action is whitespace-cleanup that runs
+//! before any structural editing applies — same carve-out category as
+//! modeline handling and BOM stripping. Not an AST-retrofit candidate.
+
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Position, Range, TextEdit};
 
 use super::make_action;
