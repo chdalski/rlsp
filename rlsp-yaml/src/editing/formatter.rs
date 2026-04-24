@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
 use rlsp_fmt::{
@@ -1673,7 +1674,6 @@ fn dedup_key_str(key: &Node<Span>) -> Option<String> {
 /// - `Node::Alias { name, .. }` → key string is `*name`
 /// - Complex keys (`Node::Mapping`, `Node::Sequence`) → skipped (not deduplicated)
 fn dedup_mapping_keys(node: &mut Node<Span>) {
-    use std::collections::HashSet;
     match node {
         Node::Mapping { entries, .. } => {
             // Determine which keys to keep by scanning in reverse: the last

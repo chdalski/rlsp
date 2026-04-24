@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
 use serde_json::json;
+use tower::Service;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::{Request, Response};
 use tower_lsp::lsp_types::{
@@ -75,7 +76,6 @@ fn did_close_notification(uri: &str) -> Request {
 }
 
 async fn send(service: &mut LspService<Backend>, req: Request) -> Option<Response> {
-    use tower::Service;
     service.call(req).await.expect("service call failed")
 }
 

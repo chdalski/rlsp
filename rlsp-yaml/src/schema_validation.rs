@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use regex::RegexBuilder;
+use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
@@ -290,8 +291,6 @@ fn validate_type(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) -> bool {
-    use rlsp_yaml_parser::ScalarStyle;
-
     let Some(schema_type) = &schema.schema_type else {
         return true;
     };
@@ -781,7 +780,6 @@ fn validate_scalar_constraints(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    use rlsp_yaml_parser::ScalarStyle;
     if let Node::Scalar {
         value,
         style,
@@ -1668,10 +1666,12 @@ fn format_path(path: &[String]) -> String {
     reason = "test code"
 )]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use rstest::rstest;
 
     use super::*;
-    use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+    use crate::schema::{AdditionalProperties, JsonSchema, SchemaType, parse_schema};
     use crate::test_utils::parse_docs;
     use serde_json::json;
 
@@ -2738,8 +2738,6 @@ mod tests {
     // Test 65
     #[test]
     fn should_continue_without_schema_validation_when_cache_lock_poisoned() {
-        use std::sync::{Arc, Mutex};
-
         let lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
         let lock_clone = Arc::clone(&lock);
 
@@ -4181,8 +4179,6 @@ mod tests {
     // Test 148 — Draft-04 array-form items parsed as prefixItems
     #[test]
     fn should_parse_draft04_array_items_as_prefix_items() {
-        use crate::schema::parse_schema;
-        use serde_json::json;
         let raw = json!({
             "type": "object",
             "properties": {
@@ -4209,8 +4205,6 @@ mod tests {
     // Test 149 — prefixItems takes precedence over array-form items
     #[test]
     fn should_prefer_prefix_items_over_draft04_array_items() {
-        use crate::schema::parse_schema;
-        use serde_json::json;
         let raw = json!({
             "prefixItems": [{ "type": "string" }],
             "items": [{ "type": "integer" }, { "type": "boolean" }]

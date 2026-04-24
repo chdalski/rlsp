@@ -976,6 +976,7 @@ fn corpus_invariants() {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::io::Write as _;
 
     use rlsp_yaml_parser::{CollectionStyle, Pos, ScalarStyle, Span as TestSpan};
@@ -1633,7 +1634,6 @@ mod tests {
     // UT-I9-7: 110-key mapping — exercises the len <= MAX_COMPLETION_ITEMS branch
     #[test]
     fn i9_ut7_large_mapping_respects_item_cap() {
-        use std::fmt::Write as _;
         let mut yaml = String::new();
         for i in 1..=110_u32 {
             writeln!(yaml, "k{i}: v").expect("write to String is infallible");
@@ -1672,8 +1672,6 @@ mod tests {
     // this case.
     #[test]
     fn i6_missing_tag_loc_for_non_core_tag_fails() {
-        use rlsp_yaml_parser::{Pos, ScalarStyle};
-
         let origin = Span {
             start: Pos::ORIGIN,
             end: Pos::ORIGIN,

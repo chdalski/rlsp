@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::{Document, Event, Node, Span};
+use rlsp_yaml_parser::{Document, Event, Node, ScalarStyle, Span};
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };
@@ -184,8 +184,6 @@ fn classify_scalar_node(
     style: rlsp_yaml_parser::ScalarStyle,
     loc: Span,
 ) -> Option<RawToken> {
-    use rlsp_yaml_parser::ScalarStyle;
-
     #[expect(
         clippy::cast_possible_truncation,
         reason = "LSP line/col are u32; always fits"

@@ -91,6 +91,8 @@ impl DocumentStore {
     reason = "test code"
 )]
 mod tests {
+    use rlsp_yaml_parser::node::Node;
+
     use super::*;
 
     fn test_uri(name: &str) -> Url {
@@ -240,8 +242,6 @@ mod tests {
 
     #[test]
     fn should_update_parsed_documents_on_change() {
-        use rlsp_yaml_parser::node::Node;
-
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
@@ -338,8 +338,6 @@ mod tests {
 
     #[test]
     fn should_update_document_span_root_on_change() {
-        use rlsp_yaml_parser::node::Node;
-
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 

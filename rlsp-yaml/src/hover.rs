@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use std::fmt::Write as _;
+
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{Pos, Span};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
@@ -230,7 +232,6 @@ fn truncate_to(s: &str, max_chars: usize) -> String {
 
 /// Format the hover content as Markdown.
 fn format_hover_markdown(path: &str, yaml_type: &str, value: Option<&str>) -> String {
-    use std::fmt::Write;
     let mut md = String::new();
     let escaped_path = escape_for_code_span(path);
     let _ = write!(md, "**Path:** `{escaped_path}`\n\n");
@@ -307,7 +308,6 @@ fn find_in_branches<'a>(schema: &'a JsonSchema, key: &str) -> Option<&'a JsonSch
 
 /// Format the schema information section appended below the structural hover.
 fn format_schema_section(schema: &JsonSchema) -> String {
-    use std::fmt::Write;
     let mut md = String::new();
 
     // Description takes priority over title; skip empty strings
@@ -406,6 +406,7 @@ mod tests {
 
     use rstest::rstest;
     use serde_json::Value as JsonValue;
+    use serde_json::json;
 
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
@@ -1586,7 +1587,6 @@ mod tests {
     // Test 51 — object example renders as fenced ```json code block
     #[test]
     fn object_example_renders_as_fenced_code_block() {
-        use serde_json::json;
         let schema = schema_with_examples(vec![json!({"name": "Alice", "age": 30})]);
         let text = "key: v\n";
         let docs = parse_docs(text);
@@ -1608,7 +1608,6 @@ mod tests {
     // Test 52 — array example renders as fenced ```json code block
     #[test]
     fn array_example_renders_as_fenced_code_block() {
-        use serde_json::json;
         let schema = schema_with_examples(vec![json!(["a", "b", "c"])]);
         let text = "key: v\n";
         let docs = parse_docs(text);
@@ -1625,7 +1624,6 @@ mod tests {
     // Test 53 — simple value (string, number, bool) uses list-item format, no code block
     #[test]
     fn simple_value_examples_use_list_item_format() {
-        use serde_json::json;
         let schema = schema_with_examples(vec![json!("hello"), json!(42), json!(true)]);
         let text = "key: v\n";
         let docs = parse_docs(text);
@@ -1654,7 +1652,6 @@ mod tests {
     // Test 54 — mixed examples: object gets code block, simple gets list item
     #[test]
     fn mixed_examples_dispatch_correctly_per_type() {
-        use serde_json::json;
         let schema = schema_with_examples(vec![json!({"host": "localhost"}), json!("simple")]);
         let text = "key: v\n";
         let docs = parse_docs(text);
@@ -1675,7 +1672,6 @@ mod tests {
     // Test 55 — long object exceeding MAX_EXAMPLE_LEN falls back to compact inline
     #[test]
     fn long_object_example_falls_back_to_compact_inline() {
-        use serde_json::json;
         // Build an object whose pretty-printed form exceeds 100 chars
         let big_value: String = "x".repeat(50);
         let schema = schema_with_examples(vec![json!({

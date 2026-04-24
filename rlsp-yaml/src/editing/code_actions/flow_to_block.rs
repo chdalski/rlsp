@@ -226,6 +226,8 @@ fn find_flow_sequence_in_node<'a>(
 mod tests {
     use rstest::rstest;
 
+    use rlsp_yaml_parser::Span;
+    use rlsp_yaml_parser::node::Node;
     use tower_lsp::lsp_types::{CodeActionKind, Position, Range};
 
     use super::super::code_actions;
@@ -747,9 +749,6 @@ mod tests {
     // INT-1: sequence-item flow map preserves all scalars end-to-end
     #[test]
     fn int_sequence_item_flow_map_preserves_all_scalars() {
-        use rlsp_yaml_parser::Span;
-        use rlsp_yaml_parser::node::Node;
-
         let text = "- {target: linux, os: ubuntu}\n";
         let docs = docs_for(text);
         let pre_scalars: Vec<String> = {

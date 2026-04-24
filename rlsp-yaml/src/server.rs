@@ -1417,7 +1417,9 @@ impl LanguageServer for Backend {
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::{
-        HoverProviderCapability, OneOf, TextDocumentSyncCapability, TextDocumentSyncKind,
+        FormattingOptions, HoverProviderCapability, OneOf, PartialResultParams,
+        TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind,
+        WorkDoneProgressParams,
     };
 
     #[test]
@@ -1964,11 +1966,6 @@ mod tests {
 
     #[tokio::test]
     async fn range_formatting_returns_none_when_range_already_formatted() {
-        use tower_lsp::lsp_types::{
-            DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
-
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
@@ -2008,11 +2005,6 @@ mod tests {
 
     #[tokio::test]
     async fn range_formatting_returns_edit_scoped_to_requested_lines() {
-        use tower_lsp::lsp_types::{
-            DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
-
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
@@ -2067,11 +2059,6 @@ mod tests {
 
     #[tokio::test]
     async fn formatting_handler_uses_v1_1_from_modeline() {
-        use tower_lsp::lsp_types::{
-            DocumentFormattingParams, FormattingOptions, TextDocumentIdentifier,
-            WorkDoneProgressParams,
-        };
-
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
@@ -2157,10 +2144,6 @@ mod tests {
 
     #[tokio::test]
     async fn document_color_returns_colors_for_yaml_with_hex_values() {
-        use tower_lsp::lsp_types::{
-            PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
-        };
-
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
@@ -2183,10 +2166,6 @@ mod tests {
 
     #[tokio::test]
     async fn document_color_returns_empty_when_color_decorators_disabled() {
-        use tower_lsp::lsp_types::{
-            PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
-        };
-
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 

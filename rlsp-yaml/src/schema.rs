@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read as _;
+use std::net::IpAddr;
 
 use serde_json::Value;
 use tower_lsp::lsp_types::Url;
@@ -371,8 +373,6 @@ pub fn validate_and_normalize_url(raw: &str) -> Result<String, SchemaError> {
 /// the server runs on a developer's machine and is not exposed to arbitrary
 /// internet actors.
 fn is_ssrf_blocked_host(host: &str) -> bool {
-    use std::net::IpAddr;
-
     // Symbolic hostnames
     if host.eq_ignore_ascii_case("localhost") {
         return true;
@@ -470,8 +470,6 @@ pub fn fetch_schema_raw(
     proxy: Option<&str>,
     ctx: Option<&mut ParseContext<'_>>,
 ) -> Result<(Value, JsonSchema), SchemaError> {
-    use std::io::Read as _;
-
     // Validate and normalise the URL before issuing any network request.
     validate_and_normalize_url(url)?;
 
@@ -544,8 +542,6 @@ const SCHEMASTORE_CATALOG_URL: &str = "https://www.schemastore.org/api/json/cata
 /// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
 /// failure.
 pub fn fetch_schemastore_catalog(proxy: Option<&str>) -> Result<SchemaStoreCatalog, SchemaError> {
-    use std::io::Read as _;
-
     let agent = build_agent(proxy);
 
     let response = agent
@@ -1396,6 +1392,8 @@ fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
     reason = "test code"
 )]
 mod tests {
+    use std::io::Read as _;
+
     use rstest::rstest;
 
     use super::*;
@@ -1908,8 +1906,6 @@ mod tests {
     // Test 55b — response larger than MAX_SCHEMA_BYTES triggers ResponseTooLarge.
     #[test]
     fn should_return_error_when_response_exceeds_size_limit_over() {
-        use std::io::Read as _;
-
         // Build a body of MAX_SCHEMA_BYTES + 1 bytes (over the cap).
         let body = vec![b'x'; MAX_SCHEMA_BYTES as usize + 1];
         let cursor = std::io::Cursor::new(&body);

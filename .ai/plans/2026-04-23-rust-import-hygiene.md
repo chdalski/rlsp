@@ -91,8 +91,9 @@ task.
 - [x] Classify and fix the 14 function-body `use`
       statements in `rlsp-yaml-parser/` across 7 files
       (Task 2). *(commit `fffe9d8`)*
-- [ ] Classify and fix the 35 function-body `use`
+- [x] Classify and fix the 35 function-body `use`
       statements in `rlsp-yaml/` across 11 files (Task 3).
+      *(commit `46a1a4a`)*
 - [ ] Fix the 17 sub-module `use`-after-`mod` header
       violations across 4 files (Task 4), then confirm zero
       violations remain across the workspace.
@@ -255,87 +256,87 @@ listed line in `rlsp-yaml/`.
 
 File-and-line targets (35):
 
-- [ ] `rlsp-yaml/src/analysis/semantic_tokens.rs:187` —
+- [x] `rlsp-yaml/src/analysis/semantic_tokens.rs:187` —
       `use rlsp_yaml_parser::ScalarStyle;`
-- [ ] `rlsp-yaml/src/document_store.rs:243` —
+- [x] `rlsp-yaml/src/document_store.rs:243` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/document_store.rs:341` —
+- [x] `rlsp-yaml/src/document_store.rs:341` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/editing/code_actions/flow_to_block.rs:750` —
+- [x] `rlsp-yaml/src/editing/code_actions/flow_to_block.rs:750` —
       `use rlsp_yaml_parser::Span;`
-- [ ] `rlsp-yaml/src/editing/code_actions/flow_to_block.rs:751` —
+- [x] `rlsp-yaml/src/editing/code_actions/flow_to_block.rs:751` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/editing/formatter.rs:1676` —
+- [x] `rlsp-yaml/src/editing/formatter.rs:1676` —
       `use std::collections::HashSet;`
-- [ ] `rlsp-yaml/src/hover.rs:233` —
+- [x] `rlsp-yaml/src/hover.rs:233` —
       `use std::fmt::Write;`
-- [ ] `rlsp-yaml/src/hover.rs:310` —
+- [x] `rlsp-yaml/src/hover.rs:310` —
       `use std::fmt::Write;`
-- [ ] `rlsp-yaml/src/hover.rs:1589` —
+- [x] `rlsp-yaml/src/hover.rs:1589` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/hover.rs:1611` —
+- [x] `rlsp-yaml/src/hover.rs:1611` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/hover.rs:1628` —
+- [x] `rlsp-yaml/src/hover.rs:1628` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/hover.rs:1657` —
+- [x] `rlsp-yaml/src/hover.rs:1657` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/hover.rs:1678` —
+- [x] `rlsp-yaml/src/hover.rs:1678` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/parser.rs:255` —
+- [x] `rlsp-yaml/src/parser.rs:255` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/parser.rs:291` —
+- [x] `rlsp-yaml/src/parser.rs:291` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/parser.rs:359` —
+- [x] `rlsp-yaml/src/parser.rs:359` —
       `use rlsp_yaml_parser::node::Node;`
-- [ ] `rlsp-yaml/src/schema.rs:374` —
+- [x] `rlsp-yaml/src/schema.rs:374` —
       `use std::net::IpAddr;`
-- [ ] `rlsp-yaml/src/schema.rs:473` —
+- [x] `rlsp-yaml/src/schema.rs:473` —
       `use std::io::Read as _;`
-- [ ] `rlsp-yaml/src/schema.rs:547` —
+- [x] `rlsp-yaml/src/schema.rs:547` —
       `use std::io::Read as _;`
-- [ ] `rlsp-yaml/src/schema.rs:1911` —
+- [x] `rlsp-yaml/src/schema.rs:1911` —
       `use std::io::Read as _;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:293` —
+- [x] `rlsp-yaml/src/schema_validation.rs:293` —
       `use rlsp_yaml_parser::ScalarStyle;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:784` —
+- [x] `rlsp-yaml/src/schema_validation.rs:784` —
       `use rlsp_yaml_parser::ScalarStyle;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:2741` —
+- [x] `rlsp-yaml/src/schema_validation.rs:2741` —
       `use std::sync::{Arc, Mutex};`
-- [ ] `rlsp-yaml/src/schema_validation.rs:4184` —
+- [x] `rlsp-yaml/src/schema_validation.rs:4184` —
       `use crate::schema::parse_schema;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:4185` —
+- [x] `rlsp-yaml/src/schema_validation.rs:4185` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:4212` —
+- [x] `rlsp-yaml/src/schema_validation.rs:4212` —
       `use crate::schema::parse_schema;`
-- [ ] `rlsp-yaml/src/schema_validation.rs:4213` —
+- [x] `rlsp-yaml/src/schema_validation.rs:4213` —
       `use serde_json::json;`
-- [ ] `rlsp-yaml/src/server.rs:1967` —
+- [x] `rlsp-yaml/src/server.rs:1967` —
       `use tower_lsp::lsp_types::{DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/src/server.rs:2011` —
+- [x] `rlsp-yaml/src/server.rs:2011` —
       `use tower_lsp::lsp_types::{DocumentRangeFormattingParams, FormattingOptions, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/src/server.rs:2070` —
+- [x] `rlsp-yaml/src/server.rs:2070` —
       `use tower_lsp::lsp_types::{DocumentFormattingParams, FormattingOptions, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/src/server.rs:2160` —
+- [x] `rlsp-yaml/src/server.rs:2160` —
       `use tower_lsp::lsp_types::{PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/src/server.rs:2186` —
+- [x] `rlsp-yaml/src/server.rs:2186` —
       `use tower_lsp::lsp_types::{PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams};`
-- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1636` —
+- [x] `rlsp-yaml/tests/corpus_invariants.rs:1636` —
       `use std::fmt::Write as _;`
-- [ ] `rlsp-yaml/tests/corpus_invariants.rs:1675` —
+- [x] `rlsp-yaml/tests/corpus_invariants.rs:1675` —
       `use rlsp_yaml_parser::{Pos, ScalarStyle};`
-- [ ] `rlsp-yaml/tests/lsp_lifecycle.rs:78` —
+- [x] `rlsp-yaml/tests/lsp_lifecycle.rs:78` —
       `use tower::Service;`
 
 **Verification:**
 
-- [ ] Every listed line is either removed, unchanged (with
+- [x] Every listed line is either removed, unchanged (with
       justifying comment if kept as an exception), or
       relocated to the enclosing module or test module's
       header `use` block.
-- [ ] `cargo fmt --check` clean.
-- [ ] `cargo clippy --all-targets -p rlsp-yaml` zero
+- [x] `cargo fmt --check` clean.
+- [x] `cargo clippy --all-targets -p rlsp-yaml` zero
       warnings; workspace-wide clippy also zero warnings.
-- [ ] `cargo test -p rlsp-yaml` passes; workspace tests
+- [x] `cargo test -p rlsp-yaml` passes; workspace tests
       still pass.
 
 ### Task 4: Fix sub-module `use`-after-`mod` header violations (17 cases across 4 files)

@@ -87,6 +87,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 mod tests {
     use std::fmt::Write as _;
 
+    use rlsp_yaml_parser::node::Node;
     use rstest::rstest;
 
     use super::*;
@@ -252,8 +253,6 @@ mod tests {
 
     #[test]
     fn should_include_span_in_parsed_scalar() {
-        use rlsp_yaml_parser::node::Node;
-
         let result = parse_yaml("hello\n");
 
         assert!(!result.documents.is_empty());
@@ -288,8 +287,6 @@ mod tests {
 
     #[test]
     fn parse_yaml_returns_documents_with_string_value_type() {
-        use rlsp_yaml_parser::node::Node;
-
         let result = parse_yaml("key: value\n");
 
         assert!(!result.documents.is_empty());
@@ -356,8 +353,6 @@ mod tests {
 
     #[test]
     fn parse_yaml_undefined_alias_in_lossless_mode_produces_alias_node() {
-        use rlsp_yaml_parser::node::Node;
-
         // In lossless mode (the default), *undefined aliases are NOT errors;
         // they are preserved as Node::Alias leaves.
         let result = parse_yaml("key: *undefined\n");
