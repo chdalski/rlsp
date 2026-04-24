@@ -136,6 +136,31 @@ When `false` (the default), the formatter preserves the original style — block
 { "formatEnforceBlockStyle": true }
 ```
 
+### `formatIndentSequences`
+
+- **Type:** `boolean`
+- **Default:** `true`
+
+When `true` (the default), block sequences under mapping keys are indented relative to the key:
+
+```yaml
+script:
+  - install
+  - build
+```
+
+When `false`, sequences are placed at the same indentation level as the key (indentless style):
+
+```yaml
+script:
+- install
+- build
+```
+
+```json
+{ "formatIndentSequences": false }
+```
+
 ### `yamlVersion`
 
 - **Type:** `string` (optional)

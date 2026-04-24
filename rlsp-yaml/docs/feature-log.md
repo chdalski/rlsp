@@ -31,6 +31,13 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `formatIndentSequences` Option [completed]
+
+**Description:** New formatter setting `formatIndentSequences` (boolean, default `true`) controls whether block sequences under mapping keys are indented. When `true` (the default), sequences are indented relative to their key (`key:\n  - item`). When `false`, sequences are placed at the same indentation level as the key (`key:\n- item`). Existing users see no change — the default preserves the previous behavior.
+**Complexity:** Low
+**Comment:** The indentless style (YAML block sequence syntax per §8.2.1) is common in Docker Compose and Ansible. RedHat yaml-language-server has an equivalent `indentSequence` setting. Both styles are valid YAML 1.2.
+**Tier:** 2
+
 ### Drop `use_tabs` Formatter Option [completed]
 
 **Description:** The `use_tabs` formatter option has been removed. The formatter always uses space indentation for YAML. When the LSP client sends `insertSpaces: false` (editor configured for tab indentation), the setting is silently ignored and spaces are used instead.

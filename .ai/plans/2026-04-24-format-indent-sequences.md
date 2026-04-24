@@ -37,8 +37,8 @@ Add a `formatIndentSequences` boolean setting (default `true`) to rlsp-yaml's fo
 - [x] Add VS Code extension configuration and config sync
 - [x] Implement conditional indentation in formatter logic
 - [x] Add fixture tests for both modes and setting interactions
-- [ ] Update documentation (`configuration.md`, `feature-log.md`)
-- [ ] Update follow-up queue
+- [x] Update documentation (`configuration.md`, `feature-log.md`)
+- [x] Update follow-up queue
 
 ## Tasks
 
@@ -75,15 +75,15 @@ Add formatter fixtures covering the new setting in isolation and in combination 
 - [x] Add fixture parser support: add `"format_indent_sequences"` match arm in `formatter_fixtures.rs` and add the field to `frontmatter_parses_all_default_settings` assertion
 - [x] All fixture tests pass via `cargo test`
 
-### Task 4: Update documentation and follow-up queue
+### Task 4: Update documentation and follow-up queue — commit ab6ad0f
 
 Document the new setting in configuration.md, add a feature-log entry, and remove the follow-up queue item.
 
-- [ ] Add `### formatIndentSequences` section to `rlsp-yaml/docs/configuration.md` in the formatting settings area (after `formatEnforceBlockStyle`), following the same pattern: Type, Default, description with both styles shown, JSON example
-- [ ] Add entry to `rlsp-yaml/docs/feature-log.md`: "`formatIndentSequences` option" with description of both modes and the default
-- [ ] Remove the `formatIndentSequences` bullet from `.ai/memory/project_followup_plans.md`
-- [ ] The `configuration.md` section shows both `true` and `false` output forms with correct indentation, matches the default stated in `YamlFormatOptions`, and uses the same structure (Type / Default / description / JSON example) as the `formatEnforceBlockStyle` section
-- [ ] The `feature-log.md` entry describes both indented (`true`) and indentless (`false`) modes and states the default
+- [x] Add `### formatIndentSequences` section to `rlsp-yaml/docs/configuration.md` in the formatting settings area (after `formatEnforceBlockStyle`), following the same pattern: Type, Default, description with both styles shown, JSON example
+- [x] Add entry to `rlsp-yaml/docs/feature-log.md`: "`formatIndentSequences` option" with description of both modes and the default
+- [x] Remove the `formatIndentSequences` bullet from `.ai/memory/project_followup_plans.md`
+- [x] The `configuration.md` section shows both `true` and `false` output forms with correct indentation, matches the default stated in `YamlFormatOptions`, and uses the same structure (Type / Default / description / JSON example) as the `formatEnforceBlockStyle` section
+- [x] The `feature-log.md` entry describes both indented (`true`) and indentless (`false`) modes and states the default
 
 ## Decisions
 
