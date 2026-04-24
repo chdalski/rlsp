@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+pub use directive_scope::DirectiveScope;
+pub use state::{CollectionEntry, IterState, PendingAnchor, PendingTag};
+
 mod base;
 mod block;
 mod directive_scope;
@@ -9,6 +12,3 @@ mod line_mapping;
 mod properties;
 mod state;
 mod step;
-
-pub use directive_scope::DirectiveScope;
-pub use state::{CollectionEntry, IterState, PendingAnchor, PendingTag};

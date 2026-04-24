@@ -29,17 +29,6 @@
 //! where Lossless mode is the default.  The `expanded_nodes` volume limit
 //! provides the backstop.
 
-mod comments;
-mod reloc;
-mod stream;
-
-use comments::{attach_leading_comments, attach_trailing_comment};
-use reloc::reloc;
-use stream::{
-    consume_leading_comments, consume_leading_doc_comments, next_from, peek_trailing_comment,
-    with_hash_prefix,
-};
-
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
@@ -48,6 +37,17 @@ use crate::event::{Event, ScalarStyle};
 use crate::node::{Document, Node};
 use crate::pos::{Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
+
+use comments::{attach_leading_comments, attach_trailing_comment};
+use reloc::reloc;
+use stream::{
+    consume_leading_comments, consume_leading_doc_comments, next_from, peek_trailing_comment,
+    with_hash_prefix,
+};
+
+mod comments;
+mod reloc;
+mod stream;
 
 // ---------------------------------------------------------------------------
 // Public error type

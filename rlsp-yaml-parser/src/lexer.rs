@@ -13,16 +13,16 @@ use crate::error::Error;
 use crate::lines::{Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
 
-mod block;
-mod comment;
-pub mod plain;
-mod quoted;
-
 pub use crate::chars::is_ns_char;
 pub use plain::scan_plain_line_flow;
 
 use block::parse_block_header;
 use plain::scan_plain_line_block;
+
+mod block;
+mod comment;
+pub mod plain;
+mod quoted;
 
 // ---------------------------------------------------------------------------
 // Lexer

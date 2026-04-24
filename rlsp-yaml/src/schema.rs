@@ -7,9 +7,10 @@ use std::net::IpAddr;
 use serde_json::Value;
 use tower_lsp::lsp_types::Url;
 
+pub use association::*;
+
 /// Schema association management: glob-pattern-to-schema-URL mappings.
 pub mod association;
-pub use association::*;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants

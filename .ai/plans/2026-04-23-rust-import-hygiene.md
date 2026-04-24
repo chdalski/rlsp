@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed
 **Created:** 2026-04-23
 
 # Rust Import Placement — Workspace-Wide Cleanup
@@ -94,9 +94,10 @@ task.
 - [x] Classify and fix the 35 function-body `use`
       statements in `rlsp-yaml/` across 11 files (Task 3).
       *(commit `46a1a4a`)*
-- [ ] Fix the 17 sub-module `use`-after-`mod` header
+- [x] Fix the 17 sub-module `use`-after-`mod` header
       violations across 4 files (Task 4), then confirm zero
       violations remain across the workspace.
+      *(commit `aa3a789`)*
 
 ## Tasks
 
@@ -351,70 +352,70 @@ and runs identically.
 
 **`rlsp-yaml-parser/src/event_iter.rs` (sub-module):**
 
-- [ ] `:13` move `pub use directive_scope::DirectiveScope;`
+- [x] `:13` move `pub use directive_scope::DirectiveScope;`
       above the `mod` declaration group at the top of the
       file.
-- [ ] `:14` move `pub use state::{CollectionEntry, IterState,
+- [x] `:14` move `pub use state::{CollectionEntry, IterState,
       PendingAnchor, PendingTag};` to the same `use` group.
 
 **`rlsp-yaml-parser/src/lexer.rs` (sub-module):**
 
-- [ ] `:21` move `pub use crate::chars::is_ns_char;` above
+- [x] `:21` move `pub use crate::chars::is_ns_char;` above
       the `mod` declaration group (joining the existing
       top-of-file `use` block or a new `pub use` group
       immediately after it).
-- [ ] `:22` move `pub use plain::scan_plain_line_flow;` to
+- [x] `:22` move `pub use plain::scan_plain_line_flow;` to
       the same group.
-- [ ] `:24` move `use block::parse_block_header;` to the
+- [x] `:24` move `use block::parse_block_header;` to the
       top-of-file `use` block.
-- [ ] `:25` move `use plain::scan_plain_line_block;` to the
+- [x] `:25` move `use plain::scan_plain_line_block;` to the
       same block.
 
 **`rlsp-yaml-parser/src/loader.rs` (sub-module):**
 
-- [ ] `:36` move `use comments::{attach_leading_comments,
+- [x] `:36` move `use comments::{attach_leading_comments,
       attach_trailing_comment};` above the `mod`
       declaration group at line 32.
-- [ ] `:37` move `use reloc::reloc;` to the same block.
-- [ ] `:38` move `use stream::{consume_leading_comments,
+- [x] `:37` move `use reloc::reloc;` to the same block.
+- [x] `:38` move `use stream::{consume_leading_comments,
       consume_leading_doc_comments, next_from,
       peek_trailing_comment, with_hash_prefix};` to the same
       block.
-- [ ] `:43` move `use std::collections::{HashMap, HashSet};`
+- [x] `:43` move `use std::collections::{HashMap, HashSet};`
       above the `mod` group (it is a std import, so it
       belongs in the std group of the file's `use` block).
-- [ ] `:44` move `use std::iter::Peekable;` to the same std
+- [x] `:44` move `use std::iter::Peekable;` to the same std
       group.
-- [ ] `:46` move `use crate::error::Error;` into the
+- [x] `:46` move `use crate::error::Error;` into the
       `crate::` group.
-- [ ] `:47` move `use crate::event::{Event, ScalarStyle};`
+- [x] `:47` move `use crate::event::{Event, ScalarStyle};`
       to the same group.
-- [ ] `:48` move `use crate::node::{Document, Node};` to
+- [x] `:48` move `use crate::node::{Document, Node};` to
       the same group.
-- [ ] `:49` move `use crate::pos::{Pos, Span};` to the same
+- [x] `:49` move `use crate::pos::{Pos, Span};` to the same
       group.
-- [ ] `:50` move `use crate::schema::{CollectionKind,
+- [x] `:50` move `use crate::schema::{CollectionKind,
       Schema, resolve_collection, resolve_scalar};` to the
       same group.
 
 **`rlsp-yaml/src/schema.rs` (sub-module):**
 
-- [ ] `:10` move `pub use association::*;` above the `mod
+- [x] `:10` move `pub use association::*;` above the `mod
       association;` declaration at line 9. The final order
       at the file header is `use` / `pub use` first, then
       `mod`, then items.
 
 **Verification:**
 
-- [ ] Every listed line has been relocated; each sub-module
+- [x] Every listed line has been relocated; each sub-module
       file's header now follows `use` → `mod` → items
       (submodule tier) with rustfmt's grouping of std /
       external / crate applied.
-- [ ] `cargo fmt --check` clean.
-- [ ] `cargo clippy --all-targets` zero warnings across
+- [x] `cargo fmt --check` clean.
+- [x] `cargo clippy --all-targets` zero warnings across
       the workspace.
-- [ ] `cargo test` passes across the workspace.
-- [ ] If the scanner at `/tmp/import-scan/` is still
+- [x] `cargo test` passes across the workspace.
+- [x] If the scanner at `/tmp/import-scan/` is still
       available (rebuild with `cargo build --release` in
       `/tmp/import-scan` if `/tmp` was cleared —
       source is a single `src/main.rs`), re-running it
