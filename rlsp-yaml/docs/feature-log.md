@@ -31,6 +31,13 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Drop `use_tabs` Formatter Option [completed]
+
+**Description:** The `use_tabs` formatter option has been removed. The formatter always uses space indentation for YAML. When the LSP client sends `insertSpaces: false` (editor configured for tab indentation), the setting is silently ignored and spaces are used instead.
+**Complexity:** Low
+**Comment:** YAML 1.2 §6.1 forbids tab characters for indentation — the project's own parser rejects tab-indented YAML on re-parse, producing a broken round-trip. RedHat yaml-language-server and Prettier both ignore `insertSpaces: false` for YAML; this change brings rlsp-yaml in line with the ecosystem. The underlying `rlsp-fmt` pretty-printer retains its `use_tabs` option for non-YAML consumers.
+**Tier:** 1
+
 ### YAML 1.1 Compatibility Diagnostics [completed]
 
 **Description:** Warn when plain scalars would be interpreted differently by YAML 1.1 parsers (Kubernetes, Ansible, GitLab CI, etc.). `yaml11Boolean` (warning) fires for the 16 YAML 1.1 boolean forms not in YAML 1.2 (`yes`, `no`, `on`, `off`, `y`, `n`, and case variants); `yaml11Octal` (info) fires for C-style octal literals (`0777`). Schema-aware variants (`schemaYaml11Boolean`, `schemaYaml11Octal`) escalate severity when the field is schema-typed as `string` — the 1.2 parser accepts the value but downstream 1.1 tools will silently corrupt it; `schemaType` messages are enhanced when a boolean-typed field receives a 1.1 boolean form. Quick fixes: quote value (universally safe, listed first) or convert to canonical 1.2 form (`true`/`false`, `0o777`). All four diagnostics are suppressed when `yamlVersion` is `"1.1"`. The VS Code extension now exposes `rlsp-yaml.yamlVersion` and `rlsp-yaml.validate` settings.

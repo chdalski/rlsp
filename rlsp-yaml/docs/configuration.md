@@ -359,7 +359,7 @@ This limit prevents performance degradation when editing very large YAML files t
 { "maxItemsComputed": 1000 }
 ```
 
-> **Indentation** (`tabWidth`, `useTabs`) is not configurable via workspace settings — it is taken directly from the LSP `textDocument/formatting` request, which carries the editor's indentation preferences. Configure indentation in your editor settings.
+> **Tab width** is not configurable via workspace settings — it is taken from the `tab_size` field of the LSP `textDocument/formatting` request, which carries the editor's indentation preference. Configure it in your editor settings. `insertSpaces: false` (tabs) is silently ignored: YAML 1.2 §6.1 forbids tab characters for indentation, so the formatter always uses spaces regardless of editor preference.
 
 ## Modelines
 
@@ -493,7 +493,7 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 
 **Behavior:**
 
-- **Indentation** (tab size, tabs vs spaces) is controlled by the editor — the LSP formatting requests carry `tab_size` and `insert_spaces` from the editor's own settings.
+- **Indentation** (tab size) is controlled by the editor — the LSP formatting requests carry `tab_size` from the editor's own settings. The formatter always uses spaces; `insertSpaces: false` is silently ignored because YAML 1.2 §6.1 forbids tab indentation.
 - **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`, `formatPreserveQuotes`).
 - **Comments** are preserved during formatting. The formatter extracts comments from the original text and reattaches them to the formatted output.
 - **Syntax errors** — if the document cannot be parsed, the original text is returned unchanged so no content is lost.

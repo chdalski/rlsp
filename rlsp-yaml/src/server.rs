@@ -1048,7 +1048,6 @@ impl LanguageServer for Backend {
 
         // Tab settings come from LSP params (editor override); other settings from workspace.
         let tab_size = params.options.tab_size as usize;
-        let insert_spaces = params.options.insert_spaces;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
         let options = crate::editing::formatter::YamlFormatOptions {
@@ -1057,7 +1056,6 @@ impl LanguageServer for Backend {
                 .and_then(|s| s.format_print_width)
                 .unwrap_or(80),
             tab_width: tab_size,
-            use_tabs: !insert_spaces,
             single_quote: settings
                 .as_ref()
                 .and_then(|s| s.format_single_quote)
@@ -1136,7 +1134,6 @@ impl LanguageServer for Backend {
         };
 
         let tab_size = params.options.tab_size as usize;
-        let insert_spaces = params.options.insert_spaces;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
         let options = crate::editing::formatter::YamlFormatOptions {
@@ -1145,7 +1142,6 @@ impl LanguageServer for Backend {
                 .and_then(|s| s.format_print_width)
                 .unwrap_or(80),
             tab_width: tab_size,
-            use_tabs: !insert_spaces,
             single_quote: settings
                 .as_ref()
                 .and_then(|s| s.format_single_quote)

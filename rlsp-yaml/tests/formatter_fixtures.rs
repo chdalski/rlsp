@@ -195,9 +195,6 @@ fn apply_setting(options: &mut YamlFormatOptions, key: &str, value: &str, path_s
                 panic_with_message(&format!("fixture {path_str}: invalid tab_width: {value:?}"))
             });
         }
-        "use_tabs" => {
-            options.use_tabs = value == "true";
-        }
         "single_quote" => {
             options.single_quote = value == "true";
         }
@@ -345,7 +342,6 @@ mod tests {
         // Compare field by field (YamlFormatOptions does not implement PartialEq).
         assert_eq!(opts.print_width, default.print_width);
         assert_eq!(opts.tab_width, default.tab_width);
-        assert_eq!(opts.use_tabs, default.use_tabs);
         assert_eq!(opts.single_quote, default.single_quote);
         assert_eq!(opts.bracket_spacing, default.bracket_spacing);
         assert_eq!(opts.yaml_version, default.yaml_version);

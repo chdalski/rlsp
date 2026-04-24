@@ -27,33 +27,33 @@ Remove the `use_tabs` option from rlsp-yaml's YAML formatter because it violates
 
 ## Steps
 
-- [ ] Remove `use_tabs` from `YamlFormatOptions` and pin `use_tabs: false` in `FormatOptions` constructions
-- [ ] Remove `insertSpaces → use_tabs` mapping from server.rs
-- [ ] Delete `interact-use-tabs-tab-width.md` fixture
-- [ ] Update fixture parser and default assertion in `formatter_fixtures.rs`
-- [ ] Update `configuration.md` to document that `insertSpaces: false` is ignored for YAML
-- [ ] Add `feature-log.md` entry documenting the removal with §6.1 rationale
-- [ ] Update follow-up queue to remove the `use_tabs` item
+- [x] Remove `use_tabs` from `YamlFormatOptions` and pin `use_tabs: false` in `FormatOptions` constructions
+- [x] Remove `insertSpaces → use_tabs` mapping from server.rs
+- [x] Delete `interact-use-tabs-tab-width.md` fixture
+- [x] Update fixture parser and default assertion in `formatter_fixtures.rs`
+- [x] Update `configuration.md` to document that `insertSpaces: false` is ignored for YAML
+- [x] Add `feature-log.md` entry documenting the removal with §6.1 rationale
+- [x] Update follow-up queue to remove the `use_tabs` item
 
 ## Tasks
 
-### Task 1: Remove `use_tabs` from formatter, server, fixture, and docs
+### Task 1: Remove `use_tabs` from formatter, server, fixture, and docs — commit a8462ed
 
 Remove the `use_tabs` field from `YamlFormatOptions`, update the server mapping to stop passing `insertSpaces` through, delete the interaction fixture, update the fixture test harness, update docs, and add a feature-log entry.
 
-- [ ] Remove `pub use_tabs: bool` field and its doc comment from `YamlFormatOptions` in `formatter.rs:321`
-- [ ] Remove `use_tabs: false` from the `Default` impl in `formatter.rs:344`
-- [ ] Change `use_tabs: options.use_tabs` to `use_tabs: false` in both `FormatOptions` constructions (`formatter.rs:375` and `formatter.rs:424`)
-- [ ] Remove `use_tabs: !insert_spaces,` lines from `server.rs:1060` and `server.rs:1148`
-- [ ] Delete fixture file `rlsp-yaml/tests/fixtures/formatter/interact-use-tabs-tab-width.md`
-- [ ] Remove the `"use_tabs"` match arm from the fixture parser in `formatter_fixtures.rs:198-200`
-- [ ] Remove the `assert_eq!(opts.use_tabs, default.use_tabs)` line from `formatter_fixtures.rs:348`
-- [ ] Update `configuration.md:362` — change the indentation note to explain that `insertSpaces: false` is silently ignored for YAML because YAML 1.2 §6.1 forbids tab indentation
-- [ ] Update `configuration.md:496` — remove "tabs vs spaces" from the indentation description, replacing with a note that the formatter always uses spaces
-- [ ] Add entry to `rlsp-yaml/docs/feature-log.md`: "Drop `use_tabs` formatter option" documenting the removal with §6.1 and ecosystem rationale (RedHat + Prettier both ignore `insertSpaces: false`)
-- [ ] Remove the "Drop `use_tabs`..." bullet from `.ai/memory/project_followup_plans.md`
-- [ ] Remove the "Formatter fixture gaps" note about excluding `use_tabs` pairs from `.ai/memory/project_followup_plans.md` (update the bullet to remove the `use_tabs` exclusion clause)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` all pass with zero warnings/failures
+- [x] Remove `pub use_tabs: bool` field and its doc comment from `YamlFormatOptions` in `formatter.rs:321`
+- [x] Remove `use_tabs: false` from the `Default` impl in `formatter.rs:344`
+- [x] Change `use_tabs: options.use_tabs` to `use_tabs: false` in both `FormatOptions` constructions (`formatter.rs:375` and `formatter.rs:424`)
+- [x] Remove `use_tabs: !insert_spaces,` lines from `server.rs:1060` and `server.rs:1148`
+- [x] Delete fixture file `rlsp-yaml/tests/fixtures/formatter/interact-use-tabs-tab-width.md`
+- [x] Remove the `"use_tabs"` match arm from the fixture parser in `formatter_fixtures.rs:198-200`
+- [x] Remove the `assert_eq!(opts.use_tabs, default.use_tabs)` line from `formatter_fixtures.rs:348`
+- [x] Update `configuration.md:362` — change the indentation note to explain that `insertSpaces: false` is silently ignored for YAML because YAML 1.2 §6.1 forbids tab indentation
+- [x] Update `configuration.md:496` — remove "tabs vs spaces" from the indentation description, replacing with a note that the formatter always uses spaces
+- [x] Add entry to `rlsp-yaml/docs/feature-log.md`: "Drop `use_tabs` formatter option" documenting the removal with §6.1 and ecosystem rationale (RedHat + Prettier both ignore `insertSpaces: false`)
+- [x] Remove the "Drop `use_tabs`..." bullet from `.ai/memory/project_followup_plans.md`
+- [x] Remove the "Formatter fixture gaps" note about excluding `use_tabs` pairs from `.ai/memory/project_followup_plans.md` (update the bullet to remove the `use_tabs` exclusion clause)
+- [x] `cargo fmt`, `cargo clippy --all-targets`, `cargo test` all pass with zero warnings/failures
 
 ## Decisions
 

@@ -317,8 +317,6 @@ pub struct YamlFormatOptions {
     pub print_width: usize,
     /// Spaces per indent level. Default: 2.
     pub tab_width: usize,
-    /// Use tabs instead of spaces. Default: false.
-    pub use_tabs: bool,
     /// Prefer single-quoted strings. Default: false (double quotes).
     pub single_quote: bool,
     /// Preserve the source quote style of scalars. Default: false.
@@ -341,7 +339,6 @@ impl Default for YamlFormatOptions {
         Self {
             print_width: 80,
             tab_width: 2,
-            use_tabs: false,
             single_quote: false,
             preserve_quotes: false,
             bracket_spacing: true,
@@ -372,7 +369,7 @@ pub fn format_subtree(
     let fmt_options = FormatOptions {
         print_width: options.print_width,
         tab_width: options.tab_width,
-        use_tabs: options.use_tabs,
+        use_tabs: false,
     };
     let rendered = fmt_format(&doc, &fmt_options);
     // Strip the trailing newline that fmt_format appends, then re-join lines
@@ -421,7 +418,7 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     let fmt_options = FormatOptions {
         print_width: options.print_width,
         tab_width: options.tab_width,
-        use_tabs: options.use_tabs,
+        use_tabs: false,
     };
 
     // Apply duplicate-key removal pre-pass when enabled.
