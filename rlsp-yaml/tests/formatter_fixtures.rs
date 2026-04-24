@@ -219,6 +219,9 @@ fn apply_setting(options: &mut YamlFormatOptions, key: &str, value: &str, path_s
         "format_remove_duplicate_keys" => {
             options.format_remove_duplicate_keys = value == "true";
         }
+        "format_indent_sequences" => {
+            options.format_indent_sequences = value == "true";
+        }
         // Unknown settings keys are silently ignored.
         _ => {}
     }
@@ -352,6 +355,10 @@ mod tests {
         assert_eq!(
             opts.format_remove_duplicate_keys,
             default.format_remove_duplicate_keys
+        );
+        assert_eq!(
+            opts.format_indent_sequences,
+            default.format_indent_sequences
         );
     }
 

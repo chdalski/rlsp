@@ -36,7 +36,7 @@ Add a `formatIndentSequences` boolean setting (default `true`) to rlsp-yaml's fo
 - [x] Wire the setting through server formatting handlers
 - [x] Add VS Code extension configuration and config sync
 - [x] Implement conditional indentation in formatter logic
-- [ ] Add fixture tests for both modes and setting interactions
+- [x] Add fixture tests for both modes and setting interactions
 - [ ] Update documentation (`configuration.md`, `feature-log.md`)
 - [ ] Update follow-up queue
 
@@ -64,16 +64,16 @@ Wire the new setting through the VS Code extension so it appears in the settings
 - [x] Add `rlsp-yaml.formatIndentSequences` to `package.json` `contributes.configuration.properties` with type `boolean`, default `true`, and description: "Indent block sequences under mapping keys. When true (default), sequences are indented: `key:\\n  - item`. When false, sequences start at the key's indent level: `key:\\n- item`."
 - [x] `pnpm run build`, `pnpm run lint`, `pnpm run test` all pass in `rlsp-yaml/integrations/vscode/`
 
-### Task 3: Add fixture tests for indentless mode and setting interactions
+### Task 3: Add fixture tests for indentless mode and setting interactions — commit 688287f
 
 Add formatter fixtures covering the new setting in isolation and in combination with interacting settings.
 
-- [ ] Add fixture `structure-indent-sequences-false.md` with `format_indent_sequences: false` — test basic mapping-with-sequence-value normalization to indentless style. Input: indented sequence under a mapping key; expected: indentless output
-- [ ] Add fixture `structure-indent-sequences-true.md` with `format_indent_sequences: true` (explicit non-default to document the behavior) — test normalization to indented style. Input: indentless sequence under a mapping key; expected: indented output
-- [ ] Add fixture `structure-indent-sequences-false-nested.md` with `format_indent_sequences: false` — test that nested mappings and sequences inside sequence items retain correct indentation even when the top-level sequence is indentless
-- [ ] Add fixture `interact-indent-sequences-enforce-block-style.md` with `format_indent_sequences: false` + `format_enforce_block_style: true` — test that flow sequences converted to block use indentless style
-- [ ] Add fixture parser support: add `"format_indent_sequences"` match arm in `formatter_fixtures.rs` and add the field to `frontmatter_parses_all_default_settings` assertion
-- [ ] All fixture tests pass via `cargo test`
+- [x] Add fixture `structure-indent-sequences-false.md` with `format_indent_sequences: false` — test basic mapping-with-sequence-value normalization to indentless style. Input: indented sequence under a mapping key; expected: indentless output
+- [x] Add fixture `structure-indent-sequences-true.md` with `format_indent_sequences: true` (explicit non-default to document the behavior) — test normalization to indented style. Input: indentless sequence under a mapping key; expected: indented output
+- [x] Add fixture `structure-indent-sequences-false-nested.md` with `format_indent_sequences: false` — test that nested mappings and sequences inside sequence items retain correct indentation even when the top-level sequence is indentless
+- [x] Add fixture `interact-indent-sequences-enforce-block-style.md` with `format_indent_sequences: false` + `format_enforce_block_style: true` — test that flow sequences converted to block use indentless style
+- [x] Add fixture parser support: add `"format_indent_sequences"` match arm in `formatter_fixtures.rs` and add the field to `frontmatter_parses_all_default_settings` assertion
+- [x] All fixture tests pass via `cargo test`
 
 ### Task 4: Update documentation and follow-up queue
 
