@@ -6,9 +6,9 @@
   "version": "0.1.0",
   "license": "MIT",
   "icon": "rlsp-yaml-logo-small.png",
-  "packageManager": "pnpm@9.15.5",
+  "packageManager": "pnpm@10.33.2",
   "engines": {
-    "vscode": "^1.115.0"
+    "vscode": "^1.116.0"
   },
   "categories": [
     "Programming Languages",
@@ -200,17 +200,17 @@
     "@tsconfig/strictest": "^2.0.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.0",
-    "@types/vscode": "^1.115.0",
-    "@vitest/coverage-v8": "^4.1.4",
+    "@types/vscode": "^1.116.0",
+    "@vitest/coverage-v8": "^4.1.5",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.7.1",
+    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
-    "eslint": "^10.0.0",
-    "prettier": "^3.8.2",
-    "typescript": "^6.0.0",
-    "typescript-eslint": "^8.58.1",
-    "vite": "^6.0.0",
-    "vitest": "^4.0.0"
+    "eslint": "^10.2.1",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.0",
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }

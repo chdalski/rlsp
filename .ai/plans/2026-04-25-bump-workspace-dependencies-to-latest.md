@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-25
 
 ## Goal
@@ -119,7 +119,7 @@ not silently break).
 
 ## Steps
 
-- [ ] Bump every dep + non-dep field in the VS Code
+- [x] Bump every dep + non-dep field in the VS Code
   extension; verify lint/format/build/unit/integration
   tests
 - [ ] Verify `rlsp-fmt` has no manifest deps and the
@@ -134,6 +134,8 @@ not silently break).
 
 ### Task 1: VS Code extension dependency bump
 
+**Completed:** 2026-04-25 — commit `08e97b6cedae35065f532bf1ff126afd8e417d01`
+
 Update every entry in
 `rlsp-yaml/integrations/vscode/package.json` —
 `dependencies` and `devDependencies` — to the absolute
@@ -146,37 +148,37 @@ in `src/`, the eslint config, the prettier config, the
 vitest config, the vscode-test config, or the tsconfig
 as needed to keep every existing check green.
 
-- [ ] Enumerate latest versions for every entry in
+- [x] Enumerate latest versions for every entry in
   `dependencies` and `devDependencies` using
   `pnpm outdated` plus `pnpm view <pkg> version` for any
   package not flagged outdated (some are at-latest but
   must be re-confirmed)
-- [ ] Edit `package.json`: set every dep's caret range
+- [x] Edit `package.json`: set every dep's caret range
   to its latest version (e.g., `"vite": "^8.0.10"`)
-- [ ] Bump `engines.vscode` to `^<NEW_TYPES_VSCODE_MAJOR>.<MINOR>.0`
+- [x] Bump `engines.vscode` to `^<NEW_TYPES_VSCODE_MAJOR>.<MINOR>.0`
   matching the new `@types/vscode` (e.g., if types
   become `^1.116.0`, set engines to `^1.116.0`)
-- [ ] Bump `packageManager` to `pnpm@<latest-10.x>`
+- [x] Bump `packageManager` to `pnpm@<latest-10.x>`
   (use `pnpm view pnpm version` for the exact value)
-- [ ] Run `pnpm install` to regenerate `pnpm-lock.yaml`
+- [x] Run `pnpm install` to regenerate `pnpm-lock.yaml`
   against the new manifest
-- [ ] Run `pnpm run lint` from
+- [x] Run `pnpm run lint` from
   `rlsp-yaml/integrations/vscode/` — exit code 0, zero
   ESLint errors
-- [ ] Run `pnpm run format` from the same directory —
+- [x] Run `pnpm run format` from the same directory —
   prettier check passes (exit 0)
-- [ ] Run `pnpm run build` — esbuild bundles
+- [x] Run `pnpm run build` — esbuild bundles
   `out/main.js` without error
-- [ ] Run `pnpm run test` — all vitest unit tests pass,
+- [x] Run `pnpm run test` — all vitest unit tests pass,
   exit code 0
-- [ ] Run `xvfb-run -a pnpm run test:integration` — all
+- [x] Run `xvfb-run -a pnpm run test:integration` — all
   vscode-test integration tests pass, exit code 0
-- [ ] Run `pnpm run package` — vsce produces a `.vsix`
+- [x] Run `pnpm run package` — vsce produces a `.vsix`
   without errors. Warnings about missing
   `repository`/`license`/etc. that are unchanged from the
   baseline are acceptable; warnings introduced by the
   bumps are not — fix them.
-- [ ] If any of the above checks fail because a bump
+- [x] If any of the above checks fail because a bump
   introduced breaking API changes, edit the consuming
   source (`src/**/*.ts`, `eslint.config.mjs`,
   `vitest.config.ts`, `.vscode-test.mjs`, `tsconfig.json`)

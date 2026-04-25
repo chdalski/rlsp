@@ -83,10 +83,9 @@ export async function deactivate(): Promise<void> {
 }
 
 function packageVersion(context: ExtensionContext): string {
-  // packageJSON is typed as `any`; access via index to satisfy no-unsafe-member-access.
   const pkg: unknown = context.extension.packageJSON;
   if (typeof pkg === 'object' && pkg !== null && 'version' in pkg) {
-    return String((pkg as { version: unknown }).version);
+    return String(pkg.version);
   }
   return 'unknown';
 }
