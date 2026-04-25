@@ -1,6 +1,49 @@
 # Changelog
 
 
+## Bug Fixes
+
+- Accept BOM at document-prefix positions per YAML 1.2 §5.2 (49a36cb)
+- Reject underscore in named tag handle names ([92]) (589a5ec)
+- Suppress resolver-injected tags on empty scalars (34bcc58)
+
+## Documentation
+
+- Cache YAML 1.2.2 spec and scaffold conformance audit (f234708)
+- Draft §3/§4/§5 conformance entries [1]–[62] (752e622)
+- Verify §3/§4/§5 conformance entries against cached spec (3e23f94)
+- Draft §6 conformance entries [63]–[103] (6b67752)
+- Verify §6 conformance entries against cached spec (2c73f86)
+- Draft §7 conformance entries [104]–[161] (a2982ba)
+- Verify §7 conformance entries against cached spec (29fd46c)
+- Draft §8 conformance entries [162]–[201] (9428165)
+- Verify §8 conformance entries against cached spec (cc961f8)
+- Draft §9 conformance entries [202]–[211] (0d5b42b)
+- Verify §9 conformance entries against cached spec (066dd76)
+- Draft §10 conformance entries (8ca0224)
+- Verify §10 conformance entries and append Summary (562e013)
+- Update conformance doc for BOM-between-documents fix (894e14b)
+- Add Strict (security-hardened) sub-class to audit methodology (631b34f)
+- Reclassify hex-escape findings as Strict (security-hardened) (f2cce24)
+- Flip [154]/[155]/[192]/[193] to Conformant after 1024-char limit (8bee30d)
+- Flip [92] c-named-tag-handle to Conformant after underscore fix (4fc9b91)
+- Update conformance doc and feature-log for §10 schema resolution (84fc75c)
+
+## Features
+
+- Enforce 1024-char implicit key limit in block context (cc7b6ba)
+- Enforce 1024-char limit for flow-context implicit keys ([154], [155]) (b7b6bcc)
+- Add Schema enum and §10 tag resolution infrastructure (5296aa1)
+- Wire §10 schema tag resolution into the loader (d640dd1)
+- Add JSON and Failsafe schema resolution variants (60c095c)
+- Make Schema::Core the loader default and remove load_with_schema (073f128)
+
+## Refactoring
+
+- Hoist module-scope use/mod to header per import-placement rule (698263d)
+- Hoist fn-body use statements per import-placement rule (c63d70f)
+- Reorder sub-module use/mod headers per import-placement rule (543cd93)
+
 ## Features
 
 - Expose anchor_loc span on node events (265cb5a)
