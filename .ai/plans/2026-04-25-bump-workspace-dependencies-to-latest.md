@@ -122,7 +122,7 @@ not silently break).
 - [x] Bump every dep + non-dep field in the VS Code
   extension; verify lint/format/build/unit/integration
   tests
-- [ ] Verify `rlsp-fmt` has no manifest deps and the
+- [x] Verify `rlsp-fmt` has no manifest deps and the
   crate still builds and tests cleanly
 - [ ] Bump every dep in `rlsp-yaml-parser`; verify
   build/test/clippy/bench-compile
@@ -208,6 +208,8 @@ bumped versions" is not equivalent to a risk assessment.
 
 ### Task 2: rlsp-fmt verification
 
+**Completed:** 2026-04-25 — commit `188a2078093a74f5ab9cfca651728a13f1d8c864`
+
 The `rlsp-fmt` crate's `Cargo.toml` declares no
 `[dependencies]` and no `[dev-dependencies]`. This task
 records that fact, runs the standard verification suite,
@@ -218,15 +220,15 @@ explicit verification slice for the dep-free crate. It
 is expected to produce no source-file changes — the
 plan-checkbox commit is the task's closure artifact.
 
-- [ ] Read `rlsp-fmt/Cargo.toml` and confirm there are
+- [x] Read `rlsp-fmt/Cargo.toml` and confirm there are
   no `[dependencies]` or `[dev-dependencies]` sections
-- [ ] Run `cargo build -p rlsp-fmt` — zero errors
-- [ ] Run `cargo test -p rlsp-fmt` — every test passes,
+- [x] Run `cargo build -p rlsp-fmt` — zero errors
+- [x] Run `cargo test -p rlsp-fmt` — every test passes,
   exit code 0
-- [ ] Run `cargo clippy -p rlsp-fmt --all-targets` —
+- [x] Run `cargo clippy -p rlsp-fmt --all-targets` —
   zero warnings (workspace `warnings = "deny"` makes any
   warning a hard error)
-- [ ] Run `cargo fmt -p rlsp-fmt -- --check` — formatter
+- [x] Run `cargo fmt -p rlsp-fmt -- --check` — formatter
   check passes (exit 0)
 
 Files: none expected. The verified file list submitted
