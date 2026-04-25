@@ -3,6 +3,31 @@
 
 ## Bug Fixes
 
+- Suppress resolver-injected tags on empty scalars (34bcc58)
+- Drop use_tabs formatter option that violates YAML 1.2 §6.1 (6f5e075)
+
+## Documentation
+
+- Remove internal-refactor entries from feature-log (d00d48a)
+- Add formatIndentSequences to configuration and feature log (90c4b1c)
+- Move tab_to_spaces retrofit note to module doc comment (9c21f9b)
+
+## Features
+
+- Add JSON and Failsafe schema resolution variants (60c095c)
+- Add formatIndentSequences setting (7f1b161)
+- Add formatIndentSequences setting (fb84f02)
+
+## Refactoring
+
+- Migrate type-inference callsites to tag-URI comparisons (8ecdeb5)
+- Remove dead type-classification functions from scalar_helpers (e8139ef)
+- Hoist module-scope use/mod to header per import-placement rule (698263d)
+- Hoist fn-body use statements per import-placement rule (f984301)
+- Reorder sub-module use/mod headers per import-placement rule (543cd93)
+
+## Bug Fixes
+
 - Add complete_at corpus invariant and cap structural completions (aef054d)
 
 ## Documentation
