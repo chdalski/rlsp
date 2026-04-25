@@ -124,7 +124,7 @@ not silently break).
   tests
 - [x] Verify `rlsp-fmt` has no manifest deps and the
   crate still builds and tests cleanly
-- [ ] Bump every dep in `rlsp-yaml-parser`; verify
+- [x] Bump every dep in `rlsp-yaml-parser`; verify
   build/test/clippy/bench-compile
 - [ ] Bump every dep in `rlsp-yaml`; verify
   build/test/clippy/bench-compile and run a final
@@ -241,6 +241,17 @@ no deps bumped.
 
 ### Task 3: rlsp-yaml-parser dependency bump
 
+**Completed:** 2026-04-25 — commit `1743f663c12e8b4ea14c194c79abe475f77bbc56`
+
+Outcome: every direct dep was already at its absolute latest
+published version (`memchr 2.8.0`, `thiserror 2.0.18`,
+`rstest 0.26.1`, `criterion 0.8.2`).
+`cargo upgrade --dry-run --incompatible -p rlsp-yaml-parser`
+reported `latest: rlsp-yaml-parser` (no proposed bumps). No
+manifest or source changes were required; existing
+verification commands all passed (2,588 tests, 0 clippy
+warnings, 3 benches compile).
+
 Update every dep in `rlsp-yaml-parser/Cargo.toml` —
 `memchr`, `thiserror`, `rstest`, `criterion` — to the
 absolute latest version, including incompatible majors
@@ -250,32 +261,32 @@ clippy, or benchmark-compile breakage in
 `rlsp-yaml-parser/src/`, `rlsp-yaml-parser/tests/`, and
 `rlsp-yaml-parser/benches/` produced by the bumps.
 
-- [ ] If `cargo upgrade` is unavailable
+- [x] If `cargo upgrade` is unavailable
   (`cargo upgrade --help` errors), install it via
   `cargo install cargo-edit`
-- [ ] Run `cargo upgrade --dry-run --incompatible -p rlsp-yaml-parser`
-  and record the proposed bumps
-- [ ] Apply the bumps with
+- [x] Run `cargo upgrade --dry-run --incompatible -p rlsp-yaml-parser`
+  and record the proposed bumps (none — already at latest)
+- [x] Apply the bumps with
   `cargo upgrade --incompatible -p rlsp-yaml-parser`
-  (or hand-edit `rlsp-yaml-parser/Cargo.toml` if a
-  specific bump must be tuned)
-- [ ] Run `cargo update -p rlsp-yaml-parser` to refresh
-  `Cargo.lock`
-- [ ] Run `cargo build -p rlsp-yaml-parser` — zero
+  (no-op — nothing to apply)
+- [x] Run `cargo update -p rlsp-yaml-parser` to refresh
+  `Cargo.lock` (no-op — `Locking 0 packages`)
+- [x] Run `cargo build -p rlsp-yaml-parser` — zero
   errors
-- [ ] Run `cargo test -p rlsp-yaml-parser` — every test
+- [x] Run `cargo test -p rlsp-yaml-parser` — every test
   passes, including yaml-test-suite event-stream
   conformance and loader conformance suites; exit code 0
-- [ ] Run `cargo clippy -p rlsp-yaml-parser --all-targets` —
+  (2,588 passed)
+- [x] Run `cargo clippy -p rlsp-yaml-parser --all-targets` —
   zero warnings
-- [ ] Run `cargo fmt -p rlsp-yaml-parser -- --check` —
+- [x] Run `cargo fmt -p rlsp-yaml-parser -- --check` —
   exit 0
-- [ ] Run `cargo bench -p rlsp-yaml-parser --no-run` —
-  every benchmark target compiles
-- [ ] If a major bump introduces breaking API changes
+- [x] Run `cargo bench -p rlsp-yaml-parser --no-run` —
+  every benchmark target compiles (3 benches)
+- [x] If a major bump introduces breaking API changes
   (e.g., `rstest` macro signature changes, `criterion`
   group-config changes), update the consuming test or
-  bench source as part of this task
+  bench source as part of this task (N/A — no bumps)
 
 Files (expected, may grow):
 - `rlsp-yaml-parser/Cargo.toml`
