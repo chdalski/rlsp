@@ -429,6 +429,9 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
         .timeout_connect(Some(std::time::Duration::from_secs(5)))
         .timeout_global(Some(std::time::Duration::from_secs(15)));
     if let Some(url) = proxy {
+        // A malformed proxy URL is silently ignored; the agent falls back to
+        // direct connections. Intentional: for an LSP server the worst outcome
+        // is a failed schema fetch, not a security incident.
         if let Ok(p) = ureq::Proxy::new(url) {
             builder = builder.proxy(Some(p));
         }

@@ -126,7 +126,7 @@ not silently break).
   crate still builds and tests cleanly
 - [x] Bump every dep in `rlsp-yaml-parser`; verify
   build/test/clippy/bench-compile
-- [ ] Bump every dep in `rlsp-yaml`; verify
+- [x] Bump every dep in `rlsp-yaml`; verify
   build/test/clippy/bench-compile and run a final
   workspace-wide verification
 
@@ -305,6 +305,19 @@ parsing path. Existing tests are the verification.
 
 ### Task 4: rlsp-yaml dependency bump
 
+**Completed:** 2026-04-25 — commit `10ffcbf1477bca65b8c313c5fd9380de97b0642c`
+
+Outcome: only two manifest bumps were available — `idna 1.0 → 1.1`
+and `data-encoding 2.9 → 2.11`. All other direct deps and dev-deps
+were already at their absolute latest (verbose `cargo upgrade
+--dry-run --incompatible` reported `latest: 19 packages`). Workspace
+path entries retained their pinned `version` strings. The
+security-engineer input gate flagged a clarity concern around the
+silent proxy-URL fallback in `build_agent`; resolved by adding an
+inline comment documenting the intentional behavior. Output gate
+sign-off granted. Workspace-wide verification clean: build, all
+tests, clippy, fmt, and bench-compile across all three crates.
+
 Update every dep in `rlsp-yaml/Cargo.toml` — both
 `[dependencies]` (excluding the two workspace path
 deps, which keep their current pinned `version` field)
@@ -321,30 +334,30 @@ Refresh `Cargo.lock`. Adjust source code in
 workspace-wide verification to catch any cross-crate
 fallout.
 
-- [ ] Run `cargo upgrade --dry-run --incompatible -p rlsp-yaml`
+- [x] Run `cargo upgrade --dry-run --incompatible -p rlsp-yaml`
   and record the proposed bumps. The two workspace
   `path = "..."` entries (`rlsp-fmt`,
   `rlsp-yaml-parser`) must be excluded from the bump
   because their version is governed by the local crate
   release, not crates.io
-- [ ] Apply the bumps with
+- [x] Apply the bumps with
   `cargo upgrade --incompatible -p rlsp-yaml --exclude rlsp-fmt --exclude rlsp-yaml-parser`
   (or hand-edit `rlsp-yaml/Cargo.toml`)
-- [ ] Run `cargo update -p rlsp-yaml` to refresh
+- [x] Run `cargo update -p rlsp-yaml` to refresh
   `Cargo.lock`
-- [ ] Run `cargo build -p rlsp-yaml` — zero errors
-- [ ] Run `cargo test -p rlsp-yaml` — every test passes,
+- [x] Run `cargo build -p rlsp-yaml` — zero errors
+- [x] Run `cargo test -p rlsp-yaml` — every test passes,
   exit code 0
-- [ ] Run `cargo clippy -p rlsp-yaml --all-targets` —
+- [x] Run `cargo clippy -p rlsp-yaml --all-targets` —
   zero warnings
-- [ ] Run `cargo fmt -p rlsp-yaml -- --check` — exit 0
-- [ ] Run `cargo bench -p rlsp-yaml --no-run` — every
+- [x] Run `cargo fmt -p rlsp-yaml -- --check` — exit 0
+- [x] Run `cargo bench -p rlsp-yaml --no-run` — every
   benchmark target compiles
-- [ ] Run the final workspace-wide verification:
+- [x] Run the final workspace-wide verification:
   `cargo build --workspace`, `cargo test --workspace`,
   `cargo clippy --workspace --all-targets` — every
   command exits 0 with zero warnings
-- [ ] For each major bump that changes a public API
+- [x] For each major bump that changes a public API
   used by `rlsp-yaml/src/`, update the consuming source
   to match. Each such change is part of this task.
 
