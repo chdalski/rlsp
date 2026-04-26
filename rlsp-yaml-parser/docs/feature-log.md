@@ -12,6 +12,23 @@ with existing infrastructure.
 
 ---
 
+### Single-comparison document dispatch [completed]
+
+**Description:** The core parse loop's per-line handler selection now performs a
+single byte comparison instead of up to 15 sequential checks. Each YAML structural
+indicator (`-`, `*`, `!`, `&`, `[`, `{`, etc.) has a unique first non-whitespace
+byte; the parser matches on that byte directly and routes to the correct handler in
+one step. Mapping key detection (which can start with any byte) runs once
+unconditionally after the byte match.
+**Complexity:** Low
+**Comment:** Dense and small documents (Kubernetes manifests, short configuration
+files) spend a measurable fraction of parse time in handler selection. The
+restructure eliminates redundant probes without changing any parse semantics —
+all 726 yaml-test-suite conformance tests continue to pass.
+**Tier:** 1
+
+---
+
 ### Lazy Position Resolution via `LineIndex` [completed]
 
 **Description:** `Span` now stores only byte offsets (`start: u32`, `end: u32`,

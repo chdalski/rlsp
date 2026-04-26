@@ -148,3 +148,75 @@ fn it_double_quoted_invalid_trailing_content_is_error(#[case] input: &str) {
         "invalid trailing content after double-quoted scalar must be a parse error"
     );
 }
+
+// -----------------------------------------------------------------------
+// Group I — byte-dispatch arm boundaries
+// -----------------------------------------------------------------------
+
+#[test]
+fn stray_close_bracket_in_block_context_is_error() {
+    assert!(
+        has_parse_error("]\n"),
+        "stray ']' outside flow collection must be a parse error"
+    );
+    let err_msg = parse_events("]\n").find_map(Result::err).map(|e| e.message);
+    assert!(
+        err_msg.is_some_and(|m| m.contains(']')),
+        "error message must mention ']'"
+    );
+}
+
+#[test]
+fn stray_close_brace_in_block_context_is_error() {
+    assert!(
+        has_parse_error("}\n"),
+        "stray '}}' outside flow collection must be a parse error"
+    );
+    let err_msg = parse_events("}\n").find_map(Result::err).map(|e| e.message);
+    assert!(
+        err_msg.is_some_and(|m| m.contains('}')),
+        "error message must mention '}}'"
+    );
+}
+
+#[test]
+fn indented_stray_close_bracket_in_block_context_is_error() {
+    assert!(
+        has_parse_error("  ]\n"),
+        "indented stray ']' outside flow collection must be a parse error"
+    );
+}
+
+#[test]
+fn question_mark_without_trailing_space_is_plain_scalar() {
+    let ev = first_scalar("?foo\n");
+    assert!(
+        matches!(ev, Some(Event::Scalar { style: ScalarStyle::Plain, ref value, .. }) if value == "?foo"),
+        "?foo must be plain scalar with value '?foo', got {ev:?}"
+    );
+    // Must not open a mapping.
+    let events: Vec<_> = parse_events("?foo\n")
+        .filter_map(Result::ok)
+        .map(|(ev, _)| ev)
+        .collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::MappingStart { .. })),
+        "?foo must not produce a MappingStart event"
+    );
+}
+
+#[test]
+fn bare_question_mark_at_eol_routes_to_explicit_key() {
+    let events: Vec<_> = parse_events("?\n")
+        .filter_map(Result::ok)
+        .map(|(ev, _)| ev)
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MappingStart { .. })),
+        "bare '?' at EOL must produce a MappingStart event, got {events:?}"
+    );
+}

@@ -137,7 +137,7 @@ That is the hot path the boxing exists to optimize.
   Span becomes `(start_offset_u32, end_offset_u32)`; line/
   column computed on demand. Bench. Decision gate as
   above.
-- [ ] **Stage D — `step_in_document` byte-dispatch
+- [x] **Stage D — `step_in_document` byte-dispatch
   (conditional).** Only if a load fixture (especially
   `block_sequence`) is still outside ±2%. Bench. Decision
   gate as above.
@@ -366,18 +366,22 @@ estimates 5–15% on `block_sequence`, 2–8% elsewhere.
 
 **Implementation:**
 
-- [ ] Restructure `step_in_document` per the memory file's
+- [x] Restructure `step_in_document` per the memory file's
   target shape. Order-sensitive top-level checks (comment
   skip, blank skip, tab/EOF/marker) stay above the
   dispatch.
-- [ ] Verify yaml-test-suite conformance unchanged.
-- [ ] Bench. Record results.
+- [x] Verify yaml-test-suite conformance unchanged
+  (726/726).
+- [x] Bench. Record results.
 
 **Acceptance:**
 
-- [ ] Build / clippy / tests clean.
-- [ ] yaml-test-suite pass rate unchanged.
-- [ ] Decision gate as above.
+- [x] Build / clippy / tests clean.
+- [x] yaml-test-suite pass rate unchanged (726/726).
+- [ ] Decision gate as above. (User-directed pause for
+  conversation regardless of outcome.)
+
+**Completed:** 2026-04-26 — commit `8e9b0d29b0044408062c53e3a35e47fd56cfe470`
 
 ### Task E (conditional, repeatable): Re-flame and pick
 
@@ -596,6 +600,50 @@ Stage C — Lazy Span (commit 6a61b6f):
   User-directed hold: pause after Stage D for a
   conversation regardless of outcome (do not auto-trigger
   Stage E).
+
+Stage D — step_in_document byte-dispatch (commit 8e9b0d2):
+  [load size]
+    tiny_100B      54.75  MiB/s   (vs baseline 54.08, +1.2%) ★ within ±2%
+    medium_10KB    60.66  MiB/s   (vs baseline 58.28, +4.1%) ★ beats baseline
+    large_100KB    62.95  MiB/s   (vs baseline 43.34, +45.3%) ★★ massive
+    huge_1MB       49.91  MiB/s   (vs baseline 35.69, +39.8%) ★★ massive
+  [load style]
+    block_heavy    53.97  MiB/s   (vs baseline 55.92, −3.5%)
+    block_sequence 135.97 MiB/s   (vs baseline 128.89, +5.5%) ★ beats baseline
+    flow_heavy     60.84  MiB/s   (vs baseline 57.83, +5.2%) ★ beats baseline
+    scalar_heavy   137.17 MiB/s   (vs baseline 141.14, −2.8%)
+    mixed          62.86  MiB/s   (vs baseline 60.69, +3.6%) ★ beats baseline
+  [load real]
+    kubernetes_3KB 80.21  MiB/s   (vs baseline 79.15, +1.3%) ★ within ±2%
+  [events size]
+    tiny_100B      93.19  MiB/s   (vs baseline 87.02, +7.1%) ★ beats baseline
+    medium_10KB    121.89 MiB/s   (vs baseline 109.88, +10.9%) ★ beats baseline
+    large_100KB    130.73 MiB/s   (vs baseline 123.59, +5.8%) ★ beats baseline
+    huge_1MB       135.06 MiB/s   (vs baseline 130.80, +3.3%) ★ beats baseline
+  [events style]
+    block_heavy    111.62 MiB/s   (vs baseline 105.37, +5.9%) ★ beats baseline
+    block_sequence 255.36 MiB/s   (vs baseline 227.65, +12.2%) ★ beats baseline
+    flow_heavy     153.78 MiB/s   (vs baseline 131.22, +17.2%) ★ beats baseline
+    scalar_heavy   257.17 MiB/s   (vs baseline 236.16, +8.9%) ★ beats baseline
+    mixed          131.35 MiB/s   (vs baseline 115.53, +13.7%) ★ beats baseline
+  [events real]
+    kubernetes_3KB 149.37 MiB/s   (vs baseline 138.11, +8.2%) ★ beats baseline
+  [latency first_event]
+    tiny_100B      36.81  ns      (vs baseline 38.88, −5.3%)  ★ beats baseline
+    medium_10KB    36.71  ns      (vs baseline 38.82, −5.4%)  ★ beats baseline
+    large_100KB    35.93  ns      (vs baseline 38.80, −7.4%)  ★ beats baseline
+    huge_1MB       36.74  ns      (vs baseline 38.91, −5.6%)  ★ beats baseline
+    kubernetes_3KB 36.10  ns      (vs baseline 39.54, −8.7%)  ★ beats baseline
+
+  Final tally vs ±2% target:
+    Within ±2% or BEATS baseline: 22 of 24 metric/fixture
+    combinations.
+    Just outside ±2% (≤3.5% off):
+      - load/block_heavy (−3.5%)
+      - load/scalar_heavy (−2.8%)
+
+  DECISION: PAUSE for user conversation per their
+  directive. Do not auto-trigger Stage E.
 ```
 
 ## Decisions

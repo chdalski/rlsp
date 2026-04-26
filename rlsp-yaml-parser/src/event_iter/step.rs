@@ -260,544 +260,600 @@ impl<'input> EventIter<'input> {
             }
         }
 
-        // ---- Block sequence / mapping entry detection ----
+        // ---- Byte-prefix dispatch ----
         //
-        // Most YAML lines are sequence entries (`- item`) or mapping entries
-        // (`key: value`). Check these first before the rare alias/tag/anchor
-        // probes so common-path dispatch hits on the first or second try.
+        // Each YAML structural indicator has a unique first non-whitespace byte.
+        // Match once on `first_byte` to route directly to the right handler,
+        // replacing 10–15 sequential probes per step with a single comparison.
         //
-        // Safety: the probes are non-overlapping by first non-space byte:
-        //   sequence entry: `b'-'` followed by space or newline
-        //   mapping entry:  plain char (not `*`, `!`, `&`, `[`, `{`, `]`, `}`, `-`)
-        //   flow:           `b'['` or `b'{'`
-        //   stray closer:   `b']'` or `b'}'`
-        //   alias:          `b'*'`
-        //   tag:            `b'!'`
-        //   anchor:         `b'&'`
-        // No two probes can match the same line, so reordering does not change
-        // which probe fires — only how many misses precede the match.
+        // Order-sensitive top checks (comment skip, blank-line skip, tab/BOM/
+        // EOF/marker, root-node guard) stay above this dispatch unchanged.
+        //
+        // Arms that resolve the line early-return via `return`.  The `_` arm and
+        // any arm whose handler didn't match (e.g. `-x` for dash) fall through
+        // to the dedent + block-validity + scalar code below, which handles
+        // mapping keys and plain scalars via `find_value_indicator_offset` /
+        // `try_consume_scalar`.
+        //
+        // Invariant: the post-match fallthrough always ends with an unconditional
+        // `consume_line()` before returning `StepResult::Continue`, preventing
+        // infinite loops on unrecognised content.
 
-        if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
-            return self.handle_sequence_entry(dash_indent, dash_pos);
-        }
-        if let Some((key_indent, key_pos)) = self.peek_mapping_entry() {
-            return self.handle_mapping_entry(key_indent, key_pos);
-        }
-
-        // ---- Flow collection detection: `[` or `{` starts a flow collection ----
-        // Stray closing flow indicators (`]`, `}`) in block context are errors.
-
-        if first_byte == Some(b'[') || first_byte == Some(b'{') {
-            return self.handle_flow_collection();
-        }
-        if let Some(line) = self.lexer.peek_next_line() {
-            if trimmed.starts_with(']') || trimmed.starts_with('}') {
-                let err_pos = line.pos;
-                let ch = trimmed.chars().next().unwrap_or(']');
-                self.state = IterState::Done;
-                self.lexer.consume_line();
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: format!("unexpected '{ch}' outside flow collection"),
-                }));
+        match first_byte {
+            // ---- Sequence entry: `- `, `-\t`, or `-\n` (bare dash) ----
+            //
+            // Delegate to peek_sequence_entry() — it checks the second byte
+            // correctly and returns None for `-x` (plain scalar, falls to `_`).
+            Some(b'-') => {
+                if let Some((dash_indent, dash_pos)) = self.peek_sequence_entry() {
+                    return self.handle_sequence_entry(dash_indent, dash_pos);
+                }
+                // `-x` or `--` (not `---`, already handled above) — not a
+                // sequence entry; fall through to dedent + scalar.
             }
-        }
 
-        // ---- Alias node: `*name` is a complete node ----
-
-        if let Some(peek) = self.lexer.peek_next_line() {
-            let content: &'input str = peek.content;
-            let line_pos = peek.pos;
-            let line_indent = peek.indent;
-            let line_break_type = peek.break_type;
-            if let Some(after_star) = trimmed.strip_prefix('*') {
-                let leading = content.len() - trimmed.len();
-                let star_pos = Pos {
-                    byte_offset: line_pos.byte_offset + leading,
-                    line: line_pos.line,
-                    column: line_pos.column + leading,
-                };
-                // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
-                if self.pending_tag.is_some() {
+            // ---- Flow collection: `[` or `{` starts a flow collection ----
+            // Stray closing flow indicators (`]`, `}`) in block context are errors.
+            Some(b'[' | b'{') => {
+                return self.handle_flow_collection();
+            }
+            Some(b']' | b'}') => {
+                if let Some(line) = self.lexer.peek_next_line() {
+                    let err_pos = line.pos;
+                    let ch = trimmed.chars().next().unwrap_or(']');
                     self.state = IterState::Done;
+                    self.lexer.consume_line();
                     return StepResult::Yield(Err(Error {
-                        pos: star_pos,
-                        message: "alias node cannot have a tag property".into(),
+                        pos: err_pos,
+                        message: format!("unexpected '{ch}' outside flow collection"),
                     }));
                 }
-                // An Inline anchor preceding `*alias` is an error — it would annotate
-                // the alias node, which is illegal.  A Standalone anchor belongs to
-                // the surrounding collection, not the alias, so it is not an error here.
-                if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..))) {
-                    self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: star_pos,
-                        message: "alias node cannot have an anchor property".into(),
-                    }));
-                }
-                match scan_anchor_name(after_star, star_pos) {
-                    Err(e) => {
-                        self.state = IterState::Done;
-                        return StepResult::Yield(Err(e));
-                    }
-                    Ok(name) => {
-                        let name_char_count = name.chars().count();
-                        // Build alias span: from `*` through end of name.
-                        let alias_end = Pos {
-                            byte_offset: star_pos.byte_offset + 1 + name.len(),
-                            line: star_pos.line,
-                            column: star_pos.column + 1 + name_char_count,
+            }
+
+            // ---- Alias node: `*name` is a complete node ----
+            Some(b'*') => {
+                if let Some(peek) = self.lexer.peek_next_line() {
+                    let content: &'input str = peek.content;
+                    let line_pos = peek.pos;
+                    let line_indent = peek.indent;
+                    let line_break_type = peek.break_type;
+                    if let Some(after_star) = trimmed.strip_prefix('*') {
+                        let leading = content.len() - trimmed.len();
+                        let star_pos = Pos {
+                            byte_offset: line_pos.byte_offset + leading,
+                            line: line_pos.line,
+                            column: line_pos.column + leading,
                         };
-                        let alias_span = Span::from_pos(star_pos, alias_end);
-                        // Compute remaining content after the alias name, before
-                        // consuming the line (which would invalidate the borrow).
-                        let after_name = &after_star[name.len()..];
-                        let remaining: &'input str = after_name.trim_start_matches([' ', '\t']);
-                        let spaces = after_name.len() - remaining.len();
-                        let had_remaining = !remaining.is_empty();
-                        let rem_byte_offset = star_pos.byte_offset + 1 + name.len() + spaces;
-                        let rem_col = star_pos.column + 1 + name_char_count + spaces;
+                        // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
+                        if self.pending_tag.is_some() {
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(Error {
+                                pos: star_pos,
+                                message: "alias node cannot have a tag property".into(),
+                            }));
+                        }
+                        // An Inline anchor preceding `*alias` is an error — it would annotate
+                        // the alias node, which is illegal.  A Standalone anchor belongs to
+                        // the surrounding collection, not the alias, so it is not an error here.
+                        if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..))) {
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(Error {
+                                pos: star_pos,
+                                message: "alias node cannot have an anchor property".into(),
+                            }));
+                        }
+                        match scan_anchor_name(after_star, star_pos) {
+                            Err(e) => {
+                                self.state = IterState::Done;
+                                return StepResult::Yield(Err(e));
+                            }
+                            Ok(name) => {
+                                let name_char_count = name.chars().count();
+                                // Build alias span: from `*` through end of name.
+                                let alias_end = Pos {
+                                    byte_offset: star_pos.byte_offset + 1 + name.len(),
+                                    line: star_pos.line,
+                                    column: star_pos.column + 1 + name_char_count,
+                                };
+                                let alias_span = Span::from_pos(star_pos, alias_end);
+                                // Compute remaining content after the alias name, before
+                                // consuming the line (which would invalidate the borrow).
+                                let after_name = &after_star[name.len()..];
+                                let remaining: &'input str =
+                                    after_name.trim_start_matches([' ', '\t']);
+                                let spaces = after_name.len() - remaining.len();
+                                let had_remaining = !remaining.is_empty();
+                                let rem_byte_offset =
+                                    star_pos.byte_offset + 1 + name.len() + spaces;
+                                let rem_col = star_pos.column + 1 + name_char_count + spaces;
 
-                        // When the alias is followed by a value indicator (`: ` or `:`
-                        // at EOL), it is acting as an implicit mapping key.  If there
-                        // is no block mapping open at `line_indent` yet, open one now
-                        // (consuming any pending Standalone anchor as the mapping
-                        // anchor) and let the next iteration emit the alias as the key.
-                        // This handles `*alias : value` where the alias is the first
-                        // key of a block mapping (e.g. 26DV).
-                        let is_value_indicator = remaining
-                            .strip_prefix(':')
-                            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']));
-                        let already_in_mapping_here =
+                                // When the alias is followed by a value indicator (`: ` or `:`
+                                // at EOL), it is acting as an implicit mapping key.  If there
+                                // is no block mapping open at `line_indent` yet, open one now
+                                // (consuming any pending Standalone anchor as the mapping
+                                // anchor) and let the next iteration emit the alias as the key.
+                                // This handles `*alias : value` where the alias is the first
+                                // key of a block mapping (e.g. 26DV).
+                                let is_value_indicator =
+                                    remaining.strip_prefix(':').is_some_and(|rest| {
+                                        rest.is_empty() || rest.starts_with([' ', '\t'])
+                                    });
+                                let already_in_mapping_here =
                             self.coll_stack.last().is_some_and(|e| {
                                 matches!(e, CollectionEntry::Mapping(col, _, _) if *col == line_indent)
                             });
-                        if is_value_indicator && !already_in_mapping_here {
-                            let (map_anchor, map_anchor_loc) = if matches!(
-                                self.pending_anchor,
-                                Some(PendingAnchor::Standalone(_, _))
-                            ) {
-                                let loc = self.pending_anchor.map(PendingAnchor::loc);
-                                let name = self.pending_anchor.take().map(PendingAnchor::name);
-                                (name, loc)
-                            } else {
-                                (
-                                    self.pending_collection_anchor.take(),
-                                    self.pending_collection_anchor_loc.take(),
-                                )
-                            };
-                            let (map_tag, map_tag_loc) =
-                                if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
-                                    let pt = self.pending_tag.take();
-                                    let loc = pt.as_ref().map(PendingTag::loc);
-                                    (pt.map(PendingTag::into_cow), loc)
-                                } else {
-                                    (
-                                        self.pending_collection_tag.take(),
-                                        self.pending_collection_tag_loc.take(),
-                                    )
-                                };
-                            self.queue.push_back((
-                                Event::MappingStart {
-                                    style: CollectionStyle::Block,
-                                    meta: make_meta(
-                                        map_anchor,
-                                        map_anchor_loc,
-                                        map_tag,
-                                        map_tag_loc,
-                                    ),
-                                },
-                                zero_span(star_pos),
-                            ));
-                            self.coll_stack.push(CollectionEntry::Mapping(
-                                line_indent,
-                                MappingPhase::Key,
-                                false,
-                            ));
-                            return StepResult::Continue;
+                                if is_value_indicator && !already_in_mapping_here {
+                                    let (map_anchor, map_anchor_loc) = if matches!(
+                                        self.pending_anchor,
+                                        Some(PendingAnchor::Standalone(_, _))
+                                    ) {
+                                        let loc = self.pending_anchor.map(PendingAnchor::loc);
+                                        let name =
+                                            self.pending_anchor.take().map(PendingAnchor::name);
+                                        (name, loc)
+                                    } else {
+                                        (
+                                            self.pending_collection_anchor.take(),
+                                            self.pending_collection_anchor_loc.take(),
+                                        )
+                                    };
+                                    let (map_tag, map_tag_loc) = if matches!(
+                                        self.pending_tag,
+                                        Some(PendingTag::Standalone(..))
+                                    ) {
+                                        let pt = self.pending_tag.take();
+                                        let loc = pt.as_ref().map(PendingTag::loc);
+                                        (pt.map(PendingTag::into_cow), loc)
+                                    } else {
+                                        (
+                                            self.pending_collection_tag.take(),
+                                            self.pending_collection_tag_loc.take(),
+                                        )
+                                    };
+                                    self.queue.push_back((
+                                        Event::MappingStart {
+                                            style: CollectionStyle::Block,
+                                            meta: make_meta(
+                                                map_anchor,
+                                                map_anchor_loc,
+                                                map_tag,
+                                                map_tag_loc,
+                                            ),
+                                        },
+                                        zero_span(star_pos),
+                                    ));
+                                    self.coll_stack.push(CollectionEntry::Mapping(
+                                        line_indent,
+                                        MappingPhase::Key,
+                                        false,
+                                    ));
+                                    return StepResult::Continue;
+                                }
+
+                                self.lexer.consume_line();
+                                if had_remaining {
+                                    let rem_pos = Pos {
+                                        byte_offset: rem_byte_offset,
+                                        line: star_pos.line,
+                                        column: rem_col,
+                                    };
+                                    let synthetic = crate::lines::Line {
+                                        content: remaining,
+                                        offset: rem_byte_offset,
+                                        indent: rem_col,
+                                        break_type: line_break_type,
+                                        pos: rem_pos,
+                                    };
+                                    self.lexer.prepend_inline_line(synthetic);
+                                }
+                                self.tick_mapping_phase_after_scalar();
+                                return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
+                            }
                         }
-
-                        self.lexer.consume_line();
-                        if had_remaining {
-                            let rem_pos = Pos {
-                                byte_offset: rem_byte_offset,
-                                line: star_pos.line,
-                                column: rem_col,
-                            };
-                            let synthetic = crate::lines::Line {
-                                content: remaining,
-                                offset: rem_byte_offset,
-                                indent: rem_col,
-                                break_type: line_break_type,
-                                pos: rem_pos,
-                            };
-                            self.lexer.prepend_inline_line(synthetic);
-                        }
-                        self.tick_mapping_phase_after_scalar();
-                        return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
                     }
-                }
-            }
-        }
+                } // end if let Some(peek)
+            } // end Some(b'*') arm
 
-        // ---- Tag: `!tag`, `!!tag`, `!<uri>`, or `!` — attach to next node ----
-
-        if let Some(peek) = self.lexer.peek_next_line() {
-            let content: &'input str = peek.content;
-            let line_pos = peek.pos;
-            let line_indent = peek.indent;
-            let line_break_type = peek.break_type;
-            if trimmed.starts_with('!') {
-                let leading = content.len() - trimmed.len();
-                let bang_pos = Pos {
-                    byte_offset: line_pos.byte_offset + leading,
-                    line: line_pos.line,
-                    column: line_pos.column + leading,
-                };
-                // `tag_start` starts at the `!`; `after_bang` is everything after it.
-                let tag_start: &'input str = &content[leading..];
-                let after_bang: &'input str = &content[leading + 1..];
-                match scan_tag(after_bang, tag_start, bang_pos) {
-                    Err(e) => {
-                        self.state = IterState::Done;
-                        return StepResult::Yield(Err(e));
-                    }
-                    Ok((tag_slice, advance_past_bang)) => {
-                        // Total bytes consumed for the tag token: 1 (`!`) + advance.
-                        let tag_token_bytes = 1 + advance_past_bang;
-                        let after_tag = &trimmed[tag_token_bytes..];
-                        let inline: &'input str = after_tag.trim_start_matches([' ', '\t']);
-                        let spaces = after_tag.len() - inline.len();
-                        // A trailing comment (`# …`) is not node content.  Treat
-                        // the tag as standalone when the only thing following it
-                        // is a comment.
-                        let had_inline = !inline.is_empty() && !inline.starts_with('#');
-                        // YAML 1.2 §6.8.1: a tag property must be separated from
-                        // the following node content by `s-separate` when the first
-                        // character after the tag could be confused with a tag
-                        // continuation or creates structural ambiguity:
-                        // - `!` starts another tag property
-                        // - flow indicators (`,`, `[`, `]`, `{`, `}`) cause
-                        //   structural confusion (e.g. `!!str,`)
-                        // - `%` may be a valid percent-encoded continuation that
-                        //   should have been part of the tag, or an invalid
-                        //   percent-sequence that makes the input unparseable
-                        // When the tag scanner stopped at a plain non-tag char like
-                        // `<`, the tag ended naturally and the content is the value
-                        // (e.g. `!foo<bar val` → tag=`!foo`, scalar=`<bar val`).
-                        if had_inline && spaces == 0 {
-                            let first = inline.chars().next().unwrap_or('\0');
-                            if first == '!'
-                                || first == '%'
-                                || matches!(first, ',' | '[' | ']' | '{' | '}')
-                            {
+            // ---- Tag: `!tag`, `!!tag`, `!<uri>`, or `!` — attach to next node ----
+            Some(b'!') => {
+                if let Some(peek) = self.lexer.peek_next_line() {
+                    let content: &'input str = peek.content;
+                    let line_pos = peek.pos;
+                    let line_indent = peek.indent;
+                    let line_break_type = peek.break_type;
+                    {
+                        let leading = content.len() - trimmed.len();
+                        let bang_pos = Pos {
+                            byte_offset: line_pos.byte_offset + leading,
+                            line: line_pos.line,
+                            column: line_pos.column + leading,
+                        };
+                        // `tag_start` starts at the `!`; `after_bang` is everything after it.
+                        let tag_start: &'input str = &content[leading..];
+                        let after_bang: &'input str = &content[leading + 1..];
+                        match scan_tag(after_bang, tag_start, bang_pos) {
+                            Err(e) => {
                                 self.state = IterState::Done;
-                                return StepResult::Yield(Err(Error {
+                                return StepResult::Yield(Err(e));
+                            }
+                            Ok((tag_slice, advance_past_bang)) => {
+                                // Total bytes consumed for the tag token: 1 (`!`) + advance.
+                                let tag_token_bytes = 1 + advance_past_bang;
+                                let after_tag = &trimmed[tag_token_bytes..];
+                                let inline: &'input str = after_tag.trim_start_matches([' ', '\t']);
+                                let spaces = after_tag.len() - inline.len();
+                                // A trailing comment (`# …`) is not node content.  Treat
+                                // the tag as standalone when the only thing following it
+                                // is a comment.
+                                let had_inline = !inline.is_empty() && !inline.starts_with('#');
+                                // YAML 1.2 §6.8.1: a tag property must be separated from
+                                // the following node content by `s-separate` when the first
+                                // character after the tag could be confused with a tag
+                                // continuation or creates structural ambiguity:
+                                // - `!` starts another tag property
+                                // - flow indicators (`,`, `[`, `]`, `{`, `}`) cause
+                                //   structural confusion (e.g. `!!str,`)
+                                // - `%` may be a valid percent-encoded continuation that
+                                //   should have been part of the tag, or an invalid
+                                //   percent-sequence that makes the input unparseable
+                                // When the tag scanner stopped at a plain non-tag char like
+                                // `<`, the tag ended naturally and the content is the value
+                                // (e.g. `!foo<bar val` → tag=`!foo`, scalar=`<bar val`).
+                                if had_inline && spaces == 0 {
+                                    let first = inline.chars().next().unwrap_or('\0');
+                                    if first == '!'
+                                        || first == '%'
+                                        || matches!(first, ',' | '[' | ']' | '{' | '}')
+                                    {
+                                        self.state = IterState::Done;
+                                        return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
                                     message:
                                         "tag must be separated from node content by whitespace"
                                             .into(),
                                 }));
-                            }
-                        }
-                        let inline_offset =
-                            line_pos.byte_offset + leading + tag_token_bytes + spaces;
-                        let inline_col = line_pos.column + leading + tag_token_bytes + spaces;
-                        // Duplicate tags on the same node are an error.
-                        // Exception: if the existing tag is collection-level
-                        // (Standalone variant) and the new tag has inline content
-                        // that is (or contains) a mapping key line, they apply to
-                        // different nodes (collection vs. key scalar).
-                        if self.pending_tag.is_some() {
-                            let is_different_node =
-                                matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
-                                    && had_inline
-                                    && inline_contains_mapping_key(inline);
-                            if !is_different_node {
-                                self.state = IterState::Done;
-                                return StepResult::Yield(Err(Error {
-                                    pos: bang_pos,
-                                    message: "a node may not have more than one tag".into(),
-                                }));
-                            }
-                        }
-                        // Resolve tag handle against directive scope at scan time.
-                        let resolved_tag =
-                            match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    self.state = IterState::Done;
-                                    return StepResult::Yield(Err(e));
+                                    }
                                 }
-                            };
-                        // Build the tag span: from `!` through the last byte of the tag token.
-                        // All YAML tag characters are ASCII, so column == byte count.
-                        #[expect(
-                            clippy::cast_possible_truncation,
-                            reason = "YAML files <= 4 GB; u32 offset is sufficient"
-                        )]
-                        let tag_span = Span {
-                            start: bang_pos.byte_offset as u32,
-                            end: (bang_pos.byte_offset + tag_token_bytes) as u32,
-                        };
-                        self.lexer.consume_line();
-                        if had_inline {
-                            // If a standalone tag is already pending (for the
-                            // upcoming collection), save it to the collection slot
-                            // so both properties can be delivered simultaneously.
-                            if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
-                                let displaced = self.pending_tag.take();
-                                self.pending_collection_tag_loc =
-                                    displaced.as_ref().map(PendingTag::loc);
-                                self.pending_collection_tag = displaced.map(PendingTag::into_cow);
-                            }
-                            self.pending_tag = Some(PendingTag::Inline(resolved_tag, tag_span));
-                            // Record the original physical line's indent so that
-                            // handle_mapping_entry can open the mapping at the correct
-                            // indent when the key is on a synthetic (offset) line.
-                            // Also set when inline starts a flow collection that may
-                            // be a complex key (e.g. `!!tag [a, b]: value`).
-                            // Cleared by `handle_flow_collection` if not a key.
-                            if self.property_origin_indent.is_none()
-                                && (inline_contains_mapping_key(inline)
-                                    || inline.starts_with('[')
-                                    || inline.starts_with('{'))
-                            {
-                                self.property_origin_indent = Some(line_indent);
-                            }
-                            let inline_pos = Pos {
-                                byte_offset: inline_offset,
-                                line: line_pos.line,
-                                column: inline_col,
-                            };
-                            let synthetic = crate::lines::Line {
-                                content: inline,
-                                offset: inline_offset,
-                                indent: inline_col,
-                                break_type: line_break_type,
-                                pos: inline_pos,
-                            };
-                            self.lexer.prepend_inline_line(synthetic);
-                        } else {
-                            // Standalone tag line — applies to whatever node comes next.
-                            // Validate: the tag must be indented enough for this context.
-                            let min = self.min_standalone_property_indent();
-                            if line_indent < min {
-                                self.state = IterState::Done;
-                                return StepResult::Yield(Err(Error {
+                                let inline_offset =
+                                    line_pos.byte_offset + leading + tag_token_bytes + spaces;
+                                let inline_col =
+                                    line_pos.column + leading + tag_token_bytes + spaces;
+                                // Duplicate tags on the same node are an error.
+                                // Exception: if the existing tag is collection-level
+                                // (Standalone variant) and the new tag has inline content
+                                // that is (or contains) a mapping key line, they apply to
+                                // different nodes (collection vs. key scalar).
+                                if self.pending_tag.is_some() {
+                                    let is_different_node = matches!(
+                                        self.pending_tag,
+                                        Some(PendingTag::Standalone(..))
+                                    ) && had_inline
+                                        && inline_contains_mapping_key(inline);
+                                    if !is_different_node {
+                                        self.state = IterState::Done;
+                                        return StepResult::Yield(Err(Error {
+                                            pos: bang_pos,
+                                            message: "a node may not have more than one tag".into(),
+                                        }));
+                                    }
+                                }
+                                // Resolve tag handle against directive scope at scan time.
+                                let resolved_tag =
+                                    match self.directive_scope.resolve_tag(tag_slice, bang_pos) {
+                                        Ok(t) => t,
+                                        Err(e) => {
+                                            self.state = IterState::Done;
+                                            return StepResult::Yield(Err(e));
+                                        }
+                                    };
+                                // Build the tag span: from `!` through the last byte of the tag token.
+                                // All YAML tag characters are ASCII, so column == byte count.
+                                #[expect(
+                                    clippy::cast_possible_truncation,
+                                    reason = "YAML files <= 4 GB; u32 offset is sufficient"
+                                )]
+                                let tag_span = Span {
+                                    start: bang_pos.byte_offset as u32,
+                                    end: (bang_pos.byte_offset + tag_token_bytes) as u32,
+                                };
+                                self.lexer.consume_line();
+                                if had_inline {
+                                    // If a standalone tag is already pending (for the
+                                    // upcoming collection), save it to the collection slot
+                                    // so both properties can be delivered simultaneously.
+                                    if matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
+                                    {
+                                        let displaced = self.pending_tag.take();
+                                        self.pending_collection_tag_loc =
+                                            displaced.as_ref().map(PendingTag::loc);
+                                        self.pending_collection_tag =
+                                            displaced.map(PendingTag::into_cow);
+                                    }
+                                    self.pending_tag =
+                                        Some(PendingTag::Inline(resolved_tag, tag_span));
+                                    // Record the original physical line's indent so that
+                                    // handle_mapping_entry can open the mapping at the correct
+                                    // indent when the key is on a synthetic (offset) line.
+                                    // Also set when inline starts a flow collection that may
+                                    // be a complex key (e.g. `!!tag [a, b]: value`).
+                                    // Cleared by `handle_flow_collection` if not a key.
+                                    if self.property_origin_indent.is_none()
+                                        && (inline_contains_mapping_key(inline)
+                                            || inline.starts_with('[')
+                                            || inline.starts_with('{'))
+                                    {
+                                        self.property_origin_indent = Some(line_indent);
+                                    }
+                                    let inline_pos = Pos {
+                                        byte_offset: inline_offset,
+                                        line: line_pos.line,
+                                        column: inline_col,
+                                    };
+                                    let synthetic = crate::lines::Line {
+                                        content: inline,
+                                        offset: inline_offset,
+                                        indent: inline_col,
+                                        break_type: line_break_type,
+                                        pos: inline_pos,
+                                    };
+                                    self.lexer.prepend_inline_line(synthetic);
+                                } else {
+                                    // Standalone tag line — applies to whatever node comes next.
+                                    // Validate: the tag must be indented enough for this context.
+                                    let min = self.min_standalone_property_indent();
+                                    if line_indent < min {
+                                        self.state = IterState::Done;
+                                        return StepResult::Yield(Err(Error {
                                     pos: bang_pos,
                                     message:
                                         "node property is not indented enough for this context"
                                             .into(),
                                 }));
+                                    }
+                                    self.pending_tag =
+                                        Some(PendingTag::Standalone(resolved_tag, tag_span));
+                                }
+                                return StepResult::Continue;
                             }
-                            self.pending_tag = Some(PendingTag::Standalone(resolved_tag, tag_span));
                         }
-                        return StepResult::Continue;
-                    }
-                }
-            }
-        }
+                    } // end block
+                } // end if let Some(peek)
+            } // end Some(b'!') arm
 
-        // ---- Anchor: `&name` — attach to the next node ----
-
-        if let Some(peek) = self.lexer.peek_next_line() {
-            let content: &'input str = peek.content;
-            let line_pos = peek.pos;
-            let line_indent = peek.indent;
-            let line_break_type = peek.break_type;
-            if let Some(after_amp) = trimmed.strip_prefix('&') {
-                // We only look for `&` at the start of the trimmed line.
-                // Tags (`!`) before `&` are handled in Task 17.
-                //
-                // IMPORTANT for Task 17: when implementing tag-skip, the skip
-                // logic must consume the *full* tag token (all `ns-anchor-char`
-                // bytes after `!`), not just the `!` character alone.  The `!`
-                // character is itself a valid `ns-anchor-char`, so skipping
-                // only `!` and then re-entering anchor detection would silently
-                // include the tag body in the anchor name.  Example: `!tag &a`
-                // — skip must advance past `tag` before looking for `&a`.
-                let leading = content.len() - trimmed.len();
-                let amp_pos = Pos {
-                    byte_offset: line_pos.byte_offset + leading,
-                    line: line_pos.line,
-                    column: line_pos.column + leading,
-                };
-                match scan_anchor_name(after_amp, amp_pos) {
-                    Err(e) => {
-                        self.state = IterState::Done;
-                        return StepResult::Yield(Err(e));
-                    }
-                    Ok(name) => {
-                        // Determine what follows the anchor name on this line,
-                        // before consuming the line (borrow ends here).
-                        let after_name = &after_amp[name.len()..];
-                        let inline: &'input str = after_name.trim_start_matches([' ', '\t']);
-                        let spaces = after_name.len() - inline.len();
-                        // A trailing comment (`# …`) is not node content.  Treat
-                        // the anchor as standalone when the only thing following it
-                        // is a comment — the anchor annotates the next node on the
-                        // following line, not the comment.
-                        let had_inline = !inline.is_empty() && !inline.starts_with('#');
-                        let name_char_count = name.chars().count();
-                        // Compute the anchor span: from `&` through the last byte of the name.
-                        let anchor_end = Pos {
-                            byte_offset: amp_pos.byte_offset + 1 + name.len(),
-                            line: amp_pos.line,
-                            column: amp_pos.column + 1 + name_char_count,
+            // ---- Anchor: `&name` — attach to the next node ----
+            Some(b'&') => {
+                if let Some(peek) = self.lexer.peek_next_line() {
+                    let content: &'input str = peek.content;
+                    let line_pos = peek.pos;
+                    let line_indent = peek.indent;
+                    let line_break_type = peek.break_type;
+                    {
+                        // We only look for `&` at the start of the trimmed line.
+                        // Tags (`!`) before `&` are handled in Task 17.
+                        //
+                        // IMPORTANT for Task 17: when implementing tag-skip, the skip
+                        // logic must consume the *full* tag token (all `ns-anchor-char`
+                        // bytes after `!`), not just the `!` character alone.  The `!`
+                        // character is itself a valid `ns-anchor-char`, so skipping
+                        // only `!` and then re-entering anchor detection would silently
+                        // include the tag body in the anchor name.  Example: `!tag &a`
+                        // — skip must advance past `tag` before looking for `&a`.
+                        let after_amp = &trimmed[1..]; // we know first byte is b'&'
+                        let leading = content.len() - trimmed.len();
+                        let amp_pos = Pos {
+                            byte_offset: line_pos.byte_offset + leading,
+                            line: line_pos.line,
+                            column: line_pos.column + leading,
                         };
-                        let anchor_span = Span::from_pos(amp_pos, anchor_end);
-                        let inline_offset =
-                            line_pos.byte_offset + leading + 1 + name.len() + spaces;
-                        let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;
-                        // Duplicate anchors on the same node are an error.
-                        //
-                        // Case 1: existing anchor is inline (Inline variant) and no
-                        // collection tag is pending — both this and the existing anchor
-                        // are for the same item-level node.
-                        //
-                        // Case 2: existing anchor is standalone (Standalone variant)
-                        // and the new anchor has inline content that is NOT a collection
-                        // opener ([, {) or property (!, &) — both anchors apply to the
-                        // same scalar node.
-                        let amp_pos2 = amp_pos;
-                        let has_standalone_tag =
-                            matches!(self.pending_tag, Some(PendingTag::Standalone(..)));
-                        let is_duplicate =
-                            if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..)))
-                                && !has_standalone_tag
-                            {
-                                true
-                            } else if matches!(
-                                self.pending_anchor,
-                                Some(PendingAnchor::Standalone(..))
-                            ) && had_inline
-                                && !has_standalone_tag
-                            {
-                                // The existing anchor is collection-level, but the new anchor
-                                // has inline content.  If that content is a mapping key line
-                                // (contains `: ` etc.), the new anchor is for the key and the
-                                // existing anchor is for the mapping — different nodes, no error.
-                                // If the inline is a plain scalar (no key indicator), both
-                                // anchors apply to the same scalar node — error.
-                                let first_ch = inline.chars().next();
-                                // If inline starts with a collection/property opener, treat as
-                                // different node — no error.
-                                let starts_with_opener = matches!(
-                                    first_ch,
-                                    Some('[' | '{' | '!' | '&' | '*' | '|' | '>')
-                                );
-                                // If inline contains a mapping key indicator (`: `), the new
-                                // anchor is for a key — different node from the collection.
-                                let is_mapping_key = find_value_indicator_offset(inline).is_some();
-                                !starts_with_opener && !is_mapping_key
-                            } else {
-                                false
-                            };
-                        if is_duplicate {
-                            self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: amp_pos2,
-                                message: "a node may not have more than one anchor".into(),
-                            }));
-                        }
-                        self.lexer.consume_line();
-                        if had_inline {
-                            // Detect illegal inline block sequence: `&anchor - item`
-                            // is invalid — a block sequence indicator cannot appear
-                            // inline after an anchor property in block context.
-                            let is_seq = inline.strip_prefix('-').is_some_and(|rest| {
-                                rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
-                            });
-                            if is_seq {
+                        match scan_anchor_name(after_amp, amp_pos) {
+                            Err(e) => {
                                 self.state = IterState::Done;
-                                let seq_pos = Pos {
-                                    byte_offset: inline_offset,
-                                    line: line_pos.line,
-                                    column: inline_col,
+                                return StepResult::Yield(Err(e));
+                            }
+                            Ok(name) => {
+                                // Determine what follows the anchor name on this line,
+                                // before consuming the line (borrow ends here).
+                                let after_name = &after_amp[name.len()..];
+                                let inline: &'input str =
+                                    after_name.trim_start_matches([' ', '\t']);
+                                let spaces = after_name.len() - inline.len();
+                                // A trailing comment (`# …`) is not node content.  Treat
+                                // the anchor as standalone when the only thing following it
+                                // is a comment — the anchor annotates the next node on the
+                                // following line, not the comment.
+                                let had_inline = !inline.is_empty() && !inline.starts_with('#');
+                                let name_char_count = name.chars().count();
+                                // Compute the anchor span: from `&` through the last byte of the name.
+                                let anchor_end = Pos {
+                                    byte_offset: amp_pos.byte_offset + 1 + name.len(),
+                                    line: amp_pos.line,
+                                    column: amp_pos.column + 1 + name_char_count,
                                 };
-                                return StepResult::Yield(Err(Error {
+                                let anchor_span = Span::from_pos(amp_pos, anchor_end);
+                                let inline_offset =
+                                    line_pos.byte_offset + leading + 1 + name.len() + spaces;
+                                let inline_col =
+                                    line_pos.column + leading + 1 + name_char_count + spaces;
+                                // Duplicate anchors on the same node are an error.
+                                //
+                                // Case 1: existing anchor is inline (Inline variant) and no
+                                // collection tag is pending — both this and the existing anchor
+                                // are for the same item-level node.
+                                //
+                                // Case 2: existing anchor is standalone (Standalone variant)
+                                // and the new anchor has inline content that is NOT a collection
+                                // opener ([, {) or property (!, &) — both anchors apply to the
+                                // same scalar node.
+                                let amp_pos2 = amp_pos;
+                                let has_standalone_tag =
+                                    matches!(self.pending_tag, Some(PendingTag::Standalone(..)));
+                                let is_duplicate = if matches!(
+                                    self.pending_anchor,
+                                    Some(PendingAnchor::Inline(..))
+                                ) && !has_standalone_tag
+                                {
+                                    true
+                                } else if matches!(
+                                    self.pending_anchor,
+                                    Some(PendingAnchor::Standalone(..))
+                                ) && had_inline
+                                    && !has_standalone_tag
+                                {
+                                    // The existing anchor is collection-level, but the new anchor
+                                    // has inline content.  If that content is a mapping key line
+                                    // (contains `: ` etc.), the new anchor is for the key and the
+                                    // existing anchor is for the mapping — different nodes, no error.
+                                    // If the inline is a plain scalar (no key indicator), both
+                                    // anchors apply to the same scalar node — error.
+                                    let first_ch = inline.chars().next();
+                                    // If inline starts with a collection/property opener, treat as
+                                    // different node — no error.
+                                    let starts_with_opener = matches!(
+                                        first_ch,
+                                        Some('[' | '{' | '!' | '&' | '*' | '|' | '>')
+                                    );
+                                    // If inline contains a mapping key indicator (`: `), the new
+                                    // anchor is for a key — different node from the collection.
+                                    let is_mapping_key =
+                                        find_value_indicator_offset(inline).is_some();
+                                    !starts_with_opener && !is_mapping_key
+                                } else {
+                                    false
+                                };
+                                if is_duplicate {
+                                    self.state = IterState::Done;
+                                    return StepResult::Yield(Err(Error {
+                                        pos: amp_pos2,
+                                        message: "a node may not have more than one anchor".into(),
+                                    }));
+                                }
+                                self.lexer.consume_line();
+                                if had_inline {
+                                    // Detect illegal inline block sequence: `&anchor - item`
+                                    // is invalid — a block sequence indicator cannot appear
+                                    // inline after an anchor property in block context.
+                                    let is_seq = inline.strip_prefix('-').is_some_and(|rest| {
+                                        rest.is_empty()
+                                            || rest.starts_with(' ')
+                                            || rest.starts_with('\t')
+                                    });
+                                    if is_seq {
+                                        self.state = IterState::Done;
+                                        let seq_pos = Pos {
+                                            byte_offset: inline_offset,
+                                            line: line_pos.line,
+                                            column: inline_col,
+                                        };
+                                        return StepResult::Yield(Err(Error {
                                     pos: seq_pos,
                                     message:
                                         "block sequence indicator cannot appear inline after a node property"
                                             .into(),
                                 }));
-                            }
-                            // Inline content after anchor — anchor applies to the
-                            // inline node (scalar or key), not to any enclosing
-                            // collection opened on this same line.
-                            //
-                            // If a standalone anchor is already pending (for the
-                            // upcoming collection), save it to the collection slot
-                            // so both properties can be delivered: the standalone
-                            // anchor goes to MappingStart/SequenceStart and the
-                            // new inline anchor goes to the key/value scalar.
-                            //
-                            // Similarly, if an inline anchor is pending alongside a
-                            // standalone tag (`&a4 !!map` + `&a5 key: v`), the
-                            // inline anchor was paired with the collection tag — save
-                            // it to the collection slot so it reaches MappingStart.
-                            if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..)))
-                                || (matches!(self.pending_anchor, Some(PendingAnchor::Inline(..)))
-                                    && has_standalone_tag)
-                            {
-                                let displaced = self.pending_anchor.take();
-                                self.pending_collection_anchor = displaced.map(PendingAnchor::name);
-                                self.pending_collection_anchor_loc =
-                                    displaced.map(PendingAnchor::loc);
-                            }
-                            self.pending_anchor = Some(PendingAnchor::Inline(name, anchor_span));
-                            // Record the original physical line's indent so that
-                            // handle_mapping_entry can open the mapping at the correct
-                            // indent when the key is on a synthetic (offset) line.
-                            // Only set when the inline content leads to a mapping key
-                            // or starts a flow collection (which may be a complex key
-                            // on the same line — e.g. `&key [a, b]: value`).
-                            // In the flow-collection case the indent is cleared by
-                            // `handle_flow_collection` once it knows if it is a key.
-                            if self.property_origin_indent.is_none()
-                                && (inline_contains_mapping_key(inline)
-                                    || inline.starts_with('[')
-                                    || inline.starts_with('{'))
-                            {
-                                self.property_origin_indent = Some(line_indent);
-                            }
-                            let inline_pos = Pos {
-                                byte_offset: inline_offset,
-                                line: line_pos.line,
-                                column: inline_col,
-                            };
-                            let synthetic = crate::lines::Line {
-                                content: inline,
-                                offset: inline_offset,
-                                indent: inline_col,
-                                break_type: line_break_type,
-                                pos: inline_pos,
-                            };
-                            self.lexer.prepend_inline_line(synthetic);
-                        } else {
-                            // Standalone anchor line — anchor applies to whatever
-                            // node comes next (collection or scalar).
-                            // Validate: the anchor must be indented enough for this context.
-                            let min = self.min_standalone_property_indent();
-                            if line_indent < min {
-                                self.state = IterState::Done;
-                                let err_pos = amp_pos;
-                                return StepResult::Yield(Err(Error {
+                                    }
+                                    // Inline content after anchor — anchor applies to the
+                                    // inline node (scalar or key), not to any enclosing
+                                    // collection opened on this same line.
+                                    //
+                                    // If a standalone anchor is already pending (for the
+                                    // upcoming collection), save it to the collection slot
+                                    // so both properties can be delivered: the standalone
+                                    // anchor goes to MappingStart/SequenceStart and the
+                                    // new inline anchor goes to the key/value scalar.
+                                    //
+                                    // Similarly, if an inline anchor is pending alongside a
+                                    // standalone tag (`&a4 !!map` + `&a5 key: v`), the
+                                    // inline anchor was paired with the collection tag — save
+                                    // it to the collection slot so it reaches MappingStart.
+                                    if matches!(
+                                        self.pending_anchor,
+                                        Some(PendingAnchor::Standalone(..))
+                                    ) || (matches!(
+                                        self.pending_anchor,
+                                        Some(PendingAnchor::Inline(..))
+                                    ) && has_standalone_tag)
+                                    {
+                                        let displaced = self.pending_anchor.take();
+                                        self.pending_collection_anchor =
+                                            displaced.map(PendingAnchor::name);
+                                        self.pending_collection_anchor_loc =
+                                            displaced.map(PendingAnchor::loc);
+                                    }
+                                    self.pending_anchor =
+                                        Some(PendingAnchor::Inline(name, anchor_span));
+                                    // Record the original physical line's indent so that
+                                    // handle_mapping_entry can open the mapping at the correct
+                                    // indent when the key is on a synthetic (offset) line.
+                                    // Only set when the inline content leads to a mapping key
+                                    // or starts a flow collection (which may be a complex key
+                                    // on the same line — e.g. `&key [a, b]: value`).
+                                    // In the flow-collection case the indent is cleared by
+                                    // `handle_flow_collection` once it knows if it is a key.
+                                    if self.property_origin_indent.is_none()
+                                        && (inline_contains_mapping_key(inline)
+                                            || inline.starts_with('[')
+                                            || inline.starts_with('{'))
+                                    {
+                                        self.property_origin_indent = Some(line_indent);
+                                    }
+                                    let inline_pos = Pos {
+                                        byte_offset: inline_offset,
+                                        line: line_pos.line,
+                                        column: inline_col,
+                                    };
+                                    let synthetic = crate::lines::Line {
+                                        content: inline,
+                                        offset: inline_offset,
+                                        indent: inline_col,
+                                        break_type: line_break_type,
+                                        pos: inline_pos,
+                                    };
+                                    self.lexer.prepend_inline_line(synthetic);
+                                } else {
+                                    // Standalone anchor line — anchor applies to whatever
+                                    // node comes next (collection or scalar).
+                                    // Validate: the anchor must be indented enough for this context.
+                                    let min = self.min_standalone_property_indent();
+                                    if line_indent < min {
+                                        self.state = IterState::Done;
+                                        let err_pos = amp_pos;
+                                        return StepResult::Yield(Err(Error {
                                     pos: err_pos,
                                     message:
                                         "node property is not indented enough for this context"
                                             .into(),
                                 }));
+                                    }
+                                    self.pending_anchor =
+                                        Some(PendingAnchor::Standalone(name, anchor_span));
+                                }
+                                // Let the next iteration handle whatever follows.
+                                return StepResult::Continue;
                             }
-                            self.pending_anchor =
-                                Some(PendingAnchor::Standalone(name, anchor_span));
                         }
-                        // Let the next iteration handle whatever follows.
-                        return StepResult::Continue;
-                    }
-                }
-            }
+                    } // end block
+                } // end if let Some(peek)
+            } // end Some(b'&') arm
+
+            // ---- All other bytes: mapping keys, plain/block/quoted scalars ----
+            //
+            // `|`, `>`, `'`, `"` have unique first-byte signatures but fall here
+            // because `try_consume_scalar` handles them — no separate arm needed.
+            //
+            // Implicit mapping keys with any first byte (including non-matching
+            // `Some(b'-')` or `Some(b'?')` that didn't early-return) are caught
+            // by the `peek_mapping_entry` call in the post-match block below.
+            _ => {}
+        } // end match first_byte
+
+        // ---- Implicit mapping key detection (post-match) ----
+        //
+        // Mapping keys can start with ANY first byte — `key: value`, `-foo: val`,
+        // `?foo: val`, `:foo: val` are all valid implicit mapping keys.  Arms above
+        // may not early-return for those bytes (e.g. `-` not followed by space),
+        // so this check runs unconditionally after the dispatch match.
+        if let Some((key_indent, key_pos)) = self.peek_mapping_entry() {
+            return self.handle_mapping_entry(key_indent, key_pos);
         }
 
         // ---- Dedent: close collections more deeply nested than the current line ----
