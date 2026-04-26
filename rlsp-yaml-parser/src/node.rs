@@ -32,6 +32,53 @@ pub struct Document<Loc = Span> {
     pub explicit_end: bool,
 }
 
+/// Rare per-node fields that are absent on most nodes in typical documents.
+///
+/// Bundled behind `Option<Box<NodeMeta>>` on `Node::Scalar`, `Node::Mapping`,
+/// and `Node::Sequence` so that the common case (no anchor, no user-authored
+/// tag location, no comments) pays only one 8-byte pointer instead of ~200
+/// bytes of inline storage.  When `meta` is `None` all five fields read as
+/// their zero/empty defaults via the `Node` accessor methods.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeMeta<Loc = Span> {
+    /// Anchor name defined on this node (e.g. `&anchor`), if any.
+    pub anchor: Option<String>,
+    /// Source span of the `&name` anchor token — from `&` through the last byte of the
+    /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
+    pub anchor_loc: Option<Loc>,
+    /// Source span of the tag token — from `!` through the last byte of the tag.
+    /// `Some` when a user-authored tag is present; `None` for resolver-injected tags.
+    pub tag_loc: Option<Loc>,
+    /// Comment lines that appear before this node (e.g. `# note`).
+    /// Populated only for non-first entries in a mapping or sequence.
+    /// Document-prefix leading comments are discarded by the tokenizer
+    /// per YAML §9.2 and cannot be recovered here.
+    pub leading_comments: Option<Vec<String>>,
+    /// Inline comment on the same line as this node (e.g. `# note`).
+    pub trailing_comment: Option<String>,
+}
+
+impl<Loc> NodeMeta<Loc> {
+    /// Return `true` if all fields are `None` / empty — used to decide whether
+    /// to store `None` or `Some(Box::new(self))`.
+    pub(crate) const fn is_all_none(&self) -> bool {
+        self.anchor.is_none()
+            && self.anchor_loc.is_none()
+            && self.tag_loc.is_none()
+            && self.leading_comments.is_none()
+            && self.trailing_comment.is_none()
+    }
+
+    /// Wrap into `Option<Box<NodeMeta>>`, returning `None` when all fields are absent.
+    pub fn into_option(self) -> Option<Box<Self>> {
+        if self.is_all_none() {
+            None
+        } else {
+            Some(Box::new(self))
+        }
+    }
+}
+
 /// A YAML node parameterized by its location type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node<Loc = Span> {
@@ -41,25 +88,13 @@ pub enum Node<Loc = Span> {
         value: String,
         /// The presentation style used in the source (plain, single-quoted, etc.).
         style: ScalarStyle,
-        /// Anchor name defined on this node (e.g. `&anchor`), if any.
-        anchor: Option<String>,
-        /// Source span of the `&name` anchor token — from `&` through the last byte of the
-        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
-        anchor_loc: Option<Loc>,
         /// Tag applied to this node (e.g. `!!str`), if any.
         tag: Option<Cow<'static, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the tag.
-        /// `Some` when `tag` is `Some`; `None` otherwise.
-        tag_loc: Option<Loc>,
         /// Source span covering this scalar in the input.
         loc: Loc,
-        /// Comment lines that appear before this node (e.g. `# note`).
-        /// Populated only for non-first entries in a mapping or sequence.
-        /// Document-prefix leading comments are discarded by the tokenizer
-        /// per YAML §9.2 and cannot be recovered here.
-        leading_comments: Option<Vec<String>>,
-        /// Inline comment on the same line as this node (e.g. `# note`).
-        trailing_comment: Option<String>,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag_loc`, `leading_comments`, `trailing_comment`.
+        /// `None` for the common case where none of these are set.
+        meta: Option<Box<NodeMeta<Loc>>>,
     },
     /// A mapping (sequence of key–value pairs preserving declaration order).
     Mapping {
@@ -67,22 +102,13 @@ pub enum Node<Loc = Span> {
         entries: Vec<(Self, Self)>,
         /// The presentation style used in the source (block or flow).
         style: CollectionStyle,
-        /// Anchor name defined on this mapping (e.g. `&anchor`), if any.
-        anchor: Option<String>,
-        /// Source span of the `&name` anchor token — from `&` through the last byte of the
-        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
-        anchor_loc: Option<Loc>,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
         tag: Option<Cow<'static, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the tag.
-        /// `Some` when `tag` is `Some`; `None` otherwise.
-        tag_loc: Option<Loc>,
         /// Source span from the opening indicator to the last entry.
         loc: Loc,
-        /// Comment lines that appear before this node.
-        leading_comments: Option<Vec<String>>,
-        /// Inline comment on the same line as this node.
-        trailing_comment: Option<String>,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag_loc`, `leading_comments`, `trailing_comment`.
+        /// `None` for the common case where none of these are set.
+        meta: Option<Box<NodeMeta<Loc>>>,
     },
     /// A sequence (ordered list of nodes).
     Sequence {
@@ -90,22 +116,13 @@ pub enum Node<Loc = Span> {
         items: Vec<Self>,
         /// The presentation style used in the source (block or flow).
         style: CollectionStyle,
-        /// Anchor name defined on this sequence (e.g. `&anchor`), if any.
-        anchor: Option<String>,
-        /// Source span of the `&name` anchor token — from `&` through the last byte of the
-        /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
-        anchor_loc: Option<Loc>,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.
         tag: Option<Cow<'static, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the tag.
-        /// `Some` when `tag` is `Some`; `None` otherwise.
-        tag_loc: Option<Loc>,
         /// Source span from the opening indicator to the last item.
         loc: Loc,
-        /// Comment lines that appear before this node.
-        leading_comments: Option<Vec<String>>,
-        /// Inline comment on the same line as this node.
-        trailing_comment: Option<String>,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag_loc`, `leading_comments`, `trailing_comment`.
+        /// `None` for the common case where none of these are set.
+        meta: Option<Box<NodeMeta<Loc>>>,
     },
     /// An alias reference (lossless mode only — resolved mode expands these).
     Alias {
@@ -122,11 +139,12 @@ pub enum Node<Loc = Span> {
 
 impl<Loc> Node<Loc> {
     /// Returns the anchor name if this node defines one.
+    #[inline]
     pub fn anchor(&self) -> Option<&str> {
         match self {
-            Self::Scalar { anchor, .. }
-            | Self::Mapping { anchor, .. }
-            | Self::Sequence { anchor, .. } => anchor.as_deref(),
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => meta.as_ref().and_then(|m| m.anchor.as_deref()),
             Self::Alias { .. } => None,
         }
     }
@@ -135,67 +153,84 @@ impl<Loc> Node<Loc> {
     ///
     /// `Some(span)` when `anchor()` is `Some`; `None` otherwise.
     /// Always `None` for [`Node::Alias`] — the alias span is in `loc`.
-    pub const fn anchor_loc(&self) -> Option<Loc>
+    #[inline]
+    pub fn anchor_loc(&self) -> Option<Loc>
     where
         Loc: Copy,
     {
         match self {
-            Self::Scalar { anchor_loc, .. }
-            | Self::Mapping { anchor_loc, .. }
-            | Self::Sequence { anchor_loc, .. } => *anchor_loc,
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => meta.as_ref().and_then(|m| m.anchor_loc),
             Self::Alias { .. } => None,
         }
     }
 
     /// Returns the source span of the tag token, if any.
     ///
-    /// `Some(span)` when `tag()` is `Some`; `None` otherwise.
+    /// `Some(span)` when a user-authored tag is present; `None` for resolver-injected tags.
     /// Always `None` for [`Node::Alias`].
-    pub const fn tag_loc(&self) -> Option<Loc>
+    #[inline]
+    pub fn tag_loc(&self) -> Option<Loc>
     where
         Loc: Copy,
     {
         match self {
-            Self::Scalar { tag_loc, .. }
-            | Self::Mapping { tag_loc, .. }
-            | Self::Sequence { tag_loc, .. } => *tag_loc,
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => meta.as_ref().and_then(|m| m.tag_loc),
             Self::Alias { .. } => None,
         }
     }
 
     /// Returns the leading comments for this node.
+    #[inline]
     pub fn leading_comments(&self) -> &[String] {
         match self {
-            Self::Scalar {
-                leading_comments, ..
-            }
-            | Self::Mapping {
-                leading_comments, ..
-            }
-            | Self::Sequence {
-                leading_comments, ..
-            }
-            | Self::Alias {
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => meta
+                .as_ref()
+                .and_then(|m| m.leading_comments.as_deref())
+                .unwrap_or(&[]),
+            Self::Alias {
                 leading_comments, ..
             } => leading_comments.as_deref().unwrap_or(&[]),
         }
     }
 
     /// Returns the trailing comment for this node, if any.
+    #[inline]
     pub fn trailing_comment(&self) -> Option<&str> {
         match self {
-            Self::Scalar {
-                trailing_comment, ..
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => {
+                meta.as_ref().and_then(|m| m.trailing_comment.as_deref())
             }
-            | Self::Mapping {
-                trailing_comment, ..
-            }
-            | Self::Sequence {
-                trailing_comment, ..
-            }
-            | Self::Alias {
+            Self::Alias {
                 trailing_comment, ..
             } => trailing_comment.as_deref(),
+        }
+    }
+
+    /// Clear the anchor and `anchor_loc` on this node (used by code actions that
+    /// remove unused anchors).  No-op on `Node::Alias`.
+    pub fn clear_anchor(&mut self) {
+        match self {
+            Self::Scalar { meta, .. }
+            | Self::Mapping { meta, .. }
+            | Self::Sequence { meta, .. } => {
+                if let Some(m) = meta.as_mut() {
+                    m.anchor = None;
+                    m.anchor_loc = None;
+                    // Collapse box to None if no other fields remain set.
+                    if m.is_all_none() {
+                        *meta = None;
+                    }
+                }
+            }
+            Self::Alias { .. } => {}
         }
     }
 }
@@ -219,14 +254,379 @@ mod tests {
         Node::Scalar {
             value: value.to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
+            loc: zero_span(),
+            meta: None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // META-*: NodeMeta None/Some gating
+    // -----------------------------------------------------------------------
+
+    // META-1: scalar_all_none_meta_fields_produces_meta_none
+    #[test]
+    fn scalar_all_none_meta_fields_produces_meta_none() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Scalar { meta: None, .. }),
+            "all-None meta fields must produce meta: None"
+        );
+    }
+
+    // META-2: scalar_with_anchor_only_produces_meta_some
+    #[test]
+    fn scalar_with_anchor_only_produces_meta_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Scalar { meta: Some(_), .. }),
+            "anchor-only meta must produce meta: Some"
+        );
+    }
+
+    // META-3: scalar_with_leading_comment_only_produces_meta_some
+    #[test]
+    fn scalar_with_leading_comment_only_produces_meta_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# x".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Scalar { meta: Some(_), .. }),
+            "leading-comment-only meta must produce meta: Some"
+        );
+    }
+
+    // META-4: scalar_with_trailing_comment_only_produces_meta_some
+    #[test]
+    fn scalar_with_trailing_comment_only_produces_meta_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: Some("# y".to_owned()),
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Scalar { meta: Some(_), .. }),
+            "trailing-comment-only meta must produce meta: Some"
+        );
+    }
+
+    // META-5: scalar_with_tag_loc_only_produces_meta_some
+    #[test]
+    fn scalar_with_tag_loc_only_produces_meta_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(zero_span()),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Scalar { meta: Some(_), .. }),
+            "tag-loc-only meta must produce meta: Some"
+        );
+    }
+
+    // META-6: mapping_all_none_meta_fields_produces_meta_none
+    #[test]
+    fn mapping_all_none_meta_fields_produces_meta_none() {
+        let node = Node::Mapping {
+            entries: vec![],
+            style: CollectionStyle::Block,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Mapping { meta: None, .. }),
+            "all-None mapping meta must produce meta: None"
+        );
+    }
+
+    // META-7: sequence_all_none_meta_fields_produces_meta_none
+    #[test]
+    fn sequence_all_none_meta_fields_produces_meta_none() {
+        let node = Node::Sequence {
+            items: vec![],
+            style: CollectionStyle::Block,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert!(
+            matches!(node, Node::Sequence { meta: None, .. }),
+            "all-None sequence meta must produce meta: None"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ACC-*: accessor behavior
+    // -----------------------------------------------------------------------
+
+    // ACC-1: accessor_anchor_returns_none_when_meta_is_none
+    #[test]
+    fn accessor_anchor_returns_none_when_meta_is_none() {
+        let node = plain_scalar("v");
+        assert_eq!(node.anchor(), None);
+    }
+
+    // ACC-2: accessor_anchor_returns_some_when_meta_is_some
+    #[test]
+    fn accessor_anchor_returns_some_when_meta_is_some() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert_eq!(node.anchor(), Some("a"));
+    }
+
+    // ACC-3: accessor_anchor_loc_returns_none_when_meta_is_none
+    #[test]
+    fn accessor_anchor_loc_returns_none_when_meta_is_none() {
+        let node = plain_scalar("v");
+        assert_eq!(node.anchor_loc(), None);
+    }
+
+    // ACC-4: accessor_anchor_loc_returns_some_when_set
+    #[test]
+    fn accessor_anchor_loc_returns_some_when_set() {
+        let span = zero_span();
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: Some(span),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert_eq!(node.anchor_loc(), Some(span));
+    }
+
+    // ACC-5: accessor_tag_loc_returns_none_when_meta_is_none
+    #[test]
+    fn accessor_tag_loc_returns_none_when_meta_is_none() {
+        let node = plain_scalar("v");
+        assert_eq!(node.tag_loc(), None);
+    }
+
+    // ACC-6: accessor_tag_loc_returns_some_when_set
+    #[test]
+    fn accessor_tag_loc_returns_some_when_set() {
+        let span = zero_span();
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert_eq!(node.tag_loc(), Some(span));
+    }
+
+    // ACC-7: accessor_leading_comments_returns_empty_slice_when_meta_is_none
+    #[test]
+    fn accessor_leading_comments_returns_empty_slice_when_meta_is_none() {
+        let node = plain_scalar("v");
+        assert_eq!(node.leading_comments(), &[] as &[String]);
+    }
+
+    // ACC-8: accessor_leading_comments_returns_slice_when_set
+    #[test]
+    fn accessor_leading_comments_returns_slice_when_set() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# x".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        assert_eq!(node.leading_comments(), &["# x"]);
+    }
+
+    // ACC-9: accessor_trailing_comment_returns_none_when_meta_is_none
+    #[test]
+    fn accessor_trailing_comment_returns_none_when_meta_is_none() {
+        let node = plain_scalar("v");
+        assert_eq!(node.trailing_comment(), None);
+    }
+
+    // ACC-10: accessor_trailing_comment_returns_some_when_set
+    #[test]
+    fn accessor_trailing_comment_returns_some_when_set() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: Some("# y".to_owned()),
+            }
+            .into_option(),
+        };
+        assert_eq!(node.trailing_comment(), Some("# y"));
+    }
+
+    // ACC-ALIAS-1: alias_anchor_returns_none
+    #[test]
+    fn alias_anchor_returns_none() {
+        let node = Node::Alias {
+            name: "x".to_owned(),
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
-        }
+        };
+        assert_eq!(node.anchor(), None);
+        assert_eq!(node.anchor_loc(), None);
+        assert_eq!(node.tag_loc(), None);
+    }
+
+    // SIZE-1: node_span_size_fits_target
+    const _: () = assert!(
+        std::mem::size_of::<Node<Span>>() <= 120,
+        "Node<Span> must be <= 120 bytes"
+    );
+    #[test]
+    fn node_span_size_fits_target() {
+        let size = std::mem::size_of::<Node<Span>>();
+        assert!(
+            size <= 120,
+            "Node<Span> size {size} exceeds 120-byte target"
+        );
+    }
+
+    // CROSS-1: clear_anchor_sets_anchor_and_anchor_loc_to_none
+    #[test]
+    fn clear_anchor_sets_anchor_and_anchor_loc_to_none() {
+        let mut node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: zero_span(),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: Some(zero_span()),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        node.clear_anchor();
+        assert_eq!(
+            node.anchor(),
+            None,
+            "anchor must be None after clear_anchor"
+        );
+        assert_eq!(
+            node.anchor_loc(),
+            None,
+            "anchor_loc must be None after clear_anchor"
+        );
+        // Only anchor was set, so meta should collapse to None.
+        assert!(
+            matches!(node, Node::Scalar { meta: None, .. }),
+            "meta must collapse to None when all fields become None"
+        );
     }
 
     // NF-1: node_debug_includes_leading_comments
@@ -235,13 +635,16 @@ mod tests {
         let node = Node::Scalar {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: Some(vec!["# note".to_owned()]),
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# note".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let debug = format!("{node:?}");
         assert!(debug.contains("# note"), "debug output: {debug}");
@@ -253,24 +656,30 @@ mod tests {
         let a = Node::Scalar {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: Some(vec!["# a".to_owned()]),
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# a".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let b = Node::Scalar {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: Some(vec!["# b".to_owned()]),
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# b".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_ne!(a, b);
     }
@@ -281,13 +690,16 @@ mod tests {
         let node = Node::Scalar {
             value: "val".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: Some(vec!["# x".to_owned()]),
-            trailing_comment: Some("# y".to_owned()),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# x".to_owned()]),
+                trailing_comment: Some("# y".to_owned()),
+            }
+            .into_option(),
         };
         let cloned = node.clone();
         assert_eq!(node, cloned);
@@ -301,38 +713,6 @@ mod tests {
         let n = plain_scalar("hello");
         assert!(n.leading_comments().is_empty());
         assert!(n.trailing_comment().is_none());
-    }
-
-    #[test]
-    fn node_accessor_returns_empty_slice_for_none() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
-        };
-        assert_eq!(node.leading_comments(), &[] as &[String]);
-    }
-
-    #[test]
-    fn node_accessor_returns_slice_for_some() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: zero_span(),
-            leading_comments: Some(vec!["# x".to_owned()]),
-            trailing_comment: None,
-        };
-        assert_eq!(node.leading_comments(), &["# x"]);
     }
 
     fn bare_document(explicit_start: bool, explicit_end: bool) -> Document<Span> {
@@ -391,13 +771,16 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: Some("a".to_owned()),
-            anchor_loc: Some(span),
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: Some(span),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.anchor_loc(), Some(span));
     }
@@ -405,17 +788,7 @@ mod tests {
     // AL-NODE-2: anchor_loc_accessor_returns_none_for_unanchored_scalar
     #[test]
     fn anchor_loc_accessor_returns_none_for_unanchored_scalar() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
-        };
+        let node = plain_scalar("v");
         assert_eq!(node.anchor_loc(), None);
     }
 
@@ -438,13 +811,16 @@ mod tests {
         let node = Node::Mapping {
             entries: vec![],
             style: CollectionStyle::Block,
-            anchor: Some("m".to_owned()),
-            anchor_loc: Some(span),
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: Some("m".to_owned()),
+                anchor_loc: Some(span),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.anchor_loc(), Some(span));
     }
@@ -456,13 +832,16 @@ mod tests {
         let node = Node::Sequence {
             items: vec![],
             style: CollectionStyle::Block,
-            anchor: Some("s".to_owned()),
-            anchor_loc: Some(span),
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: Some("s".to_owned()),
+                anchor_loc: Some(span),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.anchor_loc(), Some(span));
     }
@@ -478,13 +857,16 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!t".to_owned())),
-            tag_loc: Some(span),
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.tag_loc(), Some(span));
     }
@@ -492,17 +874,7 @@ mod tests {
     // TL-NODE-2: tag_loc_accessor_returns_none_for_untagged_scalar
     #[test]
     fn tag_loc_accessor_returns_none_for_untagged_scalar() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
-        };
+        let node = plain_scalar("v");
         assert_eq!(node.tag_loc(), None);
     }
 
@@ -525,13 +897,16 @@ mod tests {
         let node = Node::Mapping {
             entries: vec![],
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!!map".to_owned())),
-            tag_loc: Some(span),
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.tag_loc(), Some(span));
     }
@@ -543,13 +918,16 @@ mod tests {
         let node = Node::Sequence {
             items: vec![],
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!!seq".to_owned())),
-            tag_loc: Some(span),
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         assert_eq!(node.tag_loc(), Some(span));
     }
@@ -564,13 +942,9 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         assert_eq!(node.tag_loc(), None);
         if let Node::Scalar { tag, .. } = &node {
@@ -584,13 +958,9 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!custom".to_owned())),
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         assert_eq!(node.tag_loc(), None);
         if let Node::Scalar { tag, .. } = &node {
@@ -604,24 +974,16 @@ mod tests {
         let borrowed = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         let owned = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("tag:yaml.org,2002:str".to_owned())),
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         assert_eq!(borrowed, owned);
     }
@@ -632,16 +994,10 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
-        // The tag field is Copy-compatible via Cow::clone. Verify the cloned
-        // Scalar's tag is still Borrowed by re-constructing from the original.
         let cloned_tag = if let Node::Scalar { tag, .. } = &node {
             tag.clone()
         } else {

@@ -103,10 +103,8 @@ fn collect_anchors_and_aliases(
             );
             aliases.push((name.clone(), range));
         }
-        Node::Scalar { anchor, loc, .. }
-        | Node::Mapping { anchor, loc, .. }
-        | Node::Sequence { anchor, loc, .. } => {
-            if let Some(name) = anchor {
+        Node::Scalar { loc, .. } | Node::Mapping { loc, .. } | Node::Sequence { loc, .. } => {
+            if let Some(name) = node.anchor() {
                 #[expect(
                     clippy::cast_possible_truncation,
                     reason = "LSP line/col are u32; always fits"
@@ -119,7 +117,7 @@ fn collect_anchors_and_aliases(
                     Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
                 );
                 anchors.push(AnchorEntry {
-                    name: name.clone(),
+                    name: name.to_owned(),
                     range,
                 });
             }

@@ -35,7 +35,7 @@ use std::iter::Peekable;
 
 use crate::error::Error;
 use crate::event::{Event, ScalarStyle};
-use crate::node::{Document, Node};
+use crate::node::{Document, Node, NodeMeta};
 use crate::pos::{Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 
@@ -464,16 +464,20 @@ impl<'opt> LoadState<'opt> {
                 tag_loc,
                 ..
             } => {
+                let anchor = anchor.map(str::to_owned);
                 let mut node = Node::Scalar {
                     value: value.into_owned(),
                     style,
-                    anchor: anchor.map(str::to_owned),
-                    anchor_loc,
                     tag: tag.map(|t| Cow::Owned(t.into_owned())),
-                    tag_loc,
                     loc: span,
-                    leading_comments: None,
-                    trailing_comment: None,
+                    meta: NodeMeta {
+                        anchor,
+                        anchor_loc,
+                        tag_loc,
+                        leading_comments: None,
+                        trailing_comment: None,
+                    }
+                    .into_option(),
                 };
                 apply_schema_to_node(&mut node, self.options.schema)?;
                 if let Some(name) = node.anchor() {
@@ -494,6 +498,7 @@ impl<'opt> LoadState<'opt> {
                 let anchor_loc = mapping_anchor_loc;
                 let tag_loc = mapping_tag_loc;
                 let tag = tag.map(|t| Cow::Owned(t.into_owned()));
+                let anchor_for_registration = anchor.clone();
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
@@ -577,19 +582,22 @@ impl<'opt> LoadState<'opt> {
                 let mut node = Node::Mapping {
                     entries,
                     style,
-                    anchor: anchor.clone(),
-                    anchor_loc,
                     tag,
-                    tag_loc,
                     loc: Span {
                         start: span.start,
                         end: end_span.end,
                     },
-                    leading_comments: None,
-                    trailing_comment: None,
+                    meta: NodeMeta {
+                        anchor,
+                        anchor_loc,
+                        tag_loc,
+                        leading_comments: None,
+                        trailing_comment: None,
+                    }
+                    .into_option(),
                 };
                 apply_schema_to_node(&mut node, self.options.schema)?;
-                if let Some(name) = anchor {
+                if let Some(name) = anchor_for_registration {
                     self.register_anchor(name, &node)?;
                 }
                 Ok(node)
@@ -607,6 +615,7 @@ impl<'opt> LoadState<'opt> {
                 let anchor_loc = sequence_anchor_loc;
                 let tag_loc = sequence_tag_loc;
                 let tag = tag.map(|t| Cow::Owned(t.into_owned()));
+                let anchor_for_registration = anchor.clone();
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
@@ -686,19 +695,22 @@ impl<'opt> LoadState<'opt> {
                 let mut node = Node::Sequence {
                     items,
                     style,
-                    anchor: anchor.clone(),
-                    anchor_loc,
                     tag,
-                    tag_loc,
                     loc: Span {
                         start: span.start,
                         end: end_span.end,
                     },
-                    leading_comments: None,
-                    trailing_comment: None,
+                    meta: NodeMeta {
+                        anchor,
+                        anchor_loc,
+                        tag_loc,
+                        leading_comments: None,
+                        trailing_comment: None,
+                    }
+                    .into_option(),
                 };
                 apply_schema_to_node(&mut node, self.options.schema)?;
-                if let Some(name) = anchor {
+                if let Some(name) = anchor_for_registration {
                     self.register_anchor(name, &node)?;
                 }
                 Ok(node)
@@ -815,13 +827,9 @@ impl<'opt> LoadState<'opt> {
             Node::Mapping {
                 entries,
                 style,
-                anchor,
-                anchor_loc,
                 tag,
-                tag_loc,
                 loc,
-                leading_comments,
-                trailing_comment,
+                meta,
             } => {
                 let mut expanded_entries = Vec::with_capacity(entries.len());
                 for (k, v) in entries {
@@ -832,25 +840,17 @@ impl<'opt> LoadState<'opt> {
                 Ok(Node::Mapping {
                     entries: expanded_entries,
                     style,
-                    anchor,
-                    anchor_loc,
                     tag,
-                    tag_loc,
                     loc,
-                    leading_comments,
-                    trailing_comment,
+                    meta,
                 })
             }
             Node::Sequence {
                 items,
                 style,
-                anchor,
-                anchor_loc,
                 tag,
-                tag_loc,
                 loc,
-                leading_comments,
-                trailing_comment,
+                meta,
             } => {
                 let mut expanded_items = Vec::with_capacity(items.len());
                 for item in items {
@@ -859,13 +859,9 @@ impl<'opt> LoadState<'opt> {
                 Ok(Node::Sequence {
                     items: expanded_items,
                     style,
-                    anchor,
-                    anchor_loc,
                     tag,
-                    tag_loc,
                     loc,
-                    leading_comments,
-                    trailing_comment,
+                    meta,
                 })
             }
             // Scalars and already-resolved nodes — pass through.
@@ -974,9 +970,8 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             value,
             style,
             tag,
-            tag_loc,
             loc,
-            ..
+            meta,
         } => {
             // Bare `!` on a scalar is the non-specific scalar tag — it resolves
             // unconditionally to !!str regardless of content (YAML 1.2.2 §10.2.1,
@@ -996,7 +991,13 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             match resolve_scalar(schema, *style, value, tag.as_deref()) {
                 Ok(Some(resolved)) => {
                     *tag = Some(Cow::Borrowed(resolved.as_str()));
-                    *tag_loc = None;
+                    // Clear tag_loc: resolver-injected tags have no source position.
+                    if let Some(m) = meta.as_mut() {
+                        m.tag_loc = None;
+                        if m.is_all_none() {
+                            *meta = None;
+                        }
+                    }
                 }
                 Ok(None) => {}
                 Err(_) => {
@@ -1007,7 +1008,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
                 }
             }
         }
-        Node::Mapping { tag, tag_loc, .. } => {
+        Node::Mapping { tag, meta, .. } => {
             // Bare `!` on a collection means non-specific collection tag — translate
             // to None so the resolver returns the kind-based tag (!!map / !!seq).
             let effective_tag = tag.as_deref().filter(|t| *t != "!");
@@ -1015,16 +1016,26 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
                 resolve_collection(schema, CollectionKind::Mapping, effective_tag)
             {
                 *tag = Some(Cow::Borrowed(resolved.as_str()));
-                *tag_loc = None;
+                if let Some(m) = meta.as_mut() {
+                    m.tag_loc = None;
+                    if m.is_all_none() {
+                        *meta = None;
+                    }
+                }
             }
         }
-        Node::Sequence { tag, tag_loc, .. } => {
+        Node::Sequence { tag, meta, .. } => {
             let effective_tag = tag.as_deref().filter(|t| *t != "!");
             if let Some(resolved) =
                 resolve_collection(schema, CollectionKind::Sequence, effective_tag)
             {
                 *tag = Some(Cow::Borrowed(resolved.as_str()));
-                *tag_loc = None;
+                if let Some(m) = meta.as_mut() {
+                    m.tag_loc = None;
+                    if m.is_all_none() {
+                        *meta = None;
+                    }
+                }
             }
         }
         Node::Alias { .. } => {}
@@ -1040,16 +1051,12 @@ const fn empty_scalar() -> Node<Span> {
     Node::Scalar {
         value: String::new(),
         style: ScalarStyle::Plain,
-        anchor: None,
-        anchor_loc: None,
         tag: None,
-        tag_loc: None,
         loc: Span {
             start: Pos::ORIGIN,
             end: Pos::ORIGIN,
         },
-        leading_comments: None,
-        trailing_comment: None,
+        meta: None,
     }
 }
 
@@ -1097,16 +1104,12 @@ mod tests {
         let node = Node::Scalar {
             value: "x".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: Span {
                 start: Pos::ORIGIN,
                 end: Pos::ORIGIN,
             },
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         assert!(state.register_anchor("a".to_owned(), &node).is_ok());
         assert!(state.register_anchor("b".to_owned(), &node).is_ok());
@@ -1804,5 +1807,73 @@ mod tests {
             panic!("expected scalar");
         };
         assert_eq!(tag_user.as_deref(), Some("!custom"));
+    }
+
+    // -----------------------------------------------------------------------
+    // LOAD-META: loader correctly gates NodeMeta construction
+    // -----------------------------------------------------------------------
+
+    // LOAD-META-1: loaded_plain_scalar_has_no_meta
+    #[test]
+    fn loaded_plain_scalar_has_no_meta() {
+        let docs = load("hello\n").unwrap();
+        let root = &docs[0].root;
+        // Plain scalar with no anchor, no user-authored tag_loc, no comments → meta: None
+        assert!(
+            matches!(root, Node::Scalar { meta: None, .. }),
+            "plain scalar must have meta: None, got: {root:?}"
+        );
+    }
+
+    // LOAD-META-2: loaded_anchored_scalar_has_meta_some
+    #[test]
+    fn loaded_anchored_scalar_has_meta_some() {
+        let docs = load("- &foo bar\n").unwrap();
+        let Node::Sequence { items, .. } = &docs[0].root else {
+            panic!("expected root Sequence");
+        };
+        let item = &items[0];
+        assert!(
+            matches!(item, Node::Scalar { meta: Some(_), .. }),
+            "anchored scalar must have meta: Some, got: {item:?}"
+        );
+        assert_eq!(item.anchor(), Some("foo"));
+    }
+
+    // LOAD-META-3: loaded_mapping_with_no_meta_fields_has_meta_none
+    #[test]
+    fn loaded_mapping_with_no_meta_fields_has_meta_none() {
+        let docs = load("a: 1\n").unwrap();
+        let root = &docs[0].root;
+        assert!(
+            matches!(root, Node::Mapping { meta: None, .. }),
+            "plain mapping must have meta: None, got: {root:?}"
+        );
+    }
+
+    // LOAD-META-4: loaded_sequence_with_no_meta_fields_has_meta_none
+    #[test]
+    fn loaded_sequence_with_no_meta_fields_has_meta_none() {
+        let docs = load("- a\n").unwrap();
+        let root = &docs[0].root;
+        assert!(
+            matches!(root, Node::Sequence { meta: None, .. }),
+            "plain sequence must have meta: None, got: {root:?}"
+        );
+    }
+
+    // LOAD-META-5: loaded_scalar_with_anchor_has_meta_some_with_anchor_loc
+    #[test]
+    fn loaded_scalar_with_anchor_has_meta_some_with_anchor_loc() {
+        let docs = load("&tag hello\n").unwrap();
+        let root = &docs[0].root;
+        assert!(
+            matches!(root, Node::Scalar { meta: Some(_), .. }),
+            "anchored scalar must have meta: Some"
+        );
+        assert!(
+            root.anchor_loc().is_some(),
+            "anchor_loc() must be Some for anchored scalar"
+        );
     }
 }

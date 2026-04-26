@@ -418,11 +418,7 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
     match (actual, expected) {
         (
             Node::Scalar {
-                value,
-                style,
-                anchor,
-                tag,
-                ..
+                value, style, tag, ..
             },
             ExpectedNode::Scalar {
                 value: exp_value,
@@ -440,9 +436,10 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 "{path}: scalar style mismatch: got {style:?}, expected {exp_style:?}"
             );
             assert_eq!(
-                anchor.as_deref(),
+                actual.anchor(),
                 exp_anchor.as_deref(),
-                "{path}: scalar anchor mismatch: got {anchor:?}, expected {exp_anchor:?}"
+                "{path}: scalar anchor mismatch: got {:?}, expected {exp_anchor:?}",
+                actual.anchor()
             );
             // When the event tree records a tag, it must match exactly —
             // with one exception: the bare `!` non-specific scalar tag is
@@ -465,11 +462,7 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
         }
         (
             Node::Sequence {
-                items,
-                style,
-                anchor,
-                tag,
-                ..
+                items, style, tag, ..
             },
             ExpectedNode::Sequence {
                 items: exp_items,
@@ -483,7 +476,7 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 "{path}: sequence style mismatch: got {style:?}, expected {exp_style:?}"
             );
             assert_eq!(
-                anchor.as_deref(),
+                actual.anchor(),
                 exp_anchor.as_deref(),
                 "{path}: sequence anchor mismatch"
             );
@@ -512,7 +505,6 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
             Node::Mapping {
                 entries,
                 style,
-                anchor,
                 tag,
                 ..
             },
@@ -528,7 +520,7 @@ fn assert_node(actual: &Node<Span>, expected: &ExpectedNode, path: &str) {
                 "{path}: mapping style mismatch: got {style:?}, expected {exp_style:?}"
             );
             assert_eq!(
-                anchor.as_deref(),
+                actual.anchor(),
                 exp_anchor.as_deref(),
                 "{path}: mapping anchor mismatch"
             );

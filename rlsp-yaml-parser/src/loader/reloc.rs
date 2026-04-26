@@ -9,65 +9,41 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
         Node::Scalar {
             value,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
-            leading_comments,
-            trailing_comment,
+            meta,
             ..
         } => Node::Scalar {
             value,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
             loc,
-            leading_comments,
-            trailing_comment,
+            meta,
         },
         Node::Mapping {
             entries,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
-            leading_comments,
-            trailing_comment,
+            meta,
             ..
         } => Node::Mapping {
             entries,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
             loc,
-            leading_comments,
-            trailing_comment,
+            meta,
         },
         Node::Sequence {
             items,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
-            leading_comments,
-            trailing_comment,
+            meta,
             ..
         } => Node::Sequence {
             items,
             style,
-            anchor,
-            anchor_loc,
             tag,
-            tag_loc,
             loc,
-            leading_comments,
-            trailing_comment,
+            meta,
         },
         Node::Alias {
             name,
@@ -88,6 +64,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
     clippy::indexing_slicing,
     clippy::panic,
     clippy::wildcard_enum_match_arm,
+    clippy::expect_used,
     reason = "test code"
 )]
 mod tests {
@@ -95,6 +72,7 @@ mod tests {
 
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
+    use crate::node::NodeMeta;
     use crate::pos::Pos;
 
     fn span(line: usize) -> Span {
@@ -110,13 +88,9 @@ mod tests {
         Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc,
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -125,36 +99,36 @@ mod tests {
         let node = Node::Scalar {
             value: "hello".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: Some("a".to_owned()),
-            anchor_loc: Some(span(5)),
             tag: Some(Cow::Owned("!t".to_owned())),
-            tag_loc: Some(span(6)),
             loc: span(1),
-            leading_comments: Some(vec!["# lc".to_owned()]),
-            trailing_comment: Some("# tc".to_owned()),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: Some(span(5)),
+                tag_loc: Some(span(6)),
+                leading_comments: Some(vec!["# lc".to_owned()]),
+                trailing_comment: Some("# tc".to_owned()),
+            }
+            .into_option(),
         };
         let result = reloc(node, span(2));
         match result {
             Node::Scalar {
                 value,
                 style,
-                anchor,
-                anchor_loc,
                 tag,
-                tag_loc,
                 loc,
-                leading_comments,
-                trailing_comment,
+                meta,
             } => {
                 assert_eq!(loc, span(2));
-                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
-                assert_eq!(tag_loc, Some(span(6)), "tag_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.anchor_loc, Some(span(5)), "anchor_loc must be preserved");
+                assert_eq!(m.tag_loc, Some(span(6)), "tag_loc must be preserved");
                 assert_eq!(value, "hello");
                 assert_eq!(style, ScalarStyle::Plain);
-                assert_eq!(anchor, Some("a".to_owned()));
+                assert_eq!(m.anchor, Some("a".to_owned()));
                 assert_eq!(tag.as_deref(), Some("!t"));
-                assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
-                assert_eq!(trailing_comment, Some("# tc".to_owned()));
+                assert_eq!(m.leading_comments, Some(vec!["# lc".to_owned()]));
+                assert_eq!(m.trailing_comment, Some("# tc".to_owned()));
             }
             _ => panic!("expected Scalar"),
         }
@@ -165,33 +139,34 @@ mod tests {
         let node = Node::Mapping {
             entries: vec![],
             style: CollectionStyle::Block,
-            anchor: Some("m".to_owned()),
-            anchor_loc: Some(span(5)),
             tag: Some(Cow::Owned("!m".to_owned())),
-            tag_loc: Some(span(6)),
             loc: span(1),
-            leading_comments: Some(vec!["# lc".to_owned()]),
-            trailing_comment: Some("# tc".to_owned()),
+            meta: NodeMeta {
+                anchor: Some("m".to_owned()),
+                anchor_loc: Some(span(5)),
+                tag_loc: Some(span(6)),
+                leading_comments: Some(vec!["# lc".to_owned()]),
+                trailing_comment: Some("# tc".to_owned()),
+            }
+            .into_option(),
         };
         let result = reloc(node, span(3));
         match result {
             Node::Mapping {
                 entries,
-                anchor,
-                anchor_loc,
                 tag,
                 loc,
-                leading_comments,
-                trailing_comment,
+                meta,
                 ..
             } => {
                 assert_eq!(loc, span(3));
-                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert!(entries.is_empty());
-                assert_eq!(anchor, Some("m".to_owned()));
+                assert_eq!(m.anchor, Some("m".to_owned()));
                 assert_eq!(tag.as_deref(), Some("!m"));
-                assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
-                assert_eq!(trailing_comment, Some("# tc".to_owned()));
+                assert_eq!(m.leading_comments, Some(vec!["# lc".to_owned()]));
+                assert_eq!(m.trailing_comment, Some("# tc".to_owned()));
             }
             _ => panic!("expected Mapping"),
         }
@@ -202,24 +177,25 @@ mod tests {
         let node = Node::Sequence {
             items: vec![],
             style: CollectionStyle::Block,
-            anchor: Some("s".to_owned()),
-            anchor_loc: Some(span(5)),
             tag: None,
-            tag_loc: None,
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: Some("s".to_owned()),
+                anchor_loc: Some(span(5)),
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let result = reloc(node, span(4));
         match result {
             Node::Sequence {
-                items,
-                loc,
-                anchor_loc,
-                ..
+                items, loc, meta, ..
             } => {
                 assert_eq!(loc, span(4));
-                assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert!(items.is_empty());
             }
             _ => panic!("expected Sequence"),
@@ -229,24 +205,15 @@ mod tests {
     // reloc_anchor_loc_none_preserved: None anchor_loc stays None after reloc
     #[test]
     fn reloc_anchor_loc_none_preserved() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
-        };
+        let node = plain_scalar(span(1));
         let result = reloc(node, span(99));
         match result {
-            Node::Scalar {
-                anchor_loc, loc, ..
-            } => {
+            Node::Scalar { meta, loc, .. } => {
                 assert_eq!(loc, span(99));
-                assert_eq!(anchor_loc, None, "None anchor_loc must remain None");
+                assert!(
+                    meta.is_none(),
+                    "None anchor_loc must remain None (meta stays None)"
+                );
             }
             _ => panic!("expected Scalar"),
         }
@@ -275,13 +242,16 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: span(1),
-            leading_comments: Some(vec!["# hi".to_owned()]),
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: Some(vec!["# hi".to_owned()]),
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let result = reloc(node, span(2));
         assert_eq!(result.leading_comments(), &["# hi"]);
@@ -292,13 +262,16 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: Some("# tail".to_owned()),
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: Some("# tail".to_owned()),
+            }
+            .into_option(),
         };
         let result = reloc(node, span(2));
         assert_eq!(result.trailing_comment(), Some("# tail"));
@@ -310,13 +283,9 @@ mod tests {
         let node = Node::Mapping {
             entries: vec![(plain_scalar(span(10)), plain_scalar(span(10)))],
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         let result = reloc(node, span(99));
         match result {
@@ -342,19 +311,23 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!t".to_owned())),
-            tag_loc: Some(span(5)),
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span(5)),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let result = reloc(node, span(2));
         match result {
-            Node::Scalar { tag_loc, loc, .. } => {
+            Node::Scalar { meta, loc, .. } => {
                 assert_eq!(loc, span(2));
-                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.tag_loc, Some(span(5)), "tag_loc must be preserved");
             }
             _ => panic!("expected Scalar"),
         }
@@ -363,22 +336,15 @@ mod tests {
     // TL-RELOC: reloc_tag_loc_none_preserved
     #[test]
     fn reloc_tag_loc_none_preserved() {
-        let node = Node::Scalar {
-            value: "v".to_owned(),
-            style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
-            tag: None,
-            tag_loc: None,
-            loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
-        };
+        let node = plain_scalar(span(1));
         let result = reloc(node, span(99));
         match result {
-            Node::Scalar { tag_loc, loc, .. } => {
+            Node::Scalar { meta, loc, .. } => {
                 assert_eq!(loc, span(99));
-                assert_eq!(tag_loc, None, "None tag_loc must remain None");
+                assert!(
+                    meta.is_none(),
+                    "None tag_loc must remain None (meta stays None)"
+                );
             }
             _ => panic!("expected Scalar"),
         }
@@ -390,19 +356,23 @@ mod tests {
         let node = Node::Mapping {
             entries: vec![],
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!m".to_owned())),
-            tag_loc: Some(span(5)),
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span(5)),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let result = reloc(node, span(3));
         match result {
-            Node::Mapping { tag_loc, loc, .. } => {
+            Node::Mapping { meta, loc, .. } => {
                 assert_eq!(loc, span(3));
-                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.tag_loc, Some(span(5)), "tag_loc must be preserved");
             }
             _ => panic!("expected Mapping"),
         }
@@ -414,19 +384,23 @@ mod tests {
         let node = Node::Sequence {
             items: vec![],
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!s".to_owned())),
-            tag_loc: Some(span(5)),
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: NodeMeta {
+                anchor: None,
+                anchor_loc: None,
+                tag_loc: Some(span(5)),
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
         };
         let result = reloc(node, span(4));
         match result {
-            Node::Sequence { tag_loc, loc, .. } => {
+            Node::Sequence { meta, loc, .. } => {
                 assert_eq!(loc, span(4));
-                assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
+                let m = meta.as_deref().expect("meta must be Some");
+                assert_eq!(m.tag_loc, Some(span(5)), "tag_loc must be preserved");
             }
             _ => panic!("expected Sequence"),
         }
@@ -442,13 +416,9 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-            tag_loc: None,
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         let result = reloc(node, span(2));
         match result {
@@ -468,13 +438,9 @@ mod tests {
         let node = Node::Scalar {
             value: "v".to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!custom".to_owned())),
-            tag_loc: None,
             loc: span(1),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         };
         let result = reloc(node, span(2));
         match result {
@@ -484,6 +450,49 @@ mod tests {
                     "reloc must preserve an Owned tag as Owned"
                 );
             }
+            _ => panic!("expected Scalar"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // RELOC-META: NodeMeta boxing preserved by reloc
+    // -----------------------------------------------------------------------
+
+    // RELOC-META-1: reloc_scalar_meta_none_preserved
+    #[test]
+    fn reloc_scalar_meta_none_preserved() {
+        let node = plain_scalar(span(1));
+        let result = reloc(node, span(42));
+        match result {
+            Node::Scalar { meta, loc, .. } => {
+                assert_eq!(loc, span(42));
+                assert!(meta.is_none(), "meta must remain None after reloc");
+            }
+            _ => panic!("expected Scalar"),
+        }
+    }
+
+    // RELOC-META-2: reloc_scalar_meta_some_preserved
+    #[test]
+    fn reloc_scalar_meta_some_preserved() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            tag: None,
+            loc: span(1),
+            meta: NodeMeta {
+                anchor: Some("a".to_owned()),
+                anchor_loc: None,
+                tag_loc: None,
+                leading_comments: None,
+                trailing_comment: None,
+            }
+            .into_option(),
+        };
+        let result = reloc(node, span(5));
+        assert_eq!(result.anchor(), Some("a"), "anchor must survive reloc");
+        match result {
+            Node::Scalar { loc, .. } => assert_eq!(loc, span(5)),
             _ => panic!("expected Scalar"),
         }
     }

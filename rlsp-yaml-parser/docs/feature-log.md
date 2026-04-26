@@ -328,6 +328,29 @@ recommended default schema that YAML [processors] should use unless instructed o
 Schema resolution is decoupled from the streaming event layer and lives entirely in the loader.
 **Tier:** 1
 
+### Node Variant Memory Layout Optimization [completed]
+
+**Description:** `Node::Scalar`, `Node::Mapping`, and `Node::Sequence` variants
+restructured to carry rare fields (`anchor`, `anchor_loc`, `tag_loc`,
+`leading_comments`, `trailing_comment`) behind a `meta: Option<Box<NodeMeta>>`
+field instead of inline. For the common case — no anchor, no user-authored tag
+location, no comments — `meta` is `None` and each node pays one 8-byte pointer
+instead of ~200 bytes of inline storage. When rare fields are present, one heap
+allocation covers all five. `Node::Alias` keeps its current inline fields
+unchanged. Accessor methods (`anchor()`, `anchor_loc()`, `tag_loc()`,
+`leading_comments()`, `trailing_comment()`) are preserved and inlined; patterns
+that previously destructured these five fields by name must use accessor calls.
+`Node<Span>` size: 288 bytes → 120 bytes per variant.
+**Complexity:** Medium
+**Comment:** This is a semver-breaking API change (0.7 → 0.8). Migration: replace
+`if let Node::Scalar { anchor, .. } = node { use anchor.as_deref() }` with
+`node.anchor()`. Direct field access on `anchor`, `anchor_loc`, `tag_loc`,
+`leading_comments`, `trailing_comment` is no longer available on the
+Scalar/Mapping/Sequence variants. The new `clear_anchor()` method removes an
+anchor from a node; use it instead of `match &mut node { Node::Scalar { anchor,
+.. } => *anchor = None, .. }`.
+**Tier:** 2
+
 ### Zero-Allocation Resolver-Injected Tags [completed]
 
 **Description:** `Node::tag` changed from `Option<String>` to

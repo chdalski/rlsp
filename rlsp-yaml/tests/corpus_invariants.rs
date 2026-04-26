@@ -492,15 +492,9 @@ fn check_i5_anchor_loc_invariant(_path: &Path, text: &str) -> Result<(), String>
 
 fn check_i5_node(node: &Node<Span>) -> Result<(), String> {
     match node {
-        Node::Scalar {
-            anchor, anchor_loc, ..
-        }
-        | Node::Mapping {
-            anchor, anchor_loc, ..
-        }
-        | Node::Sequence {
-            anchor, anchor_loc, ..
-        } => {
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
+            let anchor = node.anchor();
+            let anchor_loc = node.anchor_loc();
             if anchor.is_some() != anchor_loc.is_some() {
                 return Err(format!(
                     "I5 invariant violated: anchor={anchor:?} but anchor_loc={anchor_loc:?}"
@@ -542,13 +536,12 @@ fn check_i6_tag_loc_invariant(_path: &Path, text: &str) -> Result<(), String> {
 
 fn check_i6_node(node: &Node<Span>) -> Result<(), String> {
     match node {
-        Node::Scalar { tag, tag_loc, .. }
-        | Node::Mapping { tag, tag_loc, .. }
-        | Node::Sequence { tag, tag_loc, .. } => {
+        Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
             // Resolver-injected core schema tags (`tag:yaml.org,2002:*`) have no source
             // position (`tag_loc: None`) by design — they were inferred, not written in
             // the source.  Allow those through.  Any other tag that is present must have
             // a corresponding source location.
+            let tag_loc = node.tag_loc();
             let is_resolver_injected = tag
                 .as_deref()
                 .is_some_and(|t| t.starts_with("tag:yaml.org,2002:"));
@@ -1316,13 +1309,9 @@ mod tests {
         Node::Scalar {
             value: value.to_owned(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -1330,13 +1319,9 @@ mod tests {
         Node::Mapping {
             entries,
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -1344,13 +1329,9 @@ mod tests {
         Node::Sequence {
             items,
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -1680,13 +1661,10 @@ mod tests {
         let node = Node::Scalar {
             value: String::new(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: Some(Cow::Owned("!custom".to_owned())),
-            tag_loc: None, // Simulated loader bug: user tag with no source position.
             loc: origin,
-            leading_comments: None,
-            trailing_comment: None,
+            // Simulated loader bug: user tag with no source position (meta: None).
+            meta: None,
         };
         let result = check_i6_node(&node);
         assert!(

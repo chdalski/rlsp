@@ -181,7 +181,8 @@ fn it_12_anchor_on_scalar_is_preserved_in_lossless_mode() {
     };
     assert_eq!(items.len(), 2);
     assert!(
-        matches!(&items[0], Node::Scalar { anchor: Some(a), value, .. } if a == "ref" && value == "shared"),
+        matches!(&items[0], Node::Scalar { value, .. } if value == "shared")
+            && items[0].anchor() == Some("ref"),
         "got: {:?}",
         &items[0]
     );
@@ -221,7 +222,7 @@ fn it_14_anchor_on_mapping_is_registered() {
     assert!(base_entry.is_some(), "key 'base' not found");
     let (_, val) = base_entry.unwrap();
     assert!(
-        matches!(val, Node::Mapping { anchor: Some(a), .. } if a == "base"),
+        matches!(val, Node::Mapping { .. }) && val.anchor() == Some("base"),
         "got: {val:?}"
     );
 }
@@ -415,7 +416,7 @@ fn it_rt_9_anchored_node_preserves_anchor() {
         panic!("expected Sequence");
     };
     assert!(
-        matches!(&items[0], Node::Scalar { anchor: Some(a), .. } if a == "ref"),
+        matches!(&items[0], Node::Scalar { .. }) && items[0].anchor() == Some("ref"),
         "got: {:?}",
         &items[0]
     );
@@ -474,31 +475,25 @@ fn it_rt_12_large_mapping_count() {
 #[test]
 fn inline_anchor_before_key_annotates_key_scalar_root() {
     let node = load_one("&anchor key: value\n");
-    let Node::Mapping {
-        entries, anchor, ..
-    } = &node
-    else {
+    let Node::Mapping { entries, .. } = &node else {
         panic!("expected Mapping root, got: {node:?}");
     };
     assert!(
-        anchor.is_none(),
-        "mapping must have no anchor; got: {anchor:?}"
+        node.anchor().is_none(),
+        "mapping must have no anchor; got: {:?}",
+        node.anchor()
     );
     assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
     let (k, v) = &entries[0];
-    let Node::Scalar {
-        value: kv,
-        anchor: ka,
-        ..
-    } = k
-    else {
+    let Node::Scalar { value: kv, .. } = k else {
         panic!("key must be Scalar; got: {k:?}");
     };
     assert_eq!(kv.as_str(), "key");
     assert_eq!(
-        ka.as_deref(),
+        k.anchor(),
         Some("anchor"),
-        "anchor must be on key scalar; got: {ka:?}"
+        "anchor must be on key scalar; got: {:?}",
+        k.anchor()
     );
     assert_eq!(scalar_value(v), "value");
 }
@@ -512,17 +507,13 @@ fn inline_anchor_before_key_annotates_key_scalar_indented() {
     };
     assert_eq!(entries.len(), 1);
     let (_, v) = &entries[0];
-    let Node::Mapping {
-        entries: inner,
-        anchor,
-        ..
-    } = v
-    else {
+    let Node::Mapping { entries: inner, .. } = v else {
         panic!("expected inner Mapping; got: {v:?}");
     };
     assert!(
-        anchor.is_none(),
-        "inner mapping must have no anchor; got: {anchor:?}"
+        v.anchor().is_none(),
+        "inner mapping must have no anchor; got: {:?}",
+        v.anchor()
     );
     assert_eq!(
         inner.len(),
@@ -531,19 +522,15 @@ fn inline_anchor_before_key_annotates_key_scalar_indented() {
         inner.len()
     );
     let (ik, iv) = &inner[0];
-    let Node::Scalar {
-        value: ikv,
-        anchor: ika,
-        ..
-    } = ik
-    else {
+    let Node::Scalar { value: ikv, .. } = ik else {
         panic!("inner key must be Scalar; got: {ik:?}");
     };
     assert_eq!(ikv.as_str(), "inner_key");
     assert_eq!(
-        ika.as_deref(),
+        ik.anchor(),
         Some("anchor"),
-        "anchor must be on inner key scalar; got: {ika:?}"
+        "anchor must be on inner key scalar; got: {:?}",
+        ik.anchor()
     );
     assert_eq!(scalar_value(iv), "inner_value");
 }
@@ -581,18 +568,13 @@ fn inline_tag_before_key_annotates_key_scalar() {
 #[test]
 fn inline_anchor_and_tag_before_key_annotate_key_scalar() {
     let node = load_one("&a !!str key: value\n");
-    let Node::Mapping {
-        entries,
-        anchor,
-        tag,
-        ..
-    } = &node
-    else {
+    let Node::Mapping { entries, tag, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
     assert!(
-        anchor.is_none(),
-        "mapping must have no anchor; got: {anchor:?}"
+        node.anchor().is_none(),
+        "mapping must have no anchor; got: {:?}",
+        node.anchor()
     );
     // The mapping has no source tag; Core schema resolution gives it !!map.
     assert_eq!(
@@ -603,19 +585,17 @@ fn inline_anchor_and_tag_before_key_annotate_key_scalar() {
     assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
     let (k, v) = &entries[0];
     let Node::Scalar {
-        value: kv,
-        anchor: ka,
-        tag: kt,
-        ..
+        value: kv, tag: kt, ..
     } = k
     else {
         panic!("key must be Scalar; got: {k:?}");
     };
     assert_eq!(kv.as_str(), "key");
     assert_eq!(
-        ka.as_deref(),
+        k.anchor(),
         Some("a"),
-        "anchor must be on key scalar; got: {ka:?}"
+        "anchor must be on key scalar; got: {:?}",
+        k.anchor()
     );
     assert!(
         kt.as_deref().is_some_and(|t| t.contains("str")),
@@ -628,44 +608,39 @@ fn inline_anchor_and_tag_before_key_annotate_key_scalar() {
 #[test]
 fn standalone_anchor_before_mapping_annotates_mapping() {
     let node = load_one("&anchor\nkey: value\n");
-    let Node::Mapping {
-        entries, anchor, ..
-    } = &node
-    else {
+    let Node::Mapping { entries, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
     assert_eq!(
-        anchor.as_deref(),
+        node.anchor(),
         Some("anchor"),
-        "anchor must be on mapping; got: {anchor:?}"
+        "anchor must be on mapping; got: {:?}",
+        node.anchor()
     );
     assert_eq!(entries.len(), 1, "expected 1 entry; got: {}", entries.len());
     let (k, _) = &entries[0];
-    let Node::Scalar {
-        value: kv,
-        anchor: ka,
-        ..
-    } = k
-    else {
+    let Node::Scalar { value: kv, .. } = k else {
         panic!("key must be Scalar; got: {k:?}");
     };
     assert_eq!(kv.as_str(), "key");
-    assert!(ka.is_none(), "key scalar must have no anchor; got: {ka:?}");
+    assert!(
+        k.anchor().is_none(),
+        "key scalar must have no anchor; got: {:?}",
+        k.anchor()
+    );
 }
 
 // IT-I-6: Multi-entry mapping — inline anchor on one key, other keys unaffected.
 #[test]
 fn inline_anchor_on_one_key_in_multi_entry_mapping() {
     let node = load_one("a: 1\n&anchor b: 2\nc: 3\n");
-    let Node::Mapping {
-        entries, anchor, ..
-    } = &node
-    else {
+    let Node::Mapping { entries, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
     assert!(
-        anchor.is_none(),
-        "mapping must have no anchor; got: {anchor:?}"
+        node.anchor().is_none(),
+        "mapping must have no anchor; got: {:?}",
+        node.anchor()
     );
     assert_eq!(
         entries.len(),
@@ -675,33 +650,33 @@ fn inline_anchor_on_one_key_in_multi_entry_mapping() {
     );
     // First key: no anchor
     let (k0, _) = &entries[0];
-    let Node::Scalar { anchor: a0, .. } = k0 else {
-        panic!("expected Scalar key 0");
-    };
-    assert!(a0.is_none(), "key 'a' must have no anchor; got: {a0:?}");
+    assert!(matches!(k0, Node::Scalar { .. }), "expected Scalar key 0");
+    assert!(
+        k0.anchor().is_none(),
+        "key 'a' must have no anchor; got: {:?}",
+        k0.anchor()
+    );
     // Second key: carries the anchor
     let (k1, v1) = &entries[1];
-    let Node::Scalar {
-        value: kv1,
-        anchor: a1,
-        ..
-    } = k1
-    else {
+    let Node::Scalar { value: kv1, .. } = k1 else {
         panic!("expected Scalar key 1");
     };
     assert_eq!(kv1.as_str(), "b");
     assert_eq!(
-        a1.as_deref(),
+        k1.anchor(),
         Some("anchor"),
-        "anchor must be on key 'b'; got: {a1:?}"
+        "anchor must be on key 'b'; got: {:?}",
+        k1.anchor()
     );
     assert_eq!(scalar_value(v1), "2");
     // Third key: no anchor
     let (k2, _) = &entries[2];
-    let Node::Scalar { anchor: a2, .. } = k2 else {
-        panic!("expected Scalar key 2");
-    };
-    assert!(a2.is_none(), "key 'c' must have no anchor; got: {a2:?}");
+    assert!(matches!(k2, Node::Scalar { .. }), "expected Scalar key 2");
+    assert!(
+        k2.anchor().is_none(),
+        "key 'c' must have no anchor; got: {:?}",
+        k2.anchor()
+    );
 }
 
 // IT-I-7: Inline anchor before indented key — no phantom nesting.
@@ -758,15 +733,13 @@ fn anchor_before_mapping_key_is_usable_as_alias() {
 #[test]
 fn multiple_anchored_keys_in_same_mapping() {
     let node = load_one("&a one: 1\n&b two: 2\n&c three: 3\n");
-    let Node::Mapping {
-        entries, anchor, ..
-    } = &node
-    else {
+    let Node::Mapping { entries, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
     assert!(
-        anchor.is_none(),
-        "mapping must have no anchor; got: {anchor:?}"
+        node.anchor().is_none(),
+        "mapping must have no anchor; got: {:?}",
+        node.anchor()
     );
     assert_eq!(
         entries.len(),
@@ -777,19 +750,15 @@ fn multiple_anchored_keys_in_same_mapping() {
     let expected = [("one", "a"), ("two", "b"), ("three", "c")];
     for (i, (exp_val, exp_anchor)) in expected.iter().enumerate() {
         let (k, _) = &entries[i];
-        let Node::Scalar {
-            value: kv,
-            anchor: ka,
-            ..
-        } = k
-        else {
+        let Node::Scalar { value: kv, .. } = k else {
             panic!("entry {i} key must be Scalar; got: {k:?}");
         };
         assert_eq!(kv.as_str(), *exp_val, "entry {i} key value");
         assert_eq!(
-            ka.as_deref(),
+            k.anchor(),
             Some(*exp_anchor),
-            "entry {i} key anchor must be '{exp_anchor}'; got: {ka:?}"
+            "entry {i} key anchor must be '{exp_anchor}'; got: {:?}",
+            k.anchor()
         );
     }
 }
@@ -799,41 +768,34 @@ fn multiple_anchored_keys_in_same_mapping() {
 #[test]
 fn inline_anchor_before_value_scalar_annotates_value() {
     let node = load_one("key: &anchor value\n");
-    let Node::Mapping {
-        entries, anchor, ..
-    } = &node
-    else {
+    let Node::Mapping { entries, .. } = &node else {
         panic!("expected Mapping root; got: {node:?}");
     };
     assert!(
-        anchor.is_none(),
-        "mapping must have no anchor; got: {anchor:?}"
+        node.anchor().is_none(),
+        "mapping must have no anchor; got: {:?}",
+        node.anchor()
     );
     assert_eq!(entries.len(), 1);
     let (k, v) = &entries[0];
-    let Node::Scalar {
-        value: kv,
-        anchor: ka,
-        ..
-    } = k
-    else {
+    let Node::Scalar { value: kv, .. } = k else {
         panic!("key must be Scalar; got: {k:?}");
     };
     assert_eq!(kv.as_str(), "key");
-    assert!(ka.is_none(), "key scalar must have no anchor; got: {ka:?}");
-    let Node::Scalar {
-        value: vv,
-        anchor: va,
-        ..
-    } = v
-    else {
+    assert!(
+        k.anchor().is_none(),
+        "key scalar must have no anchor; got: {:?}",
+        k.anchor()
+    );
+    let Node::Scalar { value: vv, .. } = v else {
         panic!("value must be Scalar; got: {v:?}");
     };
     assert_eq!(vv.as_str(), "value");
     assert_eq!(
-        va.as_deref(),
+        v.anchor(),
         Some("anchor"),
-        "anchor must be on value scalar; got: {va:?}"
+        "anchor must be on value scalar; got: {:?}",
+        v.anchor()
     );
 }
 
@@ -1143,13 +1105,7 @@ fn it_j8_no_trailing_comment_on_collection_node() {
     assert_eq!(entries.len(), 1);
     let (_, v) = &entries[0];
     assert!(
-        matches!(
-            v,
-            Node::Mapping {
-                trailing_comment: None,
-                ..
-            }
-        ),
+        matches!(v, Node::Mapping { .. }) && v.trailing_comment().is_none(),
         "multi-line mapping value must have no trailing comment; got: {v:?}"
     );
 }

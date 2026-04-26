@@ -100,17 +100,9 @@ fn collect_anchor_alias_entries(doc: &Document<Span>) -> (NamedSpans, NamedSpans
 
 fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut NamedSpans) {
     match node {
-        Node::Scalar {
-            anchor, anchor_loc, ..
-        }
-        | Node::Mapping {
-            anchor, anchor_loc, ..
-        }
-        | Node::Sequence {
-            anchor, anchor_loc, ..
-        } => {
-            if let (Some(name), Some(loc)) = (anchor, anchor_loc) {
-                anchors.push((name.clone(), *loc));
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
+            if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
+                anchors.push((name.to_owned(), loc));
             }
         }
         Node::Alias { name, loc, .. } => {

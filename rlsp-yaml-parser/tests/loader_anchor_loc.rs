@@ -25,14 +25,7 @@ fn spike_anchor_loc_accessible_on_scalar_node() {
     let docs = load("&a val\n").unwrap();
     let root = &docs[0].root;
     assert!(
-        matches!(
-            root,
-            Node::Scalar {
-                anchor: Some(_),
-                anchor_loc: Some(_),
-                ..
-            }
-        ),
+        root.anchor().is_some() && root.anchor_loc().is_some(),
         "expected anchored Scalar with anchor_loc set; got: {root:?}"
     );
 }
@@ -53,14 +46,10 @@ fn al_1_scalar_with_inline_anchor_has_anchor_loc_some() {
         panic!("expected root Mapping");
     };
     let (_, value) = &entries[0];
-    let Node::Scalar {
-        anchor, anchor_loc, ..
-    } = value
-    else {
-        panic!("expected Scalar value; got: {value:?}");
-    };
-    assert_eq!(anchor.as_deref(), Some("a"), "anchor name must be 'a'");
-    let loc = anchor_loc.expect("anchor_loc must be Some for anchored scalar");
+    assert_eq!(value.anchor(), Some("a"), "anchor name must be 'a'");
+    let loc = value
+        .anchor_loc()
+        .expect("anchor_loc must be Some for anchored scalar");
     assert_eq!(
         loc.start.byte_offset, 5,
         "anchor span must start at byte 5 (the '&')"
@@ -72,15 +61,13 @@ fn al_1_scalar_with_inline_anchor_has_anchor_loc_some() {
 fn al_2_block_mapping_with_standalone_anchor_has_anchor_loc_some() {
     let docs = load("&m\nk: v\n").unwrap();
     let root = &docs[0].root;
-    let Node::Mapping {
-        anchor, anchor_loc, ..
-    } = root
-    else {
-        panic!("expected root Mapping; got: {root:?}");
-    };
-    assert_eq!(anchor.as_deref(), Some("m"));
     assert!(
-        anchor_loc.is_some(),
+        matches!(root, Node::Mapping { .. }),
+        "expected root Mapping; got: {root:?}"
+    );
+    assert_eq!(root.anchor(), Some("m"));
+    assert!(
+        root.anchor_loc().is_some(),
         "anchor_loc must be Some for anchored mapping"
     );
 }
@@ -90,15 +77,13 @@ fn al_2_block_mapping_with_standalone_anchor_has_anchor_loc_some() {
 fn al_3_block_sequence_with_standalone_anchor_has_anchor_loc_some() {
     let docs = load("&s\n- item\n").unwrap();
     let root = &docs[0].root;
-    let Node::Sequence {
-        anchor, anchor_loc, ..
-    } = root
-    else {
-        panic!("expected root Sequence; got: {root:?}");
-    };
-    assert_eq!(anchor.as_deref(), Some("s"));
     assert!(
-        anchor_loc.is_some(),
+        matches!(root, Node::Sequence { .. }),
+        "expected root Sequence; got: {root:?}"
+    );
+    assert_eq!(root.anchor(), Some("s"));
+    assert!(
+        root.anchor_loc().is_some(),
         "anchor_loc must be Some for anchored sequence"
     );
 }
@@ -111,15 +96,13 @@ fn al_4_nested_mapping_value_with_anchor_has_anchor_loc_some() {
         panic!("expected root Mapping");
     };
     let (_, outer_val) = &entries[0];
-    let Node::Mapping {
-        anchor, anchor_loc, ..
-    } = outer_val
-    else {
-        panic!("expected nested Mapping value; got: {outer_val:?}");
-    };
-    assert_eq!(anchor.as_deref(), Some("n"));
     assert!(
-        anchor_loc.is_some(),
+        matches!(outer_val, Node::Mapping { .. }),
+        "expected nested Mapping value; got: {outer_val:?}"
+    );
+    assert_eq!(outer_val.anchor(), Some("n"));
+    assert!(
+        outer_val.anchor_loc().is_some(),
         "anchor_loc must be Some for anchored nested mapping"
     );
 }
@@ -128,42 +111,27 @@ fn al_4_nested_mapping_value_with_anchor_has_anchor_loc_some() {
 #[test]
 fn al_5_scalar_without_anchor_has_anchor_loc_none() {
     let docs = load("plain value\n").unwrap();
-    let Node::Scalar {
-        anchor, anchor_loc, ..
-    } = &docs[0].root
-    else {
-        panic!("expected root Scalar");
-    };
-    assert_eq!(*anchor, None);
-    assert_eq!(*anchor_loc, None);
+    let root = &docs[0].root;
+    assert_eq!(root.anchor(), None);
+    assert_eq!(root.anchor_loc(), None);
 }
 
 // AL-6: mapping_without_anchor_has_anchor_loc_none
 #[test]
 fn al_6_mapping_without_anchor_has_anchor_loc_none() {
     let docs = load("k: v\n").unwrap();
-    let Node::Mapping {
-        anchor, anchor_loc, ..
-    } = &docs[0].root
-    else {
-        panic!("expected root Mapping");
-    };
-    assert_eq!(*anchor, None);
-    assert_eq!(*anchor_loc, None);
+    let root = &docs[0].root;
+    assert_eq!(root.anchor(), None);
+    assert_eq!(root.anchor_loc(), None);
 }
 
 // AL-7: sequence_without_anchor_has_anchor_loc_none
 #[test]
 fn al_7_sequence_without_anchor_has_anchor_loc_none() {
     let docs = load("- item\n").unwrap();
-    let Node::Sequence {
-        anchor, anchor_loc, ..
-    } = &docs[0].root
-    else {
-        panic!("expected root Sequence");
-    };
-    assert_eq!(*anchor, None);
-    assert_eq!(*anchor_loc, None);
+    let root = &docs[0].root;
+    assert_eq!(root.anchor(), None);
+    assert_eq!(root.anchor_loc(), None);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,15 +162,9 @@ fn al_8_alias_node_anchor_loc_accessor_returns_none() {
 
 fn walk_nodes_check_invariant(node: &Node<rlsp_yaml_parser::Span>) -> Result<(), String> {
     match node {
-        Node::Scalar {
-            anchor, anchor_loc, ..
-        }
-        | Node::Mapping {
-            anchor, anchor_loc, ..
-        }
-        | Node::Sequence {
-            anchor, anchor_loc, ..
-        } => {
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
+            let anchor = node.anchor();
+            let anchor_loc = node.anchor_loc();
             if anchor.is_some() != anchor_loc.is_some() {
                 return Err(format!(
                     "invariant violated: anchor={anchor:?} but anchor_loc={anchor_loc:?}"

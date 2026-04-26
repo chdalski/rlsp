@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use crate::node::Node;
+use crate::node::{Node, NodeMeta};
 use crate::pos::Span;
 
 /// Attach `leading_comments` to a node's `leading_comments` field.
@@ -9,16 +9,19 @@ pub(super) fn attach_leading_comments(node: &mut Node<Span>, comments: Vec<Strin
         return;
     }
     match node {
-        Node::Scalar {
-            leading_comments, ..
+        Node::Scalar { meta, .. } | Node::Mapping { meta, .. } | Node::Sequence { meta, .. } => {
+            meta.get_or_insert_with(|| {
+                Box::new(NodeMeta {
+                    anchor: None,
+                    anchor_loc: None,
+                    tag_loc: None,
+                    leading_comments: None,
+                    trailing_comment: None,
+                })
+            })
+            .leading_comments = Some(comments);
         }
-        | Node::Mapping {
-            leading_comments, ..
-        }
-        | Node::Sequence {
-            leading_comments, ..
-        }
-        | Node::Alias {
+        Node::Alias {
             leading_comments, ..
         } => {
             *leading_comments = Some(comments);
@@ -29,16 +32,19 @@ pub(super) fn attach_leading_comments(node: &mut Node<Span>, comments: Vec<Strin
 /// Attach a trailing comment to a node's `trailing_comment` field.
 pub(super) fn attach_trailing_comment(node: &mut Node<Span>, comment: String) {
     match node {
-        Node::Scalar {
-            trailing_comment, ..
+        Node::Scalar { meta, .. } | Node::Mapping { meta, .. } | Node::Sequence { meta, .. } => {
+            meta.get_or_insert_with(|| {
+                Box::new(NodeMeta {
+                    anchor: None,
+                    anchor_loc: None,
+                    tag_loc: None,
+                    leading_comments: None,
+                    trailing_comment: None,
+                })
+            })
+            .trailing_comment = Some(comment);
         }
-        | Node::Mapping {
-            trailing_comment, ..
-        }
-        | Node::Sequence {
-            trailing_comment, ..
-        }
-        | Node::Alias {
+        Node::Alias {
             trailing_comment, ..
         } => {
             *trailing_comment = Some(comment);
@@ -63,13 +69,9 @@ mod tests {
         Node::Scalar {
             value: String::new(),
             style: ScalarStyle::Plain,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -77,13 +79,9 @@ mod tests {
         Node::Mapping {
             entries: Vec::new(),
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -91,13 +89,9 @@ mod tests {
         Node::Sequence {
             items: Vec::new(),
             style: CollectionStyle::Block,
-            anchor: None,
-            anchor_loc: None,
             tag: None,
-            tag_loc: None,
             loc: zero_span(),
-            leading_comments: None,
-            trailing_comment: None,
+            meta: None,
         }
     }
 
@@ -115,13 +109,7 @@ mod tests {
     #[test]
     fn attach_leading_comments_noop_on_empty_vec() {
         let mut node = scalar_node();
-        if let Node::Scalar {
-            ref mut leading_comments,
-            ..
-        } = node
-        {
-            *leading_comments = Some(vec!["# existing".to_owned()]);
-        }
+        attach_leading_comments(&mut node, vec!["# existing".to_owned()]);
         attach_leading_comments(&mut node, vec![]);
         assert_eq!(node.leading_comments(), &["# existing"]);
     }
@@ -136,13 +124,7 @@ mod tests {
     #[test]
     fn attach_leading_comments_overwrites_existing_comments() {
         let mut node = scalar_node();
-        if let Node::Scalar {
-            ref mut leading_comments,
-            ..
-        } = node
-        {
-            *leading_comments = Some(vec!["# old".to_owned()]);
-        }
+        attach_leading_comments(&mut node, vec!["# old".to_owned()]);
         attach_leading_comments(&mut node, vec!["# new".to_owned()]);
         assert_eq!(node.leading_comments(), &["# new"]);
     }
@@ -187,13 +169,7 @@ mod tests {
     #[test]
     fn attach_trailing_comment_overwrites_existing_comment() {
         let mut node = scalar_node();
-        if let Node::Scalar {
-            ref mut trailing_comment,
-            ..
-        } = node
-        {
-            *trailing_comment = Some("# old".to_owned());
-        }
+        attach_trailing_comment(&mut node, "# old".to_owned());
         attach_trailing_comment(&mut node, "# new".to_owned());
         assert_eq!(node.trailing_comment(), Some("# new"));
     }

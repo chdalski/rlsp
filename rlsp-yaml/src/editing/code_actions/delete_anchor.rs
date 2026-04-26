@@ -30,13 +30,11 @@ pub(super) fn delete_unused_anchor(
     let node = find_anchored_node(docs, diag_line, anchor_name)?;
     let loc = node_loc(node);
 
-    let mut deanchored = node.clone();
-    match &mut deanchored {
-        Node::Scalar { anchor, .. }
-        | Node::Mapping { anchor, .. }
-        | Node::Sequence { anchor, .. } => *anchor = None,
-        Node::Alias { .. } => return None,
+    if matches!(node, Node::Alias { .. }) {
+        return None;
     }
+    let mut deanchored = node.clone();
+    deanchored.clear_anchor();
 
     let base_indent = loc.start.column;
     let new_text = format_subtree(&deanchored, &YamlFormatOptions::default(), base_indent);

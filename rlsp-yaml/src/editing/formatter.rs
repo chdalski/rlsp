@@ -521,12 +521,7 @@ fn extract_doc_prefix_comments(text: &str) -> Vec<Comment> {
 fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
     match node {
         Node::Scalar {
-            value,
-            style,
-            anchor,
-            tag,
-            tag_loc,
-            ..
+            value, style, tag, ..
         } => {
             // Prefix with a tag if present.
             //
@@ -544,9 +539,10 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             //   semantic meaning that cannot be inferred from an absent value.
             //
             // Non-core tags (user tags) are always emitted as-is.
+            let tag_loc_is_some = node.tag_loc().is_some();
             let tag_prefix = tag.as_ref().and_then(|t| {
                 if is_core_schema_tag(t) {
-                    if tag_loc.is_some() && value.is_empty() {
+                    if tag_loc_is_some && value.is_empty() {
                         // User-authored explicit core tag on empty scalar: emit in short form.
                         let suffix = t.trim_start_matches("tag:yaml.org,2002:");
                         Some(format!("!!{suffix}"))
@@ -660,7 +656,7 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
                 scalar_doc
             };
 
-            if let Some(name) = anchor {
+            if let Some(name) = node.anchor() {
                 // When the scalar is empty we still need a space between the
                 // anchor name and whatever follows (a tag or nothing).
                 if value.is_empty() {
@@ -682,7 +678,6 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
         Node::Mapping {
             entries,
             style,
-            anchor,
             tag,
             ..
         } => {
@@ -692,15 +687,11 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             } else {
                 *style
             };
-            prepend_collection_properties(doc, anchor.as_deref(), tag.as_deref(), effective_style)
+            prepend_collection_properties(doc, node.anchor(), tag.as_deref(), effective_style)
         }
 
         Node::Sequence {
-            items,
-            style,
-            anchor,
-            tag,
-            ..
+            items, style, tag, ..
         } => {
             let doc = sequence_to_doc(items, *style, options);
             let effective_style = if options.format_enforce_block_style {
@@ -708,7 +699,7 @@ fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> 
             } else {
                 *style
             };
-            prepend_collection_properties(doc, anchor.as_deref(), tag.as_deref(), effective_style)
+            prepend_collection_properties(doc, node.anchor(), tag.as_deref(), effective_style)
         }
 
         Node::Alias { name, .. } => text(format!("*{name}")),
@@ -820,9 +811,10 @@ fn flow_item_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool
         Node::Scalar {
             value,
             style: ScalarStyle::Plain,
-            anchor: None,
             ..
-        } if needs_flow_quoting(value) => text(format!("\"{}\"", escape_double_quoted(value))),
+        } if node.anchor().is_none() && needs_flow_quoting(value) => {
+            text(format!("\"{}\"", escape_double_quoted(value)))
+        }
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
             node_to_doc(node, options, in_key)
         }
@@ -1238,9 +1230,8 @@ fn is_empty_key(key: &Node<Span>) -> bool {
         Node::Scalar {
             value,
             tag: Some(t),
-            tag_loc: None,
             ..
-        } if value.is_empty() && is_core_schema_tag(t) => true,
+        } if value.is_empty() && is_core_schema_tag(t) && key.tag_loc().is_none() => true,
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
             false
         }
@@ -1264,12 +1255,11 @@ fn key_needs_space_before_colon(key: &Node<Span>) -> bool {
         Node::Scalar {
             value,
             tag: Some(t),
-            tag_loc,
             ..
         } if value.is_empty() => {
             // Only need a space if the tag will actually be emitted.
             // Resolver-injected core tags are suppressed → no space needed.
-            !(is_core_schema_tag(t) && tag_loc.is_none())
+            !(is_core_schema_tag(t) && key.tag_loc().is_none())
         }
         Node::Alias { .. } => true,
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => false,
@@ -1306,12 +1296,11 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
             Node::Mapping {
                 entries,
                 style,
-                anchor,
                 tag,
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-                let colon_prefix = match (anchor.as_ref(), user_tag) {
+                let colon_prefix = match (value.anchor(), user_tag) {
                     (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
                     (Some(name), None) => format!(": &{name}"),
                     (None, Some(t)) => format!(": {}", format_tag(t)),
@@ -1327,14 +1316,10 @@ fn explicit_key_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlForma
             }
             // Block sequence value: `:\n  - item` (or `:\n- item` when indentless).
             Node::Sequence {
-                items,
-                style,
-                anchor,
-                tag,
-                ..
+                items, style, tag, ..
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-                let colon_prefix = match (anchor.as_ref(), user_tag) {
+                let colon_prefix = match (value.anchor(), user_tag) {
                     (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
                     (Some(name), None) => format!(": &{name}"),
                     (None, Some(t)) => format!(": {}", format_tag(t)),
@@ -1406,7 +1391,6 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
             Node::Mapping {
                 entries,
                 style,
-                anchor,
                 tag,
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
@@ -1416,7 +1400,7 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                 } else {
                     ":"
                 };
-                let colon = match (anchor.as_ref(), user_tag) {
+                let colon = match (value.anchor(), user_tag) {
                     (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
                     (Some(name), None) => text(format!(": &{name}")),
                     (None, Some(t)) => text(format!(": {}", format_tag(t))),
@@ -1435,11 +1419,7 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
             // With anchor: `key: &anchor\n  - item` (or `key: &anchor\n- item`).
             // With tag: `key: !tag\n  - item` (anchor before tag per formatter convention).
             Node::Sequence {
-                items,
-                style,
-                anchor,
-                tag,
-                ..
+                items, style, tag, ..
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
                 let bare_colon = if key_needs_space_before_colon(key) {
@@ -1447,7 +1427,7 @@ fn key_value_to_doc(key: &Node<Span>, value: &Node<Span>, options: &YamlFormatOp
                 } else {
                     ":"
                 };
-                let colon = match (anchor.as_ref(), user_tag) {
+                let colon = match (value.anchor(), user_tag) {
                     (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
                     (Some(name), None) => text(format!(": &{name}")),
                     (None, Some(t)) => text(format!(": {}", format_tag(t))),
@@ -1569,7 +1549,6 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
         Node::Mapping {
             entries,
             style,
-            anchor,
             tag,
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
@@ -1579,7 +1558,7 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
                 .collect();
             let inner = join(&hard_line(), pairs);
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-            let prefix = match (anchor.as_ref(), user_tag) {
+            let prefix = match (item.anchor(), user_tag) {
                 (Some(name), Some(t)) => format!("&{name} {}", format_tag(t)),
                 (Some(name), None) => format!("&{name}"),
                 (None, Some(t)) => format_tag(t),
@@ -1605,14 +1584,10 @@ fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
         // With anchor: `- &anchor\n  - item`.
         // With tag: `- !tag\n  - item` (anchor before tag per formatter convention).
         Node::Sequence {
-            items,
-            style,
-            anchor,
-            tag,
-            ..
+            items, style, tag, ..
         } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-            let prefix_doc = match (anchor.as_ref(), user_tag) {
+            let prefix_doc = match (item.anchor(), user_tag) {
                 (Some(name), Some(t)) => text(format!("&{name} {}", format_tag(t))),
                 (Some(name), None) => text(format!("&{name}")),
                 (None, Some(t)) => text(format_tag(t)),

@@ -1287,16 +1287,12 @@ fn validate_mapping(
             let key_node = Node::Scalar {
                 value: key_str.clone(),
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
                 tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-                tag_loc: None,
                 loc: rlsp_yaml_parser::Span {
                     start: rlsp_yaml_parser::Pos::ORIGIN,
                     end: rlsp_yaml_parser::Pos::ORIGIN,
                 },
-                leading_comments: None,
-                trailing_comment: None,
+                meta: None,
             };
             validate_node(&key_node, pn_schema, path, ctx, depth + 1);
         }
@@ -1345,16 +1341,12 @@ fn validate_dependencies(
                 let mapping_node = Node::Mapping {
                     entries: entries.to_vec(),
                     style: rlsp_yaml_parser::CollectionStyle::Block,
-                    anchor: None,
-                    anchor_loc: None,
                     tag: None,
-                    tag_loc: None,
                     loc: rlsp_yaml_parser::Span {
                         start: rlsp_yaml_parser::Pos::ORIGIN,
                         end: rlsp_yaml_parser::Pos::ORIGIN,
                     },
-                    leading_comments: None,
-                    trailing_comment: None,
+                    meta: None,
                 };
                 validate_node(&mapping_node, dep_schema, path, ctx, depth + 1);
             }

@@ -119,19 +119,13 @@ fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>) {
                 // plus any anchor/tag on the key. Do NOT emit a scalar content token
                 // (that would be double-classifying the key text as STRING).
                 // For non-scalar keys (complex keys): recurse normally.
-                if let Node::Scalar {
-                    loc,
-                    anchor_loc,
-                    tag_loc,
-                    ..
-                } = key
-                {
+                if let Node::Scalar { loc, .. } = key {
                     out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0));
-                    if let Some(span) = anchor_loc {
-                        out.push(span_to_raw(*span, TOKEN_VARIABLE, MOD_DECLARATION));
+                    if let Some(span) = key.anchor_loc() {
+                        out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION));
                     }
-                    if let Some(span) = tag_loc {
-                        out.push(span_to_raw(*span, TOKEN_TYPE, 0));
+                    if let Some(span) = key.tag_loc() {
+                        out.push(span_to_raw(span, TOKEN_TYPE, 0));
                     }
                 } else {
                     collect_node_tokens(key, out);
