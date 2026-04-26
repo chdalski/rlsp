@@ -160,6 +160,29 @@ entire pipeline.
   be independently committable.
 - Read existing code before modifying it. Understand the
   patterns in use and match them.
+- **Search for existing implementations before adding new
+  ones.** Before writing a function, type, or component,
+  search the codebase for code that already does what you
+  are about to write. Use Glob and Grep against the
+  *purpose* (e.g., "validate", "parse", "format"), not just
+  the proposed name — duplicate implementations rarely
+  share names. If you find a substantively similar
+  implementation, message the requester before proceeding.
+  Extending existing code is almost always preferable to
+  introducing a parallel version, but the requester can
+  confirm whether duplication is intentional in this case.
+- **Before adding a new parameter to a function or
+  constructor, check what is already in scope.** Values
+  the new parameter would carry are often already
+  available via dependency injection, closure capture,
+  module-level state, or another existing parameter.
+  Adding a parameter that duplicates an existing source
+  creates a brittle coupling — the two sources can
+  diverge at the call site, producing bugs that are hard
+  to attribute. Ask: "where would the caller get this
+  value, and does the callee already have access to that
+  source?" If the callee already has access, use that —
+  do not add a parameter.
 - Follow all rules loaded by the rule system —
   language-specific guidance, code principles, and
   simplicity principles load automatically based on the

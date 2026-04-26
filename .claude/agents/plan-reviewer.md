@@ -7,7 +7,6 @@ tools:
   - Read
   - Glob
   - Grep
-  - Bash
 ---
 
 # Plan Reviewer

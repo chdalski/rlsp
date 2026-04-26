@@ -168,18 +168,6 @@ cutting mass by ~50%.
 - **Context-dependent** — works best for algorithm
   comparisons
 
-## Remember
-
-- APP is a **tool, not a rule** — it informs decisions,
-  it doesn't make them
-- **Context matters** more than absolute scores
-- **Lower mass is generally better**, but a higher-mass
-  solution may win when it is more readable, more
-  idiomatic, or has better performance characteristics
-- **Use during refactoring**, not initial development —
-  premature optimization of mass distracts from getting
-  the logic right
-
 ## Sources and References
 
 ### Primary Sources
