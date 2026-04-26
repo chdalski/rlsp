@@ -56,13 +56,10 @@ pub(super) fn attach_trailing_comment(node: &mut Node<Span>, comment: String) {
 mod tests {
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
-    use crate::pos::{Pos, Span};
+    use crate::pos::Span;
 
     fn zero_span() -> Span {
-        Span {
-            start: Pos::ORIGIN,
-            end: Pos::ORIGIN,
-        }
+        Span { start: 0, end: 0 }
     }
 
     fn scalar_node() -> Node<Span> {

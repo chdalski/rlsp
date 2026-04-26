@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::{Document, Event, Node, Span};
+use rlsp_yaml_parser::{Document, Event, LineIndex, Node, Span};
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
 /// Compute folding ranges from the YAML AST.
@@ -15,6 +15,10 @@ pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange> 
 
     let mut ranges = Vec::new();
     let is_multidoc = docs.len() > 1;
+    let Some(first_doc) = docs.first() else {
+        return Vec::new();
+    };
+    let idx = first_doc.line_index();
 
     for doc in docs {
         if is_multidoc {
@@ -27,16 +31,18 @@ pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange> 
                 | Node::Scalar { loc, .. }
                 | Node::Alias { loc, .. } => loc,
             };
-            if root_loc.end.line > root_loc.start.line {
-                let (start, end) = node_span_0based(&doc.root);
+            let start_line = idx.line_column(root_loc.start).0;
+            let end_line = idx.line_column(root_loc.end).0;
+            if end_line > start_line {
+                let (start, end) = node_span_0based(&doc.root, idx);
                 if end > start {
                     push_fold(&mut ranges, start, end, Some(FoldingRangeKind::Region));
                 }
             }
             // Walk children only — the root is already covered by the Region fold above.
-            collect_children_folds(&doc.root, &mut ranges);
+            collect_children_folds(&doc.root, &mut ranges, idx);
         } else {
-            collect_node_folds(&doc.root, &mut ranges);
+            collect_node_folds(&doc.root, &mut ranges, idx);
         }
     }
 
@@ -48,7 +54,7 @@ pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange> 
 /// Extract the 0-based `(start_line, end_line)` from a node's `loc` span.
 ///
 /// AST positions are 1-based; `saturating_sub(1)` converts to 0-based LSP lines.
-const fn node_span_0based(node: &Node<Span>) -> (usize, usize) {
+fn node_span_0based(node: &Node<Span>, idx: &LineIndex) -> (u32, u32) {
     let loc = match node {
         Node::Mapping { loc, .. }
         | Node::Sequence { loc, .. }
@@ -56,23 +62,23 @@ const fn node_span_0based(node: &Node<Span>) -> (usize, usize) {
         | Node::Alias { loc, .. } => loc,
     };
     (
-        loc.start.line.saturating_sub(1),
-        loc.end.line.saturating_sub(1),
+        idx.line_column(loc.start).0.saturating_sub(1),
+        idx.line_column(loc.end).0.saturating_sub(1),
     )
 }
 
 /// Walk a node's immediate children and fold each `Mapping` / `Sequence` child.
-fn collect_children_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>) {
+fn collect_children_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>, idx: &LineIndex) {
     match node {
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                collect_node_folds(k, ranges);
-                collect_node_folds(v, ranges);
+                collect_node_folds(k, ranges, idx);
+                collect_node_folds(v, ranges, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_node_folds(item, ranges);
+                collect_node_folds(item, ranges, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -80,35 +86,35 @@ fn collect_children_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>) {
 }
 
 /// Recursively walk a node and emit a fold for every `Mapping` and `Sequence`.
-fn collect_node_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>) {
+fn collect_node_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>, idx: &LineIndex) {
     match node {
         Node::Mapping { entries, loc, .. } => {
-            if loc.end.line > loc.start.line {
-                let (start, end) = (
-                    loc.start.line.saturating_sub(1),
-                    loc.end.line.saturating_sub(1),
-                );
+            let start_line = idx.line_column(loc.start).0;
+            let end_line = idx.line_column(loc.end).0;
+            if end_line > start_line {
+                let start = start_line.saturating_sub(1);
+                let end = end_line.saturating_sub(1);
                 if end > start {
                     push_fold(ranges, start, end, None);
                 }
             }
             for (k, v) in entries {
-                collect_node_folds(k, ranges);
-                collect_node_folds(v, ranges);
+                collect_node_folds(k, ranges, idx);
+                collect_node_folds(v, ranges, idx);
             }
         }
         Node::Sequence { items, loc, .. } => {
-            if loc.end.line > loc.start.line {
-                let (start, end) = (
-                    loc.start.line.saturating_sub(1),
-                    loc.end.line.saturating_sub(1),
-                );
+            let start_line = idx.line_column(loc.start).0;
+            let end_line = idx.line_column(loc.end).0;
+            if end_line > start_line {
+                let start = start_line.saturating_sub(1);
+                let end = end_line.saturating_sub(1);
                 if end > start {
                     push_fold(ranges, start, end, None);
                 }
             }
             for item in items {
-                collect_node_folds(item, ranges);
+                collect_node_folds(item, ranges, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -117,10 +123,11 @@ fn collect_node_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>) {
 
 /// Group contiguous `Event::Comment` spans (≥2 consecutive lines) into folds.
 fn collect_comment_folds(yaml: &str, ranges: &mut Vec<FoldingRange>) {
-    let comment_lines: Vec<usize> = rlsp_yaml_parser::parse_events(yaml)
+    let idx = LineIndex::new(yaml);
+    let comment_lines: Vec<u32> = rlsp_yaml_parser::parse_events(yaml)
         .filter_map(|result| {
             if let Ok((Event::Comment { .. }, span)) = result {
-                Some(span.start.line) // 1-based
+                Some(idx.line_column(span.start).0) // 1-based
             } else {
                 None
             }
@@ -158,21 +165,12 @@ fn collect_comment_folds(yaml: &str, ranges: &mut Vec<FoldingRange>) {
     }
 }
 
-/// Push a folding range, performing the `usize` to `u32` conversion.
-fn push_fold(
-    ranges: &mut Vec<FoldingRange>,
-    start: usize,
-    end: usize,
-    kind: Option<FoldingRangeKind>,
-) {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
+/// Push a folding range.
+fn push_fold(ranges: &mut Vec<FoldingRange>, start: u32, end: u32, kind: Option<FoldingRangeKind>) {
     ranges.push(FoldingRange {
-        start_line: start as u32,
+        start_line: start,
         start_character: None,
-        end_line: end as u32,
+        end_line: end,
         end_character: None,
         kind,
         collapsed_text: None,
@@ -236,7 +234,6 @@ mod tests {
         let text = "key1: val1\nkey2: val2\n---\nkey3: val3\nkey4: val4\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
         assert!(
             result.len() >= 2,
             "should have at least 2 folding ranges for 2 document sections, got: {}",
@@ -249,7 +246,6 @@ mod tests {
         let text = "doc1:\n  key: val\n---\ndoc2:\n  key: val\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
         let tuples = ranges_as_tuples(&result);
         assert!(
             tuples.contains(&(0, 2)),
@@ -268,8 +264,6 @@ mod tests {
         let text = "# Header comment\n# continues here\n# and here\nkey: value\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
-        // Comment block folding is optional. If present, it should use Comment kind.
         let comment_folds: Vec<&FoldingRange> = result
             .iter()
             .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
@@ -278,8 +272,6 @@ mod tests {
             .iter()
             .filter(|r| r.kind == Some(FoldingRangeKind::Region) || r.kind.is_none())
             .collect();
-
-        // The comment block should not produce a Region or mapping fold starting at line 0
         for fold in &region_folds {
             assert!(
                 fold.start_line > 2,
@@ -287,8 +279,6 @@ mod tests {
                 fold.start_line
             );
         }
-
-        // If comment folds are present, verify them
         if !comment_folds.is_empty() {
             let tuples: Vec<(u32, u32)> = comment_folds
                 .iter()
@@ -301,15 +291,11 @@ mod tests {
         }
     }
 
-    // ---- Edge Cases ----
-
     #[test]
     fn should_return_empty_for_comment_only_document() {
         let text = "# just a comment\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
-        // Either empty or a comment fold -- both are acceptable
         for fold in &result {
             assert!(
                 fold.kind == Some(FoldingRangeKind::Comment) || fold.kind.is_none(),
@@ -318,40 +304,33 @@ mod tests {
         }
     }
 
-    // multi-document: three sections
     #[test]
     fn should_fold_three_document_sections() {
         let text = "a: 1\nb: 2\n---\nc: 3\nd: 4\n---\ne: 5\nf: 6\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
         assert!(
             result.len() >= 3,
             "three document sections should produce at least 3 folding ranges, got: {result:?}"
         );
     }
 
-    // multi-document: content only after last separator (last section fold)
     #[test]
     fn should_fold_last_section_after_final_separator() {
         let text = "---\nkey1: val1\nkey2: val2\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
-        // Single document with explicit start — mapping fold covers lines 1-2 (0-based)
         assert!(
             !result.is_empty(),
             "content after separator should produce a fold, got: {result:?}"
         );
     }
 
-    // comment block at end of file (no trailing non-comment line)
     #[test]
     fn should_fold_comment_block_at_end_of_file() {
         let text = "key: value\n# comment line 1\n# comment line 2\n# comment line 3\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
         let comment_folds: Vec<_> = result
             .iter()
             .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
@@ -370,13 +349,11 @@ mod tests {
         );
     }
 
-    // comment block of exactly 1 line (should NOT fold)
     #[test]
     fn should_not_fold_single_comment_line() {
         let text = "# only one comment\nkey: value\n";
         let docs = load_docs(text);
         let result = folding_ranges(&docs, text);
-
         let comment_folds: Vec<_> = result
             .iter()
             .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
@@ -387,10 +364,6 @@ mod tests {
         );
     }
 
-    // ---- Regression cases (mandatory rstest) ----
-
-    // Regression (a) + (b): mapping at top level produces a fold matching AST loc;
-    // nested mapping produces nested folds.
     #[rstest]
     #[case::top_level_mapping_matches_ast_loc(
         "server:\n  host: localhost\n  port: 8080\n",
@@ -415,7 +388,6 @@ mod tests {
         );
     }
 
-    // Regression (c): multi-document YAML produces one fold per document.
     #[rstest]
     #[case::two_doc_stream(
         "key1: val1\nkey2: val2\n---\nkey3: val3\nkey4: val4\n",
@@ -440,7 +412,6 @@ mod tests {
         );
     }
 
-    // Regression (d): contiguous block of ≥2 comments produces exactly one comment fold.
     #[rstest]
     #[case::two_consecutive_comments(
         "# first comment\n# second comment\nkey: value\n",
@@ -473,9 +444,6 @@ mod tests {
         );
     }
 
-    // ---- Additional new tests ----
-
-    // sequence_fold_basic: bare root sequence produces a fold.
     #[test]
     fn sequence_fold_basic() {
         let text = "- one\n- two\n- three\n";
@@ -488,7 +456,6 @@ mod tests {
         );
     }
 
-    // flow_mapping_single_line_no_fold: single-line flow mapping produces no fold.
     #[test]
     fn flow_mapping_single_line_no_fold() {
         let text = "{a: 1, b: 2}\n";

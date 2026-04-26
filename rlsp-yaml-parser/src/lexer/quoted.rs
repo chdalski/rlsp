@@ -68,10 +68,7 @@ impl<'input> Lexer<'input> {
             .advance('\'');
             return Ok(Some((
                 value.into_cow(body_start),
-                Span {
-                    start: open_pos,
-                    end: end_pos,
-                },
+                Span::from_pos(open_pos, end_pos),
             )));
         }
 
@@ -144,13 +141,7 @@ impl<'input> Lexer<'input> {
                     self.pending_multiline_tail = Some((tail, close_pos));
                 }
                 let end_pos = self.current_pos;
-                return Ok(Some((
-                    Cow::Owned(owned),
-                    Span {
-                        start: open_pos,
-                        end: end_pos,
-                    },
-                )));
+                return Ok(Some((Cow::Owned(owned), Span::from_pos(open_pos, end_pos))));
             }
             // Non-closing continuation: trim trailing whitespace per YAML §7.3.3.
             let line_str = if cont_value.has_escape {
@@ -228,10 +219,7 @@ impl<'input> Lexer<'input> {
                 }
                 (
                     value.into_cow(body_start),
-                    Span {
-                        start: open_pos,
-                        end: end_pos,
-                    },
+                    Span::from_pos(open_pos, end_pos),
                 )
             }
             DoubleQuotedLine::Incomplete {
@@ -247,13 +235,7 @@ impl<'input> Lexer<'input> {
                     block_context_indent,
                 )?;
                 let end_pos = self.current_pos;
-                (
-                    Cow::Owned(owned),
-                    Span {
-                        start: open_pos,
-                        end: end_pos,
-                    },
-                )
+                (Cow::Owned(owned), Span::from_pos(open_pos, end_pos))
             }
         };
         Ok(Some((value, span)))

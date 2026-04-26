@@ -307,20 +307,9 @@ mod tests {
     use std::borrow::Cow;
 
     use super::*;
-    use crate::pos::{Pos, Span};
+    use crate::pos::Span;
 
-    const SPAN: Span = Span {
-        start: Pos {
-            byte_offset: 0,
-            line: 1,
-            column: 0,
-        },
-        end: Pos {
-            byte_offset: 4,
-            line: 1,
-            column: 4,
-        },
-    };
+    const SPAN: Span = Span { start: 0, end: 4 };
 
     // EM-1: meta is None when all four fields are absent.
     #[test]

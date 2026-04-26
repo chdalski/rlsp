@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{ScalarStyle, Span};
+use rlsp_yaml_parser::{LineIndex, ScalarStyle, Span};
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
 /// Compute text edits for on-type formatting when a newline is typed.
@@ -49,7 +49,8 @@ fn indent_for_prev_line(
     tab_size: usize,
 ) -> Option<usize> {
     for doc in docs {
-        if let Some(indent) = node_indent(&doc.root, prev_ast_line, tab_size) {
+        let idx = doc.line_index();
+        if let Some(indent) = node_indent(&doc.root, prev_ast_line, tab_size, idx) {
             return Some(indent);
         }
     }
@@ -61,43 +62,48 @@ fn indent_for_prev_line(
 ///
 /// Returns `Some(column)` when this subtree provides context for the target
 /// line, or `None` when the line falls outside this subtree.
-fn node_indent(node: &Node<Span>, prev_ast_line: usize, tab_size: usize) -> Option<usize> {
+fn node_indent(
+    node: &Node<Span>,
+    prev_ast_line: usize,
+    tab_size: usize,
+    idx: &LineIndex,
+) -> Option<usize> {
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                let key_line = node_start_line(key);
-                let val_line = node_start_line(value);
+                let key_line = node_start_line(key, idx);
+                let val_line = node_start_line(value, idx);
 
                 // Case 1: key and value on the same line as prev_ast_line.
                 if key_line == prev_ast_line && val_line == prev_ast_line {
                     // Block scalar on the same line as the key → extra indent.
                     if is_block_scalar_node(value) {
-                        return Some(key_line_column(key) + tab_size);
+                        return Some(node_start_col(key, idx) + tab_size);
                     }
                     // Recurse into the value in case it is a nested collection
                     // on the same line.
-                    if let Some(inner) = node_indent(value, prev_ast_line, tab_size) {
+                    if let Some(inner) = node_indent(value, prev_ast_line, tab_size, idx) {
                         return Some(inner);
                     }
                     // Plain inline value → indent to the key's column (no extra).
-                    return Some(key_line_column(key));
+                    return Some(node_start_col(key, idx));
                 }
 
                 // Case 2: key is on prev_ast_line but value starts later → bare key.
                 if key_line == prev_ast_line && val_line > prev_ast_line {
-                    return Some(key_line_column(key) + tab_size);
+                    return Some(node_start_col(key, idx) + tab_size);
                 }
 
                 // Case 3: key is before prev_ast_line, value starts on or after →
                 // cursor is in the "gap" between a key and its deferred block value,
                 // or within the value's subtree.
                 if key_line < prev_ast_line && val_line > prev_ast_line {
-                    return Some(key_line_column(key) + tab_size);
+                    return Some(node_start_col(key, idx) + tab_size);
                 }
 
                 // Case 4: value starts at or before prev_ast_line → recurse into value.
                 if val_line <= prev_ast_line {
-                    if let Some(inner) = node_indent(value, prev_ast_line, tab_size) {
+                    if let Some(inner) = node_indent(value, prev_ast_line, tab_size, idx) {
                         return Some(inner);
                     }
                 }
@@ -105,14 +111,14 @@ fn node_indent(node: &Node<Span>, prev_ast_line: usize, tab_size: usize) -> Opti
             None
         }
         Node::Sequence { items, loc, .. } => {
-            let seq_col = loc.start.column;
+            let seq_col = idx.line_column(loc.start).1 as usize;
             for item in items {
-                let item_line = node_start_line(item);
+                let item_line = node_start_line(item, idx);
                 if item_line == prev_ast_line {
                     return Some(seq_col);
                 }
                 // Recurse into nested items.
-                if let Some(inner) = node_indent(item, prev_ast_line, tab_size) {
+                if let Some(inner) = node_indent(item, prev_ast_line, tab_size, idx) {
                     return Some(inner);
                 }
             }
@@ -123,22 +129,22 @@ fn node_indent(node: &Node<Span>, prev_ast_line: usize, tab_size: usize) -> Opti
 }
 
 /// Return the 1-based parser line on which `node` starts.
-const fn node_start_line(node: &Node<Span>) -> usize {
+fn node_start_line(node: &Node<Span>, idx: &LineIndex) -> usize {
     match node {
         Node::Scalar { loc, .. }
         | Node::Mapping { loc, .. }
         | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => loc.start.line,
+        | Node::Alias { loc, .. } => idx.line_column(loc.start).0 as usize,
     }
 }
 
-/// Return the 0-based column of the key node's start position.
-const fn key_line_column(key: &Node<Span>) -> usize {
-    match key {
+/// Return the 0-based column of the node's start position.
+fn node_start_col(node: &Node<Span>, idx: &LineIndex) -> usize {
+    match node {
         Node::Scalar { loc, .. }
         | Node::Mapping { loc, .. }
         | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => loc.start.column,
+        | Node::Alias { loc, .. } => idx.line_column(loc.start).1 as usize,
     }
 }
 

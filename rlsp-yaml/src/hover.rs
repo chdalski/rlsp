@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{Pos, Span};
+use rlsp_yaml_parser::{LineIndex, Pos, Span};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::schema::JsonSchema;
@@ -88,9 +88,10 @@ enum PathSegment {
 /// Walk all documents and return the path + deepest node whose span contains `cursor`.
 fn ast_walk(docs: &[Document<Span>], cursor: Pos) -> Option<(Vec<PathSegment>, &Node<Span>)> {
     for doc in docs {
-        if span_contains(node_loc(&doc.root), cursor) {
+        let idx = doc.line_index();
+        if span_contains(node_loc(&doc.root), cursor, idx) {
             let mut path = Vec::new();
-            if let Some(result) = walk_node(&doc.root, cursor, &mut path) {
+            if let Some(result) = walk_node(&doc.root, cursor, &mut path, idx) {
                 return Some(result);
             }
         }
@@ -104,6 +105,7 @@ fn walk_node<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
     path: &mut Vec<PathSegment>,
+    idx: &LineIndex,
 ) -> Option<(Vec<PathSegment>, &'a Node<Span>)> {
     match node {
         Node::Mapping { entries, .. } => {
@@ -113,24 +115,26 @@ fn walk_node<'a>(
                     Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => continue,
                 };
 
-                if span_contains(node_loc(key), cursor) {
+                if span_contains(node_loc(key), cursor, idx) {
                     // Cursor is on the key — hover shows the value at this key.
                     path.push(PathSegment::Key(key_name));
                     return Some((path.clone(), value));
                 }
 
-                if span_contains(node_loc(value), cursor) {
+                if span_contains(node_loc(value), cursor, idx) {
                     path.push(PathSegment::Key(key_name));
-                    return walk_node(value, cursor, path).or_else(|| Some((path.clone(), value)));
+                    return walk_node(value, cursor, path, idx)
+                        .or_else(|| Some((path.clone(), value)));
                 }
             }
             None
         }
         Node::Sequence { items, .. } => {
-            for (idx, item) in items.iter().enumerate() {
-                if span_contains(node_loc(item), cursor) {
-                    path.push(PathSegment::Index(idx));
-                    return walk_node(item, cursor, path).or_else(|| Some((path.clone(), item)));
+            for (i, item) in items.iter().enumerate() {
+                if span_contains(node_loc(item), cursor, idx) {
+                    path.push(PathSegment::Index(i));
+                    return walk_node(item, cursor, path, idx)
+                        .or_else(|| Some((path.clone(), item)));
                 }
             }
             None
@@ -143,9 +147,11 @@ fn walk_node<'a>(
 /// Returns `true` when `cursor` is within `span` using half-open `[start, end)`.
 ///
 /// Comparison is lexicographic on `(line, column)`.
-fn span_contains(span: Span, cursor: Pos) -> bool {
-    let start = (span.start.line, span.start.column);
-    let end = (span.end.line, span.end.column);
+fn span_contains(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
+    let (start_line, start_col) = idx.line_column(span.start);
+    let (end_line, end_col) = idx.line_column(span.end);
+    let start = (start_line as usize, start_col as usize);
+    let end = (end_line as usize, end_col as usize);
     let pos = (cursor.line, cursor.column);
     start <= pos && pos < end
 }

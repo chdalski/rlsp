@@ -170,21 +170,10 @@ pub enum ConsumedMapping<'input> {
 #[cfg(test)]
 mod tests {
     use super::{PendingAnchor, PendingTag};
-    use crate::pos::{Pos, Span};
+    use crate::pos::Span;
     use std::borrow::Cow;
 
-    const TEST_SPAN: Span = Span {
-        start: Pos {
-            byte_offset: 0,
-            line: 1,
-            column: 0,
-        },
-        end: Pos {
-            byte_offset: 7,
-            line: 1,
-            column: 7,
-        },
-    };
+    const TEST_SPAN: Span = Span { start: 0, end: 7 };
 
     // A-1: Standalone variant carries the anchor name.
     #[test]
@@ -214,18 +203,7 @@ mod tests {
     // SA-1: Standalone variant loc() returns the stored span.
     #[test]
     fn pending_anchor_standalone_loc_returns_span() {
-        let span = Span {
-            start: Pos {
-                byte_offset: 5,
-                line: 2,
-                column: 3,
-            },
-            end: Pos {
-                byte_offset: 12,
-                line: 2,
-                column: 10,
-            },
-        };
+        let span = Span { start: 5, end: 12 };
         let a = PendingAnchor::Standalone("anchor", span);
         assert_eq!(a.loc(), span);
     }
@@ -233,35 +211,13 @@ mod tests {
     // SA-2: Inline variant loc() returns the stored span.
     #[test]
     fn pending_anchor_inline_loc_returns_span() {
-        let span = Span {
-            start: Pos {
-                byte_offset: 10,
-                line: 3,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 17,
-                line: 3,
-                column: 7,
-            },
-        };
+        let span = Span { start: 10, end: 17 };
         let a = PendingAnchor::Inline("anchor", span);
         assert_eq!(a.loc(), span);
     }
 
     fn dummy_span() -> Span {
-        Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 1,
-                line: 1,
-                column: 1,
-            },
-        }
+        Span { start: 0, end: 1 }
     }
 
     // T-1: Standalone variant carries the tag string.
@@ -285,18 +241,7 @@ mod tests {
     // TL-U1: Standalone variant loc() returns the stored span.
     #[test]
     fn pending_tag_standalone_loc_returns_span() {
-        let span = Span {
-            start: Pos {
-                byte_offset: 5,
-                line: 2,
-                column: 3,
-            },
-            end: Pos {
-                byte_offset: 12,
-                line: 2,
-                column: 10,
-            },
-        };
+        let span = Span { start: 5, end: 12 };
         let tag = PendingTag::Standalone(Cow::Borrowed("!!str"), span);
         assert_eq!(tag.loc(), span);
     }
@@ -304,18 +249,7 @@ mod tests {
     // TL-U2: Inline variant loc() returns the stored span.
     #[test]
     fn pending_tag_inline_loc_returns_span() {
-        let span = Span {
-            start: Pos {
-                byte_offset: 10,
-                line: 3,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 17,
-                line: 3,
-                column: 7,
-            },
-        };
+        let span = Span { start: 10, end: 17 };
         let tag = PendingTag::Inline(Cow::Borrowed("!mytag"), span);
         assert_eq!(tag.loc(), span);
     }

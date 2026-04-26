@@ -265,10 +265,7 @@ impl<'input> Lexer<'input> {
         // and `trailing_newlines` counts blank lines following that last content line.
         let value = apply_chomping(out, trailing_newlines, chomp);
 
-        let span = Span {
-            start: pipe_pos,
-            end: self.current_pos,
-        };
+        let span = Span::from_pos(pipe_pos, self.current_pos);
 
         Some(Ok((Cow::Owned(value), chomp, span)))
     }
@@ -343,10 +340,7 @@ impl<'input> Lexer<'input> {
             Err(e) => return Some(Err(e)),
         };
         let value = apply_chomping(folded, trailing_newlines, chomp);
-        let span = Span {
-            start: gt_pos,
-            end: self.current_pos,
-        };
+        let span = Span::from_pos(gt_pos, self.current_pos);
         Some(Ok((Cow::Owned(value), chomp, span)))
     }
 
@@ -918,13 +912,15 @@ mod tests {
     // UT-LB-F3: span start is at position of `|`
     #[test]
     fn literal_span_start_at_pipe() {
-        let mut lex = make_lexer("|\n  hello\n");
+        let input = "|\n  hello\n";
+        let mut lex = make_lexer(input);
         let (_, _, span) = lex
             .try_consume_literal_block_scalar(0)
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
-        assert_eq!(span.start.byte_offset, 0);
-        assert_eq!(span.start.column, 0);
+        assert_eq!(span.start, 0);
+        let idx = crate::pos::LineIndex::new(input);
+        assert_eq!(idx.line_column(span.start).1, 0); // column 0
     }
 
     // UT-LB-F4: span end after all consumed lines
@@ -936,7 +932,7 @@ mod tests {
             .try_consume_literal_block_scalar(0)
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
-        assert_eq!(span.end.byte_offset, 10);
+        assert_eq!(span.end, 10);
     }
 
     // UT-LB-F5: span end covers trailing blanks that are consumed
@@ -949,7 +945,7 @@ mod tests {
             .try_consume_literal_block_scalar(0)
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
-        assert_eq!(span.end.byte_offset, 9);
+        assert_eq!(span.end, 9);
     }
 
     // -----------------------------------------------------------------------

@@ -27,7 +27,7 @@ pub(super) fn delete_unused_anchor(
     // Diagnostic range starts at `&` — the name follows.
     let anchor_name = &line[anchor_start_col + 1..anchor_end_col];
 
-    let node = find_anchored_node(docs, diag_line, anchor_name)?;
+    let (node, idx) = find_anchored_node(docs, diag_line, anchor_name)?;
     let loc = node_loc(node);
 
     if matches!(node, Node::Alias { .. }) {
@@ -36,7 +36,7 @@ pub(super) fn delete_unused_anchor(
     let mut deanchored = node.clone();
     deanchored.clear_anchor();
 
-    let base_indent = loc.start.column;
+    let base_indent = idx.line_column(loc.start).1 as usize;
     let new_text = format_subtree(&deanchored, &YamlFormatOptions::default(), base_indent);
 
     #[expect(
@@ -45,7 +45,10 @@ pub(super) fn delete_unused_anchor(
     )]
     let edit_range = Range::new(
         Position::new(diag_line as u32, anchor_start_col as u32),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     );
 
     Some(make_action(
@@ -64,11 +67,12 @@ fn find_anchored_node<'a>(
     docs: &'a [Document<Span>],
     diag_line: usize,
     anchor_name: &str,
-) -> Option<&'a Node<Span>> {
+) -> Option<(&'a Node<Span>, &'a rlsp_yaml_parser::LineIndex)> {
     let parser_line = diag_line + 1;
     for doc in docs {
-        if let Some(node) = find_anchored_node_in(&doc.root, parser_line, anchor_name) {
-            return Some(node);
+        let idx = doc.line_index();
+        if let Some(node) = find_anchored_node_in(&doc.root, parser_line, anchor_name, idx) {
+            return Some((node, idx));
         }
     }
     None
@@ -78,9 +82,10 @@ fn find_anchored_node_in<'a>(
     node: &'a Node<Span>,
     parser_line: usize,
     anchor_name: &str,
+    idx: &rlsp_yaml_parser::LineIndex,
 ) -> Option<&'a Node<Span>> {
     if node.anchor() == Some(anchor_name) {
-        let loc_line = node_loc(node).start.line;
+        let loc_line = idx.line_column(node_loc(node).start).0 as usize;
         if loc_line == parser_line || loc_line == parser_line + 1 {
             return Some(node);
         }
@@ -88,10 +93,10 @@ fn find_anchored_node_in<'a>(
     match node {
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                if let Some(found) = find_anchored_node_in(k, parser_line, anchor_name) {
+                if let Some(found) = find_anchored_node_in(k, parser_line, anchor_name, idx) {
                     return Some(found);
                 }
-                if let Some(found) = find_anchored_node_in(v, parser_line, anchor_name) {
+                if let Some(found) = find_anchored_node_in(v, parser_line, anchor_name, idx) {
                     return Some(found);
                 }
             }
@@ -99,7 +104,7 @@ fn find_anchored_node_in<'a>(
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                if let Some(found) = find_anchored_node_in(item, parser_line, anchor_name) {
+                if let Some(found) = find_anchored_node_in(item, parser_line, anchor_name, idx) {
                     return Some(found);
                 }
             }

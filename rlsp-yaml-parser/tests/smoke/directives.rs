@@ -458,12 +458,9 @@ fn explicit_document_start_span_covers_dashes() {
         "expected an explicit DocumentStart"
     );
     if let Some(span) = doc_start_span {
+        assert_eq!(span.start, 0, "DocumentStart span must start at byte 0");
         assert_eq!(
-            span.start.byte_offset, 0,
-            "DocumentStart span must start at byte 0"
-        );
-        assert_eq!(
-            span.end.byte_offset, 3,
+            span.end, 3,
             "DocumentStart span must end after '---' (byte 3)"
         );
     }

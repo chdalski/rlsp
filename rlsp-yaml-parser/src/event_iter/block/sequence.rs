@@ -348,10 +348,7 @@ impl<'input> EventIter<'input> {
                             let scalar_start_pos = line.pos;
                             let value_end_pos =
                                 crate::pos::advance_within_line(scalar_start_pos, value);
-                            let span = Span {
-                                start: scalar_start_pos,
-                                end: value_end_pos,
-                            };
+                            let span = Span::from_pos(scalar_start_pos, value_end_pos);
 
                             // Inline suffix validation: NUL/BOM detection.
                             // We do NOT use self.lexer.plain_scalar_suffix_error
@@ -403,13 +400,8 @@ impl<'input> EventIter<'input> {
                                         hash_pos.advance('#'),
                                         comment_text,
                                     );
-                                    self.lexer.trailing_comment = Some((
-                                        comment_text,
-                                        Span {
-                                            start: hash_pos,
-                                            end: span_end,
-                                        },
-                                    ));
+                                    self.lexer.trailing_comment =
+                                        Some((comment_text, Span::from_pos(hash_pos, span_end)));
                                     suffix_error = None;
                                 }
                             } else if let Some((bad_i, bad_ch)) = suffix

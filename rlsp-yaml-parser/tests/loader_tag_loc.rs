@@ -53,10 +53,7 @@ fn tl_1_scalar_with_primary_tag_has_tag_loc_some_starting_at_bang() {
     let loc = value
         .tag_loc()
         .expect("tag_loc must be Some for tagged scalar");
-    assert_eq!(
-        loc.start.byte_offset, 5,
-        "tag span must start at byte 5 (the '!')"
-    );
+    assert_eq!(loc.start, 5, "tag span must start at byte 5 (the '!')");
 }
 
 // TL-2: mapping_with_anchor_and_tag_has_both_locs_some

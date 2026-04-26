@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use regex::Regex;
+use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
@@ -38,13 +39,19 @@ static URL_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
 pub fn find_document_links(docs: &[Document<Span>], base_uri: Option<&Url>) -> Vec<DocumentLink> {
     let mut links = Vec::new();
     for doc in docs {
-        collect_node_links(&doc.root, base_uri, &mut links);
+        let idx = doc.line_index();
+        collect_node_links(&doc.root, base_uri, &mut links, idx);
     }
     links
 }
 
 /// Recursively walk `node` and collect document links into `out`.
-fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<DocumentLink>) {
+fn collect_node_links(
+    node: &Node<Span>,
+    base_uri: Option<&Url>,
+    out: &mut Vec<DocumentLink>,
+    idx: &LineIndex,
+) {
     match node {
         Node::Scalar {
             value,
@@ -59,7 +66,7 @@ fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<D
                 if !value.is_empty() && !value.contains(['\n', '\r', '\x00']) {
                     if let Some(target) = resolve_include_path(value, base_uri) {
                         out.push(DocumentLink {
-                            range: span_to_range(*loc),
+                            range: span_to_range(*loc, idx),
                             target: Some(target),
                             tooltip: Some("Open included file".to_string()),
                             data: None,
@@ -89,19 +96,21 @@ fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<D
                 };
                 let range = if is_multiline {
                     // Multi-line scalar: fall back to the full node span.
-                    span_to_range(*loc)
+                    span_to_range(*loc, idx)
                 } else {
                     // Single-line scalar: compute the precise character range within the
-                    // source line. loc.start.column is the codepoint column of the scalar's
+                    // source line. loc.start column is the codepoint column of the scalar's
                     // opening character (including the quote for quoted styles).
-                    let start_utf16 = u32::try_from(loc.start.column).unwrap_or(u32::MAX)
+                    let loc_start_col = idx.line_column(loc.start).1;
+                    let start_utf16 = u32::try_from(loc_start_col as usize).unwrap_or(u32::MAX)
                         + quote_utf16
                         + byte_to_utf16_offset(value, mat.start());
-                    let end_utf16 = u32::try_from(loc.start.column).unwrap_or(u32::MAX)
+                    let end_utf16 = u32::try_from(loc_start_col as usize).unwrap_or(u32::MAX)
                         + quote_utf16
                         + byte_to_utf16_offset(value, mat.start() + matched.len());
                     let lsp_line =
-                        u32::try_from(loc.start.line.saturating_sub(1)).unwrap_or(u32::MAX);
+                        u32::try_from(idx.line_column(loc.start).0.saturating_sub(1) as usize)
+                            .unwrap_or(u32::MAX);
                     Range {
                         start: Position {
                             line: lsp_line,
@@ -123,13 +132,13 @@ fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<D
         }
         Node::Mapping { entries, .. } => {
             for (key, val) in entries {
-                collect_node_links(key, base_uri, out);
-                collect_node_links(val, base_uri, out);
+                collect_node_links(key, base_uri, out, idx);
+                collect_node_links(val, base_uri, out, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_node_links(item, base_uri, out);
+                collect_node_links(item, base_uri, out, idx);
             }
         }
         Node::Alias { .. } => {}
@@ -141,19 +150,15 @@ fn collect_node_links(node: &Node<Span>, base_uri: Option<&Url>, out: &mut Vec<D
 /// `Pos::line` is 1-based; LSP lines are 0-based — hence `saturating_sub(1)`.
 /// `Pos::column` is 0-based codepoints; used directly as LSP character offset
 /// (same limitation as `schema_validation.rs:span_to_range`).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "LSP positions are u32; documents exceeding 4 billion lines/columns are not realistic"
-)]
-const fn span_to_range(loc: Span) -> Range {
+fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
     Range {
         start: Position {
-            line: loc.start.line.saturating_sub(1) as u32,
-            character: loc.start.column as u32,
+            line: idx.line_column(loc.start).0.saturating_sub(1),
+            character: idx.line_column(loc.start).1,
         },
         end: Position {
-            line: loc.end.line.saturating_sub(1) as u32,
-            character: loc.end.column as u32,
+            line: idx.line_column(loc.end).0.saturating_sub(1),
+            character: idx.line_column(loc.end).1,
         },
     }
 }

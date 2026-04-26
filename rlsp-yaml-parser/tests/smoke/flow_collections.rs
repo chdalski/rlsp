@@ -583,18 +583,20 @@ fn single_item_flow_sequence_leading_trailing_spaces() {
 #[test]
 fn flow_sequence_start_span_anchors_at_opening_bracket() {
     // "[a]\n" — SequenceStart span.start must be at byte 0, column 0.
-    let items = parse_to_vec("[a]\n");
+    let input = "[a]\n";
+    let items = parse_to_vec(input);
     let seq_span = items.iter().find_map(|r| match r {
         Ok((Event::SequenceStart { .. }, span)) => Some(*span),
         Ok(_) | Err(_) => None,
     });
     assert!(seq_span.is_some(), "SequenceStart event must be present");
     if let Some(span) = seq_span {
+        assert_eq!(span.start, 0, "SequenceStart byte_offset must be 0");
         assert_eq!(
-            span.start.byte_offset, 0,
-            "SequenceStart byte_offset must be 0"
+            line_col(input, span.start).1,
+            0,
+            "SequenceStart column must be 0"
         );
-        assert_eq!(span.start.column, 0, "SequenceStart column must be 0");
     }
 }
 
@@ -609,7 +611,7 @@ fn flow_sequence_end_span_anchors_at_closing_bracket() {
     assert!(end_span.is_some(), "SequenceEnd event must be present");
     if let Some(span) = end_span {
         assert_eq!(
-            span.start.byte_offset, 2,
+            span.start, 2,
             "SequenceEnd byte_offset must be 2 (position of `]`)"
         );
     }
@@ -618,18 +620,20 @@ fn flow_sequence_end_span_anchors_at_closing_bracket() {
 #[test]
 fn flow_mapping_start_span_anchors_at_opening_brace() {
     // "{a: b}\n" — MappingStart span.start at byte 0, column 0.
-    let items = parse_to_vec("{a: b}\n");
+    let input = "{a: b}\n";
+    let items = parse_to_vec(input);
     let map_span = items.iter().find_map(|r| match r {
         Ok((Event::MappingStart { .. }, span)) => Some(*span),
         Ok(_) | Err(_) => None,
     });
     assert!(map_span.is_some(), "MappingStart event must be present");
     if let Some(span) = map_span {
+        assert_eq!(span.start, 0, "MappingStart byte_offset must be 0");
         assert_eq!(
-            span.start.byte_offset, 0,
-            "MappingStart byte_offset must be 0"
+            line_col(input, span.start).1,
+            0,
+            "MappingStart column must be 0"
         );
-        assert_eq!(span.start.column, 0, "MappingStart column must be 0");
     }
 }
 
@@ -644,7 +648,7 @@ fn flow_mapping_end_span_anchors_at_closing_brace() {
     assert!(end_span.is_some(), "MappingEnd event must be present");
     if let Some(span) = end_span {
         assert_eq!(
-            span.start.byte_offset, 5,
+            span.start, 5,
             "MappingEnd byte_offset must be 5 (position of `}}`)"
         );
     }
@@ -660,11 +664,8 @@ fn scalar_span_inside_flow_sequence_is_correct() {
     });
     assert!(scalar_span.is_some(), "Scalar event must be present");
     if let Some(span) = scalar_span {
-        assert_eq!(
-            span.start.byte_offset, 1,
-            "scalar start byte_offset must be 1"
-        );
-        assert_eq!(span.end.byte_offset, 3, "scalar end byte_offset must be 3");
+        assert_eq!(span.start, 1, "scalar start byte_offset must be 1");
+        assert_eq!(span.end, 3, "scalar end byte_offset must be 3");
     }
 }
 
@@ -1068,7 +1069,8 @@ fn scalar_on_continuation_line_has_correct_span() {
     //  10: `\n`
     //  11: `]`
     //  12: `\n`
-    let items = parse_to_vec("[\n  a,\n  b\n]\n");
+    let input = "[\n  a,\n  b\n]\n";
+    let items = parse_to_vec(input);
     // Find the *second* Scalar — `b` (index 1 in scalar events).
     let scalar_spans: Vec<_> = items
         .iter()
@@ -1079,16 +1081,15 @@ fn scalar_on_continuation_line_has_correct_span() {
         .collect();
     assert_eq!(scalar_spans.len(), 2, "expected exactly 2 scalar events");
     if let [_a_span, b_span] = scalar_spans.as_slice() {
+        assert_eq!(b_span.start, 9, "scalar `b` must start at byte_offset 9");
         assert_eq!(
-            b_span.start.byte_offset, 9,
-            "scalar `b` must start at byte_offset 9"
-        );
-        assert_eq!(
-            b_span.start.line, 3,
+            line_col(input, b_span.start).0,
+            3,
             "scalar `b` must be on line 3 (1-based)"
         );
         assert_eq!(
-            b_span.start.column, 2,
+            line_col(input, b_span.start).1,
+            2,
             "scalar `b` must be at column 2 (0-based)"
         );
     } else {

@@ -12,6 +12,22 @@ with existing infrastructure.
 
 ---
 
+### Lazy Position Resolution via `LineIndex` [completed]
+
+**Description:** `Span` now stores only byte offsets (`start: u32`, `end: u32`,
+8 bytes total, down from 48 bytes). Line and column numbers are resolved on demand
+via the new `LineIndex` type. Each `Document<Span>` exposes a `line_index()` accessor
+that returns a `&LineIndex` shared across all documents in the same parse. Callers
+convert byte offsets to `(line, column)` pairs with `idx.line_column(offset)`.
+**Complexity:** Medium
+**Comment:** `Span` is the most-allocated type in the parser — every AST node and
+event carries one. Shrinking it from 48 to 8 bytes reduces peak heap usage and
+improves cache locality for batch parsing workloads. The `Pos` type is retained
+for error reporting (`LoadError::Parse { pos: Pos }`). The `LineIndex` is built
+once per input string and shared via `Arc` across multi-document streams so the
+newline table is not duplicated.
+**Tier:** 1
+
 ### Named Tag Handle `_` Rejection [completed]
 
 **Description:** Named `%TAG` directive handle names now reject `_` per YAML 1.2.2

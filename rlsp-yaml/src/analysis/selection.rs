@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
-use tower_lsp::lsp_types::{Position, Range, SelectionRange};
+use rlsp_yaml_parser::{LineIndex, Span};
+use tower_lsp::lsp_types::{Position, SelectionRange};
+
+use crate::lsp_util::span_to_lsp;
 
 /// Compute selection ranges for the given YAML documents and cursor positions.
 ///
@@ -32,15 +34,18 @@ fn selection_range_for_position(
     // Find the document whose root span contains this cursor position.
     // Pos convention: line is 1-based, column is 0-based.
     let doc = docs.iter().find(|d| {
+        let idx = d.line_index();
         let loc = node_span(&d.root);
-        let start_line_0 = loc.start.line.saturating_sub(1);
-        let end_line_0 = loc.end.line.saturating_sub(1);
+        let start_line_0 = idx.line_column(loc.start).0.saturating_sub(1) as usize;
+        let end_line_0 = idx.line_column(loc.end).0.saturating_sub(1) as usize;
         line >= start_line_0 && line <= end_line_0
     })?;
 
+    let idx = doc.line_index();
+
     // Collect ancestor spans innermost-first from the AST walk
     let mut ancestor_spans: Vec<Span> = Vec::new();
-    collect_ancestor_spans(&doc.root, line, col, &mut ancestor_spans);
+    collect_ancestor_spans(&doc.root, line, col, &mut ancestor_spans, idx);
 
     if ancestor_spans.is_empty() {
         return None;
@@ -48,7 +53,7 @@ fn selection_range_for_position(
 
     // Derive doc root range from AST span directly
     let doc_root_span = node_span(&doc.root);
-    let doc_root = span_to_lsp_range(&doc_root_span);
+    let doc_root = span_to_lsp(doc_root_span, idx);
 
     // Build the SelectionRange chain: innermost first in ancestor_spans,
     // outermost (doc root) is the final parent.
@@ -60,7 +65,7 @@ fn selection_range_for_position(
     // ancestor_spans[0] is innermost, last is closest-to-root.
     // We want to wrap them outermost-first, so iterate in reverse.
     for span in ancestor_spans.iter().rev() {
-        let range = span_to_lsp_range(span);
+        let range = span_to_lsp(*span, idx);
         // Avoid emitting the doc root twice
         if range == doc_root {
             continue;
@@ -98,6 +103,7 @@ fn collect_ancestor_spans(
     line: usize,
     col: usize,
     ancestor_spans: &mut Vec<Span>,
+    idx: &LineIndex,
 ) {
     let depth_before = ancestor_spans.len();
 
@@ -105,16 +111,16 @@ fn collect_ancestor_spans(
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
                 let key_span = node_span(key);
-                let key_line_0 = key_span.start.line.saturating_sub(1);
+                let key_line_0 = idx.line_column(key_span.start).0.saturating_sub(1) as usize;
                 let val_end = node_span(value).end;
-                let entry_end_line_0 = val_end.line.saturating_sub(1);
+                let entry_end_line_0 = idx.line_column(val_end).0.saturating_sub(1) as usize;
 
                 if line < key_line_0 || line > entry_end_line_0 {
                     continue;
                 }
 
                 // Recurse into value first (innermost wins)
-                collect_ancestor_spans(value, line, col, ancestor_spans);
+                collect_ancestor_spans(value, line, col, ancestor_spans, idx);
                 if ancestor_spans.len() > depth_before {
                     ancestor_spans.push(Span {
                         start: key_span.start,
@@ -124,8 +130,9 @@ fn collect_ancestor_spans(
                 }
 
                 // Check if cursor is on the key itself
-                if key_line_0 == line && col >= key_span.start.column && col <= key_span.end.column
-                {
+                let key_start_col = idx.line_column(key_span.start).1 as usize;
+                let key_end_col = idx.line_column(key_span.end).1 as usize;
+                if key_line_0 == line && col >= key_start_col && col <= key_end_col {
                     ancestor_spans.push(key_span);
                     ancestor_spans.push(Span {
                         start: key_span.start,
@@ -147,66 +154,35 @@ fn collect_ancestor_spans(
         Node::Sequence { items, .. } => {
             for item in items {
                 let item_span = node_span(item);
-                let start_line_0 = item_span.start.line.saturating_sub(1);
-                let end_line_0 = item_span.end.line.saturating_sub(1);
+                let start_line_0 = idx.line_column(item_span.start).0.saturating_sub(1) as usize;
+                let end_line_0 = idx.line_column(item_span.end).0.saturating_sub(1) as usize;
 
                 if line < start_line_0 || line > end_line_0 {
                     continue;
                 }
 
-                collect_ancestor_spans(item, line, col, ancestor_spans);
+                collect_ancestor_spans(item, line, col, ancestor_spans, idx);
                 if ancestor_spans.len() > depth_before {
                     ancestor_spans.push(item_span);
                     break;
                 }
 
                 // Leaf item — cursor is within its line range
-                if col >= item_span.start.column {
+                if col >= idx.line_column(item_span.start).1 as usize {
                     ancestor_spans.push(item_span);
                     break;
                 }
             }
         }
         Node::Scalar { loc, .. } | Node::Alias { loc, .. } => {
-            if loc.start.line > 0 {
-                let start_line_0 = loc.start.line.saturating_sub(1);
-                let end_line_0 = loc.end.line.saturating_sub(1);
-                if line >= start_line_0 && line <= end_line_0 && col >= loc.start.column {
-                    ancestor_spans.push(*loc);
-                }
+            let start_line_0 = idx.line_column(loc.start).0.saturating_sub(1) as usize;
+            let end_line_0 = idx.line_column(loc.end).0.saturating_sub(1) as usize;
+            let start_col = idx.line_column(loc.start).1 as usize;
+            if line >= start_line_0 && line <= end_line_0 && col >= start_col {
+                ancestor_spans.push(*loc);
             }
         }
     }
-}
-
-/// Convert an `rlsp-yaml-parser` `Span` to an LSP `Range`.
-/// Pos: line 1-based, column 0-based -> LSP: both 0-based.
-fn span_to_lsp_range(span: &Span) -> Range {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_line = span.start.line.saturating_sub(1) as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_col = span.start.column as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_line = span.end.line.saturating_sub(1) as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_col = span.end.column as u32;
-
-    Range::new(
-        Position::new(start_line, start_col),
-        Position::new(end_line, end_col),
-    )
 }
 
 #[cfg(test)]
@@ -779,5 +755,41 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    // LSP-3: multibyte key — selection range character offsets are codepoint-based
+    #[test]
+    fn selection_ranges_multibyte_key_character_correct() {
+        let text = "日本語: val\n";
+        let docs = parse_docs(text);
+        let positions = vec![Position {
+            line: 0,
+            character: 0,
+        }];
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &positions);
+        assert!(!result.is_empty(), "expected at least one selection range");
+        // Walk the range chain and look for a range that covers [0:0..0:3]
+        // (3 codepoints for "日本語", not 9 bytes).
+        let sr = &result[0];
+        let mut current = sr;
+        let mut found_key_range = false;
+        loop {
+            if current.range.start.line == 0
+                && current.range.start.character == 0
+                && current.range.end.line == 0
+                && current.range.end.character == 3
+            {
+                found_key_range = true;
+                break;
+            }
+            match &current.parent {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+        assert!(
+            found_key_range,
+            "expected a selection range [0:0..0:3] for '日本語' (3 codepoints, not 9 bytes)"
+        );
     }
 }

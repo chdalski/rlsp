@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, Position, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Document, ScalarStyle, Span};
+use rlsp_yaml_parser::{Document, LineIndex, ScalarStyle, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
 
@@ -14,7 +14,7 @@ pub(super) fn yaml11_bool_actions(
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Vec<CodeAction> {
-    let Some((scalar, loc, base_indent)) = find_yaml11_bool_scalar(docs, diag) else {
+    let Some((scalar, loc, base_indent, idx)) = find_yaml11_bool_scalar(docs, diag) else {
         return vec![];
     };
     let Node::Scalar { value, .. } = scalar else {
@@ -40,17 +40,15 @@ pub(super) fn yaml11_bool_actions(
     };
     let quoted_text = format_subtree(&quoted, &quote_opts, base_indent);
     let plain_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
     let edit_range = Range::new(
         Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
+            idx.line_column(loc.start).0.saturating_sub(1),
+            idx.line_column(loc.start).1,
         ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     );
 
     vec![
@@ -82,7 +80,7 @@ pub(super) fn schema_yaml11_bool_type_actions(
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Vec<CodeAction> {
-    let Some((scalar, loc, base_indent)) = find_yaml11_bool_scalar(docs, diag) else {
+    let Some((scalar, loc, base_indent, idx)) = find_yaml11_bool_scalar(docs, diag) else {
         return vec![];
     };
     let Node::Scalar { value, .. } = scalar else {
@@ -99,17 +97,15 @@ pub(super) fn schema_yaml11_bool_type_actions(
     }
 
     let plain_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
     let edit_range = Range::new(
         Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
+            idx.line_column(loc.start).0.saturating_sub(1),
+            idx.line_column(loc.start).1,
         ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     );
 
     vec![make_action(
@@ -128,28 +124,31 @@ pub(super) fn schema_yaml11_bool_type_actions(
 fn find_yaml11_bool_scalar<'a>(
     docs: &'a [Document<Span>],
     diag: &Diagnostic,
-) -> Option<(&'a Node<Span>, &'a Span, usize)> {
+) -> Option<(&'a Node<Span>, &'a Span, usize, &'a LineIndex)> {
     let col_match = diagnostic_code(diag) == Some("yaml11Boolean");
     let parser_line = diag.range.start.line as usize + 1;
     if !col_match {
         let count: usize = docs
             .iter()
-            .map(|doc| count_yaml11_bool_on_line(&doc.root, parser_line))
+            .map(|doc| count_yaml11_bool_on_line(&doc.root, parser_line, doc.line_index()))
             .sum();
         if count != 1 {
             return None;
         }
     }
     for doc in docs {
-        if let Some(result) = find_yaml11_bool_in_node(&doc.root, parser_line, diag, col_match) {
-            return Some(result);
+        let idx = doc.line_index();
+        if let Some((node, loc, col)) =
+            find_yaml11_bool_in_node(&doc.root, parser_line, diag, col_match, idx)
+        {
+            return Some((node, loc, col, idx));
         }
     }
     None
 }
 
 /// Count plain yaml11 bool scalars on `parser_line` (1-based) in the AST subtree.
-fn count_yaml11_bool_on_line(node: &Node<Span>, parser_line: usize) -> usize {
+fn count_yaml11_bool_on_line(node: &Node<Span>, parser_line: usize, idx: &LineIndex) -> usize {
     match node {
         Node::Mapping { entries, .. } => entries
             .iter()
@@ -162,13 +161,13 @@ fn count_yaml11_bool_on_line(node: &Node<Span>, parser_line: usize) -> usize {
                 } = v
                 {
                     usize::from(
-                        loc.start.line == parser_line
+                        idx.line_column(loc.start).0 as usize == parser_line
                             && crate::scalar_helpers::is_yaml11_bool(value),
                     )
                 } else {
-                    count_yaml11_bool_on_line(v, parser_line)
+                    count_yaml11_bool_on_line(v, parser_line, idx)
                 };
-                count_yaml11_bool_on_line(k, parser_line) + v_count
+                count_yaml11_bool_on_line(k, parser_line, idx) + v_count
             })
             .sum(),
         Node::Sequence { items, .. } => items
@@ -182,11 +181,11 @@ fn count_yaml11_bool_on_line(node: &Node<Span>, parser_line: usize) -> usize {
                 } = item
                 {
                     usize::from(
-                        loc.start.line == parser_line
+                        idx.line_column(loc.start).0 as usize == parser_line
                             && crate::scalar_helpers::is_yaml11_bool(value),
                     )
                 } else {
-                    count_yaml11_bool_on_line(item, parser_line)
+                    count_yaml11_bool_on_line(item, parser_line, idx)
                 }
             })
             .sum(),
@@ -194,10 +193,9 @@ fn count_yaml11_bool_on_line(node: &Node<Span>, parser_line: usize) -> usize {
     }
 }
 
-/// `yaml11Boolean` emits `loc.end.column` without the `+1` used by flow-map diagnostics.
-const fn yaml11_bool_col_matches_diag(loc: &Span, diag: &Diagnostic) -> bool {
-    diag.range.start.character as usize == loc.start.column
-        && diag.range.end.character as usize == loc.end.column
+fn yaml11_bool_col_matches_diag(loc: Span, diag: &Diagnostic, idx: &LineIndex) -> bool {
+    diag.range.start.character as usize == idx.line_column(loc.start).1 as usize
+        && diag.range.end.character as usize == idx.line_column(loc.end).1 as usize
 }
 
 fn find_yaml11_bool_in_node<'a>(
@@ -205,6 +203,7 @@ fn find_yaml11_bool_in_node<'a>(
     parser_line: usize,
     diag: &Diagnostic,
     col_match: bool,
+    idx: &LineIndex,
 ) -> Option<(&'a Node<Span>, &'a Span, usize)> {
     match node {
         Node::Mapping { entries, .. } => {
@@ -216,18 +215,20 @@ fn find_yaml11_bool_in_node<'a>(
                     ..
                 } = v
                 {
-                    if loc.start.line == parser_line
+                    if idx.line_column(loc.start).0 as usize == parser_line
                         && crate::scalar_helpers::is_yaml11_bool(value)
-                        && (!col_match || yaml11_bool_col_matches_diag(loc, diag))
+                        && (!col_match || yaml11_bool_col_matches_diag(*loc, diag, idx))
                     {
-                        let key_col = node_loc(k).start.column;
+                        let key_col = idx.line_column(node_loc(k).start).1 as usize;
                         return Some((v, loc, key_col));
                     }
                 }
-                if let Some(result) = find_yaml11_bool_in_node(k, parser_line, diag, col_match) {
+                if let Some(result) = find_yaml11_bool_in_node(k, parser_line, diag, col_match, idx)
+                {
                     return Some(result);
                 }
-                if let Some(result) = find_yaml11_bool_in_node(v, parser_line, diag, col_match) {
+                if let Some(result) = find_yaml11_bool_in_node(v, parser_line, diag, col_match, idx)
+                {
                     return Some(result);
                 }
             }
@@ -242,14 +243,16 @@ fn find_yaml11_bool_in_node<'a>(
                     ..
                 } = item
                 {
-                    if loc.start.line == parser_line
+                    if idx.line_column(loc.start).0 as usize == parser_line
                         && crate::scalar_helpers::is_yaml11_bool(value)
-                        && (!col_match || yaml11_bool_col_matches_diag(loc, diag))
+                        && (!col_match || yaml11_bool_col_matches_diag(*loc, diag, idx))
                     {
-                        return Some((item, loc, loc.start.column));
+                        return Some((item, loc, idx.line_column(loc.start).1 as usize));
                     }
                 }
-                if let Some(result) = find_yaml11_bool_in_node(item, parser_line, diag, col_match) {
+                if let Some(result) =
+                    find_yaml11_bool_in_node(item, parser_line, diag, col_match, idx)
+                {
                     return Some(result);
                 }
             }

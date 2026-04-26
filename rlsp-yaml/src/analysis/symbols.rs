@@ -3,8 +3,10 @@
 use std::fmt::Write;
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{Pos, Span};
+use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
+
+use crate::lsp_util::{offset_to_lsp, span_to_lsp};
 
 /// Produce a hierarchical list of document symbols for the given YAML documents.
 ///
@@ -17,16 +19,16 @@ pub fn document_symbols(docs: &[Document<Span>]) -> Vec<DocumentSymbol> {
     }
 
     docs.iter()
-        .flat_map(|doc| yaml_to_symbols(&doc.root))
+        .flat_map(|doc| yaml_to_symbols(&doc.root, doc.line_index()))
         .collect()
 }
 
 /// Convert a `Node<Span>` into `DocumentSymbol` objects.
-fn yaml_to_symbols(node: &Node<Span>) -> Vec<DocumentSymbol> {
+fn yaml_to_symbols(node: &Node<Span>, idx: &LineIndex) -> Vec<DocumentSymbol> {
     match node {
         Node::Mapping { entries, .. } => entries
             .iter()
-            .map(|(key, value)| make_symbol(&node_to_string(key), key, value))
+            .map(|(key, value)| make_symbol(&node_to_string(key), key, value, idx))
             .collect(),
         Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => Vec::new(),
     }
@@ -37,18 +39,26 @@ fn yaml_to_symbols(node: &Node<Span>) -> Vec<DocumentSymbol> {
     deprecated,
     reason = "DocumentSymbol.deprecated field is required by LSP spec"
 )]
-fn make_symbol(key_name: &str, key_node: &Node<Span>, value: &Node<Span>) -> DocumentSymbol {
+fn make_symbol(
+    key_name: &str,
+    key_node: &Node<Span>,
+    value: &Node<Span>,
+    idx: &LineIndex,
+) -> DocumentSymbol {
     let key_loc = node_loc(key_node);
     let value_loc = node_loc(value);
 
-    let selection_range = span_to_lsp_range(key_loc);
-    let range = Range::new(pos_to_lsp(key_loc.start), pos_to_lsp(value_loc.end));
+    let selection_range = span_to_lsp(key_loc, idx);
+    let range = Range::new(
+        offset_to_lsp(key_loc.start, idx),
+        offset_to_lsp(value_loc.end, idx),
+    );
 
     let children = match value {
         Node::Mapping { entries, .. } => {
             let child_symbols: Vec<DocumentSymbol> = entries
                 .iter()
-                .map(|(k, v)| make_symbol(&node_to_string(k), k, v))
+                .map(|(k, v)| make_symbol(&node_to_string(k), k, v, idx))
                 .collect();
             if child_symbols.is_empty() {
                 None
@@ -57,7 +67,7 @@ fn make_symbol(key_name: &str, key_node: &Node<Span>, value: &Node<Span>) -> Doc
             }
         }
         Node::Sequence { items, .. } => {
-            let child_symbols = make_sequence_children(items);
+            let child_symbols = make_sequence_children(items, idx);
             if child_symbols.is_empty() {
                 None
             } else {
@@ -84,18 +94,18 @@ fn make_symbol(key_name: &str, key_node: &Node<Span>, value: &Node<Span>) -> Doc
     deprecated,
     reason = "DocumentSymbol.deprecated field is required by LSP spec"
 )]
-fn make_sequence_children(items: &[Node<Span>]) -> Vec<DocumentSymbol> {
+fn make_sequence_children(items: &[Node<Span>], idx: &LineIndex) -> Vec<DocumentSymbol> {
     let mut children = Vec::new();
 
-    for (idx, item) in items.iter().enumerate() {
+    for (i, item) in items.iter().enumerate() {
         let item_loc = node_loc(item);
 
         let mut name = String::new();
-        let _ = write!(name, "[{idx}]");
+        let _ = write!(name, "[{i}]");
 
-        let range = span_to_lsp_range(item_loc);
+        let range = span_to_lsp(item_loc, idx);
         // selection_range is a single character at the item content start (AST-derived).
-        let start = pos_to_lsp(item_loc.start);
+        let start = offset_to_lsp(item_loc.start, idx);
         let sel_end = Position::new(start.line, start.character + 1);
         let selection_range = Range::new(start, sel_end);
 
@@ -103,7 +113,7 @@ fn make_sequence_children(items: &[Node<Span>]) -> Vec<DocumentSymbol> {
             Node::Mapping { entries, .. } => {
                 let cs: Vec<DocumentSymbol> = entries
                     .iter()
-                    .map(|(k, v)| make_symbol(&node_to_string(k), k, v))
+                    .map(|(k, v)| make_symbol(&node_to_string(k), k, v, idx))
                     .collect();
                 if cs.is_empty() { None } else { Some(cs) }
             }
@@ -133,20 +143,6 @@ const fn node_loc(node: &Node<Span>) -> Span {
         | Node::Sequence { loc, .. }
         | Node::Alias { loc, .. } => *loc,
     }
-}
-
-/// Convert a parser `Span` (1-based line, 0-based column) to an LSP `Range` (both 0-based).
-fn span_to_lsp_range(span: Span) -> Range {
-    Range::new(pos_to_lsp(span.start), pos_to_lsp(span.end))
-}
-
-/// Convert a parser `Pos` (1-based line, 0-based column) to an LSP `Position` (both 0-based).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "LSP line/col are u32; always fits"
-)]
-fn pos_to_lsp(pos: Pos) -> Position {
-    Position::new(pos.line.saturating_sub(1) as u32, pos.column as u32)
 }
 
 /// Map a `Node<Span>` value to the appropriate `SymbolKind`.
@@ -669,6 +665,28 @@ mod tests {
             sym.kind,
             SymbolKind::NULL,
             "!!null tag must produce NULL symbol kind regardless of value content"
+        );
+    }
+
+    // LSP-2: multibyte key — character offsets are codepoint-based, not byte-based
+    //
+    // selection_range covers the key span only ("日本語"), so end.character
+    // must be 3 (codepoints) rather than 9 (bytes) or any byte-based count.
+    #[test]
+    fn symbols_multibyte_key_lsp_character_correct() {
+        let text = "日本語: val\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let sym = find_symbol(&symbols, "日本語").expect("should have '日本語' symbol");
+        assert_eq!(
+            sym.selection_range.start.character, 0,
+            "selection_range start.character should be 0, got {}",
+            sym.selection_range.start.character
+        );
+        assert_eq!(
+            sym.selection_range.end.character, 3,
+            "selection_range end.character should be 3 (codepoints), not 9 (bytes), got {}",
+            sym.selection_range.end.character
         );
     }
 }

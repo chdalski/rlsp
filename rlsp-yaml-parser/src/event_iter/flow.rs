@@ -330,10 +330,7 @@ impl<'input> EventIter<'input> {
                     let comment_text: &'input str = cur_content.get(text_start..).unwrap_or("");
                     let comment_end =
                         crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
-                    let comment_span = Span {
-                        start: hash_pos,
-                        end: comment_end,
-                    };
+                    let comment_span = Span::from_pos(hash_pos, comment_end);
                     events.push((Event::Comment { text: comment_text }, comment_span));
                     pos_in_line = cur_content.len();
                 } else {
@@ -981,15 +978,22 @@ impl<'input> EventIter<'input> {
                     }
                 } else {
                     // Single-line scalar: derive tail from `remaining`.
-                    let consumed_bytes = span.end.byte_offset - cur_abs_pos.byte_offset;
+                    let end_offset = span.end as usize;
+                    let consumed_bytes = end_offset - cur_abs_pos.byte_offset;
                     let tail_in_remaining = remaining.get(consumed_bytes..).unwrap_or("");
                     if !tail_in_remaining.is_empty() {
+                        // Reconstruct the tail Pos by advancing cur_abs_pos through
+                        // the consumed prefix of `remaining`.
+                        let tail_pos = crate::pos::advance_within_line(
+                            cur_abs_pos,
+                            &remaining[..consumed_bytes],
+                        );
                         let tail_syn = crate::lines::Line {
                             content: tail_in_remaining,
-                            offset: span.end.byte_offset,
-                            indent: span.end.column,
+                            offset: tail_pos.byte_offset,
+                            indent: tail_pos.column,
                             break_type: crate::lines::BreakType::Eof,
-                            pos: span.end,
+                            pos: tail_pos,
                         };
                         self.lexer.prepend_inline_line(tail_syn);
                     }
@@ -1283,14 +1287,16 @@ impl<'input> EventIter<'input> {
                                 }
                             };
                         let tag_token_bytes = 1 + advance_past_bang;
-                        pending_flow_tag_loc = Some(Span {
-                            start: bang_pos,
-                            end: Pos {
-                                byte_offset: bang_pos.byte_offset + tag_token_bytes,
-                                line: bang_pos.line,
-                                column: bang_pos.column + tag_token_bytes,
-                            },
-                        });
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            reason = "YAML files <= 4 GB; u32 offset is sufficient"
+                        )]
+                        {
+                            pending_flow_tag_loc = Some(Span {
+                                start: bang_pos.byte_offset as u32,
+                                end: (bang_pos.byte_offset + tag_token_bytes) as u32,
+                            });
+                        }
                         pending_flow_tag = Some(resolved_flow_tag);
                         pos_in_line += tag_token_bytes;
                         // Skip any whitespace after the tag.
@@ -1328,10 +1334,7 @@ impl<'input> EventIter<'input> {
                         }
                         let anchor_end =
                             crate::pos::advance_within_line(amp_pos.advance('&'), name);
-                        pending_flow_anchor_loc = Some(Span {
-                            start: amp_pos,
-                            end: anchor_end,
-                        });
+                        pending_flow_anchor_loc = Some(Span::from_pos(amp_pos, anchor_end));
                         pending_flow_anchor = Some(name);
                         pos_in_line += 1 + name.len();
                         // Skip any whitespace after the anchor name.
@@ -1378,10 +1381,7 @@ impl<'input> EventIter<'input> {
                             line: star_pos.line,
                             column: star_pos.column + 1 + name.chars().count(),
                         };
-                        let alias_span = Span {
-                            start: star_pos,
-                            end: alias_end,
-                        };
+                        let alias_span = Span::from_pos(star_pos, alias_end);
                         events.push((Event::Alias { name }, alias_span));
                         pos_in_line += 1 + name.len();
                         // Advance mapping phase; mark frame as having a value.
@@ -1599,10 +1599,7 @@ impl<'input> EventIter<'input> {
                         let scalar_start = abs_pos(cur_base_pos, cur_content, pos_in_line);
                         let scalar_end =
                             abs_pos(cur_base_pos, cur_content, pos_in_line + scanned.len());
-                        let scalar_span = Span {
-                            start: scalar_start,
-                            end: scalar_end,
-                        };
+                        let scalar_span = Span::from_pos(scalar_start, scalar_end);
 
                         // Record key start for the §7.4.3 1024-char check when this
                         // scalar is in a key position (Mapping Key phase, or the first

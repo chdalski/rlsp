@@ -204,6 +204,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
             reason: "test fixture",
         },
     },
+    AllowEntry {
+        file: "lsp_util.rs",
+        func: "idx",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — builds LineIndex from source for lsp_util unit tests",
+        },
+    },
 ];
 
 // ---------------------------------------------------------------------------

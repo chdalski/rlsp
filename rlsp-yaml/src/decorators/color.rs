@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Color, ColorPresentation, Position, Range};
@@ -183,7 +184,8 @@ static NAMED_COLORS: &[(&str, [u8; 3])] = &[
 pub fn find_colors(docs: &[Document<Span>]) -> Vec<ColorMatch> {
     let mut results = Vec::new();
     for doc in docs {
-        walk_node_value(&doc.root, &mut results);
+        let idx = doc.line_index();
+        walk_node_value(&doc.root, &mut results, idx);
     }
     results
 }
@@ -270,19 +272,19 @@ fn hsl_to_u32(v: f32) -> u32 {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Walk `node` as a VALUE position, collecting color matches.
-fn walk_node_value(node: &Node<Span>, results: &mut Vec<ColorMatch>) {
+fn walk_node_value(node: &Node<Span>, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
     match node {
         Node::Scalar { value, loc, .. } => {
-            scan_scalar_for_colors(value, *loc, results);
+            scan_scalar_for_colors(value, *loc, results, idx);
         }
         Node::Mapping { entries, .. } => {
             for (_key, value) in entries {
-                walk_node_value(value, results);
+                walk_node_value(value, results, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                walk_node_value(item, results);
+                walk_node_value(item, results, idx);
             }
         }
         Node::Alias { .. } => {}
@@ -295,18 +297,16 @@ fn walk_node_value(node: &Node<Span>, results: &mut Vec<ColorMatch>) {
 /// quote character for quoted scalars, or the first content character for plain
 /// scalars). For multi-line block scalars, `node.value` may contain `\n`
 /// characters; tokens that straddle a line boundary are skipped.
-fn scan_scalar_for_colors(value: &str, loc: Span, results: &mut Vec<ColorMatch>) {
+fn scan_scalar_for_colors(value: &str, loc: Span, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
     // Split the value on newlines so each line gets an independent scan.
     // For single-line scalars this produces exactly one segment.
+    let start_line_0 = idx.line_column(loc.start).0.saturating_sub(1) as usize;
+    let start_col = idx.line_column(loc.start).1 as usize;
     for (segment_idx, segment) in value.split('\n').enumerate() {
-        let line_idx = loc.start.line.saturating_sub(1) + segment_idx;
-        // Column base: first segment starts at loc.start.column; subsequent
+        let line_idx = start_line_0 + segment_idx;
+        // Column base: first segment starts at start_col; subsequent
         // segments start at column 0 (block scalar continuation lines).
-        let col_base = if segment_idx == 0 {
-            loc.start.column
-        } else {
-            0
-        };
+        let col_base = if segment_idx == 0 { start_col } else { 0 };
         scan_line_for_colors(segment, line_idx, col_base, results);
     }
 }
@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn hex_in_value_position_produces_correct_range() {
         // Hex must be quoted to avoid YAML treating # as comment.
-        // "color: '#ff0000'" — quoted value; node.loc.start.column = 7 (at the ').
+        // "color: '#ff0000'" — quoted value; node.(idx.line_column(loc.start).1 as usize) = 7 (at the ').
         // node.value = "#ff0000"; match starts at offset 0 → start_col = 7.
         // #ff0000 is 7 chars → end_col = 7 + 7 = 14.
         let docs = parse_docs("color: '#ff0000'\n");
@@ -992,7 +992,7 @@ mod tests {
 
     #[test]
     fn quoted_string_color_value_produces_correct_range() {
-        // "color: 'red'" — quoted scalar; node.loc.start.column points at the
+        // "color: 'red'" — quoted scalar; node.(idx.line_column(loc.start).1 as usize) points at the
         // opening quote character. node.value = "red" (decoded, no quotes).
         // Byte offset 0 in node.value → column = opening_quote_col + 0.
         // Range: start at opening quote, end 3 chars later (length of "red").
@@ -1000,7 +1000,7 @@ mod tests {
         let colors = find_colors(&docs);
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
-        // loc.start.column for a single-quoted scalar is at the opening quote
+        // (idx.line_column(loc.start).1 as usize) for a single-quoted scalar is at the opening quote
         assert_eq!(colors[0].range.start.character, 7);
         assert_eq!(colors[0].range.end.character, 10);
     }

@@ -331,15 +331,16 @@ fn scalar_span_inside_nested_compact_mapping_key() {
     // `- key: value\n`
     // '-'=0, ' '=1, k=2, e=3, y=4, ':'=5, ' '=6, v=7...
     // key must start at byte 2, column 2
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let key_span = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key"),
     );
     assert!(key_span.is_some(), "key scalar must have a span");
     if let Some(span) = key_span {
-        assert_eq!(span.start.byte_offset, 2, "key at byte 2");
-        assert_eq!(span.start.column, 2, "key at column 2");
+        assert_eq!(span.start, 2, "key at byte 2");
+        assert_eq!(line_col(input, span.start).1, 2, "key at column 2");
     }
 }
 
@@ -347,15 +348,16 @@ fn scalar_span_inside_nested_compact_mapping_key() {
 fn scalar_span_inside_nested_compact_mapping_value() {
     // `- key: value\n`
     // value starts at byte 7, column 7
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let val_span = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "value"),
     );
     assert!(val_span.is_some(), "value scalar must have a span");
     if let Some(span) = val_span {
-        assert_eq!(span.start.byte_offset, 7, "value at byte 7");
-        assert_eq!(span.start.column, 7, "value at column 7");
+        assert_eq!(span.start, 7, "value at byte 7");
+        assert_eq!(line_col(input, span.start).1, 7, "value at column 7");
     }
 }
 
@@ -363,15 +365,16 @@ fn scalar_span_inside_nested_compact_mapping_value() {
 fn mapping_start_span_inside_nested_sequence() {
     // `- key: value\n` — MappingStart inside sequence item
     // MappingStart must point at 'k' (the key), byte 2, column 2
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let span = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(span.is_some(), "MappingStart must have a span");
     if let Some(span) = span {
         assert_eq!(
-            span.start.byte_offset, 2,
+            span.start, 2,
             "MappingStart inside seq item must point at byte 2"
         );
-        assert_eq!(span.start.column, 2);
+        assert_eq!(line_col(input, span.start).1, 2);
     }
 }
 
@@ -380,15 +383,17 @@ fn sequence_start_span_inside_mapping_value() {
     // `key:\n  - a\n`
     // k=0,e=1,y=2,:=3,\n=4 → line 2: ' '=5,' '=6,'-'=7,' '=8,'a'=9,\n=10
     // SequenceStart must point at '-' indicator: byte 7, column 2
-    let results = parse_to_vec("key:\n  - a\n");
+    let input = "key:\n  - a\n";
+    let results = parse_to_vec(input);
     let seq_span = find_span(&results, |e| matches!(e, Event::SequenceStart { .. }));
     assert!(seq_span.is_some(), "SequenceStart must have a span");
     if let Some(span) = seq_span {
+        assert_eq!(span.start, 7, "SequenceStart must point at '-' (byte 7)");
         assert_eq!(
-            span.start.byte_offset, 7,
-            "SequenceStart must point at '-' (byte 7)"
+            line_col(input, span.start).1,
+            2,
+            "SequenceStart at column 2"
         );
-        assert_eq!(span.start.column, 2, "SequenceStart at column 2");
     }
 }
 
@@ -397,31 +402,34 @@ fn nested_mapping_value_span_indented_key() {
     // `outer:\n  inner: val\n`
     // outer=0..5, :=5, \n=6 → line 2: ' '=7,' '=8,i=9...r=13,:=14,' '=15,v=16..l=18,\n=19
     // "val" starts at byte 16, column 9
-    let results = parse_to_vec("outer:\n  inner: val\n");
+    let input = "outer:\n  inner: val\n";
+    let results = parse_to_vec(input);
     let val_span = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "val"),
     );
     assert!(val_span.is_some(), "val scalar must have a span");
     if let Some(span) = val_span {
-        assert_eq!(span.start.byte_offset, 16, "val at byte 16");
-        assert_eq!(span.start.column, 9, "val at column 9");
+        assert_eq!(span.start, 16, "val at byte 16");
+        assert_eq!(line_col(input, span.start).1, 9, "val at column 9");
     }
 }
 
 #[test]
 fn sequence_start_span_in_compact_seq_map() {
     // `- key: value\n` — SequenceStart must anchor at byte 0, column 0
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let seq_span = find_span(&results, |e| matches!(e, Event::SequenceStart { .. }));
     assert!(seq_span.is_some(), "SequenceStart must have a span");
     if let Some(span) = seq_span {
+        assert_eq!(span.start, 0, "SequenceStart must anchor at byte 0");
         assert_eq!(
-            span.start.byte_offset, 0,
-            "SequenceStart must anchor at byte 0"
+            line_col(input, span.start).1,
+            0,
+            "SequenceStart at column 0"
         );
-        assert_eq!(span.start.column, 0, "SequenceStart at column 0");
-        assert_eq!(span.start.line, 1, "SequenceStart at line 1");
+        assert_eq!(line_col(input, span.start).0, 1, "SequenceStart at line 1");
     }
 }
 
@@ -434,7 +442,8 @@ fn seq_of_seq_of_map_spans() {
     // MappingStart: byte 4, col 4
     // key scalar: byte 4, col 4
     // value scalar: byte 9, col 9
-    let results = parse_to_vec("- - key: val\n");
+    let input = "- - key: val\n";
+    let results = parse_to_vec(input);
     let seq_start_spans: Vec<_> = results
         .iter()
         .filter_map(|r| {
@@ -450,17 +459,25 @@ fn seq_of_seq_of_map_spans() {
             seq_start_spans.len()
         )
     };
-    assert_eq!(outer.start.byte_offset, 0, "outer SeqStart at byte 0");
-    assert_eq!(outer.start.column, 0, "outer SeqStart at col 0");
-    assert_eq!(outer.start.line, 1, "outer SeqStart at line 1");
-    assert_eq!(inner.start.byte_offset, 2, "inner SeqStart at byte 2");
-    assert_eq!(inner.start.column, 2, "inner SeqStart at col 2");
-    assert_eq!(inner.start.line, 1, "inner SeqStart at line 1");
+    assert_eq!(outer.start, 0, "outer SeqStart at byte 0");
+    assert_eq!(line_col(input, outer.start).1, 0, "outer SeqStart at col 0");
+    assert_eq!(
+        line_col(input, outer.start).0,
+        1,
+        "outer SeqStart at line 1"
+    );
+    assert_eq!(inner.start, 2, "inner SeqStart at byte 2");
+    assert_eq!(line_col(input, inner.start).1, 2, "inner SeqStart at col 2");
+    assert_eq!(
+        line_col(input, inner.start).0,
+        1,
+        "inner SeqStart at line 1"
+    );
     let map_span = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(map_span.is_some(), "MappingStart must have a span");
     if let Some(span) = map_span {
-        assert_eq!(span.start.byte_offset, 4, "MappingStart at byte 4");
-        assert_eq!(span.start.column, 4, "MappingStart at col 4");
+        assert_eq!(span.start, 4, "MappingStart at byte 4");
+        assert_eq!(line_col(input, span.start).1, 4, "MappingStart at col 4");
     }
     let key_span = find_span(
         &results,
@@ -468,8 +485,8 @@ fn seq_of_seq_of_map_spans() {
     );
     assert!(key_span.is_some(), "key scalar must have a span");
     if let Some(span) = key_span {
-        assert_eq!(span.start.byte_offset, 4, "key at byte 4");
-        assert_eq!(span.start.column, 4, "key at col 4");
+        assert_eq!(span.start, 4, "key at byte 4");
+        assert_eq!(line_col(input, span.start).1, 4, "key at col 4");
     }
     let val_span = find_span(
         &results,
@@ -477,8 +494,8 @@ fn seq_of_seq_of_map_spans() {
     );
     assert!(val_span.is_some(), "val scalar must have a span");
     if let Some(span) = val_span {
-        assert_eq!(span.start.byte_offset, 9, "val at byte 9");
-        assert_eq!(span.start.column, 9, "val at col 9");
+        assert_eq!(span.start, 9, "val at byte 9");
+        assert_eq!(line_col(input, span.start).1, 9, "val at col 9");
     }
 }
 
@@ -490,13 +507,22 @@ fn mapping_and_scalar_spans_with_seq_value() {
     // key scalar "key": byte 0, col 0, line 1
     // SequenceStart: byte 7, col 2, line 2  (already asserted by sequence_start_span_inside_mapping_value)
     // item scalar: byte 9, col 4, line 2
-    let results = parse_to_vec("key:\n  - item\n");
+    let input = "key:\n  - item\n";
+    let results = parse_to_vec(input);
     let map_span = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(map_span.is_some(), "MappingStart must have a span");
     if let Some(span) = map_span {
-        assert_eq!(span.start.byte_offset, 0, "outer MappingStart at byte 0");
-        assert_eq!(span.start.column, 0, "outer MappingStart at col 0");
-        assert_eq!(span.start.line, 1, "outer MappingStart at line 1");
+        assert_eq!(span.start, 0, "outer MappingStart at byte 0");
+        assert_eq!(
+            line_col(input, span.start).1,
+            0,
+            "outer MappingStart at col 0"
+        );
+        assert_eq!(
+            line_col(input, span.start).0,
+            1,
+            "outer MappingStart at line 1"
+        );
     }
     let item_span = find_span(
         &results,
@@ -504,9 +530,9 @@ fn mapping_and_scalar_spans_with_seq_value() {
     );
     assert!(item_span.is_some(), "item scalar must have a span");
     if let Some(span) = item_span {
-        assert_eq!(span.start.byte_offset, 9, "item at byte 9");
-        assert_eq!(span.start.column, 4, "item at col 4");
-        assert_eq!(span.start.line, 2, "item at line 2");
+        assert_eq!(span.start, 9, "item at byte 9");
+        assert_eq!(line_col(input, span.start).1, 4, "item at col 4");
+        assert_eq!(line_col(input, span.start).0, 2, "item at line 2");
     }
 }
 
@@ -805,15 +831,16 @@ fn key_scalar_span_in_two_level_deep_compact_mapping() {
     // `outer:\n  - inner_key: inner_val\n`
     // outer=0..4,:=5,\n=6 → line 2: ' '=7,' '=8,'-'=9,' '=10
     // inner_key starts at byte 11, column 4
-    let results = parse_to_vec("outer:\n  - inner_key: inner_val\n");
+    let input = "outer:\n  - inner_key: inner_val\n";
+    let results = parse_to_vec(input);
     let span = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "inner_key"),
     );
     assert!(span.is_some(), "inner_key scalar must have a span");
     if let Some(s) = span {
-        assert_eq!(s.start.byte_offset, 11, "inner_key at byte 11");
-        assert_eq!(s.start.column, 4, "inner_key at column 4");
+        assert_eq!(s.start, 11, "inner_key at byte 11");
+        assert_eq!(line_col(input, s.start).1, 4, "inner_key at column 4");
     }
 }
 
@@ -823,7 +850,8 @@ fn mapping_start_span_in_seq_of_mappings_second_item() {
     // "- a: 1\n- b: 2\n"
     // First MappingStart: byte 2, col 2 (at 'a')
     // Second MappingStart: byte 9, col 2 (at 'b')
-    let results = parse_to_vec("- a: 1\n- b: 2\n");
+    let input = "- a: 1\n- b: 2\n";
+    let results = parse_to_vec(input);
     let map_start_spans: Vec<_> = results
         .iter()
         .filter_map(|r| {
@@ -840,10 +868,18 @@ fn mapping_start_span_in_seq_of_mappings_second_item() {
     let [first, second] = map_start_spans.as_slice() else {
         unreachable!("expected exactly two MappingStart spans");
     };
-    assert_eq!(first.start.byte_offset, 2, "first MappingStart at byte 2");
-    assert_eq!(first.start.column, 2, "first MappingStart at column 2");
-    assert_eq!(second.start.byte_offset, 9, "second MappingStart at byte 9");
-    assert_eq!(second.start.column, 2, "second MappingStart at column 2");
+    assert_eq!(first.start, 2, "first MappingStart at byte 2");
+    assert_eq!(
+        line_col(input, first.start).1,
+        2,
+        "first MappingStart at column 2"
+    );
+    assert_eq!(second.start, 9, "second MappingStart at byte 9");
+    assert_eq!(
+        line_col(input, second.start).1,
+        2,
+        "second MappingStart at column 2"
+    );
 }
 
 // NC-18: compact sequence items each with multiple mapping keys (fixture 9U5K)

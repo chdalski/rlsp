@@ -90,13 +90,8 @@ impl<'input> Lexer<'input> {
                         message: "invalid character U+0000 in comment".to_owned(),
                     });
                 } else {
-                    self.trailing_comment = Some((
-                        comment_text,
-                        Span {
-                            start: hash_pos,
-                            end: span_end,
-                        },
-                    ));
+                    self.trailing_comment =
+                        Some((comment_text, Span::from_pos(hash_pos, span_end)));
                 }
             } else if let Some((bad_i, bad_ch)) = suffix
                 .char_indices()
@@ -135,19 +130,13 @@ impl<'input> Lexer<'input> {
                 let end_pos = crate::pos::advance_within_line(scalar_start_pos, first_value_ref);
                 (
                     Cow::Borrowed(first_value_ref),
-                    Span {
-                        start: scalar_start_pos,
-                        end: end_pos,
-                    },
+                    Span::from_pos(scalar_start_pos, end_pos),
                 )
             },
             |owned| {
                 (
                     Cow::Owned(owned),
-                    Span {
-                        start: scalar_start_pos,
-                        end: span_end,
-                    },
+                    Span::from_pos(scalar_start_pos, span_end),
                 )
             },
         ))
@@ -752,8 +741,14 @@ mod tests {
         if let Some(ev) = expected_val {
             assert_eq!(val, ev);
         }
-        assert_eq!(span.start.byte_offset, expected_start);
-        assert_eq!(span.end.byte_offset, expected_end);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "test values fit u32; casting usize to u32 for comparison"
+        )]
+        {
+            assert_eq!(span.start, expected_start as u32);
+            assert_eq!(span.end, expected_end as u32);
+        }
     }
 
     #[test]

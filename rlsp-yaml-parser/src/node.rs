@@ -7,16 +7,17 @@
 //! `Vec<Document<Span>>`.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use crate::event::{CollectionStyle, ScalarStyle};
-use crate::pos::Span;
+use crate::pos::{LineIndex, Span};
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 /// A YAML document: a root node plus directive metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Document<Loc = Span> {
     /// The root node of the document.
     pub root: Node<Loc>,
@@ -30,6 +31,65 @@ pub struct Document<Loc = Span> {
     pub explicit_start: bool,
     /// Whether the document was closed with an explicit `...` marker.
     pub explicit_end: bool,
+    /// Line index for resolving byte offsets to `(line, column)` pairs.
+    /// Shared via `Arc` across all documents in a multi-doc stream so that
+    /// only one copy of the source string and newline table is kept in memory.
+    /// Only populated when `Loc = Span` (i.e., when constructed by the loader).
+    pub(crate) line_index: Option<Arc<LineIndex>>,
+}
+
+impl<Loc: PartialEq> PartialEq for Document<Loc> {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+            && self.version == other.version
+            && self.tags == other.tags
+            && self.comments == other.comments
+            && self.explicit_start == other.explicit_start
+            && self.explicit_end == other.explicit_end
+        // line_index is excluded: it is derived from source and does not
+        // represent document content.
+    }
+}
+
+impl<Loc> Document<Loc> {
+    /// Construct a document with the given root node and all metadata set to
+    /// their default values.
+    ///
+    /// This constructor is intended for unit tests that synthesise AST nodes
+    /// without going through the loader.  The `line_index` is set to `None`;
+    /// calling `line_index()` on the resulting document will panic.
+    pub const fn with_root(root: Node<Loc>) -> Self {
+        Self {
+            root,
+            version: None,
+            tags: Vec::new(),
+            comments: Vec::new(),
+            explicit_start: false,
+            explicit_end: false,
+            line_index: None,
+        }
+    }
+}
+
+impl Document<Span> {
+    /// Return the `LineIndex` for this document, used to resolve byte offsets
+    /// from `Span` values to `(line, column)` pairs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document was not created by the loader (i.e., `line_index`
+    /// is `None`). All documents returned by `load()` or `Loader::load()` have a
+    /// `LineIndex` set.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "documents from load() always have line_index set; None only for manually constructed test documents"
+    )]
+    pub fn line_index(&self) -> &LineIndex {
+        self.line_index
+            .as_deref()
+            .expect("Document<Span> must have a LineIndex from the loader")
+    }
 }
 
 /// Rare per-node fields that are absent on most nodes in typical documents.
@@ -241,13 +301,10 @@ mod tests {
 
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
-    use crate::pos::{Pos, Span};
+    use crate::pos::Span;
 
     fn zero_span() -> Span {
-        Span {
-            start: Pos::ORIGIN,
-            end: Pos::ORIGIN,
-        }
+        Span { start: 0, end: 0 }
     }
 
     fn plain_scalar(value: &str) -> Node<Span> {
@@ -723,6 +780,7 @@ mod tests {
             comments: Vec::new(),
             explicit_start,
             explicit_end,
+            line_index: None,
         }
     }
 

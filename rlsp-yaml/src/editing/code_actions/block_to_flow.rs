@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Position, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{CollectionStyle, Document, Span};
+use rlsp_yaml_parser::{CollectionStyle, Document, LineIndex, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
 
@@ -14,10 +14,12 @@ pub(super) fn block_to_flow(
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let (node, key_loc) = find_innermost_block_collection(docs, line_idx)?;
+    let (node, key_loc, idx) = find_innermost_block_collection(docs, line_idx)?;
     let loc = node_loc(node);
 
-    if loc.start.line <= key_loc.start.line {
+    let loc_start_line = idx.line_column(loc.start).0 as usize;
+    let key_start_line = idx.line_column(key_loc.start).0 as usize;
+    if loc_start_line <= key_start_line {
         return None;
     }
 
@@ -33,8 +35,9 @@ pub(super) fn block_to_flow(
         Node::Scalar { .. } | Node::Alias { .. } => return None,
     }
 
-    let base_indent = key_loc.start.column + 2;
-    let key_line = key_loc.start.line.saturating_sub(1); // 0-based
+    let (key_start_line_1based, key_start_col) = idx.line_column(key_loc.start);
+    let base_indent = key_start_col as usize + 2;
+    let key_line = key_start_line_1based.saturating_sub(1); // 0-based
     let formatted = format_subtree(&flow_node, &YamlFormatOptions::default(), base_indent);
     let new_text = format!(" {formatted}");
 
@@ -48,18 +51,17 @@ pub(super) fn block_to_flow(
         "Convert block to flow style".to_string()
     };
 
-    let edit_start_col = key_loc.end.column + 1;
+    let (_, key_end_col) = idx.line_column(key_loc.end);
+    let edit_start_col = key_end_col as usize + 1;
+    let (loc_end_line, loc_end_col) = idx.line_column(loc.end);
 
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
+        reason = "edit_start_col is a usize byte offset that always fits u32"
     )]
     let edit_range = Range::new(
-        Position::new(key_line as u32, edit_start_col as u32),
-        Position::new(
-            loc.end.line.saturating_sub(1) as u32,
-            (loc.end.column + 1) as u32,
-        ),
+        Position::new(key_line, edit_start_col as u32),
+        Position::new(loc_end_line.saturating_sub(1), loc_end_col + 1),
     );
 
     Some(make_action(
@@ -82,11 +84,12 @@ pub(super) fn block_to_flow(
 /// replaces from the `{`/`[` with a newline-plus-properly-indented block form.
 pub(super) fn block_text_and_start_col(
     node: &Node<Span>,
-    loc: &Span,
+    loc: Span,
     text: &str,
+    idx: &LineIndex,
 ) -> (String, usize) {
-    let start_col = loc.start.column;
-    let line_idx = loc.start.line.saturating_sub(1);
+    let start_col = idx.line_column(loc.start).1 as usize;
+    let line_idx = idx.line_column(loc.start).0.saturating_sub(1) as usize;
     let lines: Vec<&str> = text.lines().collect();
 
     let is_mapping_value = lines.get(line_idx).is_some_and(|line| {
@@ -117,11 +120,12 @@ pub(super) fn block_text_and_start_col(
 fn find_innermost_block_collection<'a>(
     docs: &'a [Document<Span>],
     line_idx: usize,
-) -> Option<(&'a Node<Span>, &'a Span)> {
+) -> Option<(&'a Node<Span>, &'a Span, &'a LineIndex)> {
     let parser_line = line_idx + 1;
-    let mut best: Option<(&'a Node<Span>, &'a Span)> = None;
+    let mut best: Option<(&'a Node<Span>, &'a Span, &'a LineIndex)> = None;
     for doc in docs {
-        find_innermost_block_in_node(&doc.root, parser_line, &mut best);
+        let idx = doc.line_index();
+        find_innermost_block_in_node(&doc.root, parser_line, &mut best, idx);
     }
     best
 }
@@ -129,21 +133,24 @@ fn find_innermost_block_collection<'a>(
 fn find_innermost_block_in_node<'a>(
     node: &'a Node<Span>,
     parser_line: usize,
-    best: &mut Option<(&'a Node<Span>, &'a Span)>,
+    best: &mut Option<(&'a Node<Span>, &'a Span, &'a LineIndex)>,
+    idx: &'a LineIndex,
 ) {
     match node {
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                if node_loc(k).start.line == parser_line && is_block_collection(v) {
-                    *best = Some((v, node_loc(k)));
+                if idx.line_column(node_loc(k).start).0 as usize == parser_line
+                    && is_block_collection(v)
+                {
+                    *best = Some((v, node_loc(k), idx));
                 }
-                find_innermost_block_in_node(k, parser_line, best);
-                find_innermost_block_in_node(v, parser_line, best);
+                find_innermost_block_in_node(k, parser_line, best, idx);
+                find_innermost_block_in_node(v, parser_line, best, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                find_innermost_block_in_node(item, parser_line, best);
+                find_innermost_block_in_node(item, parser_line, best, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}

@@ -96,11 +96,7 @@ fn stream_start_span_starts_at_origin() {
     let Some(Ok((Event::StreamStart, span))) = events.first() else {
         unreachable!("expected StreamStart as first event");
     };
-    assert_eq!(
-        span.start,
-        Pos::ORIGIN,
-        "StreamStart span must start at Pos::ORIGIN"
-    );
+    assert_eq!(span.start, 0u32, "StreamStart span must start at byte 0");
 }
 
 #[test]
@@ -110,7 +106,7 @@ fn stream_end_span_for_empty_input_is_at_origin() {
         unreachable!("expected StreamEnd as second event");
     };
     assert_eq!(
-        span.start.byte_offset, 0,
+        span.start, 0,
         "StreamEnd for empty input must be at byte_offset 0"
     );
 }
@@ -123,7 +119,7 @@ fn stream_end_span_for_whitespace_input_reflects_consumed_bytes() {
         unreachable!("expected StreamEnd as second event");
     };
     assert_eq!(
-        span.start.byte_offset, 3,
+        span.start, 3,
         "StreamEnd span start must be at byte_offset 3 after consuming 3-byte input"
     );
 }

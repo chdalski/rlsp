@@ -50,10 +50,7 @@ fn al_1_scalar_with_inline_anchor_has_anchor_loc_some() {
     let loc = value
         .anchor_loc()
         .expect("anchor_loc must be Some for anchored scalar");
-    assert_eq!(
-        loc.start.byte_offset, 5,
-        "anchor span must start at byte 5 (the '&')"
-    );
+    assert_eq!(loc.start, 5, "anchor span must start at byte 5 (the '&')");
 }
 
 // AL-2: block_mapping_with_standalone_anchor_has_anchor_loc_some

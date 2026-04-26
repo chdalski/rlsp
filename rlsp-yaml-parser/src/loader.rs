@@ -33,10 +33,12 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
+use std::sync::Arc;
+
 use crate::error::Error;
 use crate::event::{Event, EventMeta, ScalarStyle};
 use crate::node::{Document, Node, NodeMeta};
-use crate::pos::{Pos, Span};
+use crate::pos::{LineIndex, Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 
 use comments::{attach_leading_comments, attach_trailing_comment};
@@ -297,7 +299,7 @@ impl Loader {
     /// Returns `Err` if the input contains a parse error, exceeds a configured
     /// security limit, or (in resolved mode) references an undefined anchor.
     pub fn load(&self, input: &str) -> std::result::Result<Vec<Document<Span>>, LoadError> {
-        let mut state = LoadState::new(&self.options);
+        let mut state = LoadState::new(&self.options, input);
         let iter: Box<dyn Iterator<Item = std::result::Result<(Event<'_>, Span), Error>> + '_> =
             Box::new(crate::parse_events(input));
         state.run(iter.peekable())
@@ -353,10 +355,13 @@ struct LoadState<'opt> {
     /// comments.  The next mapping/sequence loop iteration picks these up and
     /// prepends them to the next entry's leading comments.
     pending_leading: Vec<String>,
+    /// Line index for the current document source; shared across all documents
+    /// produced from the same input via `Arc` to avoid N full copies.
+    line_index: Arc<LineIndex>,
 }
 
 impl<'opt> LoadState<'opt> {
-    fn new(options: &'opt LoaderOptions) -> Self {
+    fn new(options: &'opt LoaderOptions, input: &str) -> Self {
         Self {
             options,
             anchor_map: HashMap::new(),
@@ -364,6 +369,7 @@ impl<'opt> LoadState<'opt> {
             depth: 0,
             expanded_nodes: 0,
             pending_leading: Vec::new(),
+            line_index: Arc::new(LineIndex::new(input)),
         }
     }
 
@@ -408,13 +414,13 @@ impl<'opt> LoadState<'opt> {
                     let mut doc_comments: Vec<String> = Vec::new();
 
                     // Consume leading comments at document level.
-                    consume_leading_doc_comments(&mut stream, &mut doc_comments)?;
+                    consume_leading_doc_comments(&mut stream, &mut doc_comments, &self.line_index)?;
 
                     // Parse root node (may be absent for empty documents).
                     let root = if is_document_end(stream.peek()) {
                         // Empty document — emit an empty scalar as root.
                         let mut node = empty_scalar();
-                        apply_schema_to_node(&mut node, self.options.schema)?;
+                        apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                         node
                     } else {
                         self.parse_node(&mut stream)?
@@ -437,6 +443,7 @@ impl<'opt> LoadState<'opt> {
                         comments: doc_comments,
                         explicit_start: doc_explicit_start,
                         explicit_end: doc_explicit_end,
+                        line_index: Some(self.line_index.clone()),
                     });
                 }
                 Some(_) => {
@@ -491,7 +498,7 @@ impl<'opt> LoadState<'opt> {
                     }
                     .into_option(),
                 };
-                apply_schema_to_node(&mut node, self.options.schema)?;
+                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = node.anchor() {
                     self.register_anchor(name.to_owned(), &node)?;
                 }
@@ -567,8 +574,10 @@ impl<'opt> LoadState<'opt> {
                     if !is_block_scalar(&value)
                         && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
                     {
-                        let value_end_line = node_end_line(&value);
-                        if let Some(trail) = peek_trailing_comment(stream, value_end_line)? {
+                        let value_end_line = node_end_line(&value, &self.line_index);
+                        if let Some(trail) =
+                            peek_trailing_comment(stream, value_end_line, &self.line_index)?
+                        {
                             attach_trailing_comment(&mut value, trail);
                         }
                     }
@@ -600,7 +609,7 @@ impl<'opt> LoadState<'opt> {
                     }
                     .into_option(),
                 };
-                apply_schema_to_node(&mut node, self.options.schema)?;
+                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = anchor_for_registration {
                     self.register_anchor(name, &node)?;
                 }
@@ -672,8 +681,10 @@ impl<'opt> LoadState<'opt> {
                     if !is_block_scalar(&item)
                         && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
                     {
-                        let item_end_line = node_end_line(&item);
-                        if let Some(trail) = peek_trailing_comment(stream, item_end_line)? {
+                        let item_end_line = node_end_line(&item, &self.line_index);
+                        if let Some(trail) =
+                            peek_trailing_comment(stream, item_end_line, &self.line_index)?
+                        {
                             attach_trailing_comment(&mut item, trail);
                         }
                     }
@@ -705,7 +716,7 @@ impl<'opt> LoadState<'opt> {
                     }
                     .into_option(),
                 };
-                apply_schema_to_node(&mut node, self.options.schema)?;
+                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = anchor_for_registration {
                     self.register_anchor(name, &node)?;
                 }
@@ -874,18 +885,30 @@ const fn is_document_end(peeked: Option<&std::result::Result<(Event<'_>, Span), 
     )
 }
 
+/// Convert a `Span.start` byte offset to a `Pos` with accurate line/column.
+#[inline]
+fn span_start_to_pos(offset: u32, line_index: &LineIndex) -> Pos {
+    let (line, column) = line_index.line_column(offset);
+    Pos {
+        byte_offset: offset as usize,
+        line: line as usize,
+        column: column as usize,
+    }
+}
+
 /// Return the line number of a node's span end position.
 ///
 /// Used to determine whether the next `Comment` event is trailing (same line)
 /// or leading (different line).
 #[inline]
-const fn node_end_line(node: &Node<Span>) -> usize {
-    match node {
+fn node_end_line(node: &Node<Span>, line_index: &LineIndex) -> u32 {
+    let end_offset = match node {
         Node::Scalar { loc, .. }
         | Node::Mapping { loc, .. }
         | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => loc.end.line,
-    }
+        | Node::Alias { loc, .. } => loc.end,
+    };
+    line_index.line_column(end_offset).0
 }
 
 /// Return `true` if the node is a block scalar (literal `|` or folded `>`).
@@ -960,7 +983,11 @@ fn sanitize_scalar_for_error(raw: &str) -> String {
 ///
 /// Returns [`LoadError::UnresolvedScalar`] when `schema` is [`Schema::Json`]
 /// and a plain scalar does not match any JSON type pattern.
-fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
+fn apply_schema_to_node(
+    node: &mut Node<Span>,
+    schema: Schema,
+    line_index: &LineIndex,
+) -> Result<()> {
     match node {
         Node::Scalar {
             value,
@@ -999,7 +1026,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
                 Err(_) => {
                     return Err(LoadError::UnresolvedScalar {
                         value: sanitize_scalar_for_error(value),
-                        pos: loc.start,
+                        pos: span_start_to_pos(loc.start, line_index),
                     });
                 }
             }
@@ -1048,10 +1075,7 @@ const fn empty_scalar() -> Node<Span> {
         value: String::new(),
         style: ScalarStyle::Plain,
         tag: None,
-        loc: Span {
-            start: Pos::ORIGIN,
-            end: Pos::ORIGIN,
-        },
+        loc: Span { start: 0, end: 0 },
         meta: None,
     }
 }
@@ -1096,15 +1120,12 @@ mod tests {
             max_anchors: 2,
             ..LoaderOptions::default()
         };
-        let mut state = LoadState::new(&options);
+        let mut state = LoadState::new(&options, "");
         let node = Node::Scalar {
             value: "x".to_owned(),
             style: ScalarStyle::Plain,
             tag: None,
-            loc: Span {
-                start: Pos::ORIGIN,
-                end: Pos::ORIGIN,
-            },
+            loc: Span { start: 0, end: 0 },
             meta: None,
         };
         assert!(state.register_anchor("a".to_owned(), &node).is_ok());
@@ -1125,14 +1146,11 @@ mod tests {
             mode: LoadMode::Resolved,
             ..LoaderOptions::default()
         };
-        let mut state = LoadState::new(&options);
+        let mut state = LoadState::new(&options, "");
         // Insert a self-referential alias node.
         let alias_node = Node::Alias {
             name: "a".to_owned(),
-            loc: Span {
-                start: Pos::ORIGIN,
-                end: Pos::ORIGIN,
-            },
+            loc: Span { start: 0, end: 0 },
             leading_comments: None,
             trailing_comment: None,
         };

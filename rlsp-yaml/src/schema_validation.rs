@@ -5,34 +5,18 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use regex::RegexBuilder;
+use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
+use crate::lsp_util::span_to_lsp;
 use crate::scalar_helpers;
 use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
 use crate::server::YamlVersion;
 
 mod formats;
-
-/// Convert a parser `Span` to an LSP `Range`.
-///
-/// `Pos::line` is 1-based; LSP lines are 0-based — hence the `saturating_sub(1)`.
-/// `Pos::column` is already 0-based.
-fn span_to_range(loc: Span) -> Range {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP positions are u32; documents exceeding 4 billion lines/columns are not a realistic concern"
-    )]
-    Range::new(
-        Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
-        ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-    )
-}
 
 /// Extract the `loc` span from any AST node.
 const fn node_loc(node: &Node<Span>) -> Span {
@@ -208,6 +192,7 @@ struct Ctx<'a> {
     diagnostics: &'a mut Vec<Diagnostic>,
     format_validation: bool,
     yaml_version: YamlVersion,
+    idx: &'a LineIndex,
 }
 
 impl<'a> Ctx<'a> {
@@ -215,11 +200,13 @@ impl<'a> Ctx<'a> {
         diagnostics: &'a mut Vec<Diagnostic>,
         format_validation: bool,
         yaml_version: YamlVersion,
+        idx: &'a LineIndex,
     ) -> Self {
         Self {
             diagnostics,
             format_validation,
             yaml_version,
+            idx,
         }
     }
 }
@@ -242,9 +229,14 @@ pub fn validate_schema(
     yaml_version: YamlVersion,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut ctx = Ctx::new(&mut diagnostics, format_validation, yaml_version);
 
     for doc in docs {
+        let mut ctx = Ctx::new(
+            &mut diagnostics,
+            format_validation,
+            yaml_version,
+            doc.line_index(),
+        );
         validate_node(&doc.root, schema, &[], &mut ctx, 0);
     }
 
@@ -302,7 +294,7 @@ fn validate_type(
     let effective = effective_yaml_type(node, schema_type, yaml_type, is_plain, ctx.yaml_version);
 
     if !type_matches(effective, schema_type) {
-        let range = span_to_range(node_loc(node));
+        let range = span_to_lsp(node_loc(node), ctx.idx);
         let (code, message) = type_mismatch_diagnostic(
             node,
             schema_type,
@@ -388,7 +380,7 @@ fn emit_yaml11_string_warnings(node: &Node<Span>, path: &[String], ctx: &mut Ctx
     };
     if scalar_helpers::is_yaml11_bool(value) {
         let canonical = scalar_helpers::yaml11_bool_canonical(value);
-        let range = span_to_range(node_loc(node));
+        let range = span_to_lsp(node_loc(node), ctx.idx);
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::WARNING,
@@ -403,7 +395,7 @@ fn emit_yaml11_string_warnings(node: &Node<Span>, path: &[String], ctx: &mut Ctx
     } else if scalar_helpers::is_yaml11_octal(value) {
         let decimal = i64::from_str_radix(&value[1..], 8).unwrap_or(0);
         let yaml12 = format!("0o{}", &value[1..]);
-        let range = span_to_range(node_loc(node));
+        let range = span_to_lsp(node_loc(node), ctx.idx);
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::WARNING,
@@ -443,7 +435,7 @@ fn validate_node(
         && let Some(yaml_val) = yaml_to_json(node)
         && !enum_values.contains(&yaml_val)
     {
-        let range = span_to_range(node_loc(node));
+        let range = span_to_lsp(node_loc(node), ctx.idx);
         let listed: Vec<String> = enum_values
             .iter()
             .take(MAX_ENUM_DISPLAY)
@@ -513,7 +505,7 @@ fn validate_unevaluated_properties(
         }
         match &schema.unevaluated_properties {
             Some(AdditionalProperties::Denied) => {
-                let range = span_to_range(node_loc(k));
+                let range = span_to_lsp(node_loc(k), ctx.idx);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::WARNING,
@@ -587,7 +579,7 @@ fn validate_sequence(
             item_path.push(format!("[{i}]"));
             match additional_items {
                 AdditionalProperties::Denied => {
-                    let range = span_to_range(node_loc(item));
+                    let range = span_to_lsp(node_loc(item), ctx.idx);
                     ctx.diagnostics.push(make_diagnostic(
                         range,
                         DiagnosticSeverity::WARNING,
@@ -619,7 +611,7 @@ fn validate_array_constraints(
 
     if let Some(min) = schema.min_items {
         if len < min {
-            let range = span_to_range(seq_loc);
+            let range = span_to_lsp(seq_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -636,7 +628,7 @@ fn validate_array_constraints(
 
     if let Some(max) = schema.max_items {
         if len > max {
-            let range = span_to_range(seq_loc);
+            let range = span_to_lsp(seq_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -659,7 +651,7 @@ fn validate_array_constraints(
                 .is_some_and(|prev| prev.iter().any(|b| a == b))
         });
         if has_duplicate {
-            let range = span_to_range(seq_loc);
+            let range = span_to_lsp(seq_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -685,7 +677,7 @@ fn validate_mapping_constraints(
 
     if let Some(min) = schema.min_properties {
         if len < min {
-            let range = span_to_range(mapping_loc);
+            let range = span_to_lsp(mapping_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -702,7 +694,7 @@ fn validate_mapping_constraints(
 
     if let Some(max) = schema.max_properties {
         if len > max {
-            let range = span_to_range(mapping_loc);
+            let range = span_to_lsp(mapping_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -733,7 +725,7 @@ fn validate_contains(
         .iter()
         .filter(|item| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
+            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
             validate_node(item, contains_schema, path, &mut probe, depth + 1);
             scratch.is_empty()
         })
@@ -743,7 +735,7 @@ fn validate_contains(
     let effective_min = schema.min_contains.unwrap_or(1);
 
     if match_count < effective_min {
-        let range = span_to_range(seq_loc);
+        let range = span_to_lsp(seq_loc, ctx.idx);
         ctx.diagnostics.push(make_diagnostic(
             range,
             DiagnosticSeverity::ERROR,
@@ -759,7 +751,7 @@ fn validate_contains(
 
     if let Some(max) = schema.max_contains {
         if match_count > max {
-            let range = span_to_range(seq_loc);
+            let range = span_to_lsp(seq_loc, ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
@@ -817,7 +809,7 @@ fn validate_scalar_constraints(
     if let Some(const_val) = &schema.const_value {
         if let Some(yaml_val) = yaml_to_json(node) {
             if yaml_val != *const_val {
-                let range = span_to_range(node_loc(node));
+                let range = span_to_lsp(node_loc(node), ctx.idx);
                 ctx.diagnostics.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
@@ -837,7 +829,7 @@ fn validate_string_constraints(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    let range = span_to_range(loc);
+    let range = span_to_lsp(loc, ctx.idx);
     if let Some(pattern) = &schema.pattern {
         if pattern.len() > MAX_PATTERN_LEN {
             ctx.diagnostics.push(make_diagnostic(
@@ -911,13 +903,13 @@ fn validate_string_constraints(
 
     if ctx.format_validation {
         if let Some(format) = &schema.format {
-            validate_format(s, format, loc, path, ctx.diagnostics);
+            validate_format(s, format, loc, path, ctx.diagnostics, ctx.idx);
         }
         if schema.content_encoding.is_some()
             || schema.content_media_type.is_some()
             || schema.content_schema.is_some()
         {
-            validate_content(s, schema, loc, path, ctx.diagnostics);
+            validate_content(s, schema, loc, path, ctx.diagnostics, ctx.idx);
         }
     }
 }
@@ -931,6 +923,7 @@ fn validate_format(
     loc: Span,
     path: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    idx: &LineIndex,
 ) {
     let valid = match format {
         "date-time" => formats::is_valid_date_time(s),
@@ -957,7 +950,7 @@ fn validate_format(
     };
     if !valid {
         diagnostics.push(make_diagnostic(
-            span_to_range(loc),
+            span_to_lsp(loc, idx),
             DiagnosticSeverity::WARNING,
             "schemaFormat",
             format!(
@@ -980,6 +973,7 @@ fn validate_content(
     loc: Span,
     path: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    idx: &LineIndex,
 ) {
     // Step 1: decode if contentEncoding is set
     let decoded_bytes: Option<Vec<u8>> = if let Some(enc) = &schema.content_encoding {
@@ -995,7 +989,7 @@ fn validate_content(
             Some(bytes)
         } else {
             diagnostics.push(make_diagnostic(
-                span_to_range(loc),
+                span_to_lsp(loc, idx),
                 DiagnosticSeverity::WARNING,
                 "schemaContentEncoding",
                 format!(
@@ -1020,7 +1014,7 @@ fn validate_content(
             let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
             if !valid {
                 diagnostics.push(make_diagnostic(
-                    span_to_range(loc),
+                    span_to_lsp(loc, idx),
                     DiagnosticSeverity::WARNING,
                     "schemaContentMediaType",
                     format!(
@@ -1036,7 +1030,15 @@ fn validate_content(
     }
 
     // Step 3: validate decoded content against contentSchema if present
-    validate_content_schema(s, decoded_bytes.as_deref(), schema, loc, path, diagnostics);
+    validate_content_schema(
+        s,
+        decoded_bytes.as_deref(),
+        schema,
+        loc,
+        path,
+        diagnostics,
+        idx,
+    );
 }
 
 /// If `contentSchema` is present, parse the (possibly decoded) content as YAML
@@ -1048,6 +1050,7 @@ fn validate_content_schema(
     loc: Span,
     path: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    idx: &LineIndex,
 ) {
     let Some(content_schema) = &schema.content_schema else {
         return;
@@ -1061,7 +1064,7 @@ fn validate_content_schema(
     // Parse the content as YAML.
     let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
         diagnostics.push(make_diagnostic(
-            span_to_range(loc),
+            span_to_lsp(loc, idx),
             DiagnosticSeverity::WARNING,
             "schemaContentSchema",
             format!(
@@ -1078,7 +1081,7 @@ fn validate_content_schema(
     for doc in &docs {
         let mut content_path = path.to_vec();
         content_path.push("(content)".to_string());
-        let mut ctx = Ctx::new(diagnostics, true, YamlVersion::V1_2);
+        let mut ctx = Ctx::new(diagnostics, true, YamlVersion::V1_2, doc.line_index());
         validate_node(&doc.root, content_schema, &content_path, &mut ctx, 0);
     }
 }
@@ -1090,7 +1093,7 @@ fn validate_numeric_constraints(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
-    let range = span_to_range(loc);
+    let range = span_to_lsp(loc, ctx.idx);
     // minimum (inclusive by default; strict if Draft-04 exclusiveMinimum is true)
     if let Some(minimum) = schema.minimum {
         let exclusive = schema.exclusive_minimum_draft04.unwrap_or(false);
@@ -1221,7 +1224,7 @@ fn validate_mapping(
                 .iter()
                 .filter(|req_key| !entries_contains_key(entries, req_key))
                 .map(|req_key| {
-                    let range = span_to_range(mapping_loc);
+                    let range = span_to_lsp(mapping_loc, ctx.idx);
                     make_diagnostic(
                         range,
                         DiagnosticSeverity::ERROR,
@@ -1258,7 +1261,7 @@ fn validate_mapping(
                 // Check additionalProperties
                 match &schema.additional_properties {
                     Some(AdditionalProperties::Denied) => {
-                        let range = span_to_range(node_loc(k));
+                        let range = span_to_lsp(node_loc(k), ctx.idx);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::WARNING,
@@ -1288,10 +1291,7 @@ fn validate_mapping(
                 value: key_str.clone(),
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
                 tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-                loc: rlsp_yaml_parser::Span {
-                    start: rlsp_yaml_parser::Pos::ORIGIN,
-                    end: rlsp_yaml_parser::Pos::ORIGIN,
-                },
+                loc: rlsp_yaml_parser::Span { start: 0, end: 0 },
                 meta: None,
             };
             validate_node(&key_node, pn_schema, path, ctx, depth + 1);
@@ -1315,7 +1315,7 @@ fn validate_dependencies(
             if entries_contains_key(entries, trigger) {
                 for missing in required_keys {
                     if !entries_contains_key(entries, missing) {
-                        let range = span_to_range(mapping_loc);
+                        let range = span_to_lsp(mapping_loc, ctx.idx);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::ERROR,
@@ -1342,10 +1342,7 @@ fn validate_dependencies(
                     entries: entries.to_vec(),
                     style: rlsp_yaml_parser::CollectionStyle::Block,
                     tag: None,
-                    loc: rlsp_yaml_parser::Span {
-                        start: rlsp_yaml_parser::Pos::ORIGIN,
-                        end: rlsp_yaml_parser::Pos::ORIGIN,
-                    },
+                    loc: rlsp_yaml_parser::Span { start: 0, end: 0 },
                     meta: None,
                 };
                 validate_node(&mapping_node, dep_schema, path, ctx, depth + 1);
@@ -1371,7 +1368,7 @@ fn validate_pattern_properties(
     let mut matched = false;
     for (pattern, pat_schema) in pattern_props {
         if pattern.len() > MAX_PATTERN_LEN {
-            let range = span_to_range(node_loc(value));
+            let range = span_to_lsp(node_loc(value), ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1391,7 +1388,7 @@ fn validate_pattern_properties(
                 validate_node(value, pat_schema, &child_path, ctx, depth + 1);
             }
         } else {
-            let range = span_to_range(node_loc(value));
+            let range = span_to_lsp(node_loc(value), ctx.idx);
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -1415,7 +1412,7 @@ fn validate_composition(
 ) {
     let format_validation = ctx.format_validation;
     let yaml_version = ctx.yaml_version;
-    let node_range = span_to_range(node_loc(node));
+    let node_range = span_to_lsp(node_loc(node), ctx.idx);
 
     // allOf: all branches must pass
     if let Some(all_of) = &schema.all_of {
@@ -1429,7 +1426,7 @@ fn validate_composition(
         let branch_count = any_of.iter().take(MAX_BRANCH_COUNT).count();
         let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
             let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
+            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
             validate_node(node, branch, path, &mut probe, depth + 1);
             scratch.is_empty()
         });
@@ -1454,7 +1451,7 @@ fn validate_composition(
             .take(MAX_BRANCH_COUNT)
             .filter(|branch| {
                 let mut scratch = Vec::new();
-                let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
+                let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
                 validate_node(node, branch, path, &mut probe, depth + 1);
                 scratch.is_empty()
             })
@@ -1486,7 +1483,7 @@ fn validate_composition(
     // not: the value must NOT match the sub-schema
     if let Some(not_schema) = &schema.not {
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
+        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
         validate_node(node, not_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
             ctx.diagnostics.push(make_diagnostic(
@@ -1504,7 +1501,7 @@ fn validate_composition(
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
         let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version);
+        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
         validate_node(node, if_schema, path, &mut probe, depth + 1);
         if scratch.is_empty() {
             if let Some(then_schema) = &schema.then_schema {
@@ -1662,6 +1659,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use rstest::rstest;
+    use tower_lsp::lsp_types::Position;
 
     use super::*;
     use crate::schema::{AdditionalProperties, JsonSchema, SchemaType, parse_schema};
@@ -5822,6 +5820,7 @@ mod tests {
         };
         let text = "age: 30";
         let docs = parse_docs(text);
+        let idx = docs[0].line_index();
         let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         let diag = result
             .iter()
@@ -5829,13 +5828,9 @@ mod tests {
             .expect("expected a schemaRequired diagnostic");
         // Derive expected range from the AST directly
         let root_loc = node_loc(&docs[0].root);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "test: position values are small"
-        )]
         let expected_start = Position::new(
-            root_loc.start.line.saturating_sub(1) as u32,
-            root_loc.start.column as u32,
+            idx.line_column(root_loc.start).0.saturating_sub(1),
+            idx.line_column(root_loc.start).1,
         );
         assert_eq!(
             diag.range.start, expected_start,
@@ -6002,6 +5997,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("tags", tags_schema)]);
         let text = "tags:\n  - a";
         let docs = parse_docs(text);
+        let idx = docs[0].line_index();
         let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
         let diag = result
             .iter()
@@ -6017,13 +6013,9 @@ mod tests {
         } else {
             panic!("expected mapping root");
         };
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "test: position values are small"
-        )]
         let expected_start = Position::new(
-            seq_loc.start.line.saturating_sub(1) as u32,
-            seq_loc.start.column as u32,
+            idx.line_column(seq_loc.start).0.saturating_sub(1),
+            idx.line_column(seq_loc.start).1,
         );
         assert_eq!(
             diag.range.start, expected_start,

@@ -18,6 +18,7 @@ thiserror = "2"
 [dev-dependencies]
 rstest = "0.26"
 criterion = { version = "0.8", features = ["html_reports"] }
+proptest = "1"
 
 [[bench]]
 name = "throughput"

@@ -480,11 +480,11 @@ fn tagged_scalar_span_covers_value_not_tag() {
     assert!(scalar_span.is_some(), "tagged scalar event must be present");
     if let Some(span) = scalar_span {
         assert_eq!(
-            span.start.byte_offset, 6,
+            span.start, 6,
             "tagged scalar span must start at 'h' of 'hello' (byte 6), not at '!'"
         );
         assert_eq!(
-            span.end.byte_offset, 11,
+            span.end, 11,
             "tagged scalar span must end after 'hello' (byte 11)"
         );
     }
@@ -507,7 +507,7 @@ fn tagged_sequence_span_is_at_dash_indicator() {
     // `!!seq\n` is 6 bytes; `-` is at byte 6.
     if let Some(span) = seq_span {
         assert_eq!(
-            span.start.byte_offset, 6,
+            span.start, 6,
             "SequenceStart span must start at '-' indicator (byte 6), not at tag"
         );
     }
@@ -846,18 +846,7 @@ fn tag_loc_inline_shorthand_on_scalar() {
         "inline tag on scalar must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(loc, expected, "tag_loc must cover `!!str` (5 bytes)");
     }
 }
@@ -876,9 +865,9 @@ fn tag_loc_verbatim_tag_on_scalar() {
         "verbatim tag on scalar must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        assert_eq!(loc.start.byte_offset, 0, "tag_loc must start at `!`");
+        assert_eq!(loc.start, 0, "tag_loc must start at `!`");
         assert_eq!(
-            loc.end.byte_offset, 24,
+            loc.end, 24,
             "tag_loc must end after `>` of verbatim tag (24 bytes)"
         );
     }
@@ -897,18 +886,7 @@ fn tag_loc_standalone_tag_on_scalar() {
         "standalone tag on scalar must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(
             loc, expected,
             "tag_loc for standalone `!!str` must cover 5 bytes"
@@ -929,18 +907,7 @@ fn tag_loc_standalone_tag_on_block_sequence() {
         "tagged SequenceStart must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(
             loc, expected,
             "SequenceStart tag_loc must cover `!!seq` (5 bytes)"
@@ -961,18 +928,7 @@ fn tag_loc_standalone_tag_on_block_mapping() {
         "tagged MappingStart must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(
             loc, expected,
             "MappingStart tag_loc must cover `!!map` (5 bytes)"
@@ -993,18 +949,7 @@ fn tag_loc_inline_tag_on_flow_sequence() {
         "flow SequenceStart with tag must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(
             loc, expected,
             "flow SequenceStart tag_loc must cover `!!seq` (5 bytes)"
@@ -1025,18 +970,7 @@ fn tag_loc_inline_tag_on_flow_mapping() {
         "flow MappingStart with tag must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 1,
-                column: 5,
-            },
-        };
+        let expected = Span { start: 0, end: 5 };
         assert_eq!(
             loc, expected,
             "flow MappingStart tag_loc must cover `!!map` (5 bytes)"
@@ -1057,11 +991,8 @@ fn tag_loc_inline_tag_on_mapping_key_scalar() {
         "key scalar with inline tag must have tag_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        assert_eq!(loc.start.byte_offset, 0, "tag_loc must start at `!`");
-        assert_eq!(
-            loc.end.byte_offset, 5,
-            "tag_loc must end after `!!str` (5 bytes)"
-        );
+        assert_eq!(loc.start, 0, "tag_loc must start at `!`");
+        assert_eq!(loc.end, 5, "tag_loc must end after `!!str` (5 bytes)");
     }
 }
 
@@ -1090,11 +1021,11 @@ fn tag_loc_named_handle_with_pct_tag_directive() {
     );
     if let Some(loc) = loc_opt {
         assert_eq!(
-            loc.start.byte_offset, 26,
+            loc.start, 26,
             "tag_loc must start at `!` of `!h!s` (byte 26)"
         );
         assert_eq!(
-            loc.end.byte_offset, 30,
+            loc.end, 30,
             "tag_loc must end after `!h!s` (4 bytes, byte 30)"
         );
     }
@@ -1137,7 +1068,7 @@ fn tag_loc_none_when_no_tag(#[case] input: &str) {
 fn tag_loc_utf8_scalar_key_tag_byte_offset() {
     // `é: !!str val\n` — `é` (U+00E9) is 2 UTF-8 bytes; `: ` is 2 bytes.
     // `!!str` starts at byte 4, not char-index 3.
-    // tag_loc.start.byte_offset must be 4 (bytes), not 3 (chars).
+    // tag_loc.start must be 4 (bytes), not 3 (chars).
     let input = "\u{00e9}: !!str val\n";
     let items = parse_to_vec(input);
     let loc_opt = items
@@ -1149,12 +1080,12 @@ fn tag_loc_utf8_scalar_key_tag_byte_offset() {
     );
     if let Some(loc) = loc_opt {
         assert_eq!(
-            loc.start.byte_offset, 4,
-            "tag_loc.start.byte_offset must be 4 (bytes), not 3 (chars) — é is 2 UTF-8 bytes"
+            loc.start, 4,
+            "tag_loc.start must be 4 (bytes), not 3 (chars) — é is 2 UTF-8 bytes"
         );
         assert_eq!(
-            loc.end.byte_offset, 9,
-            "tag_loc.end.byte_offset must be 9 (byte 4 + 5 bytes for `!!str`)"
+            loc.end, 9,
+            "tag_loc.end must be 9 (byte 4 + 5 bytes for `!!str`)"
         );
     }
 }
@@ -1204,19 +1135,16 @@ fn tag_loc_two_tagged_scalars_each_gets_own_loc() {
     assert_eq!(locs.len(), 2, "must find exactly two tagged scalars");
     if let [first, second] = locs.as_slice() {
         assert_eq!(
-            first.start.byte_offset, 3,
+            first.start, 3,
             "first tagged scalar tag_loc starts at byte 3 (`!!str`)"
         );
+        assert_eq!(first.end, 8, "first tag_loc ends at byte 8 (after `!!str`)");
         assert_eq!(
-            first.end.byte_offset, 8,
-            "first tag_loc ends at byte 8 (after `!!str`)"
-        );
-        assert_eq!(
-            second.start.byte_offset, 18,
+            second.start, 18,
             "second tagged scalar tag_loc starts at byte 18 (`!!int`)"
         );
         assert_eq!(
-            second.end.byte_offset, 23,
+            second.end, 23,
             "second tag_loc ends at byte 23 (after `!!int`)"
         );
     }

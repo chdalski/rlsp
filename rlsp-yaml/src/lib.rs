@@ -18,6 +18,8 @@ pub mod document_store;
 pub mod editing;
 /// Hover documentation provider.
 pub mod hover;
+/// Shared helpers for converting parser positions to LSP positions.
+pub(crate) mod lsp_util;
 /// Navigation features: find-references and rename.
 pub mod navigation;
 /// YAML document parsing utilities used by LSP handlers.

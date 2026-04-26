@@ -476,7 +476,8 @@ fn trailing_comment_has_no_separate_length_limit() {
 #[test]
 fn standalone_comment_span_starts_at_hash() {
     // "# hello\n" — `#` is at byte 0.
-    let results: Vec<_> = parse_events("# hello\n").collect();
+    let input = "# hello\n";
+    let results: Vec<_> = parse_events(input).collect();
     let comment_span = results.iter().find_map(|r| {
         if let Ok((Event::Comment { .. }, span)) = r {
             Some(*span)
@@ -486,12 +487,12 @@ fn standalone_comment_span_starts_at_hash() {
     });
     assert!(comment_span.is_some(), "expected Comment span");
     if let Some(span) = comment_span {
-        assert_eq!(span.start.byte_offset, 0, "span start at byte 0 (the `#`)");
-        assert_eq!(span.start.line, 1, "on line 1");
-        assert_eq!(span.start.column, 0, "at column 0 (0-based)");
+        assert_eq!(span.start, 0, "span start at byte 0 (the `#`)");
+        assert_eq!(line_col(input, span.start).0, 1, "on line 1");
+        assert_eq!(line_col(input, span.start).1, 0, "at column 0 (0-based)");
         // end should be at the last byte of text " hello" (6 bytes after `#`)
         assert_eq!(
-            span.end.byte_offset, 7,
+            span.end, 7,
             "span end covers `# hello` (7 bytes, newline excluded)"
         );
     }
@@ -501,7 +502,8 @@ fn standalone_comment_span_starts_at_hash() {
 #[test]
 fn trailing_comment_span_starts_at_hash_on_scalar_line() {
     // "foo # bar\n" — `#` is at byte 4.
-    let results: Vec<_> = parse_events("foo # bar\n").collect();
+    let input = "foo # bar\n";
+    let results: Vec<_> = parse_events(input).collect();
     let comment_span = results.iter().find_map(|r| {
         if let Ok((Event::Comment { .. }, span)) = r {
             Some(*span)
@@ -511,8 +513,8 @@ fn trailing_comment_span_starts_at_hash_on_scalar_line() {
     });
     assert!(comment_span.is_some(), "expected trailing Comment span");
     if let Some(span) = comment_span {
-        assert_eq!(span.start.byte_offset, 4, "span start at byte 4 (the `#`)");
-        assert_eq!(span.start.line, 1, "on line 1");
+        assert_eq!(span.start, 4, "span start at byte 4 (the `#`)");
+        assert_eq!(line_col(input, span.start).0, 1, "on line 1");
     }
 }
 
@@ -823,7 +825,8 @@ fn trailing_comment_no_trailing_newline() {
 #[test]
 fn comment_on_second_line_span_has_correct_line_number() {
     // "key: val\n# second\n" — comment is on line 2.
-    let results: Vec<_> = parse_events("key: val\n# second\n").collect();
+    let input = "key: val\n# second\n";
+    let results: Vec<_> = parse_events(input).collect();
     let comment_span = results.iter().find_map(|r| {
         if let Ok((Event::Comment { .. }, span)) = r {
             Some(*span)
@@ -833,7 +836,15 @@ fn comment_on_second_line_span_has_correct_line_number() {
     });
     assert!(comment_span.is_some(), "expected a Comment span on line 2");
     if let Some(span) = comment_span {
-        assert_eq!(span.start.line, 2, "comment must be on line 2");
-        assert_eq!(span.start.column, 0, "comment starts at column 0");
+        assert_eq!(
+            line_col(input, span.start).0,
+            2,
+            "comment must be on line 2"
+        );
+        assert_eq!(
+            line_col(input, span.start).1,
+            0,
+            "comment starts at column 0"
+        );
     }
 }

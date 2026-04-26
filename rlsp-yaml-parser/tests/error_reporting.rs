@@ -276,6 +276,28 @@ fn parse_events_emits_stream_start_before_error() {
 }
 
 // ===========================================================================
+// LE-1: LoadError::Parse Display includes a line number
+// ===========================================================================
+
+#[test]
+fn load_error_parse_display_contains_line_info() {
+    let input = "key: 'unterminated\n";
+    let err = load(input).expect_err("expected LoadError::Parse");
+    let display = format!("{err}");
+    // The Display impl renders: "parse error at Pos { byte_offset: N, line: L, column: C }: …"
+    // Assert that "line" appears (indicating position info is present) and that
+    // a digit follows it (not just a bare word from the message text).
+    assert!(
+        display.contains("line"),
+        "LoadError::Parse Display should contain 'line' (Pos info), got: {display:?}"
+    );
+    assert!(
+        display.chars().any(|c| c.is_ascii_digit()),
+        "LoadError::Parse Display should contain a digit after 'line', got: {display:?}"
+    );
+}
+
+// ===========================================================================
 // Group E: Merge key error
 // ===========================================================================
 

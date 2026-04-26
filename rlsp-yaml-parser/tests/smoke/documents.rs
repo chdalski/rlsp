@@ -447,7 +447,7 @@ fn doc_start_explicit_span_covers_three_bytes() {
         unreachable!("expected DocumentStart as second event");
     };
     assert_eq!(
-        span.end.byte_offset - span.start.byte_offset,
+        span.end - span.start,
         3,
         "DocumentStart span must cover exactly 3 bytes"
     );
@@ -459,7 +459,7 @@ fn doc_start_explicit_span_start_byte_offset_is_zero() {
     let Some(Ok((Event::DocumentStart { .. }, span))) = results.get(1) else {
         unreachable!("expected DocumentStart as second event");
     };
-    assert_eq!(span.start.byte_offset, 0);
+    assert_eq!(span.start, 0);
 }
 
 #[test]
@@ -469,7 +469,7 @@ fn doc_end_explicit_span_covers_three_bytes() {
         unreachable!("expected explicit DocumentEnd as third event");
     };
     assert_eq!(
-        span.end.byte_offset - span.start.byte_offset,
+        span.end - span.start,
         3,
         "DocumentEnd span must cover exactly 3 bytes"
     );
@@ -482,7 +482,7 @@ fn doc_end_explicit_span_start_byte_offset_is_four() {
     let Some(Ok((Event::DocumentEnd { explicit: true }, span))) = results.get(2) else {
         unreachable!("expected explicit DocumentEnd as third event");
     };
-    assert_eq!(span.start.byte_offset, 4);
+    assert_eq!(span.start, 4);
 }
 
 #[test]
@@ -504,7 +504,7 @@ fn doc_start_explicit_span_start_after_blank_lines() {
     let Some(Ok((Event::DocumentStart { .. }, span))) = results.get(1) else {
         unreachable!("expected DocumentStart as second event");
     };
-    assert_eq!(span.start.byte_offset, 2);
+    assert_eq!(span.start, 2);
 }
 
 // -----------------------------------------------------------------------
@@ -688,7 +688,7 @@ fn bare_doc_start_span_is_zero_width_at_first_content_byte() {
         span.start, span.end,
         "bare DocumentStart span must be zero-width"
     );
-    assert_eq!(span.start.byte_offset, 0);
+    assert_eq!(span.start, 0);
 }
 
 #[test]
@@ -703,7 +703,7 @@ fn bare_doc_end_at_eof_span_is_zero_width_after_last_content() {
         span.start, span.end,
         "bare DocumentEnd span must be zero-width"
     );
-    assert_eq!(span.start.byte_offset, 4);
+    assert_eq!(span.start, 4);
 }
 
 #[test]
@@ -718,7 +718,7 @@ fn bare_doc_end_before_explicit_doc_span_is_zero_width_at_marker_pos() {
         span.start, span.end,
         "implicit DocumentEnd span must be zero-width"
     );
-    assert_eq!(span.start.byte_offset, 4);
+    assert_eq!(span.start, 4);
 }
 
 #[test]
@@ -734,7 +734,7 @@ fn bare_doc_start_span_zero_width_after_leading_blank() {
     else {
         unreachable!("expected bare DocumentStart as second event");
     };
-    assert_eq!(span.start.byte_offset, 1);
+    assert_eq!(span.start, 1);
 }
 
 // -----------------------------------------------------------------------

@@ -686,32 +686,39 @@ fn zero_indent_sequence_scalar_span_points_at_value() {
     // Input: "- foo\n"
     // byte 0: '-'  byte 1: ' '  byte 2-4: "foo"  byte 5: '\n'
     // Scalar("foo") must start at byte 2, column 2.
-    let results = parse_to_vec("- foo\n");
+    let input = "- foo\n";
+    let results = parse_to_vec(input);
     let foo_span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "foo" => Some(*span),
         _ => None,
     });
     let foo_span = foo_span.unwrap_or_else(|| unreachable!("foo scalar must exist"));
-    assert_eq!(foo_span.start.byte_offset, 2, "scalar must start at byte 2");
-    assert_eq!(foo_span.start.column, 2, "scalar must start at column 2");
+    assert_eq!(foo_span.start, 2, "scalar must start at byte 2");
+    assert_eq!(
+        line_col(input, foo_span.start).1,
+        2,
+        "scalar must start at column 2"
+    );
 }
 
 #[test]
 fn zero_indent_sequence_start_span_points_at_dash() {
     // Input: "- foo\n"
     // SequenceStart must anchor at the '-' indicator: byte 0, column 0.
-    let results = parse_to_vec("- foo\n");
+    let input = "- foo\n";
+    let results = parse_to_vec(input);
     let seq_start_span = results.iter().find_map(|r| match r {
         Ok((Event::SequenceStart { .. }, span)) => Some(*span),
         _ => None,
     });
     let seq_start_span = seq_start_span.unwrap_or_else(|| unreachable!("SequenceStart must exist"));
     assert_eq!(
-        seq_start_span.start.byte_offset, 0,
+        seq_start_span.start, 0,
         "SequenceStart must anchor at byte 0"
     );
     assert_eq!(
-        seq_start_span.start.column, 0,
+        line_col(input, seq_start_span.start).1,
+        0,
         "SequenceStart must anchor at column 0"
     );
 }
@@ -721,18 +728,17 @@ fn indented_sequence_scalar_span_points_at_value() {
     // Input: "  - foo\n"
     // byte 0-1: ' '  byte 2: '-'  byte 3: ' '  byte 4-6: "foo"  byte 7: '\n'
     // Scalar("foo") must start at byte 4, column 4.
-    let results = parse_to_vec("  - foo\n");
+    let input = "  - foo\n";
+    let results = parse_to_vec(input);
     let foo_span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "foo" => Some(*span),
         _ => None,
     });
     let foo_span = foo_span.unwrap_or_else(|| unreachable!("foo scalar must exist"));
+    assert_eq!(foo_span.start, 4, "indented scalar must start at byte 4");
     assert_eq!(
-        foo_span.start.byte_offset, 4,
-        "indented scalar must start at byte 4"
-    );
-    assert_eq!(
-        foo_span.start.column, 4,
+        line_col(input, foo_span.start).1,
+        4,
         "indented scalar must start at column 4"
     );
 }
@@ -741,18 +747,20 @@ fn indented_sequence_scalar_span_points_at_value() {
 fn indented_sequence_start_span_points_at_dash() {
     // Input: "  - foo\n"
     // SequenceStart must anchor at the '-' indicator: byte 2, column 2.
-    let results = parse_to_vec("  - foo\n");
+    let input = "  - foo\n";
+    let results = parse_to_vec(input);
     let seq_start_span = results.iter().find_map(|r| match r {
         Ok((Event::SequenceStart { .. }, span)) => Some(*span),
         _ => None,
     });
     let seq_start_span = seq_start_span.unwrap_or_else(|| unreachable!("SequenceStart must exist"));
     assert_eq!(
-        seq_start_span.start.byte_offset, 2,
+        seq_start_span.start, 2,
         "SequenceStart must anchor at the dash (byte 2)"
     );
     assert_eq!(
-        seq_start_span.start.column, 2,
+        line_col(input, seq_start_span.start).1,
+        2,
         "SequenceStart must anchor at the dash (column 2)"
     );
 }
@@ -763,18 +771,20 @@ fn nested_indented_sequence_scalar_span_points_at_value() {
     // byte 0-1: ' '  byte 2: '-'  byte 3: ' '  byte 4: '-'  byte 5: ' '
     // byte 6-10: "inner"  byte 11: '\n'
     // Scalar("inner") must start at byte 6, column 6.
-    let results = parse_to_vec("  - - inner\n");
+    let input = "  - - inner\n";
+    let results = parse_to_vec(input);
     let inner_span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "inner" => Some(*span),
         _ => None,
     });
     let inner_span = inner_span.unwrap_or_else(|| unreachable!("inner scalar must exist"));
     assert_eq!(
-        inner_span.start.byte_offset, 6,
+        inner_span.start, 6,
         "nested indented scalar must start at byte 6"
     );
     assert_eq!(
-        inner_span.start.column, 6,
+        line_col(input, inner_span.start).1,
+        6,
         "nested indented scalar must start at column 6"
     );
 }
@@ -784,7 +794,8 @@ fn nested_indented_sequence_inner_start_span_points_at_dash() {
     // Input: "  - - inner\n"
     // Outer SequenceStart: byte 2 (the first `-`), column 2.
     // Inner SequenceStart: byte 4 (the second `-`), column 4.
-    let results = parse_to_vec("  - - inner\n");
+    let input = "  - - inner\n";
+    let results = parse_to_vec(input);
     let seq_starts: Vec<_> = results
         .iter()
         .filter_map(|r| match r {
@@ -794,20 +805,16 @@ fn nested_indented_sequence_inner_start_span_points_at_dash() {
         .collect();
     assert_eq!(seq_starts.len(), 2, "exactly 2 SequenceStart events");
     if let [outer, inner] = seq_starts.as_slice() {
+        assert_eq!(outer.start, 2, "outer SequenceStart must be at byte 2");
         assert_eq!(
-            outer.start.byte_offset, 2,
-            "outer SequenceStart must be at byte 2"
-        );
-        assert_eq!(
-            outer.start.column, 2,
+            line_col(input, outer.start).1,
+            2,
             "outer SequenceStart must be at column 2"
         );
+        assert_eq!(inner.start, 4, "inner SequenceStart must be at byte 4");
         assert_eq!(
-            inner.start.byte_offset, 4,
-            "inner SequenceStart must be at byte 4"
-        );
-        assert_eq!(
-            inner.start.column, 4,
+            line_col(input, inner.start).1,
+            4,
             "inner SequenceStart must be at column 4"
         );
     }
@@ -818,18 +825,20 @@ fn inline_nested_sequence_scalar_span_points_at_value() {
     // Input: "- - inner\n"
     // byte 0: '-'  byte 1: ' '  byte 2: '-'  byte 3: ' '  byte 4-8: "inner"
     // Scalar("inner") must start at byte 4, column 4.
-    let results = parse_to_vec("- - inner\n");
+    let input = "- - inner\n";
+    let results = parse_to_vec(input);
     let inner_span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "inner" => Some(*span),
         _ => None,
     });
     let inner_span = inner_span.unwrap_or_else(|| unreachable!("inner scalar must exist"));
     assert_eq!(
-        inner_span.start.byte_offset, 4,
+        inner_span.start, 4,
         "inline nested scalar must start at byte 4"
     );
     assert_eq!(
-        inner_span.start.column, 4,
+        line_col(input, inner_span.start).1,
+        4,
         "inline nested scalar must start at column 4"
     );
 }
@@ -839,7 +848,8 @@ fn multiline_indented_sequence_second_entry_scalar_span() {
     // Input: "  - foo\n  - bar\n"
     // Line 1 bytes 0-7:  "  - foo\n"  → "foo" at byte 4, col 4, line 1
     // Line 2 bytes 8-15: "  - bar\n"  → "bar" at byte 12, col 4, line 2
-    let results = parse_to_vec("  - foo\n  - bar\n");
+    let input = "  - foo\n  - bar\n";
+    let results = parse_to_vec(input);
     let scalars: Vec<_> = results
         .iter()
         .filter_map(|r| match r {
@@ -850,13 +860,13 @@ fn multiline_indented_sequence_second_entry_scalar_span() {
     assert_eq!(scalars.len(), 2, "exactly 2 scalars");
     if let [(foo_val, foo_span), (bar_val, bar_span)] = scalars.as_slice() {
         assert_eq!(foo_val, "foo");
-        assert_eq!(foo_span.start.byte_offset, 4, "foo at byte 4");
-        assert_eq!(foo_span.start.column, 4, "foo at column 4");
-        assert_eq!(foo_span.start.line, 1, "foo on line 1");
+        assert_eq!(foo_span.start, 4, "foo at byte 4");
+        assert_eq!(line_col(input, foo_span.start).1, 4, "foo at column 4");
+        assert_eq!(line_col(input, foo_span.start).0, 1, "foo on line 1");
         assert_eq!(bar_val, "bar");
-        assert_eq!(bar_span.start.byte_offset, 12, "bar at byte 12");
-        assert_eq!(bar_span.start.column, 4, "bar at column 4");
-        assert_eq!(bar_span.start.line, 2, "bar on line 2");
+        assert_eq!(bar_span.start, 12, "bar at byte 12");
+        assert_eq!(line_col(input, bar_span.start).1, 4, "bar at column 4");
+        assert_eq!(line_col(input, bar_span.start).0, 2, "bar on line 2");
     }
 }
 
@@ -927,27 +937,37 @@ fn fast_path_plain_scalar_colon_no_space() {
 #[test]
 fn fast_path_plain_scalar_span_points_at_value() {
     // "- foo\n": scalar starts at byte 2, column 2 (same as slow path).
-    let results = parse_to_vec("- foo\n");
+    let input = "- foo\n";
+    let results = parse_to_vec(input);
     let span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "foo" => Some(*span),
         _ => None,
     });
     let span = span.unwrap_or_else(|| unreachable!("scalar must exist"));
-    assert_eq!(span.start.byte_offset, 2, "scalar must start at byte 2");
-    assert_eq!(span.start.column, 2, "scalar must start at column 2");
+    assert_eq!(span.start, 2, "scalar must start at byte 2");
+    assert_eq!(
+        line_col(input, span.start).1,
+        2,
+        "scalar must start at column 2"
+    );
 }
 
 #[test]
 fn fast_path_plain_scalar_indented_span() {
     // "  - bar\n": scalar starts at byte 4, column 4.
-    let results = parse_to_vec("  - bar\n");
+    let input = "  - bar\n";
+    let results = parse_to_vec(input);
     let span = results.iter().find_map(|r| match r {
         Ok((Event::Scalar { value, .. }, span)) if value.as_ref() == "bar" => Some(*span),
         _ => None,
     });
     let span = span.unwrap_or_else(|| unreachable!("scalar must exist"));
-    assert_eq!(span.start.byte_offset, 4, "scalar must start at byte 4");
-    assert_eq!(span.start.column, 4, "scalar must start at column 4");
+    assert_eq!(span.start, 4, "scalar must start at byte 4");
+    assert_eq!(
+        line_col(input, span.start).1,
+        4,
+        "scalar must start at column 4"
+    );
 }
 
 #[test]
@@ -1079,7 +1099,7 @@ fn fast_path_span_matches_slow_path_for_all_plain_cases() {
     // Regression guard: fast-path span must equal slow-path span.
     // For "- X..." the scalar always starts at byte (leading_spaces + 2), col same.
     for (input, expected_byte_offset, expected_col) in [
-        ("- a\n", 2usize, 2usize),
+        ("- a\n", 2u32, 2u32),
         ("- foo\n", 2, 2),
         ("  - bar\n", 4, 4),
         ("- hello world\n", 2, 2),
@@ -1091,11 +1111,12 @@ fn fast_path_span_matches_slow_path_for_all_plain_cases() {
         });
         let span = span.unwrap_or_else(|| unreachable!("scalar must exist in {input:?}"));
         assert_eq!(
-            span.start.byte_offset, expected_byte_offset,
+            span.start, expected_byte_offset,
             "byte_offset mismatch for {input:?}"
         );
         assert_eq!(
-            span.start.column, expected_col,
+            line_col(input, span.start).1,
+            expected_col,
             "column mismatch for {input:?}"
         );
     }

@@ -174,8 +174,13 @@ impl<'input> EventIter<'input> {
             // document's (empty) directive scope.  Tags defined in the previous
             // document do not carry over (YAML §9.2), so an undefined handle
             // must fail immediately.
-            if let Some((tag_val, tag_pos)) = self.lexer.peek_inline_scalar() {
+            if let Some((tag_val, tag_offset)) = self.lexer.peek_inline_scalar() {
                 if tag_val.starts_with('!') {
+                    let tag_pos = Pos {
+                        byte_offset: tag_offset as usize,
+                        line: 0,
+                        column: 0,
+                    };
                     if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
                         self.lexer.drain_inline_scalar();
                         self.state = IterState::Done;
@@ -343,10 +348,7 @@ impl<'input> EventIter<'input> {
                             line: star_pos.line,
                             column: star_pos.column + 1 + name_char_count,
                         };
-                        let alias_span = Span {
-                            start: star_pos,
-                            end: alias_end,
-                        };
+                        let alias_span = Span::from_pos(star_pos, alias_end);
                         // Compute remaining content after the alias name, before
                         // consuming the line (which would invalidate the borrow).
                         let after_name = &after_star[name.len()..];
@@ -530,13 +532,13 @@ impl<'input> EventIter<'input> {
                             };
                         // Build the tag span: from `!` through the last byte of the tag token.
                         // All YAML tag characters are ASCII, so column == byte count.
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            reason = "YAML files <= 4 GB; u32 offset is sufficient"
+                        )]
                         let tag_span = Span {
-                            start: bang_pos,
-                            end: Pos {
-                                byte_offset: bang_pos.byte_offset + tag_token_bytes,
-                                line: bang_pos.line,
-                                column: bang_pos.column + tag_token_bytes,
-                            },
+                            start: bang_pos.byte_offset as u32,
+                            end: (bang_pos.byte_offset + tag_token_bytes) as u32,
                         };
                         self.lexer.consume_line();
                         if had_inline {
@@ -644,10 +646,7 @@ impl<'input> EventIter<'input> {
                             line: amp_pos.line,
                             column: amp_pos.column + 1 + name_char_count,
                         };
-                        let anchor_span = Span {
-                            start: amp_pos,
-                            end: anchor_end,
-                        };
+                        let anchor_span = Span::from_pos(amp_pos, anchor_end);
                         let inline_offset =
                             line_pos.byte_offset + leading + 1 + name.len() + spaces;
                         let inline_col = line_pos.column + leading + 1 + name_char_count + spaces;

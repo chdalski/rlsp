@@ -116,7 +116,7 @@ fn span_start_at_pipe_byte_offset() {
     });
     let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
     // `|` is at byte 0.
-    assert_eq!(span.start.byte_offset, 0, "span must start at the `|`");
+    assert_eq!(span.start, 0, "span must start at the `|`");
 }
 
 // IT-LB-10 — Span: end after all content lines are consumed.
@@ -135,7 +135,7 @@ fn span_end_after_all_consumed_lines() {
         _ => None,
     });
     let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
-    assert_eq!(span.end.byte_offset, 10, "span must end after all 10 bytes");
+    assert_eq!(span.end, 10, "span must end after all 10 bytes");
 }
 
 // IT-LB-11 — Span: start at `|` when `|` is after leading whitespace.
@@ -154,10 +154,7 @@ fn span_start_accounts_for_leading_whitespace() {
         _ => None,
     });
     let span = scalar_span.unwrap_or_else(|| unreachable!("expected a Literal scalar event"));
-    assert_eq!(
-        span.start.byte_offset, 2,
-        "span must start at `|` byte offset"
-    );
+    assert_eq!(span.start, 2, "span must start at `|` byte offset");
 }
 
 // IT-LB-12 — Error path: invalid indicator character.

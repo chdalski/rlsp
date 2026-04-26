@@ -147,7 +147,7 @@ fn span_starts_at_gt() {
             _ => None,
         })
         .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
-    assert_eq!(span.start.byte_offset, 0, "span must start at the `>`");
+    assert_eq!(span.start, 0, "span must start at the `>`");
 }
 
 // IT-FB-22 — span starts at `>` when preceded by whitespace.
@@ -168,10 +168,7 @@ fn span_start_accounts_for_leading_whitespace() {
             _ => None,
         })
         .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
-    assert_eq!(
-        span.start.byte_offset, 2,
-        "span must start at `>` byte offset"
-    );
+    assert_eq!(span.start, 2, "span must start at `>` byte offset");
 }
 
 // IT-FB-23 — span ends after all consumed lines.
@@ -192,7 +189,7 @@ fn span_end_after_all_consumed_lines() {
             _ => None,
         })
         .unwrap_or_else(|| unreachable!("expected a Folded scalar event"));
-    assert_eq!(span.end.byte_offset, 10, "span must end after all 10 bytes");
+    assert_eq!(span.end, 10, "span must end after all 10 bytes");
 }
 
 // -----------------------------------------------------------------------

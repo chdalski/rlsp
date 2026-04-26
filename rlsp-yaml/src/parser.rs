@@ -258,7 +258,7 @@ mod tests {
         assert!(!result.documents.is_empty());
         match &result.documents[0].root {
             Node::Scalar { loc, .. } => {
-                assert_eq!(loc.start.byte_offset, 0);
+                assert_eq!(loc.start, 0);
             }
             Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
                 panic!("expected Scalar")

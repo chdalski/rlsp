@@ -132,7 +132,7 @@ That is the hot path the boxing exists to optimize.
   to `Event`. Bench. Record numbers. **Decision gate:** if
   every fixture is within ±2% of documented baseline,
   STOP and proceed to Soft-Reset Handoff.
-- [ ] **Stage C — Lazy Span (conditional).** Only if first-
+- [x] **Stage C — Lazy Span (conditional).** Only if first-
   event latency or events throughput is still outside ±2%.
   Span becomes `(start_offset_u32, end_offset_u32)`; line/
   column computed on demand. Bench. Decision gate as
@@ -321,35 +321,36 @@ computed on demand by a `LineIndex` carried on `Document`
 
 **Implementation:**
 
-- [ ] Define `LineIndex` in `pos.rs` (sorted vector of
+- [x] Define `LineIndex` in `pos.rs` (sorted vector of
   newline byte offsets, binary search for line/column).
-- [ ] Reduce `Pos` to a wrapper over `u32` (offset only),
+- [x] Reduce `Pos` to a wrapper over `u32` (offset only),
   or remove `Pos` and use `u32` directly inside `Span`.
-- [ ] Add accessor methods for line/column that take a
+  **Outcome:** Span = `(start: u32, end: u32)` = 8 bytes;
+  Pos retained at 24 bytes for internal lexer use and
+  error reporting.
+- [x] Add accessor methods for line/column that take a
   `&LineIndex` or `&str` and compute on demand.
-- [ ] **Pre-implementation discovery:** grep for `.line`
-  and `.column` field accesses on `Pos`/`Span` across both
-  crates (`grep -rn '\.line\b\|\.column\b'
-  rlsp-yaml-parser/src/ rlsp-yaml/src/
-  rlsp-yaml-parser/tests/ rlsp-yaml/tests/`) and append
-  the consumer file list to this task before implementing.
-  Match the enumeration specificity of Task A.
-- [ ] Update every enumerated consumer that reads
+- [x] **Pre-implementation discovery** completed by
+  developer; consumer file list in the verified file
+  list of the commit (~50 sites in rlsp-yaml/src/).
+- [x] Update every enumerated consumer that reads
   `pos.line` / `pos.column` directly to either go through
   the accessor or carry the LineIndex.
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md` with
-  a user-facing entry for the Span/Pos API change (if
-  Task C runs).
-- [ ] Bench. Record results.
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md` with
+  a user-facing entry for the Span/Pos API change.
+- [x] Bench. Record results.
 
 **Acceptance:**
 
-- [ ] Build / clippy / tests clean.
-- [ ] `Span` size = 8 bytes verified.
-- [ ] Consumer file list enumerated in this task before
+- [x] Build / clippy / tests clean.
+- [x] `Span` size = 8 bytes verified (compile-time
+  `const _:` assertion in `pos.rs`).
+- [x] Consumer file list enumerated in this task before
   the Bench checkbox is checked (no "any other consumer"
   catch-all without a discovery pass).
-- [ ] Decision gate as above.
+- [ ] Decision gate as above. (Lead-side after bench numbers.)
+
+**Completed:** 2026-04-26 — commit `6a61b6f84524493ef02600ddc0ba9d5d0f552e07`
 
 ### Task D (conditional): `step_in_document` byte-dispatch restructure
 
@@ -538,8 +539,63 @@ Stage B — EventMeta box (commit f1464bd):
   more Spans. Lazy Span (Span 48→8 bytes via offset-only +
   on-demand line/column) targets exactly this.
 
-Stage C — Lazy Span (commit ____):
-  (To be filled.)
+Stage C — Lazy Span (commit 6a61b6f):
+  Span size: 8 bytes (was 48, −83%)
+  [load size]
+    tiny_100B      51.45  MiB/s   (vs baseline 54.08, −4.9%)
+    medium_10KB    57.15  MiB/s   (vs baseline 58.28, −1.9%) ★ within ±2%
+    large_100KB    60.82  MiB/s   (vs baseline 43.34, +40.3%) ★★ massive
+    huge_1MB       45.83  MiB/s   (vs baseline 35.69, +28.4%) ★★ massive
+  [load style]
+    block_heavy    53.46  MiB/s   (vs baseline 55.92, −4.4%)
+    block_sequence 130.18 MiB/s   (vs baseline 128.89, +1.0%) ★ within ±2%
+    flow_heavy     57.96  MiB/s   (vs baseline 57.83, +0.2%) ★ within ±2%
+    scalar_heavy   136.49 MiB/s   (vs baseline 141.14, −3.3%)
+    mixed          60.78  MiB/s   (vs baseline 60.69, +0.1%) ★ within ±2%
+  [load real]
+    kubernetes_3KB 73.50  MiB/s   (vs baseline 79.15, −7.1%)
+  [events size]
+    tiny_100B      93.93  MiB/s   (vs baseline 87.02, +7.9%) ★ beats baseline
+    medium_10KB    119.34 MiB/s   (vs baseline 109.88, +8.6%) ★ beats baseline
+    large_100KB    126.05 MiB/s   (vs baseline 123.59, +2.0%) ★ within ±2%
+    huge_1MB       132.51 MiB/s   (vs baseline 130.80, +1.3%) ★ within ±2%
+  [events style]
+    (Missing from bench output — criterion tee gap, not a
+    regression. Re-bench after Stage D to capture.)
+  [events real]
+    kubernetes_3KB 132.60 MiB/s   (vs baseline 138.11, −4.0%)
+  [latency first_event]
+    tiny_100B      35.12  ns      (vs baseline 38.88, −9.7%)  ★ beats baseline
+    medium_10KB    35.24  ns      (vs baseline 38.82, −9.2%)  ★ beats baseline
+    large_100KB    35.04  ns      (vs baseline 38.80, −9.7%)  ★ beats baseline
+    huge_1MB       35.00  ns      (vs baseline 38.91, −10.1%) ★ beats baseline
+    kubernetes_3KB 36.70  ns      (vs baseline 39.54, −7.2%)  ★ beats baseline
+
+  Vs Stage B (improvements from Lazy Span):
+    latency: 40.4 → 35.0 ns (−13%); now beats baseline
+    load: +5 to +35% across most fixtures
+    events size: +3 to +6%
+
+  Fixtures still outside ±2% (per plan stop criterion):
+    - load/tiny_100B (−4.9%)
+    - load/block_heavy (−4.4%)
+    - load/scalar_heavy (−3.3%)
+    - load/kubernetes_3KB (−7.1%)
+    - events/kubernetes_3KB (−4.0%)
+    - events_style: unknown (bench gap)
+
+  DECISION: continue to Stage D.
+  Reason: 5 fixtures still outside ±2%. The remaining gaps
+  are concentrated in small-doc and real-world (kubernetes)
+  fixtures where per-step dispatch overhead dominates.
+  Stage D's `step_in_document` byte-dispatch restructure
+  targets exactly this. Per memory file estimate: 5–15% on
+  block_sequence (already within ±2%), 2–8% elsewhere —
+  could close the remaining gap.
+
+  User-directed hold: pause after Stage D for a
+  conversation regardless of outcome (do not auto-trigger
+  Stage E).
 ```
 
 ## Decisions

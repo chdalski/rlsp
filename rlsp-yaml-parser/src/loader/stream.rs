@@ -4,7 +4,7 @@ use std::iter::Peekable;
 
 use crate::error::Error;
 use crate::event::Event;
-use crate::pos::Span;
+use crate::pos::{LineIndex, Span};
 
 use super::{LoadError, Result};
 
@@ -39,14 +39,17 @@ pub(super) fn next_from<'a>(stream: &mut EventStream<'a>) -> Result<Option<(Even
 /// Consume leading block-level Comment events at document level, appending
 /// them to `doc_comments`.  Stops at the first non-Comment event.
 ///
-/// Block-level comments have `span.end.line > span.start.line`.
+/// Block-level comments have `span.end` on a different line than `span.start`.
 pub(super) fn consume_leading_doc_comments(
     stream: &mut EventStream<'_>,
     doc_comments: &mut Vec<String>,
+    line_index: &LineIndex,
 ) -> Result<()> {
     while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
         if let Some((Event::Comment { text }, span)) = next_from(stream)? {
-            if span.end.line > span.start.line {
+            let start_line = line_index.line_column(span.start).0;
+            let end_line = line_index.line_column(span.end).0;
+            if end_line > start_line {
                 doc_comments.push(with_hash_prefix(text));
             }
         }
@@ -89,20 +92,18 @@ fn consume_leading_comments_slow(stream: &mut EventStream<'_>) -> Result<Vec<Str
 ///
 /// libfyaml (`fy_attach_comments_if_any` in `fy-parse.c`) uses the same
 /// criterion: a comment is "trailing" when its line equals the preceding
-/// token's end line (`fym.line == fyt->handle.end_mark.line`).  The new
-/// parser emits trailing comments with real spans (not zero-width), so the
-/// old `span.start == span.end` sentinel from the original parser does not
-/// apply here.
+/// token's end line.  Line resolution is performed via `line_index`.
 pub(super) fn peek_trailing_comment(
     stream: &mut EventStream<'_>,
-    preceding_end_line: usize,
+    preceding_end_line: u32,
+    line_index: &LineIndex,
 ) -> Result<Option<String>> {
-    if matches!(
-        stream.peek(),
-        Some(Ok((Event::Comment { .. }, span))) if span.start.line == preceding_end_line
-    ) {
-        if let Some((Event::Comment { text }, _)) = next_from(stream)? {
-            return Ok(Some(with_hash_prefix(text)));
+    if let Some(Ok((Event::Comment { .. }, span))) = stream.peek() {
+        let comment_line = line_index.line_column(span.start).0;
+        if comment_line == preceding_end_line {
+            if let Some((Event::Comment { text }, _)) = next_from(stream)? {
+                return Ok(Some(with_hash_prefix(text)));
+            }
         }
     }
     Ok(None)
@@ -113,7 +114,7 @@ mod tests {
     use super::*;
     use crate::error::Error;
     use crate::event::{Event, ScalarStyle};
-    use crate::pos::{Pos, Span};
+    use crate::pos::{LineIndex, Pos, Span};
 
     fn make_stream<'a>(
         items: Vec<std::result::Result<(Event<'a>, Span), Error>>,
@@ -122,19 +123,27 @@ mod tests {
         boxed.peekable()
     }
 
-    fn span(start_line: usize, end_line: usize) -> Span {
-        Span {
-            start: Pos {
-                byte_offset: 0,
-                line: start_line,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 0,
-                line: end_line,
-                column: 0,
-            },
-        }
+    /// Build a zero-width span at byte offset 0. Suitable for events whose
+    /// span position does not matter for the test being exercised.
+    fn span(_start_line: usize, _end_line: usize) -> Span {
+        Span { start: 0, end: 0 }
+    }
+
+    /// A `LineIndex` for a 5-line source, used in tests that check line-number comparisons.
+    /// Source: "a\nb\nc\nd\ne\nf\ng\n" (8 lines, newlines at bytes 1,3,5,7,9,11,13).
+    fn multi_line_index() -> LineIndex {
+        LineIndex::new("a\nb\nc\nd\ne\nf\ng\n")
+    }
+
+    /// Span whose start and end are on the same line (both on line 6 = byte 10..11).
+    fn inline_span() -> Span {
+        // Line 6 starts at byte 10 ("f\n"). Start at 10, end at 11 (the \n) — same line 6.
+        Span { start: 10, end: 11 }
+    }
+
+    /// Span whose start is on line 5 (byte 8) and end is on line 6 (byte 10).
+    fn block_span() -> Span {
+        Span { start: 8, end: 10 }
     }
 
     fn pos(line: usize) -> Pos {
@@ -188,9 +197,10 @@ mod tests {
     #[test]
     fn consume_leading_doc_comments_empty_when_first_event_is_not_comment() {
         let sp = span(1, 1);
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![Ok((Event::StreamStart, sp))]);
         let mut doc_comments: Vec<String> = Vec::new();
-        let result = consume_leading_doc_comments(&mut stream, &mut doc_comments);
+        let result = consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx);
         assert_eq!(result, Ok(()));
         assert!(doc_comments.is_empty());
         // stream not consumed — StreamStart still peeked
@@ -199,9 +209,10 @@ mod tests {
 
     #[test]
     fn consume_leading_doc_comments_accumulates_block_comments() {
-        // block-level: end.line > start.line
-        let sp = span(1, 2);
+        // block-level: end byte on a later line than start byte
+        let sp = block_span(); // start line 5, end line 6
         let trailing_sp = span(3, 3);
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![
             Ok((Event::Comment { text: " note" }, sp)),
             Ok((Event::Comment { text: " note" }, sp)),
@@ -209,7 +220,7 @@ mod tests {
         ]);
         let mut doc_comments: Vec<String> = Vec::new();
         assert_eq!(
-            consume_leading_doc_comments(&mut stream, &mut doc_comments),
+            consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx),
             Ok(())
         );
         assert_eq!(doc_comments, vec!["# note", "# note"]);
@@ -219,16 +230,17 @@ mod tests {
 
     #[test]
     fn consume_leading_doc_comments_skips_single_line_comment() {
-        // inline: end.line == start.line
-        let inline_sp = span(1, 1);
+        // inline: start and end on the same line
+        let inline_sp = inline_span();
         let trailing_sp = span(2, 2);
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![
             Ok((Event::Comment { text: " inline" }, inline_sp)),
             Ok((Event::StreamStart, trailing_sp)),
         ]);
         let mut doc_comments: Vec<String> = Vec::new();
         assert_eq!(
-            consume_leading_doc_comments(&mut stream, &mut doc_comments),
+            consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx),
             Ok(())
         );
         assert!(doc_comments.is_empty());
@@ -404,8 +416,9 @@ mod tests {
     #[test]
     fn peek_trailing_comment_returns_none_when_next_is_not_comment() {
         let sp = span(1, 1);
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![Ok((Event::StreamStart, sp))]);
-        let result = peek_trailing_comment(&mut stream, 1);
+        let result = peek_trailing_comment(&mut stream, 1, &idx);
         assert_eq!(result, Ok(None));
         // stream untouched
         assert!(stream.peek().is_some());
@@ -413,28 +426,21 @@ mod tests {
 
     #[test]
     fn peek_trailing_comment_returns_none_when_stream_empty() {
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![]);
-        let result = peek_trailing_comment(&mut stream, 1);
+        let result = peek_trailing_comment(&mut stream, 1, &idx);
         assert_eq!(result, Ok(None));
     }
 
     #[test]
     fn peek_trailing_comment_returns_some_when_comment_on_same_line() {
-        // comment span.start.line == preceding_end_line
-        let sp = Span {
-            start: Pos {
-                byte_offset: 10,
-                line: 5,
-                column: 20,
-            },
-            end: Pos {
-                byte_offset: 15,
-                line: 5,
-                column: 25,
-            },
-        };
+        // comment span.start is on line 6 (byte 10 in "a\nb\nc\nd\ne\nf\ng\n")
+        // preceding_end_line = 6 → same line → consumed
+        let sp = Span { start: 10, end: 12 };
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![Ok((Event::Comment { text: " text" }, sp))]);
-        let result = peek_trailing_comment(&mut stream, 5);
+        let preceding_line = idx.line_column(sp.start).0;
+        let result = peek_trailing_comment(&mut stream, preceding_line, &idx);
         assert_eq!(result, Ok(Some("# text".to_string())));
         // stream advanced — comment consumed
         assert!(stream.peek().is_none());
@@ -442,21 +448,11 @@ mod tests {
 
     #[test]
     fn peek_trailing_comment_returns_none_when_comment_on_later_line() {
-        // comment span.start.line > preceding_end_line
-        let sp = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 7,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 5,
-                line: 7,
-                column: 5,
-            },
-        };
+        // comment span.start is on line 6 (byte 10), preceding_end_line = 5
+        let sp = Span { start: 10, end: 12 };
+        let idx = multi_line_index();
         let mut stream = make_stream(vec![Ok((Event::Comment { text: " later" }, sp))]);
-        let result = peek_trailing_comment(&mut stream, 5);
+        let result = peek_trailing_comment(&mut stream, 5, &idx);
         assert_eq!(result, Ok(None));
         // stream NOT consumed
         assert!(stream.peek().is_some());

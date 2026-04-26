@@ -61,10 +61,7 @@ impl<'input> Lexer<'input> {
 
         // Span: from `#` through end of text (not the newline).
         let span_end = crate::pos::advance_within_line(hash_pos.advance('#'), text);
-        let span = Span {
-            start: hash_pos,
-            end: span_end,
-        };
+        let span = Span::from_pos(hash_pos, span_end);
 
         // SAFETY: peek succeeded above; LineBuffer invariant.
         let Some(consumed) = self.buf.consume_next() else {
@@ -129,17 +126,19 @@ mod tests {
     #[case::span_start_column_at_hash_after_leading_spaces("   # comment\n", 3, 3, 1)]
     fn span_start(
         #[case] input: &str,
-        #[case] expected_byte_offset: usize,
-        #[case] expected_column: usize,
-        #[case] expected_line: usize,
+        #[case] expected_byte_offset: u32,
+        #[case] expected_column: u32,
+        #[case] expected_line: u32,
     ) {
         let mut lex = make_lexer(input);
         let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(span.start.byte_offset, expected_byte_offset);
-        assert_eq!(span.start.column, expected_column);
-        assert_eq!(span.start.line, expected_line);
+        let idx = crate::pos::LineIndex::new(input);
+        assert_eq!(span.start, expected_byte_offset);
+        let (line, col) = idx.line_column(span.start);
+        assert_eq!(col, expected_column);
+        assert_eq!(line, expected_line);
     }
 
     #[rstest]
@@ -149,15 +148,17 @@ mod tests {
     #[case::span_end_byte_offset_for_multibyte_body("# 日\n", 5, 3)]
     fn span_end(
         #[case] input: &str,
-        #[case] expected_byte_offset: usize,
-        #[case] expected_column: usize,
+        #[case] expected_byte_offset: u32,
+        #[case] expected_column: u32,
     ) {
         let mut lex = make_lexer(input);
         let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(span.end.byte_offset, expected_byte_offset);
-        assert_eq!(span.end.column, expected_column);
+        let idx = crate::pos::LineIndex::new(input);
+        assert_eq!(span.end, expected_byte_offset);
+        let (_, col) = idx.line_column(span.end);
+        assert_eq!(col, expected_column);
     }
 
     #[test]
@@ -166,8 +167,8 @@ mod tests {
         let Ok(Some((_, span))) = lex.try_consume_comment(1024) else {
             unreachable!("expected Ok(Some(...))")
         };
-        assert_eq!(span.start.byte_offset, 0);
-        assert_eq!(span.end.byte_offset, 1);
+        assert_eq!(span.start, 0);
+        assert_eq!(span.end, 1);
     }
 
     // -----------------------------------------------------------------------

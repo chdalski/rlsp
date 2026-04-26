@@ -107,7 +107,7 @@ fn plain_scalar_span_start_at_byte_zero() {
     let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
         unreachable!("expected Scalar as third event");
     };
-    assert_eq!(span.start.byte_offset, 0);
+    assert_eq!(span.start, 0);
 }
 
 // IT-S9 — span end byte offset for plain scalar.
@@ -118,7 +118,7 @@ fn plain_scalar_span_end_after_value() {
     let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
         unreachable!("expected Scalar as third event");
     };
-    assert_eq!(span.end.byte_offset, 5);
+    assert_eq!(span.end, 5);
 }
 
 // IT-S10 — span start for indented scalar.
@@ -129,5 +129,5 @@ fn plain_scalar_indented_span_start() {
     let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
         unreachable!("expected Scalar as third event");
     };
-    assert_eq!(span.start.byte_offset, 2);
+    assert_eq!(span.start, 2);
 }

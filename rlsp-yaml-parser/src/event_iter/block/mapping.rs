@@ -182,10 +182,7 @@ impl<'input> EventIter<'input> {
             column: line_pos.column + leading_spaces,
         };
         let key_end_pos = crate::pos::advance_within_line(key_start_pos, key_content);
-        let key_span = Span {
-            start: key_start_pos,
-            end: key_end_pos,
-        };
+        let key_span = Span::from_pos(key_start_pos, key_end_pos);
 
         // Compute position of value content (after `: ` / `:\t`).
         let spaces_after_colon = after_colon.len() - value_content.len();

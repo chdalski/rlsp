@@ -3,10 +3,12 @@
 use std::collections::{HashMap, HashSet};
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{CollectionStyle, Span};
+use rlsp_yaml_parser::{CollectionStyle, LineIndex, Span};
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range,
 };
+
+use crate::lsp_util::span_to_lsp;
 
 /// An anchor definition collected from the AST.
 struct AnchorEntry {
@@ -27,10 +29,11 @@ pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for doc in docs {
+        let idx = doc.line_index();
         let mut anchors: Vec<AnchorEntry> = Vec::new();
         let mut alias_names: Vec<(String, Range)> = Vec::new();
 
-        collect_anchors_and_aliases(&doc.root, &mut anchors, &mut alias_names, 0);
+        collect_anchors_and_aliases(&doc.root, &mut anchors, &mut alias_names, 0, idx);
 
         // Build anchor name → range map for lookup (last definition wins on duplicates)
         let anchor_map: HashMap<&str, &AnchorEntry> =
@@ -82,6 +85,7 @@ fn collect_anchors_and_aliases(
     anchors: &mut Vec<AnchorEntry>,
     aliases: &mut Vec<(String, Range)>,
     depth: usize,
+    idx: &LineIndex,
 ) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
@@ -90,32 +94,12 @@ fn collect_anchors_and_aliases(
 
     match node {
         Node::Alias { name, loc, .. } => {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "LSP line/col are u32; always fits"
-            )]
-            let range = Range::new(
-                Position::new(
-                    loc.start.line.saturating_sub(1) as u32,
-                    loc.start.column as u32,
-                ),
-                Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-            );
+            let range = span_to_lsp(*loc, idx);
             aliases.push((name.clone(), range));
         }
         Node::Scalar { loc, .. } | Node::Mapping { loc, .. } | Node::Sequence { loc, .. } => {
             if let Some(name) = node.anchor() {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "LSP line/col are u32; always fits"
-                )]
-                let range = Range::new(
-                    Position::new(
-                        loc.start.line.saturating_sub(1) as u32,
-                        loc.start.column as u32,
-                    ),
-                    Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-                );
+                let range = span_to_lsp(*loc, idx);
                 anchors.push(AnchorEntry {
                     name: name.to_owned(),
                     range,
@@ -124,13 +108,13 @@ fn collect_anchors_and_aliases(
             match node {
                 Node::Mapping { entries, .. } => {
                     for (key, value) in entries {
-                        collect_anchors_and_aliases(key, anchors, aliases, depth + 1);
-                        collect_anchors_and_aliases(value, anchors, aliases, depth + 1);
+                        collect_anchors_and_aliases(key, anchors, aliases, depth + 1, idx);
+                        collect_anchors_and_aliases(value, anchors, aliases, depth + 1, idx);
                     }
                 }
                 Node::Sequence { items, .. } => {
                     for item in items {
-                        collect_anchors_and_aliases(item, anchors, aliases, depth + 1);
+                        collect_anchors_and_aliases(item, anchors, aliases, depth + 1, idx);
                     }
                 }
                 Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -153,7 +137,8 @@ fn collect_anchors_and_aliases(
 pub fn validate_flow_style(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for doc in docs {
-        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, 0);
+        let idx = doc.line_index();
+        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, 0, idx);
     }
     diagnostics
 }
@@ -163,6 +148,7 @@ fn collect_flow_style_diagnostics(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
+    idx: &LineIndex,
 ) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
@@ -179,17 +165,18 @@ fn collect_flow_style_diagnostics(
             diagnostics.push(flow_diagnostic(
                 "flowMap",
                 "Flow mapping style: use block style instead",
-                loc,
+                *loc,
+                idx,
             ));
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, depth + 1);
-                collect_flow_style_diagnostics(value, diagnostics, depth + 1);
+                collect_flow_style_diagnostics(key, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(value, diagnostics, depth + 1, idx);
             }
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, depth + 1);
-                collect_flow_style_diagnostics(value, diagnostics, depth + 1);
+                collect_flow_style_diagnostics(key, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(value, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence {
@@ -201,49 +188,32 @@ fn collect_flow_style_diagnostics(
             diagnostics.push(flow_diagnostic(
                 "flowSeq",
                 "Flow sequence style: use block style instead",
-                loc,
+                *loc,
+                idx,
             ));
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, depth + 1);
+                collect_flow_style_diagnostics(item, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, depth + 1);
+                collect_flow_style_diagnostics(item, diagnostics, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
-fn flow_diagnostic(code: &str, message: &str, loc: &Span) -> Diagnostic {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_line = loc.start.line.saturating_sub(1) as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_col = loc.start.column as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_line = loc.end.line.saturating_sub(1) as u32;
+fn flow_diagnostic(code: &str, message: &str, loc: Span, idx: &LineIndex) -> Diagnostic {
+    let (start_line_1based, start_col) = idx.line_column(loc.start);
     // The AST end span is at the closing `}` or `]` character (zero-width span).
     // Add 1 so the LSP range end is exclusive — past the delimiter — which
     // lets flow_map_to_block/flow_seq_to_block extract the full `{...}` slice.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_col = (loc.end.column + 1) as u32;
+    let (end_line_1based, end_col) = idx.line_column(loc.end);
     Diagnostic {
         range: Range::new(
-            Position::new(start_line, start_col),
-            Position::new(end_line, end_col),
+            Position::new(start_line_1based.saturating_sub(1), start_col),
+            Position::new(end_line_1based.saturating_sub(1), end_col + 1),
         ),
         severity: Some(DiagnosticSeverity::WARNING),
         code: Some(NumberOrString::String(code.to_string())),
@@ -273,7 +243,8 @@ pub fn validate_custom_tags<S: std::hash::BuildHasher>(
     let mut diagnostics = Vec::new();
 
     for doc in docs {
-        collect_tag_diagnostics(&doc.root, allowed_tags, &mut diagnostics, 0);
+        let idx = doc.line_index();
+        collect_tag_diagnostics(&doc.root, allowed_tags, &mut diagnostics, 0, idx);
     }
 
     diagnostics
@@ -285,6 +256,7 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
     allowed_tags: &HashSet<String, S>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
+    idx: &LineIndex,
 ) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
@@ -303,17 +275,7 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
         if tag_str.starts_with("tag:yaml.org,2002:") {
             // Fall through to child recursion only.
         } else if !allowed_tags.contains(tag_str) {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "LSP line/col are u32; always fits"
-            )]
-            let range = Range::new(
-                Position::new(
-                    loc.start.line.saturating_sub(1) as u32,
-                    loc.start.column as u32,
-                ),
-                Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-            );
+            let range = span_to_lsp(*loc, idx);
             diagnostics.push(Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -329,13 +291,13 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_tag_diagnostics(key, allowed_tags, diagnostics, depth + 1);
-                collect_tag_diagnostics(value, allowed_tags, diagnostics, depth + 1);
+                collect_tag_diagnostics(key, allowed_tags, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(value, allowed_tags, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_tag_diagnostics(item, allowed_tags, diagnostics, depth + 1);
+                collect_tag_diagnostics(item, allowed_tags, diagnostics, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -352,14 +314,20 @@ pub fn validate_key_ordering(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for doc in docs {
-        check_yaml_ordering(&doc.root, &mut diagnostics, 0);
+        let idx = doc.line_index();
+        check_yaml_ordering(&doc.root, &mut diagnostics, 0, idx);
     }
 
     diagnostics
 }
 
 /// Recursively check YAML nodes for key ordering, with depth limit.
-fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, depth: usize) {
+fn check_yaml_ordering(
+    node: &Node<Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+    idx: &LineIndex,
+) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
         return;
@@ -388,17 +356,7 @@ fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, dep
 
             for &(key, loc) in keys.iter().skip(1) {
                 if key < max_key {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let range = Range::new(
-                        Position::new(
-                            loc.start.line.saturating_sub(1) as u32,
-                            loc.start.column as u32,
-                        ),
-                        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-                    );
+                    let range = span_to_lsp(*loc, idx);
                     diagnostics.push(Diagnostic {
                         range,
                         severity: Some(DiagnosticSeverity::WARNING),
@@ -414,12 +372,12 @@ fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, dep
 
             // Recursively check nested structures.
             for (_, value) in entries {
-                check_yaml_ordering(value, diagnostics, depth + 1);
+                check_yaml_ordering(value, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                check_yaml_ordering(item, diagnostics, depth + 1);
+                check_yaml_ordering(item, diagnostics, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -437,7 +395,8 @@ fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, dep
 pub fn validate_duplicate_keys(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for doc in docs {
-        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, 0);
+        let idx = doc.line_index();
+        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, 0, idx);
     }
     diagnostics
 }
@@ -447,6 +406,7 @@ fn check_node_for_duplicate_keys(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
+    idx: &LineIndex,
 ) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
@@ -468,19 +428,19 @@ fn check_node_for_duplicate_keys(
                 };
                 if let Some((key_str, loc)) = key_str_and_loc {
                     if seen.contains(&key_str) {
-                        push_duplicate_diagnostic(diagnostics, &key_str, loc);
+                        push_duplicate_diagnostic(diagnostics, &key_str, *loc, idx);
                     } else {
                         seen.insert(key_str);
                     }
                 }
                 // Recurse into the key (e.g. complex keys) and value
-                check_node_for_duplicate_keys(key, diagnostics, depth + 1);
-                check_node_for_duplicate_keys(value, diagnostics, depth + 1);
+                check_node_for_duplicate_keys(key, diagnostics, depth + 1, idx);
+                check_node_for_duplicate_keys(value, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                check_node_for_duplicate_keys(item, diagnostics, depth + 1);
+                check_node_for_duplicate_keys(item, diagnostics, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -501,13 +461,19 @@ fn check_node_for_duplicate_keys(
 pub fn validate_yaml11_compat(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for doc in docs {
-        collect_yaml11_diagnostics(&doc.root, &mut diagnostics, 0);
+        let idx = doc.line_index();
+        collect_yaml11_diagnostics(&doc.root, &mut diagnostics, 0, idx);
     }
     diagnostics
 }
 
 /// Recursively walk a YAML node and emit diagnostics for YAML 1.1 compatibility issues.
-fn collect_yaml11_diagnostics(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, depth: usize) {
+fn collect_yaml11_diagnostics(
+    node: &Node<Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+    idx: &LineIndex,
+) {
     const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
         return;
@@ -520,21 +486,9 @@ fn collect_yaml11_diagnostics(node: &Node<Span>, diagnostics: &mut Vec<Diagnosti
             if *style == rlsp_yaml_parser::ScalarStyle::Plain {
                 if crate::scalar_helpers::is_yaml11_bool(value) {
                     let canonical = crate::scalar_helpers::yaml11_bool_canonical(value);
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let start_line = loc.start.line.saturating_sub(1) as u32;
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let start_col = loc.start.column as u32;
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let end_col = loc.end.column as u32;
+                    let (start_line_1based, start_col) = idx.line_column(loc.start);
+                    let (_, end_col) = idx.line_column(loc.end);
+                    let start_line = start_line_1based.saturating_sub(1);
                     diagnostics.push(Diagnostic {
                         range: Range::new(
                             Position::new(start_line, start_col),
@@ -553,21 +507,9 @@ fn collect_yaml11_diagnostics(node: &Node<Span>, diagnostics: &mut Vec<Diagnosti
                 } else if crate::scalar_helpers::is_yaml11_octal(value) {
                     let decimal = i64::from_str_radix(&value[1..], 8).unwrap_or(0);
                     let yaml12 = format!("0o{}", &value[1..]);
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let start_line = loc.start.line.saturating_sub(1) as u32;
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let start_col = loc.start.column as u32;
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "LSP line/col are u32; always fits"
-                    )]
-                    let end_col = loc.end.column as u32;
+                    let (start_line_1based, start_col) = idx.line_column(loc.start);
+                    let (_, end_col) = idx.line_column(loc.end);
+                    let start_line = start_line_1based.saturating_sub(1);
                     diagnostics.push(Diagnostic {
                         range: Range::new(
                             Position::new(start_line, start_col),
@@ -588,13 +530,13 @@ fn collect_yaml11_diagnostics(node: &Node<Span>, diagnostics: &mut Vec<Diagnosti
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_yaml11_diagnostics(key, diagnostics, depth + 1);
-                collect_yaml11_diagnostics(value, diagnostics, depth + 1);
+                collect_yaml11_diagnostics(key, diagnostics, depth + 1, idx);
+                collect_yaml11_diagnostics(value, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_yaml11_diagnostics(item, diagnostics, depth + 1);
+                collect_yaml11_diagnostics(item, diagnostics, depth + 1, idx);
             }
         }
         Node::Alias { .. } => {}
@@ -602,28 +544,21 @@ fn collect_yaml11_diagnostics(node: &Node<Span>, diagnostics: &mut Vec<Diagnosti
 }
 
 /// Push an error diagnostic for a duplicate scalar key.
-fn push_duplicate_diagnostic(diagnostics: &mut Vec<Diagnostic>, key: &str, loc: &Span) {
+fn push_duplicate_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    key: &str,
+    loc: Span,
+    idx: &LineIndex,
+) {
     let display_key = if key.len() > 100 {
         let end = key.char_indices().nth(100).map_or(key.len(), |(i, _)| i);
         format!("{}...", &key[..end])
     } else {
         key.to_string()
     };
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_line = loc.start.line.saturating_sub(1) as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let start_col = loc.start.column as u32;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let end_col = loc.end.column as u32;
+    let (start_line_1based, start_col) = idx.line_column(loc.start);
+    let (_, end_col) = idx.line_column(loc.end);
+    let start_line = start_line_1based.saturating_sub(1);
     diagnostics.push(Diagnostic {
         range: Range::new(
             Position::new(start_line, start_col),
@@ -1432,7 +1367,7 @@ jobs:
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].range.start.line, 0, "scalar on line 0");
-        // The parser's loc.start.column for a tagged scalar points to where the
+        // The parser's (idx.line_column(loc.start).1 as usize) for a tagged scalar points to where the
         // value content begins (after the tag token and separating space).
         // "key: !custom value" — "value" starts at col 13.
         assert_eq!(

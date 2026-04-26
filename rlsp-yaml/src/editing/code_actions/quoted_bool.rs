@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Position, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Document, ScalarStyle, Span};
+use rlsp_yaml_parser::{Document, LineIndex, ScalarStyle, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
 
@@ -16,7 +16,7 @@ pub(super) fn quoted_bool_to_unquoted(
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
     let parser_line = line_idx + 1;
-    let scalar = find_quoted_bool_scalar(docs, parser_line, col)?;
+    let (scalar, idx) = find_quoted_bool_scalar(docs, parser_line, col)?;
 
     let Node::Scalar { value, loc, .. } = scalar else {
         return None;
@@ -27,19 +27,18 @@ pub(super) fn quoted_bool_to_unquoted(
         *style = ScalarStyle::Plain;
     }
 
-    let base_indent = loc.start.column;
+    let base_indent = idx.line_column(loc.start).1 as usize;
     let new_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
     let edit_range = Range::new(
         Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
+            idx.line_column(loc.start).0.saturating_sub(1),
+            idx.line_column(loc.start).1,
         ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     );
 
     Some(make_action(
@@ -58,29 +57,31 @@ fn find_quoted_bool_scalar(
     docs: &[Document<Span>],
     parser_line: usize,
     col: usize,
-) -> Option<&Node<Span>> {
+) -> Option<(&Node<Span>, &LineIndex)> {
     for doc in docs {
-        if let Some(node) = find_quoted_bool_in_node(&doc.root, parser_line, col) {
-            return Some(node);
+        let idx = doc.line_index();
+        if let Some(node) = find_quoted_bool_in_node(&doc.root, parser_line, col, idx) {
+            return Some((node, idx));
         }
     }
     None
 }
 
-fn find_quoted_bool_in_node(
-    node: &Node<Span>,
+fn find_quoted_bool_in_node<'a>(
+    node: &'a Node<Span>,
     parser_line: usize,
     col: usize,
-) -> Option<&Node<Span>> {
+    idx: &LineIndex,
+) -> Option<&'a Node<Span>> {
     match node {
         Node::Scalar {
             style: ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
             value,
             loc,
             ..
-        } if loc.start.line == parser_line
-            && col >= loc.start.column
-            && col <= loc.end.column
+        } if idx.line_column(loc.start).0 as usize == parser_line
+            && col >= idx.line_column(loc.start).1 as usize
+            && col <= idx.line_column(loc.end).1 as usize
             && (value == "true" || value == "false") =>
         {
             Some(node)
@@ -88,10 +89,10 @@ fn find_quoted_bool_in_node(
         Node::Scalar { .. } | Node::Alias { .. } => None,
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                if let Some(found) = find_quoted_bool_in_node(k, parser_line, col) {
+                if let Some(found) = find_quoted_bool_in_node(k, parser_line, col, idx) {
                     return Some(found);
                 }
-                if let Some(found) = find_quoted_bool_in_node(v, parser_line, col) {
+                if let Some(found) = find_quoted_bool_in_node(v, parser_line, col, idx) {
                     return Some(found);
                 }
             }
@@ -99,7 +100,7 @@ fn find_quoted_bool_in_node(
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                if let Some(found) = find_quoted_bool_in_node(item, parser_line, col) {
+                if let Some(found) = find_quoted_bool_in_node(item, parser_line, col, idx) {
                     return Some(found);
                 }
             }
@@ -273,14 +274,14 @@ mod tests {
         let actions = code_actions(&docs, text, cursor_range(0, 15), &[], &test_uri());
         assert!(
             actions.iter().any(|a| a.title.contains("Convert quoted")),
-            "cursor at loc.end.column (exclusive end) must still trigger action"
+            "cursor at end col must still trigger action"
         );
         let actions_past = code_actions(&docs, text, cursor_range(0, 16), &[], &test_uri());
         assert!(
             actions_past
                 .iter()
                 .all(|a| !a.title.contains("Convert quoted")),
-            "cursor past loc.end.column must not trigger action"
+            "cursor past end must not trigger action"
         );
     }
 

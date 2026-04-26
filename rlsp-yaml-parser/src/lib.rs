@@ -26,7 +26,7 @@ pub use event::{Chomp, CollectionStyle, Event, EventMeta, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
 pub use node::{Document, Node};
-pub use pos::{Pos, Span};
+pub use pos::{LineIndex, Pos, Span};
 pub use schema::{ResolvedTag, Schema};
 
 pub use limits::{
@@ -179,22 +179,27 @@ pub(crate) const fn empty_scalar_event<'input>() -> Event<'input> {
 }
 
 /// Build a span that covers exactly the 3-byte document marker at `marker_pos`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "YAML files <= 4 GB; u32 offset is sufficient"
+)]
 pub(crate) const fn marker_span(marker_pos: Pos) -> Span {
     Span {
-        start: marker_pos,
-        end: Pos {
-            byte_offset: marker_pos.byte_offset + 3,
-            line: marker_pos.line,
-            column: marker_pos.column + 3,
-        },
+        start: marker_pos.byte_offset as u32,
+        end: (marker_pos.byte_offset + 3) as u32,
     }
 }
 
 /// Build a zero-width span at `pos`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "YAML files <= 4 GB; u32 offset is sufficient"
+)]
 pub(crate) const fn zero_span(pos: Pos) -> Span {
+    let offset = pos.byte_offset as u32;
     Span {
-        start: pos,
-        end: pos,
+        start: offset,
+        end: offset,
     }
 }
 

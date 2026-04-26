@@ -85,12 +85,15 @@ struct ContentEntry {
 /// standalone comments.  This function derives the last content line from AST span
 /// information, which is authoritative.
 ///
-/// For each scalar node: `last_line = loc.start.line + lines_in_value - 1`.
-/// The `loc.start.line` is the first content line (not the header line for block scalars).
+/// For each scalar node: `last_line = (idx.line_column(loc.start).0 as usize) + lines_in_value - 1`.
+/// The `(idx.line_column(loc.start).0 as usize)` is the first content line (not the header line for block scalars).
 /// `lines_in_value` counts the lines in the decoded value — for block scalars this
 /// includes any trailing blank lines consumed by the chomp indicator.
 fn last_content_line_from_ast(docs: &[Document<Span>]) -> Option<usize> {
-    fn node_last_content_line(node: &Node<Span>) -> Option<usize> {
+    fn node_last_content_line(
+        node: &Node<Span>,
+        idx: &rlsp_yaml_parser::LineIndex,
+    ) -> Option<usize> {
         match node {
             // Block scalars occupy multiple source lines.  The decoded value
             // includes trailing blank lines consumed by the chomp indicator,
@@ -102,28 +105,35 @@ fn last_content_line_from_ast(docs: &[Document<Span>]) -> Option<usize> {
                 value,
                 ..
             } => {
-                // `loc.start.line` is 1-based; convert to 0-based first.
-                let start_0 = loc.start.line.saturating_sub(1);
+                // line_column returns 1-based line; convert to 0-based first.
+                let start_0 = idx.line_column(loc.start).0.saturating_sub(1) as usize;
                 let line_count = value.lines().count();
                 Some(start_0 + line_count.saturating_sub(1))
             }
             // Non-block scalars (plain, single-quoted, double-quoted) always
             // occupy a single source line regardless of how many newlines are
             // embedded in the decoded value.
-            // `loc.start.line` is 1-based; convert to 0-based.
             Node::Scalar { loc, .. } | Node::Alias { loc, .. } => {
-                Some(loc.start.line.saturating_sub(1))
+                Some(idx.line_column(loc.start).0.saturating_sub(1) as usize)
             }
             Node::Mapping { entries, .. } => entries
                 .iter()
-                .flat_map(|(k, v)| [node_last_content_line(k), node_last_content_line(v)])
+                .flat_map(|(k, v)| {
+                    [
+                        node_last_content_line(k, idx),
+                        node_last_content_line(v, idx),
+                    ]
+                })
                 .flatten()
                 .max(),
-            Node::Sequence { items, .. } => items.iter().filter_map(node_last_content_line).max(),
+            Node::Sequence { items, .. } => items
+                .iter()
+                .filter_map(|n| node_last_content_line(n, idx))
+                .max(),
         }
     }
     docs.iter()
-        .filter_map(|doc| node_last_content_line(&doc.root))
+        .filter_map(|doc| node_last_content_line(&doc.root, doc.line_index()))
         .max()
 }
 

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, Position, Range, TextEdit};
+use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Document, ScalarStyle, Span};
+use rlsp_yaml_parser::{Document, LineIndex, ScalarStyle, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
+use crate::lsp_util::span_to_lsp;
 
 use super::{block_to_flow::node_loc, diagnostic_code, make_action};
 
@@ -14,7 +15,7 @@ pub(super) fn yaml11_octal_actions(
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Vec<CodeAction> {
-    let Some((scalar, loc, base_indent)) = find_yaml11_octal_scalar(docs, diag) else {
+    let Some((scalar, loc, base_indent, idx)) = find_yaml11_octal_scalar(docs, diag) else {
         return vec![];
     };
     let Node::Scalar { value, .. } = scalar else {
@@ -40,18 +41,7 @@ pub(super) fn yaml11_octal_actions(
     };
     let quoted_text = format_subtree(&quoted, &quote_opts, base_indent);
     let converted_text = format_subtree(&converted, &YamlFormatOptions::default(), base_indent);
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let edit_range = Range::new(
-        Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
-        ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
-    );
+    let edit_range = span_to_lsp(*loc, idx);
 
     vec![
         make_action(
@@ -80,27 +70,30 @@ pub(super) fn yaml11_octal_actions(
 fn find_yaml11_octal_scalar<'a>(
     docs: &'a [Document<Span>],
     diag: &Diagnostic,
-) -> Option<(&'a Node<Span>, &'a Span, usize)> {
+) -> Option<(&'a Node<Span>, &'a Span, usize, &'a LineIndex)> {
     let col_match = diagnostic_code(diag) == Some("yaml11Octal");
     let parser_line = diag.range.start.line as usize + 1;
     if !col_match {
         let count: usize = docs
             .iter()
-            .map(|doc| count_yaml11_octal_on_line(&doc.root, parser_line))
+            .map(|doc| count_yaml11_octal_on_line(&doc.root, parser_line, doc.line_index()))
             .sum();
         if count != 1 {
             return None;
         }
     }
     for doc in docs {
-        if let Some(result) = find_yaml11_octal_in_node(&doc.root, parser_line, diag, col_match) {
-            return Some(result);
+        let idx = doc.line_index();
+        if let Some((node, loc, col)) =
+            find_yaml11_octal_in_node(&doc.root, parser_line, diag, col_match, idx)
+        {
+            return Some((node, loc, col, idx));
         }
     }
     None
 }
 
-fn count_yaml11_octal_on_line(node: &Node<Span>, parser_line: usize) -> usize {
+fn count_yaml11_octal_on_line(node: &Node<Span>, parser_line: usize, idx: &LineIndex) -> usize {
     match node {
         Node::Mapping { entries, .. } => entries
             .iter()
@@ -113,13 +106,13 @@ fn count_yaml11_octal_on_line(node: &Node<Span>, parser_line: usize) -> usize {
                 } = v
                 {
                     usize::from(
-                        loc.start.line == parser_line
+                        idx.line_column(loc.start).0 as usize == parser_line
                             && crate::scalar_helpers::is_yaml11_octal(value),
                     )
                 } else {
-                    count_yaml11_octal_on_line(v, parser_line)
+                    count_yaml11_octal_on_line(v, parser_line, idx)
                 };
-                count_yaml11_octal_on_line(k, parser_line) + v_count
+                count_yaml11_octal_on_line(k, parser_line, idx) + v_count
             })
             .sum(),
         Node::Sequence { items, .. } => items
@@ -133,11 +126,11 @@ fn count_yaml11_octal_on_line(node: &Node<Span>, parser_line: usize) -> usize {
                 } = item
                 {
                     usize::from(
-                        loc.start.line == parser_line
+                        idx.line_column(loc.start).0 as usize == parser_line
                             && crate::scalar_helpers::is_yaml11_octal(value),
                     )
                 } else {
-                    count_yaml11_octal_on_line(item, parser_line)
+                    count_yaml11_octal_on_line(item, parser_line, idx)
                 }
             })
             .sum(),
@@ -145,9 +138,10 @@ fn count_yaml11_octal_on_line(node: &Node<Span>, parser_line: usize) -> usize {
     }
 }
 
-const fn yaml11_octal_col_matches_diag(loc: &Span, diag: &Diagnostic) -> bool {
-    diag.range.start.character as usize == loc.start.column
-        && diag.range.end.character as usize == loc.end.column
+fn yaml11_octal_col_matches_diag(loc: Span, diag: &Diagnostic, idx: &LineIndex) -> bool {
+    let (_, start_col) = idx.line_column(loc.start);
+    let (_, end_col) = idx.line_column(loc.end);
+    diag.range.start.character == start_col && diag.range.end.character == end_col
 }
 
 fn find_yaml11_octal_in_node<'a>(
@@ -155,6 +149,7 @@ fn find_yaml11_octal_in_node<'a>(
     parser_line: usize,
     diag: &Diagnostic,
     col_match: bool,
+    idx: &LineIndex,
 ) -> Option<(&'a Node<Span>, &'a Span, usize)> {
     match node {
         Node::Mapping { entries, .. } => {
@@ -166,18 +161,22 @@ fn find_yaml11_octal_in_node<'a>(
                     ..
                 } = v
                 {
-                    if loc.start.line == parser_line
+                    if idx.line_column(loc.start).0 as usize == parser_line
                         && crate::scalar_helpers::is_yaml11_octal(value)
-                        && (!col_match || yaml11_octal_col_matches_diag(loc, diag))
+                        && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
                     {
-                        let key_col = node_loc(k).start.column;
+                        let key_col = idx.line_column(node_loc(k).start).1 as usize;
                         return Some((v, loc, key_col));
                     }
                 }
-                if let Some(result) = find_yaml11_octal_in_node(k, parser_line, diag, col_match) {
+                if let Some(result) =
+                    find_yaml11_octal_in_node(k, parser_line, diag, col_match, idx)
+                {
                     return Some(result);
                 }
-                if let Some(result) = find_yaml11_octal_in_node(v, parser_line, diag, col_match) {
+                if let Some(result) =
+                    find_yaml11_octal_in_node(v, parser_line, diag, col_match, idx)
+                {
                     return Some(result);
                 }
             }
@@ -192,14 +191,15 @@ fn find_yaml11_octal_in_node<'a>(
                     ..
                 } = item
                 {
-                    if loc.start.line == parser_line
+                    if idx.line_column(loc.start).0 as usize == parser_line
                         && crate::scalar_helpers::is_yaml11_octal(value)
-                        && (!col_match || yaml11_octal_col_matches_diag(loc, diag))
+                        && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
                     {
-                        return Some((item, loc, loc.start.column));
+                        return Some((item, loc, idx.line_column(loc.start).1 as usize));
                     }
                 }
-                if let Some(result) = find_yaml11_octal_in_node(item, parser_line, diag, col_match)
+                if let Some(result) =
+                    find_yaml11_octal_in_node(item, parser_line, diag, col_match, idx)
                 {
                     return Some(result);
                 }

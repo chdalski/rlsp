@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{Pos, Span};
+use rlsp_yaml_parser::{LineIndex, Pos, Span};
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 /// Prepare rename: validates cursor is on anchor/alias, returns name range.
@@ -12,14 +12,18 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 #[must_use]
 pub fn prepare_rename(docs: &[Document<Span>], position: Position) -> Option<Range> {
     let cursor = lsp_to_pos(position);
-    let doc = containing_document(docs, cursor)?;
+    let (doc, idx) = containing_document(docs, cursor)?;
     let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
     anchors
         .iter()
-        .find(|(_, loc)| span_contains(*loc, cursor))
-        .or_else(|| aliases.iter().find(|(_, loc)| span_contains(*loc, cursor)))
-        .map(|(_, loc)| span_to_range(*loc))
+        .find(|(_, loc)| span_contains(*loc, cursor, idx))
+        .or_else(|| {
+            aliases
+                .iter()
+                .find(|(_, loc)| span_contains(*loc, cursor, idx))
+        })
+        .map(|(_, loc)| span_to_range(*loc, idx))
 }
 
 /// Rename: returns edits for all occurrences of anchor and aliases.
@@ -38,17 +42,17 @@ pub fn rename(
     }
 
     let cursor = lsp_to_pos(position);
-    let doc = containing_document(docs, cursor)?;
+    let (doc, idx) = containing_document(docs, cursor)?;
     let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
     let name = anchors
         .iter()
-        .find(|(_, loc)| span_contains(*loc, cursor))
+        .find(|(_, loc)| span_contains(*loc, cursor, idx))
         .map(|(n, _)| n.as_str())
         .or_else(|| {
             aliases
                 .iter()
-                .find(|(_, loc)| span_contains(*loc, cursor))
+                .find(|(_, loc)| span_contains(*loc, cursor, idx))
                 .map(|(n, _)| n.as_str())
         })?;
 
@@ -56,7 +60,7 @@ pub fn rename(
         .iter()
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| TextEdit {
-            range: span_to_range(*loc),
+            range: span_to_range(*loc, idx),
             new_text: format!("&{new_name}"),
         });
 
@@ -64,7 +68,7 @@ pub fn rename(
         .iter()
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| TextEdit {
-            range: span_to_range(*loc),
+            range: span_to_range(*loc, idx),
             new_text: format!("*{new_name}"),
         });
 
@@ -128,9 +132,18 @@ fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut Named
 }
 
 /// Find the document whose root span contains the cursor.
-fn containing_document(docs: &[Document<Span>], cursor: Pos) -> Option<&Document<Span>> {
-    docs.iter()
-        .find(|doc| span_contains(node_loc(&doc.root), cursor))
+fn containing_document(
+    docs: &[Document<Span>],
+    cursor: Pos,
+) -> Option<(&Document<Span>, &LineIndex)> {
+    docs.iter().find_map(|doc| {
+        let idx = doc.line_index();
+        if span_contains(node_loc(&doc.root), cursor, idx) {
+            Some((doc, idx))
+        } else {
+            None
+        }
+    })
 }
 
 const fn node_loc(node: &Node<Span>) -> Span {
@@ -142,9 +155,15 @@ const fn node_loc(node: &Node<Span>) -> Span {
     }
 }
 
-fn span_contains(span: Span, cursor: Pos) -> bool {
-    let start = (span.start.line, span.start.column);
-    let end = (span.end.line, span.end.column);
+fn span_contains(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
+    let start = (
+        idx.line_column(span.start).0 as usize,
+        idx.line_column(span.start).1 as usize,
+    );
+    let end = (
+        idx.line_column(span.end).0 as usize,
+        idx.line_column(span.end).1 as usize,
+    );
     let pos = (cursor.line, cursor.column);
     pos >= start && pos < end
 }
@@ -160,17 +179,16 @@ const fn lsp_to_pos(position: Position) -> Pos {
 }
 
 /// Convert a parser `Span` to an LSP `Range`.
-fn span_to_range(loc: Span) -> Range {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
+fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
     Range::new(
         Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
+            idx.line_column(loc.start).0.saturating_sub(1),
+            idx.line_column(loc.start).1,
         ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     )
 }
 

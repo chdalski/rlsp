@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, Position, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{CollectionStyle, Document, Span};
+use rlsp_yaml_parser::{CollectionStyle, Document, LineIndex, Span};
 
 use super::{block_to_flow::block_text_and_start_col, make_action, span_matches_diag};
 
@@ -13,7 +13,7 @@ pub(super) fn flow_map_to_block(
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let node = find_flow_mapping(docs, diag)?;
+    let (node, idx) = find_flow_mapping(docs, diag)?;
     let Node::Mapping { loc, .. } = node else {
         return None;
     };
@@ -23,24 +23,20 @@ pub(super) fn flow_map_to_block(
         *style = CollectionStyle::Block;
     }
 
-    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, loc, text);
+    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, *loc, text, idx);
     if new_text.trim().is_empty() {
         return None;
     }
 
+    let (start_line, _) = idx.line_column(loc.start);
+    let (end_line, end_col) = idx.line_column(loc.end);
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
+        reason = "edit_start_col is a byte column that always fits u32"
     )]
     let edit_range = Range::new(
-        Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            edit_start_col as u32,
-        ),
-        Position::new(
-            loc.end.line.saturating_sub(1) as u32,
-            (loc.end.column + 1) as u32,
-        ),
+        Position::new(start_line.saturating_sub(1), edit_start_col as u32),
+        Position::new(end_line.saturating_sub(1), end_col + 1),
     );
 
     Some(make_action(
@@ -56,10 +52,14 @@ pub(super) fn flow_map_to_block(
 }
 
 /// Walk the AST to find a flow mapping node whose span matches the diagnostic range.
-fn find_flow_mapping<'a>(docs: &'a [Document<Span>], diag: &Diagnostic) -> Option<&'a Node<Span>> {
+fn find_flow_mapping<'a>(
+    docs: &'a [Document<Span>],
+    diag: &Diagnostic,
+) -> Option<(&'a Node<Span>, &'a LineIndex)> {
     for doc in docs {
-        if let Some(node) = find_flow_mapping_in_node(&doc.root, diag) {
-            return Some(node);
+        let idx = doc.line_index();
+        if let Some(node) = find_flow_mapping_in_node(&doc.root, diag, idx) {
+            return Some((node, idx));
         }
     }
     None
@@ -68,6 +68,7 @@ fn find_flow_mapping<'a>(docs: &'a [Document<Span>], diag: &Diagnostic) -> Optio
 fn find_flow_mapping_in_node<'a>(
     node: &'a Node<Span>,
     diag: &Diagnostic,
+    idx: &LineIndex,
 ) -> Option<&'a Node<Span>> {
     match node {
         Node::Mapping {
@@ -76,15 +77,15 @@ fn find_flow_mapping_in_node<'a>(
             entries,
             ..
         } => {
-            if span_matches_diag(loc, diag) {
+            if span_matches_diag(*loc, diag, idx) {
                 return Some(node);
             }
             // Search nested nodes
             for (k, v) in entries {
-                if let Some(found) = find_flow_mapping_in_node(k, diag) {
+                if let Some(found) = find_flow_mapping_in_node(k, diag, idx) {
                     return Some(found);
                 }
-                if let Some(found) = find_flow_mapping_in_node(v, diag) {
+                if let Some(found) = find_flow_mapping_in_node(v, diag, idx) {
                     return Some(found);
                 }
             }
@@ -92,10 +93,10 @@ fn find_flow_mapping_in_node<'a>(
         }
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                if let Some(found) = find_flow_mapping_in_node(k, diag) {
+                if let Some(found) = find_flow_mapping_in_node(k, diag, idx) {
                     return Some(found);
                 }
-                if let Some(found) = find_flow_mapping_in_node(v, diag) {
+                if let Some(found) = find_flow_mapping_in_node(v, diag, idx) {
                     return Some(found);
                 }
             }
@@ -103,7 +104,7 @@ fn find_flow_mapping_in_node<'a>(
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                if let Some(found) = find_flow_mapping_in_node(item, diag) {
+                if let Some(found) = find_flow_mapping_in_node(item, diag, idx) {
                     return Some(found);
                 }
             }
@@ -119,7 +120,7 @@ pub(super) fn flow_seq_to_block(
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let node = find_flow_sequence(docs, diag)?;
+    let (node, idx) = find_flow_sequence(docs, diag)?;
     let Node::Sequence { loc, .. } = node else {
         return None;
     };
@@ -129,24 +130,20 @@ pub(super) fn flow_seq_to_block(
         *style = CollectionStyle::Block;
     }
 
-    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, loc, text);
+    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, *loc, text, idx);
     if new_text.trim().is_empty() {
         return None;
     }
 
+    let (start_line, _) = idx.line_column(loc.start);
+    let (end_line, end_col) = idx.line_column(loc.end);
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
+        reason = "edit_start_col is a byte column that always fits u32"
     )]
     let edit_range = Range::new(
-        Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            edit_start_col as u32,
-        ),
-        Position::new(
-            loc.end.line.saturating_sub(1) as u32,
-            (loc.end.column + 1) as u32,
-        ),
+        Position::new(start_line.saturating_sub(1), edit_start_col as u32),
+        Position::new(end_line.saturating_sub(1), end_col + 1),
     );
 
     Some(make_action(
@@ -162,10 +159,14 @@ pub(super) fn flow_seq_to_block(
 }
 
 /// Walk the AST to find a flow sequence node whose span matches the diagnostic range.
-fn find_flow_sequence<'a>(docs: &'a [Document<Span>], diag: &Diagnostic) -> Option<&'a Node<Span>> {
+fn find_flow_sequence<'a>(
+    docs: &'a [Document<Span>],
+    diag: &Diagnostic,
+) -> Option<(&'a Node<Span>, &'a LineIndex)> {
     for doc in docs {
-        if let Some(node) = find_flow_sequence_in_node(&doc.root, diag) {
-            return Some(node);
+        let idx = doc.line_index();
+        if let Some(node) = find_flow_sequence_in_node(&doc.root, diag, idx) {
+            return Some((node, idx));
         }
     }
     None
@@ -174,6 +175,7 @@ fn find_flow_sequence<'a>(docs: &'a [Document<Span>], diag: &Diagnostic) -> Opti
 fn find_flow_sequence_in_node<'a>(
     node: &'a Node<Span>,
     diag: &Diagnostic,
+    idx: &LineIndex,
 ) -> Option<&'a Node<Span>> {
     match node {
         Node::Sequence {
@@ -182,11 +184,11 @@ fn find_flow_sequence_in_node<'a>(
             items,
             ..
         } => {
-            if span_matches_diag(loc, diag) {
+            if span_matches_diag(*loc, diag, idx) {
                 return Some(node);
             }
             for item in items {
-                if let Some(found) = find_flow_sequence_in_node(item, diag) {
+                if let Some(found) = find_flow_sequence_in_node(item, diag, idx) {
                     return Some(found);
                 }
             }
@@ -194,7 +196,7 @@ fn find_flow_sequence_in_node<'a>(
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                if let Some(found) = find_flow_sequence_in_node(item, diag) {
+                if let Some(found) = find_flow_sequence_in_node(item, diag, idx) {
                     return Some(found);
                 }
             }
@@ -202,10 +204,10 @@ fn find_flow_sequence_in_node<'a>(
         }
         Node::Mapping { entries, .. } => {
             for (k, v) in entries {
-                if let Some(found) = find_flow_sequence_in_node(k, diag) {
+                if let Some(found) = find_flow_sequence_in_node(k, diag, idx) {
                     return Some(found);
                 }
-                if let Some(found) = find_flow_sequence_in_node(v, diag) {
+                if let Some(found) = find_flow_sequence_in_node(v, diag, idx) {
                     return Some(found);
                 }
             }

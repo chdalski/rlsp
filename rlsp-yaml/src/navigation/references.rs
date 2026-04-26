@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{Pos, Span};
+use rlsp_yaml_parser::{LineIndex, Pos, Span};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 type NamedSpans = Vec<(String, Span)>;
@@ -13,20 +13,20 @@ type NamedSpans = Vec<(String, Span)>;
 #[must_use]
 pub fn goto_definition(docs: &[Document<Span>], uri: &Url, position: Position) -> Option<Location> {
     let cursor = lsp_to_pos(position);
-    let doc = containing_document(docs, cursor)?;
+    let (doc, idx) = containing_document(docs, cursor)?;
 
     let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
     let alias_entry = aliases
         .iter()
-        .find(|(_, loc)| span_contains(*loc, cursor))?;
+        .find(|(_, loc)| span_contains(*loc, cursor, idx))?;
     let alias_name = &alias_entry.0;
 
     let anchor_entry = anchors.iter().find(|(name, _)| name == alias_name)?;
 
     Some(Location {
         uri: uri.clone(),
-        range: span_to_range(anchor_entry.1),
+        range: span_to_range(anchor_entry.1, idx),
     })
 }
 
@@ -42,7 +42,7 @@ pub fn find_references(
     include_declaration: bool,
 ) -> Vec<Location> {
     let cursor = lsp_to_pos(position);
-    let Some(doc) = containing_document(docs, cursor) else {
+    let Some((doc, idx)) = containing_document(docs, cursor) else {
         return Vec::new();
     };
 
@@ -50,12 +50,12 @@ pub fn find_references(
 
     let name = anchors
         .iter()
-        .find(|(_, loc)| span_contains(*loc, cursor))
+        .find(|(_, loc)| span_contains(*loc, cursor, idx))
         .map(|(n, _)| n.as_str())
         .or_else(|| {
             aliases
                 .iter()
-                .find(|(_, loc)| span_contains(*loc, cursor))
+                .find(|(_, loc)| span_contains(*loc, cursor, idx))
                 .map(|(n, _)| n.as_str())
         });
 
@@ -69,7 +69,7 @@ pub fn find_references(
             .find(|(n, _)| n == name)
             .map(|(_, loc)| Location {
                 uri: uri.clone(),
-                range: span_to_range(*loc),
+                range: span_to_range(*loc, idx),
             })
     } else {
         None
@@ -80,7 +80,7 @@ pub fn find_references(
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| Location {
             uri: uri.clone(),
-            range: span_to_range(*loc),
+            range: span_to_range(*loc, idx),
         });
 
     declaration.into_iter().chain(alias_locations).collect()
@@ -126,9 +126,18 @@ fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut Named
 }
 
 /// Find the document whose root span contains the cursor (per-document scoping).
-fn containing_document(docs: &[Document<Span>], cursor: Pos) -> Option<&Document<Span>> {
-    docs.iter()
-        .find(|doc| span_contains(node_loc(&doc.root), cursor))
+fn containing_document(
+    docs: &[Document<Span>],
+    cursor: Pos,
+) -> Option<(&Document<Span>, &LineIndex)> {
+    docs.iter().find_map(|doc| {
+        let idx = doc.line_index();
+        if span_contains(node_loc(&doc.root), cursor, idx) {
+            Some((doc, idx))
+        } else {
+            None
+        }
+    })
 }
 
 /// Returns the location span of a node.
@@ -142,9 +151,15 @@ const fn node_loc(node: &Node<Span>) -> Span {
 }
 
 /// Returns `true` when `cursor` is within `span` using half-open `[start, end)`.
-fn span_contains(span: Span, cursor: Pos) -> bool {
-    let start = (span.start.line, span.start.column);
-    let end = (span.end.line, span.end.column);
+fn span_contains(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
+    let start = (
+        idx.line_column(span.start).0 as usize,
+        idx.line_column(span.start).1 as usize,
+    );
+    let end = (
+        idx.line_column(span.end).0 as usize,
+        idx.line_column(span.end).1 as usize,
+    );
     let pos = (cursor.line, cursor.column);
     pos >= start && pos < end
 }
@@ -160,17 +175,16 @@ const fn lsp_to_pos(position: Position) -> Pos {
 }
 
 /// Convert a parser `Span` to an LSP `Range`.
-fn span_to_range(loc: Span) -> Range {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
+fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
     Range::new(
         Position::new(
-            loc.start.line.saturating_sub(1) as u32,
-            loc.start.column as u32,
+            idx.line_column(loc.start).0.saturating_sub(1),
+            idx.line_column(loc.start).1,
         ),
-        Position::new(loc.end.line.saturating_sub(1) as u32, loc.end.column as u32),
+        Position::new(
+            idx.line_column(loc.end).0.saturating_sub(1),
+            idx.line_column(loc.end).1,
+        ),
     )
 }
 

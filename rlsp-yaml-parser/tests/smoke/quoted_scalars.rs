@@ -94,11 +94,8 @@ fn single_quoted_span_covers_including_delimiters() {
     let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
         unreachable!("expected Scalar as third event");
     };
-    assert_eq!(
-        span.start.byte_offset, 0,
-        "span must start at opening quote"
-    );
-    assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
+    assert_eq!(span.start, 0, "span must start at opening quote");
+    assert_eq!(span.end, 7, "span must end after closing quote");
 }
 
 // IT-7: double-quoted span covers including delimiters.
@@ -110,11 +107,8 @@ fn double_quoted_span_covers_including_delimiters() {
     let Some(Ok((Event::Scalar { .. }, span))) = results.get(2) else {
         unreachable!("expected Scalar as third event");
     };
-    assert_eq!(
-        span.start.byte_offset, 0,
-        "span must start at opening quote"
-    );
-    assert_eq!(span.end.byte_offset, 7, "span must end after closing quote");
+    assert_eq!(span.start, 0, "span must start at opening quote");
+    assert_eq!(span.end, 7, "span must end after closing quote");
 }
 
 // IT-15: double-quoted mapping key emits DoubleQuoted style at event layer.

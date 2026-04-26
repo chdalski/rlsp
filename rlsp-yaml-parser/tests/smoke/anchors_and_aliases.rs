@@ -450,19 +450,21 @@ fn tag_before_anchor_on_same_line_both_emitted() {
 fn alias_event_span_covers_star_and_name() {
     // `*foo\n` — alias span must start at `*` and cover the full name.
     // `*` = byte 0, `foo` = bytes 1-3, so span is [0, 4).
-    let items = parse_to_vec("*foo\n");
+    let input = "*foo\n";
+    let items = parse_to_vec(input);
     let alias_span = items.iter().find_map(|r| match r {
         Ok((Event::Alias { .. }, span)) => Some(*span),
         Ok(_) | Err(_) => None,
     });
     assert!(alias_span.is_some(), "Alias event must be present");
     if let Some(span) = alias_span {
-        assert_eq!(span.start.byte_offset, 0, "Alias span must start at byte 0");
+        assert_eq!(span.start, 0, "Alias span must start at byte 0");
+        assert_eq!(span.end, 4, "Alias span must end at byte 4 (after 'foo')");
         assert_eq!(
-            span.end.byte_offset, 4,
-            "Alias span must end at byte 4 (after 'foo')"
+            line_col(input, span.start).1,
+            0,
+            "Alias must start at column 0"
         );
-        assert_eq!(span.start.column, 0, "Alias must start at column 0");
     }
 }
 
@@ -775,7 +777,7 @@ fn scalar_span_covers_value_not_anchor_prefix() {
     assert!(scalar_span.is_some(), "Scalar event must be present");
     if let Some(span) = scalar_span {
         assert_eq!(
-            span.start.byte_offset, 3,
+            span.start, 3,
             "Scalar span must start at byte 3 (the 'f' of 'foo'), not at the anchor prefix"
         );
     }
@@ -793,7 +795,7 @@ fn sequence_start_span_starts_at_dash_not_anchor_line() {
     assert!(seq_span.is_some(), "SequenceStart event must be present");
     if let Some(span) = seq_span {
         assert_eq!(
-            span.start.byte_offset, 8,
+            span.start, 8,
             "SequenceStart span must start at the `-` (byte 8), not at the anchor line"
         );
     }
@@ -1102,18 +1104,7 @@ fn anchor_loc_some_for_anchored_plain_scalar() {
         "anchored scalar must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 4,
-                line: 1,
-                column: 4,
-            },
-        };
+        let expected = Span { start: 0, end: 4 };
         assert_eq!(
             loc, expected,
             "anchor_loc must cover `&` through last byte of name"
@@ -1140,18 +1131,7 @@ fn anchor_loc_some_for_anchored_sequence_start() {
         "anchored SequenceStart must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 2,
-                line: 1,
-                column: 2,
-            },
-        };
+        let expected = Span { start: 0, end: 2 };
         assert_eq!(loc, expected, "SequenceStart anchor_loc must cover `&s`");
     }
 }
@@ -1175,18 +1155,7 @@ fn anchor_loc_some_for_anchored_mapping_start() {
         "anchored MappingStart must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 2,
-                line: 1,
-                column: 2,
-            },
-        };
+        let expected = Span { start: 0, end: 2 };
         assert_eq!(loc, expected, "MappingStart anchor_loc must cover `&m`");
     }
 }
@@ -1210,18 +1179,7 @@ fn anchor_loc_inline_anchor_on_mapping_key_scalar() {
         "key scalar with inline anchor must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 2,
-                line: 1,
-                column: 2,
-            },
-        };
+        let expected = Span { start: 0, end: 2 };
         assert_eq!(
             loc, expected,
             "inline anchor on key: anchor_loc must cover `&k`"
@@ -1252,14 +1210,19 @@ fn anchor_loc_multibyte_anchor_name_byte_range() {
     if let Some(loc) = loc_opt {
         // `&` = 1 byte at col 0; `é` = 2 bytes at col 1; `n` = 1 byte at col 2;
         // end byte = 0 + 1 + 2 + 1 = 4; end col = 0 + 1 + 1 + 1 = 3.
-        assert_eq!(loc.start.byte_offset, 0, "anchor start byte must be 0");
-        assert_eq!(loc.start.column, 0, "anchor start col must be 0");
+        assert_eq!(loc.start, 0, "anchor start byte must be 0");
         assert_eq!(
-            loc.end.byte_offset, 4,
+            line_col(input, loc.start).1,
+            0,
+            "anchor start col must be 0"
+        );
+        assert_eq!(
+            loc.end, 4,
             "anchor end byte must cover ampersand + 2-byte + 1-byte"
         );
         assert_eq!(
-            loc.end.column, 3,
+            line_col(input, loc.end).1,
+            3,
             "anchor end col must be 3 (1 + 1 + 1 codepoints)"
         );
     }
@@ -1269,7 +1232,8 @@ fn anchor_loc_multibyte_anchor_name_byte_range() {
 #[test]
 fn anchor_loc_start_at_ampersand_mid_line() {
     // `key: &v val\n` — `&v` is at byte offset 5, col 5, line 1.
-    let events = parse_to_vec("key: &v val\n");
+    let input = "key: &v val\n";
+    let events = parse_to_vec(input);
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
             if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("v") {
@@ -1285,13 +1249,14 @@ fn anchor_loc_start_at_ampersand_mid_line() {
     );
     if let Some(loc) = loc_opt {
         // `key: ` = 5 bytes; `&` at byte 5, col 5.
-        assert_eq!(loc.start.byte_offset, 5, "anchor start byte must be 5");
-        assert_eq!(loc.start.column, 5, "anchor start col must be 5");
+        assert_eq!(loc.start, 5, "anchor start byte must be 5");
         assert_eq!(
-            loc.end.byte_offset, 7,
-            "anchor end byte must be 7 (`&v` = 2 bytes)"
+            line_col(input, loc.start).1,
+            5,
+            "anchor start col must be 5"
         );
-        assert_eq!(loc.end.column, 7, "anchor end col must be 7");
+        assert_eq!(loc.end, 7, "anchor end byte must be 7 (`&v` = 2 bytes)");
+        assert_eq!(line_col(input, loc.end).1, 7, "anchor end col must be 7");
     }
 }
 
@@ -1340,7 +1305,8 @@ fn anchor_loc_none_for_mapping_start_without_anchor() {
 fn anchor_loc_start_line_matches_anchor_line() {
     // Standalone anchor on line 2: `---\n&a val\n`
     // `&a` is on line 2, byte offset = len("---\n") = 4.
-    let events = parse_to_vec("---\n&a val\n");
+    let input = "---\n&a val\n";
+    let events = parse_to_vec(input);
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
             if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("a") {
@@ -1355,11 +1321,12 @@ fn anchor_loc_start_line_matches_anchor_line() {
         "anchored scalar on line 2 must have anchor_loc"
     );
     if let Some(loc) = loc_opt {
-        assert_eq!(loc.start.line, 2, "anchor_loc.start.line must be 2");
         assert_eq!(
-            loc.start.byte_offset, 4,
-            "anchor_loc.start.byte_offset must be 4 (after `---\\n`)"
+            line_col(input, loc.start).0,
+            2,
+            "line_col(input, anchor_loc.start).0 must be 2"
         );
+        assert_eq!(loc.start, 4, "anchor_loc.start must be 4 (after `---\\n`)");
     }
 }
 
@@ -1389,18 +1356,7 @@ fn anchor_loc_some_for_anchored_flow_mapping() {
         "anchored flow MappingStart must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 2,
-                line: 1,
-                column: 2,
-            },
-        };
+        let expected = Span { start: 0, end: 2 };
         assert_eq!(
             loc, expected,
             "flow MappingStart anchor_loc must cover `&a`"
@@ -1434,18 +1390,7 @@ fn anchor_loc_some_for_anchored_flow_sequence() {
         "anchored flow SequenceStart must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 2,
-                line: 1,
-                column: 2,
-            },
-        };
+        let expected = Span { start: 0, end: 2 };
         assert_eq!(
             loc, expected,
             "flow SequenceStart anchor_loc must cover `&a`"
@@ -1472,18 +1417,7 @@ fn anchor_loc_dotted_anchor_name_full_span() {
         "dotted-anchor scalar must have anchor_loc = Some(...)"
     );
     if let Some(loc) = loc_opt {
-        let expected = Span {
-            start: Pos {
-                byte_offset: 0,
-                line: 1,
-                column: 0,
-            },
-            end: Pos {
-                byte_offset: 6,
-                line: 1,
-                column: 6,
-            },
-        };
+        let expected = Span { start: 0, end: 6 };
         assert_eq!(loc, expected, "anchor_loc must cover `&a.b.c` (6 bytes)");
     }
 }

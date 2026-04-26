@@ -469,8 +469,8 @@ fn inner_flow_sequence_start_span_in_nested_context() {
         .collect();
     assert_eq!(seq_spans.len(), 2, "two SequenceStart spans");
     if let [outer, inner] = seq_spans.as_slice() {
-        assert_eq!(outer.start.byte_offset, 0, "outer SequenceStart at byte 0");
-        assert_eq!(inner.start.byte_offset, 1, "inner SequenceStart at byte 1");
+        assert_eq!(outer.start, 0, "outer SequenceStart at byte 0");
+        assert_eq!(inner.start, 1, "inner SequenceStart at byte 1");
     } else {
         unreachable!("expected exactly two SequenceStart spans");
     }

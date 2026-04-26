@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::Pos;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
@@ -76,7 +77,9 @@ pub fn complete_at(
             enclosing_path,
             mapping,
         } => {
-            let present = present_keys(mapping, cursor_line);
+            let present = docs.first().map_or_else(HashSet::new, |d| {
+                present_keys(mapping, cursor_line, d.line_index())
+            });
             if let Some(s) = schema {
                 if let Some(resolved_schema) = resolve_schema_path(s, &enclosing_path)
                     && schema_has_properties(resolved_schema)
@@ -104,7 +107,9 @@ fn complete_on_key<'a>(
     mapping: &'a Node<Span>,
     schema: Option<&JsonSchema>,
 ) -> Vec<CompletionItem> {
-    let present = present_keys(mapping, cursor_line);
+    let present = docs.first().map_or_else(HashSet::new, |d| {
+        present_keys(mapping, cursor_line, d.line_index())
+    });
     let seq_len = enclosing_path.len().saturating_sub(1);
     let structural_keys: HashSet<String> = if enclosing_path.last().is_some_and(|s| s == "[]") {
         let seq_path = enclosing_path.get(..seq_len).unwrap_or(&[]);
@@ -157,14 +162,17 @@ fn complete_on_value(
         }
     }
     let cursor_parser_line = cursor_line + 1;
-    let cursor_doc = docs
-        .iter()
-        .position(|d| {
-            let span = node_span(&d.root);
-            span.start.line <= cursor_parser_line && cursor_parser_line <= span.end.line
-        })
-        .and_then(|i| docs.get(i))
-        .map_or(docs, std::slice::from_ref);
+    let cursor_doc = docs.first().map_or(docs, |first_doc| {
+        let idx = first_doc.line_index();
+        docs.iter()
+            .position(|d| {
+                let span = node_span(&d.root);
+                idx.line_column(span.start).0 as usize <= cursor_parser_line
+                    && cursor_parser_line <= idx.line_column(span.end).0 as usize
+            })
+            .and_then(|i| docs.get(i))
+            .map_or(docs, std::slice::from_ref)
+    });
     collect_values_for_key_ast(cursor_doc, cursor_line, key)
 }
 
@@ -227,12 +235,14 @@ fn collect_values_for_key_ast(
     let mut items = Vec::new();
 
     for doc in docs {
+        let idx = doc.line_index();
         collect_values_in_node(
             &doc.root,
             key_name,
             parser_cursor_line,
             &mut seen,
             &mut items,
+            idx,
         );
     }
     items
@@ -244,6 +254,7 @@ fn collect_values_in_node(
     parser_cursor_line: usize,
     seen: &mut HashSet<String>,
     items: &mut Vec<CompletionItem>,
+    idx: &LineIndex,
 ) {
     match node {
         Node::Mapping { entries, .. } => {
@@ -251,7 +262,7 @@ fn collect_values_in_node(
                 if let Some(k) = scalar_key(key_node) {
                     if k == key_name {
                         let key_span = node_span(key_node);
-                        if key_span.start.line != parser_cursor_line {
+                        if idx.line_column(key_span.start).0 as usize != parser_cursor_line {
                             if let Node::Scalar { value, .. } = value_node {
                                 if !value.is_empty() && seen.insert(value.clone()) {
                                     items.push(CompletionItem {
@@ -264,14 +275,14 @@ fn collect_values_in_node(
                         }
                     }
                 }
-                collect_values_in_node(value_node, key_name, parser_cursor_line, seen, items);
+                collect_values_in_node(value_node, key_name, parser_cursor_line, seen, items, idx);
             }
         }
         Node::Sequence {
             items: seq_items, ..
         } => {
             for item in seq_items {
-                collect_values_in_node(item, key_name, parser_cursor_line, seen, items);
+                collect_values_in_node(item, key_name, parser_cursor_line, seen, items, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -644,9 +655,15 @@ enum CursorLocation<'a> {
 ///
 /// Comparison is lexicographic on `(line, column)`, matching the semantics of
 /// `hover.rs::span_contains` and `navigation/references.rs::span_contains`.
-fn span_contains_cursor(span: Span, cursor: Pos) -> bool {
-    let start = (span.start.line, span.start.column);
-    let end = (span.end.line, span.end.column);
+fn span_contains_cursor(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
+    let start = (
+        idx.line_column(span.start).0 as usize,
+        idx.line_column(span.start).1 as usize,
+    );
+    let end = (
+        idx.line_column(span.end).0 as usize,
+        idx.line_column(span.end).1 as usize,
+    );
     let pos = (cursor.line, cursor.column);
     start <= pos && pos < end
 }
@@ -681,7 +698,7 @@ const fn lsp_position_to_pos(position: Position) -> Pos {
 }
 
 /// Walk `node` (which must be a `Node::Mapping`) looking for the deepest
-/// nested mapping whose entries have `key.loc.start.column <= cursor.column`
+/// nested mapping whose entries have `key.(idx.line_column(loc.start).1 as usize) <= cursor.column`
 /// and whose span covers `cursor.line`.
 ///
 /// `path` accumulates ancestor mapping keys in root-to-leaf order as the
@@ -692,13 +709,16 @@ fn deepest_mapping_at_column<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
     path: &mut Vec<String>,
+    idx: &LineIndex,
 ) -> Option<&'a Node<Span>> {
     let Node::Mapping { entries, loc, .. } = node else {
         return None;
     };
 
     // The mapping span must cover the cursor line.
-    if !(loc.start.line <= cursor.line && cursor.line <= loc.end.line) {
+    if !(idx.line_column(loc.start).0 as usize <= cursor.line
+        && cursor.line <= idx.line_column(loc.end).0 as usize)
+    {
         return None;
     }
 
@@ -711,7 +731,7 @@ fn deepest_mapping_at_column<'a>(
             continue;
         };
         let key_span = node_span(key_node);
-        if key_span.start.column > cursor.column {
+        if idx.line_column(key_span.start).1 as usize > cursor.column {
             continue;
         }
 
@@ -720,7 +740,7 @@ fn deepest_mapping_at_column<'a>(
         if let Node::Mapping { .. } = value_node {
             let saved_len = path.len();
             path.push(key_str.to_string());
-            if let Some(deeper) = deepest_mapping_at_column(value_node, cursor, path) {
+            if let Some(deeper) = deepest_mapping_at_column(value_node, cursor, path, idx) {
                 return Some(deeper);
             }
             // Descent failed (value's entries too deep or span mismatch) — undo.
@@ -732,7 +752,7 @@ fn deepest_mapping_at_column<'a>(
     // key column satisfies the condition — if so, this mapping is the result.
     let has_eligible_entry = entries.iter().any(|(k, _)| {
         let key_span = node_span(k);
-        key_span.start.column <= cursor.column
+        idx.line_column(key_span.start).1 as usize <= cursor.column
     });
     if has_eligible_entry { Some(node) } else { None }
 }
@@ -743,18 +763,19 @@ fn deepest_mapping_at_column<'a>(
 /// Used to prevent the blank-line extension from firing on non-blank lines
 /// where the cursor is positioned past the end of content.
 fn cursor_line_has_mapping_content(docs: &[Document<Span>], cursor_parser_line: usize) -> bool {
-    fn node_has_content_on_line(node: &Node<Span>, line: usize) -> bool {
+    fn node_has_content_on_line(node: &Node<Span>, line: usize, idx: &LineIndex) -> bool {
         match node {
             Node::Mapping { entries, .. } => {
                 for (key_node, value_node) in entries {
                     let key_span = node_span(key_node);
                     let value_span = node_span(value_node);
-                    if key_span.start.line == line
-                        || (value_span.start.line == line && value_span.start != value_span.end)
+                    if idx.line_column(key_span.start).0 as usize == line
+                        || (idx.line_column(value_span.start).0 as usize == line
+                            && value_span.start != value_span.end)
                     {
                         return true;
                     }
-                    if node_has_content_on_line(value_node, line) {
+                    if node_has_content_on_line(value_node, line, idx) {
                         return true;
                     }
                 }
@@ -762,14 +783,17 @@ fn cursor_line_has_mapping_content(docs: &[Document<Span>], cursor_parser_line: 
             }
             Node::Sequence { items, .. } => items.iter().any(|item| {
                 let span = node_span(item);
-                span.start.line == line || node_has_content_on_line(item, line)
+                idx.line_column(span.start).0 as usize == line
+                    || node_has_content_on_line(item, line, idx)
             }),
-            Node::Scalar { loc, .. } => loc.start.line == line && loc.start != loc.end,
+            Node::Scalar { loc, .. } => {
+                idx.line_column(loc.start).0 as usize == line && loc.start != loc.end
+            }
             Node::Alias { .. } => false,
         }
     }
     docs.iter()
-        .any(|doc| node_has_content_on_line(&doc.root, cursor_parser_line))
+        .any(|doc| node_has_content_on_line(&doc.root, cursor_parser_line, doc.line_index()))
 }
 
 /// Determine the `CursorLocation` for a cursor position within `docs`.
@@ -788,12 +812,13 @@ fn locate_cursor(docs: &[Document<Span>], position: Position) -> CursorLocation<
     // When a document has an explicit start marker, the marker is on the line
     // immediately before the root node's start line.
     for doc in docs {
-        let root_start = node_span(&doc.root).start.line;
+        let idx = doc.line_index();
+        let root_start = idx.line_column(node_span(&doc.root).start).0 as usize;
         if doc.explicit_start && root_start > 0 && cursor.line == root_start - 1 {
             return CursorLocation::OutsideAny;
         }
         if doc.explicit_end {
-            let root_end = node_span(&doc.root).end.line;
+            let root_end = idx.line_column(node_span(&doc.root).end).0 as usize;
             if cursor.line == root_end {
                 return CursorLocation::OutsideAny;
             }
@@ -801,7 +826,8 @@ fn locate_cursor(docs: &[Document<Span>], position: Position) -> CursorLocation<
     }
 
     for doc in docs {
-        let result = locate_in_node(&doc.root, cursor, &mut Vec::new());
+        let idx = doc.line_index();
+        let result = locate_in_node(&doc.root, cursor, &mut Vec::new(), idx);
         if !matches!(result, CursorLocation::OutsideAny) {
             return result;
         }
@@ -813,12 +839,15 @@ fn locate_cursor(docs: &[Document<Span>], position: Position) -> CursorLocation<
     // positions past the end of a content-bearing line should return OutsideAny.
     if !cursor_line_has_mapping_content(docs, cursor.line) {
         for doc in docs {
+            let idx = doc.line_index();
             let path: Vec<String> = Vec::new();
             if let Node::Mapping { loc, .. } = &doc.root {
-                if loc.start.line <= cursor.line && cursor.line <= loc.end.line {
+                if idx.line_column(loc.start).0 as usize <= cursor.line
+                    && cursor.line <= idx.line_column(loc.end).0 as usize
+                {
                     let mut descent_path: Vec<String> = Vec::new();
                     if let Some(mapping) =
-                        deepest_mapping_at_column(&doc.root, cursor, &mut descent_path)
+                        deepest_mapping_at_column(&doc.root, cursor, &mut descent_path, idx)
                     {
                         return CursorLocation::InBlankMapping {
                             enclosing_path: descent_path,
@@ -827,7 +856,9 @@ fn locate_cursor(docs: &[Document<Span>], position: Position) -> CursorLocation<
                     }
                 }
             } else if let Node::Sequence { loc, .. } = &doc.root {
-                if loc.start.line <= cursor.line && cursor.line <= loc.end.line {
+                if idx.line_column(loc.start).0 as usize <= cursor.line
+                    && cursor.line <= idx.line_column(loc.end).0 as usize
+                {
                     return CursorLocation::InBlankSequence {
                         enclosing_path: path,
                         sequence: &doc.root,
@@ -847,6 +878,7 @@ fn locate_in_node<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
     enclosing_path: &mut Vec<String>,
+    idx: &LineIndex,
 ) -> CursorLocation<'a> {
     match node {
         Node::Mapping { entries, .. } => {
@@ -854,7 +886,7 @@ fn locate_in_node<'a>(
                 let key_span = node_span(key_node);
                 let value_span = node_span(value_node);
 
-                if span_contains_cursor(key_span, cursor) {
+                if span_contains_cursor(key_span, cursor, idx) {
                     let key = scalar_key(key_node).unwrap_or("").to_string();
                     return CursorLocation::OnKey {
                         key,
@@ -863,12 +895,12 @@ fn locate_in_node<'a>(
                     };
                 }
 
-                if span_contains_cursor(value_span, cursor) {
+                if span_contains_cursor(value_span, cursor, idx) {
                     let key = scalar_key(key_node).unwrap_or("").to_string();
                     enclosing_path.push(key.clone());
 
                     // Recurse into the value.
-                    let inner = locate_in_node(value_node, cursor, enclosing_path);
+                    let inner = locate_in_node(value_node, cursor, enclosing_path, idx);
                     if !matches!(inner, CursorLocation::OutsideAny) {
                         return inner;
                     }
@@ -903,9 +935,9 @@ fn locate_in_node<'a>(
                 // span, and the value node's span starts on a DIFFERENT line.
                 // This happens for null/empty values where the parser places the
                 // value span at the start of the following line. Treat as OnValue.
-                if cursor.line == key_span.start.line
-                    && cursor.column >= key_span.end.column
-                    && value_span.start.line != cursor.line
+                if cursor.line == idx.line_column(key_span.start).0 as usize
+                    && cursor.column >= idx.line_column(key_span.end).1 as usize
+                    && idx.line_column(value_span.start).0 as usize != cursor.line
                 {
                     if let Some(key) = scalar_key(key_node) {
                         return CursorLocation::OnValue {
@@ -920,11 +952,11 @@ fn locate_in_node<'a>(
         Node::Sequence { items, .. } => {
             for item in items {
                 let item_span = node_span(item);
-                if span_contains_cursor(item_span, cursor) {
+                if span_contains_cursor(item_span, cursor, idx) {
                     // Push "[]" so that inner mapping keys carry the sequence
                     // sentinel in their enclosing_path.
                     enclosing_path.push("[]".to_string());
-                    let inner = locate_in_node(item, cursor, enclosing_path);
+                    let inner = locate_in_node(item, cursor, enclosing_path, idx);
                     if matches!(inner, CursorLocation::OutsideAny) {
                         enclosing_path.pop();
                         return CursorLocation::InSequenceItem {
@@ -939,7 +971,7 @@ fn locate_in_node<'a>(
             }
 
             // Cursor in sequence span but not in any item — blank sequence line.
-            if span_contains_cursor(node_span(node), cursor) {
+            if span_contains_cursor(node_span(node), cursor, idx) {
                 return CursorLocation::InBlankSequence {
                     enclosing_path: enclosing_path.clone(),
                     sequence: node,
@@ -977,7 +1009,7 @@ fn find_node_at_path<'a>(docs: &'a [Document<Span>], path: &[String]) -> Option<
 /// `cursor_line` is the 0-based LSP line number. The exclusion prevents the
 /// key under the cursor from appearing in "already present" sets when
 /// computing schema suggestions.
-fn present_keys(mapping: &Node<Span>, cursor_line: usize) -> HashSet<String> {
+fn present_keys(mapping: &Node<Span>, cursor_line: usize, idx: &LineIndex) -> HashSet<String> {
     let Node::Mapping { entries, .. } = mapping else {
         return HashSet::new();
     };
@@ -987,7 +1019,7 @@ fn present_keys(mapping: &Node<Span>, cursor_line: usize) -> HashSet<String> {
         .iter()
         .filter_map(|(key_node, _)| {
             let key_span = node_span(key_node);
-            if key_span.start.line == parser_cursor_line {
+            if idx.line_column(key_span.start).0 as usize == parser_cursor_line {
                 return None;
             }
             scalar_key(key_node).map(ToString::to_string)
@@ -2982,7 +3014,7 @@ mod tests {
         let Node::Mapping { .. } = &docs[0].root else {
             panic!("expected mapping root");
         };
-        let keys = present_keys(&docs[0].root, cursor_line);
+        let keys = present_keys(&docs[0].root, cursor_line, docs[0].line_index());
         for k in expected_present {
             assert!(
                 keys.contains(*k),
@@ -3011,7 +3043,7 @@ mod tests {
         };
         let item_mapping = &items[0];
         // cursor_line=1 corresponds to "- name: foo" (0-based LSP line 1)
-        let keys = present_keys(item_mapping, 1);
+        let keys = present_keys(item_mapping, 1, docs[0].line_index());
         assert!(keys.contains("age"), "age should be present");
         assert!(
             !keys.contains("name"),

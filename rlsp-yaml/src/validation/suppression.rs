@@ -29,7 +29,7 @@ impl SuppressionRule {
 /// Suppressions are parsed from `# rlsp-yaml-disable-next-line` and
 /// `# rlsp-yaml-disable-file` comments in the document text.
 ///
-/// All line numbers are 0-based, matching LSP `Range.start.line`.
+/// All line numbers are 0-based, matching LSP `Range.start.line as usize`.
 pub struct SuppressionMap {
     /// Per-line suppressions: line number → suppression rule.
     line_suppressions: HashMap<u32, SuppressionRule>,

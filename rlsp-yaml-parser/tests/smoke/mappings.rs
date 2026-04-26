@@ -517,31 +517,33 @@ where
 #[test]
 fn zero_indent_mapping_key_span() {
     // "key: value\n" — k=0,e=1,y=2,:=3,' '=4,v=5,a=6,l=7,u=8,e=9,\n=10
-    let results = parse_to_vec("key: value\n");
+    let input = "key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key"),
     );
     assert!(span_opt.is_some(), "expected key scalar span");
     if let Some(span) = span_opt {
-        assert_eq!(span.start.byte_offset, 0, "key must start at byte 0");
-        assert_eq!(span.start.column, 0, "key must be at column 0");
-        assert_eq!(span.end.byte_offset, 3, "key ends at byte 3 (past 'y')");
+        assert_eq!(span.start, 0, "key must start at byte 0");
+        assert_eq!(line_col(input, span.start).1, 0, "key must be at column 0");
+        assert_eq!(span.end, 3, "key ends at byte 3 (past 'y')");
     }
 }
 
 #[test]
 fn zero_indent_mapping_value_span() {
-    let results = parse_to_vec("key: value\n");
+    let input = "key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "value"),
     );
     assert!(span_opt.is_some(), "expected value scalar span");
     if let Some(span) = span_opt {
-        assert_eq!(span.start.byte_offset, 5, "value must start at byte 5");
-        assert_eq!(span.start.column, 5, "value at column 5");
-        assert_eq!(span.end.byte_offset, 10, "value ends at byte 10");
+        assert_eq!(span.start, 5, "value must start at byte 5");
+        assert_eq!(line_col(input, span.start).1, 5, "value at column 5");
+        assert_eq!(span.end, 10, "value ends at byte 10");
     }
 }
 
@@ -549,7 +551,8 @@ fn zero_indent_mapping_value_span() {
 fn indented_mapping_key_span() {
     // "  key: value\n" — ' '=0,' '=1,k=2,e=3,y=4,:=5,' '=6,v=7...
     // This is the Task 11 bug class: dropping leading_spaces would give byte_offset=0.
-    let results = parse_to_vec("  key: value\n");
+    let input = "  key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key"),
@@ -557,16 +560,17 @@ fn indented_mapping_key_span() {
     assert!(span_opt.is_some(), "expected key scalar span");
     if let Some(span) = span_opt {
         assert_eq!(
-            span.start.byte_offset, 2,
+            span.start, 2,
             "key must start at byte 2 (after 2 leading spaces)"
         );
-        assert_eq!(span.start.column, 2, "key at column 2");
+        assert_eq!(line_col(input, span.start).1, 2, "key at column 2");
     }
 }
 
 #[test]
 fn indented_mapping_value_span() {
-    let results = parse_to_vec("  key: value\n");
+    let input = "  key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "value"),
@@ -574,53 +578,53 @@ fn indented_mapping_value_span() {
     assert!(span_opt.is_some(), "expected value scalar span");
     if let Some(span) = span_opt {
         assert_eq!(
-            span.start.byte_offset, 7,
+            span.start, 7,
             "value must start at byte 7 (2 spaces + 'key' + ': ')"
         );
-        assert_eq!(span.start.column, 7, "value at column 7");
+        assert_eq!(line_col(input, span.start).1, 7, "value at column 7");
     }
 }
 
 #[test]
 fn mapping_start_span_points_at_first_key() {
-    let results = parse_to_vec("key: value\n");
+    let input = "key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(span_opt.is_some(), "expected MappingStart span");
     if let Some(span) = span_opt {
         assert_eq!(
-            span.start.byte_offset, 0,
+            span.start, 0,
             "MappingStart span must point at the first key (byte 0)"
         );
-        assert_eq!(span.start.column, 0);
+        assert_eq!(line_col(input, span.start).1, 0);
     }
 }
 
 #[test]
 fn indented_mapping_start_span_points_at_first_key() {
-    let results = parse_to_vec("  key: value\n");
+    let input = "  key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(span_opt.is_some(), "expected MappingStart span");
     if let Some(span) = span_opt {
-        assert_eq!(
-            span.start.byte_offset, 2,
-            "MappingStart must point at byte 2"
-        );
-        assert_eq!(span.start.column, 2);
+        assert_eq!(span.start, 2, "MappingStart must point at byte 2");
+        assert_eq!(line_col(input, span.start).1, 2);
     }
 }
 
 #[test]
 fn mapping_inside_sequence_item_key_span() {
     // "- key: value\n" — '-'=0,' '=1,k=2,e=3,y=4,':'=5,' '=6,v=7...
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let key_span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key"),
     );
     assert!(key_span_opt.is_some(), "expected key scalar span");
     if let Some(key_span) = key_span_opt {
-        assert_eq!(key_span.start.byte_offset, 2, "key at byte 2");
-        assert_eq!(key_span.start.column, 2, "key at column 2");
+        assert_eq!(key_span.start, 2, "key at byte 2");
+        assert_eq!(line_col(input, key_span.start).1, 2, "key at column 2");
     }
     let val_span_opt = find_span(
         &results,
@@ -628,22 +632,23 @@ fn mapping_inside_sequence_item_key_span() {
     );
     assert!(val_span_opt.is_some(), "expected value scalar span");
     if let Some(val_span) = val_span_opt {
-        assert_eq!(val_span.start.byte_offset, 7, "value at byte 7");
-        assert_eq!(val_span.start.column, 7, "value at column 7");
+        assert_eq!(val_span.start, 7, "value at byte 7");
+        assert_eq!(line_col(input, val_span.start).1, 7, "value at column 7");
     }
 }
 
 #[test]
 fn mapping_inside_sequence_item_mapping_start_span() {
-    let results = parse_to_vec("- key: value\n");
+    let input = "- key: value\n";
+    let results = parse_to_vec(input);
     let span_opt = find_span(&results, |e| matches!(e, Event::MappingStart { .. }));
     assert!(span_opt.is_some(), "expected MappingStart span");
     if let Some(span) = span_opt {
         assert_eq!(
-            span.start.byte_offset, 2,
+            span.start, 2,
             "MappingStart inside seq item must point at byte 2"
         );
-        assert_eq!(span.start.column, 2);
+        assert_eq!(line_col(input, span.start).1, 2);
     }
 }
 
@@ -652,15 +657,16 @@ fn nested_mapping_value_span() {
     // "outer:\n  inner: val\n"
     // outer=0..5, :=5, \n=6 → line 2 starts at byte 7:
     // ' '=7,' '=8,i=9,n=10,n=11,e=12,r=13,:=14,' '=15,v=16,a=17,l=18,\n=19
-    let results = parse_to_vec("outer:\n  inner: val\n");
+    let input = "outer:\n  inner: val\n";
+    let results = parse_to_vec(input);
     let inner_span_opt = find_span(
         &results,
         |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "inner"),
     );
     assert!(inner_span_opt.is_some(), "expected inner scalar span");
     if let Some(inner_span) = inner_span_opt {
-        assert_eq!(inner_span.start.byte_offset, 9, "inner at byte 9");
-        assert_eq!(inner_span.start.column, 2, "inner at column 2");
+        assert_eq!(inner_span.start, 9, "inner at byte 9");
+        assert_eq!(line_col(input, inner_span.start).1, 2, "inner at column 2");
     }
     let val_span_opt = find_span(
         &results,
@@ -668,8 +674,8 @@ fn nested_mapping_value_span() {
     );
     assert!(val_span_opt.is_some(), "expected val scalar span");
     if let Some(val_span) = val_span_opt {
-        assert_eq!(val_span.start.byte_offset, 16, "val at byte 16");
-        assert_eq!(val_span.start.column, 9, "val at column 9");
+        assert_eq!(val_span.start, 16, "val at byte 16");
+        assert_eq!(line_col(input, val_span.start).1, 9, "val at column 9");
     }
 }
 
@@ -696,9 +702,6 @@ fn empty_value_span_is_zero_width() {
         "expected at least one empty scalar"
     );
     if let Some(&span) = empty_spans.first() {
-        assert_eq!(
-            span.start.byte_offset, span.end.byte_offset,
-            "empty value span must be zero-width"
-        );
+        assert_eq!(span.start, span.end, "empty value span must be zero-width");
     }
 }

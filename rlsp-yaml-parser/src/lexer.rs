@@ -275,13 +275,7 @@ impl<'input> Lexer<'input> {
         if let Some(comment_text) = inline.strip_prefix('#') {
             let comment_end =
                 crate::pos::advance_within_line(inline_start.advance('#'), comment_text);
-            self.trailing_comment = Some((
-                comment_text,
-                Span {
-                    start: inline_start,
-                    end: comment_end,
-                },
-            ));
+            self.trailing_comment = Some((comment_text, Span::from_pos(inline_start, comment_end)));
         } else if reject_all_inline {
             // `...` markers must not have non-comment inline content.
             self.marker_inline_error = Some(Error {
@@ -381,10 +375,7 @@ impl<'input> Lexer<'input> {
             let inline_end = crate::pos::advance_within_line(inline_start, scanned);
             self.inline_scalar = Some((
                 Cow::Borrowed(scanned),
-                Span {
-                    start: inline_start,
-                    end: inline_end,
-                },
+                Span::from_pos(inline_start, inline_end),
             ));
         }
     }
@@ -440,10 +431,10 @@ impl<'input> Lexer<'input> {
         self.inline_scalar.is_some()
     }
 
-    /// Return a reference to the pending inline scalar (value, start position)
+    /// Return a reference to the pending inline scalar (value, start byte offset)
     /// without consuming it, or `None` if there is no pending inline scalar.
     #[must_use]
-    pub fn peek_inline_scalar(&self) -> Option<(&str, Pos)> {
+    pub fn peek_inline_scalar(&self) -> Option<(&str, u32)> {
         self.inline_scalar
             .as_ref()
             .map(|(v, span)| (v.as_ref(), span.start))

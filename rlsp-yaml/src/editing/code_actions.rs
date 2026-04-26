@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
 
 use std::collections::HashMap;
 
-use rlsp_yaml_parser::{Document, Span};
+use rlsp_yaml_parser::{Document, LineIndex, Span};
 
 use block_scalar::string_to_block_scalar;
 use block_to_flow::block_to_flow;
@@ -98,16 +98,11 @@ pub(super) const fn diagnostic_code(diag: &Diagnostic) -> Option<&str> {
 const fn ranges_overlap(a: &tower_lsp::lsp_types::Range, b: &tower_lsp::lsp_types::Range) -> bool {
     a.start.line <= b.end.line && b.start.line <= a.end.line
 }
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "LSP line/col are u32; always fits"
-)]
-pub(super) const fn span_matches_diag(loc: &Span, diag: &Diagnostic) -> bool {
-    let start_line = loc.start.line.saturating_sub(1) as u32;
-    let start_col = loc.start.column as u32;
-    let end_line = loc.end.line.saturating_sub(1) as u32;
-    let end_col = (loc.end.column + 1) as u32;
+pub(super) fn span_matches_diag(loc: Span, diag: &Diagnostic, idx: &LineIndex) -> bool {
+    let start_line = idx.line_column(loc.start).0.saturating_sub(1);
+    let start_col = idx.line_column(loc.start).1;
+    let end_line = idx.line_column(loc.end).0.saturating_sub(1);
+    let end_col = idx.line_column(loc.end).1 + 1;
 
     diag.range.start.line == start_line
         && diag.range.start.character == start_col

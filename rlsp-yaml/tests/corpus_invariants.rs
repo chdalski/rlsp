@@ -973,7 +973,7 @@ mod tests {
     use std::fmt::Write as _;
     use std::io::Write as _;
 
-    use rlsp_yaml_parser::{CollectionStyle, Pos, ScalarStyle, Span as TestSpan};
+    use rlsp_yaml_parser::{CollectionStyle, ScalarStyle, Span as TestSpan};
     use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
     use super::*;
@@ -1299,10 +1299,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     fn zero_span() -> TestSpan {
-        TestSpan {
-            start: Pos::ORIGIN,
-            end: Pos::ORIGIN,
-        }
+        TestSpan { start: 0, end: 0 }
     }
 
     fn make_scalar(value: &str) -> Node<TestSpan> {
@@ -1336,14 +1333,7 @@ mod tests {
     }
 
     fn make_doc(root: Node<TestSpan>) -> Document<TestSpan> {
-        Document {
-            root,
-            version: None,
-            tags: Vec::new(),
-            comments: Vec::new(),
-            explicit_start: false,
-            explicit_end: false,
-        }
+        Document::with_root(root)
     }
 
     // CSV-1: empty document list returns empty vec
@@ -1654,10 +1644,7 @@ mod tests {
     // this case.
     #[test]
     fn i6_missing_tag_loc_for_non_core_tag_fails() {
-        let origin = Span {
-            start: Pos::ORIGIN,
-            end: Pos::ORIGIN,
-        };
+        let origin = Span { start: 0, end: 0 };
         let node = Node::Scalar {
             value: String::new(),
             style: ScalarStyle::Plain,

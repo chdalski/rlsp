@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::{Document, Event, Node, ScalarStyle, Span};
+use rlsp_yaml_parser::{Document, Event, LineIndex, Node, ScalarStyle, Span};
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };
@@ -56,7 +56,8 @@ pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken
     let mut raw: Vec<RawToken> = Vec::new();
 
     for doc in docs {
-        collect_node_tokens(&doc.root, &mut raw);
+        let idx = doc.line_index();
+        collect_node_tokens(&doc.root, &mut raw, idx);
     }
 
     collect_comment_tokens(text, &mut raw);
@@ -94,22 +95,22 @@ pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Recursively walk a node and collect tokens for all token kinds except comments.
-fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>) {
+fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>, idx: &LineIndex) {
     // Emit anchor token if present (all node kinds except Alias carry anchor_loc).
     if let Some(span) = node.anchor_loc() {
-        out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION));
+        out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION, idx));
     }
 
     // Emit tag token if present (all node kinds except Alias carry tag_loc).
     if let Some(span) = node.tag_loc() {
-        out.push(span_to_raw(span, TOKEN_TYPE, 0));
+        out.push(span_to_raw(span, TOKEN_TYPE, 0, idx));
     }
 
     match node {
         Node::Scalar {
             loc, style, value, ..
         } => {
-            if let Some(rt) = classify_scalar_node(value, *style, *loc) {
+            if let Some(rt) = classify_scalar_node(value, *style, *loc, idx) {
                 out.push(rt);
             }
         }
@@ -120,35 +121,36 @@ fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>) {
                 // (that would be double-classifying the key text as STRING).
                 // For non-scalar keys (complex keys): recurse normally.
                 if let Node::Scalar { loc, .. } = key {
-                    out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0));
+                    out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0, idx));
                     if let Some(span) = key.anchor_loc() {
-                        out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION));
+                        out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION, idx));
                     }
                     if let Some(span) = key.tag_loc() {
-                        out.push(span_to_raw(span, TOKEN_TYPE, 0));
+                        out.push(span_to_raw(span, TOKEN_TYPE, 0, idx));
                     }
                 } else {
-                    collect_node_tokens(key, out);
+                    collect_node_tokens(key, out, idx);
                 }
-                collect_node_tokens(value, out);
+                collect_node_tokens(value, out, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_node_tokens(item, out);
+                collect_node_tokens(item, out, idx);
             }
         }
         Node::Alias { loc, .. } => {
-            out.push(span_to_raw(*loc, TOKEN_VARIABLE, 0));
+            out.push(span_to_raw(*loc, TOKEN_VARIABLE, 0, idx));
         }
     }
 }
 
 /// Collect comment tokens from `Event::Comment` events in the event stream.
 fn collect_comment_tokens(yaml: &str, out: &mut Vec<RawToken>) {
+    let idx = LineIndex::new(yaml);
     for result in rlsp_yaml_parser::parse_events(yaml) {
         if let Ok((Event::Comment { .. }, span)) = result {
-            out.push(span_to_raw(span, TOKEN_COMMENT, 0));
+            out.push(span_to_raw(span, TOKEN_COMMENT, 0, &idx));
         }
     }
 }
@@ -157,15 +159,19 @@ fn collect_comment_tokens(yaml: &str, out: &mut Vec<RawToken>) {
 ///
 /// AST positions: line is 1-based, column is 0-based codepoints.
 /// LSP positions: line is 0-based, column is 0-based codepoints.
-const fn span_to_raw(span: Span, token_type: u32, token_modifiers_bitset: u32) -> RawToken {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
+fn span_to_raw(
+    span: Span,
+    token_type: u32,
+    token_modifiers_bitset: u32,
+    idx: &LineIndex,
+) -> RawToken {
+    let (start_line, start_col) = idx.line_column(span.start);
+    let (_, end_col) = idx.line_column(span.end);
+    let length = end_col.saturating_sub(start_col);
     RawToken {
-        line: (span.start.line.saturating_sub(1)) as u32,
-        start: span.start.column as u32,
-        length: (span.end.column.saturating_sub(span.start.column)) as u32,
+        line: start_line.saturating_sub(1),
+        start: start_col,
+        length,
         token_type,
         token_modifiers_bitset,
     }
@@ -177,31 +183,23 @@ fn classify_scalar_node(
     value: &str,
     style: rlsp_yaml_parser::ScalarStyle,
     loc: Span,
+    idx: &LineIndex,
 ) -> Option<RawToken> {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let length = (loc.end.column.saturating_sub(loc.start.column)) as u32;
+    let (start_line, start_col) = idx.line_column(loc.start);
+    let (_, end_col) = idx.line_column(loc.end);
+    let length = end_col.saturating_sub(start_col);
     if length == 0 {
         return None;
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "LSP line/col are u32; always fits"
-    )]
-    let (line, start) = (
-        (loc.start.line.saturating_sub(1)) as u32,
-        loc.start.column as u32,
-    );
+    let line = start_line.saturating_sub(1);
 
     // Block scalar indicators.
     match style {
         ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
             return Some(RawToken {
                 line,
-                start,
+                start: start_col,
                 length: 1, // only the `|` or `>` sigil
                 token_type: TOKEN_OPERATOR,
                 token_modifiers_bitset: 0,
@@ -215,7 +213,7 @@ fn classify_scalar_node(
         ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
             return Some(RawToken {
                 line,
-                start,
+                start: start_col,
                 length,
                 token_type: TOKEN_STRING,
                 token_modifiers_bitset: 0,
@@ -238,7 +236,7 @@ fn classify_scalar_node(
     ) {
         return Some(RawToken {
             line,
-            start,
+            start: start_col,
             length,
             token_type: TOKEN_KEYWORD,
             token_modifiers_bitset: 0,
@@ -249,7 +247,7 @@ fn classify_scalar_node(
     if is_number(trimmed) {
         return Some(RawToken {
             line,
-            start,
+            start: start_col,
             length,
             token_type: TOKEN_NUMBER,
             token_modifiers_bitset: 0,
@@ -259,7 +257,7 @@ fn classify_scalar_node(
     // Fallback: unquoted scalar → STRING.
     Some(RawToken {
         line,
-        start,
+        start: start_col,
         length,
         token_type: TOKEN_STRING,
         token_modifiers_bitset: 0,
@@ -314,8 +312,6 @@ fn split_digits(s: &str) -> (&str, &str) {
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::cast_possible_truncation,
-    clippy::wildcard_enum_match_arm,
     reason = "test code"
 )]
 mod tests {
@@ -651,6 +647,7 @@ mod tests {
     fn anchor_token_position_matches_anchor_loc_not_scalar_loc(#[case] text: &str) {
         let docs = parse_docs(text);
         let abs = absolute(&semantic_tokens(&docs, text));
+        let idx = docs[0].line_index();
 
         let anchor_tokens: Vec<_> = abs
             .iter()
@@ -666,26 +663,28 @@ mod tests {
         let anchor_loc = value.anchor_loc().expect("expected anchor_loc on value");
         let scalar_loc = match value {
             Node::Scalar { loc, .. } => *loc,
-            _ => panic!("expected scalar value"),
+            Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                panic!("expected scalar value")
+            }
         };
+
+        let (anchor_start_line, anchor_start_col) = idx.line_column(anchor_loc.start);
+        let (_, anchor_end_col) = idx.line_column(anchor_loc.end);
+        let scalar_start_col = idx.line_column(scalar_loc.start).1;
 
         // Token must be at anchor_loc, not scalar_loc
         assert_eq!(
             tok.0,
-            (anchor_loc.start.line.saturating_sub(1)) as u32,
+            anchor_start_line.saturating_sub(1),
             "anchor token line must match anchor_loc"
         );
         assert_eq!(
-            tok.1, anchor_loc.start.column as u32,
-            "anchor token col must match anchor_loc, not scalar_loc col {}",
-            scalar_loc.start.column
+            tok.1, anchor_start_col,
+            "anchor token col must match anchor_loc, not scalar_loc col {scalar_start_col}"
         );
         assert_eq!(
             tok.2,
-            (anchor_loc
-                .end
-                .column
-                .saturating_sub(anchor_loc.start.column)) as u32,
+            anchor_end_col.saturating_sub(anchor_start_col),
             "anchor token length must span '&anchor'"
         );
     }
@@ -696,6 +695,7 @@ mod tests {
     fn alias_token_position_matches_alias_loc(#[case] text: &str) {
         let docs = parse_docs(text);
         let abs = absolute(&semantic_tokens(&docs, text));
+        let idx = docs[0].line_index();
 
         let alias_tokens: Vec<_> = abs
             .iter()
@@ -720,13 +720,16 @@ mod tests {
             panic!("expected alias node");
         };
 
+        let (alias_start_col, alias_end_col) =
+            (idx.line_column(loc.start).1, idx.line_column(loc.end).1);
+
         assert_eq!(
-            tok.1, loc.start.column as u32,
+            tok.1, alias_start_col,
             "alias token col must match alias.loc"
         );
         assert_eq!(
             tok.2,
-            (loc.end.column.saturating_sub(loc.start.column)) as u32,
+            alias_end_col.saturating_sub(alias_start_col),
             "alias token length must span '*x'"
         );
     }
@@ -742,6 +745,7 @@ mod tests {
     ) {
         let docs = parse_docs(text);
         let abs = absolute(&semantic_tokens(&docs, text));
+        let idx = LineIndex::new(text);
 
         let comment_tok = abs
             .iter()
@@ -759,13 +763,15 @@ mod tests {
             })
             .expect("expected Event::Comment");
 
+        let (comment_start_line, comment_start_col) = idx.line_column(comment_span.start);
+
         assert_eq!(
             comment_tok.0,
-            (comment_span.start.line.saturating_sub(1)) as u32,
+            comment_start_line.saturating_sub(1),
             "comment token line must match event span"
         );
         assert_eq!(
-            comment_tok.1, comment_span.start.column as u32,
+            comment_tok.1, comment_start_col,
             "comment token col must match event span"
         );
         assert_eq!(comment_tok.0, expected_line, "comment line");
@@ -779,6 +785,7 @@ mod tests {
     fn tagged_scalar_tag_token_at_tag_loc_not_scalar_loc(#[case] text: &str) {
         let docs = parse_docs(text);
         let abs = absolute(&semantic_tokens(&docs, text));
+        let idx = docs[0].line_index();
 
         let Node::Mapping { entries, .. } = &docs[0].root else {
             panic!("expected mapping root");
@@ -787,21 +794,28 @@ mod tests {
         let tag_loc = value.tag_loc().expect("expected tag_loc");
         let scalar_loc = match value {
             Node::Scalar { loc, .. } => *loc,
-            _ => panic!("expected scalar value"),
+            Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                panic!("expected scalar value")
+            }
         };
 
         let tag_tokens: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_TYPE).collect();
         assert_eq!(tag_tokens.len(), 1, "expected exactly one type token");
         let tag_tok = tag_tokens[0];
 
+        let (tag_start_col, tag_end_col) = (
+            idx.line_column(tag_loc.start).1,
+            idx.line_column(tag_loc.end).1,
+        );
+        let scalar_start_col = idx.line_column(scalar_loc.start).1;
+
         assert_eq!(
-            tag_tok.1, tag_loc.start.column as u32,
-            "tag token col must match tag_loc (col {}), not scalar col {}",
-            tag_loc.start.column, scalar_loc.start.column
+            tag_tok.1, tag_start_col,
+            "tag token col must match tag_loc (col {tag_start_col}), not scalar col {scalar_start_col}"
         );
         assert_eq!(
             tag_tok.2,
-            (tag_loc.end.column.saturating_sub(tag_loc.start.column)) as u32,
+            tag_end_col.saturating_sub(tag_start_col),
             "tag length must span '!!int'"
         );
 
@@ -914,5 +928,23 @@ mod tests {
                 (b.0, b.1)
             );
         }
+    }
+
+    // LSP-4: multibyte key — token length is codepoint count, not byte count
+    #[test]
+    fn semantic_tokens_multibyte_key_delta_correct() {
+        let text = "日本語: val\n";
+        let docs = parse_docs(text);
+        let abs = absolute(&semantic_tokens(&docs, text));
+        // The key "日本語" must produce a property token on line 0, col 0.
+        let key_tok = abs
+            .iter()
+            .find(|t| t.3 == TOKEN_PROPERTY && t.0 == 0 && t.1 == 0)
+            .expect("expected a property token for '日本語' on line 0, col 0");
+        assert_eq!(
+            key_tok.2, 3,
+            "token length for '日本語' must be 3 (codepoints), not 9 (bytes), got {}",
+            key_tok.2
+        );
     }
 }
