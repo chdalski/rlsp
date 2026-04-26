@@ -22,7 +22,7 @@ mod pos;
 /// YAML 1.2.2 §10 schema tag resolution.
 pub mod schema;
 pub use error::Error;
-pub use event::{Chomp, CollectionStyle, Event, ScalarStyle};
+pub use event::{Chomp, CollectionStyle, Event, EventMeta, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
 pub use node::{Document, Node};
@@ -174,10 +174,7 @@ pub(crate) const fn empty_scalar_event<'input>() -> Event<'input> {
     Event::Scalar {
         value: std::borrow::Cow::Borrowed(""),
         style: ScalarStyle::Plain,
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
     }
 }
 
@@ -198,5 +195,20 @@ pub(crate) const fn zero_span(pos: Pos) -> Span {
     Span {
         start: pos,
         end: pos,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ES-1: empty_scalar_event must return meta: None.
+    #[test]
+    fn empty_scalar_event_has_no_meta() {
+        let ev = empty_scalar_event();
+        assert!(
+            matches!(ev, Event::Scalar { meta: None, .. }),
+            "empty_scalar_event must produce meta: None, not an allocated EventMeta box"
+        );
     }
 }

@@ -14,6 +14,29 @@ use std::borrow::Cow;
 
 use crate::pos::Span;
 
+/// Rare per-event fields for node-typed events (`Scalar`, `SequenceStart`, `MappingStart`).
+///
+/// Bundled behind `Option<Box<EventMeta>>` so that the common case — no anchor, no
+/// source-text tag — pays only one 8-byte pointer instead of ~96 bytes of inline storage.
+/// Events with tags and anchors are rare in block-heavy and Kubernetes YAML; boxing them
+/// moves the cost to the uncommon path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventMeta<'input> {
+    /// The anchor name, if any (e.g. `&foo`).
+    pub anchor: Option<&'input str>,
+    /// Source span of the `&name` anchor token — from `&` through the last byte of the name.
+    /// `Some` when `anchor` is `Some`, `None` otherwise.
+    pub anchor_loc: Option<Span>,
+    /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:str"` for `!!str`).
+    ///
+    /// Verbatim tags (`!<URI>`) borrow from input.  Shorthand tags resolved via `%TAG`
+    /// directives or the built-in `!!` default produce owned strings.
+    pub tag: Option<Cow<'input, str>>,
+    /// Source span of the tag token — from `!` through the last byte of the tag token.
+    /// `Some` when `tag` is `Some`, `None` otherwise.
+    pub tag_loc: Option<Span>,
+}
+
 /// Block scalar chomping mode per YAML 1.2 §8.1.1.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Chomp {
@@ -128,21 +151,11 @@ pub enum Event<'input> {
     /// Followed by zero or more node events (scalars or nested collections),
     /// then a matching [`Event::SequenceEnd`].
     SequenceStart {
-        /// The anchor name, if any (e.g. `&foo`).
-        anchor: Option<&'input str>,
-        /// Source span of the `&name` anchor token — from `&` through the last
-        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
-        anchor_loc: Option<Span>,
-        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:seq"` for `!!seq`).
-        ///
-        /// Verbatim tags (`!<URI>`) borrow from input.  Shorthand tags resolved
-        /// via `%TAG` directives or the built-in `!!` default produce owned strings.
-        tag: Option<Cow<'input, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the
-        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
-        tag_loc: Option<Span>,
         /// Whether this is a block (`-` indicator) or flow (`[...]`) sequence.
         style: CollectionStyle,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag`, `tag_loc`.
+        /// `None` when no anchor or source-text tag is present (the common case).
+        meta: Option<Box<EventMeta<'input>>>,
     },
     /// A sequence has ended.
     ///
@@ -153,20 +166,11 @@ pub enum Event<'input> {
     /// Followed by alternating key/value node events (scalars or nested
     /// collections), then a matching [`Event::MappingEnd`].
     MappingStart {
-        /// The anchor name, if any (e.g. `&foo`).
-        anchor: Option<&'input str>,
-        /// Source span of the `&name` anchor token — from `&` through the last
-        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
-        anchor_loc: Option<Span>,
-        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:map"` for `!!map`).
-        ///
-        /// See [`SequenceStart::tag`] for resolution semantics.
-        tag: Option<Cow<'input, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the
-        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
-        tag_loc: Option<Span>,
         /// Whether this is a block (indentation-based) or flow (`{...}`) mapping.
         style: CollectionStyle,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag`, `tag_loc`.
+        /// `None` when no anchor or source-text tag is present (the common case).
+        meta: Option<Box<EventMeta<'input>>>,
     },
     /// A mapping has ended.
     ///
@@ -182,17 +186,193 @@ pub enum Event<'input> {
         value: Cow<'input, str>,
         /// The style in which the scalar appeared in the source.
         style: ScalarStyle,
-        /// The anchor name, if any (e.g. `&foo`).
-        anchor: Option<&'input str>,
-        /// Source span of the `&name` anchor token — from `&` through the last
-        /// byte of the name.  `Some` when `anchor` is `Some`, `None` otherwise.
-        anchor_loc: Option<Span>,
-        /// The resolved tag, if any (e.g. `"tag:yaml.org,2002:str"` for `!!str`).
-        ///
-        /// See [`SequenceStart::tag`] for resolution semantics.
-        tag: Option<Cow<'input, str>>,
-        /// Source span of the tag token — from `!` through the last byte of the
-        /// tag token.  `Some` when `tag` is `Some`, `None` otherwise.
-        tag_loc: Option<Span>,
+        /// Rare fields: `anchor`, `anchor_loc`, `tag`, `tag_loc`.
+        /// `None` when no anchor or source-text tag is present (the common case).
+        meta: Option<Box<EventMeta<'input>>>,
     },
+}
+
+impl Event<'_> {
+    /// Returns the anchor name if this event defines one.
+    #[must_use]
+    #[inline]
+    pub fn anchor(&self) -> Option<&str> {
+        match self {
+            Self::Scalar { meta, .. }
+            | Self::SequenceStart { meta, .. }
+            | Self::MappingStart { meta, .. } => meta.as_ref().and_then(|m| m.anchor),
+            Self::StreamStart
+            | Self::StreamEnd
+            | Self::Comment { .. }
+            | Self::Alias { .. }
+            | Self::DocumentStart { .. }
+            | Self::DocumentEnd { .. }
+            | Self::SequenceEnd
+            | Self::MappingEnd => None,
+        }
+    }
+
+    /// Returns the source span of the `&name` anchor token, if any.
+    #[must_use]
+    #[inline]
+    pub fn anchor_loc(&self) -> Option<Span> {
+        match self {
+            Self::Scalar { meta, .. }
+            | Self::SequenceStart { meta, .. }
+            | Self::MappingStart { meta, .. } => meta.as_ref().and_then(|m| m.anchor_loc),
+            Self::StreamStart
+            | Self::StreamEnd
+            | Self::Comment { .. }
+            | Self::Alias { .. }
+            | Self::DocumentStart { .. }
+            | Self::DocumentEnd { .. }
+            | Self::SequenceEnd
+            | Self::MappingEnd => None,
+        }
+    }
+
+    /// Returns the resolved tag string, if any.
+    #[must_use]
+    #[inline]
+    pub fn tag(&self) -> Option<&str> {
+        match self {
+            Self::Scalar { meta, .. }
+            | Self::SequenceStart { meta, .. }
+            | Self::MappingStart { meta, .. } => meta.as_ref().and_then(|m| m.tag.as_deref()),
+            Self::StreamStart
+            | Self::StreamEnd
+            | Self::Comment { .. }
+            | Self::Alias { .. }
+            | Self::DocumentStart { .. }
+            | Self::DocumentEnd { .. }
+            | Self::SequenceEnd
+            | Self::MappingEnd => None,
+        }
+    }
+
+    /// Returns the source span of the tag token, if any.
+    #[must_use]
+    #[inline]
+    pub fn tag_loc(&self) -> Option<Span> {
+        match self {
+            Self::Scalar { meta, .. }
+            | Self::SequenceStart { meta, .. }
+            | Self::MappingStart { meta, .. } => meta.as_ref().and_then(|m| m.tag_loc),
+            Self::StreamStart
+            | Self::StreamEnd
+            | Self::Comment { .. }
+            | Self::Alias { .. }
+            | Self::DocumentStart { .. }
+            | Self::DocumentEnd { .. }
+            | Self::SequenceEnd
+            | Self::MappingEnd => None,
+        }
+    }
+}
+
+/// Build an `EventMeta` box when at least one field is `Some`.
+///
+/// Returns `None` when all four fields are `None` (the common case).
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) inside private module — accessibility requires crate-wide visibility"
+)]
+#[inline]
+pub(crate) fn make_meta<'input>(
+    anchor: Option<&'input str>,
+    anchor_loc: Option<Span>,
+    tag: Option<Cow<'input, str>>,
+    tag_loc: Option<Span>,
+) -> Option<Box<EventMeta<'input>>> {
+    if anchor.is_none() && tag.is_none() {
+        None
+    } else {
+        Some(Box::new(EventMeta {
+            anchor,
+            anchor_loc,
+            tag,
+            tag_loc,
+        }))
+    }
+}
+
+const _: () = assert!(
+    std::mem::size_of::<Event<'_>>() <= 56,
+    "Event must be at most 56 bytes after EventMeta boxing"
+);
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code")]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+    use crate::pos::{Pos, Span};
+
+    const SPAN: Span = Span {
+        start: Pos {
+            byte_offset: 0,
+            line: 1,
+            column: 0,
+        },
+        end: Pos {
+            byte_offset: 4,
+            line: 1,
+            column: 4,
+        },
+    };
+
+    // EM-1: meta is None when all four fields are absent.
+    #[test]
+    fn make_meta_returns_none_when_all_fields_absent() {
+        let meta = make_meta(None, None, None, None);
+        assert!(
+            meta.is_none(),
+            "make_meta must return None when anchor and tag are both None"
+        );
+    }
+
+    // EM-2: meta is Some when only anchor is present.
+    #[test]
+    fn make_meta_returns_some_when_anchor_only() {
+        let meta = make_meta(Some("a"), Some(SPAN), None, None).unwrap();
+        assert_eq!(meta.anchor, Some("a"));
+        assert_eq!(meta.anchor_loc, Some(SPAN));
+        assert!(meta.tag.is_none());
+        assert!(meta.tag_loc.is_none());
+    }
+
+    // EM-3: meta is Some when only tag is present.
+    #[test]
+    fn make_meta_returns_some_when_tag_only() {
+        let meta = make_meta(None, None, Some(Cow::Borrowed("!str")), Some(SPAN)).unwrap();
+        assert!(meta.anchor.is_none());
+        assert!(meta.anchor_loc.is_none());
+        assert_eq!(meta.tag.as_deref(), Some("!str"));
+        assert_eq!(meta.tag_loc, Some(SPAN));
+    }
+
+    // EM-4: meta is Some when both anchor and tag are present.
+    #[test]
+    fn make_meta_returns_some_when_both_anchor_and_tag() {
+        let meta = make_meta(
+            Some("a"),
+            Some(SPAN),
+            Some(Cow::Borrowed("!str")),
+            Some(SPAN),
+        )
+        .unwrap();
+        assert_eq!(meta.anchor, Some("a"));
+        assert_eq!(meta.tag.as_deref(), Some("!str"));
+    }
+
+    // EM-5: Event size at or below 56 bytes.
+    #[test]
+    fn event_size_at_most_56_bytes() {
+        assert!(
+            std::mem::size_of::<Event<'_>>() <= 56,
+            "Event size {} exceeds 56 bytes",
+            std::mem::size_of::<Event<'_>>()
+        );
+    }
 }

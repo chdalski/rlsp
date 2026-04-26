@@ -128,7 +128,7 @@ That is the hot path the boxing exists to optimize.
   cross-checks Docker-vs-baremetal drift.
 - [x] **Stage A — Box NodeMeta.** Apply Option B to `Node`.
   Bench. Record numbers.
-- [ ] **Stage B — Box EventMeta.** Apply the same pattern
+- [x] **Stage B — Box EventMeta.** Apply the same pattern
   to `Event`. Bench. Record numbers. **Decision gate:** if
   every fixture is within ±2% of documented baseline,
   STOP and proceed to Soft-Reset Handoff.
@@ -255,18 +255,18 @@ have `tag: None` naturally.
 
 **Implementation:**
 
-- [ ] Define `EventMeta<'input>` in `event.rs` with the
+- [x] Define `EventMeta<'input>` in `event.rs` with the
   four moved fields.
-- [ ] Restructure the three variants to carry
+- [x] Restructure the three variants to carry
   `meta: Option<Box<EventMeta<'input>>>` (lifetime
   parameter preserved through the box).
-- [ ] Update `Event` construction sites in
+- [x] Update `Event` construction sites in
   `event_iter/` — emit `meta: None` when no anchor/tag
   is present (the common case), otherwise allocate the
   meta box.
-- [ ] Update `loader.rs` Event consumption sites to
+- [x] Update `loader.rs` Event consumption sites to
   pattern-match on `meta` and pull out the four fields.
-- [ ] Update production Event-construction sites:
+- [x] Update production Event-construction sites:
   `rlsp-yaml-parser/src/lib.rs`,
   `rlsp-yaml-parser/src/loader/stream.rs`,
   `rlsp-yaml-parser/src/loader.rs`,
@@ -275,36 +275,37 @@ have `tag: None` naturally.
   `rlsp-yaml-parser/src/event_iter/step.rs`,
   `rlsp-yaml-parser/src/event_iter/block/mapping.rs`,
   `rlsp-yaml-parser/src/event_iter/block/sequence.rs`.
-- [ ] Update test Event-construction sites:
-  `rlsp-yaml-parser/tests/encoding.rs`,
-  `rlsp-yaml-parser/tests/unicode_positions.rs`,
-  all files under `rlsp-yaml-parser/tests/smoke/` that
-  construct Event literals (~17 files including
-  `scalars.rs`, `sequences.rs`, `mappings.rs`,
-  `tags.rs`, `anchors_and_aliases.rs`, etc. —
-  `cargo build` will surface any missed sites).
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md` if
-  Task A's entry didn't already cover the Event API
-  change; otherwise extend that entry. Confirm parser
-  `Cargo.toml` is at `0.8.0` from Task A (no second
-  bump needed).
-- [ ] Bench: full `cargo bench -p rlsp-yaml-parser`.
+- [x] Update test Event-construction sites:
+  ~17 files under `rlsp-yaml-parser/tests/smoke/`
+  (anchors_and_aliases, block_scalars, comments,
+  conformance, directives, documents, flow_collections,
+  folded_scalars, mappings, nested_flow_block_mixing,
+  probe_dispatch, quoted_scalars, scalars, sequences,
+  tags) plus `tests/loader.rs`.
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md` —
+  Stage A entry extended to cover Stage B coherently.
+  No second version bump (0.8.0 from Task A).
+- [x] Bench: full `cargo bench -p rlsp-yaml-parser`.
   Record per-fixture results in the Stage B bench-record
   block below.
 
 **Acceptance:**
 
-- [ ] `cargo build` workspace clean.
-- [ ] `cargo clippy --all-targets` zero warnings.
-- [ ] `cargo test` workspace passes.
-- [ ] All yaml-test-suite conformance tests still pass at
+- [x] `cargo build` workspace clean.
+- [x] `cargo clippy --all-targets` zero warnings.
+- [x] `cargo test` workspace passes (yaml-test-suite
+  726/726).
+- [x] All yaml-test-suite conformance tests still pass at
   the same rate as before this stage.
-- [ ] `Event` size measured and recorded (target: ≤ 56
-  bytes for the three node-variants).
+- [x] `Event` size measured and recorded (target: ≤ 56
+  bytes for the three node-variants). **Measured: 40
+  bytes** — under target.
 - [ ] **Decision gate:** if every fixture is within ±2% of
   the documented baseline, mark Stages C/D/E `Skipped`
   and proceed to Soft-Reset Handoff. Otherwise, pick the
   next stage based on which fixture class is still off.
+
+**Completed:** 2026-04-26 — commit `f1464bd31dbe32d266b37bf491226fb98f31c0ae`
 
 ### Task C (conditional): Lazy Span construction
 
@@ -489,15 +490,56 @@ Stage A — NodeMeta box (commit 40b3e8d):
   fixtures remain >2% from baseline; latency 19% off.
   Stage B targets exactly this remaining cost.
 
-Stage B — EventMeta box (commit ____):
-  Event size: _____ bytes
-  [load size] tiny ____ medium ____ large ____ huge ____
-  [load style] bh ____ bs ____ fh ____ sh ____ mx ____
-  [events] tiny ____ medium ____ large ____ huge ____
-  [latency tiny] _____ ns
-  DECISION: STOP / continue to Stage C / continue to Stage D
+Stage B — EventMeta box (commit f1464bd):
+  Event size: 40 bytes (target ≤ 56)
+  [load size]
+    tiny_100B      50.76  MiB/s   (vs baseline 54.08, −6.1%)
+    medium_10KB    53.84  MiB/s   (vs baseline 58.28, −7.6%)
+    large_100KB    45.46  MiB/s   (vs baseline 43.34, +4.9%)  ★ beats baseline
+    huge_1MB       39.76  MiB/s   (vs baseline 35.69, +11.4%) ★ beats baseline
+  [load style]
+    block_heavy    50.02  MiB/s   (vs baseline 55.92, −10.6%)
+    block_sequence 126.93 MiB/s   (vs baseline 128.89, −1.5%) ★ within ±2%
+    flow_heavy     52.71  MiB/s   (vs baseline 57.83, −8.9%)
+    scalar_heavy   132.38 MiB/s   (vs baseline 141.14, −6.2%)
+    mixed          56.66  MiB/s   (vs baseline 60.69, −6.6%)
+  [load real]
+    kubernetes_3KB 73.75  MiB/s   (vs baseline 79.15, −6.8%)
+  [events size]
+    tiny_100B      87.50  MiB/s   (vs baseline 87.02, +0.6%)  ★ within ±2%
+    medium_10KB    113.40 MiB/s   (vs baseline 109.88, +3.2%) ★ beats baseline
+    large_100KB    118.18 MiB/s   (vs baseline 123.59, −4.4%)
+    huge_1MB       125.08 MiB/s   (vs baseline 130.80, −4.4%)
+  [events style]
+    block_heavy    103.06 MiB/s   (vs baseline 105.37, −2.2%)
+    block_sequence 256.55 MiB/s   (vs baseline 227.65, +12.7%) ★ beats baseline
+    flow_heavy     145.04 MiB/s   (vs baseline 131.22, +10.5%) ★ beats baseline
+    scalar_heavy   227.91 MiB/s   (vs baseline 236.16, −3.5%)
+    mixed          116.22 MiB/s   (vs baseline 115.53, +0.6%)  ★ within ±2%
+  [events real]
+    kubernetes_3KB 136.14 MiB/s   (vs baseline 138.11, −1.4%)  ★ within ±2%
+  [latency first_event]
+    tiny_100B      40.39  ns      (vs baseline 38.88, +3.9%)
+    medium_10KB    40.46  ns      (vs baseline 38.82, +4.2%)
+    large_100KB    40.36  ns      (vs baseline 38.80, +4.0%)
+    kubernetes_3KB 41.40  ns      (vs baseline 39.54, +4.7%)
 
-(Add Stage C, D, E records here as needed.)
+  Vs Stage A (improvements from EventMeta box):
+    events: +6 to +24% across fixtures (huge wins on style fixtures)
+    latency: 46.4 → 40.4 ns (−13%) — closes most of the 19% gap
+    load: small additional bumps (+5 to +12%)
+
+  DECISION: continue to Stage C (Lazy Span).
+  Reason: events and latency both made big gains but latency
+  is still +4% (outside ±2%); 7 load fixtures still 6-11% off
+  baseline; 4 events fixtures still −2.2 to −4.4%. The remaining
+  gap is consistent with per-Span construction overhead — Span
+  is 48 bytes per location, and every event/node carries one or
+  more Spans. Lazy Span (Span 48→8 bytes via offset-only +
+  on-demand line/column) targets exactly this.
+
+Stage C — Lazy Span (commit ____):
+  (To be filled.)
 ```
 
 ## Decisions

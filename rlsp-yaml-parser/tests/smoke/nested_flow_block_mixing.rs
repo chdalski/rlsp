@@ -4,10 +4,7 @@ use super::*;
 
 const fn seq_start_flow() -> Event<'static> {
     Event::SequenceStart {
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
         style: CollectionStyle::Flow,
     }
 }

@@ -7,20 +7,14 @@ use rstest::rstest;
 
 const fn seq_start_flow() -> Event<'static> {
     Event::SequenceStart {
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
         style: CollectionStyle::Flow,
     }
 }
 
 const fn map_start_flow() -> Event<'static> {
     Event::MappingStart {
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
         style: CollectionStyle::Flow,
     }
 }
@@ -29,10 +23,7 @@ const fn plain(v: &'static str) -> Event<'static> {
     Event::Scalar {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::Plain,
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
     }
 }
 
@@ -40,10 +31,7 @@ const fn single_quoted(v: &'static str) -> Event<'static> {
     Event::Scalar {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::SingleQuoted,
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
     }
 }
 
@@ -51,10 +39,7 @@ const fn double_quoted(v: &'static str) -> Event<'static> {
     Event::Scalar {
         value: std::borrow::Cow::Borrowed(v),
         style: ScalarStyle::DoubleQuoted,
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
     }
 }
 
@@ -749,14 +734,10 @@ fn anchor_in_flow_sequence_emits_scalar_with_anchor() {
     // `[&x foo]\n` — anchor on plain scalar inside flow sequence.
     let events = evs("[&x foo]\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                anchor: Some("x"),
-                value,
-                ..
-            } if value.as_ref() == "foo"
-        )),
+        events.iter().any(|e| {
+            matches!(e, Event::Scalar { value, .. } if value.as_ref() == "foo")
+                && e.anchor() == Some("x")
+        }),
         "anchor `&x` must be attached to the scalar 'foo' inside the flow sequence"
     );
 }
@@ -779,13 +760,9 @@ fn tag_indicator_in_flow_sequence_is_parsed() {
     // `!t` is a secondary-handle tag; `x` is the scalar value.
     let events = evs("[!t x]\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "!t"
-        )),
+        events
+            .iter()
+            .any(|e| { matches!(e, Event::Scalar { .. }) && e.tag() == Some("!t") }),
         "tag `!t` inside flow sequence must produce a tagged scalar event"
     );
 }
@@ -981,14 +958,8 @@ fn anchor_before_comma_emits_empty_scalar_with_anchor() {
     // carrying the anchor, then resets the frame.
     let events = evs("{a: &x , b: c}\n");
     let has_anchored_empty = events.iter().any(|e| {
-        matches!(
-            e,
-            Event::Scalar {
-                anchor: Some("x"),
-                value,
-                ..
-            } if value.as_ref().is_empty()
-        )
+        matches!(e, Event::Scalar { value, .. } if value.as_ref().is_empty())
+            && e.anchor() == Some("x")
     });
     assert!(
         has_anchored_empty,
@@ -1008,14 +979,7 @@ fn tag_before_comma_emits_empty_scalar_with_tag() {
     // carrying the tag.
     let events = evs("{a: !!str , b: c}\n");
     let has_tagged_empty = events.iter().any(|e| {
-        matches!(
-            e,
-            Event::Scalar {
-                tag: Some(_),
-                value,
-                ..
-            } if value.as_ref().is_empty()
-        )
+        matches!(e, Event::Scalar { value, .. } if value.as_ref().is_empty()) && e.tag().is_some()
     });
     assert!(
         has_tagged_empty,

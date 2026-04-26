@@ -9,11 +9,13 @@ use rstest::rstest;
 fn verbatim_tag_on_plain_scalar() {
     let events = evs("!<tag:yaml.org,2002:str> hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "hello"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "hello"
+            } else {
+                false
+            }),
         "verbatim tag must be stored as URI content (without angle brackets)"
     );
 }
@@ -22,13 +24,11 @@ fn verbatim_tag_on_plain_scalar() {
 fn verbatim_tag_strips_angle_brackets() {
     let events = evs("!<my-uri> val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "my-uri"
-        )),
+        events.iter().any(|e| if let Event::Scalar { .. } = e {
+            e.tag() == Some("my-uri")
+        } else {
+            false
+        }),
         "verbatim tag must store just 'my-uri', not '!<my-uri>'"
     );
 }
@@ -113,11 +113,13 @@ fn verbatim_tag_uri_embedded_close_delimiter_terminates_uri() {
     // First `>` closes the verbatim tag; `bar>` becomes part of the scalar value.
     let events = evs("!<foo>bar>\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "foo" && value.as_ref() == "bar>"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("foo") && value.as_ref() == "bar>"
+            } else {
+                false
+            }),
         "first '>' must close the verbatim tag URI; remainder is scalar content"
     );
 }
@@ -131,11 +133,13 @@ fn primary_handle_on_plain_scalar() {
     // `!!str` expands to `"tag:yaml.org,2002:str"` via the default `!!` handle.
     let events = evs("!!str hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "hello"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "hello"
+            } else {
+                false
+            }),
         "primary handle tag must expand to 'tag:yaml.org,2002:str'"
     );
 }
@@ -145,13 +149,11 @@ fn primary_handle_empty_suffix_expands_to_core_schema_prefix() {
     // `!! val` — primary handle with empty suffix; expands to `"tag:yaml.org,2002:"`.
     let events = evs("!! val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:"
-        )),
+        events.iter().any(|e| if let Event::Scalar { .. } = e {
+            e.tag() == Some("tag:yaml.org,2002:")
+        } else {
+            false
+        }),
         "primary handle with empty suffix must expand to 'tag:yaml.org,2002:'"
     );
 }
@@ -177,11 +179,13 @@ fn named_handle_without_declaration_returns_error() {
 fn secondary_handle_on_plain_scalar() {
     let events = evs("!yaml val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "!yaml" && value.as_ref() == "val"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!yaml") && value.as_ref() == "val"
+            } else {
+                false
+            }),
         "secondary handle tag must be stored as '!yaml'"
     );
 }
@@ -195,11 +199,13 @@ fn non_specific_tag_on_plain_scalar() {
     // `! val` — bare `!` followed by space, then content.
     let events = evs("! val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "!" && value.as_ref() == "val"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!") && value.as_ref() == "val"
+            } else {
+                false
+            }),
         "non-specific tag '!' must be stored as '!'"
     );
 }
@@ -212,14 +218,17 @@ fn non_specific_tag_on_plain_scalar() {
 fn tag_on_block_sequence() {
     let events = evs("!!seq\n- item\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::SequenceStart {
                 style: CollectionStyle::Block,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:seq")
+            } else {
+                false
+            }
+        }),
         "block sequence must carry resolved tag 'tag:yaml.org,2002:seq'"
     );
 }
@@ -228,14 +237,17 @@ fn tag_on_block_sequence() {
 fn tag_on_block_mapping() {
     let events = evs("!!map\nkey: val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::MappingStart {
                 style: CollectionStyle::Block,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:map"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:map")
+            } else {
+                false
+            }
+        }),
         "block mapping must carry resolved tag 'tag:yaml.org,2002:map'"
     );
 }
@@ -244,15 +256,18 @@ fn tag_on_block_mapping() {
 fn tag_on_block_literal_scalar() {
     let events = evs("!!str |\n  hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::Scalar {
                 style: ScalarStyle::Literal(Chomp::Clip),
                 value,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "hello\n"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "hello\n"
+            } else {
+                false
+            }
+        }),
         "literal block scalar must carry resolved tag 'tag:yaml.org,2002:str'"
     );
 }
@@ -261,14 +276,17 @@ fn tag_on_block_literal_scalar() {
 fn tag_on_block_folded_scalar() {
     let events = evs("!!str >\n  hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::Scalar {
                 style: ScalarStyle::Folded(Chomp::Clip),
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:str"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:str")
+            } else {
+                false
+            }
+        }),
         "folded block scalar must carry resolved tag 'tag:yaml.org,2002:str'"
     );
 }
@@ -281,14 +299,17 @@ fn tag_on_block_folded_scalar() {
 fn tag_on_flow_sequence() {
     let events = evs("!!seq [a, b]\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::SequenceStart {
                 style: CollectionStyle::Flow,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:seq")
+            } else {
+                false
+            }
+        }),
         "flow sequence must carry resolved tag 'tag:yaml.org,2002:seq'"
     );
 }
@@ -297,14 +318,17 @@ fn tag_on_flow_sequence() {
 fn tag_on_flow_mapping() {
     let events = evs("!!map {a: b}\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::MappingStart {
                 style: CollectionStyle::Flow,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:map"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:map")
+            } else {
+                false
+            }
+        }),
         "flow mapping must carry resolved tag 'tag:yaml.org,2002:map'"
     );
 }
@@ -317,15 +341,13 @@ fn tag_on_flow_mapping() {
 fn tag_before_anchor_both_emitted_on_scalar() {
     let events = evs("!str &anchor value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                anchor: Some("anchor"),
-                value,
-                ..
-            } if t.as_ref() == "!str" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!str") && e.anchor() == Some("anchor") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "tag before anchor: both must be emitted on the scalar"
     );
 }
@@ -334,15 +356,13 @@ fn tag_before_anchor_both_emitted_on_scalar() {
 fn anchor_before_tag_both_emitted_on_scalar() {
     let events = evs("&anchor !str value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                anchor: Some("anchor"),
-                value,
-                ..
-            } if t.as_ref() == "!str" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!str") && e.anchor() == Some("anchor") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "anchor before tag: both must be emitted on the scalar"
     );
 }
@@ -351,14 +371,11 @@ fn anchor_before_tag_both_emitted_on_scalar() {
 fn tag_before_anchor_both_emitted_on_sequence() {
     let events = evs("!seq &s\n- item\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                tag: Some(t),
-                anchor: Some("s"),
-                ..
-            } if t.as_ref() == "!seq"
-        )),
+        events.iter().any(|e| {
+            matches!(e, Event::SequenceStart { .. })
+                && e.tag() == Some("!seq")
+                && e.anchor() == Some("s")
+        }),
         "tag before anchor on sequence: both must be emitted on SequenceStart"
     );
 }
@@ -410,13 +427,11 @@ fn tag_with_invalid_char_stops_at_boundary() {
     // and treats the rest as the scalar value.)
     let events = evs("!foo<bar val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "!foo"
-        )),
+        events.iter().any(|e| if let Event::Scalar { .. } = e {
+            e.tag() == Some("!foo")
+        } else {
+            false
+        }),
         "tag scan must stop before '<' — tag must be '!foo'"
     );
 }
@@ -426,13 +441,11 @@ fn percent_encoded_tag_suffix_is_accepted() {
     // `!foo%2Fbar val\n` — `%2F` is a valid percent-encoded sequence.
     let events = evs("!foo%2Fbar val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "!foo%2Fbar"
-        )),
+        events.iter().any(|e| if let Event::Scalar { .. } = e {
+            e.tag() == Some("!foo%2Fbar")
+        } else {
+            false
+        }),
         "percent-encoded sequence in tag suffix must be accepted"
     );
 }
@@ -461,7 +474,7 @@ fn tagged_scalar_span_covers_value_not_tag() {
     // `!!str hello\n` — `!!str ` is 6 bytes; `hello` starts at byte 6.
     let items = parse_to_vec("!!str hello\n");
     let scalar_span = items.iter().find_map(|r| match r {
-        Ok((Event::Scalar { tag: Some(_), .. }, span)) => Some(*span),
+        Ok((ev, span)) if matches!(ev, Event::Scalar { .. }) && ev.tag().is_some() => Some(*span),
         Ok(_) | Err(_) => None,
     });
     assert!(scalar_span.is_some(), "tagged scalar event must be present");
@@ -482,7 +495,9 @@ fn tagged_sequence_span_is_at_dash_indicator() {
     // `!!seq\n- a\n` — SequenceStart span should point to the `-` on line 2.
     let items = parse_to_vec("!!seq\n- a\n");
     let seq_span = items.iter().find_map(|r| match r {
-        Ok((Event::SequenceStart { tag: Some(_), .. }, span)) => Some(*span),
+        Ok((ev, span)) if matches!(ev, Event::SequenceStart { .. }) && ev.tag().is_some() => {
+            Some(*span)
+        }
         Ok(_) | Err(_) => None,
     });
     assert!(
@@ -514,11 +529,13 @@ fn tag_prefix_line_not_silently_dropped() {
         "!str value must produce a Scalar event, not be silently dropped"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "!str" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!str") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "scalar must have tag '!str' and value 'value'"
     );
 }
@@ -543,18 +560,20 @@ fn tag_on_implicit_mapping_key_scalar() {
     let events = evs("!!str key: val\n");
     // Key scalar carries the tag.
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref().contains("str") && value.as_ref() == "key"
-        )),
+        events.iter().any(|e| {
+            if let Event::Scalar { value, .. } = e {
+                e.tag().is_some_and(|t| t.contains("str")) && value.as_ref() == "key"
+            } else {
+                false
+            }
+        }),
         "tag must be on key scalar, not on MappingStart"
     );
     // MappingStart has no tag.
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::MappingStart { tag: None, .. })),
+            .any(|e| matches!(e, Event::MappingStart { .. }) && e.tag().is_none()),
         "MappingStart must have no tag when tag is inline before key"
     );
 }
@@ -567,11 +586,13 @@ fn tag_on_implicit_mapping_key_scalar() {
 fn standalone_tag_line_applies_to_scalar_below() {
     let events = evs("!!str\nhello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "hello"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "hello"
+            } else {
+                false
+            }),
         "standalone tag line must be attached to the following scalar"
     );
 }
@@ -580,13 +601,13 @@ fn standalone_tag_line_applies_to_scalar_below() {
 fn standalone_tag_line_applies_to_sequence_below() {
     let events = evs("!!seq\n- a\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::SequenceStart { .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:seq")
+            } else {
+                false
+            }),
         "standalone tag line must be attached to the following sequence"
     );
 }
@@ -595,13 +616,10 @@ fn standalone_tag_line_applies_to_sequence_below() {
 fn standalone_tag_line_applies_to_mapping_below() {
     let events = evs("!!map\nkey: val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:map"
-        )),
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MappingStart { .. })
+                && e.tag() == Some("tag:yaml.org,2002:map")),
         "standalone tag line must be attached to the following mapping"
     );
 }
@@ -626,17 +644,20 @@ fn standalone_tag_line_applies_to_mapping_below() {
 fn standalone_tag_on_block_sequence_propagates_to_sequence_start() {
     let events = evs("!!seq\n- a\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::SequenceStart { .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:seq")
+            } else {
+                false
+            }),
         "SequenceStart must carry tag:yaml.org,2002:seq"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: None, value, .. } if value.as_ref() == "a"
-        )),
+        events.iter().any(
+            |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "a")
+                && e.tag().is_none()
+        ),
         "sequence item scalar must have no tag"
     );
 }
@@ -648,15 +669,17 @@ fn inline_tag_on_mapping_key_annotates_key_scalar_not_mapping() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::MappingStart { tag: None, .. })),
+            .any(|e| matches!(e, Event::MappingStart { .. }) && e.tag().is_none()),
         "MappingStart must have no tag when !!str is inline before key"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "key"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "key"
+            } else {
+                false
+            }),
         "key scalar must carry tag:yaml.org,2002:str"
     );
 }
@@ -666,17 +689,17 @@ fn inline_tag_on_mapping_key_annotates_key_scalar_not_mapping() {
 fn standalone_tag_on_block_mapping_propagates_to_mapping_start() {
     let events = evs("!!map\nkey: value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:map"
-        )),
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MappingStart { .. })
+                && e.tag() == Some("tag:yaml.org,2002:map")),
         "MappingStart must carry tag:yaml.org,2002:map"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: None, value, .. } if value.as_ref() == "key"
-        )),
+        events.iter().any(
+            |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "key")
+                && e.tag().is_none()
+        ),
         "key scalar must have no tag"
     );
 }
@@ -686,11 +709,13 @@ fn standalone_tag_on_block_mapping_propagates_to_mapping_start() {
 fn verbatim_tag_passes_through_unchanged() {
     let events = evs("!<tag:example.com/foo> value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:example.com/foo" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:example.com/foo") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "verbatim tag must be preserved as-is on the scalar"
     );
 }
@@ -700,11 +725,13 @@ fn verbatim_tag_passes_through_unchanged() {
 fn local_tag_preserved_as_is() {
     let events = evs("!local value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "!local" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("!local") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "local tag !local must be preserved unchanged"
     );
 }
@@ -715,11 +742,13 @@ fn tag_resolved_via_pct_tag_directive_cow_owned() {
     let input = "%TAG !custom! tag:example.com/\n---\n!custom!foo value\n";
     let events = evs(input);
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:example.com/foo" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:example.com/foo") && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "resolved tag tag:example.com/foo must flow through PendingTag::Inline correctly"
     );
 }
@@ -729,18 +758,20 @@ fn tag_resolved_via_pct_tag_directive_cow_owned() {
 fn tag_cleared_after_use_second_item_has_none() {
     let events = evs("- !!str first\n- second\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), value, .. }
-                if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "first"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "first"
+            } else {
+                false
+            }),
         "first item must carry tag:yaml.org,2002:str"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: None, value, .. } if value.as_ref() == "second"
-        )),
+        events.iter().any(
+            |e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "second")
+                && e.tag().is_none()
+        ),
         "second item must have no tag"
     );
 }
@@ -750,14 +781,17 @@ fn tag_cleared_after_use_second_item_has_none() {
 fn tag_on_flow_sequence_propagates_to_sequence_start() {
     let events = evs("!!seq [a, b]\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                tag: Some(t),
+        events.iter().any(|e| {
+            if let Event::SequenceStart {
                 style: CollectionStyle::Flow,
                 ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+            } = e
+            {
+                e.tag() == Some("tag:yaml.org,2002:seq")
+            } else {
+                false
+            }
+        }),
         "SequenceStart for flow sequence must carry tag:yaml.org,2002:seq"
     );
 }
@@ -768,14 +802,11 @@ fn tag_and_anchor_both_standalone_both_propagate_to_sequence_start() {
     let input = "&myseq\n!!seq\n- a\n";
     let events = evs(input);
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                anchor: Some("myseq"),
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+        events
+            .iter()
+            .any(|e| matches!(e, Event::SequenceStart { .. })
+                && e.anchor() == Some("myseq")
+                && e.tag() == Some("tag:yaml.org,2002:seq")),
         "SequenceStart must carry both anchor myseq and tag:yaml.org,2002:seq"
     );
 }
@@ -785,15 +816,15 @@ fn tag_and_anchor_both_standalone_both_propagate_to_sequence_start() {
 fn inline_tag_and_anchor_on_same_scalar_both_attached() {
     let events = evs("!!str &a value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                tag: Some(t),
-                anchor: Some("a"),
-                value,
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:str" && value.as_ref() == "value"
-        )),
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str")
+                    && e.anchor() == Some("a")
+                    && value.as_ref() == "value"
+            } else {
+                false
+            }),
         "scalar must carry both tag:yaml.org,2002:str and anchor a"
     );
 }
@@ -807,20 +838,9 @@ fn inline_tag_and_anchor_on_same_scalar_both_attached() {
 fn tag_loc_inline_shorthand_on_scalar() {
     // `!!str hello\n` — `!!str` is 5 bytes at byte 0, col 0, line 1.
     let items = parse_to_vec("!!str hello\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "inline tag on scalar must have tag_loc = Some(...)"
@@ -848,20 +868,9 @@ fn tag_loc_verbatim_tag_on_scalar() {
     // `!<tag:yaml.org,2002:str> hello\n` — 24 bytes: `!` + `<tag:yaml.org,2002:str>`.
     // `<tag:yaml.org,2002:str>` = 23 chars, total token = 24 bytes.
     let items = parse_to_vec("!<tag:yaml.org,2002:str> hello\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "verbatim tag on scalar must have tag_loc = Some(...)"
@@ -880,20 +889,9 @@ fn tag_loc_verbatim_tag_on_scalar() {
 fn tag_loc_standalone_tag_on_scalar() {
     // `!!str\nhello\n` — `!!str` at byte 0, col 0, line 1; 5 bytes.
     let items = parse_to_vec("!!str\nhello\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "standalone tag on scalar must have tag_loc = Some(...)"
@@ -923,20 +921,9 @@ fn tag_loc_standalone_tag_on_scalar() {
 fn tag_loc_standalone_tag_on_block_sequence() {
     // `!!seq\n- a\n` — `!!seq` at byte 0, 5 bytes.
     let items = parse_to_vec("!!seq\n- a\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::SequenceStart {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "tagged SequenceStart must have tag_loc = Some(...)"
@@ -966,20 +953,9 @@ fn tag_loc_standalone_tag_on_block_sequence() {
 fn tag_loc_standalone_tag_on_block_mapping() {
     // `!!map\nkey: val\n` — `!!map` at byte 0, 5 bytes.
     let items = parse_to_vec("!!map\nkey: val\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::MappingStart {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "tagged MappingStart must have tag_loc = Some(...)"
@@ -1009,20 +985,9 @@ fn tag_loc_standalone_tag_on_block_mapping() {
 fn tag_loc_inline_tag_on_flow_sequence() {
     // `!!seq [a, b]\n` — `!!seq` at byte 0, 5 bytes.
     let items = parse_to_vec("!!seq [a, b]\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::SequenceStart {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "flow SequenceStart with tag must have tag_loc = Some(...)"
@@ -1052,20 +1017,9 @@ fn tag_loc_inline_tag_on_flow_sequence() {
 fn tag_loc_inline_tag_on_flow_mapping() {
     // `!!map {k: v}\n` — `!!map` at byte 0, 5 bytes.
     let items = parse_to_vec("!!map {k: v}\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::MappingStart {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "flow MappingStart with tag must have tag_loc = Some(...)"
@@ -1095,20 +1049,9 @@ fn tag_loc_inline_tag_on_flow_mapping() {
 fn tag_loc_inline_tag_on_mapping_key_scalar() {
     // `!!str key: val\n` — tag is inline before the key; tag_loc on key scalar.
     let items = parse_to_vec("!!str key: val\n");
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "key scalar with inline tag must have tag_loc = Some(...)"
@@ -1134,17 +1077,8 @@ fn tag_loc_named_handle_with_pct_tag_directive() {
     let items = parse_to_vec(input);
     let loc_opt = items.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(t),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                if t.as_ref() == "tag:ex,2026:s" {
-                    Some(*s)
-                } else {
-                    None
-                }
+            if matches!(ev, Event::Scalar { .. }) && ev.tag() == Some("tag:ex,2026:s") {
+                ev.tag_loc()
             } else {
                 None
             }
@@ -1177,9 +1111,9 @@ fn tag_loc_none_when_no_tag(#[case] input: &str) {
     let items = parse_to_vec(input);
     for (ev, _) in items.iter().filter_map(|r| r.as_ref().ok()) {
         let tag_loc_val = match ev {
-            Event::Scalar { tag_loc, .. }
-            | Event::SequenceStart { tag_loc, .. }
-            | Event::MappingStart { tag_loc, .. } => Some(tag_loc),
+            Event::Scalar { .. } | Event::SequenceStart { .. } | Event::MappingStart { .. } => {
+                Some(ev.tag_loc())
+            }
             Event::StreamStart
             | Event::StreamEnd
             | Event::Comment { .. }
@@ -1206,20 +1140,9 @@ fn tag_loc_utf8_scalar_key_tag_byte_offset() {
     // tag_loc.start.byte_offset must be 4 (bytes), not 3 (chars).
     let input = "\u{00e9}: !!str val\n";
     let items = parse_to_vec(input);
-    let loc_opt = items.iter().find_map(|r| {
-        r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                tag: Some(_),
-                tag_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
-            } else {
-                None
-            }
-        })
-    });
+    let loc_opt = items
+        .iter()
+        .find_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()));
     assert!(
         loc_opt.is_some(),
         "tagged scalar after UTF-8 key must have tag_loc = Some(...)"
@@ -1243,9 +1166,9 @@ fn tag_loc_invariant_tag_some_iff_loc_some() {
     let events = parse_to_vec(input);
     for (ev, _) in events.iter().filter_map(|r| r.as_ref().ok()) {
         let pair = match ev {
-            Event::Scalar { tag, tag_loc, .. }
-            | Event::SequenceStart { tag, tag_loc, .. }
-            | Event::MappingStart { tag, tag_loc, .. } => Some((tag.is_some(), tag_loc.is_some())),
+            Event::Scalar { .. } | Event::SequenceStart { .. } | Event::MappingStart { .. } => {
+                Some((ev.tag().is_some(), ev.tag_loc().is_some()))
+            }
             Event::StreamStart
             | Event::StreamEnd
             | Event::Comment { .. }
@@ -1273,20 +1196,7 @@ fn tag_loc_two_tagged_scalars_each_gets_own_loc() {
     let items = parse_to_vec(input);
     let locs: Vec<Span> = items
         .iter()
-        .filter_map(|r| {
-            r.as_ref().ok().and_then(|(ev, _)| {
-                if let Event::Scalar {
-                    tag: Some(_),
-                    tag_loc: Some(s),
-                    ..
-                } = ev
-                {
-                    Some(*s)
-                } else {
-                    None
-                }
-            })
-        })
+        .filter_map(|r| r.as_ref().ok().and_then(|(ev, _)| ev.tag_loc()))
         .collect();
     // `!!str` starts after `a: ` = byte 3; `!!int` starts after `b: ` on line 2.
     // Line 1: `a: !!str hello\n` = 15 bytes. Line 2 starts at byte 15: `b: !!int 42\n`.
@@ -1335,10 +1245,8 @@ fn tag_loc_invariant_corpus_wide() {
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();
         for (ev, _) in rlsp_yaml_parser::parse_events(&content).filter_map(Result::ok) {
             let pair = match &ev {
-                Event::Scalar { tag, tag_loc, .. }
-                | Event::SequenceStart { tag, tag_loc, .. }
-                | Event::MappingStart { tag, tag_loc, .. } => {
-                    Some((tag.is_some(), tag_loc.is_some()))
+                Event::Scalar { .. } | Event::SequenceStart { .. } | Event::MappingStart { .. } => {
+                    Some((ev.tag().is_some(), ev.tag_loc().is_some()))
                 }
                 Event::StreamStart
                 | Event::StreamEnd

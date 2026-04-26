@@ -1666,3 +1666,38 @@ fn explicit_key_nested_inside_mapping_value_no_phantom_entries() {
     assert_eq!(scalar_value(&inner_entries[0].0), "inner_key");
     assert_eq!(scalar_value(&inner_entries[0].1), "inner_val");
 }
+
+// LD-1: anchor and tag both flow through the loader when both are present on a scalar.
+//
+// The EventMeta box carries both anchor and tag together; the loader unpacks one box
+// to extract both. If either field were silently dropped, a combination test would catch
+// it even if anchor-only and tag-only loader tests both passed.
+#[test]
+fn anchor_and_tag_both_flow_through_loader_when_colocated_on_scalar() {
+    // `!str &a value\n` — tag before anchor on the same scalar.
+    // The loader must produce a Node::Scalar with both anchor and tag set.
+    let docs = load("!str &a value\n").expect("load failed");
+    assert_eq!(docs.len(), 1);
+    let root = &docs[0].root;
+    let Node::Scalar { tag, .. } = root else {
+        panic!("root must be Scalar; got: {root:?}");
+    };
+    assert_eq!(
+        tag.as_deref(),
+        Some("!str"),
+        "tag must flow through loader from EventMeta"
+    );
+    assert_eq!(
+        root.anchor(),
+        Some("a"),
+        "anchor must flow through loader from EventMeta"
+    );
+    assert!(
+        root.anchor_loc().is_some(),
+        "anchor_loc must be Some when anchor is present"
+    );
+    assert!(
+        root.tag_loc().is_some(),
+        "tag_loc must be Some when tag is present"
+    );
+}

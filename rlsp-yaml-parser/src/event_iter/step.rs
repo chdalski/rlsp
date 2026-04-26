@@ -12,7 +12,7 @@ use super::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
 use crate::error::Error;
-use crate::event::{CollectionStyle, Event};
+use crate::event::{CollectionStyle, Event, make_meta};
 use crate::pos::{Pos, Span};
 use crate::{EventIter, marker_span, zero_span};
 
@@ -90,16 +90,19 @@ impl<'input> EventIter<'input> {
             // (e.g. a bare `!` tag on its own line with no following node), emit
             // a null scalar so the property is properly attached.
             if self.pending_tag.is_some() || self.pending_anchor.is_some() {
+                let pa = self.pending_anchor.take();
                 let pt = self.pending_tag.take();
                 let tag_loc = pt.as_ref().map(PendingTag::loc);
                 self.queue.push_back((
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: crate::event::ScalarStyle::Plain,
-                        anchor: self.pending_anchor.map(PendingAnchor::name),
-                        anchor_loc: self.pending_anchor.take().map(PendingAnchor::loc),
-                        tag: pt.map(PendingTag::into_cow),
-                        tag_loc,
+                        meta: make_meta(
+                            pa.map(PendingAnchor::name),
+                            pa.map(PendingAnchor::loc),
+                            pt.map(PendingTag::into_cow),
+                            tag_loc,
+                        ),
                     },
                     zero_span(end),
                 ));
@@ -394,11 +397,13 @@ impl<'input> EventIter<'input> {
                                 };
                             self.queue.push_back((
                                 Event::MappingStart {
-                                    anchor: map_anchor,
-                                    anchor_loc: map_anchor_loc,
-                                    tag: map_tag,
-                                    tag_loc: map_tag_loc,
                                     style: CollectionStyle::Block,
+                                    meta: make_meta(
+                                        map_anchor,
+                                        map_anchor_loc,
+                                        map_tag,
+                                        map_tag_loc,
+                                    ),
                                 },
                                 zero_span(star_pos),
                             ));

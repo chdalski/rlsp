@@ -265,10 +265,7 @@ mod tests {
             Event::Scalar {
                 value: "x".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             sp,
         ))]);

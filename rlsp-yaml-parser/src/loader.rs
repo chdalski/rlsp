@@ -34,7 +34,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
 use crate::error::Error;
-use crate::event::{Event, ScalarStyle};
+use crate::event::{Event, EventMeta, ScalarStyle};
 use crate::node::{Document, Node, NodeMeta};
 use crate::pos::{Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
@@ -129,6 +129,25 @@ type Result<T> = std::result::Result<T, LoadError>;
 // Type alias for the peekable event stream used throughout the loader.
 type EventStream<'a> =
     Peekable<Box<dyn Iterator<Item = std::result::Result<(Event<'a>, Span), Error>> + 'a>>;
+
+/// Unpack an `Option<Box<EventMeta>>` into its four constituent fields.
+#[expect(
+    clippy::type_complexity,
+    reason = "four-tuple mirrors EventMeta fields; extracting a type alias here would obscure the one-to-one correspondence"
+)]
+#[inline]
+fn unpack_meta(
+    meta: Option<Box<EventMeta<'_>>>,
+) -> (
+    Option<&'_ str>,
+    Option<Span>,
+    Option<std::borrow::Cow<'_, str>>,
+    Option<Span>,
+) {
+    meta.map_or((None, None, None, None), |m| {
+        (m.anchor, m.anchor_loc, m.tag, m.tag_loc)
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -455,15 +474,8 @@ impl<'opt> LoadState<'opt> {
         };
 
         match event {
-            Event::Scalar {
-                value,
-                style,
-                anchor,
-                anchor_loc,
-                tag,
-                tag_loc,
-                ..
-            } => {
+            Event::Scalar { value, style, meta } => {
+                let (anchor, anchor_loc, tag, tag_loc) = unpack_meta(meta);
                 let anchor = anchor.map(str::to_owned);
                 let mut node = Node::Scalar {
                     value: value.into_owned(),
@@ -486,18 +498,10 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::MappingStart {
-                anchor,
-                anchor_loc: mapping_anchor_loc,
-                tag,
-                tag_loc: mapping_tag_loc,
-                style,
-                ..
-            } => {
-                let anchor = anchor.map(str::to_owned);
-                let anchor_loc = mapping_anchor_loc;
-                let tag_loc = mapping_tag_loc;
-                let tag = tag.map(|t| Cow::Owned(t.into_owned()));
+            Event::MappingStart { style, meta } => {
+                let (event_anchor, anchor_loc, event_tag, tag_loc) = unpack_meta(meta);
+                let anchor = event_anchor.map(str::to_owned);
+                let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
                 let anchor_for_registration = anchor.clone();
 
                 self.depth += 1;
@@ -603,18 +607,10 @@ impl<'opt> LoadState<'opt> {
                 Ok(node)
             }
 
-            Event::SequenceStart {
-                anchor,
-                anchor_loc: sequence_anchor_loc,
-                tag,
-                tag_loc: sequence_tag_loc,
-                style,
-                ..
-            } => {
-                let anchor = anchor.map(str::to_owned);
-                let anchor_loc = sequence_anchor_loc;
-                let tag_loc = sequence_tag_loc;
-                let tag = tag.map(|t| Cow::Owned(t.into_owned()));
+            Event::SequenceStart { style, meta } => {
+                let (event_anchor, anchor_loc, event_tag, tag_loc) = unpack_meta(meta);
+                let anchor = event_anchor.map(str::to_owned);
+                let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
                 let anchor_for_registration = anchor.clone();
 
                 self.depth += 1;

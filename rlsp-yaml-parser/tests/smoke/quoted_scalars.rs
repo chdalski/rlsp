@@ -35,10 +35,7 @@ fn quoted_scalar_emits_full_event_sequence(
     let scalar = Event::Scalar {
         value: expected_value.into(),
         style: expected_style,
-        anchor: None,
-        anchor_loc: None,
-        tag: None,
-        tag_loc: None,
+        meta: None,
     };
     let events = event_variants(input);
     assert_eq!(
@@ -174,10 +171,7 @@ fn single_quoted_follows_plain_scalar_fallback() {
             Event::Scalar {
                 value: "plain".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::DocumentEnd { explicit: false },
             Event::StreamEnd,

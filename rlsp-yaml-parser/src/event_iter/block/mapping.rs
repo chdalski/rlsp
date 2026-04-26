@@ -8,7 +8,7 @@
 //! `consume_explicit_value_line`.
 
 use crate::error::Error;
-use crate::event::{CollectionStyle, Event, ScalarStyle};
+use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_implicit_mapping_line, is_tab_indented_block_indicator,
 };
@@ -553,11 +553,13 @@ impl<'input> EventIter<'input> {
                 };
             self.queue.push_back((
                 Event::MappingStart {
-                    anchor: mapping_anchor,
-                    anchor_loc: mapping_anchor_loc,
-                    tag: mapping_tag,
-                    tag_loc: mapping_tag_loc,
                     style: CollectionStyle::Block,
+                    meta: make_meta(
+                        mapping_anchor,
+                        mapping_anchor_loc,
+                        mapping_tag,
+                        mapping_tag_loc,
+                    ),
                 },
                 zero_span(key_pos),
             ));
@@ -602,10 +604,12 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: std::borrow::Cow::Borrowed(""),
                         style: ScalarStyle::Plain,
-                        anchor: pa.map(PendingAnchor::name),
-                        anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: pt.map(PendingTag::into_cow),
-                        tag_loc,
+                        meta: make_meta(
+                            pa.map(PendingAnchor::name),
+                            pa.map(PendingAnchor::loc),
+                            pt.map(PendingTag::into_cow),
+                            tag_loc,
+                        ),
                     },
                     zero_span(pos),
                 ));
@@ -653,10 +657,12 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: pa.map(PendingAnchor::name),
-                    anchor_loc: pa.map(PendingAnchor::loc),
-                    tag: pt.map(PendingTag::into_cow),
-                    tag_loc,
+                    meta: make_meta(
+                        pa.map(PendingAnchor::name),
+                        pa.map(PendingAnchor::loc),
+                        pt.map(PendingTag::into_cow),
+                        tag_loc,
+                    ),
                 },
                 zero_span(pos),
             ));
@@ -685,10 +691,7 @@ impl<'input> EventIter<'input> {
                 Event::Scalar {
                     value: std::borrow::Cow::Borrowed(""),
                     style: ScalarStyle::Plain,
-                    anchor: null_anchor,
-                    anchor_loc: null_anchor_loc,
-                    tag: None,
-                    tag_loc: None,
+                    meta: make_meta(null_anchor, null_anchor_loc, None, None),
                 },
                 zero_span(pos),
             ));
@@ -748,10 +751,12 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value: key_value,
                         style: key_style,
-                        anchor: pa.map(PendingAnchor::name),
-                        anchor_loc: pa.map(PendingAnchor::loc),
-                        tag: pt.map(PendingTag::into_cow),
-                        tag_loc,
+                        meta: make_meta(
+                            pa.map(PendingAnchor::name),
+                            pa.map(PendingAnchor::loc),
+                            pt.map(PendingTag::into_cow),
+                            tag_loc,
+                        ),
                     },
                     key_span,
                 ));

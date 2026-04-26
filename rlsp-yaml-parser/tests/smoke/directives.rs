@@ -163,10 +163,9 @@ fn tag_directive_scope_resets_between_documents() {
 fn default_handle_expands_to_core_schema_prefix() {
     let events = evs("!!str hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:str"
-        )),
+        events.iter().any(
+            |e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("tag:yaml.org,2002:str"))
+        ),
         "!!str must expand to 'tag:yaml.org,2002:str' using the default !! handle"
     );
 }
@@ -176,10 +175,9 @@ fn default_handle_expands_to_core_schema_prefix() {
 fn default_handle_empty_suffix_expands_to_prefix_only() {
     let events = evs("!! val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. } if t.as_ref() == "tag:yaml.org,2002:"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("tag:yaml.org,2002:"))),
         "!! with empty suffix must expand to 'tag:yaml.org,2002:'"
     );
 }
@@ -193,11 +191,10 @@ fn default_handle_empty_suffix_expands_to_prefix_only() {
 fn custom_tag_handle_resolves_scalar_tag() {
     let events = evs("%TAG !e! tag:example.com,2026:\n---\n!e!foo bar\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. }
-                if t.as_ref() == "tag:example.com,2026:foo"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. })
+                && e.tag() == Some("tag:example.com,2026:foo"))),
         "!e!foo with %TAG !e! tag:example.com,2026: must resolve to 'tag:example.com,2026:foo'"
     );
 }
@@ -207,11 +204,10 @@ fn custom_tag_handle_resolves_scalar_tag() {
 fn percent_tag_overrides_default_double_bang_handle() {
     let events = evs("%TAG !! tag:custom.org,2026:\n---\n!!str hello\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. }
-                if t.as_ref() == "tag:custom.org,2026:str"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. })
+                && e.tag() == Some("tag:custom.org,2026:str"))),
         "%TAG !! override must cause !!str to resolve to 'tag:custom.org,2026:str'"
     );
 }
@@ -230,11 +226,10 @@ fn undeclared_named_handle_returns_error() {
 fn custom_tag_handle_resolves_sequence_tag() {
     let events = evs("%TAG !e! tag:example.com,2026:\n---\n!e!seq\n- item\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart { tag: Some(t), .. }
-                if t.as_ref() == "tag:example.com,2026:seq"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::SequenceStart { .. })
+                && e.tag() == Some("tag:example.com,2026:seq"))),
         "!e!seq on block sequence must resolve to 'tag:example.com,2026:seq'"
     );
 }
@@ -244,11 +239,10 @@ fn custom_tag_handle_resolves_sequence_tag() {
 fn custom_tag_handle_resolves_mapping_tag() {
     let events = evs("%TAG !e! tag:example.com,2026:\n---\n!e!map\nkey: val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart { tag: Some(t), .. }
-                if t.as_ref() == "tag:example.com,2026:map"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::MappingStart { .. })
+                && e.tag() == Some("tag:example.com,2026:map"))),
         "!e!map on block mapping must resolve to 'tag:example.com,2026:map'"
     );
 }
@@ -262,11 +256,10 @@ fn custom_tag_handle_resolves_mapping_tag() {
 fn verbatim_tag_stored_as_bare_uri() {
     let events = evs("!<tag:example.com,2026:str> val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. }
-                if t.as_ref() == "tag:example.com,2026:str"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. })
+                && e.tag() == Some("tag:example.com,2026:str"))),
         "verbatim tag must be stored as bare URI without angle brackets"
     );
 }
@@ -276,10 +269,9 @@ fn verbatim_tag_stored_as_bare_uri() {
 fn local_tag_stored_as_is() {
     let events = evs("!foo val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. } if t.as_ref() == "!foo"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("!foo"))),
         "local tag !foo must be stored as '!foo' without expansion"
     );
 }
@@ -300,14 +292,11 @@ fn directive_scope_is_independent_per_document() {
     let tags: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if let Event::Scalar {
-                tag: Some(t),
-                value,
-                ..
-            } = e
-            {
-                if value.as_ref() == "val1" || value.as_ref() == "val2" {
-                    return Some((value.as_ref().to_owned(), t.as_ref().to_owned()));
+            if let Event::Scalar { value, .. } = e {
+                if let Some(t) = e.tag() {
+                    if value.as_ref() == "val1" || value.as_ref() == "val2" {
+                        return Some((value.as_ref().to_owned(), t.to_owned()));
+                    }
                 }
             }
             None
@@ -653,10 +642,9 @@ fn directives_survive_interspersed_comments() {
     }
     // Scalar tag must be resolved.
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. } if t.as_ref() == "prefix:foo"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("prefix:foo"))),
         "!e!foo must resolve to prefix:foo when comments interspersed"
     );
 }
@@ -666,10 +654,9 @@ fn directives_survive_interspersed_comments() {
 fn tag_directive_survives_trailing_comment() {
     let events = evs("%TAG !e! tag:example.com:\n# banner\n---\n!e!foo val\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. } if t.as_ref() == "tag:example.com:foo"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("tag:example.com:foo"))),
         "!e!foo must resolve to tag:example.com:foo when comment follows %TAG"
     );
 }
@@ -827,11 +814,8 @@ fn tag_handle_named_is_accepted() {
 fn tag_handle_named_with_hyphen_is_accepted() {
     let events = evs("%TAG !my-handle! tag:example.org,2024:\n---\n!my-handle!scalar\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. }
-                if t.as_ref() == "tag:example.org,2024:scalar"
-        )),
+        events.iter().any(|e| (matches!(e, Event::Scalar { .. })
+            && e.tag() == Some("tag:example.org,2024:scalar"))),
         "%TAG !my-handle! must be accepted and resolve the scalar tag"
     );
 }
@@ -850,11 +834,10 @@ fn tag_handle_named_with_underscore_is_rejected() {
 fn inline_tag_suffix_with_underscore_is_accepted() {
     let events = evs("!!my_type scalar\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar { tag: Some(t), .. }
-                if t.as_ref() == "tag:yaml.org,2002:my_type"
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::Scalar { .. })
+                && e.tag() == Some("tag:yaml.org,2002:my_type"))),
         "inline tag !!my_type must be accepted; underscore is valid in tag suffixes (ns-tag-char)"
     );
 }

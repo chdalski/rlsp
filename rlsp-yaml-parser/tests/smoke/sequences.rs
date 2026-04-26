@@ -36,19 +36,13 @@ fn single_entry_sequence_emits_correct_event_order() {
                 tag_directives: vec![]
             },
             Event::SequenceStart {
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
                 value: "hello".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -70,27 +64,18 @@ fn two_entry_flat_sequence() {
                 tag_directives: vec![]
             },
             Event::SequenceStart {
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
                 value: "foo".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::Scalar {
                 value: "bar".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -139,10 +124,7 @@ fn sequence_empty_item_emits_empty_plain_scalar(#[case] input: &str) {
             Event::Scalar {
                 value,
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             } if value.as_ref() == ""
         )),
         "empty sequence item must emit empty plain scalar for input: {input:?}"
@@ -189,26 +171,17 @@ fn two_level_nested_sequence_inline() {
                 tag_directives: vec![]
             },
             Event::SequenceStart {
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
                 style: CollectionStyle::Block,
             },
             Event::SequenceStart {
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
                 value: "inner".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::SequenceEnd,
             Event::SequenceEnd,
@@ -515,27 +488,18 @@ fn sequence_in_explicit_document() {
                 tag_directives: vec![]
             },
             Event::SequenceStart {
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
                 style: CollectionStyle::Block,
             },
             Event::Scalar {
                 value: "foo".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::Scalar {
                 value: "bar".into(),
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             },
             Event::SequenceEnd,
             Event::DocumentEnd { explicit: false },
@@ -910,10 +874,7 @@ fn fast_path_plain_scalar_emits_scalar_event() {
             Event::Scalar {
                 value,
                 style: ScalarStyle::Plain,
-                anchor: None,
-                anchor_loc: None,
-                tag: None,
-                tag_loc: None,
+                meta: None,
             } if value.as_ref() == "hello"
         )
     });
@@ -941,18 +902,13 @@ fn fast_path_plain_scalar_with_trailing_comment() {
     let events = event_variants("- value # comment\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(Event::Scalar {
-        value,
-        style,
-        anchor,
-        tag,
-        ..
-    }) = scalar
-    {
-        assert_eq!(value.as_ref(), "value");
-        assert!(matches!(style, ScalarStyle::Plain));
-        assert!(anchor.is_none());
-        assert!(tag.is_none());
+    if let Some(scalar) = scalar {
+        if let Event::Scalar { value, style, .. } = scalar {
+            assert_eq!(value.as_ref(), "value");
+            assert!(matches!(style, ScalarStyle::Plain));
+            assert!(scalar.anchor().is_none());
+            assert!(scalar.tag().is_none());
+        }
     }
 }
 
@@ -1001,13 +957,10 @@ fn fast_path_multiple_entries_in_sequence() {
     let values: Vec<&str> = scalar_values(&events);
     assert_eq!(values, ["a", "b", "c"]);
     for e in events.iter().filter(|e| matches!(e, Event::Scalar { .. })) {
-        if let Event::Scalar {
-            style, anchor, tag, ..
-        } = e
-        {
+        if let Event::Scalar { style, .. } = e {
             assert!(matches!(style, ScalarStyle::Plain));
-            assert!(anchor.is_none());
-            assert!(tag.is_none());
+            assert!(e.anchor().is_none());
+            assert!(e.tag().is_none());
         }
     }
 }
@@ -1018,9 +971,11 @@ fn fast_path_skipped_anchor_prefix() {
     let events = event_variants("- &anchor value\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(Event::Scalar { value, anchor, .. }) = scalar {
-        assert_eq!(value.as_ref(), "value");
-        assert_eq!(anchor.as_deref(), Some("anchor"));
+    if let Some(scalar) = scalar {
+        if let Event::Scalar { value, .. } = scalar {
+            assert_eq!(value.as_ref(), "value");
+            assert_eq!(scalar.anchor(), Some("anchor"));
+        }
     }
 }
 
@@ -1030,9 +985,11 @@ fn fast_path_skipped_tag_prefix() {
     let events = event_variants("- !!str value\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(Event::Scalar { value, tag, .. }) = scalar {
-        assert_eq!(value.as_ref(), "value");
-        assert!(tag.is_some(), "tag must be present");
+    if let Some(scalar) = scalar {
+        if let Event::Scalar { value, .. } = scalar {
+            assert_eq!(value.as_ref(), "value");
+            assert!(scalar.tag().is_some(), "tag must be present");
+        }
     }
 }
 

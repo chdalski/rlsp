@@ -6,10 +6,6 @@ use crate::pos::{Pos, Span};
 use std::borrow::Cow;
 
 /// Outcome of one state-machine step inside [`crate::EventIter::next`].
-#[expect(
-    clippy::large_enum_variant,
-    reason = "Yield carries Event<'input> which grows with each new span field; boxing would require widespread call-site changes for an internal type"
-)]
 pub enum StepResult<'input> {
     /// The step pushed to `queue` or changed state; loop again to drain.
     Continue,

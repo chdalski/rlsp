@@ -16,7 +16,7 @@ use super::state::{
     StepResult,
 };
 use crate::error::Error;
-use crate::event::{CollectionStyle, Event, ScalarStyle};
+use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
 use crate::lexer::scan_plain_line_flow;
 use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::pos::{Pos, Span};
@@ -430,11 +430,13 @@ impl<'input> EventIter<'input> {
                     // index AFTER SequenceStart (where the first item will appear).
                     events.push((
                         Event::SequenceStart {
-                            anchor: pending_flow_anchor.take(),
-                            anchor_loc: pending_flow_anchor_loc.take(),
-                            tag: pending_flow_tag.take(),
-                            tag_loc: pending_flow_tag_loc.take(),
                             style: CollectionStyle::Flow,
+                            meta: make_meta(
+                                pending_flow_anchor.take(),
+                                pending_flow_anchor_loc.take(),
+                                pending_flow_tag.take(),
+                                pending_flow_tag_loc.take(),
+                            ),
                         },
                         open_span,
                     ));
@@ -456,11 +458,13 @@ impl<'input> EventIter<'input> {
                     });
                     events.push((
                         Event::MappingStart {
-                            anchor: pending_flow_anchor.take(),
-                            anchor_loc: pending_flow_anchor_loc.take(),
-                            tag: pending_flow_tag.take(),
-                            tag_loc: pending_flow_tag_loc.take(),
                             style: CollectionStyle::Flow,
+                            meta: make_meta(
+                                pending_flow_anchor.take(),
+                                pending_flow_anchor_loc.take(),
+                                pending_flow_tag.take(),
+                                pending_flow_tag_loc.take(),
+                            ),
                         },
                         open_span,
                     ));
@@ -729,10 +733,12 @@ impl<'input> EventIter<'input> {
                         Event::Scalar {
                             value: Cow::Borrowed(""),
                             style: ScalarStyle::Plain,
-                            anchor: pending_flow_anchor.take(),
-                            anchor_loc: pending_flow_anchor_loc.take(),
-                            tag: pending_flow_tag.take(),
-                            tag_loc: pending_flow_tag_loc.take(),
+                            meta: make_meta(
+                                pending_flow_anchor.take(),
+                                pending_flow_anchor_loc.take(),
+                                pending_flow_tag.take(),
+                                pending_flow_tag_loc.take(),
+                            ),
                         },
                         zero_span(empty_pos),
                     ));
@@ -943,10 +949,12 @@ impl<'input> EventIter<'input> {
                     Event::Scalar {
                         value,
                         style,
-                        anchor: pending_flow_anchor.take(),
-                        anchor_loc: pending_flow_anchor_loc.take(),
-                        tag: pending_flow_tag.take(),
-                        tag_loc: pending_flow_tag_loc.take(),
+                        meta: make_meta(
+                            pending_flow_anchor.take(),
+                            pending_flow_anchor_loc.take(),
+                            pending_flow_tag.take(),
+                            pending_flow_tag_loc.take(),
+                        ),
                     },
                     span,
                 ));
@@ -1174,10 +1182,12 @@ impl<'input> EventIter<'input> {
                                             Event::Scalar {
                                                 value: Cow::Borrowed(""),
                                                 style: ScalarStyle::Plain,
-                                                anchor: pending_flow_anchor.take(),
-                                                anchor_loc: pending_flow_anchor_loc.take(),
-                                                tag: pending_flow_tag.take(),
-                                                tag_loc: pending_flow_tag_loc.take(),
+                                                meta: make_meta(
+                                                    pending_flow_anchor.take(),
+                                                    pending_flow_anchor_loc.take(),
+                                                    pending_flow_tag.take(),
+                                                    pending_flow_tag_loc.take(),
+                                                ),
                                             },
                                             zero_span(key_pos),
                                         ));
@@ -1215,11 +1225,8 @@ impl<'input> EventIter<'input> {
                                     *key_start_idx,
                                     (
                                         Event::MappingStart {
-                                            anchor: None,
-                                            anchor_loc: None,
-                                            tag: None,
-                                            tag_loc: None,
                                             style: CollectionStyle::Flow,
+                                            meta: None,
                                         },
                                         zero_span(colon_pos),
                                     ),
@@ -1620,10 +1627,12 @@ impl<'input> EventIter<'input> {
                             Event::Scalar {
                                 value: Cow::Borrowed(scanned),
                                 style: ScalarStyle::Plain,
-                                anchor: pending_flow_anchor.take(),
-                                anchor_loc: pending_flow_anchor_loc.take(),
-                                tag: pending_flow_tag.take(),
-                                tag_loc: pending_flow_tag_loc.take(),
+                                meta: make_meta(
+                                    pending_flow_anchor.take(),
+                                    pending_flow_anchor_loc.take(),
+                                    pending_flow_tag.take(),
+                                    pending_flow_tag_loc.take(),
+                                ),
                             },
                             scalar_span,
                         ));
@@ -1716,11 +1725,13 @@ impl<'input> EventIter<'input> {
                 0,
                 (
                     Event::MappingStart {
-                        anchor: mapping_anchor,
-                        anchor_loc: mapping_anchor_loc,
-                        tag: mapping_tag,
-                        tag_loc: mapping_tag_loc,
                         style: crate::event::CollectionStyle::Block,
+                        meta: make_meta(
+                            mapping_anchor,
+                            mapping_anchor_loc,
+                            mapping_tag,
+                            mapping_tag_loc,
+                        ),
                     },
                     zero_span(first_line_pos),
                 ),

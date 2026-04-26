@@ -13,7 +13,7 @@ fn anchor_inline_before_plain_scalar_value() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "val"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "val"
         )),
         "anchor `&a` must be attached to value scalar 'val'"
     );
@@ -26,7 +26,7 @@ fn anchor_on_standalone_line_applies_to_scalar_below() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "val"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "val"
         )),
         "standalone anchor `&a` must be attached to following scalar"
     );
@@ -40,7 +40,7 @@ fn anchor_on_mapping_key_scalar() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("k") && value.as_ref() == "key"
         )),
         "anchor `&k` must be attached to key scalar"
     );
@@ -48,7 +48,7 @@ fn anchor_on_mapping_key_scalar() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
+            .any(|e| matches!(e, Event::MappingStart { .. } if e.anchor().is_none())),
         "MappingStart must have no anchor"
     );
 }
@@ -60,7 +60,7 @@ fn anchor_on_sequence_item_plain_scalar() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "item"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "item"
         )),
         "anchor `&a` must be attached to sequence item scalar"
     );
@@ -74,7 +74,7 @@ fn anchor_on_empty_scalar_value() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("anchor"), value, .. } if value.as_ref() == ""
+            Event::Scalar { value, .. } if e.anchor() == Some("anchor") && value.as_ref() == ""
         )),
         "anchor `&anchor` with no value must emit empty scalar"
     );
@@ -88,11 +88,7 @@ fn duplicate_anchor_name_overwrites_previous() {
     let anchored: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
-            Event::Scalar {
-                anchor: Some("anchor"),
-                value,
-                ..
-            } => Some(value.as_ref()),
+            Event::Scalar { value, .. } if e.anchor() == Some("anchor") => Some(value.as_ref()),
             Event::Scalar { .. }
             | Event::StreamStart
             | Event::StreamEnd
@@ -122,14 +118,13 @@ fn anchor_on_standalone_line_applies_to_block_sequence() {
     // `&seq\n- a\n- b\n` — standalone anchor applies to following sequence.
     let events = evs("&seq\n- a\n- b\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::SequenceStart {
-                anchor: Some("seq"),
                 style: CollectionStyle::Block,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("seq"))),
         "standalone anchor `&seq` must be attached to SequenceStart"
     );
 }
@@ -140,14 +135,13 @@ fn inline_anchor_on_dash_applies_to_nested_sequence() {
     // The `&seq` is on the same line as `-`, so it applies to the nested seq.
     let events = evs("- &seq\n  - a\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::SequenceStart {
-                anchor: Some("seq"),
                 style: CollectionStyle::Block,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("seq"))),
         "anchor `&seq` on dash line must be attached to nested SequenceStart"
     );
 }
@@ -161,14 +155,13 @@ fn anchor_on_standalone_line_applies_to_block_mapping() {
     // `&map\nkey: val\n` — standalone anchor applies to the mapping.
     let events = evs("&map\nkey: val\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::MappingStart {
-                anchor: Some("map"),
                 style: CollectionStyle::Block,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("map"))),
         "standalone anchor `&map` must be attached to MappingStart"
     );
 }
@@ -178,14 +171,13 @@ fn anchor_inline_before_mapping_value_applies_to_nested_mapping() {
     // `key: &node\n  inner: val\n` — anchor before nested mapping.
     let events = evs("key: &node\n  inner: val\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::MappingStart {
-                anchor: Some("node"),
                 style: CollectionStyle::Block,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("node"))),
         "anchor `&node` inline before nested mapping must be attached to MappingStart"
     );
 }
@@ -197,22 +189,20 @@ fn inline_anchor_on_key_does_not_annotate_mapping_start() {
     let events = evs("&k key: val\n");
     // MappingStart has no anchor.
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::MappingStart {
-                anchor: None,
-                anchor_loc: None,
                 style: CollectionStyle::Block,
                 ..
             }
-        )),
+        ) && e.anchor().is_none())),
         "MappingStart must have no anchor when anchor is inline before key"
     );
     // The key scalar carries the anchor.
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("k") && value.as_ref() == "key"
         )),
         "anchor `&k` must be on key scalar"
     );
@@ -288,14 +278,13 @@ fn anchor_on_flow_sequence_start() {
     // `&seq [a, b]\n` — anchor applied to a flow sequence.
     let events = evs("&seq [a, b]\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::SequenceStart {
-                anchor: Some("seq"),
                 style: CollectionStyle::Flow,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("seq"))),
         "anchor `&seq` must be attached to flow SequenceStart"
     );
 }
@@ -305,14 +294,13 @@ fn anchor_on_flow_mapping_start() {
     // `&map {a: b}\n` — anchor applied to a flow mapping.
     let events = evs("&map {a: b}\n");
     assert!(
-        events.iter().any(|e| matches!(
+        events.iter().any(|e| (matches!(
             e,
             Event::MappingStart {
-                anchor: Some("map"),
                 style: CollectionStyle::Flow,
                 ..
             }
-        )),
+        ) && e.anchor() == Some("map"))),
         "anchor `&map` must be attached to flow MappingStart"
     );
 }
@@ -324,7 +312,7 @@ fn anchor_on_plain_scalar_inside_flow_mapping() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "val"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "val"
         )),
         "anchor `&a` must be attached to scalar 'val' in flow mapping"
     );
@@ -386,13 +374,9 @@ fn anchor_name_with_unicode_characters_is_accepted() {
     // `&😁 unicode anchor\n`
     let events = evs("- &\u{1F601} unicode anchor\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                anchor: Some("\u{1F601}"),
-                ..
-            }
-        )),
+        events
+            .iter()
+            .any(|e| { matches!(e, Event::Scalar { .. }) && e.anchor() == Some("\u{1F601}") }),
         "unicode anchor name must be accepted"
     );
 }
@@ -422,7 +406,7 @@ fn flow_indicator_terminates_anchor_name() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("name"), value, .. } if value.as_ref() == "item"
+            Event::Scalar { value, .. } if e.anchor() == Some("name") && value.as_ref() == "item"
         )),
         "anchor name must be `name`, not include the space or the value `item`"
     );
@@ -437,7 +421,7 @@ fn line_break_terminates_anchor_name() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("name"), value, .. } if value.as_ref() == "scalar"
+            Event::Scalar { value, .. } if e.anchor() == Some("name") && value.as_ref() == "scalar"
         )),
         "newline must terminate anchor name; anchor `name` must attach to following `scalar`"
     );
@@ -449,14 +433,11 @@ fn tag_before_anchor_on_same_line_both_emitted() {
     // Both the tag and anchor are emitted on the scalar.
     let events = evs("!tag &anchor value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::Scalar {
-                anchor: Some("anchor"),
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "!tag"
-        )),
+        events.iter().any(|e| {
+            matches!(e, Event::Scalar { .. })
+                && e.anchor() == Some("anchor")
+                && e.tag() == Some("!tag")
+        }),
         "tag-before-anchor on same line: both tag and anchor must be emitted on the scalar"
     );
 }
@@ -493,7 +474,7 @@ fn anchor_name_borrowed_from_input_not_allocated() {
     let found = events.iter().any(|e| {
         matches!(
             e,
-            Event::Scalar { anchor: Some("myanchor"), value, .. } if value.as_ref() == "value"
+            Event::Scalar { value, .. } if e.anchor() == Some("myanchor") && value.as_ref() == "value"
         )
     });
     assert!(found, "anchor name must survive as a borrowed slice");
@@ -517,15 +498,7 @@ fn conformance_3gzx_spec_example_7_1_alias_nodes() {
     // Two anchored scalars ("Foo" and "Bar").
     let anchored_scalar_count = events
         .iter()
-        .filter(|e| {
-            matches!(
-                e,
-                Event::Scalar {
-                    anchor: Some("anchor"),
-                    ..
-                }
-            )
-        })
+        .filter(|e| (matches!(e, Event::Scalar { .. }) && e.anchor() == Some("anchor")))
         .count();
     assert_eq!(
         anchored_scalar_count, 2,
@@ -551,7 +524,7 @@ fn conformance_6kgn_anchor_for_empty_node() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("anchor"), value, .. } if value.as_ref() == ""
+            Event::Scalar { value, .. } if e.anchor() == Some("anchor") && value.as_ref() == ""
         )),
         "anchored empty scalar must be present"
     );
@@ -577,7 +550,7 @@ fn conformance_7bub_spec_example_2_10_sammy_sosa() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("SS"), value, .. } if value.as_ref() == "Sammy Sosa"
+            Event::Scalar { value, .. } if e.anchor() == Some("SS") && value.as_ref() == "Sammy Sosa"
         )),
         "anchor `&SS` on 'Sammy Sosa' must be present"
     );
@@ -599,8 +572,7 @@ fn conformance_8xyn_anchor_with_unicode_character() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("\u{1F601}"), value, .. }
-                if value.as_ref() == "unicode anchor"
+            Event::Scalar { value, .. } if e.anchor() == Some("\u{1F601}") && value.as_ref() == "unicode anchor"
         )),
         "unicode emoji anchor name must be accepted"
     );
@@ -616,14 +588,14 @@ fn conformance_6m2f_aliases_in_explicit_block_mapping() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "a"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "a"
         )),
         "anchor `&a` on key must be present"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("b"), value, .. } if value.as_ref() == "b"
+            Event::Scalar { value, .. } if e.anchor() == Some("b") && value.as_ref() == "b"
         )),
         "anchor `&b` on value must be present"
     );
@@ -665,14 +637,14 @@ fn flow_sequence_with_anchored_first_and_unannotated_second() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "foo"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "foo"
         )),
         "first item must have anchor `a`"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "bar"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "bar"
         )),
         "second item must have no anchor"
     );
@@ -685,7 +657,7 @@ fn anchor_on_flow_mapping_key() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "key"
         )),
         "anchor `&a` must be attached to key scalar 'key'"
     );
@@ -731,7 +703,7 @@ fn multi_document_alias_in_second_doc_emits_event() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "foo"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "foo"
         )),
         "anchored scalar 'foo' in doc 1 must be present"
     );
@@ -781,14 +753,8 @@ fn anchor_name_stops_at_closing_bracket() {
     // test just verifies no panic and no inclusion of `]` in the name.
     let result: Vec<_> = parse_events("[&name]\n").collect();
     // Check that if any anchor appeared, its name does not contain `]`.
-    for item in &result {
-        if let Ok((
-            Event::Scalar {
-                anchor: Some(name), ..
-            },
-            _,
-        )) = item
-        {
+    for (ev, _) in result.iter().filter_map(|r| r.as_ref().ok()) {
+        if let Some(name) = ev.anchor() {
             assert!(
                 !name.contains(']'),
                 "anchor name must not include `]`; got `{name}`"
@@ -840,7 +806,7 @@ fn flow_sequence_with_anchored_item_then_alias() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "first"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "first"
         )),
         "anchored scalar 'first' must be present"
     );
@@ -859,7 +825,7 @@ fn flow_mapping_with_anchored_key_and_alias_value() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("k") && value.as_ref() == "key"
         )),
         "anchor `&k` must be on key scalar"
     );
@@ -878,7 +844,7 @@ fn block_sequence_mix_scalars_and_aliases() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("first"), value, .. } if value.as_ref() == "one"
+            Event::Scalar { value, .. } if e.anchor() == Some("first") && value.as_ref() == "one"
         )),
         "anchored scalar 'one' must be present"
     );
@@ -891,7 +857,7 @@ fn block_sequence_mix_scalars_and_aliases() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "two"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "two"
         )),
         "plain scalar 'two' with no anchor must be present"
     );
@@ -906,19 +872,15 @@ fn block_sequence_mix_scalars_and_aliases() {
 fn standalone_anchor_applies_to_block_sequence_start() {
     let events = evs("&seq\n- a\n- b\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                anchor: Some("seq"),
-                ..
-            }
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::SequenceStart { .. }) && e.anchor() == Some("seq"))),
         "standalone &seq must be attached to SequenceStart"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "a"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "a"
         )),
         "first sequence item must have no anchor"
     );
@@ -931,13 +893,13 @@ fn inline_anchor_on_key_annotates_key_scalar_not_mapping() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::MappingStart { anchor: None, .. })),
+            .any(|e| matches!(e, Event::MappingStart { .. } if e.anchor().is_none())),
         "MappingStart must have no anchor when &k is inline before key"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("k") && value.as_ref() == "key"
         )),
         "key scalar must carry anchor &k"
     );
@@ -948,19 +910,15 @@ fn inline_anchor_on_key_annotates_key_scalar_not_mapping() {
 fn standalone_anchor_applies_to_block_mapping_start() {
     let events = evs("&map\nkey: value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                anchor: Some("map"),
-                ..
-            }
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::MappingStart { .. }) && e.anchor() == Some("map"))),
         "standalone &map must be attached to MappingStart"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "key"
         )),
         "key scalar must have no anchor"
     );
@@ -973,14 +931,14 @@ fn inline_anchor_on_scalar_value_attaches_to_value() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "value"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "value"
         )),
         "value scalar must carry anchor &a"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "key"
         )),
         "key scalar must have no anchor"
     );
@@ -991,26 +949,22 @@ fn inline_anchor_on_scalar_value_attaches_to_value() {
 fn nested_anchors_outer_on_sequence_inner_on_item() {
     let events = evs("&outer\n- &inner a\n- b\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                anchor: Some("outer"),
-                ..
-            }
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::SequenceStart { .. }) && e.anchor() == Some("outer"))),
         "SequenceStart must carry anchor &outer"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("inner"), value, .. } if value.as_ref() == "a"
+            Event::Scalar { value, .. } if e.anchor() == Some("inner") && value.as_ref() == "a"
         )),
         "first item scalar must carry anchor &inner"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "b"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "b"
         )),
         "second item scalar must have no anchor"
     );
@@ -1026,19 +980,15 @@ fn standalone_anchor_applies_to_mapping_inline_anchor_applies_to_key() {
     // &k is an inline anchor for the key scalar.
     let events = evs("&map\n&k key: value\n");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                anchor: Some("map"),
-                ..
-            }
-        )),
+        events
+            .iter()
+            .any(|e| (matches!(e, Event::MappingStart { .. }) && e.anchor() == Some("map"))),
         "MappingStart must carry anchor &map"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("k"), value, .. } if value.as_ref() == "key"
+            Event::Scalar { value, .. } if e.anchor() == Some("k") && value.as_ref() == "key"
         )),
         "key scalar must carry anchor &k"
     );
@@ -1060,14 +1010,14 @@ fn anchor_cleared_after_use_second_item_has_none() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: Some("a"), value, .. } if value.as_ref() == "first"
+            Event::Scalar { value, .. } if e.anchor() == Some("a") && value.as_ref() == "first"
         )),
         "first item must carry anchor &a"
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
-            Event::Scalar { anchor: None, value, .. } if value.as_ref() == "second"
+            Event::Scalar { value, .. } if e.anchor().is_none() && value.as_ref() == "second"
         )),
         "second item must have no anchor"
     );
@@ -1118,8 +1068,8 @@ fn anchor_loc_none_when_no_anchor_on_scalar() {
     let events = parse_to_vec("value\n");
     let scalar = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar { anchor_loc, .. } = ev {
-                Some(*anchor_loc)
+            if matches!(ev, Event::Scalar { .. }) {
+                Some(ev.anchor_loc())
             } else {
                 None
             }
@@ -1140,13 +1090,8 @@ fn anchor_loc_some_for_anchored_plain_scalar() {
     let events = parse_to_vec("&abc val\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some("abc"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("abc") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1183,13 +1128,8 @@ fn anchor_loc_some_for_anchored_sequence_start() {
     let events = parse_to_vec("&s\n- item\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::SequenceStart {
-                anchor: Some("s"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::SequenceStart { .. }) && ev.anchor() == Some("s") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1223,13 +1163,8 @@ fn anchor_loc_some_for_anchored_mapping_start() {
     let events = parse_to_vec("&m\nkey: val\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::MappingStart {
-                anchor: Some("m"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::MappingStart { .. }) && ev.anchor() == Some("m") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1263,13 +1198,8 @@ fn anchor_loc_inline_anchor_on_mapping_key_scalar() {
     let events = parse_to_vec("&k key: val\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some("k"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("k") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1308,13 +1238,8 @@ fn anchor_loc_multibyte_anchor_name_byte_range() {
     let events = parse_to_vec(input);
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some(_),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor().is_some() {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1347,13 +1272,8 @@ fn anchor_loc_start_at_ampersand_mid_line() {
     let events = parse_to_vec("key: &v val\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some("v"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("v") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1381,8 +1301,8 @@ fn anchor_loc_none_for_sequence_start_without_anchor() {
     let events = parse_to_vec("- item\n");
     let loc = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::SequenceStart { anchor_loc, .. } = ev {
-                Some(*anchor_loc)
+            if matches!(ev, Event::SequenceStart { .. }) {
+                Some(ev.anchor_loc())
             } else {
                 None
             }
@@ -1401,8 +1321,8 @@ fn anchor_loc_none_for_mapping_start_without_anchor() {
     let events = parse_to_vec("key: val\n");
     let loc = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::MappingStart { anchor_loc, .. } = ev {
-                Some(*anchor_loc)
+            if matches!(ev, Event::MappingStart { .. }) {
+                Some(ev.anchor_loc())
             } else {
                 None
             }
@@ -1423,13 +1343,8 @@ fn anchor_loc_start_line_matches_anchor_line() {
     let events = parse_to_vec("---\n&a val\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some("a"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("a") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1455,14 +1370,15 @@ fn anchor_loc_some_for_anchored_flow_mapping() {
     let events = parse_to_vec("&a {k: v}\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::MappingStart {
-                anchor: Some("a"),
-                anchor_loc: Some(s),
-                style: CollectionStyle::Flow,
-                ..
-            } = ev
+            if matches!(
+                ev,
+                Event::MappingStart {
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            ) && ev.anchor() == Some("a")
             {
-                Some(*s)
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1499,14 +1415,15 @@ fn anchor_loc_some_for_anchored_flow_sequence() {
     let events = parse_to_vec("&a [item]\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::SequenceStart {
-                anchor: Some("a"),
-                anchor_loc: Some(s),
-                style: CollectionStyle::Flow,
-                ..
-            } = ev
+            if matches!(
+                ev,
+                Event::SequenceStart {
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            ) && ev.anchor() == Some("a")
             {
-                Some(*s)
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1543,13 +1460,8 @@ fn anchor_loc_dotted_anchor_name_full_span() {
     let events = parse_to_vec("&a.b.c value\n");
     let loc_opt = events.iter().find_map(|r| {
         r.as_ref().ok().and_then(|(ev, _)| {
-            if let Event::Scalar {
-                anchor: Some("a.b.c"),
-                anchor_loc: Some(s),
-                ..
-            } = ev
-            {
-                Some(*s)
+            if matches!(ev, Event::Scalar { .. }) && ev.anchor() == Some("a.b.c") {
+                ev.anchor_loc()
             } else {
                 None
             }
@@ -1600,15 +1512,9 @@ fn anchor_loc_invariant_corpus_wide() {
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();
         for (ev, _) in rlsp_yaml_parser::parse_events(&content).filter_map(Result::ok) {
             let anchor_pair = match &ev {
-                Event::Scalar {
-                    anchor, anchor_loc, ..
+                Event::Scalar { .. } | Event::SequenceStart { .. } | Event::MappingStart { .. } => {
+                    Some((ev.anchor().is_some(), ev.anchor_loc().is_some()))
                 }
-                | Event::SequenceStart {
-                    anchor, anchor_loc, ..
-                }
-                | Event::MappingStart {
-                    anchor, anchor_loc, ..
-                } => Some((anchor.is_some(), anchor_loc.is_some())),
                 Event::StreamStart
                 | Event::StreamEnd
                 | Event::Comment { .. }
@@ -1636,15 +1542,9 @@ fn anchor_loc_invariant_anchor_some_iff_loc_some() {
     let events = parse_to_vec(input);
     for (ev, _) in events.iter().filter_map(|r| r.as_ref().ok()) {
         let anchor_pair = match ev {
-            Event::Scalar {
-                anchor, anchor_loc, ..
+            Event::Scalar { .. } | Event::SequenceStart { .. } | Event::MappingStart { .. } => {
+                Some((ev.anchor().is_some(), ev.anchor_loc().is_some()))
             }
-            | Event::SequenceStart {
-                anchor, anchor_loc, ..
-            }
-            | Event::MappingStart {
-                anchor, anchor_loc, ..
-            } => Some((anchor.is_some(), anchor_loc.is_some())),
             Event::StreamStart
             | Event::StreamEnd
             | Event::Comment { .. }

@@ -14,14 +14,11 @@ fn tag_first_anchor_second_standalone_both_propagate_to_sequence_start() {
     let input = "!!seq\n&myseq\n- a\n";
     let events = evs(input);
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::SequenceStart {
-                anchor: Some("myseq"),
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:seq"
-        )),
+        events.iter().any(|e| {
+            matches!(e, Event::SequenceStart { .. })
+                && e.anchor() == Some("myseq")
+                && e.tag() == Some("tag:yaml.org,2002:seq")
+        }),
         "SequenceStart must carry both anchor myseq and tag:yaml.org,2002:seq (tag-first order)"
     );
 }
@@ -33,14 +30,11 @@ fn anchor_first_tag_second_standalone_both_propagate_to_mapping_start() {
     let input = "&mymap\n!!map\nkey: val\n";
     let events = evs(input);
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            Event::MappingStart {
-                anchor: Some("mymap"),
-                tag: Some(t),
-                ..
-            } if t.as_ref() == "tag:yaml.org,2002:map"
-        )),
+        events.iter().any(|e| {
+            matches!(e, Event::MappingStart { .. })
+                && e.anchor() == Some("mymap")
+                && e.tag() == Some("tag:yaml.org,2002:map")
+        }),
         "MappingStart must carry both anchor mymap and tag:yaml.org,2002:map"
     );
 }
