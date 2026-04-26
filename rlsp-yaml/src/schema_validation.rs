@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -1288,7 +1289,7 @@ fn validate_mapping(
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
                 anchor: None,
                 anchor_loc: None,
-                tag: Some("tag:yaml.org,2002:str".to_string()),
+                tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
                 tag_loc: None,
                 loc: rlsp_yaml_parser::Span {
                     start: rlsp_yaml_parser::Pos::ORIGIN,

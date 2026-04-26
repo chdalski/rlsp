@@ -13,6 +13,8 @@
 //! All tests exercise the public API through the production entry points:
 //! `LoaderBuilder::new().schema(s).build().load(input)` and `load()`.
 
+use std::borrow::Cow;
+
 use rlsp_yaml_parser::loader::LoaderBuilder;
 use rlsp_yaml_parser::{LoadError, Node, Schema};
 
@@ -22,7 +24,7 @@ use rlsp_yaml_parser::{LoadError, Node, Schema};
 
 /// Extract the tag from the root scalar of a single-document YAML string
 /// loaded with the given schema.
-fn scalar_tag(input: &str, schema: Schema) -> Option<String> {
+fn scalar_tag(input: &str, schema: Schema) -> Option<Cow<'static, str>> {
     let docs = LoaderBuilder::new()
         .schema(schema)
         .build()
@@ -36,7 +38,7 @@ fn scalar_tag(input: &str, schema: Schema) -> Option<String> {
 }
 
 /// Extract the tag from the root mapping of a single-document YAML string.
-fn mapping_tag(input: &str, schema: Schema) -> Option<String> {
+fn mapping_tag(input: &str, schema: Schema) -> Option<Cow<'static, str>> {
     let docs = LoaderBuilder::new()
         .schema(schema)
         .build()
@@ -50,7 +52,7 @@ fn mapping_tag(input: &str, schema: Schema) -> Option<String> {
 }
 
 /// Extract the tag from the root sequence of a single-document YAML string.
-fn sequence_tag(input: &str, schema: Schema) -> Option<String> {
+fn sequence_tag(input: &str, schema: Schema) -> Option<Cow<'static, str>> {
     let docs = LoaderBuilder::new()
         .schema(schema)
         .build()
@@ -747,5 +749,133 @@ fn json_unresolved_scalar_truncates_long_value() {
         131,
         "truncated value should be 131 chars, got len={}",
         value.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Group 21 — Cow variant identity: resolver-injected vs user-authored tags
+// ---------------------------------------------------------------------------
+
+// COW-IT-1 (spike): resolver-injected scalar tag is Cow::Borrowed
+#[test]
+fn core_schema_resolver_tag_is_borrowed_scalar() {
+    let tag = scalar_tag("42\n", Schema::Core);
+    assert!(
+        matches!(tag, Some(Cow::Borrowed(_))),
+        "resolver-injected tag must be Cow::Borrowed, got: {tag:?}"
+    );
+}
+
+// COW-IT-2: resolver-injected mapping tag is Cow::Borrowed
+#[test]
+fn core_schema_resolver_tag_is_borrowed_mapping() {
+    let tag = mapping_tag("a: 1\n", Schema::Core);
+    assert!(
+        matches!(tag, Some(Cow::Borrowed(_))),
+        "resolver-injected mapping tag must be Cow::Borrowed, got: {tag:?}"
+    );
+}
+
+// COW-IT-3: resolver-injected sequence tag is Cow::Borrowed
+#[test]
+fn core_schema_resolver_tag_is_borrowed_sequence() {
+    let tag = sequence_tag("- a\n", Schema::Core);
+    assert!(
+        matches!(tag, Some(Cow::Borrowed(_))),
+        "resolver-injected sequence tag must be Cow::Borrowed, got: {tag:?}"
+    );
+}
+
+// COW-IT-4: explicit user-authored tag is Cow::Owned
+#[test]
+fn explicit_user_tag_is_owned() {
+    let tag = scalar_tag("!!str hello\n", Schema::Core);
+    assert!(
+        matches!(tag, Some(Cow::Owned(_))),
+        "user-authored tag must be Cow::Owned, got: {tag:?}"
+    );
+}
+
+// COW-IT-5: explicit user-authored tag value matches after Deref coercion
+#[test]
+fn explicit_user_tag_value_matches() {
+    let tag = scalar_tag("!!str hello\n", Schema::Core);
+    assert_eq!(
+        tag.as_deref(),
+        Some("tag:yaml.org,2002:str"),
+        "user-authored !!str must expand to the full URI"
+    );
+}
+
+// COW-IT-6: all resolver-injected tags in a nested structure are Cow::Borrowed
+#[test]
+fn resolver_tags_not_reallocated_in_nested_structure() {
+    let docs = LoaderBuilder::new()
+        .schema(Schema::Core)
+        .build()
+        .load("numbers:\n  - 1\n  - 3.14\n")
+        .expect("load failed");
+    let Node::Mapping {
+        entries,
+        tag: map_tag,
+        ..
+    } = &docs[0].root
+    else {
+        panic!("expected root mapping");
+    };
+    assert!(
+        matches!(map_tag, Some(Cow::Borrowed(_))),
+        "mapping tag must be Borrowed"
+    );
+    let (_key, value) = &entries[0];
+    let Node::Sequence {
+        items,
+        tag: seq_tag,
+        ..
+    } = value
+    else {
+        panic!("expected sequence value");
+    };
+    assert!(
+        matches!(seq_tag, Some(Cow::Borrowed(_))),
+        "sequence tag must be Borrowed"
+    );
+    for item in items {
+        let Node::Scalar { tag, .. } = item else {
+            panic!("expected scalar item");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "scalar item tag must be Borrowed, got: {tag:?}"
+        );
+    }
+}
+
+// COW-IT-7: mixed explicit and resolver tags in the same mapping
+#[test]
+fn mixed_explicit_and_resolver_tags_in_same_mapping() {
+    let docs = LoaderBuilder::new()
+        .schema(Schema::Core)
+        .build()
+        .load("a: !!str 1\nb: 2\n")
+        .expect("load failed");
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected root mapping");
+    };
+    // First entry: value has user-authored !!str
+    let Node::Scalar { tag: tag_a, .. } = &entries[0].1 else {
+        panic!("expected scalar value for key a");
+    };
+    assert!(
+        matches!(tag_a, Some(Cow::Owned(_))),
+        "user-authored !!str must be Cow::Owned, got: {tag_a:?}"
+    );
+    // Second entry: value gets resolver-injected !!int
+    let Node::Scalar { tag: tag_b, .. } = &entries[1].1 else {
+        panic!("expected scalar value for key b");
+    };
+    assert!(
+        matches!(tag_b, Some(Cow::Borrowed(_))),
+        "resolver-injected !!int must be Cow::Borrowed, got: {tag_b:?}"
     );
 }

@@ -36,6 +36,7 @@
     reason = "test code — indices are validated by invariant checks before use"
 )]
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -1681,7 +1682,7 @@ mod tests {
             style: ScalarStyle::Plain,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!custom".to_string()),
+            tag: Some(Cow::Owned("!custom".to_owned())),
             tag_loc: None, // Simulated loader bug: user tag with no source position.
             loc: origin,
             leading_comments: None,

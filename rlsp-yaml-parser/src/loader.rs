@@ -29,6 +29,7 @@
 //! where Lossless mode is the default.  The `expanded_nodes` volume limit
 //! provides the backstop.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
@@ -468,7 +469,7 @@ impl<'opt> LoadState<'opt> {
                     style,
                     anchor: anchor.map(str::to_owned),
                     anchor_loc,
-                    tag: tag.map(std::borrow::Cow::into_owned),
+                    tag: tag.map(|t| Cow::Owned(t.into_owned())),
                     tag_loc,
                     loc: span,
                     leading_comments: None,
@@ -492,7 +493,7 @@ impl<'opt> LoadState<'opt> {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = mapping_anchor_loc;
                 let tag_loc = mapping_tag_loc;
-                let tag = tag.map(std::borrow::Cow::into_owned);
+                let tag = tag.map(|t| Cow::Owned(t.into_owned()));
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
@@ -605,7 +606,7 @@ impl<'opt> LoadState<'opt> {
                 let anchor = anchor.map(str::to_owned);
                 let anchor_loc = sequence_anchor_loc;
                 let tag_loc = sequence_tag_loc;
-                let tag = tag.map(std::borrow::Cow::into_owned);
+                let tag = tag.map(|t| Cow::Owned(t.into_owned()));
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
@@ -988,13 +989,13 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             // (e.g. the formatter) distinguish user-authored tags from resolver-injected
             // ones, which is critical for correct idempotent output.
             if tag.as_deref() == Some("!") {
-                *tag = Some(crate::schema::ResolvedTag::Str.as_str().to_owned());
+                *tag = Some(Cow::Borrowed(crate::schema::ResolvedTag::Str.as_str()));
                 return Ok(());
             }
             // All other tags: pass through as-is (Some(non-!) = explicit tag → Ok(None)).
             match resolve_scalar(schema, *style, value, tag.as_deref()) {
                 Ok(Some(resolved)) => {
-                    *tag = Some(resolved.as_str().to_owned());
+                    *tag = Some(Cow::Borrowed(resolved.as_str()));
                     *tag_loc = None;
                 }
                 Ok(None) => {}
@@ -1013,7 +1014,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             if let Some(resolved) =
                 resolve_collection(schema, CollectionKind::Mapping, effective_tag)
             {
-                *tag = Some(resolved.as_str().to_owned());
+                *tag = Some(Cow::Borrowed(resolved.as_str()));
                 *tag_loc = None;
             }
         }
@@ -1022,7 +1023,7 @@ fn apply_schema_to_node(node: &mut Node<Span>, schema: Schema) -> Result<()> {
             if let Some(resolved) =
                 resolve_collection(schema, CollectionKind::Sequence, effective_tag)
             {
-                *tag = Some(resolved.as_str().to_owned());
+                *tag = Some(Cow::Borrowed(resolved.as_str()));
                 *tag_loc = None;
             }
         }
@@ -1649,5 +1650,159 @@ mod tests {
             char_count, 128,
             "truncated portion must be exactly 128 chars"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // COW-UT: Cow variant identity for resolver-injected vs user-authored tags
+    // -----------------------------------------------------------------------
+
+    fn load_root(input: &str) -> Node<Span> {
+        load(input).expect("load failed").remove(0).root
+    }
+
+    // COW-UT-1: resolver-injected !!str tag is Cow::Borrowed
+    #[test]
+    fn resolver_injected_str_tag_is_borrowed() {
+        let Node::Scalar { tag, .. } = load_root("hello\n") else {
+            panic!("expected scalar");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "resolver-injected !!str must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-2: resolver-injected !!int tag is Cow::Borrowed
+    #[test]
+    fn resolver_injected_int_tag_is_borrowed() {
+        let Node::Scalar { tag, .. } = load_root("42\n") else {
+            panic!("expected scalar");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "resolver-injected !!int must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-3: resolver-injected !!null tag is Cow::Borrowed
+    #[test]
+    fn resolver_injected_null_tag_is_borrowed() {
+        let Node::Scalar { tag, .. } = load_root("null\n") else {
+            panic!("expected scalar");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "resolver-injected !!null must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-4: resolver-injected !!map tag is Cow::Borrowed
+    #[test]
+    fn resolver_injected_map_tag_is_borrowed() {
+        let Node::Mapping { tag, .. } = load_root("a: 1\n") else {
+            panic!("expected mapping");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "resolver-injected !!map must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-5: resolver-injected !!seq tag is Cow::Borrowed
+    #[test]
+    fn resolver_injected_seq_tag_is_borrowed() {
+        let Node::Sequence { tag, .. } = load_root("- a\n") else {
+            panic!("expected sequence");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "resolver-injected !!seq must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-6: user-authored tag on scalar is Cow::Owned
+    #[test]
+    fn user_authored_tag_on_scalar_is_owned() {
+        let Node::Scalar { tag, .. } = load_root("!!str hello\n") else {
+            panic!("expected scalar");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Owned(_))),
+            "user-authored !!str must be Owned, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-7: user-authored tag on mapping is Cow::Owned
+    #[test]
+    fn user_authored_tag_on_mapping_is_owned() {
+        let Node::Mapping { tag, .. } = load_root("!!map\na: 1\n") else {
+            panic!("expected mapping");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Owned(_))),
+            "user-authored !!map must be Owned, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-8: user-authored tag on sequence is Cow::Owned
+    #[test]
+    fn user_authored_tag_on_sequence_is_owned() {
+        let Node::Sequence { tag, .. } = load_root("!!seq\n- a\n") else {
+            panic!("expected sequence");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Owned(_))),
+            "user-authored !!seq must be Owned, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-9: bare `!` on a scalar is handled inside apply_schema_to_node
+    // and must produce Cow::Borrowed (not Cow::Owned)
+    #[test]
+    fn bare_excl_tag_resolver_path_is_borrowed() {
+        let Node::Scalar { tag, .. } = load_root("! hello\n") else {
+            panic!("expected scalar");
+        };
+        assert!(
+            matches!(tag, Some(Cow::Borrowed(_))),
+            "bare-! path in apply_schema_to_node must be Borrowed, got: {tag:?}"
+        );
+    }
+
+    // COW-UT-10: alias node in lossless mode has no tag field (Alias variant)
+    #[test]
+    fn alias_node_has_no_tag_field() {
+        let docs = LoaderBuilder::new()
+            .build()
+            .load("- &a x\n- *a\n")
+            .expect("load failed");
+        let Node::Sequence { items, .. } = &docs[0].root else {
+            panic!("expected root sequence");
+        };
+        // items[1] is the alias in lossless mode
+        assert!(
+            matches!(items[1], Node::Alias { .. }),
+            "second item must be Alias in lossless mode"
+        );
+    }
+
+    // COW-UT-11: Deref coercion still works for string content comparison
+    #[test]
+    fn tag_value_content_preserved_across_cow_variants() {
+        // Resolver-injected: Borrowed — value preserved via as_deref()
+        let Node::Scalar {
+            tag: tag_resolver, ..
+        } = load_root("hello\n")
+        else {
+            panic!("expected scalar");
+        };
+        assert_eq!(tag_resolver.as_deref(), Some("tag:yaml.org,2002:str"));
+
+        // User-authored with a single-! local tag: Owned — value preserved via as_deref().
+        // `!custom` is a local tag (single !), not a handle-expanded URI.
+        let Node::Scalar { tag: tag_user, .. } = load_root("!custom hello\n") else {
+            panic!("expected scalar");
+        };
+        assert_eq!(tag_user.as_deref(), Some("!custom"));
     }
 }

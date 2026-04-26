@@ -328,6 +328,23 @@ recommended default schema that YAML [processors] should use unless instructed o
 Schema resolution is decoupled from the streaming event layer and lives entirely in the loader.
 **Tier:** 1
 
+### Zero-Allocation Resolver-Injected Tags [completed]
+
+**Description:** `Node::tag` changed from `Option<String>` to
+`Option<Cow<'static, str>>`. Tags injected by the schema resolver
+(`apply_schema_to_node`) are now `Cow::Borrowed(&'static str)`,
+eliminating four heap allocations per loaded node in typical documents.
+User-authored tags from the input stream remain `Cow::Owned(String)`.
+Callers that previously read `tag` as `Option<String>` must update to
+`Option<Cow<'static, str>>` — `as_deref()` and string comparisons
+continue to work unchanged via `Deref<Target = str>`.
+**Complexity:** Low
+**Comment:** The `'static` lifetime bound matches `ResolvedTag::as_str()`
+which returns `&'static str` constants. User-authored tags need owned
+storage because they are derived from the input buffer which does not
+outlive the AST. This is a semver-breaking API change (0.6 → 0.7).
+**Tier:** 2
+
 ### Block-Sequence Plain Scalar Fast Path [completed]
 
 **Description:** A scan optimization for the common pattern of a

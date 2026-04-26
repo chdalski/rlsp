@@ -6,6 +6,8 @@
 //! location type.  For most uses `Loc = Span`.  The loader produces
 //! `Vec<Document<Span>>`.
 
+use std::borrow::Cow;
+
 use crate::event::{CollectionStyle, ScalarStyle};
 use crate::pos::Span;
 
@@ -45,7 +47,7 @@ pub enum Node<Loc = Span> {
         /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
         anchor_loc: Option<Loc>,
         /// Tag applied to this node (e.g. `!!str`), if any.
-        tag: Option<String>,
+        tag: Option<Cow<'static, str>>,
         /// Source span of the tag token — from `!` through the last byte of the tag.
         /// `Some` when `tag` is `Some`; `None` otherwise.
         tag_loc: Option<Loc>,
@@ -71,7 +73,7 @@ pub enum Node<Loc = Span> {
         /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
         anchor_loc: Option<Loc>,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
-        tag: Option<String>,
+        tag: Option<Cow<'static, str>>,
         /// Source span of the tag token — from `!` through the last byte of the tag.
         /// `Some` when `tag` is `Some`; `None` otherwise.
         tag_loc: Option<Loc>,
@@ -94,7 +96,7 @@ pub enum Node<Loc = Span> {
         /// name.  `Some` when `anchor` is `Some`; `None` otherwise.
         anchor_loc: Option<Loc>,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.
-        tag: Option<String>,
+        tag: Option<Cow<'static, str>>,
         /// Source span of the tag token — from `!` through the last byte of the tag.
         /// `Some` when `tag` is `Some`; `None` otherwise.
         tag_loc: Option<Loc>,
@@ -200,6 +202,8 @@ impl<Loc> Node<Loc> {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
     use crate::pos::{Pos, Span};
@@ -476,7 +480,7 @@ mod tests {
             style: ScalarStyle::Plain,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!t".to_owned()),
+            tag: Some(Cow::Owned("!t".to_owned())),
             tag_loc: Some(span),
             loc: zero_span(),
             leading_comments: None,
@@ -523,7 +527,7 @@ mod tests {
             style: CollectionStyle::Block,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!!map".to_owned()),
+            tag: Some(Cow::Owned("!!map".to_owned())),
             tag_loc: Some(span),
             loc: zero_span(),
             leading_comments: None,
@@ -541,12 +545,111 @@ mod tests {
             style: CollectionStyle::Block,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!!seq".to_owned()),
+            tag: Some(Cow::Owned("!!seq".to_owned())),
             tag_loc: Some(span),
             loc: zero_span(),
             leading_comments: None,
             trailing_comment: None,
         };
         assert_eq!(node.tag_loc(), Some(span));
+    }
+
+    // -----------------------------------------------------------------------
+    // COW-NODE: Cow variant construction, equality, and clone
+    // -----------------------------------------------------------------------
+
+    // COW-NODE-1: node construction with Cow::Borrowed tag compiles and round-trips
+    #[test]
+    fn node_construction_with_borrowed_tag() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), None);
+        if let Node::Scalar { tag, .. } = &node {
+            assert!(matches!(tag, Some(Cow::Borrowed(_))));
+        }
+    }
+
+    // COW-NODE-2: node construction with Cow::Owned tag compiles and round-trips
+    #[test]
+    fn node_construction_with_owned_tag() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Owned("!custom".to_owned())),
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(node.tag_loc(), None);
+        if let Node::Scalar { tag, .. } = &node {
+            assert_eq!(tag.as_deref(), Some("!custom"));
+        }
+    }
+
+    // COW-NODE-3: Borrowed and Owned with the same content compare equal
+    #[test]
+    fn node_partial_eq_borrowed_vs_owned_same_content() {
+        let borrowed = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let owned = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Owned("tag:yaml.org,2002:str".to_owned())),
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        assert_eq!(borrowed, owned);
+    }
+
+    // COW-NODE-4: clone of Cow::Borrowed tag stays Borrowed
+    #[test]
+    fn node_clone_preserves_cow_variant() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
+            tag_loc: None,
+            loc: zero_span(),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        // The tag field is Copy-compatible via Cow::clone. Verify the cloned
+        // Scalar's tag is still Borrowed by re-constructing from the original.
+        let cloned_tag = if let Node::Scalar { tag, .. } = &node {
+            tag.clone()
+        } else {
+            unreachable!()
+        };
+        assert!(
+            matches!(cloned_tag, Some(Cow::Borrowed(_))),
+            "cloned Borrowed tag must remain Borrowed"
+        );
     }
 }

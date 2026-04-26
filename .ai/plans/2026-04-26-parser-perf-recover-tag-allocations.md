@@ -129,7 +129,7 @@ matcher to `Str`.
 
 ## Steps
 
-- [ ] Task 1: Migrate `Node::tag` to `Option<Cow<'static, str>>`
+- [x] Task 1: Migrate `Node::tag` to `Option<Cow<'static, str>>`
 - [ ] Task 2: First-byte fast-path in `resolve_core_plain`
 - [ ] User runs baremetal benchmarks out-of-band and decides
   whether to file a follow-up plan for any remaining gap
@@ -147,22 +147,22 @@ constants. User-authored tags remain owned via `Cow::Owned`
 
 **Implementation:**
 
-- [ ] `node.rs`: change `tag: Option<String>` to
+- [x] `node.rs`: change `tag: Option<String>` to
   `tag: Option<Cow<'static, str>>` on `Node::Scalar`,
   `Node::Mapping`, `Node::Sequence`
-- [ ] `loader.rs`: replace the four
+- [x] `loader.rs`: replace the four
   `Some(<…>.as_str().to_owned())` sites in
   `apply_schema_to_node` with
   `Some(Cow::Borrowed(<…>.as_str()))`. Sites are:
   line 991 (bare-`!` scalar → `ResolvedTag::Str`),
   line 997 (resolved scalar tag), line 1016 (resolved
   mapping tag), line 1025 (resolved sequence tag)
-- [ ] `loader.rs`: at Event→Node boundaries
+- [x] `loader.rs`: at Event→Node boundaries
   (lines 471, 495, 608) replace
   `tag.map(Cow::into_owned)` with
   `tag.map(|t| Cow::Owned(t.into_owned()))` — keeps
   user-authored owning, decouples from the input lifetime
-- [ ] Audit cross-crate consumers and update each call
+- [x] Audit cross-crate consumers and update each call
   site so it compiles and behaves identically against the
   new field type:
   - `rlsp-yaml/src/analysis/symbols.rs` —
@@ -196,13 +196,13 @@ constants. User-authored tags remain owned via `Cow::Owned`
     `Cow::Borrowed("!t")` where the literal is
     `'static`).** Sites: 128, 168, 345, 393, 417 (and any
     others the build surfaces).
-- [ ] Run `cargo build -p rlsp-yaml` and
+- [x] Run `cargo build -p rlsp-yaml` and
   `cargo build -p rlsp-yaml-parser` to surface any other
   call sites the audit missed
-- [ ] Update `Cargo.toml`: bump `rlsp-yaml-parser` from
+- [x] Update `Cargo.toml`: bump `rlsp-yaml-parser` from
   `0.6.0` to `0.7.0` (breaking change to public Node
   field type)
-- [ ] Update parser tests that construct `Node` literals
+- [x] Update parser tests that construct `Node` literals
   with non-`None` tags. Known sites:
   `rlsp-yaml-parser/src/node.rs` (test module),
   `rlsp-yaml-parser/src/loader.rs` (test module),
@@ -211,19 +211,21 @@ constants. User-authored tags remain owned via `Cow::Owned`
   any `tests/` integration tests in either crate.
   Wrap each tag in `Cow::Owned(...)` for runtime strings
   or `Cow::Borrowed(...)` for `'static` literals
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md` with a
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md` with a
   user-facing entry describing the API change
 
 **Acceptance:**
 
-- [ ] `cargo build` succeeds in the workspace
-- [ ] `cargo clippy --all-targets` zero warnings
-- [ ] `cargo test` passes in the workspace (parser tests,
+- [x] `cargo build` succeeds in the workspace
+- [x] `cargo clippy --all-targets` zero warnings
+- [x] `cargo test` passes in the workspace (parser tests,
   rlsp-yaml tests, integration tests)
-- [ ] No remaining `tag.map(Cow::into_owned)` calls in
+- [x] No remaining `tag.map(Cow::into_owned)` calls in
   `loader.rs` (replaced by the `Cow::Owned(t.into_owned())`
   form documented above) and no `to_owned()` on
   `ResolvedTag::as_str()` results
+
+**Completed:** 2026-04-26 — commit `eedafe27cfd9b1abc20e71194663327b466485ea`
 
 ### Task 2: First-byte fast-path in resolve_core_plain
 

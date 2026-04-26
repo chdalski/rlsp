@@ -91,6 +91,8 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
     reason = "test code"
 )]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
     use crate::pos::Pos;
@@ -125,7 +127,7 @@ mod tests {
             style: ScalarStyle::Plain,
             anchor: Some("a".to_owned()),
             anchor_loc: Some(span(5)),
-            tag: Some("!t".to_owned()),
+            tag: Some(Cow::Owned("!t".to_owned())),
             tag_loc: Some(span(6)),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
@@ -150,7 +152,7 @@ mod tests {
                 assert_eq!(value, "hello");
                 assert_eq!(style, ScalarStyle::Plain);
                 assert_eq!(anchor, Some("a".to_owned()));
-                assert_eq!(tag, Some("!t".to_owned()));
+                assert_eq!(tag.as_deref(), Some("!t"));
                 assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
                 assert_eq!(trailing_comment, Some("# tc".to_owned()));
             }
@@ -165,7 +167,7 @@ mod tests {
             style: CollectionStyle::Block,
             anchor: Some("m".to_owned()),
             anchor_loc: Some(span(5)),
-            tag: Some("!m".to_owned()),
+            tag: Some(Cow::Owned("!m".to_owned())),
             tag_loc: Some(span(6)),
             loc: span(1),
             leading_comments: Some(vec!["# lc".to_owned()]),
@@ -187,7 +189,7 @@ mod tests {
                 assert_eq!(anchor_loc, Some(span(5)), "anchor_loc must be preserved");
                 assert!(entries.is_empty());
                 assert_eq!(anchor, Some("m".to_owned()));
-                assert_eq!(tag, Some("!m".to_owned()));
+                assert_eq!(tag.as_deref(), Some("!m"));
                 assert_eq!(leading_comments, Some(vec!["# lc".to_owned()]));
                 assert_eq!(trailing_comment, Some("# tc".to_owned()));
             }
@@ -342,7 +344,7 @@ mod tests {
             style: ScalarStyle::Plain,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!t".to_owned()),
+            tag: Some(Cow::Owned("!t".to_owned())),
             tag_loc: Some(span(5)),
             loc: span(1),
             leading_comments: None,
@@ -390,7 +392,7 @@ mod tests {
             style: CollectionStyle::Block,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!m".to_owned()),
+            tag: Some(Cow::Owned("!m".to_owned())),
             tag_loc: Some(span(5)),
             loc: span(1),
             leading_comments: None,
@@ -414,7 +416,7 @@ mod tests {
             style: CollectionStyle::Block,
             anchor: None,
             anchor_loc: None,
-            tag: Some("!s".to_owned()),
+            tag: Some(Cow::Owned("!s".to_owned())),
             tag_loc: Some(span(5)),
             loc: span(1),
             leading_comments: None,
@@ -427,6 +429,62 @@ mod tests {
                 assert_eq!(tag_loc, Some(span(5)), "tag_loc must be preserved");
             }
             _ => panic!("expected Sequence"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // COW-RELOC: reloc preserves Cow variant identity
+    // -----------------------------------------------------------------------
+
+    // COW-RELOC-1: reloc preserves Cow::Borrowed tag
+    #[test]
+    fn reloc_preserves_borrowed_tag() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
+            tag_loc: None,
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(2));
+        match result {
+            Node::Scalar { tag, .. } => {
+                assert!(
+                    matches!(tag, Some(Cow::Borrowed(_))),
+                    "reloc must not reallocate a Borrowed tag"
+                );
+            }
+            _ => panic!("expected Scalar"),
+        }
+    }
+
+    // COW-RELOC-2: reloc preserves Cow::Owned tag
+    #[test]
+    fn reloc_preserves_owned_tag() {
+        let node = Node::Scalar {
+            value: "v".to_owned(),
+            style: ScalarStyle::Plain,
+            anchor: None,
+            anchor_loc: None,
+            tag: Some(Cow::Owned("!custom".to_owned())),
+            tag_loc: None,
+            loc: span(1),
+            leading_comments: None,
+            trailing_comment: None,
+        };
+        let result = reloc(node, span(2));
+        match result {
+            Node::Scalar { tag, .. } => {
+                assert!(
+                    matches!(tag, Some(Cow::Owned(_))),
+                    "reloc must preserve an Owned tag as Owned"
+                );
+            }
+            _ => panic!("expected Scalar"),
         }
     }
 }
