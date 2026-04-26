@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-26)
 **Created:** 2026-04-26
 
 # Recover rlsp-yaml-parser perf regression: stop allocating constant tag URIs
