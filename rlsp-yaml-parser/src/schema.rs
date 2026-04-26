@@ -187,18 +187,49 @@ pub const fn resolve_collection(
 
 /// Resolve a plain scalar under the Core schema.
 ///
-/// Dispatch order: null → bool → int → float → str (fallback).
+/// Dispatches on the first byte to prune the common-case `Str` outcome before
+/// any pattern matcher runs. Each branch covers exactly the prefix set of the
+/// matcher(s) it invokes — bytes outside the enumerated set can only be `Str`.
 fn resolve_core_plain(value: &str) -> ResolvedTag {
-    if is_core_null(value) {
-        ResolvedTag::Null
-    } else if is_core_bool(value) {
-        ResolvedTag::Bool
-    } else if is_core_int(value) {
-        ResolvedTag::Int
-    } else if is_core_float(value) {
-        ResolvedTag::Float
-    } else {
-        ResolvedTag::Str
+    match value.as_bytes().first().copied() {
+        // Empty string or "~" → null (the only two direct-return null forms).
+        None | Some(b'~') => ResolvedTag::Null,
+        // "null" | "Null" | "NULL" start with 'n'/'N'; only null uses these.
+        Some(b'n' | b'N') => {
+            if is_core_null(value) {
+                ResolvedTag::Null
+            } else {
+                ResolvedTag::Str
+            }
+        }
+        // "true"/"True"/"TRUE"/"false"/"False"/"FALSE".
+        Some(b't' | b'T' | b'f' | b'F') => {
+            if is_core_bool(value) {
+                ResolvedTag::Bool
+            } else {
+                ResolvedTag::Str
+            }
+        }
+        // Decimal/octal/hex integers and decimal floats with a leading digit or sign.
+        Some(b'-' | b'+' | b'0'..=b'9') => {
+            if is_core_int(value) {
+                ResolvedTag::Int
+            } else if is_core_float(value) {
+                ResolvedTag::Float
+            } else {
+                ResolvedTag::Str
+            }
+        }
+        // ".inf"/".Inf"/".INF"/".nan"/".NaN"/".NAN" and leading-dot decimal floats.
+        Some(b'.') => {
+            if is_core_float(value) {
+                ResolvedTag::Float
+            } else {
+                ResolvedTag::Str
+            }
+        }
+        // Any other first byte cannot match null/bool/int/float — return Str directly.
+        Some(_) => ResolvedTag::Str,
     }
 }
 

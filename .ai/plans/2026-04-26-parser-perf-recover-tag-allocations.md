@@ -130,7 +130,7 @@ matcher to `Str`.
 ## Steps
 
 - [x] Task 1: Migrate `Node::tag` to `Option<Cow<'static, str>>`
-- [ ] Task 2: First-byte fast-path in `resolve_core_plain`
+- [x] Task 2: First-byte fast-path in `resolve_core_plain`
 - [ ] User runs baremetal benchmarks out-of-band and decides
   whether to file a follow-up plan for any remaining gap
 
@@ -237,10 +237,13 @@ existing schema test cases.
 
 **Implementation:**
 
-- [ ] `schema.rs`: rewrite `resolve_core_plain` to dispatch
+- [x] `schema.rs`: rewrite `resolve_core_plain` to dispatch
   on `value.as_bytes().first().copied()`:
   - `None` → `Null` (empty string is null per `is_core_null`)
   - `Some(b'~')` → `Null`
+  - `Some(b'n' | b'N')` → `is_core_null` else `Str`
+    (covers `null` / `Null` / `NULL` — the original plan
+    text omitted this arm; see Decisions)
   - `Some(b't' | b'T' | b'f' | b'F')` → `is_core_bool`
     else `Str`
   - `Some(b'-' | b'+' | b'0'..=b'9')` →
@@ -249,22 +252,24 @@ existing schema test cases.
     (covers `.inf`, `.Inf`, `.INF`, `.nan`, `.NaN`,
     `.NAN`, and leading-dot decimal floats like `.5`)
   - any other byte → `Str` (no further checks)
-- [ ] Preserve `is_core_null`, `is_core_bool`,
+- [x] Preserve `is_core_null`, `is_core_bool`,
   `is_core_int`, `is_core_float` as-is — they are still
   used by the dispatch and by the public API
-- [ ] All existing rstest cases in `schema.rs` pass
+- [x] All existing rstest cases in `schema.rs` pass
   unchanged (no test edits required)
 
 **Acceptance:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo clippy --all-targets` zero warnings
-- [ ] `cargo test schema` passes with zero test
+- [x] `cargo build` succeeds
+- [x] `cargo clippy --all-targets` zero warnings
+- [x] `cargo test schema` passes with zero test
   modifications
-- [ ] `cargo test` passes in the workspace
-- [ ] `resolve_core_plain` body is a single `match` on
+- [x] `cargo test` passes in the workspace
+- [x] `resolve_core_plain` body is a single `match` on
   `value.as_bytes().first().copied()` — no cascading
   if-let-else chain remains
+
+**Completed:** 2026-04-26 — commit `83f599bd7d1a353b6293fccec536f65e0ff7d619`
 
 ## Decisions
 
@@ -299,18 +304,22 @@ existing schema test cases.
   parser can do). If the targets are not met, the
   follow-up plan handles documentation as part of its
   scope.
-- **Why a first-byte dispatch (Task 2) is safe:** the
-  byte-prefix branches map exactly to the disjoint
-  prefix sets of the existing matchers. `is_core_null`
-  matches `null`/`Null`/`NULL`/`~`/`""`; the only
-  starting bytes are `n`, `N`, `~`, or empty. The
-  empty-string and `~` cases are handled directly; the
-  `n`/`N` cases would be missed by a strict
-  byte-prefix-only check, so any byte outside the
-  enumerated branches falls through to `Str` — which is
-  the correct answer because no other plain-scalar
-  pattern starts with `n` or `N`. The exhaustive rstest
-  cases in `schema.rs` verify this.
+- **First-byte dispatch (Task 2) — corrected reasoning.**
+  The byte-prefix branches map to the disjoint prefix sets
+  of the existing matchers. `is_core_null` matches
+  `null`/`Null`/`NULL`/`~`/`""`; the starting bytes are
+  `n`, `N`, `~`, or empty. **The original plan text
+  incorrectly claimed `n`/`N` could fall through to `Str`
+  because "no other plain-scalar pattern starts with `n`
+  or `N`" — that overlooked the fact that `null`/`Null`/
+  `NULL` themselves resolve to `Null`, not `Str`. The
+  developer added a `Some(b'n' | b'N')` arm calling
+  `is_core_null` and the rstest matrix confirmed correct
+  behavior.** Recorded for any future agent: bytes that
+  *do* lead to a non-`Str` resolution must have explicit
+  arms; only bytes that lead exclusively to `Str` may
+  fall through. The exhaustive rstest cases in `schema.rs`
+  remain the authoritative behavior check.
 
 ## Non-Goals
 
