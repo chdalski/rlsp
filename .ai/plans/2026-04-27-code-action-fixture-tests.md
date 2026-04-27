@@ -154,9 +154,9 @@ no external specification governs the fixture format.
       fixture conventions
 - [x] Delete the 2 inline `tab_to_spaces` tests that were
       ported
-- [ ] Port `quoted_bool` cursor-driven tests (28 A + 4 B);
-      delete the 32 ported inline tests; keep the 1
-      Pattern C test inline
+- [x] Port `quoted_bool` cursor-driven tests (30 ports
+      after misclassification correction); delete the 30
+      ported inline tests; keep 3 Pattern C tests inline
 - [ ] Port `block_scalar` cursor-driven tests (25 A);
       delete the 25 ported inline tests
 - [ ] Port `block_to_flow` cursor-driven tests (22 A +
@@ -282,38 +282,53 @@ For each `tests/fixtures/code_actions/*.md`:
 ### Task 2: Port quoted_bool
 
 Port the cursor-driven, fixture-shaped tests from
-`rlsp-yaml/src/editing/code_actions/quoted_bool.rs` (32
-tests: 28 Pattern A positive transformations + 4 Pattern B
-negative cases). This task exercises both `applies-action`
-and `omits-action` modes at scale.
+`rlsp-yaml/src/editing/code_actions/quoted_bool.rs`. This
+task exercises both `applies-action` and `omits-action`
+modes at scale.
+
+The Explore agent's initial classification (28 A + 4 B + 1 C)
+proved incomplete: two additional Pattern C tests were
+identified during execution — one (`empty_docs`) cannot be
+expressed because the fixture harness always parses
+non-empty documents, and one (`kind_is_quickfix`) cannot
+be expressed because the fixture format has no `kind:`
+frontmatter field. The corrected classification is
+**30 ports + 3 Pattern C tests inline**.
 
 **Sub-tasks:**
 
-- [ ] Add 32 fixtures in
+- [x] Add 30 fixtures in
       `rlsp-yaml/tests/fixtures/code_actions/`, one per
       ported test, named in kebab-case derived from the
       original test function names (e.g.
       `quoted-bool-double-quoted-true-to-unquoted.md`)
-- [ ] For each fixture, the `## Test-Document` and
+- [x] For each fixture, the `## Test-Document` and
       `## Expected-Document` (or absence thereof) must
       reproduce the exact transformation the inline test
       verified
-- [ ] Delete the 32 ported `#[test]` functions from
-      `quoted_bool.rs`; keep the 1 Pattern C test
-      (`quoted_bool_edit_range_is_scalar_span_not_full_line`)
-      inline
-- [ ] Verify the surviving inline test still imports only
-      what it uses; remove now-unused `use` lines
+- [x] Delete the 30 ported `#[test]` functions from
+      `quoted_bool.rs`; keep the 3 Pattern C tests inline:
+      `quoted_bool_edit_range_is_scalar_span_not_full_line`
+      (range structure),
+      `quoted_bool_action_not_offered_for_empty_docs`
+      (empty-docs boundary), and
+      `quoted_bool_action_kind_is_quickfix` (kind assertion)
+- [x] Verify the surviving inline tests still import only
+      what they use; remove now-unused `use` lines
+
+**Completed:** 2026-04-27 — `b76d846044e7873238aae9a8546e387888fd2ca5`
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 34
-  fixture files (2 from Task 1 + 32 from this task)
-- `cargo test --test code_action_fixtures` passes; all 34
-  fixtures pass
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 32
+  fixture files (2 from Task 1 + 30 from this task)
+- `cargo test --test code_action_fixtures` passes; all 32
+  fixtures pass plus the 21 self-tests
 - `rlsp-yaml/src/editing/code_actions/quoted_bool.rs`
-  contains exactly 1 `#[test]` function
-  (`quoted_bool_edit_range_is_scalar_span_not_full_line`)
+  contains exactly 3 `#[test]` functions:
+  `quoted_bool_edit_range_is_scalar_span_not_full_line`,
+  `quoted_bool_action_not_offered_for_empty_docs`, and
+  `quoted_bool_action_kind_is_quickfix`
 - `cargo test -p rlsp-yaml` passes
 - `cargo clippy --all-targets -- -D warnings` exits 0
 - `cargo fmt --check` exits 0
@@ -341,9 +356,9 @@ single batch of `applies-action` fixtures.
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 59
-  fixture files (34 from prior tasks + 25 from this task)
-- `cargo test --test code_action_fixtures` passes; all 59
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 57
+  fixture files (32 from prior tasks + 25 from this task)
+- `cargo test --test code_action_fixtures` passes; all 57
   fixtures pass
 - `rlsp-yaml/src/editing/code_actions/block_scalar.rs`
   contains 0 `#[test]` functions
@@ -373,9 +388,9 @@ inline.
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 85
-  fixture files (59 from prior tasks + 26 from this task)
-- `cargo test --test code_action_fixtures` passes; all 85
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 83
+  fixture files (57 from prior tasks + 26 from this task)
+- `cargo test --test code_action_fixtures` passes; all 83
   fixtures pass
 - `rlsp-yaml/src/editing/code_actions/block_to_flow.rs`
   contains exactly 2 test functions (the 2 Pattern C
