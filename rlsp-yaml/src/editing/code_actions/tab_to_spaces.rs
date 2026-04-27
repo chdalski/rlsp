@@ -44,35 +44,3 @@ pub(super) fn tab_to_spaces(
         None,
     ))
 }
-
-#[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
-mod tests {
-    use super::super::code_actions;
-    use super::super::test_helpers::{cursor_range, docs_for};
-    use crate::test_utils::test_uri;
-
-    #[test]
-    fn should_convert_tabs_to_spaces() {
-        let text = "\tkey: value\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
-
-        let action = actions
-            .iter()
-            .find(|a| a.title.contains("tabs to spaces"))
-            .unwrap();
-        let edit = action.edit.as_ref().unwrap();
-        let changes = edit.changes.as_ref().unwrap();
-        let edits = &changes[&test_uri()];
-        assert_eq!(edits[0].new_text, "  key: value");
-        assert!(!edits[0].new_text.contains('\t'));
-    }
-
-    #[test]
-    fn should_not_offer_tab_conversion_without_tabs() {
-        let text = "  key: value\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
-
-        assert!(actions.iter().all(|a| !a.title.contains("tabs")));
-    }
-}

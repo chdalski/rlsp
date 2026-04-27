@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-27
 
 # Code-Action Fixture Tests
@@ -144,15 +144,15 @@ no external specification governs the fixture format.
 
 ## Steps
 
-- [ ] Define the fixture format (frontmatter fields,
+- [x] Define the fixture format (frontmatter fields,
       sections, assertion modes)
-- [ ] Implement the fixture parser and harness in
+- [x] Implement the fixture parser and harness in
       `rlsp-yaml/tests/code_action_fixtures.rs`
-- [ ] Port `tab_to_spaces` (2 tests) as proof-of-concept
-- [ ] Update `rlsp-yaml/tests/fixtures/CLAUDE.md` with the
+- [x] Port `tab_to_spaces` (2 tests) as proof-of-concept
+- [x] Update `rlsp-yaml/tests/fixtures/CLAUDE.md` with the
       "visually self-explanatory" rule and the code-action
       fixture conventions
-- [ ] Delete the 2 inline `tab_to_spaces` tests that were
+- [x] Delete the 2 inline `tab_to_spaces` tests that were
       ported
 - [ ] Port `quoted_bool` cursor-driven tests (28 A + 4 B);
       delete the 32 ported inline tests; keep the 1
@@ -221,40 +221,42 @@ For each `tests/fixtures/code_actions/*.md`:
 
 **Sub-tasks:**
 
-- [ ] Add `rlsp-yaml/tests/code_action_fixtures.rs`
+- [x] Add `rlsp-yaml/tests/code_action_fixtures.rs`
       implementing the parser, harness,
       `#[rstest] #[files("tests/fixtures/code_actions/*.md")]`
       driver, and the local `cursor_range`, `docs_for`,
       `test_uri` helpers (since `test_helpers` is
       `pub(super)` and unreachable from integration tests)
-- [ ] Add `rlsp-yaml/tests/fixtures/code_actions/`
+- [x] Add `rlsp-yaml/tests/fixtures/code_actions/`
       directory with the 2 fixtures ported from
       `tab_to_spaces.rs`
-- [ ] Add a `#[cfg(test)] mod self_tests` block in the
+- [x] Add a `#[cfg(test)] mod self_tests` block in the
       harness file with **at least 7** self-test cases
       covering: frontmatter parsing, section extraction,
       `applies-action` happy path, `omits-action` happy
       path, missing-section error, mutually-exclusive
       `applies-action` + `omits-action` error, missing
       `cursor:` error
-- [ ] Rename the top-level heading of
+- [x] Rename the top-level heading of
       `rlsp-yaml/tests/fixtures/CLAUDE.md` from
       `# Formatter Fixtures` to `# Test Fixtures`, and
       demote the existing "Setting Interaction Coverage"
       and "Idempotency-Only Fixtures" sections under a
       new `## Formatter Fixtures` H2 so the file's scope
       cleanly covers both feature categories
-- [ ] Add to `rlsp-yaml/tests/fixtures/CLAUDE.md` two
+- [x] Add to `rlsp-yaml/tests/fixtures/CLAUDE.md` two
       new top-level subsections under the renamed
       heading: (a) "When to Write a Fixture vs an Inline
       Test" stating the visually-self-explanatory rule
       and the cursor-driven / transformational scope, and
       (b) "Code-Action Fixtures" documenting the
       frontmatter fields and assertion modes
-- [ ] Delete the 2 inline `#[test]` functions in
+- [x] Delete the 2 inline `#[test]` functions in
       `rlsp-yaml/src/editing/code_actions/tab_to_spaces.rs`
       that the new fixtures cover; if the `#[cfg(test)]
       mod tests` block becomes empty, delete it as well
+
+**Completed:** 2026-04-27 — `e7491606ee70a1b35ab5b6defb82bc5db863ad06`
 
 **Acceptance:**
 
