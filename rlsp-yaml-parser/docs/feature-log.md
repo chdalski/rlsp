@@ -380,8 +380,8 @@ Accessor methods `anchor()`, `anchor_loc()`, `tag()`, `tag_loc()` on `Event`
 replace direct field access; patterns that previously destructured these four
 fields by name must use the accessor methods.
 **Complexity:** Medium
-**Comment:** Stage A is a semver-breaking API change (0.7 → 0.8). Stage B extends
-0.8.0 without an additional version bump — the accessor-method migration is the
+**Comment:** Stage A is a semver-breaking API change. Stage B extends
+it without an additional version bump — the accessor-method migration is the
 same pattern as Stage A. The `tag` field is boxed in `EventMeta` (unlike `Node`
 where tag is kept inline because the schema resolver populates it on every loaded
 node); events carry a tag only when the source text contained one, which is rare.

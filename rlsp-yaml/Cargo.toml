@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 rlsp-fmt = { version = "0.1.7", path = "../rlsp-fmt" }
-rlsp-yaml-parser = { version = "0.8", path = "../rlsp-yaml-parser" }
+rlsp-yaml-parser = { version = "0.6", path = "../rlsp-yaml-parser" }
 tower-lsp = { version = "0.20", features = ["proposed"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
