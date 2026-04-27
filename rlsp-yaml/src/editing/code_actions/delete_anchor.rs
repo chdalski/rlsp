@@ -14,6 +14,7 @@ pub(super) fn delete_unused_anchor(
     text: &str,
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let diag_line = diag.range.start.line as usize;
     let anchor_start_col = diag.range.start.character as usize;
@@ -37,7 +38,7 @@ pub(super) fn delete_unused_anchor(
     deanchored.clear_anchor();
 
     let base_indent = idx.line_column(loc.start).1 as usize;
-    let new_text = format_subtree(&deanchored, &YamlFormatOptions::default(), base_indent);
+    let new_text = format_subtree(&deanchored, options, base_indent);
 
     #[expect(
         clippy::cast_possible_truncation,
@@ -119,6 +120,7 @@ fn find_anchored_node_in<'a>(
 mod tests {
     use super::super::code_actions;
     use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
     // UA-1: plain scalar — anchor removed, surrounding structure preserved
@@ -126,7 +128,14 @@ mod tests {
     fn delete_anchor_plain_scalar_value() {
         let text = "defaults: &unused value\n";
         let diag = make_diagnostic(0, 10, 17, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -143,7 +152,14 @@ mod tests {
     fn delete_anchor_sole_value_empty_scalar() {
         let text = "data: &unused\n";
         let diag = make_diagnostic(0, 6, 13, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -158,7 +174,14 @@ mod tests {
     fn delete_anchor_quoted_scalar() {
         let text = "key: &a \"hello\"\n";
         let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -174,7 +197,14 @@ mod tests {
     fn delete_anchor_user_tag_preserved() {
         let text = "key: &a !custom \"hello\"\n";
         let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -195,7 +225,14 @@ mod tests {
     fn delete_anchor_flow_sequence() {
         let text = "list: &nums [1, 2, 3]\n";
         let diag = make_diagnostic(0, 6, 11, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -216,7 +253,14 @@ mod tests {
     fn delete_anchor_block_mapping_value() {
         let text = "base: &defaults\n  x: 1\n  y: 2\n";
         let diag = make_diagnostic(0, 6, 15, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -245,7 +289,14 @@ mod tests {
     fn delete_anchor_trailing_comment_preserved() {
         let text = "key: &a value  # keep me\n";
         let diag = make_diagnostic(0, 5, 7, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title.contains("unused anchor"))
@@ -276,7 +327,14 @@ mod tests {
     fn delete_anchor_stale_diagnostic_returns_no_action() {
         let text = "data: value\n";
         let diag = make_diagnostic(0, 6, 13, "unusedAnchor");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| !a.title.contains("unused anchor")),
             "stale diagnostic must not produce an action"

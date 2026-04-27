@@ -13,6 +13,7 @@ pub(super) fn yaml11_bool_actions(
     docs: &[Document<Span>],
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
     let Some((scalar, loc, base_indent, idx)) = find_yaml11_bool_scalar(docs, diag) else {
         return vec![];
@@ -36,10 +37,10 @@ pub(super) fn yaml11_bool_actions(
 
     let quote_opts = YamlFormatOptions {
         preserve_quotes: true,
-        ..YamlFormatOptions::default()
+        ..options.clone()
     };
     let quoted_text = format_subtree(&quoted, &quote_opts, base_indent);
-    let plain_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
+    let plain_text = format_subtree(&plain, options, base_indent);
     let edit_range = Range::new(
         Position::new(
             idx.line_column(loc.start).0.saturating_sub(1),
@@ -79,6 +80,7 @@ pub(super) fn schema_yaml11_bool_type_actions(
     docs: &[Document<Span>],
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
     let Some((scalar, loc, base_indent, idx)) = find_yaml11_bool_scalar(docs, diag) else {
         return vec![];
@@ -96,7 +98,7 @@ pub(super) fn schema_yaml11_bool_type_actions(
         *v = crate::scalar_helpers::yaml11_bool_canonical(value).to_string();
     }
 
-    let plain_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
+    let plain_text = format_subtree(&plain, options, base_indent);
     let edit_range = Range::new(
         Position::new(
             idx.line_column(loc.start).0.saturating_sub(1),
@@ -272,13 +274,21 @@ mod tests {
     use super::super::code_actions;
     use super::super::diagnostic_code;
     use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
     #[test]
     fn should_quote_yaml11_bool_yes_lowercase() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
@@ -293,7 +303,14 @@ mod tests {
     fn should_quote_yaml11_bool_uppercase_on() {
         let text = "flag: ON\n";
         let diag = make_diagnostic(0, 6, 8, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
@@ -308,7 +325,14 @@ mod tests {
     fn should_quote_yaml11_bool_with_indentation() {
         let text = "  enabled: yes\n";
         let diag = make_diagnostic(0, 11, 14, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
@@ -323,7 +347,14 @@ mod tests {
     fn yaml11_bool_quote_wrong_diagnostic_code_no_action() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "flowMap");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert!(actions.iter().all(|a| a.title != "Quote value"));
     }
@@ -332,7 +363,14 @@ mod tests {
     fn should_convert_yaml11_bool_yes_to_true() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -347,7 +385,14 @@ mod tests {
     fn should_convert_yaml11_bool_no_to_false() {
         let text = "enabled: No\n";
         let diag = make_diagnostic(0, 9, 11, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -362,7 +407,14 @@ mod tests {
     fn should_convert_yaml11_bool_on_to_true() {
         let text = "flag: ON\n";
         let diag = make_diagnostic(0, 6, 8, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -377,7 +429,14 @@ mod tests {
     fn should_convert_yaml11_bool_off_to_false() {
         let text = "flag: OFF\n";
         let diag = make_diagnostic(0, 6, 9, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -392,7 +451,14 @@ mod tests {
     fn should_convert_yaml11_bool_y_to_true() {
         let text = "active: Y\n";
         let diag = make_diagnostic(0, 8, 9, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -407,7 +473,14 @@ mod tests {
     fn should_convert_yaml11_bool_n_to_false() {
         let text = "active: N\n";
         let diag = make_diagnostic(0, 8, 9, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -422,7 +495,14 @@ mod tests {
     fn should_convert_yaml11_bool_preserving_indentation() {
         let text = "  active: yes\n";
         let diag = make_diagnostic(0, 10, 13, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -440,7 +520,14 @@ mod tests {
     fn yaml11_bool_produces_exactly_two_actions() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert_eq!(
             actions
@@ -461,6 +548,7 @@ mod tests {
             line_range(0),
             std::slice::from_ref(&diag),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         for action in actions
@@ -481,7 +569,14 @@ mod tests {
     fn yaml11_bool_quote_value_produces_valid_double_quoted_yaml() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         let new_text = &edits[0].new_text;
@@ -505,7 +600,14 @@ mod tests {
     fn yaml11_bool_convert_action_edit_range_targets_scalar_span() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -543,7 +645,14 @@ mod tests {
         let col = 6u32;
         let end = col + u32::try_from(token.len()).unwrap();
         let diag = make_diagnostic(0, col, end, "yaml11Boolean");
-        let actions = code_actions(&docs_for(&text), &text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(&text),
+            &text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -561,7 +670,14 @@ mod tests {
     fn yaml11_bool_actions_both_diag_codes_produce_two_actions(#[case] code: &str) {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 6, 9, code);
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert_eq!(
             actions
                 .iter()
@@ -576,7 +692,14 @@ mod tests {
     fn yaml11_bool_actions_out_of_range_diag_returns_empty() {
         let text = "enabled: yes\nother: string\n";
         let diag = make_diagnostic(1, 7, 13, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions
                 .iter()
@@ -589,7 +712,14 @@ mod tests {
     fn yaml11_bool_trailing_comment_preserved_quote_action() {
         let text = "enabled: yes  # keep this\n";
         let diag = make_diagnostic(0, 9, 12, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(
@@ -615,7 +745,14 @@ mod tests {
     fn yaml11_bool_trailing_comment_preserved_convert_action() {
         let text = "flag: ON  # keep this\n";
         let diag = make_diagnostic(0, 6, 8, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -641,7 +778,14 @@ mod tests {
     fn yaml11_bool_sequence_item_edit_starts_at_scalar_col() {
         let text = "items:\n  - yes\n";
         let diag = make_diagnostic(1, 4, 7, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert!(
@@ -657,7 +801,14 @@ mod tests {
     fn schema_yaml11_bool_type_returns_exactly_one_action() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let count = actions
             .iter()
             .filter(|a| a.title == "Convert to boolean" || a.title == "Quote value")
@@ -680,7 +831,14 @@ mod tests {
     fn schema_yaml11_bool_type_gated_on_yaml11_bool() {
         let text = "enabled: hello\n";
         let diag = make_diagnostic(0, 9, 14, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| a.title != "Convert to boolean"),
             "non-yaml11-bool input must not produce 'Convert to boolean' for schemaYaml11BooleanType"
@@ -691,7 +849,14 @@ mod tests {
     fn schema_yaml11_bool_type_actions_edit_range_targets_scalar_span() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 6, 9, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -712,7 +877,14 @@ mod tests {
     fn schema_yaml11_bool_type_actions_out_of_range_diag_returns_empty() {
         let text = "flag: yes\nother: string\n";
         let diag = make_diagnostic(1, 7, 13, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| a.title != "Convert to boolean"),
             "diag on non-yaml11-bool line must produce no schema-yaml11-bool actions"
@@ -725,7 +897,14 @@ mod tests {
     fn schema_yaml11_bool_two_bools_on_line_offers_no_action() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 9, 10, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions
                 .iter()
@@ -738,7 +917,14 @@ mod tests {
     fn schema_yaml11_bool_two_bools_on_line_first_key_also_suppressed() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 1, 2, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions
                 .iter()
@@ -751,7 +937,14 @@ mod tests {
     fn schema_yaml11_bool_single_bool_on_line_offers_action() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 0, 4, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -768,7 +961,14 @@ mod tests {
     fn schema_yaml11_bool_single_bool_on_line_two_actions_count() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 0, 4, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert_eq!(
             actions
                 .iter()
@@ -783,7 +983,14 @@ mod tests {
     fn schema_yaml11_bool_type_two_bools_on_line_offers_no_action() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 9, 10, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| a.title != "Convert to boolean"),
             "ambiguous line must suppress schemaYaml11BooleanType action; got: {actions:?}"
@@ -794,7 +1001,14 @@ mod tests {
     fn schema_yaml11_bool_type_single_bool_on_line_offers_action() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 0, 4, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -808,7 +1022,14 @@ mod tests {
     fn schema_yaml11_bool_two_bools_nested_offers_no_action() {
         let text = "x:\n  a: yes\n  b: no\n";
         let diag = make_diagnostic(1, 2, 3, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -825,7 +1046,14 @@ mod tests {
     fn schema_yaml11_bool_flow_map_value_two_bools_same_line_suppressed() {
         let text = "x: {a: yes, b: no}\n";
         let diag = make_diagnostic(0, 4, 5, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions
                 .iter()
@@ -840,7 +1068,14 @@ mod tests {
     fn yaml11_bool_flow_seq_second_bool_quote_action_targets_correct_scalar() {
         let text = "items: [yes, no]\n";
         let diag = make_diagnostic(0, 13, 15, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(edits[0].new_text, "\"no\"", "must quote `no`, not `yes`");
@@ -854,7 +1089,14 @@ mod tests {
     fn yaml11_bool_flow_seq_second_bool_convert_action_targets_correct_scalar() {
         let text = "items: [yes, no]\n";
         let diag = make_diagnostic(0, 13, 15, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -868,7 +1110,14 @@ mod tests {
     fn yaml11_bool_flow_seq_first_bool_not_displaced_when_second_is_targeted() {
         let text = "items: [yes, no]\n";
         let diag = make_diagnostic(0, 8, 11, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(edits[0].new_text, "\"yes\"", "must quote `yes`, not `no`");
@@ -879,7 +1128,14 @@ mod tests {
     fn yaml11_bool_flow_seq_second_of_three_bools_targeted_correctly() {
         let text = "flags: [yes, no, on]\n";
         let diag = make_diagnostic(0, 13, 15, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -893,7 +1149,14 @@ mod tests {
     fn yaml11_bool_flow_map_second_bool_quote_action_targets_correct_scalar() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 12, 14, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(edits[0].new_text, "\"no\"", "must quote `no`, not `yes`");
@@ -904,7 +1167,14 @@ mod tests {
     fn yaml11_bool_flow_map_second_bool_convert_action_targets_correct_scalar() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 12, 14, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -918,7 +1188,14 @@ mod tests {
     fn yaml11_bool_flow_map_first_bool_not_displaced_when_second_is_targeted() {
         let text = "{a: yes, b: no}\n";
         let diag = make_diagnostic(0, 4, 7, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(edits[0].new_text, "\"yes\"");
@@ -929,7 +1206,14 @@ mod tests {
     fn yaml11_bool_nested_flow_seq_second_bool_targeted_correctly() {
         let text = "x:\n  flags: [yes, no]\n";
         let diag = make_diagnostic(1, 15, 17, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -943,7 +1227,14 @@ mod tests {
     fn yaml11_bool_on_line_other_than_zero() {
         let text = "key: value\nflag: yes\n";
         let diag = make_diagnostic(1, 6, 9, "yaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
@@ -959,7 +1250,14 @@ mod tests {
     fn yaml11_bool_diagnostic_not_triggered_by_other_codes() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 0, 12, "flowMap");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert!(actions.iter().all(|a| a.title != "Quote value"));
         assert!(actions.iter().all(|a| a.title != "Convert to boolean"));
@@ -973,7 +1271,14 @@ mod tests {
     fn schema_yaml11_boolean_quote_value_action() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions.iter().find(|a| a.title == "Quote value").unwrap();
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         assert_eq!(edits[0].new_text, "\"yes\"");
@@ -984,7 +1289,14 @@ mod tests {
     fn schema_yaml11_boolean_convert_to_boolean_action() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -998,7 +1310,14 @@ mod tests {
     fn schema_yaml11_boolean_offers_exactly_two_actions() {
         let text = "flag: yes\n";
         let diag = make_diagnostic(0, 6, 9, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let count = actions
             .iter()
             .filter(|a| a.title == "Quote value" || a.title == "Convert to boolean")
@@ -1016,6 +1335,7 @@ mod tests {
             line_range(0),
             std::slice::from_ref(&diag),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         for action in actions
             .iter()
@@ -1036,7 +1356,14 @@ mod tests {
     fn schema_yaml11_boolean_converts_false_family_to_false() {
         let text = "flag: NO\n";
         let diag = make_diagnostic(0, 6, 8, "schemaYaml11Boolean");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -1054,7 +1381,14 @@ mod tests {
     fn schema_yaml11_boolean_type_convert_to_boolean_action() {
         let text = "enabled: yes\n";
         let diag = make_diagnostic(0, 9, 12, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -1068,7 +1402,14 @@ mod tests {
     fn schema_yaml11_boolean_type_converts_false_family_correctly() {
         let text = "enabled: OFF\n";
         let diag = make_diagnostic(0, 9, 12, "schemaYaml11BooleanType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to boolean")
@@ -1082,7 +1423,14 @@ mod tests {
     fn schema_type_generic_no_convert_to_boolean_action() {
         let text = "enabled: hello\n";
         let diag = make_diagnostic(0, 9, 14, "schemaType");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| a.title != "Convert to boolean"),
             "generic schemaType should not offer 'Convert to boolean': {actions:?}"

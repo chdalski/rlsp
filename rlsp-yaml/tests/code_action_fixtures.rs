@@ -37,6 +37,7 @@
 use std::path::{Path, PathBuf};
 
 use rlsp_yaml::editing::code_actions::code_actions;
+use rlsp_yaml::editing::formatter::YamlFormatOptions;
 use rstest::rstest;
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url};
 
@@ -297,7 +298,14 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
     let uri = test_uri();
     let docs = docs_for(&fixture.test_document);
     let range = cursor_range(fixture.cursor_line, fixture.cursor_char);
-    let actions = code_actions(&docs, &fixture.test_document, range, &[], &uri);
+    let actions = code_actions(
+        &docs,
+        &fixture.test_document,
+        range,
+        &[],
+        &uri,
+        &YamlFormatOptions::default(),
+    );
 
     match &fixture.mode {
         ActionMode::AppliesAction(title_sub) => {
@@ -642,7 +650,7 @@ mod self_tests {
         let uri = test_uri();
         let docs = docs_for(text);
         let range = cursor_range(0, 0);
-        let actions = code_actions(&docs, text, range, &[], &uri);
+        let actions = code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
 
         let action = actions
             .iter()
@@ -660,7 +668,7 @@ mod self_tests {
         let uri = test_uri();
         let docs = docs_for(text);
         let range = cursor_range(0, 0);
-        let actions = code_actions(&docs, text, range, &[], &uri);
+        let actions = code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
 
         let found = actions
             .iter()
@@ -675,7 +683,7 @@ mod self_tests {
         let uri = test_uri();
         let docs = docs_for(text);
         let range = cursor_range(0, 0);
-        let actions = code_actions(&docs, text, range, &[], &uri);
+        let actions = code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
 
         let found = actions.iter().find(|a| a.title.contains("tabs to spaces"));
         assert!(
@@ -692,7 +700,7 @@ mod self_tests {
         let uri = test_uri();
         let docs = docs_for(text);
         let range = cursor_range(0, 0);
-        let actions = code_actions(&docs, text, range, &[], &uri);
+        let actions = code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
 
         // Simulate the harness OmitsAction assertion — this should panic because
         // the "tabs to spaces" action IS present when the document has a tab.

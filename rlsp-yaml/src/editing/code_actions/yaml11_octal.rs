@@ -14,6 +14,7 @@ pub(super) fn yaml11_octal_actions(
     docs: &[Document<Span>],
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
     let Some((scalar, loc, base_indent, idx)) = find_yaml11_octal_scalar(docs, diag) else {
         return vec![];
@@ -37,10 +38,10 @@ pub(super) fn yaml11_octal_actions(
 
     let quote_opts = YamlFormatOptions {
         preserve_quotes: true,
-        ..YamlFormatOptions::default()
+        ..options.clone()
     };
     let quoted_text = format_subtree(&quoted, &quote_opts, base_indent);
-    let converted_text = format_subtree(&converted, &YamlFormatOptions::default(), base_indent);
+    let converted_text = format_subtree(&converted, options, base_indent);
     let edit_range = span_to_lsp(*loc, idx);
 
     vec![
@@ -219,13 +220,21 @@ mod tests {
 
     use super::super::code_actions;
     use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
     #[test]
     fn should_not_offer_yaml11_octal_quote_for_out_of_bounds_range() {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 100, 104, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert!(actions.iter().all(|a| a.title != "Quote as string"));
     }
@@ -240,6 +249,7 @@ mod tests {
             line_range(0),
             std::slice::from_ref(&diag),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         for action in actions
@@ -259,7 +269,14 @@ mod tests {
     fn yaml11_octal_on_line_other_than_zero() {
         let text = "name: foo\nmode: 0755\n";
         let diag = make_diagnostic(1, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -278,7 +295,14 @@ mod tests {
     fn yaml11_octal_diagnostic_not_triggered_by_other_codes() {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 0, 10, "flowSeq");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert!(actions.iter().all(|a| a.title != "Quote as string"));
         assert!(
@@ -292,7 +316,14 @@ mod tests {
     fn yaml11_octal_quote_action_new_text_is_scalar_only() {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Quote as string")
@@ -307,7 +338,14 @@ mod tests {
     fn yaml11_octal_convert_action_new_text_is_scalar_only() {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to YAML 1.2 octal")
@@ -322,7 +360,14 @@ mod tests {
     fn yaml11_octal_quote_on_0777_produces_valid_double_quoted_yaml() {
         let text = "perms: 0777\n";
         let diag = make_diagnostic(0, 7, 11, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Quote as string")
@@ -345,7 +390,14 @@ mod tests {
     fn yaml11_octal_convert_on_0755_produces_0o755() {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to YAML 1.2 octal")
@@ -358,7 +410,14 @@ mod tests {
     fn yaml11_octal_convert_on_0777_produces_0o777() {
         let text = "perms: 0777\n";
         let diag = make_diagnostic(0, 7, 11, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to YAML 1.2 octal")
@@ -371,7 +430,14 @@ mod tests {
     fn yaml11_octal_rejects_08_no_actions() {
         let text = "val: 08\n";
         let diag = make_diagnostic(0, 5, 7, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(actions.iter().all(|a| a.title != "Quote as string"));
         assert!(
             actions
@@ -384,7 +450,14 @@ mod tests {
     fn yaml11_octal_rejects_09_no_actions() {
         let text = "val: 09\n";
         let diag = make_diagnostic(0, 5, 7, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(actions.iter().all(|a| a.title != "Quote as string"));
         assert!(
             actions
@@ -397,7 +470,14 @@ mod tests {
     fn yaml11_octal_trailing_comment_preserved_quote_action() {
         let text = "mode: 0755  # keep this\n";
         let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Quote as string")
@@ -422,7 +502,14 @@ mod tests {
     fn yaml11_octal_trailing_comment_preserved_convert_action() {
         let text = "mode: 0755  # keep this\n";
         let diag = make_diagnostic(0, 6, 10, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Convert to YAML 1.2 octal")
@@ -448,7 +535,14 @@ mod tests {
         let text = "modes:\n  - 0755\n";
         // `0755` starts at col 4 in line 1: "  - 0755"
         let diag = make_diagnostic(1, 4, 8, "yaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(1), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(1),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let action = actions
             .iter()
             .find(|a| a.title == "Quote as string")
@@ -466,7 +560,14 @@ mod tests {
         let text = "{a: 0755, b: 0644}\n";
         // schemaYaml11Octal uses line-only matching; two octals on the same line must suppress both
         let diag = make_diagnostic(0, 4, 8, "schemaYaml11Octal");
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(actions.iter().all(|a| a.title != "Quote as string"));
         assert!(
             actions
@@ -487,6 +588,7 @@ mod tests {
             line_range(0),
             &[first_diag],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         let first_action = first_actions
             .iter()
@@ -508,6 +610,7 @@ mod tests {
             line_range(0),
             &[second_diag],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         let second_action = second_actions
             .iter()
@@ -539,6 +642,7 @@ mod tests {
             line_range(0),
             std::slice::from_ref(&diag),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         for action in actions
             .iter()
@@ -561,7 +665,14 @@ mod tests {
     fn yaml11_octal_both_diag_codes_produce_two_actions(#[case] code: &str) {
         let text = "mode: 0755\n";
         let diag = make_diagnostic(0, 6, 10, code);
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let count = actions
             .iter()
             .filter(|a| a.title == "Quote as string" || a.title == "Convert to YAML 1.2 octal")

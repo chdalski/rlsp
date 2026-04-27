@@ -14,6 +14,7 @@ pub(super) fn string_to_block_scalar(
     _text: &str,
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let parser_line = line_idx + 1;
     let (scalar, key_col, scalar_loc, idx) = find_block_scalar_candidate(docs, parser_line)?;
@@ -24,7 +25,7 @@ pub(super) fn string_to_block_scalar(
         *style = ScalarStyle::Literal(Chomp::Clip);
     }
 
-    let new_text = format_subtree(&block_scalar, &YamlFormatOptions::default(), base_indent);
+    let new_text = format_subtree(&block_scalar, options, base_indent);
 
     if new_text.trim().is_empty() {
         return None;

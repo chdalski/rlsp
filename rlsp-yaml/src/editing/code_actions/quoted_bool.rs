@@ -14,6 +14,7 @@ pub(super) fn quoted_bool_to_unquoted(
     line_idx: usize,
     col: usize,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let parser_line = line_idx + 1;
     let (scalar, idx) = find_quoted_bool_scalar(docs, parser_line, col)?;
@@ -28,7 +29,7 @@ pub(super) fn quoted_bool_to_unquoted(
     }
 
     let base_indent = idx.line_column(loc.start).1 as usize;
-    let new_text = format_subtree(&plain, &YamlFormatOptions::default(), base_indent);
+    let new_text = format_subtree(&plain, options, base_indent);
 
     let edit_range = Range::new(
         Position::new(
@@ -116,12 +117,20 @@ mod tests {
 
     use super::super::code_actions;
     use super::super::test_helpers::{cursor_range, docs_for};
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
     #[test]
     fn quoted_bool_edit_range_is_scalar_span_not_full_line() {
         let text = "enabled: \"true\"  # keep this comment\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 10),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -149,6 +158,7 @@ mod tests {
             cursor_range(0, 10),
             &[],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         assert!(actions.iter().all(|a| !a.title.contains("Convert quoted")));
     }
@@ -156,7 +166,14 @@ mod tests {
     #[test]
     fn quoted_bool_action_kind_is_quickfix() {
         let text = "enabled: \"true\"\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 10), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 10),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()

@@ -170,7 +170,14 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
     let zero_range = Range::new(Position::new(0, 0), Position::new(0, 0));
     let fake_uri = tower_lsp::lsp_types::Url::parse("file:///corpus/test.yaml").expect("valid URI");
     catch_unwind(AssertUnwindSafe(|| {
-        code_actions(&docs, text, zero_range, &all_diagnostics, &fake_uri)
+        code_actions(
+            &docs,
+            text,
+            zero_range,
+            &all_diagnostics,
+            &fake_uri,
+            &YamlFormatOptions::default(),
+        )
     }))
     .map_err(|e| format!("panic in code_actions: {}", panic_message(&e)))?;
 
@@ -340,7 +347,14 @@ fn check_i3_code_action_round_trip(path: &Path, text: &str) -> Result<(), String
     let uri = tower_lsp::lsp_types::Url::parse(&format!("file:///corpus/{file_name}"))
         .expect("valid URI");
 
-    let actions = code_actions(&docs, text, whole_file, &all_diagnostics, &uri);
+    let actions = code_actions(
+        &docs,
+        text,
+        whole_file,
+        &all_diagnostics,
+        &uri,
+        &YamlFormatOptions::default(),
+    );
 
     for action in &actions {
         let Some(edit) = &action.edit else {
@@ -427,6 +441,7 @@ fn check_i4_scalar_preservation(path: &Path, text: &str) -> Result<(), String> {
         whole_file,
         &all_diagnostics,
         &uri,
+        &YamlFormatOptions::default(),
     );
 
     for action in &actions {

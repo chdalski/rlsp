@@ -13,6 +13,7 @@ pub(super) fn block_to_flow(
     docs: &[Document<Span>],
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let (node, key_loc, idx) = find_innermost_block_collection(docs, line_idx)?;
     let loc = node_loc(node);
@@ -38,7 +39,7 @@ pub(super) fn block_to_flow(
     let (key_start_line_1based, key_start_col) = idx.line_column(key_loc.start);
     let base_indent = key_start_col as usize + 2;
     let key_line = key_start_line_1based.saturating_sub(1); // 0-based
-    let formatted = format_subtree(&flow_node, &YamlFormatOptions::default(), base_indent);
+    let formatted = format_subtree(&flow_node, options, base_indent);
     let new_text = format!(" {formatted}");
 
     if new_text.trim().is_empty() {
@@ -87,6 +88,7 @@ pub(super) fn block_text_and_start_col(
     loc: Span,
     text: &str,
     idx: &LineIndex,
+    options: &YamlFormatOptions,
 ) -> (String, usize) {
     let start_col = idx.line_column(loc.start).1 as usize;
     let line_idx = idx.line_column(loc.start).0.saturating_sub(1) as usize;
@@ -107,10 +109,10 @@ pub(super) fn block_text_and_start_col(
             .map_or(0, |line| line.len() - line.trim_start().len());
         let base_indent = key_indent + 2;
         let indent_str = " ".repeat(base_indent);
-        let formatted = format_subtree(node, &YamlFormatOptions::default(), base_indent);
+        let formatted = format_subtree(node, options, base_indent);
         (format!("\n{indent_str}{formatted}"), start_col)
     } else {
-        let formatted = format_subtree(node, &YamlFormatOptions::default(), start_col);
+        let formatted = format_subtree(node, options, start_col);
         (formatted, start_col)
     }
 }
@@ -194,6 +196,7 @@ pub(super) const fn node_loc(node: &Node<Span>) -> &Span {
 mod tests {
     use super::super::code_actions;
     use super::super::test_helpers::{apply_block_to_flow_edit, cursor_range, docs_for};
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::parser::parse_yaml;
     use crate::test_utils::test_uri;
 
@@ -201,7 +204,14 @@ mod tests {
     #[test]
     fn should_not_append_long_line_warning_for_short_result() {
         let text = "items:\n  - a\n  - b\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()

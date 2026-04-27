@@ -997,9 +997,51 @@ impl LanguageServer for Backend {
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
+        let yaml_version = self.get_yaml_version(&text);
+        let settings = self.settings.lock().ok();
+        let format_options = crate::editing::formatter::YamlFormatOptions {
+            print_width: settings
+                .as_ref()
+                .and_then(|s| s.format_print_width)
+                .unwrap_or(80),
+            tab_width: 2,
+            single_quote: settings
+                .as_ref()
+                .and_then(|s| s.format_single_quote)
+                .unwrap_or(false),
+            preserve_quotes: settings
+                .as_ref()
+                .and_then(|s| s.format_preserve_quotes)
+                .unwrap_or(false),
+            bracket_spacing: settings
+                .as_ref()
+                .and_then(|s| s.format_bracket_spacing)
+                .unwrap_or(true),
+            yaml_version,
+            format_enforce_block_style: settings
+                .as_ref()
+                .and_then(|s| s.format_enforce_block_style)
+                .unwrap_or(false),
+            format_remove_duplicate_keys: settings
+                .as_ref()
+                .and_then(|s| s.format_remove_duplicate_keys)
+                .unwrap_or(false),
+            format_indent_sequences: settings
+                .as_ref()
+                .and_then(|s| s.format_indent_sequences)
+                .unwrap_or(true),
+        };
+        drop(settings);
+
         let docs = crate::parser::parse_yaml(&text).documents;
-        let actions =
-            crate::editing::code_actions::code_actions(&docs, &text, range, &diagnostics, &uri);
+        let actions = crate::editing::code_actions::code_actions(
+            &docs,
+            &text,
+            range,
+            &diagnostics,
+            &uri,
+            &format_options,
+        );
         if actions.is_empty() {
             return Ok(None);
         }

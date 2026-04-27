@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use rlsp_yaml_parser::{Document, LineIndex, Span};
 
+use crate::editing::formatter::YamlFormatOptions;
+
 use block_scalar::string_to_block_scalar;
 use block_to_flow::block_to_flow;
 use delete_anchor::delete_unused_anchor;
@@ -43,6 +45,7 @@ pub fn code_actions(
     range: tower_lsp::lsp_types::Range,
     diagnostics: &[Diagnostic],
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
     let lines: Vec<&str> = text.lines().collect();
 
@@ -51,18 +54,24 @@ pub fn code_actions(
         .iter()
         .filter(|diag| ranges_overlap(&diag.range, &range))
         .flat_map(|diag| match diagnostic_code(diag) {
-            Some("flowMap") => flow_map_to_block(docs, text, diag, uri)
+            Some("flowMap") => flow_map_to_block(docs, text, diag, uri, options)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("flowSeq") => flow_seq_to_block(docs, text, diag, uri)
+            Some("flowSeq") => flow_seq_to_block(docs, text, diag, uri, options)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri)
+            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri, options)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("yaml11Boolean" | "schemaYaml11Boolean") => yaml11_bool_actions(docs, diag, uri),
-            Some("yaml11Octal" | "schemaYaml11Octal") => yaml11_octal_actions(docs, diag, uri),
-            Some("schemaYaml11BooleanType") => schema_yaml11_bool_type_actions(docs, diag, uri),
+            Some("yaml11Boolean" | "schemaYaml11Boolean") => {
+                yaml11_bool_actions(docs, diag, uri, options)
+            }
+            Some("yaml11Octal" | "schemaYaml11Octal") => {
+                yaml11_octal_actions(docs, diag, uri, options)
+            }
+            Some("schemaYaml11BooleanType") => {
+                schema_yaml11_bool_type_actions(docs, diag, uri, options)
+            }
             _ => vec![],
         });
 
@@ -72,13 +81,13 @@ pub fn code_actions(
     let context_actions: Vec<CodeAction> = lines.get(line_idx).map_or(vec![], |line| {
         [
             if line.contains('\t') {
-                tab_to_spaces(&lines, line_idx, uri)
+                tab_to_spaces(&lines, line_idx, uri, options)
             } else {
                 None
             },
-            quoted_bool_to_unquoted(docs, line_idx, col, uri),
-            string_to_block_scalar(docs, text, line_idx, uri),
-            block_to_flow(docs, line_idx, uri),
+            quoted_bool_to_unquoted(docs, line_idx, col, uri, options),
+            string_to_block_scalar(docs, text, line_idx, uri, options),
+            block_to_flow(docs, line_idx, uri, options),
         ]
         .into_iter()
         .flatten()
@@ -144,6 +153,7 @@ mod test_helpers {
     use rlsp_yaml_parser::Span;
     use rlsp_yaml_parser::node::Document;
 
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::{parse_docs, test_uri};
     use crate::validation::validators::validate_flow_style;
 
@@ -195,9 +205,16 @@ mod test_helpers {
             .iter()
             .find(|d| d.code == Some(NumberOrString::String("flowMap".to_string())))?;
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        code_actions(&docs, text, whole, std::slice::from_ref(diag), &test_uri())
-            .into_iter()
-            .find(|a| a.title.contains("flow mapping"))
+        code_actions(
+            &docs,
+            text,
+            whole,
+            std::slice::from_ref(diag),
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        )
+        .into_iter()
+        .find(|a| a.title.contains("flow mapping"))
     }
 
     pub(super) fn flow_seq_action(text: &str) -> Option<CodeAction> {
@@ -207,9 +224,16 @@ mod test_helpers {
             .iter()
             .find(|d| d.code == Some(NumberOrString::String("flowSeq".to_string())))?;
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        code_actions(&docs, text, whole, std::slice::from_ref(diag), &test_uri())
-            .into_iter()
-            .find(|a| a.title.contains("flow sequence"))
+        code_actions(
+            &docs,
+            text,
+            whole,
+            std::slice::from_ref(diag),
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        )
+        .into_iter()
+        .find(|a| a.title.contains("flow sequence"))
     }
 
     pub(super) fn new_text_for(action: &CodeAction) -> String {
@@ -234,6 +258,7 @@ mod test_helpers {
             cursor_range(line, 0),
             &[],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         let action = actions
             .iter()
@@ -278,6 +303,7 @@ mod test_helpers {
             cursor_range(line, 0),
             &[],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
         let action = actions
             .iter()

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-27
 
 # Code Actions Respect User Formatter Config
@@ -166,14 +166,14 @@ during execution.
 
 ## Steps
 
-- [ ] Extend `code_actions(...)` dispatch to accept
+- [x] Extend `code_actions(...)` dispatch to accept
       `YamlFormatOptions` (or a `&YamlFormatOptions`)
-- [ ] Update the server's `code_action` LSP handler to
+- [x] Update the server's `code_action` LSP handler to
       construct `YamlFormatOptions` from user settings (mirror
       the formatter's existing path) and pass it through
-- [ ] Plumb the options reference into every action submodule
+- [x] Plumb the options reference into every action submodule
       function signature
-- [ ] Replace every `format_subtree(..., &YamlFormatOptions::default(), ...)`
+- [x] Replace every `format_subtree(..., &YamlFormatOptions::default(), ...)`
       call in code-action submodules with the passed-in options
 - [ ] Fix `block_to_flow.rs:41-52`: pass user's `options`
       (already plumbed by Task 1) to `format_subtree` so the
@@ -226,19 +226,19 @@ that follow.
 
 **Sub-tasks:**
 
-- [ ] Change `code_actions(...)` signature in
+- [x] Change `code_actions(...)` signature in
       `rlsp-yaml/src/editing/code_actions.rs:40` to accept a
       `&YamlFormatOptions` (or equivalent options ref)
-- [ ] Update the server's `code_action` LSP handler in
+- [x] Update the server's `code_action` LSP handler in
       `rlsp-yaml/src/server.rs` to build `YamlFormatOptions`
       from user settings (mirror lines 1055–1064) and pass
       it to `code_actions(...)`
-- [ ] Plumb the options ref into each of the 8 action
+- [x] Plumb the options ref into each of the 8 action
       submodule entry-point functions: `block_scalar`,
       `block_to_flow`, `flow_to_block`, `delete_anchor`,
       `quoted_bool`, `tab_to_spaces`, `yaml11_bool`,
       `yaml11_octal`
-- [ ] Change the signature of the shared helper
+- [x] Change the signature of the shared helper
       `block_text_and_start_col` in `block_to_flow.rs` to
       accept a `&YamlFormatOptions` parameter, and update
       its two `format_subtree` calls (lines 110 and 113) to
@@ -251,26 +251,28 @@ that follow.
       single-line treatment would corrupt block conversion.
       Task 2's `usize::MAX` change is scoped exclusively to
       `block_to_flow.rs:41` (the main action's flow output).
-- [ ] Replace every other `format_subtree(..., &YamlFormatOptions::default(), ...)`
+- [x] Replace every other `format_subtree(..., &YamlFormatOptions::default(), ...)`
       call site in code-action submodules with the passed-in
       options. Construct quote-style overrides (e.g.
       `quote_opts` in `yaml11_bool.rs` and `yaml11_octal.rs`)
       via `..options.clone()` instead of
       `..YamlFormatOptions::default()` so user settings
       survive struct-update syntax.
-- [ ] `tab_to_spaces.rs` has no `format_subtree` calls; its
+- [x] `tab_to_spaces.rs` has no `format_subtree` calls; its
       entry-point signature still gains the options ref for
       consistent plumbing across all 8 modules — no
       behavior change in this submodule
-- [ ] Update inline tests in `code_actions.rs` and all
+- [x] Update inline tests in `code_actions.rs` and all
       submodules that call `code_actions(...)` directly to
       pass `YamlFormatOptions::default()` explicitly
-- [ ] Update the fixture harness in
+- [x] Update the fixture harness in
       `rlsp-yaml/tests/code_action_fixtures.rs` to pass a
       fixed `YamlFormatOptions::default()` to
       `code_actions(...)`. Frontmatter-driven options
       (`format-options:`) are explicitly out of scope for
       Task 1 — Task 3 owns that harness extension.
+
+**Completed:** 2026-04-27 — `d228feff4b042d180907439f1b3d4fb793cd2f04`
 
 **Acceptance:**
 

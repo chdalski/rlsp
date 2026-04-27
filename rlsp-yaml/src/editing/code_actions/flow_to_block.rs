@@ -5,6 +5,8 @@ use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, Position, Ran
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{CollectionStyle, Document, LineIndex, Span};
 
+use crate::editing::formatter::YamlFormatOptions;
+
 use super::{block_to_flow::block_text_and_start_col, make_action, span_matches_diag};
 
 pub(super) fn flow_map_to_block(
@@ -12,6 +14,7 @@ pub(super) fn flow_map_to_block(
     text: &str,
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let (node, idx) = find_flow_mapping(docs, diag)?;
     let Node::Mapping { loc, .. } = node else {
@@ -23,7 +26,8 @@ pub(super) fn flow_map_to_block(
         *style = CollectionStyle::Block;
     }
 
-    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, *loc, text, idx);
+    let (new_text, edit_start_col) =
+        block_text_and_start_col(&block_node, *loc, text, idx, options);
     if new_text.trim().is_empty() {
         return None;
     }
@@ -119,6 +123,7 @@ pub(super) fn flow_seq_to_block(
     text: &str,
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
+    options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let (node, idx) = find_flow_sequence(docs, diag)?;
     let Node::Sequence { loc, .. } = node else {
@@ -130,7 +135,8 @@ pub(super) fn flow_seq_to_block(
         *style = CollectionStyle::Block;
     }
 
-    let (new_text, edit_start_col) = block_text_and_start_col(&block_node, *loc, text, idx);
+    let (new_text, edit_start_col) =
+        block_text_and_start_col(&block_node, *loc, text, idx, options);
     if new_text.trim().is_empty() {
         return None;
     }
@@ -237,6 +243,7 @@ mod tests {
         cursor_range, docs_for, flow_diags_for, flow_map_action, flow_seq_action, line_range,
         make_diagnostic, make_flow_diag, new_text_for,
     };
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
     // ---- Flow map to block ----
@@ -250,6 +257,7 @@ mod tests {
             line_range(0),
             &flow_diags_for(text),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         let action = actions
@@ -274,7 +282,14 @@ mod tests {
         #[case] title_fragment: &str,
     ) {
         let diag = make_diagnostic(0, 100, 200, code);
-        let actions = code_actions(&docs_for(text), text, line_range(0), &[diag], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(actions.iter().all(|a| !a.title.contains(title_fragment)));
     }
 
@@ -289,6 +304,7 @@ mod tests {
             line_range(0),
             &flow_diags_for(text),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         let action = actions
@@ -313,6 +329,7 @@ mod tests {
             line_range(0),
             &flow_diags_for(text),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         let action = actions
@@ -345,6 +362,7 @@ mod tests {
             line_range(0),
             &flow_diags_for(text),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         let action = actions
@@ -377,6 +395,7 @@ mod tests {
             line_range(0),
             &flow_diags_for(text),
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         let action = actions
@@ -412,6 +431,7 @@ mod tests {
             cursor_range(1, 0),
             &[diag],
             &test_uri(),
+            &YamlFormatOptions::default(),
         );
 
         assert!(actions.iter().all(|a| !a.title.contains("flow mapping")));
@@ -422,7 +442,14 @@ mod tests {
     #[test]
     fn should_return_empty_for_plain_yaml_no_diagnostics() {
         let text = "key: value\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         assert!(actions.is_empty());
     }
@@ -430,7 +457,14 @@ mod tests {
     #[test]
     fn should_preserve_double_quoted_item_when_converting_block_seq_to_flow() {
         let text = "items:\n  - \"true\"\n  - \"false\"\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -449,7 +483,14 @@ mod tests {
     #[test]
     fn should_preserve_single_quoted_item_when_converting_block_seq_to_flow() {
         let text = "items:\n  - 'hello'\n  - 'world'\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -473,7 +514,14 @@ mod tests {
     #[test]
     fn should_quote_unsafe_item_alongside_pre_quoted_item() {
         let text = "args:\n  - \"true\"\n  - value, with comma\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -494,7 +542,14 @@ mod tests {
     #[test]
     fn should_not_quote_plain_item_alongside_pre_quoted_item() {
         let text = "args:\n  - \"true\"\n  - plain\n";
-        let actions = code_actions(&docs_for(text), text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         let action = actions
             .iter()
@@ -590,7 +645,14 @@ mod tests {
         let docs = docs_for(text);
         let diags = flow_diags_for(text);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &diags, &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &diags,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let has_map_action = actions.iter().any(|a| a.title.contains("flow mapping"));
         if has_map_action {
             let action = actions
@@ -612,7 +674,14 @@ mod tests {
         let docs = docs_for(text);
         let fake_diag = make_flow_diag("flowMap", 0, 5, 0, 10);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &[fake_diag], &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &[fake_diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().all(|a| !a.title.contains("flow mapping")),
             "no matching node should yield no action"
@@ -696,7 +765,14 @@ mod tests {
         let docs = docs_for(text);
         let diags = flow_diags_for(text);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &diags, &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &diags,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         let has_seq_action = actions.iter().any(|a| a.title.contains("flow sequence"));
         if has_seq_action {
             let action = actions
@@ -716,7 +792,14 @@ mod tests {
     // SIG-1: code_actions accepts empty docs slice
     #[test]
     fn sig_accepts_empty_docs() {
-        let actions = code_actions(&[], "key: value\n", cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &[],
+            "key: value\n",
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(actions.iter().all(|a| !a.title.contains("flow")));
     }
 
@@ -727,7 +810,14 @@ mod tests {
         let docs = docs_for(text);
         let diags = flow_diags_for(text);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &diags, &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &diags,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().any(|a| a.title.contains("flow mapping")),
             "should return flow map action: {actions:?}"
@@ -739,7 +829,14 @@ mod tests {
     fn sig_tab_action_still_works_with_docs() {
         let text = "\tkey: value\n";
         let docs = docs_for(text);
-        let actions = code_actions(&docs, text, cursor_range(0, 0), &[], &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
         assert!(
             actions.iter().any(|a| a.title.contains("tabs to spaces")),
             "tab action should still be offered: {actions:?}"
@@ -750,6 +847,10 @@ mod tests {
 
     // INT-1: sequence-item flow map preserves all scalars end-to-end
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "INT-1 exercises end-to-end scalar preservation; nested collect helpers inflate line count"
+    )]
     fn int_sequence_item_flow_map_preserves_all_scalars() {
         let text = "- {target: linux, os: ubuntu}\n";
         let docs = docs_for(text);
@@ -780,7 +881,14 @@ mod tests {
 
         let diags = flow_diags_for(text);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &diags, &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &diags,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         for action in &actions {
             if action.kind.as_ref() != Some(&CodeActionKind::REFACTOR_REWRITE) {
@@ -864,7 +972,14 @@ mod tests {
         let docs = docs_for(text);
         let diags = flow_diags_for(text);
         let whole = Range::new(Position::new(0, 0), Position::new(999, 0));
-        let actions = code_actions(&docs, text, whole, &diags, &test_uri());
+        let actions = code_actions(
+            &docs,
+            text,
+            whole,
+            &diags,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
 
         for action in &actions {
             if action.kind.as_ref() != Some(&CodeActionKind::REFACTOR_REWRITE) {

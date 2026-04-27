@@ -10,12 +10,15 @@
 
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Position, Range, TextEdit};
 
+use crate::editing::formatter::YamlFormatOptions;
+
 use super::make_action;
 
 pub(super) fn tab_to_spaces(
     lines: &[&str],
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
+    _options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
     let line = lines.get(line_idx)?;
     if !line.contains('\t') {
