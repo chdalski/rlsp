@@ -211,14 +211,20 @@ fn cursor_range(line: u32, col: u32) -> Range {
     Range::new(Position::new(line, col), Position::new(line, col))
 }
 
+/// Convert a codepoint index (LSP `Position.character`) to a byte index in `s`.
+fn codepoint_to_byte(s: &str, codepoint_idx: usize) -> usize {
+    s.char_indices()
+        .nth(codepoint_idx)
+        .map_or(s.len(), |(b, _)| b)
+}
+
 /// Apply a single `TextEdit` to `source` text.
 ///
-/// The edit replaces the byte range `[range.start.character, range.end.character)`
-/// on line `range.start.line` (which must equal `range.end.line` for single-line edits).
-/// Lines outside the edit are preserved verbatim.
+/// LSP `Position.character` values are codepoint indices; this function converts
+/// them to byte indices before slicing. Multi-line edits are supported: lines
+/// strictly between `start_line` and `end_line` are absorbed by the edit.
 ///
-/// Limitation: supports single-line edits only. Multi-edit actions are not
-/// supported by this harness — only the first `TextEdit` of an action is applied.
+/// Only the first `TextEdit` of an action is applied by this harness.
 fn apply_text_edit(source: &str, edit: &TextEdit) -> String {
     let start_line = edit.range.start.line as usize;
     let end_line = edit.range.end.line as usize;
@@ -231,18 +237,25 @@ fn apply_text_edit(source: &str, edit: &TextEdit) -> String {
     for (i, src_line) in source_lines.iter().enumerate() {
         if i < start_line || i > end_line {
             result.push_str(src_line);
+            result.push('\n');
         } else if i == start_line && i == end_line {
-            result.push_str(&src_line[..start_col]);
+            let start_byte = codepoint_to_byte(src_line, start_col);
+            let end_byte = codepoint_to_byte(src_line, end_col);
+            result.push_str(&src_line[..start_byte]);
             result.push_str(&edit.new_text);
-            result.push_str(&src_line[end_col..]);
+            result.push_str(&src_line[end_byte..]);
+            result.push('\n');
         } else if i == start_line {
-            result.push_str(&src_line[..start_col]);
+            // Multi-line edit: emit prefix + new_text, then the end-line tail closes the line.
+            let start_byte = codepoint_to_byte(src_line, start_col);
+            result.push_str(&src_line[..start_byte]);
             result.push_str(&edit.new_text);
         } else if i == end_line {
-            result.push_str(&src_line[end_col..]);
+            let end_byte = codepoint_to_byte(src_line, end_col);
+            result.push_str(&src_line[end_byte..]);
+            result.push('\n');
         }
-        // Lines strictly between start and end are absorbed by the edit.
-        result.push('\n');
+        // Lines strictly between start and end are absorbed by the edit — skip them.
     }
     result
 }
@@ -304,9 +317,18 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
             let edit = extract_first_edit(action, &uri, &path.display().to_string());
             let actual = apply_text_edit(&fixture.test_document, &edit);
 
+            // The fixture format requires a newline before the closing ``` fence, so
+            // expected_document always ends with \n. Normalize both sides so that
+            // edits producing output without a trailing newline still compare equal.
+            let actual_norm = actual.strip_suffix('\n').unwrap_or(&actual);
+            let expected_norm = fixture
+                .expected_document
+                .strip_suffix('\n')
+                .unwrap_or(&fixture.expected_document);
+
             assert_eq!(
-                actual,
-                fixture.expected_document,
+                actual_norm,
+                expected_norm,
                 "fixture {}: output mismatch\ntest-name: {}\ninput:    {:?}\nexpected: {:?}\ngot:      {:?}",
                 path.display(),
                 fixture.test_name,
@@ -520,6 +542,95 @@ mod self_tests {
         assert_eq!(lines[0], "line0");
         assert_eq!(lines[1], "  line1");
         assert_eq!(lines[2], "line2");
+    }
+
+    // C3. Multibyte single-line edit: codepoint indices on a line with 2-byte chars.
+    #[test]
+    fn apply_text_edit_multibyte_single_line() {
+        let source = "key: \"αα\"\n";
+        // α is 2 bytes but 1 codepoint. Codepoint 6 = opening quote, codepoint 8 = before closing quote.
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 6), Position::new(0, 8)),
+            new_text: "|".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "key: \"|\"\n");
+    }
+
+    // C4. Multibyte on end line only: end_col uses codepoint-to-byte on the end line.
+    #[test]
+    fn apply_text_edit_multibyte_on_end_line() {
+        let source = "start\nkey: \"αα\"\n";
+        // Edit spans lines 0–1: tail starts at codepoint 6 of line 1 ("αα\""),
+        // codepoint 6 = after the opening quote = "αα\"" remaining.
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 5), Position::new(1, 6)),
+            new_text: " ".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "start αα\"\n");
+    }
+
+    // C5. Two-line collapse: no spurious empty line between start and end.
+    #[test]
+    fn apply_text_edit_multiline_two_lines() {
+        let source = "[a,\nb]\n";
+        // Replace from col 3 on line 0 to col 0 on line 1 with a space.
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 3), Position::new(1, 0)),
+            new_text: " ".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "[a, b]\n");
+    }
+
+    // C6. Three-plus source lines absorbed: in-between lines emit nothing.
+    #[test]
+    fn apply_text_edit_multiline_three_source_lines_absorbed() {
+        let source = "a\nb\nc\nd\n";
+        // Edit from col 1 of line 0 to col 0 of line 3; lines 1 and 2 are absorbed.
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 1), Position::new(3, 0)),
+            new_text: "-".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "a-d\n");
+    }
+
+    // C7. Multibyte characters in new_text across a multi-line edit.
+    #[test]
+    fn apply_text_edit_multiline_new_text_multibyte() {
+        let source = "[a,\nb]\n";
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 3), Position::new(1, 0)),
+            new_text: " α".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "[a, αb]\n");
+    }
+
+    // C8. start_col == 0: empty prefix slice does not panic.
+    #[test]
+    fn apply_text_edit_start_col_zero() {
+        let source = "  key: value\n";
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 0), Position::new(0, 2)),
+            new_text: "\t".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "\tkey: value\n");
+    }
+
+    // C9. end_col == line.len() (codepoints): unwrap_or(s.len()) fallback is exercised.
+    #[test]
+    fn apply_text_edit_end_col_at_eol() {
+        let source = "key: value\nline2\n";
+        let edit = TextEdit {
+            range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+            new_text: "replaced".to_string(),
+        };
+        let result = apply_text_edit(source, &edit);
+        assert_eq!(result, "replaced\nline2\n");
     }
 
     // ---- Group D: Full round-trip -----------------------------------------------

@@ -160,9 +160,12 @@ no external specification governs the fixture format.
 - [x] Port `block_scalar` cursor-driven tests (23 ports
       after Pattern C corrections); delete the 23 ported
       inline tests; keep 2 Pattern C tests inline
-- [ ] Port `block_to_flow` cursor-driven tests (22 A +
-      4 B); delete the 26 ported inline tests; keep the
-      2 Pattern C tests inline
+- [x] Port `block_to_flow` cursor-driven tests (32 ports
+      after Pattern C adjudication); delete the 32 ported
+      inline tests; keep 3 Pattern C tests inline. Also
+      port the previously-inline-only block_scalar
+      multibyte test once the harness `apply_text_edit`
+      fix lands.
 
 ## Tasks
 
@@ -379,35 +382,65 @@ surfaced 2 Pattern C tests that stay inline:
 - `cargo clippy --all-targets -- -D warnings` exits 0
 - `cargo fmt --check` exits 0
 
-### Task 4: Port block_to_flow cursor-driven subset
+### Task 4: Port block_to_flow + harness fixes
 
-Port the 26 cursor-driven fixture-shaped tests from
-`rlsp-yaml/src/editing/code_actions/block_to_flow.rs` (22
-Pattern A + 4 Pattern B). The 2 Pattern C tests stay
-inline.
+Two work streams:
+
+1. **Fix `apply_text_edit` in the harness** to correctly
+   handle (a) multibyte input — the original code treated
+   `Position.character` as a byte index, panicking on
+   non-ASCII; (b) multi-line edits where in-between source
+   lines should be absorbed by the new_text instead of
+   leaking spurious newlines into the output.
+
+2. **Port the cursor-driven, fixture-shaped tests** from
+   `block_to_flow.rs` (Explore classified as 26 ports + 2
+   Pattern C; pre-scan and adjudication produced 32 ports
+   + 3 Pattern C).
+
+The harness fix unlocked porting the previously-inline-only
+multibyte test from `block_scalar.rs`.
 
 **Sub-tasks:**
 
-- [ ] Add 26 fixtures in
-      `rlsp-yaml/tests/fixtures/code_actions/`, one per
-      ported test, named in kebab-case
-- [ ] For each fixture, reproduce the input and expected
-      output (or absence assertion) from the inline test
-- [ ] Delete the 26 ported `#[test]` and `#[rstest]`
-      functions from `block_to_flow.rs`; keep the 2
-      Pattern C tests inline
-- [ ] Remove now-unused `use` imports from the surviving
-      `#[cfg(test)] mod tests` block
+- [x] Fix `apply_text_edit` in
+      `rlsp-yaml/tests/code_action_fixtures.rs`: convert
+      codepoint indices to byte indices before slicing,
+      and emit newlines only on boundary lines so absorbed
+      in-between lines no longer leak `\n`
+- [x] Add at least 4 new self-tests for the harness fix
+      (multibyte single-line, multi-line collapsing,
+      multi-line absorbed in-between, ASCII regression)
+- [x] Pre-scan `block_to_flow.rs` for non-transformation
+      assertions; surface candidates for lead adjudication
+- [x] Add 32 fixtures: 31 from `block_to_flow.rs` + 1
+      from `block_scalar.rs` (the multibyte test ported
+      after the harness fix)
+- [x] Delete the 32 ported `#[test]` and `#[rstest]`
+      functions; keep 3 Pattern C tests inline in
+      `block_to_flow.rs` and 1 Pattern C test inline in
+      `block_scalar.rs`
+- [x] Remove now-unused `use` imports
+
+**Completed:** 2026-04-27 — `8c1b79b59d2c4b10903ad9185a3d12834a506256`
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 81
-  fixture files (55 from prior tasks + 26 from this task)
-- `cargo test --test code_action_fixtures` passes; all 81
-  fixtures pass
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 87
+  fixture files (55 from prior tasks + 32 from this task)
+- `cargo test --test code_action_fixtures` passes; 87
+  fixtures + 28 self-tests = 115 total cases
 - `rlsp-yaml/src/editing/code_actions/block_to_flow.rs`
-  contains exactly 2 test functions (the 2 Pattern C
-  tests)
+  contains exactly 3 `#[test]` functions:
+  `should_not_append_long_line_warning_for_short_result`,
+  `should_produce_reparseable_yaml_when_long_sequence_wraps`,
+  `should_produce_reparseable_yaml_when_long_nested_mapping_wraps`
+- `rlsp-yaml/src/editing/code_actions/block_scalar.rs`
+  contains exactly 1 `#[test]` function
+  (`should_preserve_trailing_comment_when_converting_to_block_scalar`)
+  — reduced from 2 because the multibyte test was ported
+  to a fixture once the harness `apply_text_edit` fix
+  unlocked it
 - `cargo test -p rlsp-yaml` passes
 - `cargo clippy --all-targets -- -D warnings` exits 0
 - `cargo fmt --check` exits 0

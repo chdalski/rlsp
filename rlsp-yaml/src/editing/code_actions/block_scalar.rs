@@ -123,29 +123,7 @@ fn find_block_scalar_in_node<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::code_actions;
-    use super::super::test_helpers::{apply_block_scalar_edit, cursor_range, docs_for};
-    use crate::test_utils::test_uri;
-
-    // Pattern C (kept inline): apply_text_edit uses char-count as a byte index; for multibyte
-    // input the end column falls between byte boundaries and the harness panics. The inline test
-    // only checks action presence, never applies the edit.
-    #[test]
-    fn should_offer_block_scalar_when_char_count_meets_threshold_with_multibyte() {
-        let value = "α".repeat(40);
-        let text = format!("key: \"{value}\"\n");
-        let actions = code_actions(
-            &docs_for(&text),
-            &text,
-            cursor_range(0, 0),
-            &[],
-            &test_uri(),
-        );
-        assert!(
-            actions.iter().any(|a| a.title.contains("block scalar")),
-            "must offer block-scalar when char count meets 40-char threshold"
-        );
-    }
+    use super::super::test_helpers::apply_block_scalar_edit;
 
     // Pattern C (kept inline): column-exact range assertion — edit.range.end.character must equal
     // the exclusive byte end of the scalar span, not the end of the full line. The fixture format
