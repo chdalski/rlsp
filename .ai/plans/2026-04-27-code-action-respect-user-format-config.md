@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-27)
 **Created:** 2026-04-27
 
 # Code Actions Respect User Formatter Config
