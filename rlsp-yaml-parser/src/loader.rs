@@ -983,6 +983,7 @@ fn sanitize_scalar_for_error(raw: &str) -> String {
 ///
 /// Returns [`LoadError::UnresolvedScalar`] when `schema` is [`Schema::Json`]
 /// and a plain scalar does not match any JSON type pattern.
+#[inline]
 fn apply_schema_to_node(
     node: &mut Node<Span>,
     schema: Schema,

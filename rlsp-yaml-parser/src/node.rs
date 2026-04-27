@@ -121,6 +121,7 @@ pub struct NodeMeta<Loc = Span> {
 impl<Loc> NodeMeta<Loc> {
     /// Return `true` if all fields are `None` / empty — used to decide whether
     /// to store `None` or `Some(Box::new(self))`.
+    #[inline]
     pub(crate) const fn is_all_none(&self) -> bool {
         self.anchor.is_none()
             && self.anchor_loc.is_none()
@@ -130,6 +131,7 @@ impl<Loc> NodeMeta<Loc> {
     }
 
     /// Wrap into `Option<Box<NodeMeta>>`, returning `None` when all fields are absent.
+    #[inline]
     pub fn into_option(self) -> Option<Box<Self>> {
         if self.is_all_none() {
             None

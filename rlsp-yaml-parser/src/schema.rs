@@ -115,6 +115,7 @@ pub enum CollectionKind {
 /// other styles (single-quoted, double-quoted, literal block, folded block)
 /// resolve unconditionally to `!!str` — the content of a quoted or block scalar
 /// is always a string regardless of what the characters spell.
+#[inline]
 pub fn resolve_scalar(
     schema: Schema,
     style: ScalarStyle,
@@ -190,6 +191,7 @@ pub const fn resolve_collection(
 /// Dispatches on the first byte to prune the common-case `Str` outcome before
 /// any pattern matcher runs. Each branch covers exactly the prefix set of the
 /// matcher(s) it invokes — bytes outside the enumerated set can only be `Str`.
+#[inline]
 fn resolve_core_plain(value: &str) -> ResolvedTag {
     match value.as_bytes().first().copied() {
         // Empty string or "~" → null (the only two direct-return null forms).
