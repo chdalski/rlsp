@@ -157,8 +157,9 @@ no external specification governs the fixture format.
 - [x] Port `quoted_bool` cursor-driven tests (30 ports
       after misclassification correction); delete the 30
       ported inline tests; keep 3 Pattern C tests inline
-- [ ] Port `block_scalar` cursor-driven tests (25 A);
-      delete the 25 ported inline tests
+- [x] Port `block_scalar` cursor-driven tests (23 ports
+      after Pattern C corrections); delete the 23 ported
+      inline tests; keep 2 Pattern C tests inline
 - [ ] Port `block_to_flow` cursor-driven tests (22 A +
       4 B); delete the 26 ported inline tests; keep the
       2 Pattern C tests inline
@@ -335,33 +336,45 @@ frontmatter field. The corrected classification is
 
 ### Task 3: Port block_scalar
 
-Port the 25 cursor-driven Pattern A tests from
-`rlsp-yaml/src/editing/code_actions/block_scalar.rs`. All
-25 are positive transformations; this task is the largest
-single batch of `applies-action` fixtures.
+Port the cursor-driven, fixture-shaped tests from
+`rlsp-yaml/src/editing/code_actions/block_scalar.rs`. The
+Explore agent's classification said all 25 tests were
+Pattern A; the developer's pre-scan and implementation
+surfaced 2 Pattern C tests that stay inline:
+- `should_preserve_trailing_comment_when_converting_to_block_scalar`
+  (column-exact range assertion, same shape as the
+  quoted_bool precedent)
+- `should_offer_block_scalar_when_char_count_meets_threshold_with_multibyte`
+  (multibyte input panics the harness's `apply_text_edit`,
+  which uses `Position.character` as a byte index — fix
+  bundled into Task 4)
 
 **Sub-tasks:**
 
-- [ ] Add 25 fixtures in
+- [x] Add 23 fixtures in
       `rlsp-yaml/tests/fixtures/code_actions/`, one per
       ported test, named in kebab-case
-- [ ] For each fixture, reproduce the input and expected
+- [x] For each fixture, reproduce the input and expected
       output from the inline test, including the
       escape-sequence resolution cases (literal `\n`,
       `\t`, `''` mappings) — the fixture body is the
       verification surface
-- [ ] Delete the 25 ported `#[test]` functions from
-      `block_scalar.rs`; if the `#[cfg(test)] mod tests`
-      block becomes empty, delete it as well
+- [x] Delete the 23 ported `#[test]` functions from
+      `block_scalar.rs`; keep 2 Pattern C tests inline
+
+**Completed:** 2026-04-27 — `94d5cfc22dc8687f783014c3ffc4ecb710f5596a`
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 57
-  fixture files (32 from prior tasks + 25 from this task)
-- `cargo test --test code_action_fixtures` passes; all 57
-  fixtures pass
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 55
+  fixture files (32 from prior tasks + 23 from this task)
+- `cargo test --test code_action_fixtures` passes; all 55
+  fixtures pass plus 21 self-tests
 - `rlsp-yaml/src/editing/code_actions/block_scalar.rs`
-  contains 0 `#[test]` functions
+  contains exactly 2 `#[test]` functions:
+  `should_preserve_trailing_comment_when_converting_to_block_scalar`
+  and
+  `should_offer_block_scalar_when_char_count_meets_threshold_with_multibyte`
 - `cargo test -p rlsp-yaml` passes
 - `cargo clippy --all-targets -- -D warnings` exits 0
 - `cargo fmt --check` exits 0
@@ -388,9 +401,9 @@ inline.
 
 **Acceptance:**
 
-- `rlsp-yaml/tests/fixtures/code_actions/` contains 83
-  fixture files (57 from prior tasks + 26 from this task)
-- `cargo test --test code_action_fixtures` passes; all 83
+- `rlsp-yaml/tests/fixtures/code_actions/` contains 81
+  fixture files (55 from prior tasks + 26 from this task)
+- `cargo test --test code_action_fixtures` passes; all 81
   fixtures pass
 - `rlsp-yaml/src/editing/code_actions/block_to_flow.rs`
   contains exactly 2 test functions (the 2 Pattern C
