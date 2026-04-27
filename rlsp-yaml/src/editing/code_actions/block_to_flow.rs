@@ -46,11 +46,7 @@ pub(super) fn block_to_flow(
         return None;
     }
 
-    let title = if new_text.len() > 80 {
-        "Convert block to flow style (long line)".to_string()
-    } else {
-        "Convert block to flow style".to_string()
-    };
+    let title = "Convert block to flow style".to_string();
 
     let (_, key_end_col) = idx.line_column(key_loc.end);
     let edit_start_col = key_end_col as usize + 1;
@@ -192,37 +188,9 @@ pub(super) const fn node_loc(node: &Node<Span>) -> &Span {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
-    use super::super::code_actions;
-    use super::super::test_helpers::{apply_block_to_flow_edit, cursor_range, docs_for};
-    use crate::editing::formatter::YamlFormatOptions;
+    use super::super::test_helpers::apply_block_to_flow_edit;
     use crate::parser::parse_yaml;
-    use crate::test_utils::test_uri;
-
-    // Pattern C: title exact-equality assertion — fixture format is substring-only;
-    #[test]
-    fn should_not_append_long_line_warning_for_short_result() {
-        let text = "items:\n  - a\n  - b\n";
-        let actions = code_actions(
-            &docs_for(text),
-            text,
-            cursor_range(0, 0),
-            &[],
-            &test_uri(),
-            &YamlFormatOptions::default(),
-        );
-
-        let action = actions
-            .iter()
-            .find(|a| a.title.contains("block to flow"))
-            .unwrap();
-        assert_eq!(
-            action.title, "Convert block to flow style",
-            "short result must not include long-line warning: {:?}",
-            action.title
-        );
-    }
 
     // Pattern C: re-parseability assertion on the applied edit — fixture format verifies
     // text equality only; the round-trip parse check requires an explicit `parse_yaml` call.

@@ -175,7 +175,7 @@ during execution.
       function signature
 - [x] Replace every `format_subtree(..., &YamlFormatOptions::default(), ...)`
       call in code-action submodules with the passed-in options
-- [ ] Fix `block_to_flow.rs:41-52`: pass user's `options`
+- [x] Fix `block_to_flow.rs:41-52`: pass user's `options`
       (already plumbed by Task 1) to `format_subtree` so the
       formatter wraps using the user's `formatPrintWidth`;
       drop the `(long line)` title-suffix branching logic
@@ -315,13 +315,13 @@ suffix.
 
 **Sub-tasks:**
 
-- [ ] Remove the `if new_text.len() > 80 { ... } else { ... }`
+- [x] Remove the `if new_text.len() > 80 { ... } else { ... }`
       block at `block_to_flow.rs:48-52`. Replace with an
       unconditional `let title = "Convert block to flow style".to_string();`
-- [ ] Verify `block_to_flow.rs:41` (already touched by Task 1)
+- [x] Verify `block_to_flow.rs:41` (already touched by Task 1)
       reads as `format_subtree(&flow_node, options, base_indent)`
       — the formatter wraps using `options.print_width`
-- [ ] Update the 3 inline Pattern C tests in `block_to_flow.rs`:
+- [x] Update the 3 inline Pattern C tests in `block_to_flow.rs`:
       - `should_not_append_long_line_warning_for_short_result`
         — the asserted behavior (no `(long line)` suffix on
         short results) is now the *unconditional* behavior.
@@ -333,6 +333,8 @@ suffix.
         Update only if the test asserts on the title suffix.
       - `should_produce_reparseable_yaml_when_long_nested_mapping_wraps`
         — keep, same reasoning as above.
+
+**Completed:** 2026-04-27 — `7a29e4bc92ba384fc316d02173ee46ad22157d63`
 
 **Acceptance:**
 
