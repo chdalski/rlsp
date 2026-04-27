@@ -1,11 +1,15 @@
 ---
-test-name: block-to-flow-long-line-warning
+test-name: block-to-flow-wraps-long-output
 category: block-to-flow
 cursor: 0:0
-applies-action: (long line)
+applies-action: Convert block to flow style
 ---
 
-# Test: Offer block-to-flow with long-line warning when result exceeds 80 chars
+# Test: Wrap flow output when single-line form exceeds print_width
+
+When the single-line flow form of the converted collection exceeds the
+configured `formatPrintWidth` (default 80), the formatter breaks it across
+multiple lines.
 
 ## Test-Document
 

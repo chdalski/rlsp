@@ -10,6 +10,9 @@
 //   category: tab-to-spaces | ...
 //   cursor: <line>:<character>   (zero-based)
 //   applies-action: <title-substring>
+//   format-options:
+//     print_width: 120
+//     single_quote: true
 //   ---
 //
 //   # Test: Title
@@ -31,6 +34,11 @@
 //                    TextEdit to Test-Document, asserts result equals Expected-Document
 //   omits-action   — asserts no action with that title substring is returned;
 //                    Expected-Document is not required
+//
+// Optional frontmatter block:
+//   format-options — indented key-value pairs that override YamlFormatOptions
+//                    fields; unspecified fields remain at their default value;
+//                    unknown keys are silently ignored
 
 #![expect(missing_docs, reason = "test code")]
 
@@ -62,6 +70,8 @@ struct FixtureSpec {
     cursor_char: u32,
     /// Assertion mode.
     mode: ActionMode,
+    /// Formatter options from `format-options:` frontmatter block, or default.
+    format_options: YamlFormatOptions,
     /// Raw YAML from `## Test-Document`.
     test_document: String,
     /// Raw YAML from `## Expected-Document`. Empty for `OmitsAction` mode.
@@ -82,17 +92,38 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), String> {
     Ok((frontmatter, body))
 }
 
-fn parse_frontmatter(frontmatter: &str) -> Result<(String, u32, u32, ActionMode), String> {
+fn parse_frontmatter(
+    frontmatter: &str,
+) -> Result<(String, u32, u32, ActionMode, YamlFormatOptions), String> {
     let mut test_name = String::new();
     let mut cursor: Option<(u32, u32)> = None;
     let mut applies_action: Option<String> = None;
     let mut omits_action: Option<String> = None;
+    let mut options = YamlFormatOptions::default();
+    let mut in_format_options = false;
 
     for line in frontmatter.lines() {
         if line.is_empty() {
             continue;
         }
-        if let Some((key, value)) = line.split_once(": ") {
+
+        // Detect the `format-options:` section header.
+        if line == "format-options:" {
+            in_format_options = true;
+            continue;
+        }
+
+        // A non-indented, non-empty line ends the format-options block.
+        if in_format_options && !line.starts_with(' ') && !line.starts_with('\t') {
+            in_format_options = false;
+        }
+
+        if in_format_options {
+            let trimmed = line.trim();
+            if let Some((key, value)) = trimmed.split_once(": ") {
+                apply_format_option(&mut options, key.trim(), value.trim());
+            }
+        } else if let Some((key, value)) = line.split_once(": ") {
             let value = value.trim();
             match key.trim() {
                 "test-name" => test_name = value.to_string(),
@@ -137,7 +168,40 @@ fn parse_frontmatter(frontmatter: &str) -> Result<(String, u32, u32, ActionMode)
         );
     };
 
-    Ok((test_name, cursor_line, cursor_char, mode))
+    Ok((test_name, cursor_line, cursor_char, mode, options))
+}
+
+/// Apply a single `format-options` key-value pair to `options`.
+///
+/// Panics on invalid numeric values (mirrors `formatter_fixtures.rs` behavior).
+/// Unknown keys are silently ignored — forward-compatible with future options.
+#[expect(
+    clippy::panic,
+    reason = "test harness reports fixture errors via panic"
+)]
+fn apply_format_option(options: &mut YamlFormatOptions, key: &str, value: &str) {
+    match key {
+        "print_width" => {
+            options.print_width = value.parse().unwrap_or_else(|_| {
+                panic!("fixture format-options: invalid print_width: {value:?}")
+            });
+        }
+        "tab_width" => {
+            options.tab_width = value
+                .parse()
+                .unwrap_or_else(|_| panic!("fixture format-options: invalid tab_width: {value:?}"));
+        }
+        "single_quote" => {
+            options.single_quote = value == "true";
+        }
+        "preserve_quotes" => {
+            options.preserve_quotes = value == "true";
+        }
+        "bracket_spacing" => {
+            options.bracket_spacing = value == "true";
+        }
+        _ => {}
+    }
 }
 
 fn extract_section(body: &str, section: &str) -> Result<String, String> {
@@ -166,7 +230,7 @@ fn parse_fixture(content: &str, path: &Path) -> FixtureSpec {
     let (frontmatter, body) =
         split_frontmatter(content).unwrap_or_else(|e| panic_fixture(&path_str, &e));
 
-    let (test_name, cursor_line, cursor_char, mode) =
+    let (test_name, cursor_line, cursor_char, mode, format_options) =
         parse_frontmatter(frontmatter).unwrap_or_else(|e| panic_fixture(&path_str, &e));
 
     let test_document =
@@ -183,6 +247,7 @@ fn parse_fixture(content: &str, path: &Path) -> FixtureSpec {
         cursor_line,
         cursor_char,
         mode,
+        format_options,
         test_document,
         expected_document,
     }
@@ -304,7 +369,7 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
         range,
         &[],
         &uri,
-        &YamlFormatOptions::default(),
+        &fixture.format_options,
     );
 
     match &fixture.mode {
@@ -377,7 +442,7 @@ mod self_tests {
     #[test]
     fn frontmatter_parses_test_name() {
         let fm = "test-name: tab-convert\ncategory: editing\ncursor: 0:0\napplies-action: Foo\n";
-        let (name, _, _, _) = parse_frontmatter(fm).unwrap();
+        let (name, _, _, _, _) = parse_frontmatter(fm).unwrap();
         assert_eq!(name, "tab-convert");
     }
 
@@ -385,7 +450,7 @@ mod self_tests {
     #[test]
     fn frontmatter_cursor_parses_line_and_char() {
         let fm = "test-name: foo\ncursor: 2:5\napplies-action: Foo\n";
-        let (_, line, ch, _) = parse_frontmatter(fm).unwrap();
+        let (_, line, ch, _, _) = parse_frontmatter(fm).unwrap();
         assert_eq!(line, 2);
         assert_eq!(ch, 5);
     }
@@ -394,7 +459,7 @@ mod self_tests {
     #[test]
     fn frontmatter_parses_applies_action() {
         let fm = "test-name: foo\ncursor: 0:0\napplies-action: Convert tabs\n";
-        let (_, _, _, mode) = parse_frontmatter(fm).unwrap();
+        let (_, _, _, mode, _) = parse_frontmatter(fm).unwrap();
         assert_eq!(mode, ActionMode::AppliesAction("Convert tabs".to_string()));
     }
 
@@ -402,7 +467,7 @@ mod self_tests {
     #[test]
     fn frontmatter_parses_omits_action() {
         let fm = "test-name: foo\ncursor: 0:0\nomits-action: Convert tabs\n";
-        let (_, _, _, mode) = parse_frontmatter(fm).unwrap();
+        let (_, _, _, mode, _) = parse_frontmatter(fm).unwrap();
         assert_eq!(mode, ActionMode::OmitsAction("Convert tabs".to_string()));
     }
 
@@ -711,5 +776,157 @@ mod self_tests {
             "fixture test.md: expected no action with title containing {title_sub:?}, but found: {:?}",
             found.map(|a| &a.title),
         );
+    }
+
+    // ---- Group E: format-options frontmatter parsing -------------------------
+
+    // E1. format-options block with all supported keys parses to correct options.
+    #[test]
+    fn format_options_all_keys_parsed() {
+        let fm = "test-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n  print_width: 60\n  single_quote: true\n  bracket_spacing: false\n  preserve_quotes: true\n  tab_width: 4\n";
+        let (_, _, _, _, opts) = parse_frontmatter(fm).unwrap();
+        assert_eq!(opts.print_width, 60);
+        assert!(opts.single_quote);
+        assert!(!opts.bracket_spacing);
+        assert!(opts.preserve_quotes);
+        assert_eq!(opts.tab_width, 4);
+    }
+
+    // E2. Partial format-options block: specified fields set, unspecified remain default.
+    #[test]
+    fn format_options_partial_keys_others_remain_default() {
+        let fm =
+            "test-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n  print_width: 40\n";
+        let (_, _, _, _, opts) = parse_frontmatter(fm).unwrap();
+        let defaults = YamlFormatOptions::default();
+        assert_eq!(opts.print_width, 40);
+        assert_eq!(opts.single_quote, defaults.single_quote);
+        assert_eq!(opts.bracket_spacing, defaults.bracket_spacing);
+        assert_eq!(opts.preserve_quotes, defaults.preserve_quotes);
+        assert_eq!(opts.tab_width, defaults.tab_width);
+    }
+
+    // E3. Empty format-options block (header present, no indented keys) yields defaults.
+    #[test]
+    fn format_options_empty_block_yields_defaults() {
+        let fm = "test-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n";
+        let (_, _, _, _, opts) = parse_frontmatter(fm).unwrap();
+        let defaults = YamlFormatOptions::default();
+        assert_eq!(opts.print_width, defaults.print_width);
+        assert_eq!(opts.single_quote, defaults.single_quote);
+    }
+
+    // E4. Unknown key in format-options block is silently ignored.
+    #[test]
+    fn format_options_unknown_key_silently_ignored() {
+        let fm = "test-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n  print_width: 50\n  unknown_setting: xyz\n";
+        let (_, _, _, _, opts) = parse_frontmatter(fm).unwrap();
+        assert_eq!(opts.print_width, 50);
+    }
+
+    // E5. Frontmatter without format-options block yields default options.
+    #[test]
+    fn format_options_absent_yields_defaults() {
+        let fm = "test-name: foo\ncursor: 0:0\napplies-action: X\n";
+        let (_, _, _, _, opts) = parse_frontmatter(fm).unwrap();
+        let defaults = YamlFormatOptions::default();
+        assert_eq!(opts.print_width, defaults.print_width);
+        assert_eq!(opts.single_quote, defaults.single_quote);
+        assert_eq!(opts.bracket_spacing, defaults.bracket_spacing);
+        assert_eq!(opts.preserve_quotes, defaults.preserve_quotes);
+        assert_eq!(opts.tab_width, defaults.tab_width);
+    }
+
+    // E6. Malformed print_width value panics with a message naming the field.
+    #[test]
+    #[should_panic(expected = "print_width")]
+    fn format_options_invalid_print_width_panics() {
+        let content = "---\ntest-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n  print_width: notanumber\n---\n\n## Test-Document\n\n```yaml\nkey: value\n```\n\n## Expected-Document\n\n```yaml\nkey: value\n```\n";
+        let path = PathBuf::from("test.md");
+        let _ = parse_fixture(content, &path);
+    }
+
+    // E7. Malformed tab_width value panics with a message naming the field.
+    #[test]
+    #[should_panic(expected = "tab_width")]
+    fn format_options_invalid_tab_width_panics() {
+        let content = "---\ntest-name: foo\ncursor: 0:0\napplies-action: X\nformat-options:\n  tab_width: notanumber\n---\n\n## Test-Document\n\n```yaml\nkey: value\n```\n\n## Expected-Document\n\n```yaml\nkey: value\n```\n";
+        let path = PathBuf::from("test.md");
+        let _ = parse_fixture(content, &path);
+    }
+
+    // ---- Group F: format-options applied to code_actions ---------------------
+
+    // F1. Custom print_width in format-options is passed to code_actions and affects output.
+    #[test]
+    fn format_options_print_width_reaches_code_actions() {
+        // Input whose single-line flow form is ~92 chars — exceeds default 80, fits within 120.
+        let text = "items:\n  - alpha_item_one\n  - bravo_item_two\n  - charlie_item_three\n  - delta_item_four\n  - echo_item_five\n";
+        let uri = test_uri();
+        let docs = docs_for(text);
+        let range = cursor_range(0, 0);
+
+        // With default print_width (80): the single-line form doesn't fit, so the
+        // formatter breaks the flow sequence across multiple lines.
+        let narrow_actions =
+            code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
+        let narrow_action = narrow_actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap_or_else(|| panic!("expected block-to-flow action with default options"));
+        let narrow_edit = extract_first_edit(
+            narrow_action,
+            &uri,
+            "self_tests::format_options_print_width_reaches_code_actions",
+        );
+        let narrow_result = apply_text_edit(text, &narrow_edit);
+        // Under default width the sequence wraps — result is multi-line.
+        assert!(
+            narrow_result.lines().count() > 1,
+            "expected multi-line output under default print_width=80, got: {narrow_result:?}"
+        );
+
+        // With print_width 120: the single-line form fits, so the formatter keeps it inline.
+        let wide_opts = YamlFormatOptions {
+            print_width: 120,
+            ..YamlFormatOptions::default()
+        };
+        let wide_actions = code_actions(&docs, text, range, &[], &uri, &wide_opts);
+        let wide_action = wide_actions
+            .iter()
+            .find(|a| a.title.contains("block to flow"))
+            .unwrap_or_else(|| panic!("expected block-to-flow action with wide options"));
+        let wide_edit = extract_first_edit(
+            wide_action,
+            &uri,
+            "self_tests::format_options_print_width_reaches_code_actions",
+        );
+        let wide_result = apply_text_edit(text, &wide_edit);
+        // Under print_width=120 the sequence fits on one line.
+        assert_eq!(
+            wide_result.lines().count(),
+            1,
+            "expected single-line output under print_width=120, got: {wide_result:?}"
+        );
+    }
+
+    // F2. parse_fixture with no format-options returns options equal to default.
+    #[test]
+    fn format_options_absent_in_fixture_uses_defaults() {
+        let content = "---\ntest-name: foo\ncursor: 0:0\napplies-action: X\n---\n\n## Test-Document\n\n```yaml\nkey: value\n```\n\n## Expected-Document\n\n```yaml\nkey: value\n```\n";
+        let path = PathBuf::from("test.md");
+        let fixture = parse_fixture(content, &path);
+        let defaults = YamlFormatOptions::default();
+        assert_eq!(fixture.format_options.print_width, defaults.print_width);
+        assert_eq!(fixture.format_options.single_quote, defaults.single_quote);
+        assert_eq!(
+            fixture.format_options.bracket_spacing,
+            defaults.bracket_spacing
+        );
+        assert_eq!(
+            fixture.format_options.preserve_quotes,
+            defaults.preserve_quotes
+        );
+        assert_eq!(fixture.format_options.tab_width, defaults.tab_width);
     }
 }

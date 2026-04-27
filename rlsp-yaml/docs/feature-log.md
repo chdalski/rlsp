@@ -31,6 +31,13 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Code Actions Honor Formatter Settings [completed]
+
+**Description:** All code actions now respect the user's formatter settings (`formatPrintWidth`, `formatSingleQuote`, `formatBracketSpacing`, `formatPreserveQuotes`) consistently with the document formatter. Previously, code actions used hardcoded defaults regardless of user configuration. The `Convert block to flow style` action's output now wraps at the user's configured `formatPrintWidth` (default 80) instead of a hardcoded value, and the action title no longer appends a `(long line)` suffix when the result is long — the formatter handles wrapping automatically.
+**Complexity:** Low
+**Comment:** Consistency between the formatter and code actions is the expected UX — users configuring `formatPrintWidth: 120` expect code-action output to also fit within 120 columns.
+**Tier:** 1
+
 ### `formatIndentSequences` Option [completed]
 
 **Description:** New formatter setting `formatIndentSequences` (boolean, default `true`) controls whether block sequences under mapping keys are indented. When `true` (the default), sequences are indented relative to their key (`key:\n  - item`). When `false`, sequences are placed at the same indentation level as the key (`key:\n- item`). Existing users see no change — the default preserves the previous behavior.

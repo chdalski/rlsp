@@ -78,7 +78,8 @@ The harness is `tests/code_action_fixtures.rs`.
 
 ### Frontmatter fields
 
-All fields are flat key:value pairs between `---` delimiters.
+All fields are between `---` delimiters. Most are flat key:value pairs;
+`format-options:` introduces an indented block.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -87,8 +88,40 @@ All fields are flat key:value pairs between `---` delimiters.
 | `cursor` | yes | Zero-based `line:character` cursor position |
 | `applies-action` | see below | Title substring of the action to invoke |
 | `omits-action` | see below | Title substring asserted absent |
+| `format-options:` | no | Block of indented key-value pairs overriding `YamlFormatOptions` fields |
 
 Exactly one of `applies-action` or `omits-action` must be set; they are mutually exclusive.
+
+### `format-options:` block
+
+When present, the harness builds a `YamlFormatOptions` with the specified fields
+and passes it to `code_actions(...)`. Unspecified fields remain at their default
+values. When absent, `YamlFormatOptions::default()` is used.
+
+Supported keys (mirror the formatter fixtures' `settings:` block convention):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `print_width` | usize | Maximum line width (default: 80) |
+| `tab_width` | usize | Spaces per indent level (default: 2) |
+| `single_quote` | bool | Prefer single-quoted strings (default: false) |
+| `bracket_spacing` | bool | Spaces inside flow braces `{ a: 1 }` vs `{a: 1}` (default: true) |
+| `preserve_quotes` | bool | Preserve source quote style (default: false) |
+
+Unknown keys are silently ignored — forward-compatible with future options.
+
+Example:
+
+```
+---
+test-name: block-to-flow-respects-configured-print-width
+category: block-to-flow
+cursor: 0:0
+applies-action: Convert block to flow style
+format-options:
+  print_width: 120
+---
+```
 
 ### Assertion modes
 

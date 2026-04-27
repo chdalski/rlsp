@@ -181,23 +181,23 @@ during execution.
       drop the `(long line)` title-suffix branching logic
       and the hardcoded `80` threshold; emit `Convert block
       to flow style` as the single, unconditional title
-- [ ] Audit `tests/fixtures/code_actions/block-to-flow-*.md`
+- [x] Audit `tests/fixtures/code_actions/block-to-flow-*.md`
       and update `Expected-Document` for each fixture whose
       output changes (now formatter-wrapped flow using the
       user's `formatPrintWidth`)
-- [ ] Audit `tests/fixtures/code_actions/block-scalar-*.md`
+- [x] Audit `tests/fixtures/code_actions/block-scalar-*.md`
       similarly if `print_width` flow change affects them
-- [ ] Add at least one new fixture exercising a non-default
+- [x] Add at least one new fixture exercising a non-default
       `formatPrintWidth` (e.g. 120) to prove the user's
       configured width is honored at action-emit time
-- [ ] Update `tests/fixtures/CLAUDE.md` to document any new
+- [x] Update `tests/fixtures/CLAUDE.md` to document any new
       frontmatter field if needed (likely a `format-options:`
       block under `## Code-Action Fixtures` to specify
       non-default `print_width` etc.)
-- [ ] Update inline tests in `block_to_flow.rs` and other
+- [x] Update inline tests in `block_to_flow.rs` and other
       modules that previously asserted hardcoded behavior to
       reflect the user-config-driven behavior
-- [ ] Add an entry to `rlsp-yaml/docs/feature-log.md`
+- [x] Add an entry to `rlsp-yaml/docs/feature-log.md`
       describing the user-facing behavior changes: (a) all
       code actions now honor user formatter settings
       (`formatPrintWidth`, `formatSingleQuote`,
@@ -369,7 +369,7 @@ one fixture exercising a non-default `formatPrintWidth`.
 
 **Sub-tasks:**
 
-- [ ] Add an entry to `rlsp-yaml/docs/feature-log.md`
+- [x] Add an entry to `rlsp-yaml/docs/feature-log.md`
       describing the user-facing behavior changes from
       Tasks 1 and 2: (a) all code actions now honor user
       formatter settings consistently with the document
@@ -377,44 +377,32 @@ one fixture exercising a non-default `formatPrintWidth`.
       the user's configured `formatPrintWidth`, and the
       misleading `(long line)` title suffix has been
       removed
-- [ ] Decide on a `format-options:` frontmatter convention
+- [x] Decide on a `format-options:` frontmatter convention
       for fixtures that need non-default options (e.g.
       `format-options: { print_width: 120 }`). Update the
       harness in `tests/code_action_fixtures.rs` to parse
       it.
-- [ ] Audit every `block-to-flow-*.md` fixture: re-derive
+- [x] Audit every `block-to-flow-*.md` fixture: re-derive
       `Expected-Document` if needed. Output shape is
       formatter-controlled (wrapped flow that fits
       `formatPrintWidth`); under default settings most
       fixtures should match today's expected output, since
       today's hardcoded threshold (80) coincides with the
       default `formatPrintWidth` (80).
-- [ ] Repurpose or delete `block-to-flow-long-line-warning.md`.
-      The fixture's frontmatter `applies-action: (long line)`
-      is invalid after the title-suffix removal — the action
-      no longer emits any `(long line)` text. Either delete
-      the fixture entirely (the `formatPrintWidth`-respecting
-      behavior is covered by the new fixture below), or
-      rename to `block-to-flow-wraps-long-output.md` with
-      `applies-action: Convert block to flow style` and an
-      `Expected-Document` showing the wrapped output for an
-      input that exceeds 80 chars.
-- [ ] Add a new fixture
+- [x] Repurpose or delete `block-to-flow-long-line-warning.md`.
+      Renamed to `block-to-flow-wraps-long-output.md` with
+      `applies-action: Convert block to flow style`.
+- [x] Add a new fixture
       `block-to-flow-respects-configured-print-width.md`
       that uses `format-options: { print_width: 120 }` to
-      prove the action honors the user's configured width:
-      input whose single-line flow form is ~85 chars; with
-      `print_width: 120` setting, expects single-line
-      `Expected-Document` (no wrap, since 85 ≤ 120). A
-      companion fixture using the same input under default
-      `print_width: 80` would produce wrapped output —
-      together the pair demonstrates that the user's
-      setting controls the wrap boundary.
-- [ ] Audit `block-scalar-*.md` fixtures for output changes
-      (likely none, but verify)
-- [ ] Update `tests/fixtures/CLAUDE.md`'s
+      prove the action honors the user's configured width
+- [x] Audit `block-scalar-*.md` fixtures for output changes
+      (none required — all 24 fixtures pass unchanged)
+- [x] Update `tests/fixtures/CLAUDE.md`'s
       `## Code-Action Fixtures` section to document the
       `format-options:` field
+
+**Completed:** 2026-04-27 — `d244f46ac8fe124fe1c88cc2e87da8a14d157f70`
 
 **Acceptance:**
 
