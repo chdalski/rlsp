@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.10.1] - 2026-04-27
+
+### Bug Fixes
+
+- Revert manual version bumps — release-plz manages versions (b96bedc)
+
+### Performance
+
+- Borrow constant tag URIs from resolver (3f15780)
+- Box rare per-node metadata behind Option<Box<NodeMeta>> (d853605)
+- Replace Span Pos pair with u32 byte offsets, add LineIndex (716771f)
+
 ## Bug Fixes
 
 - Suppress resolver-injected tags on empty scalars (34bcc58)
