@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [0.6.1] - 2026-04-27
+
+### Bug Fixes
+
+- Revert manual version bumps — release-plz manages versions (b96bedc)
+
 ## Bug Fixes
 
 - Accept BOM at document-prefix positions per YAML 1.2 §5.2 (49a36cb)
