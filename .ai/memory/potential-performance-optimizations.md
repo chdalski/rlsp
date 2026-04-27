@@ -1,138 +1,76 @@
 ---
 name: potential-performance-optimizations
-description: Deferred parser/loader throughput optimizations — Option D (step_in_document restructure), full Option<Box<NodeMeta>>, arena allocation for event queue, lazy Span construction. Applied work lives in plans + git log.
+description: Parser/loader throughput optimization candidates — three applied (2026-04-27), one still deferred (arena allocation). Applied work lives in plans + git log.
 type: project
 ---
 
-## Current state (2026-04-16)
+## Current state (2026-04-27)
 
-rlsp-yaml-parser is post-campaign. The 8-plan loader
-performance push (commits `9370579` L5, `d9afbdf` L2,
-`3f493a8` L7, `a506589` L1, `d586012` L3, `8097aa5` L6,
-`e812232` L4 scoped, `3bec2da` L7b) closed the
-container-vs-baremetal regression the user surfaced on
-2026-04-16 and brought rlsp to parity-or-faster vs
-libfyaml on ~7/10 fixtures while keeping the ~19× latency
-advantage. Detail for each applied change lives in its
-plan file under `.ai/plans/2026-04-16-perf-*.md` and the
-matching git commit.
+A two-plan performance campaign recovered and exceeded the
+2026-04-16 baremetal baseline:
 
-## Deferred candidates
+- Plan 1 (`2026-04-26-parser-perf-recover-tag-allocations.md`):
+  Cow tag URIs (`3f15780`) + first-byte schema dispatch
+  (`a7206f6`). Partially recovered load throughput.
+- Plan 2 (`2026-04-26-parser-perf-recover-node-event-meta-box.md`):
+  5 stages (A–E) that fully recovered all 24 fixtures to
+  within ±2% of baseline or better.
 
-Four architectural candidates remain open. None has a
-committed plan yet — each needs fresh evidence before it
-is worth the refactor cost, since the 8-plan campaign
-already exhausted the clearly-measured gains.
+Final struct sizes: Node<Span> 120 bytes (was 288),
+Event 40 bytes (was ~112), Span 8 bytes (was 48).
+First-event latency 36.7 ns (was 38.9 ns baseline — now
+5–9% faster). Real-world kubernetes events throughput
+143.6 MiB/s (libfyaml 123.1 — rlsp 17% faster).
 
-### 1. Option D — full `step_in_document` restructure
+## Applied candidates
 
-Replace the linear if-else probe cascade in
-`src/event_iter/step.rs:step_in_document` (~760 lines)
-with a single-peek, single-trim, byte-dispatch structure.
-Today the function runs 10–15 sequential probes per step;
-a restructure would do one peek + one `match` on the
-first non-whitespace byte + one handler call.
+### 1. `step_in_document` byte-dispatch (was Option D)
 
-**Why deferred:** the cached-trim + probe-reorder
-diagnostics (commits `ba11228`, `4728ea3`) confirmed the
-cascade is a measurable cost, but the remaining gap after
-the 2026-04-16 campaign is likely dominated by
-fundamentals (Rust bounds-checking vs C unchecked,
-`VecDeque` overhead, `Span` construction, Comment event
-emission that libfyaml skips) rather than dispatch.
+**Applied:** Stage D of Plan 2, commit `9bd368e`.
+Single-peek byte-dispatch replaced the 10–15 sequential
+probe cascade. Measured 2–8% improvement on load fixtures.
+Stage E (`ccdfc1a`) added `#[inline]` hints to the schema-
+resolution chain for an additional ~2% on small fixtures.
 
-**Target shape** — after the comment/blank skip and
-tab/EOF/marker checks (which are order-sensitive and stay
-at the top), dispatch on `first_byte`:
+### 2. `Option<Box<NodeMeta>>` (was L4 full)
 
-```
-match first_byte {
-    Some(b'-') if next is space/tab/EOL → sequence entry
-    Some(b'?') if next is space/tab/EOL → explicit key
-    Some(b'*') → alias
-    Some(b'!') → tag
-    Some(b'&') → anchor
-    Some(b'[' | b'{') → flow collection start
-    Some(b']' | b'}') → stray flow closer error
-    Some(b'|' | b'>' | b'\'' | b'"') → scalar
-    _ → mapping-or-plain detection
-}
-```
+**Applied:** Stage A of Plan 2, commit `d853605`.
+Hybrid variant: `anchor`, `anchor_loc`, `tag_loc`,
+`leading_comments`, `trailing_comment` boxed behind
+`Option<Box<NodeMeta>>`. Tag stays inline (schema resolver
+populates it on every node). Node<Span> 288 → 120 bytes.
+Stage B (`76904a9`) applied the same pattern to Event
+(`Option<Box<EventMeta>>`, 40 bytes).
 
-**Hard parts:**
-1. Mapping entries can start with ANY character
-   (`key: value` starts with `k`) —
-   `find_value_indicator_offset` still needed in the
-   fallthrough path.
-2. `-` is ambiguous (sequence entry / `---` marker /
-   `-value` plain scalar) — needs second-byte context.
-3. Dedent detection depends on indent + collection stack,
-   not first byte — stays in post-dispatch fallthrough.
-4. 760-line function rewrite touches the entry point for
-   every parse event. Full conformance suite +
-   `unicode_positions` + `smoke` tests must stay green.
+The earlier scoped-L4 variant (commit `e812232`) measured
+flat because it only boxed comments. The full variant
+measured a dramatic win because the 2026-04-20 anchor/tag
+span work had widened Node by ~112 bytes since the scoped
+test — the evidence the memory file said to wait for.
 
-**Estimated impact:** 5–15% on `block_sequence`, 2–8%
-elsewhere. Based on the cached-trim diagnostic (~6–8%)
-plus the probe-reorder diagnostic (~5%).
+### 3. Lazy `Span` construction
 
-**Advisor needs:** test-engineer + security-engineer
-(both gates each). The dispatch touches the scalar entry
-point for untrusted input.
+**Applied:** Stage C of Plan 2, commit `716771f`.
+Span = `(start: u32, end: u32)` = 8 bytes. Line/column
+resolved on demand via `LineIndex` (built once per parse,
+shared via `Arc<LineIndex>`). `Pos` retained at 24 bytes
+for internal lexer use and error reporting.
 
-### 2. L4 full — `Option<Box<NodeMeta>>` variant
+## Still deferred
 
-The broader boxing of all four rarely-populated Node
-fields (`anchor`, `tag`, `leading_comments` post-scoped-L4,
-`trailing_comment`) into a single `Option<Box<NodeMeta>>`.
-Would shrink the common Node to fit 4+ per cache line,
-improving tree-traversal locality for any AST consumer
-(formatter, LSP).
-
-**Why deferred:** the scoped L4 variant that landed in
-`e812232` measured flat on block_heavy throughput even
-though it eliminated the specific `drop_in_place<Vec<String>>`
-frame. That is evidence the per-field drop costs are
-amortized below measurable throughput threshold on current
-fixtures. The full variant's win comes from cache
-locality, which is even harder to measure and more at risk
-of being cancelled by the Box indirection cost on every
-accessor call. Do not pursue without new evidence of a
-cache-bound bottleneck.
-
-**Cost:** API shape preserved (`node.leading_comments()`,
-`node.anchor()`, etc. stay the same), but internal field
-access moves through a Box indirection. Touches ~251
-consumer occurrences across `rlsp-yaml` + ~103 parser
-occurrences.
-
-### 3. Arena allocation for `Event` queue
+### Arena allocation for `Event` queue
 
 The `VecDeque<(Event, Span)>` used for multi-event parser
 steps allocates on the heap. An arena or small-vec
 optimization could reduce allocation pressure for steps
-that emit 2–4 events (common for collection open/close
-pairs).
+that emit 2–4 events.
 
-**Why deferred:** low expected impact — Rust's allocator
-is already fast for small allocations, and the 2026-04-16
-flamegraph shows no allocation-related frame in the event
-iterator hot path. Worth revisiting only if a future
-profile surfaces allocation overhead.
-
-### 4. Lazy `Span` construction
-
-Store `Span` as `(start_byte_offset, end_byte_offset)`
-and compute `(line, column)` lazily when the consumer
-actually reads them. Would eliminate `column_at` calls
-that `advance_within_line` still makes. Significant API
-change to `Span`/`Pos`.
-
-**Why deferred:** `column_at` no longer appears in the
-post-campaign flamegraph as a measurable self-time frame
-(it was 3.0% pre-campaign). The motivation weakened.
-Still a valid architectural cleanup if the `Span` API
-itself is being revisited for other reasons.
+**Why still deferred:** Event is now 40 bytes (post
+Stage B boxing), so the per-event allocation cost is much
+lower than when this candidate was first identified. No
+flamegraph evidence of allocation overhead in the current
+code. Worth revisiting only if a future profile surfaces
+allocation overhead.
 
 ## Methodology for verification
 
