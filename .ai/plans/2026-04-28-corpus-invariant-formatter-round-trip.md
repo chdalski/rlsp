@@ -184,7 +184,7 @@ not compared.
 ## Steps
 
 - [x] Implement AST equivalence helper with unit tests
-- [ ] Register I10, run on corpus, address failures via
+- [x] Register I10, run on corpus, address failures via
       Surprise Failure Protocol
 
 ## Tasks
@@ -300,7 +300,7 @@ register it, run the harness on the existing 4-file
 corpus, and address every failure under the harness's
 Surprise Failure Protocol.
 
-- [ ] Add `check_i10_formatter_round_trip(path: &Path,
+- [x] Add `check_i10_formatter_round_trip(path: &Path,
       text: &str) -> Result<(), String>`:
   1. `let parse_pre = parse_yaml(text);` — collect
      pre-format documents.
@@ -318,13 +318,13 @@ Surprise Failure Protocol.
      a failure mode this invariant catches.
   6. Call `documents_equivalent(&parse_pre.documents,
      &parse_post.documents)` and return its result.
-- [ ] Register the invariant by adding an entry at the
+- [x] Register the invariant by adding an entry at the
       end of the `INVARIANTS` array:
       `Invariant { id: "I10", description: "Formatter
       round-trip: parsing format(text) produces an AST
       semantically equivalent to parsing text", check:
       check_i10_formatter_round_trip }`.
-- [ ] Run `cargo test --test corpus_invariants`. Three
+- [x] Run `cargo test --test corpus_invariants`. Three
       possible outcomes:
 
   **(a) All 4 corpus files pass I10.** Skip-list
@@ -355,7 +355,7 @@ Surprise Failure Protocol.
   Protocol from the harness's module-level comment
   is the gate.
 
-- [ ] Per-entry skip-list verification: for each
+- [x] Per-entry skip-list verification: for each
       skip-list entry added (if any), temporarily
       remove it, run the harness, confirm the test
       fails citing that specific (file, invariant)
@@ -364,7 +364,7 @@ Surprise Failure Protocol.
       the skip-list is empty, state "no skip-list
       entries added; per-entry verification not
       applicable" in the commit message.
-- [ ] If the skip-list changed (entries added):
+- [x] If the skip-list changed (entries added):
   - Update `rlsp-yaml/tests/corpus/WORKLIST.md` to
     mirror the new `SKIP_LIST` entries 1:1 — each
     entry appears in WORKLIST.md grouped under its
@@ -374,15 +374,15 @@ Surprise Failure Protocol.
     match exactly (every constant entry has a
     WORKLIST.md line; every WORKLIST.md line traces
     to a constant entry).
-- [ ] If the skip-list did not change:
+- [x] If the skip-list did not change:
   - `WORKLIST.md` remains as-is. State this in the
     commit message.
-- [ ] `cargo test --test corpus_invariants` exits 0
+- [x] `cargo test --test corpus_invariants` exits 0
       (every (file, invariant) pair either passes or
       has a verified skip-list entry).
-- [ ] `cargo clippy --all-targets` exits 0 with no
+- [x] `cargo clippy --all-targets` exits 0 with no
       warnings.
-- [ ] `cargo fmt` applied.
+- [x] `cargo fmt` applied.
 
 Acceptance: I10 is registered in the `INVARIANTS` array
 with the specified id, description, and check function.
@@ -391,6 +391,10 @@ either has been fixed in-plan with verifiable green
 test, or has a verified skip-list entry referencing a
 filed follow-up plan. WORKLIST.md mirrors SKIP_LIST
 exactly.
+
+**Completed:** commit `f1b8670`. All 4 corpus files
+passed I10 on first run; SKIP_LIST remains empty;
+WORKLIST.md unchanged.
 
 ### Cleanup task wrapper
 
