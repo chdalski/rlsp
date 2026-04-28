@@ -183,7 +183,7 @@ not compared.
 
 ## Steps
 
-- [ ] Implement AST equivalence helper with unit tests
+- [x] Implement AST equivalence helper with unit tests
 - [ ] Register I10, run on corpus, address failures via
       Surprise Failure Protocol
 
@@ -223,18 +223,18 @@ integration; the reviewer can verify correctness of the
 comparison logic in isolation before it influences
 production-corpus pass/fail.
 
-- [ ] Add `documents_equivalent` to
+- [x] Add `documents_equivalent` to
       `corpus_invariants.rs` (visibility: file-private;
       not referenced from outside this test file).
-- [ ] Apply the AST equivalence rule from the plan's
+- [x] Apply the AST equivalence rule from the plan's
       Context section: same document count; recursive
       structural comparison; `node.anchor()`,
       `node.tag()`, scalar `value`, sequence/mapping
       counts and ordered children compared; styles,
       spans, NodeMeta comments NOT compared.
-- [ ] On mismatch, return a descriptive
+- [x] On mismatch, return a descriptive
       `Err(path_description)` per the format above.
-- [ ] Unit tests under `#[cfg(test)] mod tests` in the
+- [x] Unit tests under `#[cfg(test)] mod tests` in the
       same file (existing test module already exists
       from prior tasks). Each test uses
       `rlsp_yaml_parser::loader::load(text)` to build
@@ -275,12 +275,12 @@ production-corpus pass/fail.
     same scalar `value` `"foo"`; equivalence holds
     despite the style difference.
 
-- [ ] `cargo test --test corpus_invariants` exits 0
+- [x] `cargo test --test corpus_invariants` exits 0
       (compilation + new helper tests + existing
       harness tests all pass).
-- [ ] `cargo clippy --all-targets` exits 0 with no
+- [x] `cargo clippy --all-targets` exits 0 with no
       warnings.
-- [ ] `cargo fmt` applied.
+- [x] `cargo fmt` applied.
 
 Acceptance: `documents_equivalent` is defined in
 `corpus_invariants.rs` with the equivalence rule from
@@ -290,6 +290,8 @@ existing harness tests still pass. The helper is not
 yet wired into `INVARIANTS` (Task 2 does that). The
 existing `INVARIANTS` array, `SKIP_LIST` constant, and
 existing invariant check functions are unchanged.
+
+**Completed:** commit `8ebae20`.
 
 ### Task 2: Register I10 and run on the corpus
 
