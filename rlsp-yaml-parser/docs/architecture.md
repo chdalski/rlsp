@@ -283,6 +283,17 @@ same invariant at the AST level: `node.tag().is_some() == node.tag_loc().is_some
 rather than the enclosing mapping). This distinction is necessary to correctly
 handle cases like `&anchor key: value` vs `&anchor\n- item`.
 
+**Displacement promotion path.** When two properties appear on the same line
+(`&anchor !tag`) the first is `Inline` (because content follows) and the second
+is `Standalone`. To ensure both reach the collection, the tag scanner's
+`Standalone` branch checks whether `pending_anchor` is `Inline` and, if so,
+moves it to `pending_collection_anchor` / `pending_collection_anchor_loc`.
+The anchor scanner's `Standalone` branch performs the symmetric check for
+`pending_tag`. This is the same displacement mechanism used by the `Inline`
+branches when a later anchor or tag follows key content — it just fires one
+step earlier, at the property-scanning stage rather than at inline-key
+detection time.
+
 ### Block collection handlers (`src/event_iter/block/`)
 
 `src/event_iter/block.rs` re-exports `mapping` and `sequence` sub-modules.

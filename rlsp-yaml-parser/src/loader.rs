@@ -1891,4 +1891,246 @@ mod tests {
             "anchor_loc() must be Some for anchored scalar"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // DISP: Property displacement promotion — combined anchor+tag on block
+    //       collections.  Tests cover 4 property configs × 4 collection
+    //       shapes plus an alias-registration smoke test.
+    // -----------------------------------------------------------------------
+
+    // --- Group 1: Block mapping ---
+
+    // DISP-BM-1: anchor-only on block mapping (baseline — already passes)
+    #[test]
+    fn block_mapping_anchor_only_has_anchor_no_tag_loc() {
+        let docs = load("&a\nk: v\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(root.tag_loc().is_none(), "no user tag expected");
+        let (key, _) = &entries[0];
+        assert_eq!(key.anchor(), None, "anchor must not migrate to first key");
+        assert!(key.tag_loc().is_none(), "no user tag on first key");
+    }
+
+    // DISP-BM-2: tag-only on block mapping (baseline — already passes)
+    #[test]
+    fn block_mapping_tag_only_has_tag_loc_no_anchor() {
+        let docs = load("!mytag\nk: v\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        assert_eq!(root.anchor(), None, "no anchor expected");
+        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
+        let (key, _) = &entries[0];
+        assert!(key.tag_loc().is_none(), "tag must not appear on first key");
+    }
+
+    // DISP-BM-3: anchor-then-tag on block mapping — Bug A regression test
+    #[test]
+    fn block_mapping_anchor_then_tag_has_both_on_mapping() {
+        let docs = load("&a !mytag\nk: v\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
+        let (key, _) = &entries[0];
+        assert_eq!(
+            key.anchor(),
+            None,
+            "anchor must NOT migrate to first key (Bug A)"
+        );
+    }
+
+    // DISP-BM-4: tag-then-anchor on block mapping — Bug B regression test
+    #[test]
+    fn block_mapping_tag_then_anchor_has_both_on_mapping() {
+        let docs = load("!mytag &a\nk: v\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Mapping { entries, .. } = root else {
+            panic!("expected root mapping");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(
+            root.tag_loc().is_some(),
+            "user tag must be on mapping (Bug B)"
+        );
+        let (key, _) = &entries[0];
+        assert!(
+            key.tag_loc().is_none(),
+            "tag must NOT be dropped from mapping (Bug B)"
+        );
+    }
+
+    // --- Group 2: Block sequence ---
+
+    // DISP-BS-1: anchor-only on block sequence
+    #[test]
+    fn block_sequence_anchor_only_has_anchor_no_tag_loc() {
+        let docs = load("&a\n- item\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected root sequence");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_none(), "no user tag expected");
+        assert_eq!(
+            items[0].anchor(),
+            None,
+            "anchor must not appear on first item"
+        );
+    }
+
+    // DISP-BS-2: tag-only on block sequence
+    #[test]
+    fn block_sequence_tag_only_has_tag_loc_no_anchor() {
+        let docs = load("!mytag\n- item\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected root sequence");
+        };
+        assert_eq!(root.anchor(), None, "no anchor expected");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+        assert!(
+            items[0].tag_loc().is_none(),
+            "tag must not appear on first item"
+        );
+    }
+
+    // DISP-BS-3: anchor-then-tag on block sequence
+    #[test]
+    fn block_sequence_anchor_then_tag_has_both_on_sequence() {
+        let docs = load("&a !mytag\n- item\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected root sequence");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+        assert_eq!(
+            items[0].anchor(),
+            None,
+            "anchor must not appear on first item"
+        );
+    }
+
+    // DISP-BS-4: tag-then-anchor on block sequence
+    #[test]
+    fn block_sequence_tag_then_anchor_has_both_on_sequence() {
+        let docs = load("!mytag &a\n- item\n").unwrap();
+        let root = &docs[0].root;
+        let Node::Sequence { items, .. } = root else {
+            panic!("expected root sequence");
+        };
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+        assert!(
+            items[0].tag_loc().is_none(),
+            "tag must not appear on first item"
+        );
+    }
+
+    // --- Group 3: Flow mapping ---
+
+    // DISP-FM-1: anchor-only on flow mapping
+    #[test]
+    fn flow_mapping_anchor_only_has_anchor() {
+        let docs = load("&a {k: v}\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(root.tag_loc().is_none(), "no user tag expected");
+    }
+
+    // DISP-FM-2: tag-only on flow mapping
+    #[test]
+    fn flow_mapping_tag_only_has_tag_loc() {
+        let docs = load("!mytag {k: v}\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
+        assert_eq!(root.anchor(), None, "no anchor expected");
+        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
+    }
+
+    // DISP-FM-3: anchor-then-tag on flow mapping
+    #[test]
+    fn flow_mapping_anchor_then_tag_has_both() {
+        let docs = load("&a !mytag {k: v}\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
+    }
+
+    // DISP-FM-4: tag-then-anchor on flow mapping
+    #[test]
+    fn flow_mapping_tag_then_anchor_has_both() {
+        let docs = load("!mytag &a {k: v}\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
+        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
+    }
+
+    // --- Group 4: Flow sequence ---
+
+    // DISP-FS-1: anchor-only on flow sequence
+    #[test]
+    fn flow_sequence_anchor_only_has_anchor() {
+        let docs = load("&a [item]\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_none(), "no user tag expected");
+    }
+
+    // DISP-FS-2: tag-only on flow sequence
+    #[test]
+    fn flow_sequence_tag_only_has_tag_loc() {
+        let docs = load("!mytag [item]\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
+        assert_eq!(root.anchor(), None, "no anchor expected");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+    }
+
+    // DISP-FS-3: anchor-then-tag on flow sequence
+    #[test]
+    fn flow_sequence_anchor_then_tag_has_both() {
+        let docs = load("&a !mytag [item]\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+    }
+
+    // DISP-FS-4: tag-then-anchor on flow sequence
+    #[test]
+    fn flow_sequence_tag_then_anchor_has_both() {
+        let docs = load("!mytag &a [item]\n").unwrap();
+        let root = &docs[0].root;
+        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
+        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
+        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
+    }
+
+    // --- Group 5: Alias registration smoke test ---
+
+    // DISP-ALIAS-1: anchor on block mapping with combined properties is
+    //               resolvable via alias (anchor was registered on the mapping,
+    //               not lost to the first key)
+    #[test]
+    fn anchor_on_block_mapping_with_tag_is_resolvable_via_alias() {
+        let input = "root:\n  tagged: &a !mytag\n    k: v\n  ref: *a\n";
+        let result = LoaderBuilder::new().resolved().build().load(input);
+        assert!(
+            result.is_ok(),
+            "alias *a must resolve — anchor must be on the mapping, not lost to first key: {result:?}"
+        );
+    }
 }

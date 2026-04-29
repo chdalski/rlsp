@@ -612,6 +612,22 @@ impl<'input> EventIter<'input> {
                                     }
                                     self.pending_tag =
                                         Some(PendingTag::Standalone(resolved_tag, tag_span));
+                                    // Displacement promotion: if an inline anchor is already
+                                    // pending (it was `Inline` because this tag followed it on
+                                    // the same line), that anchor was for the collection, not for
+                                    // a key scalar.  Move it to the collection slot so that the
+                                    // mapping/sequence handler can pick up both properties.
+                                    //
+                                    // Take-and-restore pattern: take the value, match on it,
+                                    // and put it back if it does not match the Inline variant —
+                                    // avoids a double-borrow while preventing accidental drops.
+                                    match self.pending_anchor.take() {
+                                        Some(PendingAnchor::Inline(name, loc)) => {
+                                            self.pending_collection_anchor = Some(name);
+                                            self.pending_collection_anchor_loc = Some(loc);
+                                        }
+                                        other => self.pending_anchor = other,
+                                    }
                                 }
                                 return StepResult::Continue;
                             }
@@ -826,6 +842,21 @@ impl<'input> EventIter<'input> {
                                     }
                                     self.pending_anchor =
                                         Some(PendingAnchor::Standalone(name, anchor_span));
+                                    // Displacement promotion: if an inline tag is already
+                                    // pending (it was `Inline` because this anchor followed it on
+                                    // the same line), that tag was for the collection, not for a
+                                    // key scalar.  Move it to the collection slot so that the
+                                    // mapping/sequence handler can pick up both properties.
+                                    //
+                                    // Take-and-restore pattern: take the value, match on it,
+                                    // and put it back if it does not match the Inline variant.
+                                    match self.pending_tag.take() {
+                                        Some(PendingTag::Inline(cow, loc)) => {
+                                            self.pending_collection_tag = Some(cow);
+                                            self.pending_collection_tag_loc = Some(loc);
+                                        }
+                                        other => self.pending_tag = other,
+                                    }
                                 }
                                 // Let the next iteration handle whatever follows.
                                 return StepResult::Continue;

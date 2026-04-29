@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-29)
 **Created:** 2026-04-29
 
 ## Goal
@@ -180,7 +180,7 @@ is present on a mapping where it previously wasn't.
 
 ## Steps
 
-- [ ] Fix displacement logic in step.rs + add AST-shape
+- [x] Fix displacement logic in step.rs + add AST-shape
       test matrix + verify all existing tests pass
 
 ## Tasks
@@ -194,7 +194,7 @@ loader tests.
 
 **Parser fix (two symmetric additions in step.rs):**
 
-- [ ] In the tag scanner's `else` (Standalone) branch,
+- [x] In the tag scanner's `else` (Standalone) branch,
       after `self.pending_tag = Some(PendingTag::
       Standalone(resolved_tag, tag_span))` at ~line 614:
       add a check — if `self.pending_anchor` is
@@ -203,7 +203,7 @@ loader tests.
       and the loc to
       `self.pending_collection_anchor_loc`. Then clear
       `self.pending_anchor` (it was taken). ~5 lines.
-- [ ] In the anchor scanner's `else` (Standalone) branch,
+- [x] In the anchor scanner's `else` (Standalone) branch,
       after `self.pending_anchor = Some(PendingAnchor::
       Standalone(name, anchor_span))` at ~line 828:
       add a symmetric check — if `self.pending_tag` is
@@ -214,7 +214,7 @@ loader tests.
 
 **AST-shape test matrix (new tests in loader.rs):**
 
-- [ ] Add tests to `rlsp-yaml-parser/src/loader.rs`
+- [x] Add tests to `rlsp-yaml-parser/src/loader.rs`
       (existing `#[cfg(test)] mod tests` block) that
       verify correct anchor and tag attachment across
       the full property × shape matrix. Each test calls
@@ -261,7 +261,7 @@ loader tests.
 
 **Architecture doc update:**
 
-- [ ] Update the "Pending anchor and tag" section of
+- [x] Update the "Pending anchor and tag" section of
       `rlsp-yaml-parser/docs/architecture.md` (around
       lines 280-284) to describe the new displacement
       promotion path: when two collection-level
@@ -277,14 +277,14 @@ loader tests.
 
 **Regression verification:**
 
-- [ ] `cargo test` (full workspace) passes with zero
+- [x] `cargo test` (full workspace) passes with zero
       failures.
-- [ ] `cargo test --test corpus_invariants` passes
+- [x] `cargo test --test corpus_invariants` passes
       (I10 formatter round-trip still green).
-- [ ] `cargo clippy --all-targets` exits with zero
+- [x] `cargo clippy --all-targets` exits with zero
       warnings.
-- [ ] `cargo fmt` applied.
-- [ ] If any yaml-test-suite conformance test changes
+- [x] `cargo fmt` applied.
+- [x] If any yaml-test-suite conformance test changes
       status (previously passing now fails, or vice
       versa), report the test IDs to the lead via
       SendMessage before submitting to the reviewer.
@@ -318,6 +318,10 @@ user `!tag`" is removed by the lead during the
 plan-completion commit, not as part of this task (same
 convention as the I10 plan's cleanup of its follow-up
 entry).
+
+**Completed:** commit `8f7cb0a`. 726/726
+conformance tests pass, 83 corpus invariants pass,
+full workspace tests green, clippy clean, fmt clean.
 
 Acceptance: Both bugs are fixed — `load("key: &a !t\n
 v: 1\n")` and `load("key: !t &a\n  v: 1\n")` produce
