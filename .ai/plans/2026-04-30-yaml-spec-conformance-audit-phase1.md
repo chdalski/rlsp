@@ -24,7 +24,7 @@ Audit the `rlsp-yaml-parser` crate for YAML 1.2.2 conformance at the BNF-product
 - [x] Create the audit output directory `.ai/audit/2026-04-30-phase1-bnf/`
 - [x] Audit §5 (with §3, §4 folded in): dispatch A + B subagents, reconcile, commit
 - [x] Audit §6: dispatch A + B subagents, reconcile, commit
-- [ ] Audit §7: dispatch A + B subagents, reconcile, commit
+- [x] Audit §7: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §8: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §9: dispatch A + B subagents, reconcile, commit
 - [ ] Compose final summary across all chapters; file follow-up entries from summary; commit
@@ -111,10 +111,10 @@ Acceptance criteria:
 Same shape as Task 1, but for the 58 productions under `## §7` in the conformance doc.
 
 Acceptance criteria:
-- [ ] `audit-a-§7.md`, `audit-b-§7.md`, and `reconciliation-§7.md` exist with complete coverage of all 58 §7 productions.
-- [ ] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
-- [ ] Every entry has verdict + evidence + reasoning per the format above.
-- [ ] All three files committed: `docs(audit): record phase 1 §7 conformance audit`.
+- [x] `audit-a-§7.md`, `audit-b-§7.md`, and `reconciliation-§7.md` exist with complete coverage of all 58 §7 productions.
+- [x] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
+- [x] Every entry has verdict + evidence + reasoning per the format above.
+- [x] All three files committed: `docs(audit): record phase 1 §7 conformance audit`.
 
 ### Task 4: Audit §8 (block style productions)
 
