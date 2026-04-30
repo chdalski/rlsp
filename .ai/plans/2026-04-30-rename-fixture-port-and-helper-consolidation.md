@@ -208,7 +208,7 @@ ranges.
 
 ## Steps
 
-- [ ] Task 1 — extract shared helpers to
+- [x] Task 1 — extract shared helpers to
       `tests/common/mod.rs`; migrate the two existing
       integration test crates
 - [ ] Task 2 — pre-scan rename inline tests; create
@@ -231,32 +231,34 @@ via `use common::*;`. The harness-specific logic
 (frontmatter parsing, dispatch, assertion) stays in each
 crate's main file.
 
-- [ ] Create `rlsp-yaml/tests/common/mod.rs` with the
+- [x] Create `rlsp-yaml/tests/common/mod.rs` with the
       five helpers: `cursor_range`, `docs_for`,
       `test_uri`, `apply_text_edit`, `codepoint_to_byte`.
       Each helper's signature and behavior matches the
       existing implementations exactly — this is a pure
       relocation, not a redesign.
-- [ ] Update `rlsp-yaml/tests/code_action_fixtures.rs`:
+- [x] Update `rlsp-yaml/tests/code_action_fixtures.rs`:
       add `mod common;` and `use common::*;`; delete the
       now-duplicated helper definitions.
-- [ ] Update
+- [x] Update
       `rlsp-yaml/tests/code_action_property_preservation.rs`:
       add `mod common;` and `use common::*;`; delete the
       duplicated helper definitions.
-- [ ] `cargo test --test code_action_fixtures` passes
+- [x] `cargo test --test code_action_fixtures` passes
       (no regressions; the harness still finds and runs
       every fixture under `tests/fixtures/code_actions/`).
-- [ ] `cargo test --test code_action_property_preservation`
+- [x] `cargo test --test code_action_property_preservation`
       passes (24/24 invariant cases).
-- [ ] `cargo test --workspace` passes.
-- [ ] `cargo clippy --all-targets` clean.
-- [ ] `cargo fmt` applied.
+- [x] `cargo test --workspace` passes.
+- [x] `cargo clippy --all-targets` clean.
+- [x] `cargo fmt` applied.
 
 Acceptance: the five helpers exist exactly once across
 `tests/`; both existing integration test crates compile
 and run with no behavioral change; `cargo test
 --workspace` is green.
+
+**Commit:** `4a86295`
 
 ### Task 2: Create rename fixture harness; port Pattern A and B inline tests
 

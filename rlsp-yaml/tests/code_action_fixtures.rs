@@ -42,6 +42,9 @@
 
 #![expect(missing_docs, reason = "test code")]
 
+mod common;
+use common::*;
+
 use std::path::{Path, PathBuf};
 
 use rlsp_yaml::editing::code_actions::code_actions;
@@ -262,69 +265,6 @@ fn panic_fixture(path_str: &str, msg: &str) -> ! {
 }
 
 // ---- Harness helpers --------------------------------------------------------
-
-fn docs_for(text: &str) -> Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>> {
-    rlsp_yaml_parser::load(text).unwrap_or_default()
-}
-
-#[expect(clippy::expect_used, reason = "literal URL is always valid")]
-fn test_uri() -> Url {
-    Url::parse("file:///test.yaml").expect("valid test URI")
-}
-
-// cursor_range: zero-based line and character — matches LSP Position convention
-fn cursor_range(line: u32, col: u32) -> Range {
-    Range::new(Position::new(line, col), Position::new(line, col))
-}
-
-/// Convert a codepoint index (LSP `Position.character`) to a byte index in `s`.
-fn codepoint_to_byte(s: &str, codepoint_idx: usize) -> usize {
-    s.char_indices()
-        .nth(codepoint_idx)
-        .map_or(s.len(), |(b, _)| b)
-}
-
-/// Apply a single `TextEdit` to `source` text.
-///
-/// LSP `Position.character` values are codepoint indices; this function converts
-/// them to byte indices before slicing. Multi-line edits are supported: lines
-/// strictly between `start_line` and `end_line` are absorbed by the edit.
-///
-/// Only the first `TextEdit` of an action is applied by this harness.
-fn apply_text_edit(source: &str, edit: &TextEdit) -> String {
-    let start_line = edit.range.start.line as usize;
-    let end_line = edit.range.end.line as usize;
-    let start_col = edit.range.start.character as usize;
-    let end_col = edit.range.end.character as usize;
-
-    let source_lines: Vec<&str> = source.lines().collect();
-    let mut result = String::new();
-
-    for (i, src_line) in source_lines.iter().enumerate() {
-        if i < start_line || i > end_line {
-            result.push_str(src_line);
-            result.push('\n');
-        } else if i == start_line && i == end_line {
-            let start_byte = codepoint_to_byte(src_line, start_col);
-            let end_byte = codepoint_to_byte(src_line, end_col);
-            result.push_str(&src_line[..start_byte]);
-            result.push_str(&edit.new_text);
-            result.push_str(&src_line[end_byte..]);
-            result.push('\n');
-        } else if i == start_line {
-            // Multi-line edit: emit prefix + new_text, then the end-line tail closes the line.
-            let start_byte = codepoint_to_byte(src_line, start_col);
-            result.push_str(&src_line[..start_byte]);
-            result.push_str(&edit.new_text);
-        } else if i == end_line {
-            let end_byte = codepoint_to_byte(src_line, end_col);
-            result.push_str(&src_line[end_byte..]);
-            result.push('\n');
-        }
-        // Lines strictly between start and end are absorbed by the edit — skip them.
-    }
-    result
-}
 
 /// Extract the first `TextEdit` from a `CodeAction`'s workspace edit.
 ///
