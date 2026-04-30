@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-30)
 **Created:** 2026-04-30
 
 ## Goal
@@ -27,8 +27,8 @@ Audit the `rlsp-yaml-parser` crate for YAML 1.2.2 conformance at the BNF-product
 - [x] Audit §7: dispatch A + B subagents, reconcile, commit
 - [x] Audit §8: dispatch A + B subagents, reconcile, commit
 - [x] Audit §9: dispatch A + B subagents, reconcile, commit
-- [ ] Compose final summary across all chapters; file follow-up entries from summary; commit
-- [ ] Mark plan Completed and commit status update
+- [x] Compose final summary across all chapters; file follow-up entries from summary; commit
+- [x] Mark plan Completed and commit status update
 
 ## Tasks
 
@@ -150,13 +150,13 @@ Required content:
 6. **Follow-up filing** — for every production whose final verdict is `Lenient` or `Non-conformant`, append a corresponding entry to `.ai/memory/project_followup_plans.md` under `Open: rlsp-yaml-parser`, except where an existing entry in `project_followup_plans.md` already names the same spec section AND the same code location (file path + line range). Deduplication is by spec section and code location, not by topic — multiple productions whose gaps share a topic but differ in spec section or code location each get their own entry. Productions with verdicts `Strict-conformant`, `Stricter-than-spec`, `Not-applicable`, or `Indeterminate` do not generate follow-up entries from this rule. The c-printable §5.1 entry committed in `6f0ec6d` is the only known existing dedupe target at plan-creation time. New entries follow the existing followup format (bold title, prose body, references to spec section and code locations).
 
 Acceptance criteria:
-- [ ] `.ai/audit/2026-04-30-phase1-bnf/summary.md` exists with frontmatter fields `plan`, `phase`, `side: Summary`, `section: all`, `date`, `produced-by: lead`.
-- [ ] All six required sections (Verdict table, Lenient productions, Stricter-than-spec productions, Non-conformant productions, `[NEEDS USER REVIEW]` items, Follow-up filing) are present in the summary.
-- [ ] Verdict table covers every entry audited across Tasks 1–5; row count equals exactly 213 (the sum of per-chapter entry counts: 64 + 41 + 58 + 40 + 10).
-- [ ] Every `Lenient`, `Stricter-than-spec`, and `Non-conformant` entry has at least one supporting evidence pointer to a reconciliation file.
-- [ ] Every `[NEEDS USER REVIEW]` item is enumerated with the lead's tentative verdict.
-- [ ] For every production with final verdict `Lenient` or `Non-conformant`, either (a) a corresponding entry exists in `project_followup_plans.md` after this task, or (b) the summary explicitly cites the existing `project_followup_plans.md` entry that already names the same spec section AND the same code location.
-- [ ] Two commits land in this task: `docs(audit): record phase 1 conformance audit summary` for the summary file, and `chore(memory): file phase 1 conformance audit follow-ups` for the memory update. Plan status update to `Completed (2026-04-30)` lands in a final commit `docs(rlsp-yaml-parser): mark phase 1 audit plan complete`.
+- [x] `.ai/audit/2026-04-30-phase1-bnf/summary.md` exists with frontmatter fields `plan`, `phase`, `side: Summary`, `section: all`, `date`, `produced-by: lead`.
+- [x] All six required sections (Verdict table, Lenient productions, Stricter-than-spec productions, Non-conformant productions, `[NEEDS USER REVIEW]` items, Follow-up filing) are present in the summary.
+- [x] Verdict table covers every entry audited across Tasks 1–5; row count equals exactly 213 (the sum of per-chapter entry counts: 64 + 41 + 58 + 40 + 10).
+- [x] Every `Lenient`, `Stricter-than-spec`, and `Non-conformant` entry has at least one supporting evidence pointer to a reconciliation file.
+- [x] Every `[NEEDS USER REVIEW]` item is enumerated with the lead's tentative verdict.
+- [x] For every production with final verdict `Lenient` or `Non-conformant`, either (a) a corresponding entry exists in `project_followup_plans.md` after this task, or (b) the summary explicitly cites the existing `project_followup_plans.md` entry that already names the same spec section AND the same code location.
+- [x] Two commits land in this task: `docs(audit): record phase 1 conformance audit summary` for the summary file, and `chore(memory): file phase 1 conformance audit follow-ups` for the memory update. Plan status update to `Completed (2026-04-30)` lands in a final commit `docs(rlsp-yaml-parser): mark phase 1 audit plan complete`.
 
 ## Decisions
 
