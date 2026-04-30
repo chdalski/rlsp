@@ -11,6 +11,7 @@
 #![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml::parser::parse_yaml;
+use rlsp_yaml::validation::ValidationSettings;
 use rlsp_yaml::validation::validators::{validate_duplicate_keys, validate_flow_style};
 // ---- Helpers ----------------------------------------------------------------
 
@@ -265,7 +266,7 @@ fn k8s_deployment_no_false_positives() {
 fn k8s_deployment_status_empty_flow_map_no_warning() {
     // `status: {}` must not produce a flowMap warning — AST knows the collection is empty.
     let docs = parse_yaml(K8S_DEPLOYMENT).documents;
-    let diags = validate_flow_style(&docs);
+    let diags = validate_flow_style(&docs, &ValidationSettings::default());
     let status_warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -287,7 +288,7 @@ fn k8s_config_map_no_false_positives() {
 fn k8s_service_status_empty_flow_map_no_warning() {
     // `status: {}` on a Service must not produce a flowMap warning — AST knows the collection is empty.
     let docs = parse_yaml(K8S_SERVICE).documents;
-    let diags = validate_flow_style(&docs);
+    let diags = validate_flow_style(&docs, &ValidationSettings::default());
     let status_warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -325,7 +326,7 @@ fn gha_release_plz_style_expression_lines_zero_flow_diagnostics() {
     //   - `matrix: { target: …, os: … }`          → flowMap
     // All `${{ … }}` expression lines must produce zero additional diagnostics.
     let docs = parse_yaml(GHA_RELEASE_PLZ_STYLE).documents;
-    let diags = validate_flow_style(&docs);
+    let diags = validate_flow_style(&docs, &ValidationSettings::default());
 
     let flow_diags: Vec<_> = diags
         .iter()

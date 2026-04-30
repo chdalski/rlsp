@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::lsp_util::span_to_lsp;
+use crate::validation::{DiagnosticCategory, ValidationSettings};
 
 /// An anchor definition collected from the AST.
 struct AnchorEntry {
@@ -125,20 +126,26 @@ fn collect_anchors_and_aliases(
 
 /// Validate flow style usage in YAML documents.
 ///
-/// Returns warning diagnostics for:
+/// Returns diagnostics for:
 /// - Flow mappings (`{...}`) with code `flowMap`
 /// - Flow sequences (`[...]`) with code `flowSeq`
 ///
-/// Empty collections (`{}`, `[]`) produce no diagnostic. Uses the parser AST
-/// so plain scalars containing `{`/`[` (e.g. `${{ env.VAR }}`) are never
-/// false-flagged. Multi-line flow collections are detected because the AST
-/// spans across lines.
+/// Severity is taken from `settings`; returns an empty vec when
+/// `settings.severity_for(FlowStyle)` is `None` (disabled). Empty collections
+/// (`{}`, `[]`) produce no diagnostic. Uses the parser AST so plain scalars
+/// containing `{`/`[` (e.g. `${{ env.VAR }}`) are never false-flagged.
 #[must_use]
-pub fn validate_flow_style(docs: &[Document<Span>]) -> Vec<Diagnostic> {
+pub fn validate_flow_style(
+    docs: &[Document<Span>],
+    settings: &ValidationSettings,
+) -> Vec<Diagnostic> {
+    let Some(severity) = settings.severity_for(DiagnosticCategory::FlowStyle) else {
+        return Vec::new();
+    };
     let mut diagnostics = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, 0, idx);
+        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, severity, 0, idx);
     }
     diagnostics
 }
@@ -147,6 +154,7 @@ pub fn validate_flow_style(docs: &[Document<Span>]) -> Vec<Diagnostic> {
 fn collect_flow_style_diagnostics(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
     depth: usize,
     idx: &LineIndex,
 ) {
@@ -165,18 +173,19 @@ fn collect_flow_style_diagnostics(
             diagnostics.push(flow_diagnostic(
                 "flowMap",
                 "Flow mapping style: use block style instead",
+                severity,
                 *loc,
                 idx,
             ));
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, depth + 1, idx);
-                collect_flow_style_diagnostics(value, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(key, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(value, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, depth + 1, idx);
-                collect_flow_style_diagnostics(value, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(key, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(value, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Sequence {
@@ -188,23 +197,30 @@ fn collect_flow_style_diagnostics(
             diagnostics.push(flow_diagnostic(
                 "flowSeq",
                 "Flow sequence style: use block style instead",
+                severity,
                 *loc,
                 idx,
             ));
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(item, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, depth + 1, idx);
+                collect_flow_style_diagnostics(item, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
-fn flow_diagnostic(code: &str, message: &str, loc: Span, idx: &LineIndex) -> Diagnostic {
+fn flow_diagnostic(
+    code: &str,
+    message: &str,
+    severity: DiagnosticSeverity,
+    loc: Span,
+    idx: &LineIndex,
+) -> Diagnostic {
     let (start_line_1based, start_col) = idx.line_column(loc.start);
     // The AST end span is at the closing `}` or `]` character (zero-width span).
     // Add 1 so the LSP range end is exclusive — past the delimiter — which
@@ -215,7 +231,7 @@ fn flow_diagnostic(code: &str, message: &str, loc: Span, idx: &LineIndex) -> Dia
             Position::new(start_line_1based.saturating_sub(1), start_col),
             Position::new(end_line_1based.saturating_sub(1), end_col + 1),
         ),
-        severity: Some(DiagnosticSeverity::WARNING),
+        severity: Some(severity),
         code: Some(NumberOrString::String(code.to_string())),
         message: message.to_string(),
         source: Some("rlsp-yaml".to_string()),
@@ -581,6 +597,7 @@ mod tests {
 
     use super::*;
     use crate::test_utils::parse_docs;
+    use crate::validation::ValidationSettings;
 
     fn parse_anchors(yaml: &str) -> Vec<super::Diagnostic> {
         validate_unused_anchors(&parse_docs(yaml))
@@ -930,7 +947,7 @@ mod tests {
     #[case::braces_inside_single_quoted_string("msg: 'value with {braces}'\n")]
     fn flow_style_returns_empty(#[case] input: &str) {
         let docs = parse_docs(input);
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert!(result.is_empty());
     }
@@ -946,7 +963,7 @@ mod tests {
     #[case::flow_detected_after_single_quote_ends("msg: 'quoted' \nreal: {a: 1}\n", 1)]
     fn flow_style_count(#[case] input: &str, #[case] expected: usize) {
         let docs = parse_docs(input);
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), expected);
     }
@@ -956,7 +973,7 @@ mod tests {
     #[case::flow_sequence("items: [a, b]\n")]
     fn flow_style_range_start_line_zero(#[case] input: &str) {
         let docs = parse_docs(input);
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].range.start.line, 0);
@@ -967,7 +984,7 @@ mod tests {
     #[test]
     fn should_detect_flow_mapping() {
         let docs = parse_docs("config: {key: value}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -979,7 +996,7 @@ mod tests {
     #[test]
     fn should_detect_flow_sequence() {
         let docs = parse_docs("items: [one, two, three]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -991,7 +1008,7 @@ mod tests {
     #[test]
     fn should_detect_both_flow_mapping_and_sequence() {
         let docs = parse_docs("config: {key: value}\nitems: [a, b]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 2);
         let has_flow_map = result
@@ -1008,7 +1025,7 @@ mod tests {
     fn should_warn_on_outer_but_not_inner_empty_flow_mapping() {
         // Outer `{a: {}}` is non-empty → warns; inner `{}` is empty → no extra warn.
         let docs = parse_docs("data: {a: {}}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -1019,7 +1036,7 @@ mod tests {
     #[test]
     fn should_warn_only_on_non_empty_when_mixed_with_empty() {
         let docs = parse_docs("a: {}\nb: {x: 1}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].range.start.line, 1);
@@ -1030,7 +1047,7 @@ mod tests {
     #[test]
     fn flow_map_diagnostic_message_text() {
         let docs = parse_docs("config: {key: value}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(
             result[0].message,
@@ -1041,7 +1058,7 @@ mod tests {
     #[test]
     fn flow_seq_diagnostic_message_text() {
         let docs = parse_docs("items: [a, b]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(
             result[0].message,
@@ -1052,7 +1069,7 @@ mod tests {
     #[test]
     fn flow_map_diagnostic_source() {
         let docs = parse_docs("config: {key: value}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result[0].source.as_deref(), Some("rlsp-yaml"));
     }
@@ -1060,7 +1077,7 @@ mod tests {
     #[test]
     fn flow_seq_diagnostic_source() {
         let docs = parse_docs("items: [a, b]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result[0].source.as_deref(), Some("rlsp-yaml"));
     }
@@ -1071,7 +1088,7 @@ mod tests {
     fn gha_expression_in_plain_scalar_no_diagnostic() {
         // `${{ … }}` is a plain scalar in block context — AST does not see a flow mapping.
         let docs = parse_docs("token: ${{ secrets.GITHUB_TOKEN }}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert!(result.is_empty());
     }
@@ -1079,7 +1096,7 @@ mod tests {
     #[test]
     fn gha_expression_double_brace_no_diagnostic() {
         let docs = parse_docs("run: echo ${{ env.MY_VAR }}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert!(result.is_empty());
     }
@@ -1087,7 +1104,7 @@ mod tests {
     #[test]
     fn gha_expression_nested_no_diagnostic() {
         let docs = parse_docs("env:\n  TOKEN: ${{ secrets.TOKEN }}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert!(result.is_empty());
     }
@@ -1096,7 +1113,7 @@ mod tests {
     fn gha_expression_alongside_real_flow_map() {
         // GHA expression line: zero diagnostics; real flow map line: one diagnostic.
         let docs = parse_docs("token: ${{ secrets.TOKEN }}\nconfig: {key: value}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -1111,7 +1128,7 @@ mod tests {
         // Current text scanner misses multi-line flow maps; AST walk finds them.
         // Closing `}` must be indented >= the key column per YAML 1.2 flow rules.
         let docs = parse_docs("foo: {\n       a: 1,\n     }\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -1122,7 +1139,7 @@ mod tests {
     #[test]
     fn multiline_flow_seq_detected() {
         let docs = parse_docs("items: [\n         a,\n         b,\n       ]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -1133,7 +1150,7 @@ mod tests {
     #[test]
     fn multiline_flow_map_range_starts_on_opening_line() {
         let docs = parse_docs("foo: {\n       a: 1,\n     }\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result[0].range.start.line, 0);
     }
@@ -1144,7 +1161,7 @@ mod tests {
     fn nested_nonempty_flow_maps_no_double_report() {
         // outer {outer: {inner: 1}} → 2 diagnostics (one each), not more.
         let docs = parse_docs("data: {outer: {inner: 1}}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 2);
         assert!(
@@ -1158,7 +1175,7 @@ mod tests {
     fn deeply_nested_flow_seq_count() {
         // [[1, 2], [3, 4]] → 3 diagnostics: outer seq + two inner seqs.
         let docs = parse_docs("data: [[1, 2], [3, 4]]\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 3);
     }
@@ -1169,7 +1186,7 @@ mod tests {
     fn empty_nested_seq_inside_nonempty_map_no_extra_diagnostic() {
         // {a: []} → 1 diagnostic for the outer map; inner empty seq: none.
         let docs = parse_docs("data: {a: []}\n");
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -1194,7 +1211,7 @@ jobs:
       matrix: { target: linux, os: ubuntu }
 ";
         let docs = parse_docs(yaml);
-        let result = validate_flow_style(&docs);
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
 
         // Only the real flow mapping on the `matrix:` line should be reported.
         assert_eq!(
@@ -1207,6 +1224,38 @@ jobs:
             "expected flowMap diagnostic on matrix line, got: {:?}",
             result[0].code,
         );
+    }
+
+    // ---- Flow Style Validator: severity propagation ----
+
+    #[test]
+    fn validate_flow_style_none_returns_empty_on_triggering_input() {
+        let docs = parse_docs("config: {key: value}\n");
+        let settings = ValidationSettings { flow_style: None };
+        let result = validate_flow_style(&docs, &settings);
+        assert!(
+            result.is_empty(),
+            "disabled flow_style must suppress all diagnostics"
+        );
+    }
+
+    #[test]
+    fn validate_flow_style_error_severity_produces_error_diagnostics() {
+        let docs = parse_docs("config: {key: value}\n");
+        let settings = ValidationSettings {
+            flow_style: Some(DiagnosticSeverity::ERROR),
+        };
+        let result = validate_flow_style(&docs, &settings);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn validate_flow_style_default_settings_produces_warning() {
+        let docs = parse_docs("config: {key: value}\n");
+        let result = validate_flow_style(&docs, &ValidationSettings::default());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
     // ---- Map Key Order Validator: Happy Paths / Nested Structures / Edge Cases ----
@@ -2026,12 +2075,18 @@ spec:
         );
 
         // validate_flow_style: no flow collections in either text.
+        let default_vs = ValidationSettings::default();
         assert_eq!(
             validate_flow_style(
-                &rlsp_yaml_parser::load(text_with_v1_1_keywords).unwrap_or_default()
+                &rlsp_yaml_parser::load(text_with_v1_1_keywords).unwrap_or_default(),
+                &default_vs,
             )
             .len(),
-            validate_flow_style(&rlsp_yaml_parser::load(text_plain).unwrap_or_default()).len(),
+            validate_flow_style(
+                &rlsp_yaml_parser::load(text_plain).unwrap_or_default(),
+                &default_vs,
+            )
+            .len(),
             "flow-style diagnostics must not differ based on v1.1 keyword presence"
         );
     }

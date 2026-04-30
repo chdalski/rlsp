@@ -155,6 +155,7 @@ mod test_helpers {
 
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::{parse_docs, test_uri};
+    use crate::validation::ValidationSettings;
     use crate::validation::validators::validate_flow_style;
 
     use super::code_actions;
@@ -195,7 +196,7 @@ mod test_helpers {
 
     pub(super) fn flow_diags_for(text: &str) -> Vec<Diagnostic> {
         let docs = docs_for(text);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     }
 
     pub(super) fn flow_map_action(text: &str) -> Option<CodeAction> {

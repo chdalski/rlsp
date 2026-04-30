@@ -48,6 +48,7 @@ use rlsp_yaml::editing::code_actions::code_actions;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::navigation::references::{find_references, goto_definition};
 use rlsp_yaml::parser::parse_yaml;
+use rlsp_yaml::validation::ValidationSettings;
 use rlsp_yaml::validation::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
     validate_unused_anchors, validate_yaml11_compat,
@@ -143,8 +144,10 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("panic in validate_unused_anchors: {}", panic_message(&e)))?;
 
     // Stage 3: validate_flow_style
-    catch_unwind(AssertUnwindSafe(|| validate_flow_style(&docs)))
-        .map_err(|e| format!("panic in validate_flow_style: {}", panic_message(&e)))?;
+    catch_unwind(AssertUnwindSafe(|| {
+        validate_flow_style(&docs, &ValidationSettings::default())
+    }))
+    .map_err(|e| format!("panic in validate_flow_style: {}", panic_message(&e)))?;
 
     // Stage 4: validate_custom_tags (empty allowed set — all tags are unknown)
     let allowed_tags: HashSet<String> = HashSet::new();
@@ -988,7 +991,7 @@ fn collect_all_diagnostics(
     let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(docs));
-    all.extend(validate_flow_style(docs));
+    all.extend(validate_flow_style(docs, &ValidationSettings::default()));
     all.extend(validate_custom_tags(docs, &allowed_tags));
     all.extend(validate_key_ordering(docs));
     all.extend(validate_duplicate_keys(docs));

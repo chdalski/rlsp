@@ -473,17 +473,18 @@ impl Backend {
         diagnostics.extend(crate::validation::validators::validate_unused_anchors(
             &result.documents,
         ));
-        let flow_style_setting = self.get_flow_style();
-        if flow_style_setting.as_deref() != Some("off") {
-            let mut flow_diags =
-                crate::validation::validators::validate_flow_style(&result.documents);
-            if flow_style_setting.as_deref() == Some("error") {
-                for diag in &mut flow_diags {
-                    diag.severity = Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR);
-                }
-            }
-            diagnostics.extend(flow_diags);
-        }
+        let validation_settings = {
+            let settings = self.settings.lock().ok();
+            settings
+                .as_ref()
+                .map_or_else(crate::validation::ValidationSettings::default, |s| {
+                    crate::validation::ValidationSettings::from_settings(s)
+                })
+        };
+        diagnostics.extend(crate::validation::validators::validate_flow_style(
+            &result.documents,
+            &validation_settings,
+        ));
         let duplicate_keys_setting = self.get_duplicate_keys();
         if duplicate_keys_setting.as_deref() != Some("off") {
             let mut dup_diags =
@@ -640,11 +641,6 @@ impl Backend {
             .ok()
             .and_then(|s| s.max_items_computed)
             .unwrap_or(5000)
-    }
-
-    /// Return the raw `flowStyle` string setting, or `None` if absent (meaning default).
-    pub(crate) fn get_flow_style(&self) -> Option<String> {
-        self.settings.lock().ok().and_then(|s| s.flow_style.clone())
     }
 
     /// Return the raw `duplicateKeys` string setting, or `None` if absent (meaning default).

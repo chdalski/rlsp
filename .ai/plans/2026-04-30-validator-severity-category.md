@@ -121,7 +121,7 @@ own severity by category. No user-facing behavior change.
 
 ## Steps
 
-- [ ] Task 1: Introduce `validation/settings.rs` and retrofit
+- [x] Task 1: Introduce `validation/settings.rs` and retrofit
       `validate_flow_style`
 - [ ] Task 2: Retrofit `validate_duplicate_keys` to use
       `ValidationSettings`
@@ -129,6 +129,8 @@ own severity by category. No user-facing behavior change.
 ## Tasks
 
 ### Task 1: Introduce `validation/settings.rs` and retrofit `validate_flow_style`
+
+**Commit:** `e274dcdfe4f8a4ca1dd1aff7299fcae7f89727f4`
 
 Create the `DiagnosticCategory` enum and `ValidationSettings`
 struct in a new module `rlsp-yaml/src/validation/settings.rs`,
@@ -141,7 +143,7 @@ call. `validate_duplicate_keys` is not touched in this task —
 its existing string-override block in `server.rs` stays in
 place until Task 2.
 
-- [ ] Add `rlsp-yaml/src/validation/settings.rs` with:
+- [x] Add `rlsp-yaml/src/validation/settings.rs` with:
   - `pub enum DiagnosticCategory { FlowStyle }` (the
     `DuplicateKey` variant is added in Task 2).
   - `pub struct ValidationSettings { pub flow_style:
@@ -157,17 +159,17 @@ place until Task 2.
     `Option<DiagnosticSeverity>` using the documented mapping
     (`"off"` → `None`; `"warning"` or absent → `Some(WARNING)`;
     `"error"` → `Some(ERROR)`; unknown strings → default).
-- [ ] Declare the new module in `rlsp-yaml/src/validation.rs`
+- [x] Declare the new module in `rlsp-yaml/src/validation.rs`
       and re-export `DiagnosticCategory` and
       `ValidationSettings`.
-- [ ] Modify `validate_flow_style` in
+- [x] Modify `validate_flow_style` in
       `rlsp-yaml/src/validation/validators.rs` to take
       `(&[Document<Span>], &ValidationSettings)`. Look up
       `settings.severity_for(DiagnosticCategory::FlowStyle)`;
       return `Vec::new()` early if `None`. Pass the resolved
       `DiagnosticSeverity` into `flow_diagnostic` so the
       hardcoded `WARNING` at line 218 is removed.
-- [ ] In `rlsp-yaml/src/server.rs::parse_and_publish`,
+- [x] In `rlsp-yaml/src/server.rs::parse_and_publish`,
       construct `ValidationSettings` once from the locked
       `Settings` (matching the pattern at lines 1002–1033),
       drop the `if flow_style_setting.as_deref() != Some("off")
@@ -176,16 +178,16 @@ place until Task 2.
       &validation_settings));` call. The
       `validate_duplicate_keys` block in `server.rs` is
       unchanged here.
-- [ ] Update inline tests in
+- [x] Update inline tests in
       `rlsp-yaml/src/validation/validators.rs` that call
       `validate_flow_style` to pass
       `&ValidationSettings::default()`.
-- [ ] Update integration tests calling `validate_flow_style`
+- [x] Update integration tests calling `validate_flow_style`
       to pass `&ValidationSettings::default()`:
       `tests/code_action_property_preservation.rs`,
       `tests/ecosystem_fixtures.rs`,
       `tests/corpus_invariants.rs`.
-- [ ] Add unit tests in `rlsp-yaml/src/validation/settings.rs`
+- [x] Add unit tests in `rlsp-yaml/src/validation/settings.rs`
       for the boundary parser:
   - `from_settings` produces `flow_style: None` when the
     string is `"off"`.
@@ -199,7 +201,7 @@ place until Task 2.
     is an unknown value (e.g. `"verbose"`).
   - `severity_for(DiagnosticCategory::FlowStyle)` returns
     the configured `flow_style` value.
-- [ ] Add unit tests in
+- [x] Add unit tests in
       `rlsp-yaml/src/validation/validators.rs` for severity
       propagation:
   - `validate_flow_style` returns empty vec when

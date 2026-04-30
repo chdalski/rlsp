@@ -11,6 +11,7 @@ use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::schema_validation::validate_schema;
 use rlsp_yaml::server::YamlVersion;
+use rlsp_yaml::validation::ValidationSettings;
 use rlsp_yaml::validation::validators::{
     validate_duplicate_keys, validate_flow_style, validate_key_ordering, validate_unused_anchors,
 };
@@ -40,7 +41,7 @@ fn bench_parse_and_validate(c: &mut Criterion) {
             b.iter(|| {
                 let result = parse_yaml(text);
                 let _ = validate_unused_anchors(&result.documents);
-                let _ = validate_flow_style(&result.documents);
+                let _ = validate_flow_style(&result.documents, &ValidationSettings::default());
                 let _ = rlsp_yaml::validation::validators::validate_custom_tags(
                     &result.documents,
                     &allowed_tags,

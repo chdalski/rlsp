@@ -18,6 +18,7 @@ use common::*;
 
 use rlsp_yaml::editing::code_actions::code_actions;
 use rlsp_yaml::editing::formatter::YamlFormatOptions;
+use rlsp_yaml::validation::ValidationSettings;
 use rlsp_yaml::validation::validators::validate_flow_style;
 use rstest::rstest;
 use tower_lsp::lsp_types::{Diagnostic, NumberOrString, Position, Range};
@@ -158,7 +159,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_MAP_ANCHOR);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow mapping",
     vec!["&anchor"]
@@ -168,7 +169,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_MAP_TAG);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow mapping",
     vec!["!mytag"]
@@ -178,7 +179,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_MAP_ANCHOR_AND_TAG);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow mapping",
     vec!["&a", "!mytag"]
@@ -189,7 +190,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_SEQ_ANCHOR);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow sequence",
     vec!["&anchor"]
@@ -199,7 +200,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_SEQ_TAG);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow sequence",
     vec!["!mytag"]
@@ -209,7 +210,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
     Range::new(Position::new(0, 0), Position::new(999, 0)),
     {
         let docs = docs_for(FLOW_TO_BLOCK_SEQ_ANCHOR_AND_TAG);
-        validate_flow_style(&docs)
+        validate_flow_style(&docs, &ValidationSettings::default())
     },
     "flow sequence",
     vec!["&a", "!mytag"]
