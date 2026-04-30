@@ -307,9 +307,157 @@ mod tests {
 
     use super::super::code_actions;
     use super::super::diagnostic_code;
-    use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use super::super::test_helpers::{
+        apply_yaml11_bool_convert_edit, apply_yaml11_bool_quote_edit, docs_for, line_range,
+        make_diagnostic,
+    };
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
+
+    fn count(haystack: &str, needle: &str) -> usize {
+        let mut count = 0;
+        let mut start = 0;
+        while let Some(pos) = haystack[start..].find(needle) {
+            count += 1;
+            start += pos + needle.len();
+        }
+        count
+    }
+
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // The fix clears properties from both cloned nodes before formatting, so new_text
+    // contains zero occurrences — the source buffer preserves the single occurrence.
+    // The final document therefore contains exactly one occurrence.
+
+    #[test]
+    fn yaml11_bool_quote_action_new_text_does_not_duplicate_anchor() {
+        let text = "enabled: &myanchor yes\n";
+        let diag = make_diagnostic(0, 19, 22, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_quote_action_new_text_does_not_duplicate_user_tag() {
+        let text = "enabled: !mytag yes\n";
+        let diag = make_diagnostic(0, 16, 19, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_quote_action_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "enabled: &a !mytag yes\n";
+        let diag = make_diagnostic(0, 19, 22, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_convert_action_new_text_does_not_duplicate_anchor() {
+        let text = "enabled: &myanchor yes\n";
+        let diag = make_diagnostic(0, 19, 22, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_convert_action_new_text_does_not_duplicate_user_tag() {
+        let text = "enabled: !mytag yes\n";
+        let diag = make_diagnostic(0, 16, 19, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_bool_convert_action_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "enabled: &a !mytag yes\n";
+        let diag = make_diagnostic(0, 19, 22, "yaml11Boolean");
+        let (result, edit) = apply_yaml11_bool_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
 
     #[test]
     fn should_quote_yaml11_bool_yes_lowercase() {

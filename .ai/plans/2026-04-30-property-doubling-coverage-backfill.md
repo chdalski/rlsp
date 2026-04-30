@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-30)
 **Created:** 2026-04-30
 
 ## Goal
@@ -142,7 +142,7 @@ exists.
 
 ## Steps
 
-- [ ] Task 1 — backfill inline unit tests + fixtures for
+- [x] Task 1 — backfill inline unit tests + fixtures for
       the four actions
 
 ## Tasks
@@ -159,21 +159,21 @@ fixtures for the one cursor-driven action
 (`quoted_bool`), mirroring the
 `block-scalar-preserve-*.md` set.
 
-- [ ] In `rlsp-yaml/src/editing/code_actions/flow_to_block.rs`
+- [x] In `rlsp-yaml/src/editing/code_actions/flow_to_block.rs`
       `mod tests`, add 6 unit tests covering both the
       map and sequence dispatch sites (3 property shapes
       × 2 sites). Each test asserts
       `count(edit.new_text, prop) == 0` and
       `count(result, prop) == 1` for the relevant
       property literal(s).
-- [ ] In `rlsp-yaml/src/editing/code_actions/quoted_bool.rs`
+- [x] In `rlsp-yaml/src/editing/code_actions/quoted_bool.rs`
       `mod tests`, add 3 unit tests (anchor / user-tag /
       combined) with the same shape.
-- [ ] In `rlsp-yaml/src/editing/code_actions/yaml11_bool.rs`
+- [x] In `rlsp-yaml/src/editing/code_actions/yaml11_bool.rs`
       `mod tests`, add 3 unit tests with the same shape.
-- [ ] In `rlsp-yaml/src/editing/code_actions/yaml11_octal.rs`
+- [x] In `rlsp-yaml/src/editing/code_actions/yaml11_octal.rs`
       `mod tests`, add 3 unit tests with the same shape.
-- [ ] If a per-action `apply_<action>_edit` helper does
+- [x] If a per-action `apply_<action>_edit` helper does
       not already exist in
       `rlsp-yaml/src/editing/code_actions.rs::test_helpers`
       (line 150 onward), add one mirroring the
@@ -183,7 +183,7 @@ fixtures for the one cursor-driven action
       shape for diagnostic-driven), runs the action
       through `code_actions(...)`, applies the first
       `TextEdit`, and returns `(full_result, edit)`.
-- [ ] Add fixture
+- [x] Add fixture
       `rlsp-yaml/tests/fixtures/code_actions/quoted-bool-preserve-anchor.md`
       with a quoted-boolean input carrying `&myanchor`
       (e.g., `enabled: &myanchor "true"`), `cursor:`
@@ -193,28 +193,60 @@ fixtures for the one cursor-driven action
       `quoted_bool.rs` — `applies-action: unquoted`,
       and an `Expected-Document` containing exactly one
       `&myanchor` in front of the unquoted boolean.
-- [ ] Add fixture
+- [x] Add fixture
       `rlsp-yaml/tests/fixtures/code_actions/quoted-bool-preserve-user-tag.md`
       with a quoted-boolean input carrying `!mytag`
       (e.g., `enabled: !mytag "true"`), same shape, with
       exactly one `!mytag` in the expected output.
-- [ ] Add fixture
+- [x] Add fixture
       `rlsp-yaml/tests/fixtures/code_actions/quoted-bool-preserve-anchor-and-user-tag.md`
       with both `&a !mytag` properties present, with
       exactly one of each in the expected output in the
       correct order.
-- [ ] `cargo test --workspace` passes (no regressions;
-      the 15 new unit tests + 3 new fixtures all pass).
-- [ ] `cargo clippy --all-targets` clean.
-- [ ] `cargo fmt` applied.
+- [x] `cargo test --workspace` passes (no regressions;
+      the 21 new unit tests + 3 new fixtures all pass —
+      see deviations below).
+- [x] `cargo clippy --all-targets` clean.
+- [x] `cargo fmt` applied.
 
-Acceptance: `cargo test -p rlsp-yaml` shows the 15 new
-unit tests passing across the four action source files;
-`cargo test --test code_action_fixtures` shows the
-three `quoted-bool-preserve-*.md` fixtures passing; the
-existing
+Acceptance: 21 new unit tests pass across the four
+action source files; the three `quoted-bool-preserve-*.md`
+fixtures pass; the existing
 `tests/code_action_property_preservation.rs` invariant
 remains green; `cargo test --workspace` is green.
+
+**Deviations from the dispatch (accepted by reviewer):**
+
+- **Test count: 21, not 15.** The plan specified 3
+  unit tests per action for `yaml11_bool` and
+  `yaml11_octal`. Each of those actions actually emits
+  two distinct `TextEdit` variants — a quote variant
+  and a convert variant — each running its own
+  clone-then-format path that could regress
+  independently. The developer delivered 6 tests per
+  action for both, surfacing the second dispatch site
+  the plan missed. Per-action breakdown:
+  `flow_to_block` 6 (3 shapes × 2 sites), `quoted_bool`
+  3, `yaml11_bool` 6 (3 shapes × 2 variants),
+  `yaml11_octal` 6 (3 shapes × 2 variants). Total 21.
+  This is over-delivery against accurate code analysis,
+  not a scope reduction; test-engineer signed off.
+- **Helper placement.** The plan instructed adding all
+  per-action `apply_<action>_edit` helpers to
+  `code_actions.rs::test_helpers`. The developer added
+  the single-line variants there
+  (`apply_quoted_bool_edit`,
+  `apply_yaml11_{bool,octal}_{quote,convert}_edit`,
+  shared `apply_first_action_edit`) but kept
+  `apply_flow_map_edit` and `apply_flow_seq_edit` as
+  locals in `flow_to_block.rs::tests`. Reason:
+  flow_to_block edits can span multiple lines and need
+  a different splice helper than the single-line
+  variants. Acceptable as-is per reviewer; future
+  consolidation candidate when a third multi-line
+  caller appears.
+
+**Commit:** `a5826b9`
 
 ## Decisions
 

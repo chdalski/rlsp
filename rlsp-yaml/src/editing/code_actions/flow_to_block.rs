@@ -270,6 +270,197 @@ mod tests {
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
+    fn count(haystack: &str, needle: &str) -> usize {
+        let mut count = 0;
+        let mut start = 0;
+        while let Some(pos) = haystack[start..].find(needle) {
+            count += 1;
+            start += pos + needle.len();
+        }
+        count
+    }
+
+    fn apply_flow_map_edit(yaml: &str) -> (String, String) {
+        let action = flow_map_action(yaml).expect("expected flow-map action");
+        let new_text = new_text_for(&action);
+        let edit = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()][0];
+        let source_lines: Vec<&str> = yaml.lines().collect();
+        let start_line = edit.range.start.line as usize;
+        let end_line = edit.range.end.line as usize;
+        let start_col = edit.range.start.character as usize;
+        let end_col = edit.range.end.character as usize;
+        let mut result = String::new();
+        for (i, line) in source_lines.iter().enumerate() {
+            if i < start_line || i > end_line {
+                result.push_str(line);
+                result.push('\n');
+            } else if i == start_line && i == end_line {
+                result.push_str(&line[..start_col]);
+                result.push_str(&new_text);
+                result.push_str(&line[end_col..]);
+                result.push('\n');
+            } else if i == start_line {
+                result.push_str(&line[..start_col]);
+                result.push_str(&new_text);
+            } else if i == end_line {
+                result.push_str(&line[end_col..]);
+                result.push('\n');
+            }
+        }
+        (result, new_text)
+    }
+
+    fn apply_flow_seq_edit(yaml: &str) -> (String, String) {
+        let action = flow_seq_action(yaml).expect("expected flow-seq action");
+        let new_text = new_text_for(&action);
+        let edit = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()][0];
+        let source_lines: Vec<&str> = yaml.lines().collect();
+        let start_line = edit.range.start.line as usize;
+        let end_line = edit.range.end.line as usize;
+        let start_col = edit.range.start.character as usize;
+        let end_col = edit.range.end.character as usize;
+        let mut result = String::new();
+        for (i, line) in source_lines.iter().enumerate() {
+            if i < start_line || i > end_line {
+                result.push_str(line);
+                result.push('\n');
+            } else if i == start_line && i == end_line {
+                result.push_str(&line[..start_col]);
+                result.push_str(&new_text);
+                result.push_str(&line[end_col..]);
+                result.push('\n');
+            } else if i == start_line {
+                result.push_str(&line[..start_col]);
+                result.push_str(&new_text);
+            } else if i == end_line {
+                result.push_str(&line[end_col..]);
+                result.push('\n');
+            }
+        }
+        (result, new_text)
+    }
+
+    // The edit range starts at the '{' or '[', so any preceding &anchor/!tag prefix is
+    // outside the replaced range. The fix clears properties from the cloned node before
+    // formatting, so new_text contains zero occurrences — the source buffer preserves
+    // the single occurrence. The final document therefore contains exactly one occurrence.
+
+    #[test]
+    fn flow_map_to_block_new_text_does_not_duplicate_anchor() {
+        let text = "config: &myanchor {a: 1, b: 2}\n";
+        let (result, new_text) = apply_flow_map_edit(text);
+        assert_eq!(
+            count(&new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn flow_map_to_block_new_text_does_not_duplicate_user_tag() {
+        let text = "config: !mytag {a: 1, b: 2}\n";
+        let (result, new_text) = apply_flow_map_edit(text);
+        assert_eq!(
+            count(&new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn flow_map_to_block_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "config: &a !mytag {a: 1, b: 2}\n";
+        let (result, new_text) = apply_flow_map_edit(text);
+        assert_eq!(
+            count(&new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn flow_seq_to_block_new_text_does_not_duplicate_anchor() {
+        let text = "items: &myanchor [a, b, c]\n";
+        let (result, new_text) = apply_flow_seq_edit(text);
+        assert_eq!(
+            count(&new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn flow_seq_to_block_new_text_does_not_duplicate_user_tag() {
+        let text = "items: !mytag [a, b, c]\n";
+        let (result, new_text) = apply_flow_seq_edit(text);
+        assert_eq!(
+            count(&new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn flow_seq_to_block_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "items: &a !mytag [a, b, c]\n";
+        let (result, new_text) = apply_flow_seq_edit(text);
+        assert_eq!(
+            count(&new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {new_text:?}"
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
     // ---- Flow map to block ----
 
     #[test]

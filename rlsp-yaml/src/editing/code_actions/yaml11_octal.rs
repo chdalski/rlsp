@@ -241,9 +241,157 @@ mod tests {
     use rstest::rstest;
 
     use super::super::code_actions;
-    use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use super::super::test_helpers::{
+        apply_yaml11_octal_convert_edit, apply_yaml11_octal_quote_edit, docs_for, line_range,
+        make_diagnostic,
+    };
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
+
+    fn count(haystack: &str, needle: &str) -> usize {
+        let mut count = 0;
+        let mut start = 0;
+        while let Some(pos) = haystack[start..].find(needle) {
+            count += 1;
+            start += pos + needle.len();
+        }
+        count
+    }
+
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // The fix clears properties from both cloned nodes before formatting, so new_text
+    // contains zero occurrences — the source buffer preserves the single occurrence.
+    // The final document therefore contains exactly one occurrence.
+
+    #[test]
+    fn yaml11_octal_quote_action_new_text_does_not_duplicate_anchor() {
+        let text = "mode: &myanchor 0755\n";
+        let diag = make_diagnostic(0, 16, 20, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_quote_action_new_text_does_not_duplicate_user_tag() {
+        let text = "mode: !mytag 0755\n";
+        let diag = make_diagnostic(0, 13, 17, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_quote_action_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "mode: &a !mytag 0755\n";
+        let diag = make_diagnostic(0, 16, 20, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_quote_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_convert_action_new_text_does_not_duplicate_anchor() {
+        let text = "mode: &myanchor 0755\n";
+        let diag = make_diagnostic(0, 16, 20, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_convert_action_new_text_does_not_duplicate_user_tag() {
+        let text = "mode: !mytag 0755\n";
+        let diag = make_diagnostic(0, 13, 17, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn yaml11_octal_convert_action_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "mode: &a !mytag 0755\n";
+        let diag = make_diagnostic(0, 16, 20, "yaml11Octal");
+        let (result, edit) = apply_yaml11_octal_convert_edit(text, diag);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
 
     #[test]
     fn should_not_offer_yaml11_octal_quote_for_out_of_bounds_range() {

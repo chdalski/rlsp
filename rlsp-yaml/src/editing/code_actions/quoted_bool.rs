@@ -128,9 +128,86 @@ mod tests {
     use tower_lsp::lsp_types::CodeActionKind;
 
     use super::super::code_actions;
-    use super::super::test_helpers::{cursor_range, docs_for};
+    use super::super::test_helpers::{apply_quoted_bool_edit, cursor_range, docs_for};
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
+
+    fn count(haystack: &str, needle: &str) -> usize {
+        let mut count = 0;
+        let mut start = 0;
+        while let Some(pos) = haystack[start..].find(needle) {
+            count += 1;
+            start += pos + needle.len();
+        }
+        count
+    }
+
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // The fix clears properties from the cloned node before formatting, so new_text
+    // contains zero occurrences — the source buffer preserves the single occurrence.
+    // The final document therefore contains exactly one occurrence.
+
+    #[test]
+    fn quoted_bool_new_text_does_not_duplicate_anchor() {
+        let text = "enabled: &myanchor \"true\"\n";
+        let (result, edit) = apply_quoted_bool_edit(text, 19);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_new_text_does_not_duplicate_user_tag() {
+        let text = "enabled: !mytag \"true\"\n";
+        let (result, edit) = apply_quoted_bool_edit(text, 16);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_bool_new_text_does_not_duplicate_anchor_or_tag() {
+        let text = "enabled: &a !mytag \"true\"\n";
+        let (result, edit) = apply_quoted_bool_edit(text, 19);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
 
     #[test]
     fn quoted_bool_edit_range_is_scalar_span_not_full_line() {

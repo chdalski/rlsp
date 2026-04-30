@@ -294,6 +294,109 @@ mod test_helpers {
         result
     }
 
+    /// Apply the "Convert quoted string" (`quoted_bool`) edit to `yaml` at the given cursor column.
+    /// Returns the full edited text and the raw `TextEdit` (for range assertions).
+    pub(super) fn apply_quoted_bool_edit(yaml: &str, col: u32) -> (String, TextEdit) {
+        let actions = code_actions(
+            &docs_for(yaml),
+            yaml,
+            cursor_range(0, col),
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("Convert quoted"))
+            .expect("expected quoted-bool action");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        let edit = edits[0].clone();
+        let source_lines: Vec<&str> = yaml.lines().collect();
+        let line_idx = edit.range.start.line as usize;
+        let start_col = edit.range.start.character as usize;
+        let end_col = edit.range.end.character as usize;
+        let src_line = source_lines[line_idx];
+        let new_line = format!(
+            "{}{}{}",
+            &src_line[..start_col],
+            edit.new_text,
+            &src_line[end_col..]
+        );
+        let mut result = String::new();
+        for (i, l) in source_lines.iter().enumerate() {
+            if i == line_idx {
+                result.push_str(&new_line);
+            } else {
+                result.push_str(l);
+            }
+            result.push('\n');
+        }
+        (result, edit)
+    }
+
+    fn apply_first_action_edit(yaml: &str, diag: Diagnostic, title: &str) -> (String, TextEdit) {
+        let actions = code_actions(
+            &docs_for(yaml),
+            yaml,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
+        let action = actions
+            .iter()
+            .find(|a| a.title == title)
+            .expect("expected action with matching title");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        let edit = edits[0].clone();
+        let source_lines: Vec<&str> = yaml.lines().collect();
+        let line_idx = edit.range.start.line as usize;
+        let start_col = edit.range.start.character as usize;
+        let end_col = edit.range.end.character as usize;
+        let src_line = source_lines[line_idx];
+        let new_line = format!(
+            "{}{}{}",
+            &src_line[..start_col],
+            edit.new_text,
+            &src_line[end_col..]
+        );
+        let mut result = String::new();
+        for (i, l) in source_lines.iter().enumerate() {
+            if i == line_idx {
+                result.push_str(&new_line);
+            } else {
+                result.push_str(l);
+            }
+            result.push('\n');
+        }
+        (result, edit)
+    }
+
+    pub(super) fn apply_yaml11_bool_quote_edit(yaml: &str, diag: Diagnostic) -> (String, TextEdit) {
+        apply_first_action_edit(yaml, diag, "Quote value")
+    }
+
+    pub(super) fn apply_yaml11_bool_convert_edit(
+        yaml: &str,
+        diag: Diagnostic,
+    ) -> (String, TextEdit) {
+        apply_first_action_edit(yaml, diag, "Convert to boolean")
+    }
+
+    pub(super) fn apply_yaml11_octal_quote_edit(
+        yaml: &str,
+        diag: Diagnostic,
+    ) -> (String, TextEdit) {
+        apply_first_action_edit(yaml, diag, "Quote as string")
+    }
+
+    pub(super) fn apply_yaml11_octal_convert_edit(
+        yaml: &str,
+        diag: Diagnostic,
+    ) -> (String, TextEdit) {
+        apply_first_action_edit(yaml, diag, "Convert to YAML 1.2 octal")
+    }
+
     /// Apply the "Convert to block scalar" edit to `text` at the given line.
     /// Returns the full edited text and the raw `TextEdit` (for range assertions).
     pub(super) fn apply_block_scalar_edit(text: &str, line: u32) -> (String, TextEdit) {
