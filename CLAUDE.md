@@ -44,6 +44,7 @@ pnpm run format    # check formatting (prettier)
 - Clippy pedantic + nursery at warn; selected lints at deny; `warnings = "deny"`
 - Maximum TypeScript strictness — `tsconfig.json` extends `@tsconfig/strictest`, ESLint uses `strictTypeChecked` + `stylisticTypeChecked`
 - Automated releases via release-plz; tag format: `<package>-v<version>`. VS Code extension uses CalVer tags: `vscode-v<YYYY.MM.NN>`
+- Agents must not edit `version = "..."` fields in any `Cargo.toml` — release-plz owns version progression from conventional commits; milestone bumps (e.g., 0.x → 1.0) are user-directed and applied as a single deliberate commit
 - Conventional commits required — changelogs auto-generated via git-cliff
 - OIDC trusted publishing to crates.io — no `CARGO_REGISTRY_TOKEN` secret needed
 - pnpm as Node.js package manager
