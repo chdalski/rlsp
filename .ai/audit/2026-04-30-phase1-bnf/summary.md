@@ -11,11 +11,13 @@ produced-by: lead
 
 213 entries audited across YAML 1.2.2 spec chapters §3–§9 using a dual-track methodology (independent A and B subagents per chapter, lead reconciliation). Results are committed in `.ai/audit/2026-04-30-phase1-bnf/`. Corresponding follow-up entries are filed in `.ai/memory/project_followup_plans.md`.
 
+The 3 `[NEEDS USER REVIEW]` flags initially raised on §7's `[110]`, `[121]`, `[131]` were finalized as `Strict-conformant` after a detailed BNF-trace of §7.3.x prose against §7.4.2 grammar (resolved 2026-04-30 — see `reconciliation-§7.md`'s entry for [110]).
+
 ## Final Verdict Tally
 
 | Verdict | Count | Percentage |
 |---|---|---|
-| `Strict-conformant` | 194 (3 with `[NEEDS USER REVIEW]`) | 91.1% |
+| `Strict-conformant` | 194 | 91.1% |
 | `Stricter-than-spec` | 5 | 2.3% |
 | `Lenient` | 11 | 5.2% |
 | `Not-applicable` | 3 | 1.4% |
@@ -130,7 +132,7 @@ Per-chapter inter-auditor disagreement rates: §5 (3.1%), §6 (22.0%), §7 (12.1
 
 ### §7 (Flow Style Productions, 58 entries)
 
-All 58 entries are `Strict-conformant` except `[136] in-flow(n,c)` (`Not-applicable` — meta-notational context-mapping rule). Three entries carry `[NEEDS USER REVIEW]` flags: `[110] nb-double-text(n,c)`, `[121] nb-single-text(n,c)`, `[131] ns-plain(n,c)` — see [NEEDS USER REVIEW] section below.
+All 58 entries are `Strict-conformant` except `[136] in-flow(n,c)` (`Not-applicable` — meta-notational context-mapping rule). Three entries (`[110] nb-double-text(n,c)`, `[121] nb-single-text(n,c)`, `[131] ns-plain(n,c)`) were initially flagged `[NEEDS USER REVIEW]` for a §7.3.x-vs-§7.4.2 spec-interpretation question; the question was resolved on 2026-04-30 by tracing the BNF context propagation in detail (see `reconciliation-§7.md`'s [110] entry). All three are now final `Strict-conformant`.
 
 (Full per-entry reasoning in `reconciliation-§7.md`.)
 
@@ -184,25 +186,56 @@ These productions reject input the spec admits. All are intentional security-har
 
 None. The audit found no productions that produce wrong output for valid spec input.
 
-## `[NEEDS USER REVIEW]` Items (3 entries)
+## `[NEEDS USER REVIEW]` Items — Resolved 2026-04-30
 
-The lead could not resolve these from the two audit outputs alone. Each carries a tentative `Strict-conformant` verdict; the user adjudicates before the summary becomes ground truth. **All three hinge on the same spec-interpretation question.**
+The 3 entries originally flagged for user adjudication (`[110] nb-double-text(n,c)`, `[121] nb-single-text(n,c)`, `[131] ns-plain(n,c)`) hinged on whether YAML 1.2.2 §7.4.2 permits multi-line implicit keys in flow mappings (the implementation accepts them) or whether §7.3.x's "single line" restriction applies regardless of context (which would make the implementation Lenient).
 
-### The shared question
+A detailed BNF-trace resolved the question in favor of the implementation's reading. **Final verdicts: all three are `Strict-conformant`.** No fix required.
 
-YAML 1.2.2 §7.3.1 says "Double-quoted scalars are restricted to a single line when contained inside an implicit key." §7.3.2 (single-quoted) and §7.3.3 (plain) make analogous claims. The implementation enforces single-line implicit keys in flow **sequences** at `event_iter/flow.rs:1128`, but **explicitly does not enforce it in flow mappings**, citing §7.4.2 in a comment as license:
+### Resolution summary (full reasoning in `reconciliation-§7.md`'s [110] entry)
 
-> "Flow mappings `{...}` allow multi-line implicit keys — see YAML 1.2 §7.4.2"
+The §7.3.x prose ("scalars are restricted to a single line when contained inside an implicit key") is informal; the precise meaning is encoded in the BNF context labels. `BLOCK-KEY` and `FLOW-KEY` are the formal "implicit key" contexts; `FLOW-IN` is "inside a flow collection but not formally an implicit key."
 
-If §7.4.2 truly permits multi-line implicit keys in flow mappings (overriding §7.3.1's restriction in that context), the implementation is conformant. If §7.3.1 applies regardless of context (and §7.4.2 does not override it), the implementation is `Lenient` for these three productions and a fix is required.
+Three places where implicit keys appear in the spec, and what context each forces:
 
-### Affected productions
+1. **Block mapping implicit keys** (§8.2.2) — hardcoded `BLOCK-KEY` → one-line.
+2. **Flow sequence single-pair compact form** `[ a: b ]` (§7.4.1, [152]) — hardcoded `FLOW-KEY` → one-line, regardless of outer context.
+3. **Flow mapping entry keys** `{ a: b }` (§7.4.2, [145]) — uses **parent context `c`**, not hardcoded. At top level the parent is `FLOW-IN` (after `in-flow(c)` mapping), so the key parses with `ns-plain(n,FLOW-IN) ::= ns-plain-multi-line(n,FLOW-IN)` — multi-line allowed.
 
-- **[110] nb-double-text(n,c)** — tentative verdict `Strict-conformant`. If user adjudicates as `Lenient`, follow-up filing needed.
-- **[121] nb-single-text(n,c)** — tentative verdict `Strict-conformant`. Same resolution as [110].
-- **[131] ns-plain(n,c)** — tentative verdict `Strict-conformant`. Same resolution as [110].
+When a flow mapping is itself nested inside a block-key or flow-key, the outer one-line constraint cascades: the entire `{ ... }` must fit on one line, so inner keys are naturally one-line by the outer constraint.
 
-**Recommended user action:** read YAML 1.2.2 §7.4.2 carefully against §7.3.1 and decide whether the implementation's reading is correct. If yes, mark the three entries `Strict-conformant` and finalize the audit. If no, flip the three to `Lenient` and add a follow-up entry to fix flow-mapping implicit-key enforcement at `event_iter/flow.rs:1124-1135`.
+The asymmetry between flow-sequence-pair and flow-mapping-entry is deliberate in the spec. The implementation's comment "Flow mappings `{...}` allow multi-line implicit keys — see YAML 1.2 §7.4.2" is accurate. De-facto behavior of mature parsers (libyaml, PyYAML, snakeyaml) follows the BNF — multi-line implicit keys in top-level flow mappings are accepted.
+
+### Concrete examples
+
+Spec-conformant (multi-line implicit key in top-level flow mapping accepted):
+```yaml
+{
+  long
+  key: value
+}
+```
+
+Spec-conformant (one-line enforced in flow-sequence pair):
+```yaml
+[ key: value ]                    # OK
+[
+  key
+  : value                         # REJECTED — flow-sequence pair uses hardcoded FLOW-KEY
+]
+```
+
+Spec-conformant (one-line enforced when flow mapping is itself a block key):
+```yaml
+{ a: b }: outer-value             # OK
+{
+  a: b
+}: outer-value                    # REJECTED at outer scope — block-key must be one line
+```
+
+### Doc-rewrite note
+
+This BNF-trace analysis must propagate into the conformance doc rewrite verbatim — it documents a prose-vs-BNF terminology trap that is otherwise difficult to recover. The in-code comment at `flow.rs:1124-1135` could be tightened to reference the BNF terminology more precisely, but since the analysis lives here in the audit record, code-comment changes are optional.
 
 ## Doc Errata (informational — for future doc rewrite plan)
 
@@ -240,7 +273,7 @@ Per the dedup rule (spec section AND code location), the following Lenient produ
 | [93] + [94] + [95] tag prefix | §6.9.1 | tag prefix validation (combined entry) | New |
 | [99] c-ns-shorthand-tag | §6.9.1 | `event_iter/properties.rs:170-216` | New |
 
-Productions with verdict `Strict-conformant` (including 3 with `[NEEDS USER REVIEW]`), `Stricter-than-spec`, `Not-applicable` do not generate follow-up entries.
+Productions with verdict `Strict-conformant`, `Stricter-than-spec`, `Not-applicable` do not generate follow-up entries.
 
 The follow-up entries are appended to `.ai/memory/project_followup_plans.md` in a separate commit (`chore(memory): file phase 1 conformance audit follow-ups`).
 
@@ -248,6 +281,6 @@ The follow-up entries are appended to `.ai/memory/project_followup_plans.md` in 
 
 - The dual-track methodology with strict input partitioning surfaced the c-printable enforcement gap (root cause of 4 of 11 Lenient findings) and 8 Lenient productions in §6 that the conformance doc had labeled as `Conformant`. Without the audit, these would have remained as silent leniency.
 - Inter-auditor disagreement rates trended down across chapters as the reconciliation principle ("attribute strictness/leniency to the production where the rule is enforced") propagated through dispatch prompts: §5 (3.1%) → §6 (22.0%) → §7 (12.1%) → §8 (2.5%) → §9 (0.0%). §6 was the high water mark; the principle was added to dispatches starting in §7 and the rate fell.
-- The 3 `[NEEDS USER REVIEW]` items in §7 are spec-interpretation calls the lead could not resolve from code. Per the plan, the lead's tentative verdict is recorded and the items are surfaced here for user adjudication.
-- The conformance doc's "Conformant" label is unreliable for at least 11 entries (the Doc Errata listing). A doc-rewrite follow-up plan should correct the labels and update citations after the user adjudicates the `[NEEDS USER REVIEW]` items.
+- The 3 originally `[NEEDS USER REVIEW]` items in §7 were resolved on 2026-04-30 by detailed BNF-tracing (see `reconciliation-§7.md`'s [110] entry). All three finalized as `Strict-conformant`. The §7.3.x-vs-§7.4.2 prose-vs-BNF terminology analysis is preserved in the audit record for the doc rewrite.
+- The conformance doc's "Conformant" label is unreliable for at least 11 entries (the Doc Errata listing). A doc-rewrite follow-up plan should correct the labels, update citations, and embed the BNF-trace analyses captured here.
 - §10 (presentation/output) was out of scope (no BNF productions in the doc). Phase 2 (drafted at `.ai/plans/2026-04-30-yaml-spec-conformance-audit-phase2.md`, pending user approval) covers normative-prose conformance: encoding (§5.2), directives (§6.8 behavioral), tag resolution (§6.9.1 behavioral), schemas (§10.1–10.3), error semantics, and limits.

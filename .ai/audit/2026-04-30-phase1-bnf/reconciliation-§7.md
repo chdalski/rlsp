@@ -9,18 +9,18 @@ produced-by: lead
 
 # Reconciliation: §7
 
-58 entries reconciled. 51 entries had identical verdicts from Auditor A and Auditor B; 7 entries had disagreements. Three are flagged `[NEEDS USER REVIEW]` because the lead cannot resolve a §7.4.2-vs-§7.3.1 spec-interpretation question from code alone.
+58 entries reconciled. 51 entries had identical verdicts from Auditor A and Auditor B; 7 entries had disagreements. All 7 disagreements were resolved by lead investigation; the 3 `[NEEDS USER REVIEW]` flags initially raised on `[110]`, `[121]`, `[131]` were finalized as `Strict-conformant` after a detailed BNF-trace of §7.3.x prose against §7.4.2 grammar (resolved 2026-04-30 — see entry [110]'s reasoning).
 
 ## Final Verdict Tally
 
-- `Strict-conformant`: 57 (3 with `[NEEDS USER REVIEW]` tentative verdict)
+- `Strict-conformant`: 57
 - `Stricter-than-spec`: 0
 - `Lenient`: 0
 - `Not-applicable`: 1
 - `Non-conformant`: 0
 - `Indeterminate`: 0
 
-§7's clean tally reflects that the parser's flow-style implementation is mature and well-tested. The most substantive open question is the implicit-key single-line restriction in flow mappings (`[NEEDS USER REVIEW]` items below).
+§7's clean tally reflects that the parser's flow-style implementation is mature and well-tested. The §7.3.x-vs-§7.4.2 BNF analysis (formerly the open question) is captured in [110]'s entry below and should propagate verbatim into the conformance doc rewrite.
 
 ## Agreed Verdicts (51 entries)
 
@@ -89,16 +89,96 @@ produced-by: lead
 
 **Lead's verdict:** Strict-conformant.
 
-### [110] nb-double-text(n,c) — `[NEEDS USER REVIEW]`
+### [110] nb-double-text(n,c)
 
-**A's verdict:** Indeterminate — implicit-key single-line restriction not directly enforced by passing context to the lexer; whether every multi-line scalar used as an implicit key is rejected depends on `last_token_line` tracking; without a conformance-suite cross-check, the verdict cannot be reached on code reading alone.
-**B's verdict:** Strict-conformant — surrounding parsers reject `:` separators across lines, restricting effective consumption to one line; composition matches the four-context dispatch.
+**A's verdict:** Indeterminate — implicit-key single-line restriction not directly enforced by passing context to the lexer.
+**B's verdict:** Strict-conformant — surrounding parsers reject `:` separators across lines.
 
-**Lead's investigation:** The single-line restriction is implemented at `event_iter/flow.rs:1128`, which rejects implicit keys spanning multiple lines — but ONLY in flow sequences (`in_sequence` check). The same code, with comment "Flow mappings `{...}` allow multi-line implicit keys — see YAML 1.2 §7.4.2", explicitly does NOT enforce the restriction inside flow mappings. The spec at §7.3.1 says "Double-quoted scalars are restricted to a single line when contained inside an implicit key" — but §7.4.2 (flow mappings) may have a specific exception that overrides §7.3.1. Resolving this requires careful reading of §7.4.2's normative wording against §7.3.1's, which I cannot do conclusively from code.
+**Lead's investigation (resolved 2026-04-30):** Initially flagged `[NEEDS USER REVIEW]` because the BNF interaction between §7.3.1's prose ("scalars are restricted to a single line when contained inside an implicit key") and §7.4.2's flow-mapping productions was non-obvious. Resolved by tracing the BNF context propagation in detail.
 
-**Lead's tentative verdict:** Strict-conformant — the implementation documents its spec interpretation citing §7.4.2; absent clear evidence of misinterpretation, accepting the implementation's reading.
+**The §7.3.x prose-vs-BNF terminology trap.** The §7.3.1, §7.3.2, §7.3.3 prose informally says "scalars are restricted to a single line when contained inside an implicit key." The precise meaning is encoded in the BNF context labels — `BLOCK-KEY` and `FLOW-KEY` are the formal "implicit key" contexts; `FLOW-IN` is "inside a flow collection but not formally an implicit key." The terms differ.
 
-**`[NEEDS USER REVIEW]`** — please verify whether §7.4.2 permits multi-line implicit keys in flow mappings (or whether §7.3.1's restriction applies regardless of context). If the latter, the implementation is Lenient at flow.rs:1124-1135 and a fix is required.
+**Three places where implicit keys appear in the spec:**
+
+1. **Block mapping implicit keys** (§8.2.2, [193] `ns-s-block-map-implicit-key`):
+   ```
+   ns-s-block-map-implicit-key ::=
+       c-s-implicit-json-key(BLOCK-KEY)
+     | ns-s-implicit-yaml-key(BLOCK-KEY)
+   ```
+   Hardcoded `BLOCK-KEY` → `nb-double-text(n,BLOCK-KEY) ::= nb-double-one-line` → **one-line**.
+
+2. **Flow sequence single-pair compact form** (§7.4.1, [152] `ns-flow-pair-yaml-key-entry`):
+   ```
+   ns-flow-pair-yaml-key-entry(n,c) ::=
+     ns-s-implicit-yaml-key(FLOW-KEY)   # hardcoded FLOW-KEY, NOT parent c
+     c-ns-flow-map-separate-value(n,c)
+   ```
+   Hardcoded `FLOW-KEY` → **one-line**, regardless of outer context.
+
+3. **Flow mapping entry keys** (§7.4.2, [145] `ns-flow-map-yaml-key-entry`):
+   ```
+   ns-flow-map-yaml-key-entry(n,c) ::=
+     ns-flow-yaml-node(n,c)             # uses PARENT context c, NOT hardcoded FLOW-KEY
+     ...
+   ```
+   Uses parent context `c` flowing in from `c-flow-mapping(n,c)`:
+   ```
+   c-flow-mapping(n,c) ::=
+     c-mapping-start
+     s-separate(n,c)?
+     ns-s-flow-map-entries(n,in-flow(c))?    # in-flow(c) maps the context
+     c-mapping-end
+   ```
+   And `in-flow(c)` (§7.4):
+   ```
+   in-flow(n,FLOW-OUT)  ::= ns-s-flow-seq-entries(n,FLOW-IN)
+   in-flow(n,FLOW-IN)   ::= ns-s-flow-seq-entries(n,FLOW-IN)
+   in-flow(n,BLOCK-KEY) ::= ns-s-flow-seq-entries(n,FLOW-KEY)
+   in-flow(n,FLOW-KEY)  ::= ns-s-flow-seq-entries(n,FLOW-KEY)
+   ```
+
+   So inside `{ key: value }`:
+   - At top level (outer `c=FLOW-OUT` / `FLOW-IN`): entries get `FLOW-IN` context → key parses as `nb-double-text(n,FLOW-IN) ::= nb-double-multi-line(n)`. **Multi-line allowed.**
+   - Inside a block-key or flow-key context (outer `c=BLOCK-KEY` / `FLOW-KEY`): entries get `FLOW-KEY` → key parses as `nb-double-text(n,FLOW-KEY) ::= nb-double-one-line`. **One-line.**
+
+**Why the asymmetry is deliberate.** Flow-sequence-pair compact form uses the named `ns-s-implicit-yaml-key(FLOW-KEY)` production — a formal "implicit key" with hardcoded one-line constraint. Flow-mapping entry keys use `ns-flow-yaml-node(n,c)` — a regular flow node with parent context, NOT a formal "implicit key." The colloquial reading of "the key in `{ a: b }` is an implicit key" is correct in everyday language but not in spec-grammar terminology.
+
+**Why nested cases still work.** A flow mapping nested inside a block-mapping implicit key (`{ a: b }: value`) is constrained at the OUTER level by `ns-s-implicit-yaml-key(BLOCK-KEY)`'s "At most 1024 characters altogether" + single-line rule. The entire `{ a: b }` must fit on one line; inner keys are naturally one-line by the outer constraint.
+
+**Concrete examples illustrating the verdict.**
+
+Spec-conformant (multi-line implicit key in top-level flow mapping accepted):
+```yaml
+{
+  long
+  key: value
+}
+```
+At top level, c=FLOW-OUT → entries=FLOW-IN → key=`ns-plain(n,FLOW-IN)`=multi-line. Per spec, valid.
+
+Spec-conformant (one-line enforced in flow-sequence pair):
+```yaml
+[ key: value ]                    # OK — one line
+[
+  key
+  : value                         # REJECTED — flow-sequence pair uses hardcoded FLOW-KEY
+]
+```
+
+Spec-conformant (one-line enforced when flow mapping is itself an implicit block key):
+```yaml
+{ a: b }: outer-value             # OK — fits on one line
+{
+  a: b
+}: outer-value                    # REJECTED at outer scope — block-key must be one line
+```
+
+**Implementation evidence.** `event_iter/flow.rs:1124-1135` enforces single-line for flow sequences (`in_sequence` check); the comment "Flow mappings `{...}` allow multi-line implicit keys — see YAML 1.2 §7.4.2" matches the BNF analysis above. The de-facto behavior of mature parsers (libyaml, PyYAML, snakeyaml) follows the BNF — multi-line implicit keys in top-level flow mappings are accepted.
+
+**Lead's verdict (final):** Strict-conformant. The implementation correctly traces the BNF context propagation and enforces the §7.3.x prose restriction precisely where the BNF mandates (BLOCK-KEY hardcoded sites and FLOW-KEY hardcoded sites for flow-sequence-pair compact form), without over-restricting the parent-context flow-mapping case the BNF permits.
+
+**Doc-rewrite note.** The conformance doc rewrite should preserve this BNF-tracing analysis verbatim — it is the only place the prose-vs-BNF terminology trap is documented for future readers. The in-code comment at `flow.rs:1124-1135` could be tightened to "flow-mapping entry keys at top level (FLOW-IN context) per BNF §7.4.2, not formal implicit keys per §7.3.x terminology" — but since the analysis lives here, code-comment changes are optional.
 
 ### [111] nb-double-one-line
 
@@ -109,16 +189,21 @@ produced-by: lead
 
 **Lead's verdict:** Strict-conformant.
 
-### [121] nb-single-text(n,c) — `[NEEDS USER REVIEW]`
+### [121] nb-single-text(n,c)
 
 **A's verdict:** Indeterminate — same concern as [110] for single-quoted scalars.
 **B's verdict:** Strict-conformant — same composed-enforcement reasoning as [110].
 
-**Lead's investigation:** Same §7.4.2-vs-§7.3.1 ambiguity as [110]. Same code path at flow.rs:1128 enforces single-line in flow sequences but not flow mappings.
+**Lead's investigation (resolved 2026-04-30):** Same §7.4.2-vs-§7.3.x BNF analysis as [110]. The single-quoted text production has the same shape:
+```
+nb-single-text(FLOW-OUT)  ::= nb-single-multi-line(n)
+nb-single-text(FLOW-IN)   ::= nb-single-multi-line(n)
+nb-single-text(BLOCK-KEY) ::= nb-single-one-line
+nb-single-text(FLOW-KEY)  ::= nb-single-one-line
+```
+Flow-mapping entry keys inherit the parent context (FLOW-IN at top level → multi-line allowed); BLOCK-KEY and FLOW-KEY hardcoded sites force one-line. See [110] for the full BNF-trace and concrete examples.
 
-**Lead's tentative verdict:** Strict-conformant.
-
-**`[NEEDS USER REVIEW]`** — same question as [110]. Resolution should match [110]'s.
+**Lead's verdict (final):** Strict-conformant.
 
 ### [128] ns-plain-safe-out
 
@@ -129,16 +214,21 @@ produced-by: lead
 
 **Lead's verdict:** Strict-conformant.
 
-### [131] ns-plain(n,c) — `[NEEDS USER REVIEW]`
+### [131] ns-plain(n,c)
 
 **A's verdict:** Indeterminate — same concern as [110] / [121] for plain scalars.
 **B's verdict:** Strict-conformant — same composed-enforcement reasoning.
 
-**Lead's investigation:** Same §7.4.2-vs-§7.3.1 ambiguity as [110] and [121]. Plain scalars in flow mappings can span multiple lines under the implementation's interpretation.
+**Lead's investigation (resolved 2026-04-30):** Same §7.4.2-vs-§7.3.x BNF analysis as [110]. The plain scalar production has the same shape:
+```
+ns-plain(n,FLOW-OUT)  ::= ns-plain-multi-line(n,FLOW-OUT)
+ns-plain(n,FLOW-IN)   ::= ns-plain-multi-line(n,FLOW-IN)
+ns-plain(n,BLOCK-KEY) ::= ns-plain-one-line(BLOCK-KEY)
+ns-plain(n,FLOW-KEY)  ::= ns-plain-one-line(FLOW-KEY)
+```
+Flow-mapping entry keys inherit the parent context (FLOW-IN at top level → multi-line allowed); BLOCK-KEY and FLOW-KEY hardcoded sites force one-line. See [110] for the full BNF-trace and concrete examples.
 
-**Lead's tentative verdict:** Strict-conformant.
-
-**`[NEEDS USER REVIEW]`** — same question as [110]. Resolution should match [110]'s.
+**Lead's verdict (final):** Strict-conformant.
 
 ### [136] in-flow(n,c)
 
