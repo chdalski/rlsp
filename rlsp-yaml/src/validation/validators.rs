@@ -408,11 +408,18 @@ fn check_yaml_ordering(
 ///
 /// Each document and each nested mapping is scoped independently.
 #[must_use]
-pub fn validate_duplicate_keys(docs: &[Document<Span>]) -> Vec<Diagnostic> {
+pub fn validate_duplicate_keys(
+    docs: &[Document<Span>],
+    settings: &crate::validation::ValidationSettings,
+) -> Vec<Diagnostic> {
+    let Some(severity) = settings.severity_for(crate::validation::DiagnosticCategory::DuplicateKey)
+    else {
+        return Vec::new();
+    };
     let mut diagnostics = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, 0, idx);
+        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, severity, 0, idx);
     }
     diagnostics
 }
@@ -421,6 +428,7 @@ pub fn validate_duplicate_keys(docs: &[Document<Span>]) -> Vec<Diagnostic> {
 fn check_node_for_duplicate_keys(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
     depth: usize,
     idx: &LineIndex,
 ) {
@@ -444,19 +452,19 @@ fn check_node_for_duplicate_keys(
                 };
                 if let Some((key_str, loc)) = key_str_and_loc {
                     if seen.contains(&key_str) {
-                        push_duplicate_diagnostic(diagnostics, &key_str, *loc, idx);
+                        push_duplicate_diagnostic(diagnostics, &key_str, *loc, severity, idx);
                     } else {
                         seen.insert(key_str);
                     }
                 }
                 // Recurse into the key (e.g. complex keys) and value
-                check_node_for_duplicate_keys(key, diagnostics, depth + 1, idx);
-                check_node_for_duplicate_keys(value, diagnostics, depth + 1, idx);
+                check_node_for_duplicate_keys(key, diagnostics, severity, depth + 1, idx);
+                check_node_for_duplicate_keys(value, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                check_node_for_duplicate_keys(item, diagnostics, depth + 1, idx);
+                check_node_for_duplicate_keys(item, diagnostics, severity, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -564,6 +572,7 @@ fn push_duplicate_diagnostic(
     diagnostics: &mut Vec<Diagnostic>,
     key: &str,
     loc: Span,
+    severity: DiagnosticSeverity,
     idx: &LineIndex,
 ) {
     let display_key = if key.len() > 100 {
@@ -580,7 +589,7 @@ fn push_duplicate_diagnostic(
             Position::new(start_line, start_col),
             Position::new(start_line, end_col),
         ),
-        severity: Some(DiagnosticSeverity::ERROR),
+        severity: Some(severity),
         code: Some(NumberOrString::String("duplicateKey".to_string())),
         message: format!("Duplicate key: '{display_key}'"),
         source: Some("rlsp-yaml".to_string()),
@@ -605,7 +614,7 @@ mod tests {
 
     fn parse_duplicate(text: &str) -> Vec<super::Diagnostic> {
         let docs = rlsp_yaml_parser::load(text).unwrap();
-        validate_duplicate_keys(&docs)
+        validate_duplicate_keys(&docs, &ValidationSettings::default())
     }
 
     // ---- Unused Anchors Validator: Happy Paths / Edge Cases / Security ----
@@ -1231,7 +1240,10 @@ jobs:
     #[test]
     fn validate_flow_style_none_returns_empty_on_triggering_input() {
         let docs = parse_docs("config: {key: value}\n");
-        let settings = ValidationSettings { flow_style: None };
+        let settings = ValidationSettings {
+            flow_style: None,
+            duplicate_keys: None,
+        };
         let result = validate_flow_style(&docs, &settings);
         assert!(
             result.is_empty(),
@@ -1244,6 +1256,7 @@ jobs:
         let docs = parse_docs("config: {key: value}\n");
         let settings = ValidationSettings {
             flow_style: Some(DiagnosticSeverity::ERROR),
+            duplicate_keys: None,
         };
         let result = validate_flow_style(&docs, &settings);
         assert_eq!(result.len(), 1);
@@ -1784,6 +1797,53 @@ spec:
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'a'"));
+    }
+
+    // ---- Duplicate Key Validator: severity propagation ----
+
+    #[test]
+    fn validate_duplicate_keys_returns_empty_when_disabled() {
+        let settings = ValidationSettings {
+            duplicate_keys: None,
+            flow_style: None,
+        };
+        let docs = rlsp_yaml_parser::load("a: 1\na: 2\n").unwrap();
+        assert!(validate_duplicate_keys(&docs, &settings).is_empty());
+    }
+
+    #[test]
+    fn validate_duplicate_keys_emits_warning_severity_when_configured() {
+        let settings = ValidationSettings {
+            duplicate_keys: Some(DiagnosticSeverity::WARNING),
+            flow_style: None,
+        };
+        let docs = rlsp_yaml_parser::load("a: 1\na: 2\n").unwrap();
+        let result = validate_duplicate_keys(&docs, &settings);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn validate_duplicate_keys_emits_error_severity_by_default() {
+        let docs = rlsp_yaml_parser::load("a: 1\na: 2\n").unwrap();
+        let result = validate_duplicate_keys(&docs, &ValidationSettings::default());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn validate_duplicate_keys_propagates_warning_to_all_diagnostics() {
+        let settings = ValidationSettings {
+            duplicate_keys: Some(DiagnosticSeverity::WARNING),
+            flow_style: None,
+        };
+        let docs =
+            rlsp_yaml_parser::load("parent:\n  child:\n    x: 1\n    x: 2\n    x: 3\n").unwrap();
+        let result = validate_duplicate_keys(&docs, &settings);
+        assert_eq!(result.len(), 2);
+        for diag in &result {
+            assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
+        }
     }
 
     // ---- YAML version agnosticism ----

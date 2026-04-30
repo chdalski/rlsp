@@ -161,8 +161,10 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
         .map_err(|e| format!("panic in validate_key_ordering: {}", panic_message(&e)))?;
 
     // Stage 6: validate_duplicate_keys
-    catch_unwind(AssertUnwindSafe(|| validate_duplicate_keys(&docs)))
-        .map_err(|e| format!("panic in validate_duplicate_keys: {}", panic_message(&e)))?;
+    catch_unwind(AssertUnwindSafe(|| {
+        validate_duplicate_keys(&docs, &ValidationSettings::default())
+    }))
+    .map_err(|e| format!("panic in validate_duplicate_keys: {}", panic_message(&e)))?;
 
     // Stage 7: validate_yaml11_compat
     catch_unwind(AssertUnwindSafe(|| validate_yaml11_compat(&docs)))
@@ -994,7 +996,10 @@ fn collect_all_diagnostics(
     all.extend(validate_flow_style(docs, &ValidationSettings::default()));
     all.extend(validate_custom_tags(docs, &allowed_tags));
     all.extend(validate_key_ordering(docs));
-    all.extend(validate_duplicate_keys(docs));
+    all.extend(validate_duplicate_keys(
+        docs,
+        &ValidationSettings::default(),
+    ));
     all.extend(validate_yaml11_compat(docs));
     all
 }

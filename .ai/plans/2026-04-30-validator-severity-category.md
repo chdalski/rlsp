@@ -123,7 +123,7 @@ own severity by category. No user-facing behavior change.
 
 - [x] Task 1: Introduce `validation/settings.rs` and retrofit
       `validate_flow_style`
-- [ ] Task 2: Retrofit `validate_duplicate_keys` to use
+- [x] Task 2: Retrofit `validate_duplicate_keys` to use
       `ValidationSettings`
 
 ## Tasks
@@ -234,6 +234,8 @@ place until Task 2.
 
 ### Task 2: Retrofit `validate_duplicate_keys` to use `ValidationSettings`
 
+**Commit:** `e3e57759d84ff404f2964095af0841346e12ec50`
+
 Mirror Task 1 for the duplicate-key validator. Add
 `DiagnosticCategory::DuplicateKey`, add the `duplicate_keys`
 field on `ValidationSettings` (default `Some(ERROR)`), thread
@@ -243,42 +245,42 @@ After this task lands, `parse_and_publish` no longer rewrites
 diagnostic severity at all — the producer-rewrite smell is
 fully resolved.
 
-- [ ] Extend `DiagnosticCategory` with the `DuplicateKey`
+- [x] Extend `DiagnosticCategory` with the `DuplicateKey`
       variant.
-- [ ] Add `pub duplicate_keys: Option<DiagnosticSeverity>` to
+- [x] Add `pub duplicate_keys: Option<DiagnosticSeverity>` to
       `ValidationSettings`. Update `Default::default` to
       include `duplicate_keys: Some(DiagnosticSeverity::ERROR)`.
-- [ ] Update `severity_for` to return `duplicate_keys` for the
+- [x] Update `severity_for` to return `duplicate_keys` for the
       new variant.
-- [ ] Update `from_settings` to parse `settings.duplicate_keys:
+- [x] Update `from_settings` to parse `settings.duplicate_keys:
       Option<String>` to `Option<DiagnosticSeverity>` using
       the documented mapping (`"off"` → `None`; `"warning"`
       → `Some(WARNING)`; `"error"` or absent →
       `Some(ERROR)`; unknown strings → default).
-- [ ] Modify `validate_duplicate_keys` to take
+- [x] Modify `validate_duplicate_keys` to take
       `(&[Document<Span>], &ValidationSettings)`. Look up
       `settings.severity_for(DiagnosticCategory::DuplicateKey)`;
       return `Vec::new()` early if `None`. Thread the
       resolved severity through `push_duplicate_diagnostic`
       so the hardcoded `ERROR` at line 567 is removed.
-- [ ] In `parse_and_publish`, replace the `if
+- [x] In `parse_and_publish`, replace the `if
       duplicate_keys_setting.as_deref() != Some("off") { ...
       if == "warning" { rewrite loop } }` block with a single
       `diagnostics.extend(validate_duplicate_keys(&result.documents,
       &validation_settings));` call.
-- [ ] Update inline tests in `validators.rs` calling
+- [x] Update inline tests in `validators.rs` calling
       `validate_duplicate_keys` to pass
       `&ValidationSettings::default()`.
-- [ ] Update integration tests calling
+- [x] Update integration tests calling
       `validate_duplicate_keys`:
       `tests/ecosystem_fixtures.rs`,
       `tests/corpus_invariants.rs`.
-- [ ] Extend `from_settings` boundary-parser tests for the
+- [x] Extend `from_settings` boundary-parser tests for the
       new `duplicate_keys` cases (off / absent / warning /
       error / unknown).
-- [ ] Extend `severity_for` tests to cover the
+- [x] Extend `severity_for` tests to cover the
       `DiagnosticCategory::DuplicateKey` variant.
-- [ ] Add severity-propagation unit tests for
+- [x] Add severity-propagation unit tests for
       `validate_duplicate_keys`:
   - Returns empty vec when `duplicate_keys: None`.
   - Produces WARNING-severity diagnostics when

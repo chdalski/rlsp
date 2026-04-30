@@ -21,7 +21,7 @@ use rlsp_yaml::validation::validators::{validate_duplicate_keys, validate_flow_s
 /// `{`/`[` (e.g. `${{ … }}`) are never flagged.
 fn assert_no_false_positives(label: &str, text: &str) {
     let docs = parse_yaml(text).documents;
-    let dup_diags = validate_duplicate_keys(&docs);
+    let dup_diags = validate_duplicate_keys(&docs, &ValidationSettings::default());
     assert!(
         dup_diags.is_empty(),
         "{label}: unexpected duplicate-key diagnostics: {dup_diags:?}"

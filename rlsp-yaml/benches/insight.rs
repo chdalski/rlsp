@@ -53,7 +53,7 @@ fn bench_validators_individual(c: &mut Criterion) {
     });
 
     group.bench_function("validate_duplicate_keys", |b| {
-        b.iter(|| validate_duplicate_keys(&docs));
+        b.iter(|| validate_duplicate_keys(&docs, &ValidationSettings::default()));
     });
 
     group.finish();
