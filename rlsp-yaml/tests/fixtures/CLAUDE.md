@@ -55,6 +55,10 @@ The fixture format is the preferred home for:
 - **Cursor-driven code actions** — actions triggered by
   cursor position, not by a diagnostic (e.g. tab-to-spaces,
   block-to-flow, block-scalar conversion, quoted-bool).
+- **Cursor-driven rename** — rename triggered by cursor
+  position and a new name (e.g. renaming an anchor and all
+  its aliases, rejecting invalid names, rejecting cursors
+  not on a renameable symbol).
 - **Transformational formatter tests** — input → expected
   output pairs.
 
@@ -157,3 +161,79 @@ indices, matching the LSP `Position` type. Do not add 1.
 The harness strips fenced code block delimiters and any
 language tag (e.g. ` ```yaml `). Content starts at the
 first line after the opening fence.
+
+## Rename Fixtures
+
+Fixtures live in `tests/fixtures/rename/rename-*.md`.
+The harness is `tests/rename_fixtures.rs`.
+
+### Frontmatter fields
+
+All fields are between `---` delimiters.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `test-name` | yes | Kebab-case name (informational) |
+| `category` | no | Short label (informational, e.g. `rename`) |
+| `cursor` | yes | Zero-based `line:character` cursor position |
+| `new-name` | yes | The proposed replacement anchor/alias name |
+| `applies-rename` | see below | Set to `true`; asserts rename succeeds and applies edits |
+| `omits-rename` | see below | Set to `true`; asserts rename returns `None` |
+
+Exactly one of `applies-rename` or `omits-rename` must be present; they are mutually exclusive.
+
+### Assertion modes
+
+**`applies-rename: true`**
+
+The harness calls `rename(docs, uri, cursor, new_name)`. On a `Some(WorkspaceEdit)` result,
+it collects all `TextEdit`s from `changes[uri]`, sorts them in **reverse range-start order**
+(highest line/character first), applies them to the `## Test-Document` string in that order,
+then asserts the result equals `## Expected-Document`.
+
+Applying edits in reverse order is necessary when rename produces multiple edits (anchor +
+aliases): applying the edit at the later position first keeps the byte offsets of earlier
+edits valid.
+
+**`omits-rename: true`**
+
+The harness asserts `rename(...)` returned `None`. `## Expected-Document` is not required
+and should be omitted.
+
+### Cursor convention
+
+`cursor: line:character` uses zero-based line and character indices, matching the LSP
+`Position` type. Do not add 1.
+
+### Sections
+
+- `## Test-Document` — fenced YAML input (always required)
+- `## Expected-Document` — fenced YAML output (required for `applies-rename`; omit for
+  `omits-rename`)
+
+The harness strips fenced code block delimiters and any language tag (e.g. ` ```yaml `).
+Content starts at the first line after the opening fence.
+
+### Multi-edit application rule
+
+When a rename produces multiple `TextEdit`s (one per anchor occurrence and one per alias
+occurrence), the harness sorts all edits in **reverse range-start order** (descending by
+line, then by character) and applies them sequentially. This ensures that applying the edit
+at the later position first does not shift the byte offsets of edits at earlier positions.
+
+### What stays inline (not ported to fixtures)
+
+- All `prepare_rename` tests — `prepare_rename` returns `Option<Range>`, not a document
+  transformation. Tests assert specific `Range` field values; there is no "expected output
+  document" to compare against. These are Pattern C by construction.
+- Rename tests that assert specific `Range` field values within `TextEdit`s (e.g.
+  `should_produce_correct_edit_ranges`). The fixture format does not support range-field
+  assertions — only output-document comparison.
+- Existence-only assertions that don't validate output shape (e.g.
+  `should_accept_new_name_at_exactly_max_length` — the 256-char name makes a readable
+  `Expected-Document` impractical).
+- Test inputs containing characters that cannot appear in YAML frontmatter — specifically
+  newline (`\n`), tab (`\t`), and carriage return (`\r`). These are security-relevant
+  rejection cases (YAML-structure injection, CRLF injection, whitespace-semantics
+  protection) and must be exercised with the actual control characters, not surrogates.
+  They stay inline as Pattern C in `rename.rs`.

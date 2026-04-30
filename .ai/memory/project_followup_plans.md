@@ -12,10 +12,6 @@ type: project
 
 ## Open: rlsp-yaml
 
-- **Consolidate duplicated integration-test helpers** — `cursor_range`, `docs_for`, `test_uri`, `apply_text_edit`, and `codepoint_to_byte` are re-implemented locally in both `rlsp-yaml/tests/code_action_fixtures.rs` (pub(super)) and `rlsp-yaml/tests/code_action_property_preservation.rs`. Two callsites is not yet structurally costly; extract to a shared module (e.g. `tests/test_harness.rs` or `tests/helpers/mod.rs`) when a third caller arrives.
-
-- **Port `rename` to fixtures** — Symmetric companion to the code-action fixture port (plan `2026-04-27-code-action-fixture-tests.md`, completed). The user's scoping decision was: fixtures only for user-triggered document mutations where the input → expected-output shape is well-suited; rename qualifies. `rlsp-yaml/src/navigation/rename.rs` has ~68 inline tests; the same Pattern A/B/C taxonomy applies. The fixture format and harness in `tests/code_action_fixtures.rs` could be reused or duplicated (TBD during planning). Apply the same "visually self-explanatory" gate documented in `tests/fixtures/CLAUDE.md`. Per-test pre-scan for non-transformation assertions (kind, range structure, multi-edit count, exact title) is mandatory before porting — this surfaces Pattern C upfront.
-
 <!-- helper-of: convention — an allow-list entry marked `HelperOf` exists because its root
      feature function is also allow-listed as a `TodoRetrofit`. When the root's retrofit plan
      lands, all `HelperOf` entries pointing at that root are removed from the allow-list at the

@@ -296,59 +296,7 @@ mod tests {
 
     // ---- rename: Happy Path ----
 
-    // RN-1
-    #[rstest]
-    #[case::anchor_and_single_alias(
-        "defaults: &old\n  key: val\nproduction:\n  <<: *old\n",
-        0,
-        10,
-        "new",
-        2
-    )]
-    #[case::anchor_and_multiple_aliases(
-        "defaults: &shared\n  key: val\ndev:\n  <<: *shared\nprod:\n  <<: *shared\n",
-        0,
-        10,
-        "common",
-        3
-    )]
-    #[case::cursor_on_alias(
-        "defaults: &old\n  key: val\nproduction:\n  <<: *old\n",
-        3,
-        7,
-        "new",
-        2
-    )]
-    #[case::anchor_with_no_aliases("key: &lonely value\n", 0, 5, "orphan", 1)]
-    #[case::not_across_document_boundaries(
-        "doc1: &name\n  ref: *name\n---\ndoc2: &name\n  ref: *name\n",
-        0,
-        6,
-        "renamed",
-        2
-    )]
-    #[case::within_second_document(
-        "doc1: &name\n---\ndoc2: &name\n  ref: *name\n",
-        2,
-        6,
-        "other",
-        2
-    )]
-    fn rename_returns_edits_len(
-        #[case] text: &str,
-        #[case] line: u32,
-        #[case] character: u32,
-        #[case] new_name: &str,
-        #[case] expected_len: usize,
-    ) {
-        let uri = test_uri();
-        let docs = parse(text);
-        let result = rename(&docs, &uri, pos(line, character), new_name);
-        let edit = result.expect("should return WorkspaceEdit");
-        let changes = edit.changes.expect("should have changes");
-        let edits = changes.get(&uri).expect("should have edits for uri");
-        assert_eq!(edits.len(), expected_len);
-    }
+    // RN-1 ported to tests/fixtures/rename/ (Pattern A).
 
     // RN-2
     #[test]
@@ -439,47 +387,8 @@ mod tests {
         assert_eq!(anchor_edit.range.end.character, 11, "&seq ends at col 11");
     }
 
-    // RN-5
-    #[test]
-    fn rename_does_not_cross_document_boundary_to_second_doc() {
-        let text = "doc1: &name\n  ref: *name\n---\ndoc2: &name\n  ref: *name\n";
-        let uri = test_uri();
-        let docs = parse(text);
-        let result = rename(&docs, &uri, pos(0, 6), "renamed");
-
-        let edit = result.expect("should return WorkspaceEdit");
-        let changes = edit.changes.expect("should have changes");
-        let edits = changes.get(&uri).expect("should have edits for uri");
-        assert_eq!(edits.len(), 2, "only doc 1 edits");
-        for e in edits {
-            assert!(
-                e.range.start.line < 3,
-                "no edit should be on doc 2 lines (line {})",
-                e.range.start.line
-            );
-        }
-    }
-
-    // RN-6
-    #[test]
-    fn rename_does_not_cross_document_boundary_to_first_doc() {
-        let text = "doc1: &name\n  ref: *name\n---\ndoc2: &name\n  ref: *name\n";
-        let uri = test_uri();
-        let docs = parse(text);
-        let result = rename(&docs, &uri, pos(3, 6), "renamed");
-
-        let edit = result.expect("should return WorkspaceEdit");
-        let changes = edit.changes.expect("should have changes");
-        let edits = changes.get(&uri).expect("should have edits for uri");
-        assert_eq!(edits.len(), 2, "only doc 2 edits");
-        for e in edits {
-            assert!(
-                e.range.start.line >= 3,
-                "no edit should be on doc 1 lines (line {})",
-                e.range.start.line
-            );
-        }
-    }
+    // RN-5 ported to tests/fixtures/rename/ (Pattern A).
+    // RN-6 ported to tests/fixtures/rename/ (Pattern A).
 
     // RN-7
     #[test]
@@ -523,45 +432,18 @@ mod tests {
 
     // ---- rename: Invalid Position Cases ----
 
-    // RN-8
-    #[rstest]
-    #[case::cursor_not_on_anchor_or_alias("key: value\n", 0, 0, "anything")]
-    #[case::empty_document("", 0, 0, "anything")]
-    #[case::beyond_document_lines("key: &anchor value\n", 10, 0, "anything")]
-    #[case::beyond_line_length("key: &anchor value\n", 0, 100, "anything")]
-    fn rename_returns_none_invalid_position(
-        #[case] text: &str,
-        #[case] line: u32,
-        #[case] character: u32,
-        #[case] new_name: &str,
-    ) {
-        let uri = test_uri();
-        let docs = parse(text);
-        let result = rename(&docs, &uri, pos(line, character), new_name);
-        assert!(result.is_none());
-    }
+    // RN-8 ported to tests/fixtures/rename/ (Pattern B).
 
     // ---- rename: Invalid new_name Validation (Security Cases) ----
 
-    // RN-9
+    // RN-9 (most cases) ported to tests/fixtures/rename/ (Pattern B).
+    // RN-9k/9l/9m: newline, tab, and carriage-return cannot appear in fixture frontmatter,
+    // so these three security-relevant cases stay inline as Pattern C.
     #[rstest]
-    #[case::empty_name("")]
-    #[case::spaces("has space")]
-    #[case::open_bracket("bad[name")]
-    #[case::close_bracket("bad]name")]
-    #[case::open_brace("bad{name")]
-    #[case::close_brace("bad}name")]
-    #[case::colon("bad:name")]
-    #[case::comma("bad,name")]
-    #[case::whitespace_only("   ")]
-    #[case::hash("name#comment")]
     #[case::newline("name\n")]
     #[case::tab("name\t")]
     #[case::carriage_return("name\r")]
-    #[case::ampersand("name&other")]
-    #[case::asterisk("name*other")]
-    #[case::exclamation("name!tag")]
-    fn rename_rejects_invalid_new_name(#[case] new_name: &str) {
+    fn rename_rejects_control_char_new_name(#[case] new_name: &str) {
         let text = "key: &anchor value\n";
         let uri = test_uri();
         let docs = parse(text);
@@ -571,33 +453,9 @@ mod tests {
 
     // ---- rename: Valid new_name Validation ----
 
-    // RN-10
-    #[rstest]
-    #[case::hyphen("valid-name")]
-    #[case::underscore("valid_name")]
-    #[case::dot("valid.name")]
-    #[case::starts_with_digit("123abc")]
-    fn rename_accepts_valid_new_name(#[case] new_name: &str) {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let docs = parse(text);
-        let result = rename(&docs, &uri, pos(0, 5), new_name);
-        assert!(result.is_some());
-    }
+    // RN-10 ported to tests/fixtures/rename/ (Pattern A).
 
-    // RN-11
-    #[test]
-    fn should_reject_new_name_exceeding_max_length() {
-        let text = "key: &anchor value\n";
-        let uri = test_uri();
-        let docs = parse(text);
-        let long_name = "a".repeat(257);
-        let result = rename(&docs, &uri, pos(0, 5), &long_name);
-        assert!(
-            result.is_none(),
-            "name longer than 256 chars must be rejected"
-        );
-    }
+    // RN-11 ported to tests/fixtures/rename/ (Pattern B).
 
     // RN-12
     #[test]
