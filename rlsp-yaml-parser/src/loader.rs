@@ -1095,8 +1095,8 @@ const fn empty_scalar() -> Node<Span> {
 )]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    // UT-1: loader_state_resets_anchor_map_between_documents
     #[test]
     fn loader_state_resets_anchor_map_between_documents() {
         // In resolved mode: anchor defined in doc 1 must not be visible in doc 2.
@@ -1114,7 +1114,6 @@ mod tests {
         ));
     }
 
-    // UT-2: register_anchor_increments_count
     #[test]
     fn register_anchor_increments_count() {
         let options = LoaderOptions {
@@ -1140,7 +1139,6 @@ mod tests {
         ));
     }
 
-    // UT-3: expand_node_detects_circular_alias
     #[test]
     fn expand_node_detects_circular_alias() {
         let options = LoaderOptions {
@@ -1165,17 +1163,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Bug A: comment between mapping key and its collection value
+    // Comment between mapping key and nested collection is attached to first nested entry
     // -----------------------------------------------------------------------
 
-    // UT-A1: comment between key and nested mapping is attached to first entry.
     #[test]
     fn comment_between_key_and_nested_mapping_is_attached_to_first_key() {
         let docs = load("outer:\n  # Style 1\n  inner: val\n").unwrap();
         let root = &docs[0].root;
-        // root is a mapping: outer -> { inner: val }
-        // The comment "# Style 1" appears between "outer" key and the nested
-        // MappingStart.  After the fix it must be attached to the "inner" key.
         let Node::Mapping { entries, .. } = root else {
             panic!("expected root mapping");
         };
@@ -1196,7 +1190,6 @@ mod tests {
         );
     }
 
-    // UT-A2: comment between key and nested sequence is attached to first item.
     #[test]
     fn comment_between_key_and_nested_sequence_is_attached_to_first_item() {
         let docs = load("key:\n  # leading\n  - item1\n  - item2\n").unwrap();
@@ -1208,8 +1201,6 @@ mod tests {
         let Node::Sequence { items, .. } = seq_value else {
             panic!("expected sequence value");
         };
-        // The comment "# leading" appears before the sequence items; after
-        // the fix it is attached to the first item.
         assert_eq!(
             items[0].leading_comments(),
             &["# leading"],
@@ -1217,7 +1208,6 @@ mod tests {
         );
     }
 
-    // UT-A3: multiple consecutive comments before a collection are all preserved.
     #[test]
     fn multiple_comments_between_key_and_collection_all_preserved() {
         let docs = load("key:\n  # first\n  # second\n  - item\n").unwrap();
@@ -1236,7 +1226,6 @@ mod tests {
         );
     }
 
-    // UT-A4: the KEY node itself has no leading comments from Bug-A fix.
     #[test]
     fn comment_between_key_and_collection_does_not_corrupt_key_node() {
         let docs = load("outer:\n  # Style 1\n  inner: val\n").unwrap();
@@ -1255,7 +1244,6 @@ mod tests {
         );
     }
 
-    // UT-A5: no comment between key and value leaves leading_comments empty.
     #[test]
     fn no_comment_between_key_and_value_leaves_leading_comments_empty() {
         let docs = load("key:\n  inner: val\n").unwrap();
@@ -1279,10 +1267,9 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Bug B: comment at end of collection preserved as leading on next sibling
+    // Trailing comment of nested collection becomes leading comment on next sibling
     // -----------------------------------------------------------------------
 
-    // UT-B1: comment before SequenceEnd becomes leading on next mapping entry.
     #[test]
     fn trailing_comment_of_sequence_preserved_as_leading_on_next_sibling() {
         let input =
@@ -1309,7 +1296,6 @@ mod tests {
         );
     }
 
-    // UT-B2: comment at end of nested sequence propagates to next mapping entry.
     #[test]
     fn overflow_comments_from_nested_sequence_end_reach_next_mapping_entry() {
         let input = "outer:\n  a:\n    - x\n    # between\n  b: y\n";
@@ -1334,7 +1320,6 @@ mod tests {
         );
     }
 
-    // UT-B3: comment at end of nested mapping propagates to next sibling.
     #[test]
     fn overflow_comments_from_nested_mapping_end_reach_next_sibling() {
         let input = "parent:\n  child1:\n    k: v\n    # end-of-child1\n  child2: val\n";
@@ -1359,14 +1344,8 @@ mod tests {
         );
     }
 
-    // UT-B4: overflow comment at top-level sequence end is not silently dropped.
     #[test]
     fn overflow_comments_at_top_level_sequence_end_are_not_lost() {
-        // The comment "# tail" appears before SequenceEnd of the top-level items
-        // sequence.  The fix saves it to pending_leading; since there is no next
-        // sibling, it ends up in the document's root mapping's pending state and
-        // is not lost.  We assert it appears somewhere reachable in the AST rather
-        // than disappearing entirely.
         let input = "items:\n  - a\n  - b\n  # tail\n";
         let docs = load(input).unwrap();
         // The document must parse successfully (no panic, no error).
@@ -1383,7 +1362,6 @@ mod tests {
         assert_eq!(items.len(), 2, "sequence items must not be lost");
     }
 
-    // UT-B5: no overflow comments when collection ends cleanly.
     #[test]
     fn no_overflow_comments_when_collection_ends_cleanly() {
         let docs = load("key:\n  - item1\n  - item2\n").unwrap();
@@ -1407,7 +1385,6 @@ mod tests {
     // Combined scenarios
     // -----------------------------------------------------------------------
 
-    // UT-C1: exact bug-report input — both comments survive.
     #[test]
     fn original_bug_report_input_preserves_both_comments() {
         let input = "Lists:\n  # Style 1\n  list-a:\n    - item1\n    - item2\n\n  # Style 2\n  list-b:\n  - item1\n  - item2\n";
@@ -1439,7 +1416,6 @@ mod tests {
         );
     }
 
-    // UT-C2: leading and trailing comments on sibling entries both preserved.
     #[test]
     fn leading_and_trailing_comments_both_preserved_on_sibling_entries() {
         let input = "map:\n  # leading\n  key: value  # trailing\n  # next-leading\n  key2: v2\n";
@@ -1463,7 +1439,6 @@ mod tests {
         assert_eq!(key2.leading_comments(), &["# next-leading"]);
     }
 
-    // UT-C3: deeply nested overflow comments propagate to correct sibling.
     #[test]
     fn deeply_nested_overflow_comments_reach_correct_sibling() {
         let input = "top:\n  mid:\n    - x\n    # deep-overflow\n  next: y\n";
@@ -1490,51 +1465,28 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // UT-D: Document marker flags (explicit_start / explicit_end)
+    // Document marker flags (explicit_start / explicit_end)
     // -----------------------------------------------------------------------
 
-    // UT-D1: Bare document (no markers) → both flags false
-    #[test]
-    fn bare_document_has_both_flags_false() {
-        let docs = load("key: value\n").expect("load failed");
+    #[rstest]
+    #[case::bare_document("key: value\n", false, false)]
+    #[case::start_marker_only("---\nkey: value\n", true, false)]
+    #[case::end_marker_only("key: value\n...\n", false, true)]
+    #[case::both_markers("---\nkey: value\n...\n", true, true)]
+    #[case::empty_with_both_markers("---\n...\n", true, true)]
+    fn document_marker_flags_match_input(
+        #[case] input: &str,
+        #[case] expected_start: bool,
+        #[case] expected_end: bool,
+    ) {
+        let docs = load(input).expect("load failed");
         assert_eq!(docs.len(), 1);
-        assert!(!docs[0].explicit_start, "expected explicit_start=false");
-        assert!(!docs[0].explicit_end, "expected explicit_end=false");
+        assert_eq!(docs[0].explicit_start, expected_start, "explicit_start");
+        assert_eq!(docs[0].explicit_end, expected_end, "explicit_end");
     }
 
-    // UT-D2: Document with `---` start marker → explicit_start true, explicit_end false
-    #[test]
-    fn document_with_start_marker_has_explicit_start_true() {
-        let docs = load("---\nkey: value\n").expect("load failed");
-        assert_eq!(docs.len(), 1);
-        assert!(docs[0].explicit_start, "expected explicit_start=true");
-        assert!(!docs[0].explicit_end, "expected explicit_end=false");
-    }
-
-    // UT-D3: Document with `...` end marker → explicit_start false, explicit_end true
-    #[test]
-    fn document_with_end_marker_has_explicit_end_true() {
-        let docs = load("key: value\n...\n").expect("load failed");
-        assert_eq!(docs.len(), 1);
-        assert!(!docs[0].explicit_start, "expected explicit_start=false");
-        assert!(docs[0].explicit_end, "expected explicit_end=true");
-    }
-
-    // UT-D4: Document with both `---` and `...` → both flags true
-    #[test]
-    fn document_with_both_markers_has_both_flags_true() {
-        let docs = load("---\nkey: value\n...\n").expect("load failed");
-        assert_eq!(docs.len(), 1);
-        assert!(docs[0].explicit_start, "expected explicit_start=true");
-        assert!(docs[0].explicit_end, "expected explicit_end=true");
-    }
-
-    // UT-D5: Multi-document — each document's flags are independent
     #[test]
     fn multi_document_flags_are_independent() {
-        // doc1: no explicit start/end (bare)
-        // doc2: explicit start (---), explicit end (...)
-        // doc3: explicit start (---), no explicit end
         let docs = load("doc1: a\n---\ndoc2: b\n...\n---\ndoc3: c\n").expect("load failed");
         assert_eq!(docs.len(), 3);
         assert!(!docs[0].explicit_start, "doc1 explicit_start");
@@ -1545,65 +1497,32 @@ mod tests {
         assert!(!docs[2].explicit_end, "doc3 explicit_end");
     }
 
-    // UT-D6: Empty document with explicit markers → flags are set
-    #[test]
-    fn empty_document_with_explicit_markers_has_both_flags_true() {
-        let docs = load("---\n...\n").expect("load failed");
-        assert_eq!(docs.len(), 1);
-        assert!(docs[0].explicit_start, "expected explicit_start=true");
-        assert!(docs[0].explicit_end, "expected explicit_end=true");
-    }
-
     // -----------------------------------------------------------------------
-    // UT-S: sanitize_scalar_for_error unit tests
+    // sanitize_scalar_for_error unit tests
     // -----------------------------------------------------------------------
 
-    // UT-S1: newline replaced with \u000A escape (no raw newline in output)
-    #[test]
-    fn sanitize_newline_replaced_with_escape() {
-        let result = sanitize_scalar_for_error("foo\nbar");
+    #[rstest]
+    #[case::newline("foo\nbar", '\n', "\\u000A", "foo\\u000Abar")]
+    #[case::carriage_return("foo\rbar", '\r', "\\u000D", "foo\\u000Dbar")]
+    #[case::null_byte("foo\0bar", '\0', "\\u0000", "foo\\u0000bar")]
+    fn sanitize_replaces_control_char_with_escape(
+        #[case] input: &str,
+        #[case] raw_char: char,
+        #[case] escape_seq: &str,
+        #[case] expected: &str,
+    ) {
+        let result = sanitize_scalar_for_error(input);
         assert!(
-            !result.contains('\n'),
-            "output must not contain a raw newline"
+            !result.contains(raw_char),
+            "output must not contain the raw control character"
         );
         assert!(
-            result.contains("\\u000A"),
-            "output must contain \\u000A escape, got: {result:?}"
+            result.contains(escape_seq),
+            "output must contain {escape_seq} escape, got: {result:?}"
         );
-        assert_eq!(result, "foo\\u000Abar");
+        assert_eq!(result, expected);
     }
 
-    // UT-S2: carriage return replaced with \u000D escape
-    #[test]
-    fn sanitize_carriage_return_replaced_with_escape() {
-        let result = sanitize_scalar_for_error("foo\rbar");
-        assert!(
-            !result.contains('\r'),
-            "output must not contain a raw carriage return"
-        );
-        assert!(
-            result.contains("\\u000D"),
-            "output must contain \\u000D escape, got: {result:?}"
-        );
-        assert_eq!(result, "foo\\u000Dbar");
-    }
-
-    // UT-S3: null byte replaced with \u0000 escape
-    #[test]
-    fn sanitize_null_byte_replaced_with_escape() {
-        let result = sanitize_scalar_for_error("foo\0bar");
-        assert!(
-            !result.contains('\0'),
-            "output must not contain a raw null byte"
-        );
-        assert!(
-            result.contains("\\u0000"),
-            "output must contain \\u0000 escape, got: {result:?}"
-        );
-        assert_eq!(result, "foo\\u0000bar");
-    }
-
-    // UT-S4: short value (≤128 chars) stored verbatim without ellipsis
     #[test]
     fn sanitize_short_value_stored_verbatim() {
         let input = "hello";
@@ -1615,7 +1534,6 @@ mod tests {
         );
     }
 
-    // UT-S5: value at exactly 128 chars stored verbatim, no ellipsis
     #[test]
     fn sanitize_value_at_exact_limit_not_truncated() {
         let input = "a".repeat(128);
@@ -1631,7 +1549,6 @@ mod tests {
         );
     }
 
-    // UT-S6: value of 129 chars truncated to 128 chars + "..."
     #[test]
     fn sanitize_value_over_limit_truncated() {
         let input = "a".repeat(129);
@@ -1647,22 +1564,14 @@ mod tests {
         );
     }
 
-    // UT-S7: multibyte chars are counted by Unicode scalar value, not bytes;
-    // truncation at 128 chars does not split a multibyte sequence or produce invalid UTF-8.
     #[test]
     fn sanitize_multibyte_char_boundary_not_split() {
-        // Each '中' is 3 bytes. 127 of them = 127 Unicode scalar values, under limit.
-        // Adding one more ASCII char pushes to 128 (at limit, no truncation).
-        // Adding yet another pushes to 129 → truncation after 128 chars.
         let input: String = "中".repeat(127) + "ab"; // 129 chars total
         let result = sanitize_scalar_for_error(&input);
-        // Must be valid UTF-8 (String guarantees this if we don't split bytes).
         assert!(
             result.ends_with("..."),
             "129-char multibyte input should be truncated"
         );
-        // The result up to the ellipsis must be valid UTF-8 — verified by the
-        // fact that it's a String. Also check char count = 128.
         let char_count = result.trim_end_matches("...").chars().count();
         assert_eq!(
             char_count, 128,
@@ -1671,123 +1580,49 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // COW-UT: Cow variant identity for resolver-injected vs user-authored tags
+    // Cow variant identity for resolver-injected vs user-authored tags
     // -----------------------------------------------------------------------
 
     fn load_root(input: &str) -> Node<Span> {
         load(input).expect("load failed").remove(0).root
     }
 
-    // COW-UT-1: resolver-injected !!str tag is Cow::Borrowed
-    #[test]
-    fn resolver_injected_str_tag_is_borrowed() {
-        let Node::Scalar { tag, .. } = load_root("hello\n") else {
-            panic!("expected scalar");
-        };
+    fn node_tag(node: Node<Span>) -> Option<Cow<'static, str>> {
+        match node {
+            Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
+                tag
+            }
+            Node::Alias { .. } => None,
+        }
+    }
+
+    #[rstest]
+    #[case::str_tag("hello\n")]
+    #[case::int_tag("42\n")]
+    #[case::null_tag("null\n")]
+    #[case::map_tag("a: 1\n")]
+    #[case::seq_tag("- a\n")]
+    #[case::bare_excl_tag("! hello\n")]
+    fn resolver_emitted_tag_is_borrowed(#[case] input: &str) {
+        let tag = node_tag(load_root(input));
         assert!(
             matches!(tag, Some(Cow::Borrowed(_))),
-            "resolver-injected !!str must be Borrowed, got: {tag:?}"
+            "resolver-emitted tag must be Borrowed, got: {tag:?}"
         );
     }
 
-    // COW-UT-2: resolver-injected !!int tag is Cow::Borrowed
-    #[test]
-    fn resolver_injected_int_tag_is_borrowed() {
-        let Node::Scalar { tag, .. } = load_root("42\n") else {
-            panic!("expected scalar");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Borrowed(_))),
-            "resolver-injected !!int must be Borrowed, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-3: resolver-injected !!null tag is Cow::Borrowed
-    #[test]
-    fn resolver_injected_null_tag_is_borrowed() {
-        let Node::Scalar { tag, .. } = load_root("null\n") else {
-            panic!("expected scalar");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Borrowed(_))),
-            "resolver-injected !!null must be Borrowed, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-4: resolver-injected !!map tag is Cow::Borrowed
-    #[test]
-    fn resolver_injected_map_tag_is_borrowed() {
-        let Node::Mapping { tag, .. } = load_root("a: 1\n") else {
-            panic!("expected mapping");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Borrowed(_))),
-            "resolver-injected !!map must be Borrowed, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-5: resolver-injected !!seq tag is Cow::Borrowed
-    #[test]
-    fn resolver_injected_seq_tag_is_borrowed() {
-        let Node::Sequence { tag, .. } = load_root("- a\n") else {
-            panic!("expected sequence");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Borrowed(_))),
-            "resolver-injected !!seq must be Borrowed, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-6: user-authored tag on scalar is Cow::Owned
-    #[test]
-    fn user_authored_tag_on_scalar_is_owned() {
-        let Node::Scalar { tag, .. } = load_root("!!str hello\n") else {
-            panic!("expected scalar");
-        };
+    #[rstest]
+    #[case::scalar("!!str hello\n")]
+    #[case::mapping("!!map\na: 1\n")]
+    #[case::sequence("!!seq\n- a\n")]
+    fn user_authored_tag_is_owned(#[case] input: &str) {
+        let tag = node_tag(load_root(input));
         assert!(
             matches!(tag, Some(Cow::Owned(_))),
-            "user-authored !!str must be Owned, got: {tag:?}"
+            "user-authored tag must be Owned, got: {tag:?}"
         );
     }
 
-    // COW-UT-7: user-authored tag on mapping is Cow::Owned
-    #[test]
-    fn user_authored_tag_on_mapping_is_owned() {
-        let Node::Mapping { tag, .. } = load_root("!!map\na: 1\n") else {
-            panic!("expected mapping");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Owned(_))),
-            "user-authored !!map must be Owned, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-8: user-authored tag on sequence is Cow::Owned
-    #[test]
-    fn user_authored_tag_on_sequence_is_owned() {
-        let Node::Sequence { tag, .. } = load_root("!!seq\n- a\n") else {
-            panic!("expected sequence");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Owned(_))),
-            "user-authored !!seq must be Owned, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-9: bare `!` on a scalar is handled inside apply_schema_to_node
-    // and must produce Cow::Borrowed (not Cow::Owned)
-    #[test]
-    fn bare_excl_tag_resolver_path_is_borrowed() {
-        let Node::Scalar { tag, .. } = load_root("! hello\n") else {
-            panic!("expected scalar");
-        };
-        assert!(
-            matches!(tag, Some(Cow::Borrowed(_))),
-            "bare-! path in apply_schema_to_node must be Borrowed, got: {tag:?}"
-        );
-    }
-
-    // COW-UT-10: alias node in lossless mode has no tag field (Alias variant)
     #[test]
     fn alias_node_has_no_tag_field() {
         let docs = LoaderBuilder::new()
@@ -1797,17 +1632,14 @@ mod tests {
         let Node::Sequence { items, .. } = &docs[0].root else {
             panic!("expected root sequence");
         };
-        // items[1] is the alias in lossless mode
         assert!(
             matches!(items[1], Node::Alias { .. }),
             "second item must be Alias in lossless mode"
         );
     }
 
-    // COW-UT-11: Deref coercion still works for string content comparison
     #[test]
     fn tag_value_content_preserved_across_cow_variants() {
-        // Resolver-injected: Borrowed — value preserved via as_deref()
         let Node::Scalar {
             tag: tag_resolver, ..
         } = load_root("hello\n")
@@ -1816,8 +1648,6 @@ mod tests {
         };
         assert_eq!(tag_resolver.as_deref(), Some("tag:yaml.org,2002:str"));
 
-        // User-authored with a single-! local tag: Owned — value preserved via as_deref().
-        // `!custom` is a local tag (single !), not a handle-expanded URI.
         let Node::Scalar { tag: tag_user, .. } = load_root("!custom hello\n") else {
             panic!("expected scalar");
         };
@@ -1825,22 +1655,31 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // LOAD-META: loader correctly gates NodeMeta construction
+    // Loader correctly gates NodeMeta construction
     // -----------------------------------------------------------------------
 
-    // LOAD-META-1: loaded_plain_scalar_has_no_meta
-    #[test]
-    fn loaded_plain_scalar_has_no_meta() {
-        let docs = load("hello\n").unwrap();
+    fn node_meta_is_none(node: &Node<Span>) -> bool {
+        matches!(
+            node,
+            Node::Scalar { meta: None, .. }
+                | Node::Mapping { meta: None, .. }
+                | Node::Sequence { meta: None, .. }
+        )
+    }
+
+    #[rstest]
+    #[case::plain_scalar("hello\n")]
+    #[case::plain_mapping("a: 1\n")]
+    #[case::plain_sequence("- a\n")]
+    fn loaded_node_with_no_meta_fields_has_meta_none(#[case] input: &str) {
+        let docs = load(input).unwrap();
         let root = &docs[0].root;
-        // Plain scalar with no anchor, no user-authored tag_loc, no comments → meta: None
         assert!(
-            matches!(root, Node::Scalar { meta: None, .. }),
-            "plain scalar must have meta: None, got: {root:?}"
+            node_meta_is_none(root),
+            "plain node must have meta: None, got: {root:?}"
         );
     }
 
-    // LOAD-META-2: loaded_anchored_scalar_has_meta_some
     #[test]
     fn loaded_anchored_scalar_has_meta_some() {
         let docs = load("- &foo bar\n").unwrap();
@@ -1855,29 +1694,6 @@ mod tests {
         assert_eq!(item.anchor(), Some("foo"));
     }
 
-    // LOAD-META-3: loaded_mapping_with_no_meta_fields_has_meta_none
-    #[test]
-    fn loaded_mapping_with_no_meta_fields_has_meta_none() {
-        let docs = load("a: 1\n").unwrap();
-        let root = &docs[0].root;
-        assert!(
-            matches!(root, Node::Mapping { meta: None, .. }),
-            "plain mapping must have meta: None, got: {root:?}"
-        );
-    }
-
-    // LOAD-META-4: loaded_sequence_with_no_meta_fields_has_meta_none
-    #[test]
-    fn loaded_sequence_with_no_meta_fields_has_meta_none() {
-        let docs = load("- a\n").unwrap();
-        let root = &docs[0].root;
-        assert!(
-            matches!(root, Node::Sequence { meta: None, .. }),
-            "plain sequence must have meta: None, got: {root:?}"
-        );
-    }
-
-    // LOAD-META-5: loaded_scalar_with_anchor_has_meta_some_with_anchor_loc
     #[test]
     fn loaded_scalar_with_anchor_has_meta_some_with_anchor_loc() {
         let docs = load("&tag hello\n").unwrap();
@@ -1893,237 +1709,78 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // DISP: Property displacement promotion — combined anchor+tag on block
-    //       collections.  Tests cover 4 property configs × 4 collection
-    //       shapes plus an alias-registration smoke test.
+    // Property displacement promotion — combined anchor+tag on block collections
     // -----------------------------------------------------------------------
 
-    // --- Group 1: Block mapping ---
-
-    // DISP-BM-1: anchor-only on block mapping (baseline — already passes)
-    #[test]
-    fn block_mapping_anchor_only_has_anchor_no_tag_loc() {
-        let docs = load("&a\nk: v\n").unwrap();
+    #[rstest]
+    // Block mapping
+    #[case::block_mapping_anchor_only("&a\nk: v\n", Some("a"), false)]
+    #[case::block_mapping_tag_only("!mytag\nk: v\n", None, true)]
+    #[case::block_mapping_anchor_then_tag("&a !mytag\nk: v\n", Some("a"), true)]
+    #[case::block_mapping_tag_then_anchor("!mytag &a\nk: v\n", Some("a"), true)]
+    // Block sequence
+    #[case::block_sequence_anchor_only("&a\n- item\n", Some("a"), false)]
+    #[case::block_sequence_tag_only("!mytag\n- item\n", None, true)]
+    #[case::block_sequence_anchor_then_tag("&a !mytag\n- item\n", Some("a"), true)]
+    #[case::block_sequence_tag_then_anchor("!mytag &a\n- item\n", Some("a"), true)]
+    // Flow mapping
+    #[case::flow_mapping_anchor_only("&a {k: v}\n", Some("a"), false)]
+    #[case::flow_mapping_tag_only("!mytag {k: v}\n", None, true)]
+    #[case::flow_mapping_anchor_then_tag("&a !mytag {k: v}\n", Some("a"), true)]
+    #[case::flow_mapping_tag_then_anchor("!mytag &a {k: v}\n", Some("a"), true)]
+    // Flow sequence
+    #[case::flow_sequence_anchor_only("&a [item]\n", Some("a"), false)]
+    #[case::flow_sequence_tag_only("!mytag [item]\n", None, true)]
+    #[case::flow_sequence_anchor_then_tag("&a !mytag [item]\n", Some("a"), true)]
+    #[case::flow_sequence_tag_then_anchor("!mytag &a [item]\n", Some("a"), true)]
+    fn combined_properties_attach_to_root_collection(
+        #[case] input: &str,
+        #[case] expected_anchor: Option<&str>,
+        #[case] expected_has_tag: bool,
+    ) {
+        let docs = load(input).unwrap();
         let root = &docs[0].root;
-        let Node::Mapping { entries, .. } = root else {
-            panic!("expected root mapping");
-        };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(root.tag_loc().is_none(), "no user tag expected");
-        let (key, _) = &entries[0];
-        assert_eq!(key.anchor(), None, "anchor must not migrate to first key");
-        assert!(key.tag_loc().is_none(), "no user tag on first key");
-    }
-
-    // DISP-BM-2: tag-only on block mapping (baseline — already passes)
-    #[test]
-    fn block_mapping_tag_only_has_tag_loc_no_anchor() {
-        let docs = load("!mytag\nk: v\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Mapping { entries, .. } = root else {
-            panic!("expected root mapping");
-        };
-        assert_eq!(root.anchor(), None, "no anchor expected");
-        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
-        let (key, _) = &entries[0];
-        assert!(key.tag_loc().is_none(), "tag must not appear on first key");
-    }
-
-    // DISP-BM-3: anchor-then-tag on block mapping — Bug A regression test
-    #[test]
-    fn block_mapping_anchor_then_tag_has_both_on_mapping() {
-        let docs = load("&a !mytag\nk: v\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Mapping { entries, .. } = root else {
-            panic!("expected root mapping");
-        };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
-        let (key, _) = &entries[0];
+        assert_eq!(root.anchor(), expected_anchor, "anchor on root collection");
         assert_eq!(
-            key.anchor(),
-            None,
-            "anchor must NOT migrate to first key (Bug A)"
-        );
-    }
-
-    // DISP-BM-4: tag-then-anchor on block mapping — Bug B regression test
-    #[test]
-    fn block_mapping_tag_then_anchor_has_both_on_mapping() {
-        let docs = load("!mytag &a\nk: v\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Mapping { entries, .. } = root else {
-            panic!("expected root mapping");
-        };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(
             root.tag_loc().is_some(),
-            "user tag must be on mapping (Bug B)"
-        );
-        let (key, _) = &entries[0];
-        assert!(
-            key.tag_loc().is_none(),
-            "tag must NOT be dropped from mapping (Bug B)"
+            expected_has_tag,
+            "tag_loc on root collection"
         );
     }
 
-    // --- Group 2: Block sequence ---
-
-    // DISP-BS-1: anchor-only on block sequence
-    #[test]
-    fn block_sequence_anchor_only_has_anchor_no_tag_loc() {
-        let docs = load("&a\n- item\n").unwrap();
+    // Block collections: first child must not inherit anchor or tag from the root
+    #[rstest]
+    // Block mapping
+    #[case::block_mapping_anchor_only("&a\nk: v\n")]
+    #[case::block_mapping_tag_only("!mytag\nk: v\n")]
+    #[case::block_mapping_anchor_then_tag("&a !mytag\nk: v\n")]
+    #[case::block_mapping_tag_then_anchor("!mytag &a\nk: v\n")]
+    // Block sequence
+    #[case::block_sequence_anchor_only("&a\n- item\n")]
+    #[case::block_sequence_tag_only("!mytag\n- item\n")]
+    #[case::block_sequence_anchor_then_tag("&a !mytag\n- item\n")]
+    #[case::block_sequence_tag_then_anchor("!mytag &a\n- item\n")]
+    fn first_child_of_block_collection_has_no_properties(#[case] input: &str) {
+        let docs = load(input).unwrap();
         let root = &docs[0].root;
-        let Node::Sequence { items, .. } = root else {
-            panic!("expected root sequence");
+        let first_child: &Node<Span> = match root {
+            Node::Mapping { entries, .. } => &entries[0].0,
+            Node::Sequence { items, .. } => &items[0],
+            Node::Scalar { .. } | Node::Alias { .. } => panic!("expected block collection"),
         };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_none(), "no user tag expected");
         assert_eq!(
-            items[0].anchor(),
+            first_child.anchor(),
             None,
-            "anchor must not appear on first item"
+            "anchor must not appear on first child"
         );
-    }
-
-    // DISP-BS-2: tag-only on block sequence
-    #[test]
-    fn block_sequence_tag_only_has_tag_loc_no_anchor() {
-        let docs = load("!mytag\n- item\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Sequence { items, .. } = root else {
-            panic!("expected root sequence");
-        };
-        assert_eq!(root.anchor(), None, "no anchor expected");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
         assert!(
-            items[0].tag_loc().is_none(),
-            "tag must not appear on first item"
+            first_child.tag_loc().is_none(),
+            "tag_loc must not appear on first child"
         );
     }
 
-    // DISP-BS-3: anchor-then-tag on block sequence
-    #[test]
-    fn block_sequence_anchor_then_tag_has_both_on_sequence() {
-        let docs = load("&a !mytag\n- item\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Sequence { items, .. } = root else {
-            panic!("expected root sequence");
-        };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
-        assert_eq!(
-            items[0].anchor(),
-            None,
-            "anchor must not appear on first item"
-        );
-    }
+    // --- Alias registration smoke test ---
 
-    // DISP-BS-4: tag-then-anchor on block sequence
-    #[test]
-    fn block_sequence_tag_then_anchor_has_both_on_sequence() {
-        let docs = load("!mytag &a\n- item\n").unwrap();
-        let root = &docs[0].root;
-        let Node::Sequence { items, .. } = root else {
-            panic!("expected root sequence");
-        };
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
-        assert!(
-            items[0].tag_loc().is_none(),
-            "tag must not appear on first item"
-        );
-    }
-
-    // --- Group 3: Flow mapping ---
-
-    // DISP-FM-1: anchor-only on flow mapping
-    #[test]
-    fn flow_mapping_anchor_only_has_anchor() {
-        let docs = load("&a {k: v}\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(root.tag_loc().is_none(), "no user tag expected");
-    }
-
-    // DISP-FM-2: tag-only on flow mapping
-    #[test]
-    fn flow_mapping_tag_only_has_tag_loc() {
-        let docs = load("!mytag {k: v}\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
-        assert_eq!(root.anchor(), None, "no anchor expected");
-        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
-    }
-
-    // DISP-FM-3: anchor-then-tag on flow mapping
-    #[test]
-    fn flow_mapping_anchor_then_tag_has_both() {
-        let docs = load("&a !mytag {k: v}\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
-    }
-
-    // DISP-FM-4: tag-then-anchor on flow mapping
-    #[test]
-    fn flow_mapping_tag_then_anchor_has_both() {
-        let docs = load("!mytag &a {k: v}\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Mapping { .. }), "expected mapping");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on mapping");
-        assert!(root.tag_loc().is_some(), "user tag must be on mapping");
-    }
-
-    // --- Group 4: Flow sequence ---
-
-    // DISP-FS-1: anchor-only on flow sequence
-    #[test]
-    fn flow_sequence_anchor_only_has_anchor() {
-        let docs = load("&a [item]\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_none(), "no user tag expected");
-    }
-
-    // DISP-FS-2: tag-only on flow sequence
-    #[test]
-    fn flow_sequence_tag_only_has_tag_loc() {
-        let docs = load("!mytag [item]\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
-        assert_eq!(root.anchor(), None, "no anchor expected");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
-    }
-
-    // DISP-FS-3: anchor-then-tag on flow sequence
-    #[test]
-    fn flow_sequence_anchor_then_tag_has_both() {
-        let docs = load("&a !mytag [item]\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
-    }
-
-    // DISP-FS-4: tag-then-anchor on flow sequence
-    #[test]
-    fn flow_sequence_tag_then_anchor_has_both() {
-        let docs = load("!mytag &a [item]\n").unwrap();
-        let root = &docs[0].root;
-        assert!(matches!(root, Node::Sequence { .. }), "expected sequence");
-        assert_eq!(root.anchor(), Some("a"), "anchor must be on sequence");
-        assert!(root.tag_loc().is_some(), "user tag must be on sequence");
-    }
-
-    // --- Group 5: Alias registration smoke test ---
-
-    // DISP-ALIAS-1: anchor on block mapping with combined properties is
-    //               resolvable via alias (anchor was registered on the mapping,
-    //               not lost to the first key)
     #[test]
     fn anchor_on_block_mapping_with_tag_is_resolvable_via_alias() {
         let input = "root:\n  tagged: &a !mytag\n    k: v\n  ref: *a\n";

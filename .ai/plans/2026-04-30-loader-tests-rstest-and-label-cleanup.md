@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-30)
 **Created:** 2026-04-30
 
 ## Goal
@@ -65,22 +65,28 @@ that bug-fix and test-list authoring left behind.
 
 - [x] Survey complete (consolidation map captured in
       Tasks section below)
-- [ ] Capture baseline test count: run
+- [x] Capture baseline test count: run
       `cargo test -p rlsp-yaml-parser loader::tests --
       --list` and record the number of test cases
-      reported in `loader::tests`
-- [ ] Convert UT-D, UT-S, COW-UT, LOAD-META, and DISP
+      reported in `loader::tests` (baseline: 62)
+- [x] Convert UT-D, UT-S, COW-UT, LOAD-META, and DISP
       groups to rstest per the consolidation map
-- [ ] Strip stale labels from section headers, assertion
+- [x] Strip stale labels from section headers, assertion
       messages, and inline comments
-- [ ] Verify post-refactor test count equals baseline
-- [ ] Verify `cargo test -p rlsp-yaml-parser loader::tests`
+- [x] Verify post-refactor test count (70 — increase of
+      8 reflects the DISP block-form split per the
+      consolidation map; the original 8 block tests each
+      had two assertion shapes and split into two
+      parametrized functions)
+- [x] Verify `cargo test -p rlsp-yaml-parser loader::tests`
       green
-- [ ] Verify `cargo clippy --all-targets` clean
+- [x] Verify `cargo clippy --all-targets` clean
 
 ## Tasks
 
 ### Task 1: rstest consolidation and stale-label cleanup in loader test module
+
+**Commit:** `5570ad6`
 
 Refactor the `#[cfg(test)] mod tests` block in
 `rlsp-yaml-parser/src/loader.rs` to:
@@ -173,37 +179,36 @@ information:
 **Acceptance criteria.** All measured against the test
 module in `rlsp-yaml-parser/src/loader.rs`:
 
-- [ ] `cargo test -p rlsp-yaml-parser loader::tests`
-      passes; the total number of test cases reported
-      matches the pre-refactor baseline (each rstest
-      `#[case]` counts as a separate test case in cargo
-      output, so the total is preserved)
-- [ ] `cargo clippy --all-targets` reports zero warnings
-- [ ] `cargo fmt --check` reports clean
-- [ ] No occurrence of the literal strings `Bug A`,
+- [x] `cargo test -p rlsp-yaml-parser loader::tests`
+      passes (70 tests). **Note:** the literal count
+      went from 62 to 70 (+8), reflecting the DISP
+      block-form split documented in the Consolidation
+      Map — the 8 BM/BS tests each carried two
+      assertion shapes and split into two parametrized
+      functions. The plan's "matches baseline" wording
+      was internally inconsistent with its own split
+      design; the reviewer confirmed the math.
+- [x] `cargo clippy --all-targets` reports zero warnings
+- [x] `cargo fmt --check` reports clean
+- [x] No occurrence of the literal strings `Bug A`,
       `Bug B`, `Bug-A`, `Bug-B` anywhere in
-      `loader.rs` (run `grep -nE 'Bug[ -][AB]'
-      rlsp-yaml-parser/src/loader.rs` — must return zero
-      hits)
-- [ ] No occurrence of ID-prefix patterns `UT-A[0-9]`,
+      `loader.rs` (verified — zero hits)
+- [x] No occurrence of ID-prefix patterns `UT-A[0-9]`,
       `UT-B[0-9]`, `UT-C[0-9]`, `UT-D[0-9]`,
       `UT-S[0-9]`, `COW-UT-[0-9]`, `LOAD-META-[0-9]`,
       `DISP-(BM|BS|FM|FS|ALIAS)-[0-9]` in the test
-      module (run `grep -nE
-      '(UT-[A-Z][0-9]|UT-[0-9]|COW-UT-[0-9]|LOAD-META-[0-9]|DISP-[A-Z]+-[0-9])'
-      rlsp-yaml-parser/src/loader.rs` — must return zero
-      hits)
-- [ ] Each rstest function uses `#[case::name(...)]`
+      module (verified — zero hits)
+- [x] Each rstest function uses `#[case::name(...)]`
       syntax (named cases, not bare `#[case(...)]`);
-      grep `'#\[case\(' rlsp-yaml-parser/src/loader.rs`
-      must return zero hits inside the consolidated
-      functions
-- [ ] All assertions and input strings preserved
-      exactly (no test scenario removed; no input
-      changed; no assertion weakened) — the reviewer
-      verifies this by diffing the pre- and
-      post-refactor test bodies case-by-case against
-      the consolidation map above
+      verified via `grep '#\[case\('` — zero hits
+- [x] All assertions and input strings preserved
+      exactly. Reviewer noted one minor *strengthening*
+      in `first_child_of_block_collection_has_no_properties`:
+      the original 8 BM/BS tests asserted only one of
+      `anchor()` / `tag_loc()` per case; the
+      consolidated function asserts both for all 8
+      cases (strengthening, not weakening — all tests
+      pass).
 
 ## Decisions
 
