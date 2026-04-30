@@ -23,17 +23,39 @@ pub(super) fn yaml11_octal_actions(
         return vec![];
     };
 
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // Clear properties from both clones so format_subtree does not re-emit them in new_text,
+    // which would double them — the source buffer already preserves the single occurrence.
     let mut quoted = scalar.clone();
-    if let Node::Scalar { style, .. } = &mut quoted {
+    if let Node::Scalar {
+        style, tag, meta, ..
+    } = &mut quoted
+    {
         *style = ScalarStyle::DoubleQuoted;
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
     let mut converted = scalar.clone();
     if let Node::Scalar {
-        style, value: v, ..
+        style,
+        value: v,
+        tag,
+        meta,
+        ..
     } = &mut converted
     {
         *style = ScalarStyle::Plain;
         *v = format!("0o{}", &value[1..]);
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let quote_opts = YamlFormatOptions {

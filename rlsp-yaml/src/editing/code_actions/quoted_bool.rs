@@ -24,8 +24,20 @@ pub(super) fn quoted_bool_to_unquoted(
     };
 
     let mut plain = scalar.clone();
-    if let Node::Scalar { style, .. } = &mut plain {
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // Clear properties from the clone so format_subtree does not re-emit them in new_text,
+    // which would double them — the source buffer already preserves the single occurrence.
+    if let Node::Scalar {
+        style, tag, meta, ..
+    } = &mut plain
+    {
         *style = ScalarStyle::Plain;
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let base_indent = idx.line_column(loc.start).1 as usize;

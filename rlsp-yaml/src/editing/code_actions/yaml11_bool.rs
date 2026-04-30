@@ -22,17 +22,39 @@ pub(super) fn yaml11_bool_actions(
         return vec![];
     };
 
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // Clear properties from both clones so format_subtree does not re-emit them in new_text,
+    // which would double them — the source buffer already preserves the single occurrence.
     let mut quoted = scalar.clone();
-    if let Node::Scalar { style, .. } = &mut quoted {
+    if let Node::Scalar {
+        style, tag, meta, ..
+    } = &mut quoted
+    {
         *style = ScalarStyle::DoubleQuoted;
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
     let mut plain = scalar.clone();
     if let Node::Scalar {
-        style, value: v, ..
+        style,
+        value: v,
+        tag,
+        meta,
+        ..
     } = &mut plain
     {
         *style = ScalarStyle::Plain;
         *v = crate::scalar_helpers::yaml11_bool_canonical(value).to_string();
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let quote_opts = YamlFormatOptions {
@@ -90,12 +112,24 @@ pub(super) fn schema_yaml11_bool_type_actions(
     };
 
     let mut plain = scalar.clone();
+    // The edit range covers only the scalar token; clear properties from the clone so
+    // format_subtree does not re-emit them and double the single source occurrence.
     if let Node::Scalar {
-        style, value: v, ..
+        style,
+        value: v,
+        tag,
+        meta,
+        ..
     } = &mut plain
     {
         *style = ScalarStyle::Plain;
         *v = crate::scalar_helpers::yaml11_bool_canonical(value).to_string();
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let plain_text = format_subtree(&plain, options, base_indent);

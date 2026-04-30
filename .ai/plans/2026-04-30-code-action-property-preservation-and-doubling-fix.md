@@ -158,7 +158,7 @@ the invariant's effective coverage.
 
 - [x] Task 1 — fix `string_to_block_scalar` doubling +
       update/add fixtures
-- [ ] Task 2 — add property-preservation invariant test +
+- [x] Task 2 — add property-preservation invariant test +
       load-bearing comment in `block_to_flow`
 
 ## Tasks
@@ -232,7 +232,7 @@ load-bearing comment at `block_to_flow.rs:51-52`
 documenting why the edit start is computed from
 `key_end_col + 1` rather than `loc.start`.
 
-- [ ] Create
+- [x] Create
       `rlsp-yaml/tests/code_action_property_preservation.rs`
       using `rstest` named cases. The test loads each
       input, dispatches `code_actions(...)` at a cursor
@@ -241,7 +241,7 @@ documenting why the edit start is computed from
       the input, and asserts: for each property literal
       `prop` in the input, `count(input, prop) ==
       count(output, prop)`.
-- [ ] Cover all seven non-`delete_anchor` actions by name
+- [x] Cover all seven non-`delete_anchor` actions by name
       in the parameterization. Use `#[case::action_name]`
       named cases per
       `lang-rust-testing.md` "Parameterized Tests". Inputs
@@ -251,7 +251,7 @@ documenting why the edit start is computed from
       `tab_to_spaces`, a YAML 1.1 boolean keyword for
       `yaml11_bool`); the test-engineer advisory consult
       finalizes the test list before implementation.
-- [ ] Add a comment immediately above
+- [x] Add a comment immediately above
       `block_to_flow.rs:52` (the
       `let edit_start_col = key_end_col as usize + 1;`
       line) explaining that the `+ 1` past the colon
@@ -262,7 +262,7 @@ documenting why the edit start is computed from
       duplicates them. State that simplifying this to
       `loc.start` would re-introduce the doubling bug
       class.
-- [ ] If the invariant fails for an action other than
+- [x] If the invariant fails for an action other than
       `string_to_block_scalar` (which is fixed in
       Task 1):
       - **Same root cause** as Task 1 (clone-then-format
@@ -276,7 +276,23 @@ documenting why the edit start is computed from
         follow-up unilaterally, do not submit the task
         for review. The lead decides plan-level
         disposition.
-- [ ] File a follow-up entry in
+
+      **Outcome:** the invariant surfaced the same
+      doubling bug in four additional actions —
+      `flow_to_block` (both map and seq dispatch
+      sites), `quoted_bool`, `yaml11_bool`,
+      `yaml11_octal`. Each had the same clone-then-format
+      re-emission shape as Task 1 (`tag` /
+      `meta.anchor` / `meta.anchor_loc` /
+      `meta.tag_loc` retained on the cloned node;
+      edit range starts at `loc.start` excluding the
+      property prefix). All four were fixed in-plan with
+      the strip-on-clone pattern matching Task 1.
+      `block_to_flow` and `tab_to_spaces` already
+      preserved properties correctly. Final invariant
+      coverage: 24 named cases (8 dispatch sites × 3
+      property shapes), all passing, zero `#[ignore]`s.
+- [x] File a follow-up entry in
       `.ai/memory/project_followup_plans.md` for the
       duplicated integration-test helpers (`cursor_range`,
       `docs_for`, `test_uri`) — currently re-implemented
@@ -288,12 +304,12 @@ documenting why the edit start is computed from
       to extract a shared module once a third caller
       arrives. This task does not consolidate (see
       Non-Goals).
-- [ ] `cargo test --test code_action_property_preservation`
+- [x] `cargo test --test code_action_property_preservation`
       passes for all seven actions with no `#[ignore]`d
       or suppressed cases.
-- [ ] `cargo test --workspace` passes (no regressions).
-- [ ] `cargo clippy --all-targets` clean.
-- [ ] `cargo fmt` applied.
+- [x] `cargo test --workspace` passes (no regressions).
+- [x] `cargo clippy --all-targets` clean.
+- [x] `cargo fmt` applied.
 
 Acceptance: the invariant test passes for all seven
 actions with zero `#[ignore]` annotations on the
@@ -312,6 +328,8 @@ invariant's coverage, Task 2 must be revised before it
 can be marked complete — the change must be visible in
 the plan, not silently embedded in source as an
 ignored test.
+
+**Commit:** `4aa19e9`
 
 ## Decisions
 

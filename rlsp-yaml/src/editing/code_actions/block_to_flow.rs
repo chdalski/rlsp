@@ -49,6 +49,13 @@ pub(super) fn block_to_flow(
     let title = "Convert block to flow style".to_string();
 
     let (_, key_end_col) = idx.line_column(key_loc.end);
+    // The `+ 1` is load-bearing for property preservation: starting the edit immediately
+    // after the key's colon (rather than at the collection node's `loc.start`) means the
+    // edit range covers the source `&anchor`/`!tag` prefix that precedes the block value.
+    // When `format_subtree` re-emits those properties in `new_text`, the source occurrence
+    // is inside the replaced range and is erased — net count stays at 1. Simplifying this
+    // to `loc.start` would exclude the property prefix from the edit, leaving the source
+    // occurrence in place while `format_subtree` re-emits a second copy in `new_text`.
     let edit_start_col = key_end_col as usize + 1;
     let (loc_end_line, loc_end_col) = idx.line_column(loc.end);
 

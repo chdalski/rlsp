@@ -22,8 +22,20 @@ pub(super) fn flow_map_to_block(
     };
 
     let mut block_node = node.clone();
-    if let Node::Mapping { style, .. } = &mut block_node {
+    // The edit range starts at loc.start (the '{'), so any preceding &anchor/!tag prefix is
+    // outside the replaced range. Clear properties from the clone so format_subtree does not
+    // re-emit them in new_text and double the single source occurrence.
+    if let Node::Mapping {
+        style, tag, meta, ..
+    } = &mut block_node
+    {
         *style = CollectionStyle::Block;
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let (new_text, edit_start_col) =
@@ -131,8 +143,20 @@ pub(super) fn flow_seq_to_block(
     };
 
     let mut block_node = node.clone();
-    if let Node::Sequence { style, .. } = &mut block_node {
+    // The edit range starts at loc.start (the '['), so any preceding &anchor/!tag prefix is
+    // outside the replaced range. Clear properties from the clone so format_subtree does not
+    // re-emit them in new_text and double the single source occurrence.
+    if let Node::Sequence {
+        style, tag, meta, ..
+    } = &mut block_node
+    {
         *style = CollectionStyle::Block;
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let (new_text, edit_start_col) =
