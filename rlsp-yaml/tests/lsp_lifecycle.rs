@@ -1560,18 +1560,23 @@ async fn should_return_hover_when_schema_modeline_is_present() {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));
 
+    let stub = serde_json::json!({"type": "object"});
+    let schema = rlsp_yaml::schema::parse_schema(&stub).expect("stub schema");
+    service
+        .inner()
+        .seed_schema_cache(GITHUB_WORKFLOW_SCHEMA_URL, schema);
+
     send(&mut service, initialize_request(1)).await;
     send(&mut service, initialized_notification()).await;
 
     let uri = "file:///test/hover-schema.yaml";
-    // Use a $schema modeline. The fetch will fail in tests (no network), but
-    // the schema_associations entry is stored and the schema_cache lookup path
-    // in hover() is exercised (returning None from cache, which is fine).
+    // Pre-seeded schema cache means process_schema hits the cache and skips the
+    // HTTP fetch entirely — no network required.
     send(
         &mut service,
         did_open_notification(
             uri,
-            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nname: Alice\n",
+            &format!("# yaml-language-server: $schema={GITHUB_WORKFLOW_SCHEMA_URL}\nname: Alice\n"),
         ),
     )
     .await;
@@ -1601,17 +1606,23 @@ async fn should_exercise_schema_lookup_in_completion() {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));
 
+    let stub = serde_json::json!({"type": "object"});
+    let schema = rlsp_yaml::schema::parse_schema(&stub).expect("stub schema");
+    service
+        .inner()
+        .seed_schema_cache(GITHUB_WORKFLOW_SCHEMA_URL, schema);
+
     send(&mut service, initialize_request(1)).await;
     send(&mut service, initialized_notification()).await;
 
     let uri = "file:///test/completion-schema.yaml";
-    // Use a $schema modeline to store a schema association. The fetch will fail
-    // in tests but the schema lookup path in completion() is exercised.
+    // Pre-seeded schema cache means process_schema hits the cache and skips the
+    // HTTP fetch entirely — no network required.
     send(
         &mut service,
         did_open_notification(
             uri,
-            "# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\nname: Alice\nage: 30\n",
+            &format!("# yaml-language-server: $schema={GITHUB_WORKFLOW_SCHEMA_URL}\nname: Alice\nage: 30\n"),
         ),
     )
     .await;
@@ -2566,6 +2577,7 @@ fn configmap_schema() -> rlsp_yaml::schema::JsonSchema {
 }
 
 const CONFIGMAP_SCHEMA_URL: &str = "https://example.com/test-configmap.json";
+const GITHUB_WORKFLOW_SCHEMA_URL: &str = "https://json.schemastore.org/github-workflow.json";
 
 #[tokio::test]
 async fn should_emit_schema_yaml11_boolean_warning_in_string_typed_field() {

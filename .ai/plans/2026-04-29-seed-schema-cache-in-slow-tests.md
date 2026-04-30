@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-04-30)
 **Created:** 2026-04-29
 
 ## Goal
@@ -62,13 +62,15 @@ sufficient for the cache hit.
 
 ## Steps
 
-- [ ] Pre-seed schema cache in two slow tests
+- [x] Pre-seed schema cache in two slow tests
 
 ## Tasks
 
 ### Task 1: Pre-seed schema cache in slow tests
 
-- [ ] In `should_return_hover_when_schema_modeline_is_present`
+**Commit:** `90197c9`
+
+- [x] In `should_return_hover_when_schema_modeline_is_present`
       (~line 1559), add before `send(&mut service,
       initialize_request(1))`:
       ```
@@ -80,20 +82,28 @@ sufficient for the cache hit.
           schema,
       );
       ```
-- [ ] Same change in
+- [x] Same change in
       `should_exercise_schema_lookup_in_completion`
       (~line 1600).
-- [ ] Verify both tests still pass: `cargo test --test
+- [x] Verify both tests still pass: `cargo test --test
       lsp_lifecycle -- should_return_hover_when_schema
       should_exercise_schema_lookup_in_completion`
-- [ ] Verify the full suite still passes and is faster:
-      `cargo test --test lsp_lifecycle` — expected time
-      drops from ~16s to ~1s.
-- [ ] `cargo clippy --all-targets` clean.
-- [ ] `cargo fmt` applied.
+- [x] Verify the full suite still passes and is faster:
+      `cargo test --test lsp_lifecycle` — measured **1.29s**
+      (from ~16s baseline; target was <3s).
+- [x] `cargo clippy --all-targets` clean.
+- [x] `cargo fmt` applied.
 
 Acceptance: both tests pass, full `lsp_lifecycle` suite
-time drops below 3s (from ~16s), no regressions.
+time drops below 3s (from ~16s), no regressions. **Met:
+1.29s, 107/107 passing.**
+
+**Scope addition (accepted by reviewer):** developer
+introduced a `GITHUB_WORKFLOW_SCHEMA_URL` constant
+alongside the existing `CONFIGMAP_SCHEMA_URL` and
+converted the modeline strings to `format!`. This
+follows the existing idiom in the file and removes
+duplication between the seed call and the modeline.
 
 ## Decisions
 
