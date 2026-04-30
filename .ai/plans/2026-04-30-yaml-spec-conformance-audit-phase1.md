@@ -23,7 +23,7 @@ Audit the `rlsp-yaml-parser` crate for YAML 1.2.2 conformance at the BNF-product
 
 - [x] Create the audit output directory `.ai/audit/2026-04-30-phase1-bnf/`
 - [x] Audit §5 (with §3, §4 folded in): dispatch A + B subagents, reconcile, commit
-- [ ] Audit §6: dispatch A + B subagents, reconcile, commit
+- [x] Audit §6: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §7: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §8: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §9: dispatch A + B subagents, reconcile, commit
@@ -101,10 +101,10 @@ Same shape as Task 1, but for the 41 productions under `## §6` in the conforman
 Subagent A (`audit-a-§6`) and Subagent B (`audit-b-§6`) follow the same input partitioning, blindness rules, taxonomy, entry shape, and frontmatter as Task 1. Output paths replace `§5` with `§6`.
 
 Acceptance criteria:
-- [ ] `audit-a-§6.md`, `audit-b-§6.md`, and `reconciliation-§6.md` exist with complete coverage of all 41 §6 productions.
-- [ ] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
-- [ ] Every entry has verdict + evidence + reasoning per the format above.
-- [ ] All three files committed: `docs(audit): record phase 1 §6 conformance audit`.
+- [x] `audit-a-§6.md`, `audit-b-§6.md`, and `reconciliation-§6.md` exist with complete coverage of all 41 §6 productions.
+- [x] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
+- [x] Every entry has verdict + evidence + reasoning per the format above.
+- [x] All three files committed: `docs(audit): record phase 1 §6 conformance audit`.
 
 ### Task 3: Audit §7 (flow style productions)
 
