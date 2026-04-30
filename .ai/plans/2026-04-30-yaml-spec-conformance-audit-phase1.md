@@ -26,7 +26,7 @@ Audit the `rlsp-yaml-parser` crate for YAML 1.2.2 conformance at the BNF-product
 - [x] Audit §6: dispatch A + B subagents, reconcile, commit
 - [x] Audit §7: dispatch A + B subagents, reconcile, commit
 - [x] Audit §8: dispatch A + B subagents, reconcile, commit
-- [ ] Audit §9: dispatch A + B subagents, reconcile, commit
+- [x] Audit §9: dispatch A + B subagents, reconcile, commit
 - [ ] Compose final summary across all chapters; file follow-up entries from summary; commit
 - [ ] Mark plan Completed and commit status update
 
@@ -131,10 +131,10 @@ Acceptance criteria:
 Same shape as Task 1, but for the 10 productions under `## §9` in the conformance doc.
 
 Acceptance criteria:
-- [ ] `audit-a-§9.md`, `audit-b-§9.md`, and `reconciliation-§9.md` exist with complete coverage of all 10 §9 productions.
-- [ ] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
-- [ ] Every entry has verdict + evidence + reasoning per the format above.
-- [ ] All three files committed: `docs(audit): record phase 1 §9 conformance audit`.
+- [x] `audit-a-§9.md`, `audit-b-§9.md`, and `reconciliation-§9.md` exist with complete coverage of all 10 §9 productions.
+- [x] Each file's frontmatter contains all five required fields (`plan`, `phase`, `side`, `section`, `date`); reconciliation file additionally carries `produced-by: lead`.
+- [x] Every entry has verdict + evidence + reasoning per the format above.
+- [x] All three files committed: `docs(audit): record phase 1 §9 conformance audit`.
 
 ### Task 6: Compose summary and file follow-ups
 
