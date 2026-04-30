@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-30
 
 ## Goal
@@ -21,8 +21,8 @@ Audit the `rlsp-yaml-parser` crate for YAML 1.2.2 conformance at the BNF-product
 
 ## Steps
 
-- [ ] Create the audit output directory `.ai/audit/2026-04-30-phase1-bnf/`
-- [ ] Audit §5 (with §3, §4 folded in): dispatch A + B subagents, reconcile, commit
+- [x] Create the audit output directory `.ai/audit/2026-04-30-phase1-bnf/`
+- [x] Audit §5 (with §3, §4 folded in): dispatch A + B subagents, reconcile, commit
 - [ ] Audit §6: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §7: dispatch A + B subagents, reconcile, commit
 - [ ] Audit §8: dispatch A + B subagents, reconcile, commit
@@ -86,13 +86,13 @@ After both subagent outputs are complete, the lead writes `.ai/audit/2026-04-30-
 - Frontmatter side: `Reconciliation`. produced-by: `lead`.
 
 Acceptance criteria:
-- [ ] `.ai/audit/2026-04-30-phase1-bnf/audit-a-§5.md` exists and contains one verdict-bearing entry for every entry under `## §3`, `## §4`, `## §5` in the conformance doc — 64 entries total (1 + 1 + 62).
-- [ ] `.ai/audit/2026-04-30-phase1-bnf/audit-b-§5.md` exists with the same 64-entry coverage.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
-- [ ] Every entry in both files carries a verdict from the taxonomy, parser file:line evidence, and reasoning citing spec wording.
-- [ ] No entry is missing reasoning or relies on hedge words ("looks correct," "probably conformant," "should be fine").
-- [ ] `.ai/audit/2026-04-30-phase1-bnf/reconciliation-§5.md` exists with frontmatter fields `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`; covers every production; and resolves every disagreement either with a lead verdict or with `[NEEDS USER REVIEW]`.
-- [ ] All three files committed in one commit: `docs(audit): record phase 1 §5 conformance audit`.
+- [x] `.ai/audit/2026-04-30-phase1-bnf/audit-a-§5.md` exists and contains one verdict-bearing entry for every entry under `## §3`, `## §4`, `## §5` in the conformance doc — 64 entries total (1 + 1 + 62).
+- [x] `.ai/audit/2026-04-30-phase1-bnf/audit-b-§5.md` exists with the same 64-entry coverage.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
+- [x] Every entry in both files carries a verdict from the taxonomy, parser file:line evidence, and reasoning citing spec wording.
+- [x] No entry is missing reasoning or relies on hedge words ("looks correct," "probably conformant," "should be fine").
+- [x] `.ai/audit/2026-04-30-phase1-bnf/reconciliation-§5.md` exists with frontmatter fields `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`; covers every production; and resolves every disagreement either with a lead verdict or with `[NEEDS USER REVIEW]`.
+- [x] All three files committed in one commit: `docs(audit): record phase 1 §5 conformance audit`.
 
 ### Task 2: Audit §6 (structural productions)
 
