@@ -156,7 +156,7 @@ the invariant's effective coverage.
 
 ## Steps
 
-- [ ] Task 1 — fix `string_to_block_scalar` doubling +
+- [x] Task 1 — fix `string_to_block_scalar` doubling +
       update/add fixtures
 - [ ] Task 2 — add property-preservation invariant test +
       load-bearing comment in `block_to_flow`
@@ -175,7 +175,7 @@ two new fixtures covering user tags alone and the
 combined anchor+user-tag form so future regressions are
 caught at the fixture layer.
 
-- [ ] In `block_scalar.rs:23-28`, before the
+- [x] In `block_scalar.rs:23-28`, before the
       `format_subtree(&block_scalar, ...)` call, mutate
       the cloned scalar's property fields so the
       formatter no longer re-emits anchor or user tag.
@@ -186,7 +186,7 @@ caught at the fixture layer.
       three example inputs in the Context section
       produces a single occurrence of each property
       literal in the output.
-- [ ] Update
+- [x] Update
       `rlsp-yaml/tests/fixtures/code_actions/block-scalar-preserve-anchor.md`
       so `Expected-Document` is:
       ```yaml
@@ -194,28 +194,30 @@ caught at the fixture layer.
         this is a long string that exceeds forty characters
       ```
       (single `&myanchor`).
-- [ ] Add
+- [x] Add
       `rlsp-yaml/tests/fixtures/code_actions/block-scalar-preserve-user-tag.md`
       with input `description: !mytag "this is a long string that exceeds forty characters"`
       and expected output containing exactly one `!mytag`
       followed by the literal block form.
-- [ ] Add
+- [x] Add
       `rlsp-yaml/tests/fixtures/code_actions/block-scalar-preserve-anchor-and-user-tag.md`
       with input `description: &a !mytag "this is a long string that exceeds forty characters"`
       and expected output containing exactly one `&a` and
       one `!mytag` in the correct order, followed by the
       literal block form.
-- [ ] `cargo test --test code_action_fixtures` passes.
+- [x] `cargo test --test code_action_fixtures` passes.
       The three preserve-* fixtures all pass.
-- [ ] `cargo test --workspace` passes (no regressions in
+- [x] `cargo test --workspace` passes (no regressions in
       other crates).
-- [ ] `cargo clippy --all-targets` clean.
-- [ ] `cargo fmt` applied.
+- [x] `cargo clippy --all-targets` clean.
+- [x] `cargo fmt` applied.
 
 Acceptance: all four assertions hold simultaneously —
 `block-scalar-preserve-anchor.md` passes with the
 single-occurrence Expected-Document, both new fixtures
 pass, and `cargo test --workspace` is green.
+
+**Commit:** `70f2caa`
 
 ### Task 2: Add property-preservation invariant + load-bearing comment in `block_to_flow`
 

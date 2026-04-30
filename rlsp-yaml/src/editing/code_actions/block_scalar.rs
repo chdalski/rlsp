@@ -21,8 +21,21 @@ pub(super) fn string_to_block_scalar(
 
     let base_indent = key_col;
     let mut block_scalar = scalar.clone();
-    if let Node::Scalar { style, .. } = &mut block_scalar {
+    // Clear anchor, anchor_loc, tag, and tag_loc from the clone before formatting.
+    // The edit range covers only the scalar token (not the anchor/tag prefix), so
+    // the source buffer already preserves those properties. If the clone retains
+    // them, format_subtree re-emits them, doubling the properties in the output.
+    if let Node::Scalar {
+        style, tag, meta, ..
+    } = &mut block_scalar
+    {
         *style = ScalarStyle::Literal(Chomp::Clip);
+        *tag = None;
+        if let Some(m) = meta.as_mut() {
+            m.anchor = None;
+            m.anchor_loc = None;
+            m.tag_loc = None;
+        }
     }
 
     let new_text = format_subtree(&block_scalar, options, base_indent);
@@ -126,6 +139,16 @@ fn find_block_scalar_in_node<'a>(
 mod tests {
     use super::super::test_helpers::apply_block_scalar_edit;
 
+    fn count(haystack: &str, needle: &str) -> usize {
+        let mut count = 0;
+        let mut start = 0;
+        while let Some(pos) = haystack[start..].find(needle) {
+            count += 1;
+            start += pos + needle.len();
+        }
+        count
+    }
+
     // Pattern C (kept inline): column-exact range assertion — edit.range.end.character must equal
     // the exclusive byte end of the scalar span, not the end of the full line. The fixture format
     // has no range-structure field.
@@ -148,6 +171,73 @@ mod tests {
         assert!(
             result.contains("# keep me"),
             "trailing comment must survive in the final edited text: {result:?}"
+        );
+    }
+
+    // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
+    // The fix clears properties from the cloned node before formatting, so new_text
+    // contains zero occurrences — the source buffer preserves the single occurrence.
+    // The final document (source + new_text splice) therefore contains exactly one occurrence.
+
+    #[test]
+    fn new_text_does_not_duplicate_anchor() {
+        let text = "description: &myanchor \"this is a long string that exceeds forty chars\"\n";
+        let (result, edit) = apply_block_scalar_edit(text, 0);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn new_text_does_not_duplicate_user_tag() {
+        let text = "description: !mytag \"this is a long string that exceeds forty chars\"\n";
+        let (result, edit) = apply_block_scalar_edit(text, 0);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn new_text_does_not_duplicate_anchor_or_tag_when_both_present() {
+        let text = "description: &a !mytag \"this is a long string that exceeds forty chars\"\n";
+        let (result, edit) = apply_block_scalar_edit(text, 0);
+        assert_eq!(
+            count(&edit.new_text, "&a"),
+            0,
+            "new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&a"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
         );
     }
 }

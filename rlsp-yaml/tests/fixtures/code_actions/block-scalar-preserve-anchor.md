@@ -5,7 +5,7 @@ cursor: 0:0
 applies-action: block scalar
 ---
 
-# Test: Anchor on the scalar value is preserved in the block scalar output
+# Test: Anchor on the scalar value is preserved once in the block scalar output
 
 ## Test-Document
 
@@ -16,6 +16,6 @@ description: &myanchor "this is a long string that exceeds forty characters"
 ## Expected-Document
 
 ```yaml
-description: &myanchor &myanchor |
+description: &myanchor |
   this is a long string that exceeds forty characters
 ```
