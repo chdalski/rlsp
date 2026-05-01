@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-04-30)
 **Created:** 2026-04-30
 
 ## Goal
@@ -55,8 +55,8 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 - [x] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 6 (Core schema §10.3): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 7 (error semantics + limits): dispatch A + B subagents, reconcile, commit
-- [ ] Compose final summary across all areas; file follow-up entries; commit
-- [ ] Mark plan Completed and commit status update
+- [x] Compose final summary across all areas; file follow-up entries; commit
+- [x] Mark plan Completed and commit status update
 
 ## Tasks
 
@@ -267,17 +267,17 @@ Lead-authored consolidation across all areas. Summary at `.ai/audit/2026-04-30-p
 8. **Follow-up filing** — for every requirement with verdict `Lenient` or `Non-conformant`, append entry to `.ai/memory/project_followup_plans.md` under `Open: rlsp-yaml-parser`, except where an existing entry already names the same spec section AND the same code location (file path + line range). Every dedup decision must appear in section 7 (Deduplicated follow-ups) above. Deduplication is by spec section and code location, not by topic. Requirements with verdicts `Strict-conformant`, `Stricter-than-spec`, `Not-applicable`, or `Indeterminate` do not generate follow-up entries from this rule (Indeterminate requirements are surfaced in section 6 instead).
 
 **Acceptance criteria:**
-- [ ] `summary.md` exists with frontmatter fields `plan`, `phase`, `side: Summary`, `section: all`, `date`, `produced-by: lead`.
-- [ ] All eight required sections are present (Verdict table, Lenient, Stricter-than-spec, Non-conformant, `[NEEDS USER REVIEW]`, Indeterminate, Deduplicated follow-ups, Follow-up filing).
-- [ ] Verdict table row count equals the sum of per-task requirement counts; no requirement audited across Tasks 1–7 is missing from the table.
-- [ ] Lenient list includes gap nature and one-line fix summary for each entry.
-- [ ] Stricter-than-spec list includes rationale for each entry.
-- [ ] Non-conformant list includes one-line deviation description for each entry.
-- [ ] `[NEEDS USER REVIEW]` list enumerates every flagged item with the lead's tentative verdict.
-- [ ] Indeterminate list enumerates every Indeterminate requirement with a one-line description of what would resolve it.
-- [ ] Deduplicated follow-ups list explicitly names every `Lenient` or `Non-conformant` requirement that was not filed, with the existing `project_followup_plans.md` entry it deduplicates against.
-- [ ] For every `Lenient` or `Non-conformant` requirement, either (a) a new entry exists in `project_followup_plans.md` after this task, or (b) it appears in the Deduplicated follow-ups list with a cited existing entry. There is no third option.
-- [ ] Two commits land: `docs(audit): record phase 2 conformance audit summary` and `chore(memory): file phase 2 conformance audit follow-ups`. Plan status update lands in `docs(rlsp-yaml-parser): mark phase 2 audit plan complete`.
+- [x] `summary.md` exists with frontmatter fields `plan`, `phase`, `side: Summary`, `section: all`, `date`, `produced-by: lead`.
+- [x] All eight required sections are present (Verdict table, Lenient, Stricter-than-spec, Non-conformant, `[NEEDS USER REVIEW]`, Indeterminate, Deduplicated follow-ups, Follow-up filing).
+- [x] Verdict table row count equals the sum of per-task requirement counts; no requirement audited across Tasks 1–7 is missing from the table.
+- [x] Lenient list includes gap nature and one-line fix summary for each entry.
+- [x] Stricter-than-spec list includes rationale for each entry.
+- [x] Non-conformant list includes one-line deviation description for each entry.
+- [x] `[NEEDS USER REVIEW]` list enumerates every flagged item with the lead's tentative verdict.
+- [x] Indeterminate list enumerates every Indeterminate requirement with a one-line description of what would resolve it.
+- [x] Deduplicated follow-ups list explicitly names every `Lenient` or `Non-conformant` requirement that was not filed, with the existing `project_followup_plans.md` entry it deduplicates against.
+- [x] For every `Lenient` or `Non-conformant` requirement, either (a) a new entry exists in `project_followup_plans.md` after this task, or (b) it appears in the Deduplicated follow-ups list with a cited existing entry. There is no third option.
+- [x] Two commits land: `docs(audit): record phase 2 conformance audit summary` and `chore(memory): file phase 2 conformance audit follow-ups`. Plan status update lands in `docs(rlsp-yaml-parser): mark phase 2 audit plan complete`.
 
 ## Decisions
 
