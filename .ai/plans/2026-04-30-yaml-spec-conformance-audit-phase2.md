@@ -49,7 +49,7 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 - [x] Wait for Phase 1 plan completion (`Status: Completed`); read its summary and reconciliation files
 - [x] Populate the "Phase 1 Findings" section of this plan with scope additions
 - [x] Audit area 1 (encoding §5.2): dispatch A + B subagents, reconcile, commit
-- [ ] Audit area 2 (directives §6.8): dispatch A + B subagents, reconcile, commit
+- [x] Audit area 2 (directives §6.8): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 3 (tag resolution §6.9.1): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 4 (Failsafe schema §10.1): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
@@ -141,14 +141,14 @@ Audit the parser's handling of `%YAML` and `%TAG` directives. Spec normative req
 Same subagent shape, taxonomy, entry format (Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning), and reconciliation procedure as Task 1, with `§5.2` replaced by `§6.8` in output paths and frontmatter `section` field.
 
 **Acceptance criteria:**
-- [ ] `audit-a-§6.8.md`, `audit-b-§6.8.md`, and `reconciliation-§6.8.md` exist.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
-- [ ] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
-- [ ] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
-- [ ] Every requirement entry produces a verdict from the taxonomy (Strict-conformant / Stricter-than-spec / Lenient / Non-conformant / Not-applicable / Indeterminate).
-- [ ] No hedge words anywhere.
-- [ ] No throwaway test programs left committed (verified by `git status` showing no new test files after the task commit).
-- [ ] All three files committed in one commit: `docs(audit): record phase 2 §6.8 conformance audit`.
+- [x] `audit-a-§6.8.md`, `audit-b-§6.8.md`, and `reconciliation-§6.8.md` exist.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
+- [x] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
+- [x] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
+- [x] Every requirement entry produces a verdict from the taxonomy (Strict-conformant / Stricter-than-spec / Lenient / Non-conformant / Not-applicable / Indeterminate).
+- [x] No hedge words anywhere.
+- [x] No throwaway test programs left committed (verified by `git status` showing no new test files after the task commit).
+- [x] All three files committed in one commit: `docs(audit): record phase 2 §6.8 conformance audit`.
 
 ### Task 3: Audit §6.9.1 Tag Resolution
 
