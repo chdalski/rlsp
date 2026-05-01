@@ -53,7 +53,7 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 - [x] Audit area 3 (tag resolution §6.9.1): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 4 (Failsafe schema §10.1): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
-- [ ] Audit area 6 (Core schema §10.3): dispatch A + B subagents, reconcile, commit
+- [x] Audit area 6 (Core schema §10.3): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 7 (error semantics + limits): dispatch A + B subagents, reconcile, commit
 - [ ] Compose final summary across all areas; file follow-up entries; commit
 - [ ] Mark plan Completed and commit status update
@@ -219,15 +219,15 @@ Audit the parser's resolution of plain scalars under the Core schema. Spec norma
 Same subagent shape, taxonomy, entry format, and reconciliation procedure as Task 1, with `§5.2` replaced by `§10.3`.
 
 **Acceptance criteria:**
-- [ ] `audit-a-§10.3.md`, `audit-b-§10.3.md`, and `reconciliation-§10.3.md` exist.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
-- [ ] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
-- [ ] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
-- [ ] Every requirement entry produces a verdict from the taxonomy.
-- [ ] Tests cover the full set of recognized forms per the §10.3 spec tables — every null form, every bool form, every integer form, every float form — plus at least one negative case per type (a form that looks similar but should resolve to `!str`).
-- [ ] No hedge words anywhere.
-- [ ] No throwaway test programs left committed.
-- [ ] All three files committed: `docs(audit): record phase 2 §10.3 conformance audit`.
+- [x] `audit-a-§10.3.md`, `audit-b-§10.3.md`, and `reconciliation-§10.3.md` exist.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
+- [x] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
+- [x] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
+- [x] Every requirement entry produces a verdict from the taxonomy.
+- [x] Tests cover the full set of recognized forms per the §10.3 spec tables — every null form, every bool form, every integer form, every float form — plus at least one negative case per type (a form that looks similar but should resolve to `!str`).
+- [x] No hedge words anywhere.
+- [x] No throwaway test programs left committed.
+- [x] All three files committed: `docs(audit): record phase 2 §10.3 conformance audit`.
 
 ### Task 7: Audit error semantics and limits
 
