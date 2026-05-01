@@ -48,7 +48,7 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 
 - [x] Wait for Phase 1 plan completion (`Status: Completed`); read its summary and reconciliation files
 - [x] Populate the "Phase 1 Findings" section of this plan with scope additions
-- [ ] Audit area 1 (encoding §5.2): dispatch A + B subagents, reconcile, commit
+- [x] Audit area 1 (encoding §5.2): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 2 (directives §6.8): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 3 (tag resolution §6.9.1): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 4 (Failsafe schema §10.1): dispatch A + B subagents, reconcile, commit
@@ -120,15 +120,15 @@ date: 2026-04-30
 **Reconciliation (lead-authored):** `.ai/audit/2026-04-30-phase2-prose/reconciliation-§5.2.md` covers every requirement; resolves disagreements with lead verdict or `[NEEDS USER REVIEW]`. Frontmatter `side: Reconciliation`, `produced-by: lead`.
 
 **Acceptance criteria:**
-- [ ] `audit-a-§5.2.md` and `audit-b-§5.2.md` exist.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
-- [ ] Each audit file enumerates the same set of normative-prose requirements from §5.2 and assigns sequential REQ IDs (`REQ-§5.2-1`, `REQ-§5.2-2`, …).
-- [ ] Every requirement entry includes all eight required fields: Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
-- [ ] Every requirement entry's Verdict is one of the six taxonomy labels (Strict-conformant / Stricter-than-spec / Lenient / Non-conformant / Not-applicable / Indeterminate).
-- [ ] No throwaway test programs left committed in `rlsp-yaml-parser/tests/` or anywhere else after the task — verified by `git status` showing no new test files after the task commit.
-- [ ] No hedge words anywhere in the audit files.
-- [ ] `reconciliation-§5.2.md` exists with frontmatter fields `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`; covers every requirement; resolves every disagreement with a lead verdict or `[NEEDS USER REVIEW]`.
-- [ ] All three files committed in one commit: `docs(audit): record phase 2 §5.2 conformance audit`.
+- [x] `audit-a-§5.2.md` and `audit-b-§5.2.md` exist.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
+- [x] Each audit file enumerates the same set of normative-prose requirements from §5.2 and assigns sequential REQ IDs (`REQ-§5.2-1`, `REQ-§5.2-2`, …).
+- [x] Every requirement entry includes all eight required fields: Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
+- [x] Every requirement entry's Verdict is one of the six taxonomy labels (Strict-conformant / Stricter-than-spec / Lenient / Non-conformant / Not-applicable / Indeterminate).
+- [x] No throwaway test programs left committed in `rlsp-yaml-parser/tests/` or anywhere else after the task — verified by `git status` showing no new test files after the task commit.
+- [x] No hedge words anywhere in the audit files.
+- [x] `reconciliation-§5.2.md` exists with frontmatter fields `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`; covers every requirement; resolves every disagreement with a lead verdict or `[NEEDS USER REVIEW]`.
+- [x] All three files committed in one commit: `docs(audit): record phase 2 §5.2 conformance audit`.
 
 ### Task 2: Audit §6.8 Directives
 
