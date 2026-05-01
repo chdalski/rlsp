@@ -54,7 +54,7 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 - [x] Audit area 4 (Failsafe schema §10.1): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 6 (Core schema §10.3): dispatch A + B subagents, reconcile, commit
-- [ ] Audit area 7 (error semantics + limits): dispatch A + B subagents, reconcile, commit
+- [x] Audit area 7 (error semantics + limits): dispatch A + B subagents, reconcile, commit
 - [ ] Compose final summary across all areas; file follow-up entries; commit
 - [ ] Mark plan Completed and commit status update
 
@@ -240,16 +240,16 @@ Audit the parser's error reporting and resource limits. The spec leaves much of 
 Same subagent shape as Task 1, with `§5.2` replaced by `error-and-limits`.
 
 **Acceptance criteria:**
-- [ ] `audit-a-error-and-limits.md`, `audit-b-error-and-limits.md`, and `reconciliation-error-and-limits.md` exist.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
-- [ ] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
-- [ ] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
-- [ ] Every limit category exposed via `LoaderOptions` / `LoaderBuilder` produces a verdict from the taxonomy. The audit may not skip a category by reporting "observed" without a verdict.
-- [ ] Error-position accuracy receives a verdict for at least one malformed input per error class (lex error, parser state error, limit violation).
-- [ ] Limit-violation behavior verdicts confirm structured errors, not panics, for every limit category.
-- [ ] No hedge words anywhere.
-- [ ] No committed throwaway test programs (verified by `git status` showing no new files in the parser test directory after the task commit).
-- [ ] All three files committed: `docs(audit): record phase 2 error semantics and limits conformance audit`.
+- [x] `audit-a-error-and-limits.md`, `audit-b-error-and-limits.md`, and `reconciliation-error-and-limits.md` exist.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side` (`A` or `B`), `section`, `date`.
+- [x] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
+- [x] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
+- [x] Every limit category exposed via `LoaderOptions` / `LoaderBuilder` produces a verdict from the taxonomy. The audit may not skip a category by reporting "observed" without a verdict.
+- [x] Error-position accuracy receives a verdict for at least one malformed input per error class (lex error, parser state error, limit violation).
+- [x] Limit-violation behavior verdicts confirm structured errors, not panics, for every limit category.
+- [x] No hedge words anywhere.
+- [x] No committed throwaway test programs (verified by `git status` showing no new files in the parser test directory after the task commit).
+- [x] All three files committed: `docs(audit): record phase 2 error semantics and limits conformance audit`.
 
 ### Task 8: Compose summary and file follow-ups
 
