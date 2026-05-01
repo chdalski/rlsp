@@ -1118,10 +1118,18 @@ impl<'input> EventIter<'input> {
                 let is_value_sep =
                     is_standard_sep || is_adjacent_json_sep || is_mapping_value_phase;
                 if is_value_sep {
-                    // Multi-line implicit single-pair mapping key check (YAML 1.2 §7.4.1):
-                    // inside a flow sequence `[...]`, a single-pair mapping entry's key must
-                    // be on the same line as the `:` separator.  (Flow mappings `{...}` allow
-                    // multi-line implicit keys — see YAML 1.2 §7.4.2.)
+                    // Single-line constraint for flow-sequence single-pair compact keys
+                    // (YAML 1.2 §7.4.1 production [152] ns-flow-pair-yaml-key-entry, which
+                    // hardcodes ns-s-implicit-yaml-key(FLOW-KEY) — a formal "implicit key"
+                    // per spec).  Flow mappings `{a: b}` use §7.4.2 production [145]
+                    // ns-flow-map-yaml-key-entry, whose key inherits the parent context
+                    // (FLOW-IN at top level) and therefore permits multi-line per the BNF.
+                    // The §7.3.x prose "scalars are restricted to a single line when
+                    // contained inside an implicit key" is informal; the formal "implicit
+                    // key" contexts are BLOCK-KEY and the FLOW-KEY hardcoded sites only.
+                    // See .ai/audit/2026-04-30-phase1-bnf/reconciliation-§7.md entry [110]
+                    // for the prose-vs-BNF terminology analysis and concrete examples.
+                    //
                     // Exception: when a `?` explicit-key indicator was seen in this sequence
                     // (`explicit_key_in_seq`), the key may span multiple lines.
                     let in_sequence = matches!(flow_stack.last(), Some(FlowFrame::Sequence { .. }));
@@ -1130,7 +1138,7 @@ impl<'input> EventIter<'input> {
                         self.state = IterState::Done;
                         return StepResult::Yield(Err(Error {
                             pos: colon_pos,
-                            message: "implicit flow mapping key must be on a single line".into(),
+                            message: "single-pair mapping key in a flow sequence must be on a single line".into(),
                         }));
                     }
                     // YAML 1.2 §7.4.3: implicit flow keys are limited to 1024 Unicode
