@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-01)
 **Created:** 2026-04-30
 
 ## Goal
@@ -33,7 +33,7 @@ Fix the BOM-less UTF-32 encoding-detection gap in `rlsp-yaml-parser` (Phase 2 §
 - [x] Add spec-fixture parameterized integration test in `tests/encoding.rs` (`detect_encoding_covers_all_spec_rows`) with one `rstest` case per §5.2 detection-table row — both currently-covered rows (regression baseline) and the two newly-supported rows
 - [x] Add encoding round-trip proptest in `tests/encoding.rs` (`encoding_choice_invariant_under_parse`): for ASCII-only generated YAML strings, encode in all five supported encodings × {with-BOM, without-BOM} and assert `parse_events` produces the same event sequence in every form
 - [x] Verify build, clippy, all tests pass; verify the round-trip property catches a regression by manually deleting one of the new arms locally and observing the property fail (then restore)
-- [ ] Mark plan Completed and commit
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
