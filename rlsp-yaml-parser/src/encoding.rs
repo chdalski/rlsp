@@ -9,9 +9,9 @@ pub enum Encoding {
     Utf16Le,
     /// UTF-16 big-endian (BOM `FE FF` or null-byte heuristic).
     Utf16Be,
-    /// UTF-32 little-endian (BOM `FF FE 00 00`).
+    /// UTF-32 little-endian (BOM `FF FE 00 00` or null-byte heuristic).
     Utf32Le,
-    /// UTF-32 big-endian (BOM `00 00 FE FF`).
+    /// UTF-32 big-endian (BOM `00 00 FE FF` or null-byte heuristic).
     Utf32Be,
 }
 
@@ -50,7 +50,10 @@ impl core::fmt::Display for EncodingError {
 ///
 /// Implements YAML 1.2 §5.2 encoding detection. UTF-32 BOMs are checked
 /// before UTF-16 because the UTF-32 LE BOM (`FF FE 00 00`) is a superset of
-/// the UTF-16 LE BOM (`FF FE`).
+/// the UTF-16 LE BOM (`FF FE`). The same prefix-overlap reasoning applies to
+/// BOM-less heuristics: UTF-32 null-byte patterns must come before UTF-16
+/// null-byte patterns because `[a, 0x00, 0x00, 0x00, ..]` (UTF-32-LE) is a
+/// strict superset of `[a, 0x00, ..]` (UTF-16-LE).
 #[must_use]
 pub fn detect_encoding(bytes: &[u8]) -> Encoding {
     match bytes {
@@ -60,6 +63,9 @@ pub fn detect_encoding(bytes: &[u8]) -> Encoding {
         // UTF-16 BOMs
         [0xFE, 0xFF, ..] => Encoding::Utf16Be,
         [0xFF, 0xFE, ..] => Encoding::Utf16Le,
+        // BOM-less UTF-32 heuristics (must come before UTF-16 heuristics — see doc comment)
+        [0x00, 0x00, 0x00, a, ..] if *a != 0 => Encoding::Utf32Be,
+        [a, 0x00, 0x00, 0x00, ..] if *a != 0 => Encoding::Utf32Le,
         // Null-byte heuristic (no BOM): YAML streams begin with ASCII content.
         // UTF-16 LE: odd bytes are null  → first pair is [<ascii>, 0x00]
         // UTF-16 BE: even bytes are null → first pair is [0x00, <ascii>]
@@ -241,6 +247,70 @@ mod tests {
     #[case::utf16_be_two_byte_heuristic(&[0x00, b'a'], Encoding::Utf16Be)]
     fn detect_encoding_null_byte_heuristic(#[case] bytes: &[u8], #[case] expected: Encoding) {
         assert_eq!(detect_encoding(bytes), expected);
+    }
+
+    // IT-1: BOM-less UTF-32-BE positive detection and decode round-trip
+    #[test]
+    fn detect_encoding_bom_less_utf32_be() {
+        let input: &[u8] = &[0x00, 0x00, 0x00, 0x6B, 0x00, 0x00, 0x00, 0x3A];
+        assert_eq!(detect_encoding(input), Encoding::Utf32Be);
+        assert_eq!(decode(input).unwrap(), "k:");
+    }
+
+    // IT-2: BOM-less UTF-32-LE positive detection and decode round-trip
+    #[test]
+    fn detect_encoding_bom_less_utf32_le() {
+        let input: &[u8] = &[0x6B, 0x00, 0x00, 0x00, 0x3A, 0x00, 0x00, 0x00];
+        assert_eq!(detect_encoding(input), Encoding::Utf32Le);
+        assert_eq!(decode(input).unwrap(), "k:");
+    }
+
+    // IT-3: exactly 4 bytes — minimum valid BOM-less UTF-32-BE input
+    #[test]
+    fn detect_encoding_exactly_four_bytes_utf32_be() {
+        assert_eq!(
+            detect_encoding(&[0x00, 0x00, 0x00, 0x41]),
+            Encoding::Utf32Be
+        );
+    }
+
+    // IT-4: exactly 4 bytes — minimum valid BOM-less UTF-32-LE input
+    #[test]
+    fn detect_encoding_exactly_four_bytes_utf32_le() {
+        assert_eq!(
+            detect_encoding(&[0x41, 0x00, 0x00, 0x00]),
+            Encoding::Utf32Le
+        );
+    }
+
+    // IT-5: all-zero input must fall through to UTF-8 (the *a != 0 guard)
+    #[test]
+    fn detect_encoding_all_zero_input_is_utf8() {
+        assert_eq!(detect_encoding(&[0x00u8; 16]), Encoding::Utf8);
+    }
+
+    // IT-6: UTF-16-BE regression — non-zero at byte 1 means it is not UTF-32-BE
+    #[test]
+    fn detect_encoding_bom_less_utf32_does_not_shadow_utf16_be() {
+        assert_eq!(
+            detect_encoding(&[0x00, 0x41, 0x00, 0x42]),
+            Encoding::Utf16Be
+        );
+    }
+
+    // IT-7: UTF-16-LE regression — non-zero at byte 2 means it is not UTF-32-LE
+    #[test]
+    fn detect_encoding_bom_less_utf32_does_not_shadow_utf16_le() {
+        assert_eq!(
+            detect_encoding(&[0x41, 0x00, 0x42, 0x00]),
+            Encoding::Utf16Le
+        );
+    }
+
+    // IT-8: 3-byte input must not match the 4-byte UTF-32 arm
+    #[test]
+    fn detect_encoding_three_bytes_does_not_match_utf32() {
+        assert_eq!(detect_encoding(&[0x00, 0x00, 0x00]), Encoding::Utf8);
     }
 
     // -----------------------------------------------------------------------

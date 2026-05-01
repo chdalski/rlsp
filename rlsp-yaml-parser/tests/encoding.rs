@@ -19,9 +19,10 @@
     reason = "test code"
 )]
 
+use proptest::prelude::*;
 use rstest::rstest;
 
-use rlsp_yaml_parser::encoding::{EncodingError, decode};
+use rlsp_yaml_parser::encoding::{Encoding, EncodingError, decode, detect_encoding};
 use rlsp_yaml_parser::{Event, parse_events};
 
 // ---------------------------------------------------------------------------
@@ -360,4 +361,128 @@ fn parse_events_accepts_arabic_in_mapping_key() {
         values.contains(&arabic.to_string()),
         "expected Arabic key scalar, got: {values:?}"
     );
+}
+
+// ===========================================================================
+// detect_encoding() — YAML 1.2 §5.2 detection-table spec fixture
+// ===========================================================================
+//
+// One case per row of the §5.2 encoding detection table — both BOM and
+// BOM-less heuristic rows. This is the authoritative regression baseline for
+// dispatch completeness: future readers can see which spec-table row each case
+// covers.
+//
+// Note: the utf16_le_with_bom case uses [0xFF, 0xFE, 0x41, 0x00] (non-zero
+// at byte 2) rather than [0xFF, 0xFE, 0x00, 0x00] (which is the UTF-32-LE
+// BOM) to represent an unambiguous UTF-16-LE BOM input.
+
+#[rstest]
+#[case::utf32_be_with_bom(&[0x00u8, 0x00, 0xFE, 0xFF], Encoding::Utf32Be)]
+#[case::utf32_le_with_bom(&[0xFFu8, 0xFE, 0x00, 0x00], Encoding::Utf32Le)]
+#[case::utf16_be_with_bom(&[0xFEu8, 0xFF, 0x00, 0x41], Encoding::Utf16Be)]
+#[case::utf16_le_with_bom(&[0xFFu8, 0xFE, 0x41, 0x00], Encoding::Utf16Le)]
+#[case::utf8_with_bom(&[0xEFu8, 0xBB, 0xBF, 0x41], Encoding::Utf8)]
+#[case::utf32_be_no_bom(&[0x00u8, 0x00, 0x00, 0x41], Encoding::Utf32Be)]
+#[case::utf32_le_no_bom(&[0x41u8, 0x00, 0x00, 0x00], Encoding::Utf32Le)]
+#[case::utf16_be_no_bom(&[0x00u8, 0x41, 0x00, 0x42], Encoding::Utf16Be)]
+#[case::utf16_le_no_bom(&[0x41u8, 0x00, 0x42, 0x00], Encoding::Utf16Le)]
+#[case::utf8_default(&[0x41u8, 0x42, 0x43, 0x44], Encoding::Utf8)]
+fn detect_encoding_covers_all_spec_rows(#[case] bytes: &[u8], #[case] expected: Encoding) {
+    assert_eq!(detect_encoding(bytes), expected);
+}
+
+// ===========================================================================
+// detect_encoding() + decode() — encoding dispatch completeness proptest
+// ===========================================================================
+//
+// Property: for any ASCII-only YAML string, encoding it in any of the four
+// non-UTF-8 encodings × {with BOM, without BOM} and decoding it must produce
+// the same event sequence as the UTF-8 baseline. This is a permanent
+// dispatch-completeness guardrail — adding a new encoding variant without
+// correct dispatch coverage will cause this property to fail automatically.
+
+fn encode_ascii_as_utf32(bytes: &[u8], big_endian: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() * 4);
+    for &b in bytes {
+        let cp = u32::from(b);
+        if big_endian {
+            out.extend_from_slice(&cp.to_be_bytes());
+        } else {
+            out.extend_from_slice(&cp.to_le_bytes());
+        }
+    }
+    out
+}
+
+fn encode_ascii_as_utf16(bytes: &[u8], big_endian: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        if big_endian {
+            out.push(0x00);
+            out.push(b);
+        } else {
+            out.push(b);
+            out.push(0x00);
+        }
+    }
+    out
+}
+
+fn prepend_bom(encoding: Encoding, payload: &[u8]) -> Vec<u8> {
+    let bom: &[u8] = match encoding {
+        Encoding::Utf16Be => &[0xFE, 0xFF],
+        Encoding::Utf16Le => &[0xFF, 0xFE],
+        Encoding::Utf32Be => &[0x00, 0x00, 0xFE, 0xFF],
+        Encoding::Utf32Le => &[0xFF, 0xFE, 0x00, 0x00],
+        Encoding::Utf8 => &[],
+    };
+    let mut out = Vec::with_capacity(bom.len() + payload.len());
+    out.extend_from_slice(bom);
+    out.extend_from_slice(payload);
+    out
+}
+
+proptest! {
+    #[test]
+    fn encoding_choice_invariant_under_parse(
+        yaml_str in "[a-z]{1,6}: [0-9]{1,6}\n"
+    ) {
+        prop_assume!(!yaml_str.is_empty());
+
+        let utf8_events: Vec<_> = parse_events(yaml_str.as_str())
+            .map(|r| r.map(|(e, _)| e))
+            .collect();
+
+        let cases: &[(Encoding, Vec<u8>, bool)] = &[
+            (Encoding::Utf16Be, encode_ascii_as_utf16(yaml_str.as_bytes(), true), false),
+            (Encoding::Utf16Be, encode_ascii_as_utf16(yaml_str.as_bytes(), true), true),
+            (Encoding::Utf16Le, encode_ascii_as_utf16(yaml_str.as_bytes(), false), false),
+            (Encoding::Utf16Le, encode_ascii_as_utf16(yaml_str.as_bytes(), false), true),
+            (Encoding::Utf32Be, encode_ascii_as_utf32(yaml_str.as_bytes(), true), false),
+            (Encoding::Utf32Be, encode_ascii_as_utf32(yaml_str.as_bytes(), true), true),
+            (Encoding::Utf32Le, encode_ascii_as_utf32(yaml_str.as_bytes(), false), false),
+            (Encoding::Utf32Le, encode_ascii_as_utf32(yaml_str.as_bytes(), false), true),
+        ];
+
+        for (encoding, payload, include_bom) in cases {
+            let bytes = if *include_bom {
+                prepend_bom(*encoding, payload)
+            } else {
+                payload.clone()
+            };
+            let decoded = decode(&bytes).unwrap_or_else(|e| {
+                panic!("decode failed for {encoding:?} bom={include_bom}: {e}");
+            });
+            let events: Vec<_> = parse_events(&decoded)
+                .map(|r| r.map(|(e, _)| e))
+                .collect();
+            prop_assert_eq!(
+                &events,
+                &utf8_events,
+                "encoding {:?} bom={} parse events differ from UTF-8",
+                encoding,
+                include_bom
+            );
+        }
+    }
 }

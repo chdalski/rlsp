@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-04-30
 
 ## Goal
@@ -26,13 +26,13 @@ Fix the BOM-less UTF-32 encoding-detection gap in `rlsp-yaml-parser` (Phase 2 §
 
 ## Steps
 
-- [ ] Add the two BOM-less UTF-32 match arms to `detect_encoding` in `encoding.rs:55-72` with the `*a != 0` guards
-- [ ] Update the doc comment at `encoding.rs:49-53` to mention the BOM-less heuristic ordering rationale (UTF-32 patterns must precede UTF-16 patterns for both BOM and BOM-less rows)
-- [ ] Update the `Encoding::Utf32Le` and `Encoding::Utf32Be` variant doc comments at `encoding.rs:12,14` to mention both detection paths (BOM and null-byte heuristic), matching the existing `Utf16Le`/`Utf16Be` doc style
-- [ ] Add inline `#[cfg(test)]` unit tests in `encoding.rs` covering: positive BOM-less UTF-32-BE detection, positive BOM-less UTF-32-LE detection, all-zero input falls through to UTF-8 (boundary), single-zero-followed-by-ASCII still detects as UTF-16-BE (regression — confirms the new arms don't shadow existing UTF-16 detection)
-- [ ] Add spec-fixture parameterized integration test in `tests/encoding.rs` (`detect_encoding_covers_all_spec_rows`) with one `rstest` case per §5.2 detection-table row — both currently-covered rows (regression baseline) and the two newly-supported rows
-- [ ] Add encoding round-trip proptest in `tests/encoding.rs` (`encoding_choice_invariant_under_parse`): for ASCII-only generated YAML strings, encode in all five supported encodings × {with-BOM, without-BOM} and assert `parse_events` produces the same event sequence in every form
-- [ ] Verify build, clippy, all tests pass; verify the round-trip property catches a regression by manually deleting one of the new arms locally and observing the property fail (then restore)
+- [x] Add the two BOM-less UTF-32 match arms to `detect_encoding` in `encoding.rs:55-72` with the `*a != 0` guards
+- [x] Update the doc comment at `encoding.rs:49-53` to mention the BOM-less heuristic ordering rationale (UTF-32 patterns must precede UTF-16 patterns for both BOM and BOM-less rows)
+- [x] Update the `Encoding::Utf32Le` and `Encoding::Utf32Be` variant doc comments at `encoding.rs:12,14` to mention both detection paths (BOM and null-byte heuristic), matching the existing `Utf16Le`/`Utf16Be` doc style
+- [x] Add inline `#[cfg(test)]` unit tests in `encoding.rs` covering: positive BOM-less UTF-32-BE detection, positive BOM-less UTF-32-LE detection, all-zero input falls through to UTF-8 (boundary), single-zero-followed-by-ASCII still detects as UTF-16-BE (regression — confirms the new arms don't shadow existing UTF-16 detection)
+- [x] Add spec-fixture parameterized integration test in `tests/encoding.rs` (`detect_encoding_covers_all_spec_rows`) with one `rstest` case per §5.2 detection-table row — both currently-covered rows (regression baseline) and the two newly-supported rows
+- [x] Add encoding round-trip proptest in `tests/encoding.rs` (`encoding_choice_invariant_under_parse`): for ASCII-only generated YAML strings, encode in all five supported encodings × {with-BOM, without-BOM} and assert `parse_events` produces the same event sequence in every form
+- [x] Verify build, clippy, all tests pass; verify the round-trip property catches a regression by manually deleting one of the new arms locally and observing the property fail (then restore)
 - [ ] Mark plan Completed and commit
 
 ## Tasks
@@ -40,6 +40,8 @@ Fix the BOM-less UTF-32 encoding-detection gap in `rlsp-yaml-parser` (Phase 2 §
 ### Task 1: Fix BOM-less UTF-32 detection and add encoding test infrastructure
 
 Single committable unit. The fix and the tests land together so the test infrastructure pins the new behavior atomically.
+
+**Completed:** commit `fc499e9` (2026-05-01)
 
 **Implementation:**
 
@@ -136,16 +138,16 @@ Single committable unit. The fix and the tests land together so the test infrast
 
 **Acceptance criteria:**
 
-- [ ] `detect_encoding` at `encoding.rs:55-72` contains the two new BOM-less UTF-32 arms inserted between the UTF-16 BOM arms and the UTF-16 heuristic arms.
-- [ ] Each new arm has the `*a != 0` guard.
-- [ ] Doc comment at `encoding.rs:49-53` mentions BOM-less heuristic ordering rationale.
-- [ ] `Encoding::Utf32Le` and `Encoding::Utf32Be` variant doc comments at `encoding.rs:12,14` both mention the null-byte heuristic detection path in addition to the BOM, matching the doc style of the existing `Utf16Le`/`Utf16Be` variants at lines 8-10.
-- [ ] Four new inline unit tests in `encoding.rs` (`detect_encoding_bom_less_utf32_be`, `detect_encoding_bom_less_utf32_le`, `detect_encoding_all_zero_input_is_utf8`, `detect_encoding_single_zero_then_ascii_is_utf16_be`) all pass.
-- [ ] New parameterized test `detect_encoding_covers_all_spec_rows` in `tests/encoding.rs` passes with one `rstest` case per §5.2 detection-table row (10 cases total: 5 BOM rows including UTF-8 BOM + 4 BOM-less UTF-16/UTF-32 heuristic rows + 1 UTF-8 default row).
-- [ ] New proptest `encoding_choice_invariant_under_parse` in `tests/encoding.rs` runs `proptest`'s default 256 iterations and passes; a manual local check (delete one new arm → property fails) verifies the proptest catches the regression class.
-- [ ] `cargo build`, `cargo clippy --all-targets`, and `cargo test -p rlsp-yaml-parser` all pass with zero warnings.
-- [ ] `cargo fmt --check` passes.
-- [ ] Single commit with conventional format `fix(rlsp-yaml-parser): detect BOM-less UTF-32 input per YAML §5.2 table`.
+- [x] `detect_encoding` at `encoding.rs:55-72` contains the two new BOM-less UTF-32 arms inserted between the UTF-16 BOM arms and the UTF-16 heuristic arms.
+- [x] Each new arm has the `*a != 0` guard.
+- [x] Doc comment at `encoding.rs:49-53` mentions BOM-less heuristic ordering rationale.
+- [x] `Encoding::Utf32Le` and `Encoding::Utf32Be` variant doc comments at `encoding.rs:12,14` both mention the null-byte heuristic detection path in addition to the BOM, matching the doc style of the existing `Utf16Le`/`Utf16Be` variants at lines 8-10.
+- [x] Four new inline unit tests in `encoding.rs` (`detect_encoding_bom_less_utf32_be`, `detect_encoding_bom_less_utf32_le`, `detect_encoding_all_zero_input_is_utf8`, `detect_encoding_single_zero_then_ascii_is_utf16_be`) all pass.
+- [x] New parameterized test `detect_encoding_covers_all_spec_rows` in `tests/encoding.rs` passes with one `rstest` case per §5.2 detection-table row (10 cases total: 5 BOM rows including UTF-8 BOM + 4 BOM-less UTF-16/UTF-32 heuristic rows + 1 UTF-8 default row).
+- [x] New proptest `encoding_choice_invariant_under_parse` in `tests/encoding.rs` runs `proptest`'s default 256 iterations and passes; a manual local check (delete one new arm → property fails) verifies the proptest catches the regression class.
+- [x] `cargo build`, `cargo clippy --all-targets`, and `cargo test -p rlsp-yaml-parser` all pass with zero warnings.
+- [x] `cargo fmt --check` passes.
+- [x] Single commit with conventional format `fix(rlsp-yaml-parser): detect BOM-less UTF-32 input per YAML §5.2 table`.
 
 ## Decisions
 
