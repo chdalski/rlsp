@@ -52,7 +52,7 @@ Phase 1 (BNF audit, summary at `.ai/audit/2026-04-30-phase1-bnf/summary.md`) sur
 - [x] Audit area 2 (directives §6.8): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 3 (tag resolution §6.9.1): dispatch A + B subagents, reconcile, commit
 - [x] Audit area 4 (Failsafe schema §10.1): dispatch A + B subagents, reconcile, commit
-- [ ] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
+- [x] Audit area 5 (JSON schema §10.2): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 6 (Core schema §10.3): dispatch A + B subagents, reconcile, commit
 - [ ] Audit area 7 (error semantics + limits): dispatch A + B subagents, reconcile, commit
 - [ ] Compose final summary across all areas; file follow-up entries; commit
@@ -200,15 +200,15 @@ Audit the parser's resolution of plain scalars under the JSON schema. Spec norma
 Same subagent shape, taxonomy, entry format, and reconciliation procedure as Task 1, with `§5.2` replaced by `§10.2`.
 
 **Acceptance criteria:**
-- [ ] `audit-a-§10.2.md`, `audit-b-§10.2.md`, and `reconciliation-§10.2.md` exist.
-- [ ] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
-- [ ] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
-- [ ] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
-- [ ] Every requirement entry produces a verdict from the taxonomy.
-- [ ] Tests cover all five named requirement categories from the spec: null (`null`), bool (`true`, `false`), integer (decimal, hex, octal forms per the spec table), float (with and without exponent, plus infinity and NaN per the spec table), and `!str` fallback (at least one negative case where a plain scalar matches no JSON regex).
-- [ ] No hedge words anywhere.
-- [ ] No throwaway test programs left committed.
-- [ ] All three files committed: `docs(audit): record phase 2 §10.2 conformance audit`.
+- [x] `audit-a-§10.2.md`, `audit-b-§10.2.md`, and `reconciliation-§10.2.md` exist.
+- [x] Each audit file's frontmatter contains all five required fields: `plan`, `phase`, `side`, `section`, `date`.
+- [x] Reconciliation file's frontmatter contains all six required fields: `plan`, `phase`, `side: Reconciliation`, `section`, `date`, `produced-by: lead`.
+- [x] Every entry includes Spec requirement, Test method, Test input, Observed output, Spec expectation, Verdict, Evidence, Reasoning.
+- [x] Every requirement entry produces a verdict from the taxonomy.
+- [x] Tests cover all five named requirement categories from the spec: null (`null`), bool (`true`, `false`), integer (decimal, hex, octal forms per the spec table), float (with and without exponent, plus infinity and NaN per the spec table), and `!str` fallback (at least one negative case where a plain scalar matches no JSON regex).
+- [x] No hedge words anywhere.
+- [x] No throwaway test programs left committed.
+- [x] All three files committed: `docs(audit): record phase 2 §10.2 conformance audit`.
 
 ### Task 6: Audit §10.3 Core Schema
 
