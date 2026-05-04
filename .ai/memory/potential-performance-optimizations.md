@@ -72,6 +72,20 @@ flamegraph evidence of allocation overhead in the current
 code. Worth revisiting only if a future profile surfaces
 allocation overhead.
 
+### c-printable enforcement pre-scan fast-path
+
+**Current state (commit `666e2f2`):** each scanner (plain, block, comment, single-quoted, double-quoted) runs a separate byte-level post-scan over its content slice checking for non-c-printable / non-nb-json bytes. On valid YAML (which by spec definition contains no non-printables), every scan finds nothing — pure overhead proportional to total content length across all scalars and comments.
+
+**Optimization:** a single pre-scan of the entire input `&str` before parsing. If the pre-scan finds no non-printable bytes (the common case for valid YAML), set a flag and skip ALL per-scanner validation passes — zero overhead on valid input. Only if the pre-scan finds a candidate byte, fall back to the per-scanner context-aware checks (needed because the nb-json exception allows DEL, C1, U+FFFE/FFFF inside quoted scalars but not elsewhere).
+
+**Pre-scan shape:** scan for `b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D || b == 0x7F` (catches all single-byte non-printables: C0 controls except TAB/LF/CR, plus DEL). For multi-byte non-printables (C1 controls via `0xC2 0x80-0x9F`, U+FFFE/FFFF via `0xEF 0xBF 0xBE/0xBF`), scan for the lead bytes `0xC2` and `0xEF` and check followers. If none found → input is guaranteed c-printable → all per-scanner checks can be skipped.
+
+**Expected impact:** eliminates the O(n) per-scanner validation cost on valid input entirely. The pre-scan is one O(n) pass over the input, replacing N per-scanner O(m) passes (where the sum of all m equals n). Net: one pass instead of many, and if the pre-scan passes, per-scanner passes are skipped.
+
+**Threading:** the pre-scan flag could be a field on `Lexer` or passed as a parameter to `parse_events`. Set once before parsing begins; read by each scanner.
+
+**When to pursue:** after conformance work is complete. Benchmark on baremetal first to measure actual overhead of the current per-scanner approach on representative YAML files before investing in the optimization.
+
 ## Methodology for verification
 
 Before opening a new perf plan, confirm the opportunity
