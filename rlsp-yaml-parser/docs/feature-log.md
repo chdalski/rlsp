@@ -116,7 +116,7 @@ lossless mode.
 
 ### Security Limits [completed]
 
-**Description:** Seven compile-time constants (in `src/limits.rs`) cap
+**Description:** Eight compile-time constants (in `src/limits.rs`) cap
 inputs from untrusted sources. All limits return structured
 `Error`/`LoadError` values — never panics:
 - `MAX_COLLECTION_DEPTH` (512) — combined block + flow nesting depth;
@@ -131,6 +131,11 @@ inputs from untrusted sources. All limits return structured
 - `MAX_RESOLVED_TAG_LEN` (4 096) — fully-resolved tag string after
   `%TAG` prefix expansion; prevents allocation of oversized resolved
   strings.
+- `MAX_SCALAR_LEN` (1 048 576 = 1 MiB) — quoted scalar length for both
+  single-quoted and double-quoted styles; applied uniformly on the
+  borrow path (no escapes), the escape-decode (owned) path, and
+  accumulated multi-line length; prevents DoS via unbounded scalar
+  allocation.
 **Complexity:** Low
 **Comment:** All limits are generous for real-world YAML (Kubernetes
 documents rarely exceed 20 levels deep; tags are under 30 bytes) while

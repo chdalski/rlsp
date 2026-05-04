@@ -18,17 +18,17 @@ Close the 1 MiB quoted-scalar length-cap bypass identified by the Phase 2 error-
 
 ## Steps
 
-- [ ] Add `pub const MAX_SCALAR_LEN: usize = 1_048_576` to `limits.rs` with a doc comment matching the existing constant style
-- [ ] Replace the three existing `1_048_576` literals in `lexer/quoted.rs` (lines 606, 641, 709) with `MAX_SCALAR_LEN`
-- [ ] Add borrow-path length check in `scan_double_quoted_line` at the two sites where `borrow_end` advances (line 651 and line 726 in current code)
-- [ ] Add length check in `try_consume_single_quoted` multi-line accumulation loop (where `owned.push_str(...)` and `owned.push(...)` grow the buffer)
-- [ ] Add length check in `try_consume_single_quoted` single-line return path (where `value.into_cow(body_start)` returns a borrow whose length is unchecked)
-- [ ] Add inline unit tests: double-quoted borrow-path cap fires; single-quoted single-line cap fires; single-quoted multi-line cap fires
-- [ ] Add integration test via `parse_events`: a >1 MiB double-quoted scalar with no escapes produces an error
-- [ ] Add a row for the 1 MiB quoted-scalar cap to the "Parser limits" table in `rlsp-yaml-parser/docs/architecture.md`
-- [ ] Update "Security Limits" entry in `rlsp-yaml-parser/docs/feature-log.md`: count "Seven" → "Eight", add `MAX_SCALAR_LEN` to the enumerated list
-- [ ] Verify build, clippy, all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Add `pub const MAX_SCALAR_LEN: usize = 1_048_576` to `limits.rs` with a doc comment matching the existing constant style
+- [x] Replace the three existing `1_048_576` literals in `lexer/quoted.rs` (lines 606, 641, 709) with `MAX_SCALAR_LEN`
+- [x] Add borrow-path length check in `scan_double_quoted_line` at the two sites where `borrow_end` advances (line 651 and line 726 in current code)
+- [x] Add length check in `try_consume_single_quoted` multi-line accumulation loop (where `owned.push_str(...)` and `owned.push(...)` grow the buffer)
+- [x] Add length check in `try_consume_single_quoted` single-line return path (where `value.into_cow(body_start)` returns a borrow whose length is unchecked)
+- [x] Add inline unit tests: double-quoted borrow-path cap fires; single-quoted single-line cap fires; single-quoted multi-line cap fires
+- [x] Add integration test via `parse_events`: a >1 MiB double-quoted scalar with no escapes produces an error
+- [x] Add a row for the 1 MiB quoted-scalar cap to the "Parser limits" table in `rlsp-yaml-parser/docs/architecture.md`
+- [x] Update "Security Limits" entry in `rlsp-yaml-parser/docs/feature-log.md`: count "Seven" → "Eight", add `MAX_SCALAR_LEN` to the enumerated list
+- [x] Verify build, clippy, all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
@@ -36,21 +36,23 @@ Close the 1 MiB quoted-scalar length-cap bypass identified by the Phase 2 error-
 
 Add `MAX_SCALAR_LEN` constant to `limits.rs` (matching the existing Tier 1 pattern) and enforce it on all quoted-scalar accumulation paths: double-quoted borrow path, double-quoted owned path (already partially enforced — replace literals with the constant), and all single-quoted paths (currently uncapped). Update `architecture.md` "Parser limits" table.
 
-- [ ] `MAX_SCALAR_LEN` constant in `limits.rs` with value `1_048_576` and doc comment
-- [ ] Existing `1_048_576` literals in `lexer/quoted.rs` replaced with constant
-- [ ] Double-quoted borrow-path cap check at both accumulation sites in `scan_double_quoted_line`
-- [ ] Single-quoted single-line return-path cap check in `try_consume_single_quoted`
-- [ ] Single-quoted multi-line accumulation-loop cap check in `try_consume_single_quoted`
-- [ ] Inline unit test: `double_quoted_borrow_path_length_cap_fires`
-- [ ] Inline unit test: `single_quoted_single_line_length_cap_fires`
-- [ ] Inline unit test: `single_quoted_multi_line_length_cap_fires`
-- [ ] Regression: existing `double_quoted_length_cap_exceeded_raises_error` still passes
-- [ ] Integration test in `tests/scalar_limits.rs`: `parse_events_rejects_overlong_double_quoted_scalar_without_escapes`
-- [ ] "Parser limits" table in `rlsp-yaml-parser/docs/architecture.md` updated with new row
-- [ ] "Security Limits" entry in `rlsp-yaml-parser/docs/feature-log.md` updated: count "Seven" → "Eight", `MAX_SCALAR_LEN` added to the enumerated list
-- [ ] `cargo build`, `cargo clippy --all-targets`, `cargo test -p rlsp-yaml-parser` — zero warnings, zero failures
-- [ ] `cargo fmt --check` passes
-- [ ] Single commit: `fix(rlsp-yaml-parser): enforce 1 MiB cap on all quoted-scalar paths`
+**Completed:** commit `00c2f5e` (2026-05-04)
+
+- [x] `MAX_SCALAR_LEN` constant in `limits.rs` with value `1_048_576` and doc comment
+- [x] Existing `1_048_576` literals in `lexer/quoted.rs` replaced with constant
+- [x] Double-quoted borrow-path cap check at both accumulation sites in `scan_double_quoted_line`
+- [x] Single-quoted single-line return-path cap check in `try_consume_single_quoted`
+- [x] Single-quoted multi-line accumulation-loop cap check in `try_consume_single_quoted`
+- [x] Inline unit test: `double_quoted_borrow_path_length_cap_fires`
+- [x] Inline unit test: `single_quoted_single_line_length_cap_fires`
+- [x] Inline unit test: `single_quoted_multi_line_length_cap_fires`
+- [x] Regression: existing `double_quoted_length_cap_exceeded_raises_error` still passes
+- [x] Integration test in `tests/scalar_limits.rs`: `parse_events_rejects_overlong_double_quoted_scalar_without_escapes`
+- [x] "Parser limits" table in `rlsp-yaml-parser/docs/architecture.md` updated with new row
+- [x] "Security Limits" entry in `rlsp-yaml-parser/docs/feature-log.md` updated: count "Seven" → "Eight", `MAX_SCALAR_LEN` added to the enumerated list
+- [x] `cargo build`, `cargo clippy --all-targets`, `cargo test -p rlsp-yaml-parser` — zero warnings, zero failures
+- [x] `cargo fmt --check` passes
+- [x] Single commit: `fix(rlsp-yaml-parser): enforce 1 MiB cap on all quoted-scalar paths`
 
 ## Decisions
 

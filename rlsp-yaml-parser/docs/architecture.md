@@ -508,6 +508,7 @@ All limits are constants enforced during parsing; exceeding any returns an
 | `MAX_DIRECTIVES_PER_DOC` | 64 | `parse_directive` in `directives.rs` |
 | `MAX_TAG_HANDLE_BYTES` | 256 B | `parse_tag_directive` in `directives.rs` |
 | `MAX_RESOLVED_TAG_LEN` | 4 096 B | `DirectiveScope::resolve_tag` |
+| `MAX_SCALAR_LEN` | 1 048 576 B (1 MiB) | `try_consume_single_quoted` and `scan_double_quoted_line` in `lexer/quoted.rs`; accumulated length also checked in `collect_double_quoted_continuations` |
 
 `MAX_COLLECTION_DEPTH` is a unified limit over both sequences and mappings. A
 separate per-type limit would allow nesting 512 sequences inside 512 mappings

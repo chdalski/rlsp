@@ -6,6 +6,7 @@ use memchr::{memchr, memchr2};
 
 use crate::chars::{decode_escape, is_c_printable};
 use crate::error::Error;
+use crate::limits::MAX_SCALAR_LEN;
 use crate::pos::{Pos, Span};
 
 use super::{Lexer, is_doc_marker_line};
@@ -24,6 +25,10 @@ impl<'input> Lexer<'input> {
     ///
     /// **Borrow contract:** Single-line with no `''` escapes → `Cow::Borrowed`.
     /// Anything else (escapes or multi-line) → `Cow::Owned`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "length cap checks added to all single-quoted paths increase line count beyond 100"
+    )]
     pub fn try_consume_single_quoted(
         &mut self,
         _parent_indent: usize,
@@ -60,6 +65,12 @@ impl<'input> Lexer<'input> {
 
         if closed {
             // Entire scalar on one line.
+            if value.quoted_len > MAX_SCALAR_LEN {
+                return Err(Error {
+                    pos: open_pos,
+                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                });
+            }
             // Span: from open `'` through closing `'`.
             let end_pos = crate::pos::advance_within_line(
                 open_pos.advance('\''),
@@ -109,6 +120,12 @@ impl<'input> Lexer<'input> {
             if trimmed.is_empty() {
                 // Blank continuation line: counts as a literal newline.
                 owned.push('\n');
+                if owned.len() > MAX_SCALAR_LEN {
+                    return Err(Error {
+                        pos: self.current_pos,
+                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    });
+                }
                 continue;
             }
 
@@ -125,6 +142,12 @@ impl<'input> Lexer<'input> {
                     owned.push_str(&unescape_single_quoted(trimmed, cont_value.quoted_len));
                 } else {
                     owned.push_str(&trimmed[..cont_value.quoted_len]);
+                }
+                if owned.len() > MAX_SCALAR_LEN {
+                    return Err(Error {
+                        pos: self.current_pos,
+                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    });
                 }
                 // Compute position right after the closing `'` by advancing from
                 // the line start over leading whitespace + content + closing `'`.
@@ -150,6 +173,12 @@ impl<'input> Lexer<'input> {
                 trimmed[..cont_value.quoted_len].to_owned()
             };
             owned.push_str(line_str.trim_end_matches([' ', '\t']));
+            if owned.len() > MAX_SCALAR_LEN {
+                return Err(Error {
+                    pos: self.current_pos,
+                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                });
+            }
         }
     }
 
@@ -330,6 +359,12 @@ impl<'input> Lexer<'input> {
                     tail,
                 } => {
                     value.push_into(owned);
+                    if owned.len() > MAX_SCALAR_LEN {
+                        return Err(Error {
+                            pos: line_start_pos,
+                            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                        });
+                    }
                     // Store the tail (content after closing `"` on the closing
                     // line) so the flow parser can prepend it as a synthetic
                     // line to continue processing `,`, `]`, `}`, etc.
@@ -343,6 +378,12 @@ impl<'input> Lexer<'input> {
                     line_continuation: next_cont,
                 } => {
                     value.push_into(owned);
+                    if owned.len() > MAX_SCALAR_LEN {
+                        return Err(Error {
+                            pos: line_start_pos,
+                            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                        });
+                    }
                     line_continuation = next_cont;
                     // continue loop
                     let _ = open_pos;
@@ -602,8 +643,8 @@ fn decode_and_push_escape(
     let buf = ensure_owned(owned, prefix);
     buf.push(decoded_ch);
 
-    // Maximum scalar length cap: 1 MiB.
-    if buf.len() > 1_048_576 {
+    // Maximum scalar length cap.
+    if buf.len() > MAX_SCALAR_LEN {
         return Err(Error {
             pos: escape_pos,
             message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
@@ -615,6 +656,10 @@ fn decode_and_push_escape(
 
 /// `start_pos` is the position of the first character of `body` (i.e. the byte
 /// after the opening `"`), used only for error reporting.
+#[expect(
+    clippy::too_many_lines,
+    reason = "length cap checks added to borrow paths increase line count beyond 100"
+)]
 pub(super) fn scan_double_quoted_line(
     body: &str,
     start_pos: Pos,
@@ -638,7 +683,7 @@ pub(super) fn scan_double_quoted_line(
         if let Some(buf) = owned.as_mut() {
             let span = body.get(i..hit).unwrap_or_default();
             buf.push_str(span);
-            if buf.len() > 1_048_576 {
+            if buf.len() > MAX_SCALAR_LEN {
                 return Err(Error {
                     pos: start_pos,
                     message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
@@ -649,6 +694,12 @@ pub(super) fn scan_double_quoted_line(
             // we do not need to update the checkpoint here.
         } else {
             borrow_end = hit;
+            if borrow_end > MAX_SCALAR_LEN {
+                return Err(Error {
+                    pos: start_pos,
+                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                });
+            }
         }
 
         if bytes.get(hit) == Some(&b'"') {
@@ -706,7 +757,7 @@ pub(super) fn scan_double_quoted_line(
     if let Some(buf) = owned.as_mut() {
         if !rest.is_empty() {
             buf.push_str(rest);
-            if buf.len() > 1_048_576 {
+            if buf.len() > MAX_SCALAR_LEN {
                 return Err(Error {
                     pos: start_pos,
                     message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
@@ -724,6 +775,12 @@ pub(super) fn scan_double_quoted_line(
         }
     } else {
         borrow_end = body.len();
+        if borrow_end > MAX_SCALAR_LEN {
+            return Err(Error {
+                pos: start_pos,
+                message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+            });
+        }
     }
 
     // End of line without closing `"` — trim trailing LITERAL whitespace before fold.
@@ -1351,6 +1408,126 @@ mod tests {
         assert!(
             e.message.contains("invalid escape"),
             "expected invalid escape error, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group I-I continued — borrow-path length cap (I-26, I-27, I-28)
+    // -----------------------------------------------------------------------
+
+    // I-26: Double-quoted borrow path (no escape) — over 1 MiB raises error.
+    // Exercises the end-of-line borrow path (borrow_end = body.len()).
+    #[test]
+    fn double_quoted_borrow_path_length_cap_exceeded_raises_error() {
+        let mut big = String::with_capacity(1_048_579);
+        big.push('"');
+        big.extend(std::iter::repeat_n('a', 1_048_577));
+        big.push('"');
+        let e = dq_err(&big);
+        assert!(
+            e.message.contains("maximum allowed length"),
+            "expected length cap error, got: {}",
+            e.message
+        );
+    }
+
+    // I-27: Double-quoted borrow path — exactly at the 1 MiB limit succeeds.
+    #[test]
+    fn double_quoted_borrow_path_exactly_at_limit_succeeds() {
+        let mut big = String::with_capacity(1_048_578);
+        big.push('"');
+        big.extend(std::iter::repeat_n('a', 1_048_576));
+        big.push('"');
+        let (val, _) = dq(&big);
+        assert_eq!(val.len(), 1_048_576);
+    }
+
+    // I-28: Double-quoted borrow path — plain span hits closing `"` after > 1 MiB.
+    // Exercises the borrow_end = hit site (line in the memchr2 loop else branch).
+    #[test]
+    fn double_quoted_borrow_path_mid_scan_cap_exceeded_raises_error() {
+        // Build: 1_048_577 plain 'a' bytes then closing `"` — memchr2 finds the
+        // closing `"` at position 1_048_577 and sets borrow_end = hit.
+        let mut big = String::with_capacity(1_048_579);
+        big.push('"');
+        big.extend(std::iter::repeat_n('a', 1_048_577));
+        big.push('"'); // closing quote found by memchr2 at hit = 1_048_577
+        let e = dq_err(&big);
+        assert!(
+            e.message.contains("maximum allowed length"),
+            "expected length cap error, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group H-E — single-quoted length cap
+    // -----------------------------------------------------------------------
+
+    // H-E1: Single-quoted single-line borrow path — over 1 MiB raises error.
+    #[test]
+    fn single_quoted_single_line_borrow_path_length_cap_exceeded_raises_error() {
+        let mut big = String::with_capacity(1_048_579);
+        big.push('\'');
+        big.extend(std::iter::repeat_n('a', 1_048_577));
+        big.push('\'');
+        let e = sq_err(&big);
+        assert!(
+            e.message.contains("maximum allowed length"),
+            "expected length cap error, got: {}",
+            e.message
+        );
+    }
+
+    // H-E2: Single-quoted single-line borrow path — exactly at 1 MiB succeeds.
+    #[test]
+    fn single_quoted_single_line_borrow_path_exactly_at_limit_succeeds() {
+        let mut big = String::with_capacity(1_048_578);
+        big.push('\'');
+        big.extend(std::iter::repeat_n('a', 1_048_576));
+        big.push('\'');
+        let (val, _) = sq(&big);
+        assert_eq!(val.len(), 1_048_576);
+        assert!(matches!(val, Cow::Borrowed(_)), "no escape → Borrowed");
+    }
+
+    // H-E3: Single-quoted multi-line owned path — accumulated total over 1 MiB raises error.
+    #[test]
+    fn single_quoted_multiline_owned_path_length_cap_exceeded_raises_error() {
+        // Two lines of 600_000 'a' chars each; fold space between them makes
+        // total 1_200_001 > 1_048_576.
+        let mut big = String::with_capacity(1_200_010);
+        big.push('\'');
+        big.extend(std::iter::repeat_n('a', 600_000));
+        big.push('\n');
+        big.extend(std::iter::repeat_n('a', 600_000));
+        big.push('\'');
+        let e = sq_err(&big);
+        assert!(
+            e.message.contains("maximum allowed length"),
+            "expected length cap error, got: {}",
+            e.message
+        );
+    }
+
+    // H-E4: Single-quoted multi-line with escape — cap fires on push_str after unescape.
+    #[test]
+    fn single_quoted_multiline_with_escape_owned_path_length_cap_exceeded_raises_error() {
+        // First line: 600_000 'a' + '' escape (produces one literal ').
+        // Second line: 600_000 'a' + closing '.
+        // Total accumulated > 1_048_576.
+        let mut big = String::with_capacity(1_200_015);
+        big.push('\'');
+        big.extend(std::iter::repeat_n('a', 600_000));
+        big.push_str("''"); // '' escape forces owned path from the start
+        big.push('\n');
+        big.extend(std::iter::repeat_n('a', 600_000));
+        big.push('\'');
+        let e = sq_err(&big);
+        assert!(
+            e.message.contains("maximum allowed length"),
+            "expected length cap error, got: {}",
             e.message
         );
     }

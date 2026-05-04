@@ -83,3 +83,19 @@ pub const MAX_TAG_HANDLE_BYTES: usize = 256;
 /// The check is performed before allocation; exceeding this limit returns an
 /// [`crate::Error`], not a panic.
 pub const MAX_RESOLVED_TAG_LEN: usize = MAX_TAG_LEN;
+
+/// Maximum byte length of a quoted scalar (single-quoted or double-quoted)
+/// accepted from untrusted input.
+///
+/// The YAML spec places no upper limit on scalar length.  Without a cap, a
+/// single quoted scalar containing millions of bytes would exhaust heap memory
+/// or CPU time.  1 MiB is generous for all real-world YAML while bounding
+/// worst-case resource usage.
+///
+/// This limit applies uniformly to both single-quoted and double-quoted scalars,
+/// on both the borrow path (no-escape, zero-copy) and the owned path (escapes or
+/// multi-line).  It also covers accumulated length across continuation lines in
+/// multi-line double-quoted scalars.
+///
+/// Exceeding this limit returns an [`crate::Error`], not a panic.
+pub const MAX_SCALAR_LEN: usize = 1_048_576;
