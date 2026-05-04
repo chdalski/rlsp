@@ -1209,6 +1209,73 @@ fn tag_loc_two_tagged_scalars_each_gets_own_loc() {
     }
 }
 
+// -----------------------------------------------------------------------
+// Group N: Post-concatenation URI validation (§6.9.1)
+// -----------------------------------------------------------------------
+
+// N-1: Regression guard — `!!str` resolves to `tag:yaml.org,2002:str` (all valid URI chars).
+#[test]
+fn resolved_tag_double_bang_default_prefix_accepted() {
+    let events = evs("!!str hello\n");
+    assert!(
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:yaml.org,2002:str") && value.as_ref() == "hello"
+            } else {
+                false
+            }),
+        "!!str must resolve to tag:yaml.org,2002:str and be accepted"
+    );
+}
+
+// N-2: Custom `%TAG` with suffix containing `%00` — decoded NUL is not a valid URI char → error.
+#[test]
+fn resolved_tag_with_percent_encoded_nul_returns_error() {
+    // `%TAG !t! tag:example.com:` declares handle `!t!` with prefix `tag:example.com:`.
+    // `!t!%00` → suffix `%00` decodes to NUL (0x00), which is not ns-uri-char.
+    // The resolved tag `tag:example.com:\x00` must be rejected.
+    let input = "%TAG !t! tag:example.com:\n---\n!t!%00 val\n";
+    assert!(
+        has_error(input),
+        "resolved tag containing NUL (from %00 suffix) must return an error"
+    );
+}
+
+// N-3: Regression guard — custom `%TAG` with valid suffix is accepted.
+#[test]
+fn resolved_tag_custom_prefix_with_valid_suffix_accepted() {
+    let input = "%TAG !t! tag:example.com:\n---\n!t!str val\n";
+    let events = evs(input);
+    assert!(
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:example.com:str") && value.as_ref() == "val"
+            } else {
+                false
+            }),
+        "custom handle with valid suffix must resolve and be accepted"
+    );
+}
+
+// N-4: Prefix containing %HH — resolved tag preserves percent-encoding from prefix.
+#[test]
+fn resolved_tag_prefix_with_percent_encoding_accepted() {
+    let input = "%TAG !t! tag:example.com:%20\n---\n!t!str val\n";
+    let events = evs(input);
+    assert!(
+        events
+            .iter()
+            .any(|e| if let Event::Scalar { value, .. } = e {
+                e.tag() == Some("tag:example.com:%20str") && value.as_ref() == "val"
+            } else {
+                false
+            }),
+        "prefix with %HH must be accepted in resolved tag"
+    );
+}
+
 // TL-CORPUS: tag.is_some() == tag_loc.is_some() invariant holds across yaml-test-suite.
 #[test]
 fn tag_loc_invariant_corpus_wide() {

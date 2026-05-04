@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -20,30 +20,32 @@ Validate resolved tag URIs after handle+suffix concatenation per YAML 1.2.2 §6.
 
 ## Steps
 
-- [ ] Add post-concatenation URI validation in `resolve_tag`
-- [ ] Add tests for invalid resolved tags
-- [ ] Update follow-up queue: remove L8 entry
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Add post-concatenation URI validation in `resolve_tag`
+- [x] Add tests for invalid resolved tags
+- [x] Update follow-up queue: remove L8 entry
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Validate resolved tag URI after concatenation
 
+**Completed:** commit `a4be7f5` (2026-05-04)
+
 After each prefix+suffix concatenation in `resolve_tag`, validate the resolved string against `ns-uri-char` (with `%HH` support). Reuse the existing validation pattern.
 
-- [ ] Extract a reusable `validate_uri_chars(s: &str) -> Result<(), usize>` helper (or reuse `validate_tag_prefix` if it fits — check whether the local-vs-global first-char distinction applies to resolved tags). The validation must accept `ns-uri-char` singles and `%HH` sequences, same as `validate_tag_prefix`.
-- [ ] Call the validation after each of the three concatenation sites in `resolve_tag` (lines 99, 117, 140 in `directive_scope.rs`). If validation fails, return an error with the resolved tag and the byte offset of the invalid character.
-- [ ] Error message: `"resolved tag contains character not allowed in URI at byte offset N"`
-- [ ] Integration tests:
+- [x] Extract a reusable `validate_uri_chars(s: &str) -> Result<(), usize>` helper (or reuse `validate_tag_prefix` if it fits — check whether the local-vs-global first-char distinction applies to resolved tags). The validation must accept `ns-uri-char` singles and `%HH` sequences, same as `validate_tag_prefix`.
+- [x] Call the validation after each of the three concatenation sites in `resolve_tag` (lines 99, 117, 140 in `directive_scope.rs`). If validation fails, return an error with the resolved tag and the byte offset of the invalid character.
+- [x] Error message: `"resolved tag contains character not allowed in URI at byte offset N"`
+- [x] Integration tests:
   - `!!str` with default prefix → resolves to `tag:yaml.org,2002:str` → accepted (regression guard)
   - Custom `%TAG` with suffix containing `%00` → resolved tag contains NUL → error
   - Custom `%TAG` with valid suffix → accepted (regression guard)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove post-concatenation tag URI validity entry (L8) from `project_followup_plans.md`
-- [ ] Single commit: `fix(rlsp-yaml-parser): validate resolved tag URI after handle+suffix concatenation`
+- [x] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove post-concatenation tag URI validity entry (L8) from `project_followup_plans.md`
+- [x] Single commit: `fix(rlsp-yaml-parser): validate resolved tag URI after handle+suffix concatenation`
 
 ## Decisions
 

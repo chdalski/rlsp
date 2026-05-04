@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::chars::is_ns_uri_char_single;
 use crate::error::Error;
 use crate::limits::MAX_RESOLVED_TAG_LEN;
 use crate::pos::Pos;
@@ -44,6 +45,45 @@ fn percent_decode(s: &str) -> Cow<'_, str> {
         i += 1;
     }
     Cow::Owned(out)
+}
+
+/// Validate a resolved tag URI against `ns-uri-char` [38].
+///
+/// The resolved tag is the concatenation of a stored prefix and a decoded suffix.
+/// The prefix may still contain `%HH` sequences (stored as-is from `%TAG`
+/// registration); the suffix has been through `percent_decode` and its `%HH`
+/// sequences are already expanded.  Both forms must be accepted here:
+/// valid `%HH` sequences in the result are accepted; literal bytes that are
+/// neither `ns-uri-char` singles nor part of a valid `%HH` sequence are invalid.
+///
+/// Returns `Ok(())` on success, or `Err(byte_offset)` where `byte_offset` is
+/// the position of the first invalid byte within `resolved`.
+fn validate_resolved_tag(resolved: &str) -> Result<(), usize> {
+    let bytes = resolved.as_bytes();
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        if bytes.get(pos).copied() == Some(b'%') {
+            let h1 = bytes
+                .get(pos + 1)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            let h2 = bytes
+                .get(pos + 2)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            if h1 && h2 {
+                pos += 3;
+                continue;
+            }
+            return Err(pos);
+        }
+        let ch = resolved[pos..].chars().next().unwrap_or('\0');
+        if !is_ns_uri_char_single(ch) {
+            return Err(pos);
+        }
+        pos += ch.len_utf8();
+    }
+    Ok(())
 }
 
 /// Per-document directive state accumulated from `%YAML` and `%TAG` directives.
@@ -105,6 +145,12 @@ impl DirectiveScope {
                     ),
                 });
             }
+            validate_resolved_tag(&resolved).map_err(|offset| Error {
+                pos: indicator_pos,
+                message: format!(
+                    "resolved tag contains character not allowed in URI at byte offset {offset}"
+                ),
+            })?;
             return Ok(Cow::Owned(resolved));
         }
 
@@ -123,6 +169,12 @@ impl DirectiveScope {
                         ),
                     });
                 }
+                validate_resolved_tag(&resolved).map_err(|offset| Error {
+                    pos: indicator_pos,
+                    message: format!(
+                        "resolved tag contains character not allowed in URI at byte offset {offset}"
+                    ),
+                })?;
                 return Ok(Cow::Owned(resolved));
             }
             return Err(Error {
@@ -146,6 +198,12 @@ impl DirectiveScope {
                         ),
                     });
                 }
+                validate_resolved_tag(&resolved).map_err(|offset| Error {
+                    pos: indicator_pos,
+                    message: format!(
+                        "resolved tag contains character not allowed in URI at byte offset {offset}"
+                    ),
+                })?;
                 return Ok(Cow::Owned(resolved));
             }
         }
