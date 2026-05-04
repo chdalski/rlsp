@@ -27,14 +27,15 @@ mod probe_dispatch;
 mod quoted_scalars;
 mod scalar_dispatch;
 mod scalars;
+mod schema_ints;
 mod sequences;
 mod stream;
 mod tags;
 
 use rlsp_yaml_parser::{
     Chomp, CollectionStyle, Error, Event, LineIndex, MAX_ANCHOR_NAME_BYTES, MAX_COLLECTION_DEPTH,
-    MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN, ScalarStyle, Span,
-    parse_events,
+    MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN, Node, ScalarStyle,
+    Schema, Span, parse_events,
 };
 
 /// Resolve `offset` to `(line, col)` using a `LineIndex` built from `source`.

@@ -284,6 +284,10 @@ pub fn is_core_bool(value: &str) -> bool {
 
 /// Decimal `[-+]?[0-9]+`, octal `0o[0-7]+`, hex `0x[0-9a-fA-F]+` (§10.3.2
 /// int rows).  Leading zeros in decimal (e.g. `007`) are rejected.
+///
+/// The `[-+]?` prefix appears **only** on the decimal row of the §10.3.2 table.
+/// Octal and hex rows are unsigned — a leading sign (`-0o10`, `+0xFF`) does not
+/// match any int row and must resolve to `!!str` instead.
 #[must_use]
 pub fn is_core_int(value: &str) -> bool {
     // Strip optional leading sign; the sign itself is never valid.
@@ -293,6 +297,14 @@ pub fn is_core_int(value: &str) -> bool {
         .unwrap_or(value);
 
     if rest.is_empty() {
+        return false;
+    }
+
+    // Per §10.3.2, the sign prefix belongs only to the decimal row.
+    // If a sign was present and the remaining body starts with `0o` or `0x`,
+    // the input matches no int row → fall through to !!str.
+    let signed = rest.len() < value.len();
+    if signed && (rest.starts_with("0o") || rest.starts_with("0x")) {
         return false;
     }
 
@@ -554,11 +566,12 @@ mod tests {
     #[case::decimal_positive("42")]
     #[case::decimal_negative("-1")]
     #[case::decimal_plus_prefix("+100")]
+    #[case::decimal_signed_negative("-42")]
+    #[case::decimal_signed_positive("+42")]
     #[case::octal("0o17")]
-    #[case::octal_negative("-0o10")]
+    #[case::octal_unsigned("0o10")]
     #[case::hex_lower("0xff")]
     #[case::hex_upper("0xFF")]
-    #[case::hex_negative("-0x1A")]
     fn is_core_int_returns_true(#[case] input: &str) {
         assert!(is_core_int(input));
     }
@@ -575,6 +588,11 @@ mod tests {
     #[case::octal_prefix_only("0o")]
     #[case::hex_prefix_only("0x")]
     #[case::alpha_string("abc")]
+    // §10.3.2: sign is decimal-only; signed octal/hex must fall through to !!str
+    #[case::signed_octal_negative("-0o10")]
+    #[case::signed_octal_positive("+0o10")]
+    #[case::signed_hex_negative("-0xFF")]
+    #[case::signed_hex_positive("+0xFF")]
     fn is_core_int_returns_false(#[case] input: &str) {
         assert!(!is_core_int(input));
     }
@@ -751,6 +769,9 @@ mod tests {
     #[case::plain_float_nan(ScalarStyle::Plain, ".nan", None, ResolvedTag::Float)]
     #[case::plain_unmatched_str(ScalarStyle::Plain, "hello", None, ResolvedTag::Str)]
     #[case::plain_leading_zeros(ScalarStyle::Plain, "007", None, ResolvedTag::Str)]
+    // §10.3.2: signed octal/hex fall through to !!str (sign is decimal-only)
+    #[case::signed_octal_is_str(ScalarStyle::Plain, "-0o10", None, ResolvedTag::Str)]
+    #[case::signed_hex_is_str(ScalarStyle::Plain, "+0xFF", None, ResolvedTag::Str)]
     #[case::single_quoted_null(ScalarStyle::SingleQuoted, "null", None, ResolvedTag::Str)]
     #[case::double_quoted_true(ScalarStyle::DoubleQuoted, "true", None, ResolvedTag::Str)]
     #[case::literal_any(ScalarStyle::Literal(Chomp::Clip), "42", None, ResolvedTag::Str)]

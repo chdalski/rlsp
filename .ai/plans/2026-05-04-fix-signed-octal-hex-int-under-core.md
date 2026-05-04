@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -24,22 +24,24 @@ Reject signed octal and signed hex integers under the Core schema per YAML 1.2.2
 
 ## Steps
 
-- [ ] Gate sign strip in `is_core_int` to reject signed octal/hex
-- [ ] Add unit tests for signed octal/hex rejection
-- [ ] Add integration test via `parse_events` confirming `!!str` resolution
-- [ ] Update follow-up queue: remove L9/L10 entry
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Gate sign strip in `is_core_int` to reject signed octal/hex
+- [x] Add unit tests for signed octal/hex rejection
+- [x] Add integration test via `parse_events` confirming `!!str` resolution
+- [x] Update follow-up queue: remove L9/L10 entry
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Gate sign strip to decimal-only in `is_core_int`
 
+**Completed:** commit `a2d05a3` (2026-05-04)
+
 After the existing sign strip at `schema.rs:290-293`, check if the stripped body begins with `0o` or `0x`. If the original value had a sign AND the body is octal/hex, return `false` — the sign is not permitted for those rows.
 
-- [ ] In `is_core_int`, after sign strip, if a sign was present (`rest != value`) and `rest` starts with `0o` or `0x`, return `false`
-- [ ] Update the function's doc comment to document the per-row sign constraint
-- [ ] Inline unit tests in `schema.rs`:
+- [x] In `is_core_int`, after sign strip, if a sign was present (`rest != value`) and `rest` starts with `0o` or `0x`, return `false`
+- [x] Update the function's doc comment to document the per-row sign constraint
+- [x] Inline unit tests in `schema.rs`:
   - `is_core_int("-0o10") == false` (signed octal rejected)
   - `is_core_int("+0o10") == false` (signed octal rejected)
   - `is_core_int("-0xFF") == false` (signed hex rejected)
@@ -48,12 +50,12 @@ After the existing sign strip at `schema.rs:290-293`, check if the stripped body
   - `is_core_int("0xFF") == true` (unsigned hex still accepted — regression guard)
   - `is_core_int("-42") == true` (signed decimal still accepted — regression guard)
   - `is_core_int("+42") == true` (signed decimal still accepted — regression guard)
-- [ ] Integration test in `tests/smoke/` confirming `-0o10` and `+0xFF` resolve to `!!str` (not `!!int`) through `parse_events` or `load`
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove signed octal/hex entry from `project_followup_plans.md`
-- [ ] Single commit: `fix(rlsp-yaml-parser): reject signed octal and hex integers under Core schema`
+- [x] Integration test in `tests/smoke/` confirming `-0o10` and `+0xFF` resolve to `!!str` (not `!!int`) through `parse_events` or `load`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove signed octal/hex entry from `project_followup_plans.md`
+- [x] Single commit: `fix(rlsp-yaml-parser): reject signed octal and hex integers under Core schema`
 
 ## Decisions
 
