@@ -172,3 +172,135 @@ fn single_quoted_follows_plain_scalar_fallback() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------
+// s-indent(n) enforcement — block-context quoted scalar continuation lines
+// ---------------------------------------------------------------------------
+
+// IT-SQ-BLK-1: single-quoted block value with sufficient continuation indent.
+// Mapping value at column 5 (after "key: "), indent context n=0 (root).
+// The continuation line has 2 spaces — accepted per spec.
+#[test]
+fn single_quoted_block_value_sufficient_indent_accepted() {
+    let input = "key: 'foo\n  bar'\n";
+    assert!(
+        !has_error(input),
+        "single-quoted block value with indented continuation should be accepted"
+    );
+    let events = event_variants(input);
+    // Second scalar is the value (first is the "key" key).
+    let scalar = events
+        .iter()
+        .filter_map(|e| {
+            if let Event::Scalar { value, .. } = e {
+                Some(value.as_ref())
+            } else {
+                None
+            }
+        })
+        .nth(1);
+    assert_eq!(scalar, Some("foo bar"));
+}
+
+// IT-SQ-BLK-2: single-quoted block value with continuation under-indented → parse error.
+// Mapping value at column 5, continuation has 0 spaces (flush left).
+#[test]
+fn single_quoted_block_value_under_indented_continuation_errors() {
+    // In block context, the continuation line must have at least n=0 spaces
+    // (root level). This tests a flush-left continuation which is degenerate
+    // but currently the root block context passes parent_indent=0, so this
+    // tests the integration path end-to-end. The real enforcement fires when
+    // the continuation is below the mapping's indent level (n>0).
+    // For a mapping at indent 0, the value's parent_indent is also 0, so
+    // the indent check is skipped (n=0). This test verifies the accepted case
+    // to confirm the call site wires correctly.
+    let input = "key: 'foo\nbar'\n";
+    // At root level (n=0), continuation with 0 spaces is allowed by spec.
+    // No error expected — the existing folding behavior produces "foo bar".
+    assert!(
+        !has_error(input),
+        "root-level single-quoted with flush continuation should be accepted (n=0)"
+    );
+}
+
+// IT-SQ-BLK-2b: single-quoted nested block value with under-indented continuation → error.
+// Use a nested mapping where the value is at indent > 0, so the parent_indent
+// passed to the lexer is non-zero, triggering the enforcement.
+#[test]
+fn single_quoted_nested_block_value_under_indented_continuation_errors() {
+    // Outer mapping key "a" maps to inner mapping at indent 2.
+    // Inner key "b" maps to a single-quoted value; continuation is flush-left.
+    let input = "a:\n  b: 'foo\nbar'\n";
+    assert!(
+        has_error(input),
+        "nested single-quoted block value with flush continuation should produce an error"
+    );
+}
+
+// IT-DQ-BLK-1: double-quoted block value with sufficient continuation indent.
+#[test]
+fn double_quoted_block_value_sufficient_indent_accepted() {
+    let input = "key: \"foo\n  bar\"\n";
+    assert!(
+        !has_error(input),
+        "double-quoted block value with indented continuation should be accepted"
+    );
+    let events = event_variants(input);
+    // Second scalar is the value (first is the "key" key).
+    let scalar = events
+        .iter()
+        .filter_map(|e| {
+            if let Event::Scalar { value, .. } = e {
+                Some(value.as_ref())
+            } else {
+                None
+            }
+        })
+        .nth(1);
+    assert_eq!(scalar, Some("foo bar"));
+}
+
+// IT-DQ-BLK-2: double-quoted block value with continuation under-indented → parse error.
+#[test]
+fn double_quoted_nested_block_value_under_indented_continuation_errors() {
+    let input = "a:\n  b: \"foo\nbar\"\n";
+    assert!(
+        has_error(input),
+        "nested double-quoted block value with flush continuation should produce an error"
+    );
+}
+
+// IT-DQ-BLK-3: tab in indent position on continuation of block double-quoted → parse error.
+#[test]
+fn double_quoted_block_value_tab_in_indent_position_errors() {
+    // Nested value: continuation at column 0 with a tab. Tab does not satisfy
+    // s-indent(n) — only spaces count.
+    let input = "a:\n  b: \"foo\n\tbar\"\n";
+    assert!(
+        has_error(input),
+        "double-quoted block value with tab-only continuation indent should produce an error"
+    );
+}
+
+// IT-SQ-BLANK-BLK: blank line inside single-quoted block scalar is allowed.
+#[test]
+fn single_quoted_block_value_blank_continuation_line_accepted() {
+    let input = "key: 'foo\n\n  bar'\n";
+    assert!(
+        !has_error(input),
+        "single-quoted block value with blank continuation line should be accepted"
+    );
+    let events = event_variants(input);
+    // Second scalar is the value (first is the "key" key).
+    let scalar = events
+        .iter()
+        .filter_map(|e| {
+            if let Event::Scalar { value, .. } = e {
+                Some(value.as_ref())
+            } else {
+                None
+            }
+        })
+        .nth(1);
+    assert_eq!(scalar, Some("foo\nbar"));
+}

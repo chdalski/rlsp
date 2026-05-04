@@ -31,7 +31,7 @@ impl<'input> Lexer<'input> {
     )]
     pub fn try_consume_single_quoted(
         &mut self,
-        _parent_indent: usize,
+        parent_indent: usize,
     ) -> Result<Option<(Cow<'input, str>, Span)>, Error> {
         let Some(first_line) = self.buf.peek_next() else {
             return Ok(None);
@@ -138,7 +138,29 @@ impl<'input> Lexer<'input> {
             let line_content = consumed.content;
 
             // Determine how this line participates in folding.
-            let trimmed = line_content.trim_start_matches([' ', '\t']);
+            // For blank lines (all whitespace), bypass the indent check: per spec
+            // l-empty(n,c) lines are allowed regardless of indentation.
+            let trimmed_blank_check = line_content.trim_matches([' ', '\t']);
+            let trimmed = if trimmed_blank_check.is_empty() {
+                // Blank line: trim all leading whitespace.
+                trimmed_blank_check
+            } else {
+                // Non-blank: enforce s-indent(n) when in block context (n > 0).
+                if parent_indent > 0 {
+                    let found = consumed.indent;
+                    if found < parent_indent {
+                        return Err(Error {
+                            pos: line_start_pos,
+                            message: format!(
+                                "continuation line does not have enough indentation \
+                                 (expected at least {parent_indent} spaces, found {found})"
+                            ),
+                        });
+                    }
+                }
+                // Strip indent (n spaces) + separation (remaining whitespace including tabs).
+                line_content.trim_start_matches([' ', '\t'])
+            };
 
             if trimmed.is_empty() {
                 // Blank continuation line: counts as a literal newline.
@@ -341,22 +363,31 @@ impl<'input> Lexer<'input> {
                 });
             }
 
-            let trimmed = next.content.trim_start_matches([' ', '\t']);
+            // Determine if this line is blank (all whitespace).
+            let is_blank = next.content.trim_matches([' ', '\t']).is_empty();
 
-            // In block context, continuation lines of a double-quoted scalar
-            // must be indented more than the enclosing block (YAML 1.2 §7.3.1).
-            // A non-blank continuation line at indent <= n is invalid.
-            // At document root (no enclosing block), there is no constraint.
+            // In block context (Some(n)), non-blank continuation lines must
+            // satisfy s-indent(n+1): at least n+1 SPACE characters (strictly
+            // more than the enclosing block's indent n). Tabs do not contribute
+            // to indent (YAML 1.2.2 §6.3 s-flow-line-prefix, block context).
+            // Blank lines bypass the indent check (l-empty allows any indentation).
             if let Some(n) = block_context_indent {
-                if !trimmed.is_empty() && next.indent <= n {
-                    return Err(Error {
-                        pos: next.pos,
-                        message: format!(
-                            "double-quoted scalar continuation line must be indented more than {n}"
-                        ),
-                    });
+                if !is_blank {
+                    let found = next.indent;
+                    if found <= n {
+                        return Err(Error {
+                            pos: next.pos,
+                            message: format!(
+                                "continuation line does not have enough indentation \
+                                 (expected at least {} spaces, found {found})",
+                                n + 1
+                            ),
+                        });
+                    }
                 }
             }
+
+            let trimmed = next.content.trim_start_matches([' ', '\t']);
 
             if trimmed.is_empty() {
                 // Blank continuation line.
@@ -1912,6 +1943,293 @@ mod tests {
         assert!(
             e.message.contains("non-printable") || e.message.contains("U+0007"),
             "literal BEL must be rejected even in double-quoted, got: {}",
+            e.message
+        );
+    }
+
+    // =======================================================================
+    // Group J — s-indent(n) enforcement on quoted scalar continuation lines
+    // =======================================================================
+
+    fn sq_with_indent(input: &str, n: usize) -> (Cow<'_, str>, Span) {
+        make_lexer(input)
+            .try_consume_single_quoted(n)
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
+            .unwrap_or_else(|| unreachable!("expected Some, got None"))
+    }
+
+    fn sq_err_with_indent(input: &str, n: usize) -> Error {
+        match make_lexer(input).try_consume_single_quoted(n) {
+            Err(e) => e,
+            Ok(_) => unreachable!("expected Err, got Ok"),
+        }
+    }
+
+    fn dq_with_indent(input: &str, n: usize) -> (Cow<'_, str>, Span) {
+        make_lexer(input)
+            .try_consume_double_quoted(Some(n))
+            .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
+            .unwrap_or_else(|| unreachable!("expected Some, got None"))
+    }
+
+    fn dq_err_with_indent(input: &str, n: usize) -> Error {
+        match make_lexer(input).try_consume_double_quoted(Some(n)) {
+            Err(e) => e,
+            Ok(_) => unreachable!("expected Err, got Ok"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Group J-A: Single-quoted, block context (n > 0), happy path
+    // -----------------------------------------------------------------------
+
+    // J-A1: continuation with exactly n spaces is accepted.
+    #[test]
+    fn sq_indent_continuation_exactly_n_spaces_accepted() {
+        let (val, _) = sq_with_indent("'foo\n  bar'", 2);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-A2: continuation with more than n spaces is accepted.
+    #[test]
+    fn sq_indent_continuation_more_than_n_spaces_accepted() {
+        let (val, _) = sq_with_indent("'foo\n    bar'", 2);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-A3: continuation with exactly n spaces then a tab (tab in separation
+    // position) is accepted.
+    #[test]
+    fn sq_indent_continuation_n_spaces_then_tab_accepted() {
+        let (val, _) = sq_with_indent("'foo\n  \tbar'", 2);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-A4: continuation at n=1 with one space is accepted.
+    #[test]
+    fn sq_indent_continuation_n1_one_space_accepted() {
+        let (val, _) = sq_with_indent("'foo\n bar'", 1);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-A5: blank continuation line with zero spaces is accepted (blank-line bypass).
+    // The blank line itself is bypassed. The subsequent non-blank line must still
+    // satisfy s-indent(n). Use n=1 so the final "bar" line (0 spaces) would fail
+    // if checked — but it's the blank line we're testing. Use a properly-indented
+    // final line so the test isolates the blank-line bypass behavior.
+    #[test]
+    fn sq_indent_blank_continuation_zero_spaces_accepted() {
+        // n=2: blank line (0 spaces) is bypassed; " bar" (1 space + content) has
+        // indent=1 which is less than n=2 and would fail if the blank-bypass
+        // didn't fire. Instead test with blank between two well-indented lines.
+        let (val, _) = sq_with_indent("'foo\n\n  bar'", 2);
+        assert_eq!(val, "foo\nbar");
+    }
+
+    // J-A6: blank continuation line with fewer spaces than n is accepted (blank-line bypass).
+    #[test]
+    fn sq_indent_blank_continuation_fewer_spaces_accepted() {
+        // Second line is " " (one space), trims to blank — should not trigger indent check.
+        // Third line "  bar" has 2 spaces, meeting n=2 requirement.
+        let (val, _) = sq_with_indent("'foo\n \n  bar'", 2);
+        assert_eq!(val, "foo\nbar");
+    }
+
+    // J-A7: n=0 (flow context) skips indent check: tab-only indent is accepted.
+    #[test]
+    fn sq_indent_n0_tab_only_continuation_accepted() {
+        let (val, _) = sq_with_indent("'foo\n\tbar'", 0);
+        assert_eq!(val, "foo bar");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group J-B: Single-quoted, block context (n > 0), error path
+    // -----------------------------------------------------------------------
+
+    // J-B1: continuation with zero spaces when n=2 → error.
+    #[test]
+    fn sq_indent_continuation_zero_spaces_n2_err() {
+        let e = sq_err_with_indent("'foo\nbar'", 2);
+        assert!(
+            e.message.contains("expected at least 2 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+    }
+
+    // J-B2: continuation with n-1 spaces when n=3 → error with found count.
+    #[test]
+    fn sq_indent_continuation_n_minus_1_spaces_n3_err() {
+        let e = sq_err_with_indent("'foo\n  bar'", 3);
+        assert!(
+            e.message.contains("expected at least 3 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("found 2"),
+            "expected 'found 2' in error, got: {}",
+            e.message
+        );
+    }
+
+    // J-B3: continuation starting with a tab (tab in indent position) when n=2 → error.
+    #[test]
+    fn sq_indent_continuation_tab_in_indent_position_n2_err() {
+        let e = sq_err_with_indent("'foo\n\tbar'", 2);
+        assert!(
+            e.message.contains("expected at least 2 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("found 0"),
+            "expected 'found 0' in error, got: {}",
+            e.message
+        );
+    }
+
+    // J-B4: error message includes both expected and found counts.
+    #[test]
+    fn sq_indent_error_message_includes_expected_and_found() {
+        let e = sq_err_with_indent("'foo\n  bar'", 4);
+        assert!(
+            e.message.contains('4'),
+            "expected '4' in error message, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains('2'),
+            "expected '2' (found count) in error message, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group J-C: Double-quoted, block context (Some(n)), happy path
+    //
+    // For double-quoted in block context, the parameter n is the ENCLOSING
+    // block's indent. Continuation lines must have strictly more than n spaces
+    // (i.e. at least n+1) — matching the block-context `s-flow-line-prefix`
+    // requirement. `None` signals flow context where no constraint applies.
+    // -----------------------------------------------------------------------
+
+    // J-C1: continuation with more than n spaces (n=0, 2 spaces) is accepted.
+    // Enclosing block at indent 0, continuation at 2 spaces → 2 > 0.
+    #[test]
+    fn dq_indent_continuation_more_than_n_spaces_accepted() {
+        let (val, _) = dq_with_indent("\"foo\n  bar\"", 0);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-C2: continuation with many more than n spaces (n=2, 4 spaces) is accepted.
+    #[test]
+    fn dq_indent_continuation_many_more_than_n_spaces_accepted() {
+        let (val, _) = dq_with_indent("\"foo\n    bar\"", 2);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-C3: continuation with n+1 spaces then a tab (tab in separation
+    // position after sufficient spaces) is accepted.
+    // n=2, 3 spaces + tab: indent=3 > 2 → accepted, tab is in separation phase.
+    #[test]
+    fn dq_indent_continuation_np1_spaces_then_tab_accepted() {
+        let (val, _) = dq_with_indent("\"foo\n   \tbar\"", 2);
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-C4: blank continuation line with fewer spaces than n+1 is accepted (blank-line bypass).
+    #[test]
+    fn dq_indent_blank_continuation_fewer_spaces_accepted() {
+        // Second line is " " (one space), trims to blank — bypassed by blank-line rule.
+        // Third line "   bar" has 3 spaces, meeting n=2 requirement (3 > 2).
+        let (val, _) = dq_with_indent("\"foo\n \n   bar\"", 2);
+        assert_eq!(val, "foo\nbar");
+    }
+
+    // J-C5: None (flow context) skips indent check — tab-only is accepted.
+    #[test]
+    fn dq_indent_none_flow_context_tab_only_accepted() {
+        let (val, _) = dq("\"foo\n\tbar\"");
+        assert_eq!(val, "foo bar");
+    }
+
+    // J-C6: continuation after `\<LF>` line continuation escape with sufficient
+    // spaces is accepted. n=0, continuation has 1 space (1 > 0).
+    #[test]
+    fn dq_indent_line_continuation_escape_with_sufficient_spaces_accepted() {
+        let (val, _) = dq_with_indent("\"foo\\\n bar\"", 0);
+        assert_eq!(val, "foobar");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group J-D: Double-quoted, block context (Some(n)), error path
+    //
+    // Continuation lines must have more than n spaces. If found <= n, error.
+    // -----------------------------------------------------------------------
+
+    // J-D1: continuation with zero spaces when n=0 → error (0 not > 0).
+    #[test]
+    fn dq_indent_continuation_zero_spaces_n0_err() {
+        let e = dq_err_with_indent("\"foo\nbar\"", 0);
+        assert!(
+            e.message.contains("expected at least 1 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("found 0"),
+            "expected 'found 0' in error, got: {}",
+            e.message
+        );
+    }
+
+    // J-D2: continuation with n spaces when n=2 → error (2 not > 2).
+    #[test]
+    fn dq_indent_continuation_exactly_n_spaces_n2_err() {
+        let e = dq_err_with_indent("\"foo\n  bar\"", 2);
+        assert!(
+            e.message.contains("expected at least 3 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("found 2"),
+            "expected 'found 2' in error, got: {}",
+            e.message
+        );
+    }
+
+    // J-D3: continuation starting with a tab (tab in indent position) when n=0 → error.
+    // Tab contributes 0 to indent, so found=0, required>0.
+    #[test]
+    fn dq_indent_continuation_tab_in_indent_position_n0_err() {
+        let e = dq_err_with_indent("\"foo\n\tbar\"", 0);
+        assert!(
+            e.message.contains("expected at least 1 spaces"),
+            "expected indent error, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("found 0"),
+            "expected 'found 0' in error, got: {}",
+            e.message
+        );
+    }
+
+    // J-D4: error message includes both expected and found counts.
+    // n=2, continuation has 1 space → error "expected at least 3, found 1".
+    #[test]
+    fn dq_indent_error_message_includes_expected_and_found() {
+        let e = dq_err_with_indent("\"foo\n bar\"", 2);
+        assert!(
+            e.message.contains('3'),
+            "expected '3' (n+1) in error message, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains('1'),
+            "expected '1' (found count) in error message, got: {}",
             e.message
         );
     }

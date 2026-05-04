@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -24,38 +24,40 @@ Enforce `s-flow-line-prefix(n)` indent-then-separation ordering in quoted scalar
 
 ## Steps
 
-- [ ] Enforce `s-indent(n)` on continuation lines in single-quoted multi-line scanning
-- [ ] Enforce `s-indent(n)` on continuation lines in double-quoted multi-line scanning
-- [ ] Add integration tests for tab-in-indent-position rejection
-- [ ] Update follow-up queue: remove [69] entry, update Phase 1 Lenient count to 0
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Enforce `s-indent(n)` on continuation lines in single-quoted multi-line scanning
+- [x] Enforce `s-indent(n)` on continuation lines in double-quoted multi-line scanning
+- [x] Add integration tests for tab-in-indent-position rejection
+- [x] Update follow-up queue: remove [69] entry, update Phase 1 Lenient count to 0
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Enforce `s-indent(n)` ordering on quoted scalar continuation lines
 
+**Completed:** commit `78dcc62` (2026-05-04)
+
 Replace the indiscriminate `trim_start_matches([' ', '\t'])` on continuation lines with indent-aware prefix stripping: verify `line.indent >= n` (the first `n` characters are spaces), then strip the indent portion and any remaining leading whitespace (the separation portion).
 
-- [ ] In the single-quoted multi-line continuation loop (around line 141), replace `trim_start_matches([' ', '\t'])` with indent-aware stripping: check that `line.indent >= required_indent`, reject with error if not, then strip indent + separation
-- [ ] In `collect_double_quoted_continuations` (around line 344), same replacement: check `line.indent >= required_indent`, reject if not, then strip indent + separation
-- [ ] Use the already-available indent context for `required_indent`: for single-quoted, the `parent_indent` parameter (currently prefixed `_`, rename to use it); for double-quoted, the `block_context_indent` parameter. In flow context, callers pass `0` (single) or `None` (double) — `s-indent(0)` requires zero spaces, so all leading whitespace is separation and the current behavior is already correct. The enforcement only materially changes behavior for block-context quoted scalars where `n > 0`
-- [ ] Error message: `"continuation line does not have enough indentation (expected at least N spaces, found M)"` — the message must include the expected and actual indent counts
-- [ ] Do NOT modify the first-line probes at lines 39 and 253 — those are NOT continuation lines and their `trim_start_matches` is correct (they determine whether the line starts a quoted scalar, before indent context is established)
-- [ ] Integration tests covering:
+- [x] In the single-quoted multi-line continuation loop (around line 141), replace `trim_start_matches([' ', '\t'])` with indent-aware stripping: check that `line.indent >= required_indent`, reject with error if not, then strip indent + separation
+- [x] In `collect_double_quoted_continuations` (around line 344), same replacement: check `line.indent >= required_indent`, reject if not, then strip indent + separation
+- [x] Use the already-available indent context for `required_indent`: for single-quoted, the `parent_indent` parameter (currently prefixed `_`, rename to use it); for double-quoted, the `block_context_indent` parameter. In flow context, callers pass `0` (single) or `None` (double) — `s-indent(0)` requires zero spaces, so all leading whitespace is separation and the current behavior is already correct. The enforcement only materially changes behavior for block-context quoted scalars where `n > 0`
+- [x] Error message: `"continuation line does not have enough indentation (expected at least N spaces, found M)"` — the message must include the expected and actual indent counts
+- [x] Do NOT modify the first-line probes at lines 39 and 253 — those are NOT continuation lines and their `trim_start_matches` is correct (they determine whether the line starts a quoted scalar, before indent context is established)
+- [x] Integration tests covering:
   - Multi-line single-quoted scalar with tab-only indent on continuation → error
   - Multi-line double-quoted scalar with tab-only indent on continuation → error
   - Multi-line quoted scalar with spaces + tab on continuation (tab in separation portion, after sufficient spaces) → accepted
   - Multi-line quoted scalar with correct space indent → accepted (regression guard)
   - Blank continuation lines (all whitespace or empty) still produce correct folding behavior
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] yaml-test-suite `cargo test -p rlsp-yaml-parser --test yaml_test_suite` passes
-- [ ] Remove [69] entry from `project_followup_plans.md`
-- [ ] Update Phase 1 Lenient count in the orchestration pickup note from "1" to "0" and append `; [69] resolved by flow-line-prefix indent enforcement` to the parenthetical; since count reaches 0, update the orchestration step 2 description to note all Phase 1 Lenient entries are resolved
-- [ ] Update conformance doc rewrite entry: remove [69] from the Phase 1 mislabels list (it is now fixed)
-- [ ] Single commit: `fix(rlsp-yaml-parser): enforce s-indent(n) on quoted scalar continuation lines`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] yaml-test-suite `cargo test -p rlsp-yaml-parser --test yaml_test_suite` passes
+- [x] Remove [69] entry from `project_followup_plans.md`
+- [x] Update Phase 1 Lenient count in the orchestration pickup note from "1" to "0" and append `; [69] resolved by flow-line-prefix indent enforcement` to the parenthetical; since count reaches 0, update the orchestration step 2 description to note all Phase 1 Lenient entries are resolved
+- [x] Update conformance doc rewrite entry: remove [69] from the Phase 1 mislabels list (it is now fixed)
+- [x] Single commit: `fix(rlsp-yaml-parser): enforce s-indent(n) on quoted scalar continuation lines`
 
 ## Decisions
 
