@@ -167,7 +167,14 @@ pub(in crate::event_iter) fn scan_tag<'i>(
     if let Some(suffix) = content.strip_prefix('!') {
         // suffix starts after the second `!`
         let suffix_bytes = scan_tag_suffix(suffix);
-        // `!!` alone with no suffix is valid (empty suffix shorthand).
+        // Per YAML 1.2 §6.9.1 production [99], c-ns-shorthand-tag requires
+        // ns-tag-char+ (one or more suffix characters). Empty suffix is invalid.
+        if suffix_bytes == 0 {
+            return Err(Error {
+                pos: indicator_pos,
+                message: "shorthand tag requires a non-empty suffix".into(),
+            });
+        }
         if suffix_bytes > MAX_TAG_LEN {
             return Err(Error {
                 pos: indicator_pos,
@@ -193,13 +200,13 @@ pub(in crate::event_iter) fn scan_tag<'i>(
     // Scan tag chars until we hit a `!` (named handle delimiter) or non-tag-char.
     let mut end = 0;
     let mut found_inner_bang = false;
+    let mut named_handle_suffix_bytes = 0usize;
     for (i, ch) in content.char_indices() {
         if ch == '!' {
             // Named handle: `!handle!suffix` — scan the suffix after the inner `!`.
             found_inner_bang = true;
-            end = i + 1; // include the `!`
-            // Scan suffix chars (and %HH sequences) after the inner `!`.
-            end += scan_tag_suffix(&content[i + 1..]);
+            named_handle_suffix_bytes = scan_tag_suffix(&content[i + 1..]);
+            end = i + 1 + named_handle_suffix_bytes; // include the `!` + suffix
             break;
         } else if crate::chars::is_ns_tag_char_single(ch) {
             end = i + ch.len_utf8();
@@ -219,6 +226,16 @@ pub(in crate::event_iter) fn scan_tag<'i>(
         // No tag chars at all (covered by non-specific check above, but defensive).
         let tag_slice = &tag_start[..1];
         return Ok((tag_slice, 0));
+    }
+
+    // Per YAML 1.2 §6.9.1 production [99], c-ns-shorthand-tag requires
+    // ns-tag-char+ (one or more suffix characters). Reject empty suffix on
+    // named handles (e.g., `!handle!` with nothing after the closing `!`).
+    if found_inner_bang && named_handle_suffix_bytes == 0 {
+        return Err(Error {
+            pos: indicator_pos,
+            message: "shorthand tag requires a non-empty suffix".into(),
+        });
     }
 
     if end > MAX_TAG_LEN {
@@ -562,7 +579,8 @@ mod tests {
 
     #[test]
     fn scan_tag_secondary_handle_no_suffix() {
-        assert_eq!(scan("!!").unwrap(), ("!!", 1));
+        // Per YAML 1.2 §6.9.1 [99], shorthand tag requires non-empty suffix.
+        assert!(scan("!!").unwrap_err().message.contains("non-empty suffix"));
     }
 
     #[test]
@@ -602,7 +620,13 @@ mod tests {
 
     #[test]
     fn scan_tag_named_handle_with_empty_suffix() {
-        assert_eq!(scan("!foo!").unwrap(), ("!foo!", 4));
+        // Per YAML 1.2 §6.9.1 [99], shorthand tag requires non-empty suffix.
+        assert!(
+            scan("!foo!")
+                .unwrap_err()
+                .message
+                .contains("non-empty suffix")
+        );
     }
 
     // -----------------------------------------------------------------------

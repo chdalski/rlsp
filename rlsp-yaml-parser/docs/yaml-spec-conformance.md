@@ -963,28 +963,28 @@ BNF: `c-named-tag-handle ::= c-tag ns-word-char+ c-tag`
 
 BNF: `ns-tag-prefix ::= c-ns-local-tag-prefix | ns-global-tag-prefix`
 
-- Classification: Conformant
+- Classification: Strict-conformant
 - Spec (§6.8.2.2): "There are two tag prefix variants."
-- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:172–215` — prefix extracted by whitespace split; validated for control characters and length but not strictly checked against local vs global tag prefix grammar (both forms accepted)
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/directives.rs`
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs` — prefix extracted by whitespace split; `validate_tag_prefix()` dispatches on leading byte to select local vs global form and validates all bytes against `is_ns_uri_char_single` or `%HH` percent-encoded sequences
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs` Group P (P-1 through P-10)
 
 ### [94] c-ns-local-tag-prefix
 
 BNF: `c-ns-local-tag-prefix ::= c-tag ns-uri-char*`
 
-- Classification: Conformant
+- Classification: Strict-conformant
 - Spec (§6.8.2.2): "If the prefix begins with a `!` character, shorthands using the handle are expanded to a local tag."
-- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs:172–215` — prefix stored as-is; `rlsp-yaml-parser/src/event_iter/directive_scope.rs:134–151` — `!suffix` local-tag shorthand expansion preserves local prefix verbatim
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs` — `validate_tag_prefix()` accepts `!` as the leading c-tag byte, then validates all subsequent bytes as `ns-uri-char` or `%HH`; `rlsp-yaml-parser/src/event_iter/directive_scope.rs` — `!suffix` local-tag shorthand expansion preserves local prefix verbatim
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs` P-3 (`tag_prefix_local_starting_with_bang_is_accepted`)
 
 ### [95] ns-global-tag-prefix
 
 BNF: `ns-global-tag-prefix ::= ns-tag-char ns-uri-char*`
 
-- Classification: Conformant
+- Classification: Strict-conformant
 - Spec (§6.8.2.2): "If the prefix begins with a character other than `!`, it must be a valid URI prefix, and should contain at least the scheme. Shorthands using the associated handle are expanded to globally unique URI tags."
-- Implementation: `rlsp-yaml-parser/src/event_iter/directive_scope.rs:92–132` — `!!suffix` (lines 93–109) and named-handle (lines 112–132) expansions concatenate the stored URI prefix with the percent-decoded suffix; URI validity is enforced by control-character rejection in `parse_tag_directive`
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`
+- Implementation: `rlsp-yaml-parser/src/event_iter/directives.rs` — `validate_tag_prefix()` requires `is_ns_tag_char_single` on the first byte for global prefixes, then validates remaining bytes as `ns-uri-char` or `%HH`; `rlsp-yaml-parser/src/event_iter/directive_scope.rs` — `!!suffix` and named-handle expansions concatenate the stored URI prefix with the suffix
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs` P-1, P-2, P-4, P-5, P-9, P-10
 
 ### [96] c-ns-properties(n,c)
 
@@ -1017,10 +1017,10 @@ BNF: `c-verbatim-tag ::= "!<" ns-uri-char+ '>'`
 
 BNF: `c-ns-shorthand-tag ::= c-tag-handle ns-tag-char+`
 
-- Classification: Conformant
+- Classification: Strict-conformant
 - Spec (§6.9.1): "A tag shorthand consists of a valid tag handle followed by a non-empty suffix. The tag handle must be associated with a prefix, either by default or by using a `TAG` directive."
-- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs:166–233` — primary `!!suffix`, named `!handle!suffix`, and secondary `!suffix` branches all scan via `scan_tag_suffix` which validates against `is_ns_tag_char_single` and `%HH`
-- Test coverage: `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/src/event_iter/properties.rs:541–588` (unit tests `scan_tag_secondary_*`, `scan_tag_named_handle*`)
+- Implementation: `rlsp-yaml-parser/src/event_iter/properties.rs` — primary `!!suffix` branch rejects `suffix_bytes == 0`; named `!handle!suffix` branch rejects `named_handle_suffix_bytes == 0`; both return error `"shorthand tag requires a non-empty suffix"`; secondary `!suffix` branch is unaffected (no inner `!` terminator, scanned as tag chars directly)
+- Test coverage: `rlsp-yaml-parser/tests/smoke/directives.rs` P-6, P-7, P-8; `rlsp-yaml-parser/tests/smoke/tags.rs` `primary_handle_empty_suffix_returns_error`; unit tests `scan_tag_secondary_handle_no_suffix`, `scan_tag_named_handle_with_empty_suffix` (updated to assert error)
 
 ### [100] c-non-specific-tag
 

@@ -170,15 +170,12 @@ fn default_handle_expands_to_core_schema_prefix() {
     );
 }
 
-// C-2: `!! val` (empty suffix) expands to `tag:yaml.org,2002:`.
+// C-2: `!! val` (empty suffix) is rejected per YAML 1.2 §6.9.1 [99] (shorthand requires non-empty suffix).
 #[test]
-fn default_handle_empty_suffix_expands_to_prefix_only() {
-    let events = evs("!! val\n");
+fn default_handle_empty_suffix_returns_error() {
     assert!(
-        events
-            .iter()
-            .any(|e| (matches!(e, Event::Scalar { .. }) && e.tag() == Some("tag:yaml.org,2002:"))),
-        "!! with empty suffix must expand to 'tag:yaml.org,2002:'"
+        has_error("!! val\n"),
+        "!! with empty suffix must return an error (YAML 1.2 §6.9.1 [99] requires non-empty suffix)"
     );
 }
 
@@ -479,13 +476,13 @@ fn tag_directive_missing_prefix_returns_error() {
     );
 }
 
-// K-2: %TAG directive whose prefix is the two-char literal `""` is
-// accepted (non-empty prefix consisting of two ASCII quote characters).
+// K-2: %TAG directive whose prefix contains `"` (double-quote) is rejected —
+// double-quote is not ns-uri-char per YAML 1.2 §6.8.2.2 productions [93]/[94]/[95].
 #[test]
-fn tag_directive_with_double_quote_prefix_is_accepted() {
+fn tag_directive_with_double_quote_prefix_is_rejected() {
     assert!(
-        !has_error("%TAG !e! \"\"\n---\nscalar\n"),
-        "%TAG with double-quote prefix must be accepted"
+        has_error("%TAG !e! \"\"\n---\nscalar\n"),
+        "%TAG with double-quote prefix must return an error (double-quote is not ns-uri-char)"
     );
 }
 
@@ -911,5 +908,101 @@ fn unknown_directive_i1_regression_ns_char_group() {
     assert!(
         !has_error("%FOO bar baz\n---\nscalar\n"),
         "I-1 regression: %FOO bar baz must still be silently skipped (valid ns-char content)"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Group P — ns-uri-char tag prefix validation ([93]/[94]/[95]) and
+//           empty shorthand suffix rejection ([99])
+// -----------------------------------------------------------------------
+
+// P-1: Curly brace in tag prefix is rejected (not ns-uri-char).
+#[test]
+fn tag_prefix_with_open_curly_brace_returns_error() {
+    assert!(
+        has_error("%TAG !e! tag:{bad\n---\nscalar\n"),
+        "%TAG prefix containing curly brace must return an error (not ns-uri-char)"
+    );
+}
+
+// P-2: Backtick in tag prefix is rejected (not ns-uri-char).
+#[test]
+fn tag_prefix_with_backtick_returns_error() {
+    assert!(
+        has_error("%TAG !e! tag:\x60bad\n---\nscalar\n"),
+        "%TAG prefix containing backtick must return an error (not ns-uri-char)"
+    );
+}
+
+// P-3: Local prefix `!local` (starting with `!`) is accepted.
+#[test]
+fn tag_prefix_local_starting_with_bang_is_accepted() {
+    assert!(
+        !has_error("%TAG ! !local\n---\nscalar\n"),
+        "%TAG local prefix starting with ! must be accepted"
+    );
+}
+
+// P-4: Standard `!! tag:yaml.org,2002:` prefix is accepted (regression guard).
+#[test]
+fn tag_prefix_standard_double_bang_is_accepted() {
+    assert!(
+        !has_error("%TAG !! tag:yaml.org,2002:\n---\nscalar\n"),
+        "standard %TAG !! tag:yaml.org,2002: must be accepted"
+    );
+}
+
+// P-5: Percent-encoded character in prefix is accepted.
+#[test]
+fn tag_prefix_with_percent_encoded_char_is_accepted() {
+    assert!(
+        !has_error("%TAG !e! tag:%41bc\n---\nscalar\n"),
+        "%TAG prefix with percent-encoded sequence %41 must be accepted"
+    );
+}
+
+// P-6: Empty suffix on primary `!!` handle returns error.
+#[test]
+fn shorthand_tag_primary_empty_suffix_returns_error() {
+    assert!(
+        has_error("!! value\n"),
+        "!! with empty suffix must return an error (YAML 1.2 §6.9.1 [99])"
+    );
+}
+
+// P-7: Empty suffix on named handle returns error.
+#[test]
+fn shorthand_tag_named_handle_empty_suffix_returns_error() {
+    // %TAG declares !handle!; inline usage !handle! with no suffix must fail.
+    assert!(
+        has_error("%TAG !handle! prefix:\n---\n!handle! value\n"),
+        "!handle! with empty suffix must return an error (YAML 1.2 §6.9.1 [99])"
+    );
+}
+
+// P-8: Non-empty suffix on `!!str` is accepted (regression guard).
+#[test]
+fn shorthand_tag_primary_with_suffix_is_accepted() {
+    assert!(
+        !has_error("!!str value\n"),
+        "!!str with non-empty suffix must be accepted"
+    );
+}
+
+// P-9: Caret in tag prefix is rejected (not ns-uri-char).
+#[test]
+fn tag_prefix_with_caret_returns_error() {
+    assert!(
+        has_error("%TAG !e! tag:^bad\n---\nscalar\n"),
+        "%TAG prefix containing '^' must return an error (not ns-uri-char)"
+    );
+}
+
+// P-10: Backslash in tag prefix is rejected (not ns-uri-char).
+#[test]
+fn tag_prefix_with_backslash_returns_error() {
+    assert!(
+        has_error("%TAG !e! tag:\\bad\n---\nscalar\n"),
+        "%TAG prefix containing '\\' must return an error (not ns-uri-char)"
     );
 }

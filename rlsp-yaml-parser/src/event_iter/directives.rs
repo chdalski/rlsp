@@ -6,7 +6,7 @@
 
 use super::properties::is_valid_tag_handle;
 use super::state::{IterState, StepResult};
-use crate::chars::is_ns_char;
+use crate::chars::{is_ns_char, is_ns_tag_char_single, is_ns_uri_char_single};
 use crate::error::Error;
 use crate::event::Event;
 use crate::limits::{MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN};
@@ -264,6 +264,14 @@ impl<'input> EventIter<'input> {
             });
         }
 
+        // Validate prefix against ns-uri-char ([93]/[94]/[95]).
+        validate_tag_prefix(prefix).map_err(|offset| Error {
+            pos: dir_pos,
+            message: format!(
+                "tag prefix contains character not allowed in URI at byte offset {offset}"
+            ),
+        })?;
+
         // Duplicate handle check.
         if self.directive_scope.tag_handles.contains_key(handle) {
             return Err(Error {
@@ -404,4 +412,57 @@ impl<'input> EventIter<'input> {
             zero_span(content_pos),
         )))
     }
+}
+
+/// Validate a `%TAG` prefix string against the `ns-uri-char` alphabet.
+///
+/// Productions:
+///   `[93] ns-tag-prefix       ::= c-ns-local-tag-prefix | ns-global-tag-prefix`
+///   `[94] c-ns-local-tag-prefix ::= "!" ns-uri-char*`
+///   `[95] ns-global-tag-prefix ::= ns-tag-char ns-uri-char*`
+///
+/// Returns `Ok(())` on success, or `Err(byte_offset)` where `byte_offset` is
+/// the position of the first invalid byte within `prefix`.
+fn validate_tag_prefix(prefix: &str) -> Result<(), usize> {
+    let bytes = prefix.as_bytes();
+
+    // Determine starting offset based on prefix type.
+    // Local prefix starts with `!` (c-tag); global prefix starts with ns-tag-char.
+    let start = if bytes.first() == Some(&b'!') {
+        1usize // `!` is the c-tag indicator; advance past it
+    } else {
+        let ch = prefix.chars().next().unwrap_or('\0');
+        if !is_ns_tag_char_single(ch) {
+            return Err(0);
+        }
+        ch.len_utf8()
+    };
+
+    // All remaining bytes must be ns-uri-char or valid %HH percent-encoded sequences.
+    let mut pos = start;
+    while pos < bytes.len() {
+        // Use .get() to satisfy the indexing_slicing lint; the while guard
+        // ensures pos < bytes.len(), so unwrap_or is unreachable in practice.
+        if bytes.get(pos).copied() == Some(b'%') {
+            let h1 = bytes
+                .get(pos + 1)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            let h2 = bytes
+                .get(pos + 2)
+                .copied()
+                .is_some_and(|b| b.is_ascii_hexdigit());
+            if h1 && h2 {
+                pos += 3;
+                continue;
+            }
+            return Err(pos);
+        }
+        let ch = prefix[pos..].chars().next().unwrap_or('\0');
+        if !is_ns_uri_char_single(ch) {
+            return Err(pos);
+        }
+        pos += ch.len_utf8();
+    }
+    Ok(())
 }

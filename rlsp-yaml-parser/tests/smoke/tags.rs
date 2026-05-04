@@ -145,16 +145,11 @@ fn primary_handle_on_plain_scalar() {
 }
 
 #[test]
-fn primary_handle_empty_suffix_expands_to_core_schema_prefix() {
-    // `!! val` — primary handle with empty suffix; expands to `"tag:yaml.org,2002:"`.
-    let events = evs("!! val\n");
+fn primary_handle_empty_suffix_returns_error() {
+    // `!! val` — primary handle with empty suffix is invalid per YAML 1.2 §6.9.1 [99].
     assert!(
-        events.iter().any(|e| if let Event::Scalar { .. } = e {
-            e.tag() == Some("tag:yaml.org,2002:")
-        } else {
-            false
-        }),
-        "primary handle with empty suffix must expand to 'tag:yaml.org,2002:'"
+        has_error("!! val\n"),
+        "primary handle with empty suffix must return an error (shorthand requires non-empty suffix)"
     );
 }
 

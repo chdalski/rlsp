@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -23,27 +23,29 @@ Enforce tag prefix validation against `ns-uri-char` and reject empty shorthand t
 
 ## Steps
 
-- [ ] Add `ns-uri-char` validation to tag prefix in `parse_tag_directive`
-- [ ] Reject empty shorthand tag suffixes in `scan_tag`
-- [ ] Update existing unit tests that verify lenient empty-suffix behavior
-- [ ] Add integration tests for prefix validation and empty-suffix rejection
-- [ ] Update follow-up queue: remove entries, update counts
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Add `ns-uri-char` validation to tag prefix in `parse_tag_directive`
+- [x] Reject empty shorthand tag suffixes in `scan_tag`
+- [x] Update existing unit tests that verify lenient empty-suffix behavior
+- [x] Add integration tests for prefix validation and empty-suffix rejection
+- [x] Update follow-up queue: remove entries, update counts
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Enforce `ns-uri-char` on tag prefixes and reject empty shorthand suffixes
 
+**Completed:** commit `918a212` (2026-05-04)
+
 Validate tag prefixes against `ns-uri-char` (with `%HH` support) and reject shorthand tags with empty suffixes.
 
-- [ ] In `parse_tag_directive()`, after existing `ns-char` pre-validation and handle/prefix extraction, validate the prefix against `ns-uri-char`: each character must be `is_ns_uri_char_single` or a valid `%HH` percent-encoded sequence; additionally, local prefixes (starting with `!`) must have first char `!` followed by `ns-uri-char*`, and global prefixes must start with `ns-tag-char` (`is_ns_tag_char_single`) followed by `ns-uri-char*`
-- [ ] Error message format: `"tag prefix contains character not allowed in URI at byte offset N"` (consistent with verbatim tag error at `properties.rs:142`)
-- [ ] In `scan_tag()`, reject empty suffix for `!!suffix` form: when `suffix_bytes == 0` after `scan_tag_suffix`, return an error instead of accepting `!!` as a valid shorthand tag
-- [ ] In `scan_tag()`, reject empty suffix for `!handle!suffix` form: when the suffix after the inner `!` has `scan_tag_suffix == 0`, return an error
-- [ ] Error message for empty suffix: `"shorthand tag requires a non-empty suffix"` 
-- [ ] Update existing unit tests that assert empty suffix is accepted: `scan_tag_secondary_handle_no_suffix` and `scan_tag_named_handle_with_empty_suffix` — change assertions to expect errors
-- [ ] Integration tests in `tests/smoke/directives.rs` or `tests/smoke/tags.rs` covering:
+- [x] In `parse_tag_directive()`, after existing `ns-char` pre-validation and handle/prefix extraction, validate the prefix against `ns-uri-char`: each character must be `is_ns_uri_char_single` or a valid `%HH` percent-encoded sequence; additionally, local prefixes (starting with `!`) must have first char `!` followed by `ns-uri-char*`, and global prefixes must start with `ns-tag-char` (`is_ns_tag_char_single`) followed by `ns-uri-char*`
+- [x] Error message format: `"tag prefix contains character not allowed in URI at byte offset N"` (consistent with verbatim tag error at `properties.rs:142`)
+- [x] In `scan_tag()`, reject empty suffix for `!!suffix` form: when `suffix_bytes == 0` after `scan_tag_suffix`, return an error instead of accepting `!!` as a valid shorthand tag
+- [x] In `scan_tag()`, reject empty suffix for `!handle!suffix` form: when the suffix after the inner `!` has `scan_tag_suffix == 0`, return an error
+- [x] Error message for empty suffix: `"shorthand tag requires a non-empty suffix"` 
+- [x] Update existing unit tests that assert empty suffix is accepted: `scan_tag_secondary_handle_no_suffix` and `scan_tag_named_handle_with_empty_suffix` — change assertions to expect errors
+- [x] Integration tests in `tests/smoke/directives.rs` or `tests/smoke/tags.rs` covering:
   - `%TAG !e! tag:{bad` (curly brace in prefix) → error
   - `%TAG !e! tag:\x60bad` (backtick in prefix) → error
   - `%TAG ! !local` (local prefix starting with `!`) → accepted
@@ -52,14 +54,14 @@ Validate tag prefixes against `ns-uri-char` (with `%HH` support) and reject shor
   - `!! value` (empty suffix on `!!`) → error
   - `!handle! value` with `%TAG !handle! prefix:` → error (empty suffix on named handle)
   - `!!str value` (non-empty suffix) → accepted (regression guard)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove [93]/[94]/[95] entry from `project_followup_plans.md`
-- [ ] Remove [99] entry from `project_followup_plans.md`
-- [ ] Update Phase 1 Lenient count in the orchestration pickup note from "5" to "1" and append `; [93]/[94]/[95]/[99] resolved by tag prefix and shorthand suffix validation fix` to the parenthetical
-- [ ] Update conformance doc rewrite entry: remove [93], [94], [95], [99] from the Phase 1 mislabels list
-- [ ] Single commit: `fix(rlsp-yaml-parser): validate tag prefix against ns-uri-char and reject empty shorthand suffix`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove [93]/[94]/[95] entry from `project_followup_plans.md`
+- [x] Remove [99] entry from `project_followup_plans.md`
+- [x] Update Phase 1 Lenient count in the orchestration pickup note from "5" to "1" and append `; [93]/[94]/[95]/[99] resolved by tag prefix and shorthand suffix validation fix` to the parenthetical
+- [x] Update conformance doc rewrite entry: remove [93], [94], [95], [99] from the Phase 1 mislabels list
+- [x] Single commit: `fix(rlsp-yaml-parser): validate tag prefix against ns-uri-char and reject empty shorthand suffix`
 
 ## Decisions
 
