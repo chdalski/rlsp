@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use crate::chars::{find_non_c_printable, non_printable_error_message};
 use crate::error::Error;
 use crate::event::Chomp;
 use crate::lines::BreakType;
@@ -229,6 +230,27 @@ impl<'input> Lexer<'input> {
                 out.extend(std::iter::repeat_n('\n', trailing_newlines));
                 trailing_newlines = 0;
 
+                // Validate c-printable before consuming the line so we can report
+                // the correct position.  LF/CR are already stripped by the line
+                // splitter; BOM at the content start is checked elsewhere.
+                if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
+                    let after_indent_offset = next.content.len() - after_indent.len();
+                    let bad_col = crate::pos::column_at(next.content, after_indent_offset + bad_i);
+                    let bad_pos = Pos {
+                        byte_offset: next.offset + after_indent_offset + bad_i,
+                        line: next.pos.line,
+                        column: next.pos.column + bad_col,
+                    };
+                    let Some(consumed) = self.buf.consume_next() else {
+                        unreachable!("consume content line failed")
+                    };
+                    self.current_pos = pos_after_line(&consumed);
+                    return Some(Err(Error {
+                        pos: bad_pos,
+                        message: non_printable_error_message(bad_ch, "block scalar"),
+                    }));
+                }
+
                 // SAFETY: peek succeeded on this loop iteration; LineBuffer invariant.
                 let Some(consumed) = self.buf.consume_next() else {
                     unreachable!("consume content line failed")
@@ -355,6 +377,10 @@ impl<'input> Lexer<'input> {
     /// - Single break, both lines equally indented → space.
     /// - Single break surrounding a more-indented line → `\n` (preserved).
     /// - N blank lines between non-blank lines → N `\n`s.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-line-classification; c-printable validation block adds lines without structural complexity"
+    )]
     fn collect_folded_lines(&mut self, content_indent: usize) -> (Result<String, Error>, usize) {
         let mut out = String::new();
         let mut trailing_newlines: usize = 0;
@@ -434,6 +460,28 @@ impl<'input> Lexer<'input> {
                     }
                 }
                 trailing_newlines = 0;
+
+                // Validate c-printable before consuming.
+                if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
+                    let after_indent_offset = next.content.len() - after_indent.len();
+                    let bad_col = crate::pos::column_at(next.content, after_indent_offset + bad_i);
+                    let bad_pos = Pos {
+                        byte_offset: next.offset + after_indent_offset + bad_i,
+                        line: next.pos.line,
+                        column: next.pos.column + bad_col,
+                    };
+                    let Some(consumed) = self.buf.consume_next() else {
+                        unreachable!("consume content line failed")
+                    };
+                    self.current_pos = pos_after_line(&consumed);
+                    return (
+                        Err(Error {
+                            pos: bad_pos,
+                            message: non_printable_error_message(bad_ch, "block scalar"),
+                        }),
+                        0,
+                    );
+                }
 
                 let Some(consumed) = self.buf.consume_next() else {
                     unreachable!("consume content line failed")
@@ -996,6 +1044,168 @@ mod tests {
         assert!(
             matches!(cow, Cow::Owned(_)),
             "literal block scalars must always produce Cow::Owned"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group BS-NP: block scalar c-printable rejection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn literal_block_rejects_nul_in_content() {
+        let e = lit_err("|\n  val\x00ue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0000"),
+            "expected non-printable error for NUL, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_rejects_0x01_in_content() {
+        let e = lit_err("|\n  val\x01ue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0001"),
+            "expected non-printable error for SOH, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_rejects_del_0x7f_in_content() {
+        let e = lit_err("|\n  val\x7fue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+007F"),
+            "expected non-printable error for DEL, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_rejects_c1_control_0x80_in_content() {
+        let e = lit_err("|\n  val\u{0080}ue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0080"),
+            "expected non-printable error for U+0080, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_rejects_0xfffe_in_content() {
+        let e = lit_err("|\n  val\u{FFFE}ue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+FFFE"),
+            "expected non-printable error for U+FFFE, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_rejects_0xffff_in_content() {
+        let e = lit_err("|\n  val\u{FFFF}ue\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+FFFF"),
+            "expected non-printable error for U+FFFF, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_non_printable_as_first_char_of_content() {
+        // Non-printable as the very first content character must be rejected.
+        let e = lit_err("|\n  \x07abc\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error for BEL as first char, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_non_printable_at_end_of_content() {
+        // Non-printable at the very end of a content line must be rejected.
+        let e = lit_err("|\n  abc\x07\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error for BEL at end of content, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_non_printable_on_second_content_line() {
+        // Non-printable on the second content line must be rejected.
+        let e = lit_err("|\n  first\n  sec\x07ond\n");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error on second line, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn literal_block_error_message_contains_uplus_hex() {
+        let e = lit_err("|\n  val\x07ue\n");
+        assert!(
+            e.message.contains("U+0007"),
+            "error message must contain U+0007, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn folded_block_rejects_non_printable_in_content() {
+        // Folded block scalar (>) must also enforce c-printable on content.
+        let mut lex = make_lexer(">\n  val\x07ue\n");
+        let result = lex
+            .try_consume_folded_block_scalar(0)
+            .unwrap_or_else(|| unreachable!("expected Some, got None"));
+        let Err(e) = result else {
+            unreachable!("expected Err for BEL in folded block scalar, got Ok")
+        };
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group BS-OK: block scalar c-printable acceptance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn literal_block_accepts_tab_in_content() {
+        // TAB (U+0009) is allowed by c-printable.
+        let (val, _) = lit_ok("|\n  col1\tcol2\n");
+        assert!(val.contains('\t'), "TAB must be accepted in literal block content");
+    }
+
+    #[test]
+    fn literal_block_accepts_nel_0x85() {
+        // NEL (U+0085) is allowed by c-printable. In a block scalar it acts as
+        // a line break. No non-printable error should be emitted.
+        let mut lex = make_lexer("|\n  val\u{0085}ue\n");
+        let result = lex
+            .try_consume_literal_block_scalar(0)
+            .unwrap_or_else(|| unreachable!("expected Some"));
+        if let Err(e) = result {
+            assert!(
+                !e.message.contains("non-printable"),
+                "NEL must not be rejected as non-printable in block scalar, got: {}",
+                e.message
+            );
+        }
+    }
+
+    #[test]
+    fn literal_block_accepts_nbsp_0xa0() {
+        // NBSP (U+00A0) is in the 0xA0-0xD7FF c-printable range.
+        let (val, _) = lit_ok("|\n  val\u{00A0}ue\n");
+        assert!(
+            val.contains('\u{00A0}'),
+            "NBSP must be accepted in literal block content"
         );
     }
 }

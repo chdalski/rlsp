@@ -13,6 +13,7 @@
 
 mod anchors_and_aliases;
 mod block_scalars;
+mod char_validation;
 mod comments;
 mod conformance;
 mod directives;

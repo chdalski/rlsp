@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-04
 
 ## Goal
@@ -22,19 +22,19 @@ Reject literal non-c-printable characters in the YAML input stream per §5.1, wi
 
 ## Steps
 
-- [ ] Add `is_nb_json` predicate to `chars.rs` with unit tests
-- [ ] Enforce c-printable on plain scalar content in `lexer/plain.rs`
-- [ ] Enforce c-printable (as nb-char: c-printable minus line breaks minus BOM) on block scalar content in `lexer/block.rs`
-- [ ] Enforce c-printable on comment bodies in `lexer/comment.rs`
-- [ ] Enforce nb-json on single-quoted scalar literal content in `lexer/quoted.rs`
-- [ ] Enforce nb-json on double-quoted scalar literal content (between escapes) in `lexer/quoted.rs`
-- [ ] Add integration tests covering each context × representative non-printable characters
-- [ ] Verify existing yaml-test-suite tests still pass (the suite's valid-YAML fixtures should contain only c-printable characters; invalid-YAML fixtures that contain non-printables should already expect errors)
-- [ ] Add "Literal Stream Character Validation" entry to `rlsp-yaml-parser/docs/feature-log.md`
-- [ ] Remove 4 follow-up entries from `project_followup_plans.md` ([1], [27], [34], [75])
-- [ ] Update the "11 Phase 1 Lenient entries" count in the orchestration pickup note to reflect the removal
-- [ ] Update the "Non-printable unicode character diagnostic" entry in the rlsp-yaml section of `project_followup_plans.md` — reframe as LSP-layer-only since the parser now enforces c-printable
-- [ ] Mark plan Completed and commit
+- [x] Add `is_nb_json` predicate to `chars.rs` with unit tests
+- [x] Enforce c-printable on plain scalar content in `lexer/plain.rs`
+- [x] Enforce c-printable (as nb-char: c-printable minus line breaks minus BOM) on block scalar content in `lexer/block.rs`
+- [x] Enforce c-printable on comment bodies in `lexer/comment.rs`
+- [x] Enforce nb-json on single-quoted scalar literal content in `lexer/quoted.rs`
+- [x] Enforce nb-json on double-quoted scalar literal content (between escapes) in `lexer/quoted.rs`
+- [x] Add integration tests covering each context × representative non-printable characters
+- [x] Verify existing yaml-test-suite tests still pass (the suite's valid-YAML fixtures should contain only c-printable characters; invalid-YAML fixtures that contain non-printables should already expect errors)
+- [x] Add "Literal Stream Character Validation" entry to `rlsp-yaml-parser/docs/feature-log.md`
+- [x] Remove 4 follow-up entries from `project_followup_plans.md` ([1], [27], [34], [75])
+- [x] Update the "11 Phase 1 Lenient entries" count in the orchestration pickup note to reflect the removal
+- [x] Update the "Non-printable unicode character diagnostic" entry in the rlsp-yaml section of `project_followup_plans.md` — reframe as LSP-layer-only since the parser now enforces c-printable
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
@@ -42,21 +42,23 @@ Reject literal non-c-printable characters in the YAML input stream per §5.1, wi
 
 Add the `is_nb_json` predicate to `chars.rs`. Then enforce the spec's two-tier character-set rule at every content-scanning site: c-printable outside quoted scalars, nb-json inside quoted scalars. Each non-c-printable / non-nb-json byte produces a parse error with the offending codepoint and position.
 
-- [ ] `is_nb_json` predicate in `chars.rs` with unit tests (positive + negative cases matching the predicate's boundary)
-- [ ] Plain scalar content: non-c-printable byte → error with codepoint and position
-- [ ] Block scalar content (literal + folded): non-c-printable byte (excluding line breaks already handled by line splitter) → error
-- [ ] Comment bodies: non-c-printable byte → error
-- [ ] Single-quoted literal content: non-nb-json byte → error (allows DEL, C1, FFFE, FFFF per §5.1 JSON-compat)
-- [ ] Double-quoted literal content (between escapes): non-nb-json byte → error
-- [ ] Error message includes the offending codepoint as `U+XXXX` and its position (line, column, byte offset)
-- [ ] Existing specific checks (NUL in trailing comments at `plain.rs:81`, BOM in doc body at `step.rs:64-82`) remain — they fire first with their specific messages; the general c-printable check is a backstop for everything else
-- [ ] Integration tests in `tests/` covering: C0 control (e.g., U+0007 BEL) in plain scalar, block scalar, comment; DEL (U+007F) in plain scalar (rejected) vs in quoted scalar (accepted per nb-json); C1 control (e.g., U+0080) in plain scalar (rejected) vs in quoted scalar (accepted); U+FFFE in plain scalar (rejected) vs in quoted scalar (accepted)
-- [ ] yaml-test-suite `cargo test -p rlsp-yaml-parser --test yaml_test_suite` passes (no regressions on the conformance suite)
-- [ ] `cargo build`, `cargo clippy --all-targets`, `cargo test -p rlsp-yaml-parser` — zero warnings, zero failures
-- [ ] `cargo fmt --check` passes
-- [ ] `rlsp-yaml-parser/docs/feature-log.md` has a new "Literal Stream Character Validation" entry documenting: what changed (c-printable enforced on all literal stream input; nb-json exception for quoted scalars), what inputs are now rejected, the security rationale
-- [ ] `project_followup_plans.md`: 4 entries ([1], [27], [34], [75]) removed; orchestration pickup-note count updated from "11" to "7"; "Non-printable unicode character diagnostic" entry in rlsp-yaml section reframed as LSP-layer-only (parser now enforces c-printable; remaining work is to surface violations as LSP diagnostics)
-- [ ] Single commit: `fix(rlsp-yaml-parser): reject non-c-printable characters in literal stream input`
+**Completed:** commit `52e0e22` (2026-05-04)
+
+- [x] `is_nb_json` predicate in `chars.rs` with unit tests (positive + negative cases matching the predicate's boundary)
+- [x] Plain scalar content: non-c-printable byte → error with codepoint and position
+- [x] Block scalar content (literal + folded): non-c-printable byte (excluding line breaks already handled by line splitter) → error
+- [x] Comment bodies: non-c-printable byte → error
+- [x] Single-quoted literal content: non-nb-json byte → error (allows DEL, C1, FFFE, FFFF per §5.1 JSON-compat)
+- [x] Double-quoted literal content (between escapes): non-nb-json byte → error
+- [x] Error message includes the offending codepoint as `U+XXXX` and its position (line, column, byte offset)
+- [x] Existing specific checks (NUL in trailing comments at `plain.rs:81`, BOM in doc body at `step.rs:64-82`) remain — they fire first with their specific messages; the general c-printable check is a backstop for everything else
+- [x] Integration tests in `tests/` covering: C0 control (e.g., U+0007 BEL) in plain scalar, block scalar, comment; DEL (U+007F) in plain scalar (rejected) vs in quoted scalar (accepted per nb-json); C1 control (e.g., U+0080) in plain scalar (rejected) vs in quoted scalar (accepted); U+FFFE in plain scalar (rejected) vs in quoted scalar (accepted)
+- [x] yaml-test-suite `cargo test -p rlsp-yaml-parser --test yaml_test_suite` passes (no regressions on the conformance suite)
+- [x] `cargo build`, `cargo clippy --all-targets`, `cargo test -p rlsp-yaml-parser` — zero warnings, zero failures
+- [x] `cargo fmt --check` passes
+- [x] `rlsp-yaml-parser/docs/feature-log.md` has a new "Literal Stream Character Validation" entry documenting: what changed (c-printable enforced on all literal stream input; nb-json exception for quoted scalars), what inputs are now rejected, the security rationale
+- [x] `project_followup_plans.md`: 4 entries ([1], [27], [34], [75]) removed; orchestration pickup-note count updated from "11" to "7"; "Non-printable unicode character diagnostic" entry in rlsp-yaml section reframed as LSP-layer-only (parser now enforces c-printable; remaining work is to surface violations as LSP diagnostics)
+- [x] Single commit: `fix(rlsp-yaml-parser): reject non-c-printable characters in literal stream input`
 
 ## Decisions
 

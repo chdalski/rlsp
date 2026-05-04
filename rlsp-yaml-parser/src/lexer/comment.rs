@@ -2,6 +2,7 @@
 
 use memchr::memchr;
 
+use crate::chars::{find_non_c_printable, non_printable_error_message};
 use crate::error::Error;
 use crate::pos::{Pos, Span};
 
@@ -56,6 +57,20 @@ impl<'input> Lexer<'input> {
                 message: format!(
                     "comment exceeds maximum allowed length ({max_comment_len} bytes)"
                 ),
+            });
+        }
+
+        // Validate c-printable on the comment body.
+        if let Some((bad_i, bad_ch)) = find_non_c_printable(text.as_bytes()) {
+            let bad_char_count = text[..bad_i].chars().count();
+            let bad_pos = Pos {
+                byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                line: hash_pos.line,
+                column: hash_pos.column + 1 + bad_char_count,
+            };
+            return Err(Error {
+                pos: bad_pos,
+                message: non_printable_error_message(bad_ch, "comment"),
             });
         }
 
@@ -243,5 +258,164 @@ mod tests {
         };
         assert_eq!(err.pos.byte_offset, 2);
         assert_eq!(err.pos.column, 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group CM-NP: comment body c-printable rejection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn comment_rejects_nul_in_body() {
+        let mut lex = make_lexer("# hello\x00world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+0000"),
+            "expected non-printable error for NUL, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_rejects_0x01_in_body() {
+        let mut lex = make_lexer("# hello\x01world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+0001"),
+            "expected non-printable error for SOH, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_rejects_del_0x7f_in_body() {
+        let mut lex = make_lexer("# hello\x7fworld\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+007F"),
+            "expected non-printable error for DEL, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_rejects_c1_control_0x80_in_body() {
+        let mut lex = make_lexer("# hello\u{0080}world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+0080"),
+            "expected non-printable error for U+0080, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_rejects_0xfffe_in_body() {
+        let mut lex = make_lexer("# hello\u{FFFE}world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+FFFE"),
+            "expected non-printable error for U+FFFE, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_rejects_0xffff_in_body() {
+        let mut lex = make_lexer("# hello\u{FFFF}world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+FFFF"),
+            "expected non-printable error for U+FFFF, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_non_printable_as_first_body_char() {
+        // Non-printable as the very first character of the comment body.
+        let mut lex = make_lexer("#\x07hello\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("non-printable") || err.message.contains("U+0007"),
+            "expected non-printable error for BEL as first body char, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn comment_error_message_contains_uplus_hex() {
+        let mut lex = make_lexer("# hello\x07world\n");
+        let Err(err) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Err, got Ok")
+        };
+        assert!(
+            err.message.contains("U+0007"),
+            "error message must contain U+0007, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn trailing_comment_non_printable_in_body_produces_error() {
+        // Trailing comment on a content line: the non-printable must be caught
+        // when the comment is parsed (exercise through parse_events).
+        let events: Vec<_> = crate::parse_events("key: value # comment\x07here\n").collect();
+        let has_non_printable_error = events
+            .iter()
+            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
+        assert!(has_non_printable_error, "expected non-printable error for BEL in trailing comment");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group CM-OK: comment body c-printable acceptance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn comment_accepts_tab_in_body() {
+        // TAB (U+0009) is allowed by c-printable.
+        let mut lex = make_lexer("# col1\tcol2\n");
+        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Ok(Some(...))")
+        };
+        assert!(text.contains('\t'), "TAB must be accepted in comment body");
+    }
+
+    #[test]
+    fn comment_accepts_nel_0x85() {
+        // NEL (U+0085) is allowed by c-printable; in a single-line comment it
+        // acts as a line terminator, so the body is truncated before it. No
+        // non-printable error should be emitted.
+        let mut lex = make_lexer("# val\u{0085}ue\n");
+        if let Err(e) = lex.try_consume_comment(1024) {
+            assert!(
+                !e.message.contains("non-printable"),
+                "NEL must not be rejected as non-printable in comment, got: {}",
+                e.message
+            );
+        }
+    }
+
+    #[test]
+    fn comment_body_empty_no_error() {
+        // Empty comment body (just `#` with nothing after it) is always valid.
+        let mut lex = make_lexer("#\n");
+        let Ok(Some((text, _))) = lex.try_consume_comment(1024) else {
+            unreachable!("expected Ok(Some(...))")
+        };
+        assert_eq!(text, "", "empty comment body must produce empty text slice");
     }
 }

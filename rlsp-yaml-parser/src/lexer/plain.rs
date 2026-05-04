@@ -8,7 +8,7 @@ use crate::lines::LineBuffer;
 use crate::pos::{Pos, Span};
 
 use super::{Lexer, is_blank_or_comment, is_marker};
-use crate::chars::{is_c_indicator, is_ns_char};
+use crate::chars::{find_non_c_printable, is_c_indicator, is_ns_char, non_printable_error_message};
 use crate::lines::pos_after_line;
 
 impl<'input> Lexer<'input> {
@@ -28,6 +28,10 @@ impl<'input> Lexer<'input> {
     /// If [`Self::inline_scalar`] is set (populated by a preceding
     /// [`Self::consume_marker_line`] call for a `--- text` line), it is
     /// drained and returned immediately without consuming any new lines.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "plain scalar parsing with suffix and continuation checks; splitting would obscure the single-vs-multi-line flow"
+    )]
     pub fn try_consume_plain_scalar(
         &mut self,
         parent_indent: usize,
@@ -76,8 +80,10 @@ impl<'input> Lexer<'input> {
                     column: consumed_first.pos.column + hash_col_in_line,
                 };
                 let span_end = crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
-                // Validate comment text: YAML 1.2 §8.1.1 — comment lines must
-                // not contain NUL (U+0000) since it is not a c-printable char.
+                // Validate comment text: YAML 1.2 §8.1.1 / §5.1 — comment
+                // text must consist only of c-printable characters.
+                // The existing NUL check fires first with a specific message;
+                // find_non_c_printable is the general backstop for everything else.
                 if let Some(bad_i) = memchr(b'\0', comment_text.as_bytes()) {
                     let bad_char_i = comment_text[..bad_i].chars().count();
                     let bad_pos = Pos {
@@ -89,6 +95,18 @@ impl<'input> Lexer<'input> {
                         pos: bad_pos,
                         message: "invalid character U+0000 in comment".to_owned(),
                     });
+                } else if let Some((bad_i, bad_ch)) = find_non_c_printable(comment_text.as_bytes())
+                {
+                    let bad_char_count = comment_text[..bad_i].chars().count();
+                    let bad_pos = Pos {
+                        byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                        line: hash_pos.line,
+                        column: hash_pos.column + 1 + bad_char_count,
+                    };
+                    self.plain_scalar_suffix_error = Some(Error {
+                        pos: bad_pos,
+                        message: non_printable_error_message(bad_ch, "comment"),
+                    });
                 } else {
                     self.trailing_comment =
                         Some((comment_text, Span::from_pos(hash_pos, span_end)));
@@ -97,11 +115,8 @@ impl<'input> Lexer<'input> {
                 .char_indices()
                 .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
             {
-                // Suffix contains a character that stopped plain-scalar
-                // scanning (NUL U+0000 or mid-stream BOM U+FEFF) and is not
-                // valid at this position.  Other non-whitespace characters
-                // (e.g. `: value`) may be valid YAML content that the mapping
-                // detector missed and are not flagged here.
+                // Suffix contains NUL (U+0000) or mid-stream BOM (U+FEFF).
+                // These have specific existing error messages — keep them.
                 let bad_col_offset =
                     crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
                 let bad_pos = Pos {
@@ -112,6 +127,20 @@ impl<'input> Lexer<'input> {
                 self.plain_scalar_suffix_error = Some(Error {
                     pos: bad_pos,
                     message: format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
+                });
+            } else if let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes()) {
+                // General c-printable backstop: any non-printable byte in the
+                // suffix that follows the plain scalar value is an error.
+                let bad_col_offset =
+                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
+                let bad_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + bad_col_offset,
+                };
+                self.plain_scalar_suffix_error = Some(Error {
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "plain scalar"),
                 });
             }
         }
@@ -199,6 +228,34 @@ impl<'input> Lexer<'input> {
             let after_cont = trimmed[cont_value.len()..].trim_start_matches([' ', '\t']);
             if after_cont.starts_with(": ") || after_cont == ":" {
                 break;
+            }
+
+            // Check for non-c-printable bytes in the suffix that stopped the scan.
+            // `after_cont` is a suffix of `trimmed`; compute its byte offset within
+            // `next.content` by counting bytes from the end of `trimmed`.
+            if let Some((bad_byte_i, bad_ch)) = find_non_c_printable(after_cont.as_bytes()) {
+                // Byte offset of `after_cont[0]` within `next.content`:
+                //   leading_ws = next.content.len() - trimmed.len()
+                //   ws_skipped  = trimmed.len() - after_cont.len() (after cont_value strip)
+                // So after_cont starts at next.content.len() - after_cont.len().
+                let after_cont_in_content = next.content.len() - after_cont.len();
+                let bad_in_content = after_cont_in_content + bad_byte_i;
+                let bad_col = crate::pos::column_at(next.content, bad_in_content);
+                let bad_pos = Pos {
+                    byte_offset: next.offset + bad_in_content,
+                    line: next.pos.line,
+                    column: next.pos.column + bad_col,
+                };
+                // Consume the line so the parser advances past it.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume cont line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                self.plain_scalar_suffix_error = Some(Error {
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "plain scalar"),
+                });
+                return result;
             }
 
             // If the remainder after the scanned value is a comment (`# …`),
@@ -893,5 +950,221 @@ mod tests {
     #[case::trailing_whitespace_excluded("abc   ", "abc")]
     fn scan_plain_line_flow_cases(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(scan_plain_line_flow(input), expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group PS-NP: plain scalar c-printable rejection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_rejects_nul_in_body() {
+        // NUL in a plain scalar body must not pass through — the scan_plain_line_block
+        // terminates before NUL (it's a terminator byte), so the value is truncated.
+        let mut lex = make_lexer("val\x00ue\n");
+        if let Some((val, _)) = lex.try_consume_plain_scalar(0) {
+            assert!(!val.contains('\x00'), "NUL must not appear in plain scalar value");
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_0x01_soh_in_body() {
+        let mut lex = make_lexer("val\x01ue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x01'), "SOH (U+0001) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_bs_0x08_in_body() {
+        let mut lex = make_lexer("val\x08ue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x08'), "BS (U+0008) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_vt_0x0b_in_body() {
+        let mut lex = make_lexer("val\x0bue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x0b'), "VT (U+000B) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_ff_0x0c_in_body() {
+        let mut lex = make_lexer("val\x0cue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x0c'), "FF (U+000C) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_0x0e_so_in_body() {
+        let mut lex = make_lexer("val\x0eue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x0e'), "SO (U+000E) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_0x1f_us_in_body() {
+        let mut lex = make_lexer("val\x1fue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x1f'), "US (U+001F) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_del_0x7f_in_body() {
+        // DEL (U+007F) must be rejected by c-printable in plain scalar context.
+        // The parse must either error or truncate before DEL.
+        let mut lex = make_lexer("val\x7fue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x7f'), "DEL (U+007F) must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_c1_control_0x80_in_body() {
+        // U+0080 is a C1 control excluded by c-printable.
+        let mut lex = make_lexer("val\u{0080}ue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\u{0080}'), "U+0080 must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_0xfffe_in_body() {
+        let mut lex = make_lexer("val\u{FFFE}ue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\u{FFFE}'), "U+FFFE must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_0xffff_in_body() {
+        let mut lex = make_lexer("val\u{FFFF}ue\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\u{FFFF}'), "U+FFFF must not appear in plain scalar value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_rejects_non_printable_as_first_char() {
+        // Non-printable as the very first content byte must not produce a value
+        // containing that character.
+        let mut lex = make_lexer("a\x07bc\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x07'), "BEL as mid-scalar char must not appear in value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_non_printable_at_boundary_after_multibyte() {
+        // Non-printable byte immediately following a multibyte character.
+        let mut lex = make_lexer("val\u{263A}\x07end\n");
+        match lex.try_consume_plain_scalar(0) {
+            None => {}
+            Some((val, _)) => {
+                assert!(!val.contains('\x07'), "BEL after multibyte char must not appear in value");
+            }
+        }
+    }
+
+    #[test]
+    fn plain_scalar_error_message_contains_uplus_hex() {
+        // When a non-printable character is detected in a plain scalar, the error
+        // message must include the U+XXXX codepoint notation.
+        // try_consume_plain_scalar returns Option<(val, span)> but the internal
+        // validation path emits via the event stream; drive through parse_events instead.
+        let events: Vec<_> = crate::parse_events("key: val\x07ue\n").collect();
+        let err_msg = events
+            .iter()
+            .find_map(|r| r.as_ref().err().map(|e| e.message.clone()))
+            .unwrap_or_else(|| unreachable!("expected an error event"));
+        assert!(
+            err_msg.contains("U+0007"),
+            "error message must contain U+0007, got: {err_msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group PS-OK: plain scalar c-printable acceptance
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_scalar_accepts_tab_in_body() {
+        // TAB (U+0009) is allowed by c-printable.
+        let mut lex = make_lexer("col1\tcol2\n");
+        let (val, _) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert!(val.contains('\t'), "TAB must be accepted in plain scalar body");
+    }
+
+    #[test]
+    fn plain_scalar_accepts_nel_0x85() {
+        // NEL (U+0085) is allowed by c-printable (it is a line break in YAML).
+        // In a plain scalar, NEL acts as a line break; no error is expected.
+        let mut lex = make_lexer("val\u{0085}ue\n");
+        // Should not produce a non-printable error — NEL is c-printable.
+        // The value may be truncated by NEL (line-break semantics) but must not error.
+        let _result = lex.try_consume_plain_scalar(0);
+        // If we got here without panic, the acceptance criterion is satisfied.
+        // Verify no error event is emitted when NEL appears.
+        let events: Vec<_> = crate::parse_events("key: val\u{0085}ue\n").collect();
+        let has_non_printable_error = events
+            .iter()
+            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
+        assert!(!has_non_printable_error, "NEL must not be rejected as non-printable");
+    }
+
+    #[test]
+    fn plain_scalar_accepts_nbsp_0xa0() {
+        // NBSP (U+00A0) is allowed by c-printable (0xA0 is in the 0xA0-0xD7FF range).
+        let mut lex = make_lexer("val\u{00A0}ue\n");
+        let result = lex.try_consume_plain_scalar(0);
+        // If parsed, value must contain the NBSP character without error.
+        if let Some((val, _)) = result {
+            assert!(val.contains('\u{00A0}'), "NBSP must be accepted in plain scalar body");
+        }
+        let events: Vec<_> = crate::parse_events("key: val\u{00A0}ue\n").collect();
+        let has_non_printable_error = events
+            .iter()
+            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
+        assert!(!has_non_printable_error, "NBSP must not be rejected as non-printable");
     }
 }

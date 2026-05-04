@@ -12,6 +12,40 @@ with existing infrastructure.
 
 ---
 
+### Literal Stream Character Validation [completed]
+
+**Description:** The parser now enforces the YAML 1.2 §5.1 two-tier character-set
+rule on all literal stream content. Non-printable characters in the input produce
+a parse error naming the offending codepoint in `U+XXXX` format:
+
+- **c-printable rule** (stream-wide): applied to plain scalar content, block scalar
+  content (literal `|` and folded `>`), and comment bodies. Rejects C0 controls
+  (except TAB), DEL (U+007F), C1 controls (except NEL U+0085), and non-characters
+  U+FFFE/U+FFFF.
+- **nb-json rule** (quoted scalars): the spec requires that YAML processors allow
+  all non-C0 characters inside quoted scalars (§5.1 JSON-compatibility clause).
+  Single-quoted and double-quoted scalar content may contain DEL, C1 controls, and
+  U+FFFE/U+FFFF — only C0 controls (except TAB) are rejected.
+
+Previously the parser accepted any byte that cleared its delimiter scan, silently
+passing non-printable bytes to callers. Inputs such as a BEL character in a plain
+scalar or a SOH byte in a comment now produce structured parse errors.
+
+Existing specific checks (NUL in trailing comments, BOM in document body) are
+preserved and still fire with their targeted messages; the new checks are backstops
+for any other non-printable that reaches a scanner.
+**Complexity:** Low
+**Comment:** Security hardening: passing raw non-printable bytes through a YAML
+parser into downstream log pipelines, LSP diagnostics, and rendered output is a
+risk. The fix is strict-reject (not warn or diagnostic) — the user's stated
+preference and the spec's normative wording ("YAML streams use only the printable
+subset"). The nb-json exception for quoted scalars is a spec mandate ("must allow"),
+not optional. The enforcement adds a second byte-scan pass over content slices;
+overhead on valid YAML (which contains no non-printables) is near-zero.
+**Tier:** 1
+
+---
+
 ### Single-comparison document dispatch [completed]
 
 **Description:** The core parse loop's per-line handler selection now performs a

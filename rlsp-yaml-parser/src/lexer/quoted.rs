@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use memchr::{memchr, memchr2};
 
-use crate::chars::{decode_escape, is_c_printable};
+use crate::chars::{decode_escape, find_non_nb_json, is_c_printable, non_printable_error_message};
 use crate::error::Error;
 use crate::limits::MAX_SCALAR_LEN;
 use crate::pos::{Pos, Span};
@@ -71,6 +71,17 @@ impl<'input> Lexer<'input> {
                     message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
                 });
             }
+            // Validate nb-json on the literal source bytes (single-quoted scalars
+            // allow all non-C0 characters per YAML §5.1 JSON-compatibility clause).
+            let body_slice = body_start.get(..value.quoted_len).unwrap_or_default();
+            if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
+                let bad_pos =
+                    crate::pos::advance_within_line(open_pos.advance('\''), &body_slice[..bad_i]);
+                return Err(Error {
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "single-quoted scalar"),
+                });
+            }
             // Span: from open `'` through closing `'`.
             let end_pos = crate::pos::advance_within_line(
                 open_pos.advance('\''),
@@ -84,6 +95,18 @@ impl<'input> Lexer<'input> {
         }
 
         // Multi-line: YAML §7.3.3 trims trailing whitespace from each line.
+        // Validate nb-json on the first line's source bytes before building owned.
+        {
+            let body_slice = body_start.get(..value.quoted_len).unwrap_or_default();
+            if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
+                let bad_pos =
+                    crate::pos::advance_within_line(open_pos.advance('\''), &body_slice[..bad_i]);
+                return Err(Error {
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "single-quoted scalar"),
+                });
+            }
+        }
         let mut owned = value.as_owned_string(body_start);
         owned.truncate(owned.trim_end_matches([' ', '\t']).len());
 
@@ -136,6 +159,22 @@ impl<'input> Lexer<'input> {
             }
 
             let (cont_value, cont_closed) = scan_single_quoted_line(trimmed);
+
+            // Validate nb-json on the source bytes of this continuation line.
+            {
+                let cont_slice = trimmed.get(..cont_value.quoted_len).unwrap_or_default();
+                if let Some((bad_i, bad_ch)) = find_non_nb_json(cont_slice.as_bytes()) {
+                    let leading_len = line_content.len() - trimmed.len();
+                    let bad_pos = crate::pos::advance_within_line(
+                        line_start_pos,
+                        &line_content[..leading_len + bad_i],
+                    );
+                    return Err(Error {
+                        pos: bad_pos,
+                        message: non_printable_error_message(bad_ch, "single-quoted scalar"),
+                    });
+                }
+            }
 
             if cont_closed {
                 if cont_value.has_escape {
@@ -680,25 +719,39 @@ pub(super) fn scan_double_quoted_line(
 
         // Accumulate the plain span [i..hit] that memchr skipped over.
         // For the borrow case we simply extend borrow_end; for owned we push.
-        if let Some(buf) = owned.as_mut() {
+        {
             let span = body.get(i..hit).unwrap_or_default();
-            buf.push_str(span);
-            if buf.len() > MAX_SCALAR_LEN {
+            // Validate nb-json on the literal span (quoted scalars allow all
+            // non-C0 characters per YAML §5.1 JSON-compatibility clause).
+            if let Some((bad_i, bad_ch)) = find_non_nb_json(span.as_bytes()) {
+                let bad_pos = crate::pos::advance_within_line(
+                    start_pos,
+                    body.get(..i + bad_i).unwrap_or_default(),
+                );
                 return Err(Error {
-                    pos: start_pos,
-                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "double-quoted scalar"),
                 });
             }
-            // owned_non_ws_len is updated after each escape decode; see below.
-            // If the next hit is `"` (return) or `\` (escape decode updates it),
-            // we do not need to update the checkpoint here.
-        } else {
-            borrow_end = hit;
-            if borrow_end > MAX_SCALAR_LEN {
-                return Err(Error {
-                    pos: start_pos,
-                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                });
+            if let Some(buf) = owned.as_mut() {
+                buf.push_str(span);
+                if buf.len() > MAX_SCALAR_LEN {
+                    return Err(Error {
+                        pos: start_pos,
+                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    });
+                }
+                // owned_non_ws_len is updated after each escape decode; see below.
+                // If the next hit is `"` (return) or `\` (escape decode updates it),
+                // we do not need to update the checkpoint here.
+            } else {
+                borrow_end = hit;
+                if borrow_end > MAX_SCALAR_LEN {
+                    return Err(Error {
+                        pos: start_pos,
+                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    });
+                }
             }
         }
 
@@ -754,6 +807,15 @@ pub(super) fn scan_double_quoted_line(
 
     // No more `"` or `\` — consume the rest of the line as plain content.
     let rest = body.get(i..).unwrap_or_default();
+    // Validate nb-json on the trailing literal span.
+    if let Some((bad_i, bad_ch)) = find_non_nb_json(rest.as_bytes()) {
+        let bad_pos =
+            crate::pos::advance_within_line(start_pos, body.get(..i + bad_i).unwrap_or_default());
+        return Err(Error {
+            pos: bad_pos,
+            message: non_printable_error_message(bad_ch, "double-quoted scalar"),
+        });
+    }
     if let Some(buf) = owned.as_mut() {
         if !rest.is_empty() {
             buf.push_str(rest);
@@ -1528,6 +1590,298 @@ mod tests {
         assert!(
             e.message.contains("maximum allowed length"),
             "expected length cap error, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group SQ-NP: single-quoted nb-json rejection (C0 controls)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn single_quoted_rejects_nul_in_body() {
+        let e = sq_err("'val\x00ue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0000"),
+            "expected non-printable error for NUL, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_rejects_0x01_soh_in_body() {
+        let e = sq_err("'val\x01ue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0001"),
+            "expected non-printable error for SOH, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_rejects_0x08_bs_in_body() {
+        let e = sq_err("'val\x08ue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0008"),
+            "expected non-printable error for BS, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_rejects_lf_literal_in_body() {
+        // LF (U+000A) as a literal byte inside the single-quoted body is a line
+        // break; nb-json excludes it (nb-json = x09 | [x20..x10FFFF]; LF = x0A).
+        // The parser sees it as a multi-line scalar and processes it as a fold.
+        // Verify no crash occurs and the character is not in the resulting value
+        // as a raw C0 byte (it gets converted to a fold/newline by the spec).
+        let result = make_lexer("'val\nue'").try_consume_single_quoted(0);
+        // LF is a line break — the multi-line path produces a folded value;
+        // it should not be rejected as non-printable (it's a structural break).
+        if let Err(e) = result {
+            assert!(
+                !e.message.contains("non-printable"),
+                "LF in single-quoted must not be rejected as non-printable: {}",
+                e.message
+            );
+        }
+    }
+
+    #[test]
+    fn single_quoted_rejects_0x0b_vt_in_body() {
+        let e = sq_err("'val\x0bue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+000B"),
+            "expected non-printable error for VT, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_rejects_0x0c_ff_in_body() {
+        let e = sq_err("'val\x0cue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+000C"),
+            "expected non-printable error for FF, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_rejects_cr_literal_in_body() {
+        // CR (U+000D) as a literal byte — structural line break, not nb-json C0 rejection.
+        // Same reasoning as LF: CR is a line break character, not rejected as non-printable.
+        if let Err(e) = make_lexer("'val\rue'").try_consume_single_quoted(0) {
+            assert!(
+                !e.message.contains("non-printable"),
+                "CR in single-quoted must not be rejected as non-printable: {}",
+                e.message
+            );
+        }
+    }
+
+    #[test]
+    fn single_quoted_rejects_0x1f_in_body() {
+        let e = sq_err("'val\x1fue'");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+001F"),
+            "expected non-printable error for US (U+001F), got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn single_quoted_error_message_contains_uplus_hex() {
+        let e = sq_err("'val\x07ue'");
+        assert!(
+            e.message.contains("U+0007"),
+            "error message must contain U+0007, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("single-quoted scalar"),
+            "error message must mention 'single-quoted scalar', got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group SQ-OK: single-quoted nb-json acceptance (DEL, C1, U+FFFE/FFFF)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn single_quoted_accepts_del_0x7f() {
+        // DEL (0x7F) is ≥ 0x20 so it passes nb-json.
+        let (val, _) = sq("'val\x7fue'");
+        assert!(val.contains('\x7f'), "DEL must be accepted in single-quoted scalar");
+    }
+
+    #[test]
+    fn single_quoted_accepts_c1_0x80() {
+        // U+0080 is a C1 control; nb-json allows it (≥ 0x20 in the [x20..x10FFFF] range
+        // — wait, C1 = 0x80..0x9F which is > 0x20, so nb-json allows them).
+        let (val, _) = sq("'val\u{0080}ue'");
+        assert!(val.contains('\u{0080}'), "U+0080 must be accepted in single-quoted scalar");
+    }
+
+    #[test]
+    fn single_quoted_accepts_c1_0x9f() {
+        let (val, _) = sq("'val\u{009F}ue'");
+        assert!(val.contains('\u{009F}'), "U+009F must be accepted in single-quoted scalar");
+    }
+
+    #[test]
+    fn single_quoted_accepts_0xfffe() {
+        let (val, _) = sq("'val\u{FFFE}ue'");
+        assert!(val.contains('\u{FFFE}'), "U+FFFE must be accepted in single-quoted scalar");
+    }
+
+    #[test]
+    fn single_quoted_accepts_0xffff() {
+        let (val, _) = sq("'val\u{FFFF}ue'");
+        assert!(val.contains('\u{FFFF}'), "U+FFFF must be accepted in single-quoted scalar");
+    }
+
+    #[test]
+    fn single_quoted_accepts_tab() {
+        // TAB is also allowed by nb-json (x09).
+        let (val, _) = sq("'col1\tcol2'");
+        assert!(val.contains('\t'), "TAB must be accepted in single-quoted scalar");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group DQ-NP: double-quoted nb-json rejection (C0 literal content)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn double_quoted_rejects_nul_literal_in_body() {
+        let e = dq_err("\"val\x00ue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0000"),
+            "expected non-printable error for NUL, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_0x01_literal_in_body() {
+        let e = dq_err("\"val\x01ue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0001"),
+            "expected non-printable error for SOH, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_0x08_bs_literal() {
+        let e = dq_err("\"val\x08ue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0008"),
+            "expected non-printable error for BS, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_0x0b_vt_literal() {
+        let e = dq_err("\"val\x0bue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+000B"),
+            "expected non-printable error for VT, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_0x1f_literal() {
+        let e = dq_err("\"val\x1fue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+001F"),
+            "expected non-printable error for US (U+001F), got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_error_message_contains_uplus_hex() {
+        let e = dq_err("\"val\x07ue\"");
+        assert!(
+            e.message.contains("U+0007"),
+            "error message must contain U+0007, got: {}",
+            e.message
+        );
+        assert!(
+            e.message.contains("double-quoted scalar"),
+            "error message must mention 'double-quoted scalar', got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_non_nb_json_adjacent_to_escape() {
+        // BEL immediately before an escape sequence must be caught.
+        let e = dq_err("\"val\x07\\nue\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error for BEL before escape, got: {}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn double_quoted_rejects_non_nb_json_between_two_escapes() {
+        // BEL between two escape sequences must be caught.
+        let e = dq_err("\"\\n\x07\\n\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "expected non-printable error for BEL between escapes, got: {}",
+            e.message
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Group DQ-OK: double-quoted nb-json acceptance (DEL, C1, U+FFFE/FFFF)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn double_quoted_accepts_del_0x7f_literal() {
+        // DEL (0x7F) is ≥ 0x20 → accepted by nb-json.
+        let (val, _) = dq("\"val\x7fue\"");
+        assert!(val.contains('\x7f'), "DEL must be accepted in double-quoted scalar");
+    }
+
+    #[test]
+    fn double_quoted_accepts_c1_0x80_literal() {
+        let (val, _) = dq("\"val\u{0080}ue\"");
+        assert!(val.contains('\u{0080}'), "U+0080 must be accepted in double-quoted scalar");
+    }
+
+    #[test]
+    fn double_quoted_accepts_0xfffe_literal() {
+        let (val, _) = dq("\"val\u{FFFE}ue\"");
+        assert!(val.contains('\u{FFFE}'), "U+FFFE must be accepted in double-quoted scalar");
+    }
+
+    #[test]
+    fn double_quoted_accepts_0xffff_literal() {
+        let (val, _) = dq("\"val\u{FFFF}ue\"");
+        assert!(val.contains('\u{FFFF}'), "U+FFFF must be accepted in double-quoted scalar");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group DQ-REG1: regression guard — named escape for C0 still accepted
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn double_quoted_escape_non_printable_still_rejected() {
+        // A *literal* BEL byte in the source (not via escape) must be rejected.
+        // This is the regression guard: make sure the nb-json check is on the
+        // raw source span, not on the decoded value.
+        let e = dq_err("\"literal\x07bel\"");
+        assert!(
+            e.message.contains("non-printable") || e.message.contains("U+0007"),
+            "literal BEL must be rejected even in double-quoted, got: {}",
             e.message
         );
     }

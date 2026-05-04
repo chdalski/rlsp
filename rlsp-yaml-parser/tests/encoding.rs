@@ -155,12 +155,11 @@ fn parse_events_nul_produces_error(#[case] input: &str) {
 }
 
 #[test]
-fn parse_events_accepts_nul_in_double_quoted_scalar() {
-    // NUL (U+0000) is excluded from YAML 1.2 c-printable [1], but the parser's
-    // nb-double-char implementation accepts any non-break, non-BOM character
-    // that is not '"' or '\'. NUL passes that filter, so it is accepted inside
-    // double-quoted scalars. Assert actual behavior.
-    assert!(!has_parse_error("key: \"val\0ue\"\n"));
+fn parse_events_rejects_nul_in_double_quoted_scalar() {
+    // NUL (U+0000) is a C0 control character excluded by nb-json per YAML §5.1.
+    // nb-json = x09 | [x20-x10FFFF]; NUL (x00) is excluded.
+    // Parser enforces nb-json on literal content in double-quoted scalars.
+    assert!(has_parse_error("key: \"val\0ue\"\n"));
 }
 
 // ===========================================================================
