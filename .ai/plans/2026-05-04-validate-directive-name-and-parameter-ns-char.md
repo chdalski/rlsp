@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-04
 
 ## Goal
@@ -21,24 +21,26 @@ Validate directive names and parameters against the `ns-char+` production per YA
 
 ## Steps
 
-- [ ] Validate directive names and parameters against `ns-char+` in `directives.rs`
-- [ ] Add integration tests for non-`ns-char` rejection in directive names and parameters
-- [ ] Update follow-up queue: remove [84]/[85] entry, update Phase 1 Lenient count from 7 to 5
-- [ ] Verify all tests pass (`cargo test -p rlsp-yaml-parser`)
-- [ ] Mark plan Completed and commit
+- [x] Validate directive names and parameters against `ns-char+` in `directives.rs`
+- [x] Add integration tests for non-`ns-char` rejection in directive names and parameters
+- [x] Update follow-up queue: remove [84]/[85] entry, update Phase 1 Lenient count from 7 to 5
+- [x] Verify all tests pass (`cargo test -p rlsp-yaml-parser`)
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Enforce `ns-char+` validation on directive names and parameters
 
+**Completed:** commit `b221f7b` (2026-05-04)
+
 Validate directive names and parameters against the existing `is_ns_char` predicate in `chars.rs`. Reject any directive whose name or parameter contains a non-`ns-char` byte with an error that includes the offending character as `U+XXXX`.
 
-- [ ] In `parse_directive()`, after extracting the directive name, validate each char with `is_ns_char()`; if any fails, return an error with the offending codepoint
-- [ ] For unknown (reserved) directives, validate each parameter token with `is_ns_char()` before silently ignoring the directive
-- [ ] For `%YAML`: the version string is already validated by digit parsing; add `ns-char` pre-validation on the raw parameter string so that `%YAML \x01.2` is rejected with a clear "non-ns-char" error rather than a confusing "malformed version" error
-- [ ] For `%TAG`: the handle is validated by `is_valid_tag_handle()`; add `ns-char` pre-validation on the raw parameters string so that non-`ns-char` bytes in the handle/prefix portion are caught with a clear error
-- [ ] Error message format: `"directive name contains non-printable character U+XXXX"` or `"directive parameter contains non-printable character U+XXXX"`
-- [ ] Integration tests in `tests/smoke/directives.rs` covering:
+- [x] In `parse_directive()`, after extracting the directive name, validate each char with `is_ns_char()`; if any fails, return an error with the offending codepoint
+- [x] For unknown (reserved) directives, validate each parameter token with `is_ns_char()` before silently ignoring the directive
+- [x] For `%YAML`: the version string is already validated by digit parsing; add `ns-char` pre-validation on the raw parameter string so that `%YAML \x01.2` is rejected with a clear "non-ns-char" error rather than a confusing "malformed version" error
+- [x] For `%TAG`: the handle is validated by `is_valid_tag_handle()`; add `ns-char` pre-validation on the raw parameters string so that non-`ns-char` bytes in the handle/prefix portion are caught with a clear error
+- [x] Error message format: `"directive name contains non-printable character U+XXXX"` or `"directive parameter contains non-printable character U+XXXX"`
+- [x] Integration tests in `tests/smoke/directives.rs` covering:
   - C0 control (e.g., BEL U+0007) in directive name → error
   - DEL (U+007F) in directive name → error
   - BOM (U+FEFF) in directive name → error
@@ -46,13 +48,13 @@ Validate directive names and parameters against the existing `is_ns_char` predic
   - C1 control (e.g., U+0080) in `%TAG` prefix → error (replaces current partial control-char check)
   - Valid `ns-char` content in unknown directive name and parameters → no error (regression guard)
   - Existing test I-1 (`%FOO bar baz`) continues to pass (valid `ns-char` content)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove [84]/[85] entry from `project_followup_plans.md`
-- [ ] Update Phase 1 Lenient count in the orchestration pickup note from "7" to "5" and append `; [84]/[85] resolved by directive ns-char validation fix` to the parenthetical that lists prior resolutions
-- [ ] Update conformance doc rewrite entry in `project_followup_plans.md`: remove [84] and [85] from the Phase 1 mislabels list (they are now fixed, not mislabeled)
-- [ ] Single commit: `fix(rlsp-yaml-parser): validate directive names and parameters against ns-char`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove [84]/[85] entry from `project_followup_plans.md`
+- [x] Update Phase 1 Lenient count in the orchestration pickup note from "7" to "5" and append `; [84]/[85] resolved by directive ns-char validation fix` to the parenthetical that lists prior resolutions
+- [x] Update conformance doc rewrite entry in `project_followup_plans.md`: remove [84] and [85] from the Phase 1 mislabels list (they are now fixed, not mislabeled)
+- [x] Single commit: `fix(rlsp-yaml-parser): validate directive names and parameters against ns-char`
 
 ## Decisions
 

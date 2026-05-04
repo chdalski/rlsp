@@ -1179,7 +1179,10 @@ mod tests {
     fn literal_block_accepts_tab_in_content() {
         // TAB (U+0009) is allowed by c-printable.
         let (val, _) = lit_ok("|\n  col1\tcol2\n");
-        assert!(val.contains('\t'), "TAB must be accepted in literal block content");
+        assert!(
+            val.contains('\t'),
+            "TAB must be accepted in literal block content"
+        );
     }
 
     #[test]

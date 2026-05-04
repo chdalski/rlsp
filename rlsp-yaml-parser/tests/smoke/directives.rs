@@ -838,3 +838,78 @@ fn inline_tag_suffix_with_underscore_is_accepted() {
         "inline tag !!my_type must be accepted; underscore is valid in tag suffixes (ns-tag-char)"
     );
 }
+
+// -----------------------------------------------------------------------
+// Group O — ns-char validation on directive names and parameters ([84]/[85])
+// -----------------------------------------------------------------------
+
+// O-1: C0 control (BEL U+0007) in directive name returns error.
+#[test]
+fn directive_name_with_c0_control_returns_error() {
+    // %F\x07OO — name contains BEL (U+0007), a non-ns-char.
+    assert!(
+        has_error("%F\x07OO\n---\nscalar\n"),
+        "directive name containing C0 control (BEL) must return an error"
+    );
+}
+
+// O-2: DEL (U+007F) in directive name returns error.
+#[test]
+fn directive_name_with_del_returns_error() {
+    // %FOO\x7F — name contains DEL (U+007F), a non-ns-char.
+    assert!(
+        has_error("%FOO\x7F\n---\nscalar\n"),
+        "directive name containing DEL (U+007F) must return an error"
+    );
+}
+
+// O-3: BOM (U+FEFF) in directive name returns error.
+#[test]
+fn directive_name_with_bom_returns_error() {
+    // %FO\u{FEFF}O — name contains BOM, a non-ns-char.
+    assert!(
+        has_error("%FO\u{FEFF}O\n---\nscalar\n"),
+        "directive name containing BOM (U+FEFF) must return an error"
+    );
+}
+
+// O-4: C0 control in unknown directive parameter returns error.
+#[test]
+fn unknown_directive_parameter_with_c0_control_returns_error() {
+    // %FOO bad\x01content — parameter contains SOH (U+0001), a non-ns-char.
+    assert!(
+        has_error("%FOO bad\x01content\n---\nscalar\n"),
+        "unknown directive parameter containing C0 control must return an error"
+    );
+}
+
+// O-5: C1 control (U+0080) in %TAG prefix returns error (replaces old narrow control-char check).
+#[test]
+fn tag_directive_prefix_with_c1_control_returns_error() {
+    // %TAG !e! prefix\u{0080} — prefix contains U+0080 (a C1 control), a non-ns-char.
+    assert!(
+        has_error("%TAG !e! prefix\u{0080}\n---\nscalar\n"),
+        "%TAG prefix containing C1 control (U+0080) must return an error"
+    );
+}
+
+// O-6: Valid ns-char content in unknown directive name and parameters is accepted (regression guard).
+#[test]
+fn unknown_directive_with_valid_ns_char_content_is_accepted() {
+    // %FOO bar baz — all characters are valid ns-char; directive is silently ignored.
+    assert!(
+        !has_error("%FOO bar baz\n---\nscalar\n"),
+        "unknown directive with valid ns-char name and parameters must be accepted"
+    );
+}
+
+// O-7: Existing test I-1 (%FOO bar baz) still passes (valid ns-char content).
+// This is an explicit regression guard matching the existing unknown_directive_is_silently_skipped
+// test (Group I-1) — re-verifying here in the ns-char group for traceability.
+#[test]
+fn unknown_directive_i1_regression_ns_char_group() {
+    assert!(
+        !has_error("%FOO bar baz\n---\nscalar\n"),
+        "I-1 regression: %FOO bar baz must still be silently skipped (valid ns-char content)"
+    );
+}

@@ -374,10 +374,15 @@ mod tests {
         // Trailing comment on a content line: the non-printable must be caught
         // when the comment is parsed (exercise through parse_events).
         let events: Vec<_> = crate::parse_events("key: value # comment\x07here\n").collect();
-        let has_non_printable_error = events
-            .iter()
-            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
-        assert!(has_non_printable_error, "expected non-printable error for BEL in trailing comment");
+        let has_non_printable_error = events.iter().any(|r| {
+            r.as_ref()
+                .err()
+                .is_some_and(|e| e.message.contains("non-printable"))
+        });
+        assert!(
+            has_non_printable_error,
+            "expected non-printable error for BEL in trailing comment"
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -6,6 +6,7 @@
 
 use super::properties::is_valid_tag_handle;
 use super::state::{IterState, StepResult};
+use crate::chars::is_ns_char;
 use crate::error::Error;
 use crate::event::Event;
 use crate::limits::{MAX_COMMENT_LEN, MAX_DIRECTIVES_PER_DOC, MAX_TAG_HANDLE_BYTES, MAX_TAG_LEN};
@@ -92,11 +93,37 @@ impl<'input> EventIter<'input> {
         let name = &after_percent[..name_end];
         let rest = after_percent[name_end..].trim_start_matches([' ', '\t']);
 
+        // Validate directive name: every character must be ns-char ([84]).
+        for ch in name.chars() {
+            if !is_ns_char(ch) {
+                return Err(Error {
+                    pos: dir_pos,
+                    message: format!(
+                        "directive name contains non-printable character U+{:04X}",
+                        ch as u32
+                    ),
+                });
+            }
+        }
+
         match name {
             "YAML" => self.parse_yaml_directive(rest, dir_pos),
             "TAG" => self.parse_tag_directive(rest, dir_pos),
             _ => {
-                // Reserved directive — silently ignore per YAML 1.2 spec.
+                // Reserved directive — validate parameters then silently ignore per YAML 1.2 spec.
+                for token in rest.split_ascii_whitespace() {
+                    for ch in token.chars() {
+                        if !is_ns_char(ch) {
+                            return Err(Error {
+                                pos: dir_pos,
+                                message: format!(
+                                    "directive parameter contains non-printable character U+{:04X}",
+                                    ch as u32
+                                ),
+                            });
+                        }
+                    }
+                }
                 self.directive_scope.directive_count += 1;
                 Ok(())
             }
@@ -110,6 +137,24 @@ impl<'input> EventIter<'input> {
                 pos: dir_pos,
                 message: "duplicate %YAML directive in the same document".into(),
             });
+        }
+
+        // Pre-validate: every character in the parameter must be ns-char ([85]).
+        // Stop at the first comment character (`#`) since trailing comments are allowed.
+        let param_body = params.trim_start_matches([' ', '\t']);
+        let param_body = param_body.find('#').map_or(param_body, |pos| {
+            param_body[..pos].trim_end_matches([' ', '\t'])
+        });
+        for ch in param_body.chars() {
+            if !is_ns_char(ch) {
+                return Err(Error {
+                    pos: dir_pos,
+                    message: format!(
+                        "directive parameter contains non-printable character U+{:04X}",
+                        ch as u32
+                    ),
+                });
+            }
         }
 
         // Parse `major.minor`.
@@ -161,6 +206,21 @@ impl<'input> EventIter<'input> {
         params: &'input str,
         dir_pos: Pos,
     ) -> Result<(), Error> {
+        // Pre-validate: every non-whitespace character in the parameters must be ns-char ([85]).
+        for token in params.split_ascii_whitespace() {
+            for ch in token.chars() {
+                if !is_ns_char(ch) {
+                    return Err(Error {
+                        pos: dir_pos,
+                        message: format!(
+                            "directive parameter contains non-printable character U+{:04X}",
+                            ch as u32
+                        ),
+                    });
+                }
+            }
+        }
+
         // Split on whitespace to get handle and prefix.
         let handle_end = params.find([' ', '\t']).ok_or_else(|| Error {
             pos: dir_pos,
@@ -202,16 +262,6 @@ impl<'input> EventIter<'input> {
                 pos: dir_pos,
                 message: format!("tag prefix exceeds maximum length of {MAX_TAG_LEN} bytes"),
             });
-        }
-
-        // Reject control characters in prefix.
-        for ch in prefix.chars() {
-            if (ch as u32) < 0x20 || ch == '\x7F' {
-                return Err(Error {
-                    pos: dir_pos,
-                    message: format!("tag prefix contains invalid control character {ch:?}"),
-                });
-            }
         }
 
         // Duplicate handle check.

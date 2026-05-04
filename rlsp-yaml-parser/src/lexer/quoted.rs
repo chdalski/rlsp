@@ -1713,7 +1713,10 @@ mod tests {
     fn single_quoted_accepts_del_0x7f() {
         // DEL (0x7F) is ≥ 0x20 so it passes nb-json.
         let (val, _) = sq("'val\x7fue'");
-        assert!(val.contains('\x7f'), "DEL must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\x7f'),
+            "DEL must be accepted in single-quoted scalar"
+        );
     }
 
     #[test]
@@ -1721,32 +1724,47 @@ mod tests {
         // U+0080 is a C1 control; nb-json allows it (≥ 0x20 in the [x20..x10FFFF] range
         // — wait, C1 = 0x80..0x9F which is > 0x20, so nb-json allows them).
         let (val, _) = sq("'val\u{0080}ue'");
-        assert!(val.contains('\u{0080}'), "U+0080 must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\u{0080}'),
+            "U+0080 must be accepted in single-quoted scalar"
+        );
     }
 
     #[test]
     fn single_quoted_accepts_c1_0x9f() {
         let (val, _) = sq("'val\u{009F}ue'");
-        assert!(val.contains('\u{009F}'), "U+009F must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\u{009F}'),
+            "U+009F must be accepted in single-quoted scalar"
+        );
     }
 
     #[test]
     fn single_quoted_accepts_0xfffe() {
         let (val, _) = sq("'val\u{FFFE}ue'");
-        assert!(val.contains('\u{FFFE}'), "U+FFFE must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\u{FFFE}'),
+            "U+FFFE must be accepted in single-quoted scalar"
+        );
     }
 
     #[test]
     fn single_quoted_accepts_0xffff() {
         let (val, _) = sq("'val\u{FFFF}ue'");
-        assert!(val.contains('\u{FFFF}'), "U+FFFF must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\u{FFFF}'),
+            "U+FFFF must be accepted in single-quoted scalar"
+        );
     }
 
     #[test]
     fn single_quoted_accepts_tab() {
         // TAB is also allowed by nb-json (x09).
         let (val, _) = sq("'col1\tcol2'");
-        assert!(val.contains('\t'), "TAB must be accepted in single-quoted scalar");
+        assert!(
+            val.contains('\t'),
+            "TAB must be accepted in single-quoted scalar"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1848,25 +1866,37 @@ mod tests {
     fn double_quoted_accepts_del_0x7f_literal() {
         // DEL (0x7F) is ≥ 0x20 → accepted by nb-json.
         let (val, _) = dq("\"val\x7fue\"");
-        assert!(val.contains('\x7f'), "DEL must be accepted in double-quoted scalar");
+        assert!(
+            val.contains('\x7f'),
+            "DEL must be accepted in double-quoted scalar"
+        );
     }
 
     #[test]
     fn double_quoted_accepts_c1_0x80_literal() {
         let (val, _) = dq("\"val\u{0080}ue\"");
-        assert!(val.contains('\u{0080}'), "U+0080 must be accepted in double-quoted scalar");
+        assert!(
+            val.contains('\u{0080}'),
+            "U+0080 must be accepted in double-quoted scalar"
+        );
     }
 
     #[test]
     fn double_quoted_accepts_0xfffe_literal() {
         let (val, _) = dq("\"val\u{FFFE}ue\"");
-        assert!(val.contains('\u{FFFE}'), "U+FFFE must be accepted in double-quoted scalar");
+        assert!(
+            val.contains('\u{FFFE}'),
+            "U+FFFE must be accepted in double-quoted scalar"
+        );
     }
 
     #[test]
     fn double_quoted_accepts_0xffff_literal() {
         let (val, _) = dq("\"val\u{FFFF}ue\"");
-        assert!(val.contains('\u{FFFF}'), "U+FFFF must be accepted in double-quoted scalar");
+        assert!(
+            val.contains('\u{FFFF}'),
+            "U+FFFF must be accepted in double-quoted scalar"
+        );
     }
 
     // -----------------------------------------------------------------------

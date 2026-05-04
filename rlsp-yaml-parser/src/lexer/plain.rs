@@ -962,7 +962,10 @@ mod tests {
         // terminates before NUL (it's a terminator byte), so the value is truncated.
         let mut lex = make_lexer("val\x00ue\n");
         if let Some((val, _)) = lex.try_consume_plain_scalar(0) {
-            assert!(!val.contains('\x00'), "NUL must not appear in plain scalar value");
+            assert!(
+                !val.contains('\x00'),
+                "NUL must not appear in plain scalar value"
+            );
         }
     }
 
@@ -972,7 +975,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x01'), "SOH (U+0001) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x01'),
+                    "SOH (U+0001) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -983,7 +989,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x08'), "BS (U+0008) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x08'),
+                    "BS (U+0008) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -994,7 +1003,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x0b'), "VT (U+000B) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x0b'),
+                    "VT (U+000B) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1005,7 +1017,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x0c'), "FF (U+000C) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x0c'),
+                    "FF (U+000C) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1016,7 +1031,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x0e'), "SO (U+000E) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x0e'),
+                    "SO (U+000E) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1027,7 +1045,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x1f'), "US (U+001F) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x1f'),
+                    "US (U+001F) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1040,7 +1061,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x7f'), "DEL (U+007F) must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\x7f'),
+                    "DEL (U+007F) must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1052,7 +1076,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\u{0080}'), "U+0080 must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\u{0080}'),
+                    "U+0080 must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1063,7 +1090,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\u{FFFE}'), "U+FFFE must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\u{FFFE}'),
+                    "U+FFFE must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1074,7 +1104,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\u{FFFF}'), "U+FFFF must not appear in plain scalar value");
+                assert!(
+                    !val.contains('\u{FFFF}'),
+                    "U+FFFF must not appear in plain scalar value"
+                );
             }
         }
     }
@@ -1087,7 +1120,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x07'), "BEL as mid-scalar char must not appear in value");
+                assert!(
+                    !val.contains('\x07'),
+                    "BEL as mid-scalar char must not appear in value"
+                );
             }
         }
     }
@@ -1099,7 +1135,10 @@ mod tests {
         match lex.try_consume_plain_scalar(0) {
             None => {}
             Some((val, _)) => {
-                assert!(!val.contains('\x07'), "BEL after multibyte char must not appear in value");
+                assert!(
+                    !val.contains('\x07'),
+                    "BEL after multibyte char must not appear in value"
+                );
             }
         }
     }
@@ -1132,7 +1171,10 @@ mod tests {
         let (val, _) = lex
             .try_consume_plain_scalar(0)
             .unwrap_or_else(|| unreachable!("should parse"));
-        assert!(val.contains('\t'), "TAB must be accepted in plain scalar body");
+        assert!(
+            val.contains('\t'),
+            "TAB must be accepted in plain scalar body"
+        );
     }
 
     #[test]
@@ -1146,10 +1188,15 @@ mod tests {
         // If we got here without panic, the acceptance criterion is satisfied.
         // Verify no error event is emitted when NEL appears.
         let events: Vec<_> = crate::parse_events("key: val\u{0085}ue\n").collect();
-        let has_non_printable_error = events
-            .iter()
-            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
-        assert!(!has_non_printable_error, "NEL must not be rejected as non-printable");
+        let has_non_printable_error = events.iter().any(|r| {
+            r.as_ref()
+                .err()
+                .is_some_and(|e| e.message.contains("non-printable"))
+        });
+        assert!(
+            !has_non_printable_error,
+            "NEL must not be rejected as non-printable"
+        );
     }
 
     #[test]
@@ -1159,12 +1206,20 @@ mod tests {
         let result = lex.try_consume_plain_scalar(0);
         // If parsed, value must contain the NBSP character without error.
         if let Some((val, _)) = result {
-            assert!(val.contains('\u{00A0}'), "NBSP must be accepted in plain scalar body");
+            assert!(
+                val.contains('\u{00A0}'),
+                "NBSP must be accepted in plain scalar body"
+            );
         }
         let events: Vec<_> = crate::parse_events("key: val\u{00A0}ue\n").collect();
-        let has_non_printable_error = events
-            .iter()
-            .any(|r| r.as_ref().err().is_some_and(|e| e.message.contains("non-printable")));
-        assert!(!has_non_printable_error, "NBSP must not be rejected as non-printable");
+        let has_non_printable_error = events.iter().any(|r| {
+            r.as_ref()
+                .err()
+                .is_some_and(|e| e.message.contains("non-printable"))
+        });
+        assert!(
+            !has_non_printable_error,
+            "NBSP must not be rejected as non-printable"
+        );
     }
 }
