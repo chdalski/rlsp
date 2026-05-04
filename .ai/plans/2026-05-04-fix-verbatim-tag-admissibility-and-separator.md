@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -21,24 +21,26 @@ Enforce verbatim tag admissibility and separator requirements per YAML 1.2.2 §6
 
 ## Steps
 
-- [ ] Add admissibility check for verbatim tag bodies in `scan_tag`
-- [ ] Add separator enforcement after verbatim closing `>` in the caller
-- [ ] Add integration tests for both fixes
-- [ ] Update follow-up queue: remove L5 and L6 entries
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Add admissibility check for verbatim tag bodies in `scan_tag`
+- [x] Add separator enforcement after verbatim closing `>` in the caller
+- [x] Add integration tests for both fixes
+- [x] Update follow-up queue: remove L5 and L6 entries
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Enforce verbatim tag admissibility and separator
 
+**Completed:** commit `7ba4c7a` (2026-05-04)
+
 Add an admissibility check on verbatim tag bodies (must start with `!` for local or ASCII letter for global URI) and enforce `s-separate` between verbatim closing `>` and node content.
 
-- [ ] In `scan_tag()` verbatim arm, after extracting the URI body and before returning: check that the body starts with `!` (local tag) or an ASCII letter `a-zA-Z` (URI scheme start per RFC 3986). If neither, return an error.
-- [ ] Additionally reject verbatim body that is exactly `!` (bare exclamation) — `!<!>` is listed in spec Example 6.25 as invalid
-- [ ] Error message for inadmissible body: `"verbatim tag must begin with '!' (local tag) or be a valid URI (global tag)"`
-- [ ] For separator: `scan_tag` is called from two sites — `step.rs:474` (block context) and `flow.rs:1270` (flow context). The existing shorthand separator check at `step.rs:485-516` fires after the `scan_tag` match arm in the block path. Extend this check to also cover verbatim tags (currently it only applies to shorthand). In the flow path at `flow.rs:1270`, add the same separator check after the verbatim `scan_tag` result. Error message: `"tag must be separated from node content by whitespace"` (same as shorthand path)
-- [ ] Integration tests covering:
+- [x] In `scan_tag()` verbatim arm, after extracting the URI body and before returning: check that the body starts with `!` (local tag) or an ASCII letter `a-zA-Z` (URI scheme start per RFC 3986). If neither, return an error.
+- [x] Additionally reject verbatim body that is exactly `!` (bare exclamation) — `!<!>` is listed in spec Example 6.25 as invalid
+- [x] Error message for inadmissible body: `"verbatim tag must begin with '!' (local tag) or be a valid URI (global tag)"`
+- [x] For separator: `scan_tag` is called from two sites — `step.rs:474` (block context) and `flow.rs:1270` (flow context). The existing shorthand separator check at `step.rs:485-516` fires after the `scan_tag` match arm in the block path. Extend this check to also cover verbatim tags (currently it only applies to shorthand). In the flow path at `flow.rs:1270`, add the same separator check after the verbatim `scan_tag` result. Error message: `"tag must be separated from node content by whitespace"` (same as shorthand path)
+- [x] Integration tests covering:
   - `!<$:?> foo` → error (admissibility: `$` is not `!` or letter)
   - `!<:foo> bar` → error (admissibility: `:` is not `!` or letter)
   - `!<!> foo` → error (admissibility: bare `!` body)
@@ -46,12 +48,12 @@ Add an admissibility check on verbatim tag bodies (must start with `!` for local
   - `!<!local> foo` → accepted (valid local tag starting with `!`)
   - `!<tag:yaml.org,2002:str>foo` → error (separator: no whitespace after `>`)
   - `!<tag:yaml.org,2002:str> foo` → accepted (separator: space after `>`)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove verbatim tag admissibility entry (L5) from `project_followup_plans.md`
-- [ ] Remove verbatim tag separator entry (L6) from `project_followup_plans.md`
-- [ ] Single commit: `fix(rlsp-yaml-parser): enforce verbatim tag admissibility and separator`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove verbatim tag admissibility entry (L5) from `project_followup_plans.md`
+- [x] Remove verbatim tag separator entry (L6) from `project_followup_plans.md`
+- [x] Single commit: `fix(rlsp-yaml-parser): enforce verbatim tag admissibility and separator`
 
 ## Decisions
 

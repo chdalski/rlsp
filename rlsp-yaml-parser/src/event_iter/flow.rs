@@ -1306,7 +1306,25 @@ impl<'input> EventIter<'input> {
                             });
                         }
                         pending_flow_tag = Some(resolved_flow_tag);
+                        let is_verbatim = after_bang.starts_with('<');
                         pos_in_line += tag_token_bytes;
+                        // §6.9.1: verbatim tags require `s-separate(n,c)` before node content.
+                        // If the character immediately after the closing `>` is not whitespace,
+                        // the node content is unseparated — return an error.
+                        if is_verbatim {
+                            let after_tag = &cur_content[pos_in_line..];
+                            if let Some(first) = after_tag.chars().next() {
+                                if first != ' ' && first != '\t' {
+                                    self.state = IterState::Done;
+                                    return StepResult::Yield(Err(Error {
+                                        pos: bang_pos,
+                                        message:
+                                            "tag must be separated from node content by whitespace"
+                                                .into(),
+                                    }));
+                                }
+                            }
+                        }
                         // Skip any whitespace after the tag.
                         while pos_in_line < cur_content.len() {
                             match cur_content[pos_in_line..].chars().next() {

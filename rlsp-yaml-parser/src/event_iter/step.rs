@@ -486,10 +486,14 @@ impl<'input> EventIter<'input> {
                                 // the tag as standalone when the only thing following it
                                 // is a comment.
                                 let had_inline = !inline.is_empty() && !inline.starts_with('#');
-                                // YAML 1.2 §6.8.1: a tag property must be separated from
-                                // the following node content by `s-separate` when the first
-                                // character after the tag could be confused with a tag
-                                // continuation or creates structural ambiguity:
+                                // YAML 1.2 §6.8.1 / §6.9.1: a tag property must be separated
+                                // from the following node content by `s-separate`.
+                                // For verbatim tags (`!<URI>`): any content immediately after
+                                // `>` with no whitespace is an error — the closing `>` is an
+                                // unambiguous delimiter, so all non-whitespace continuation is
+                                // an unseparated node.
+                                // For shorthand tags: error only on chars that would create
+                                // structural ambiguity or be confused as tag continuation:
                                 // - `!` starts another tag property
                                 // - flow indicators (`,`, `[`, `]`, `{`, `}`) cause
                                 //   structural confusion (e.g. `!!str,`)
@@ -499,9 +503,11 @@ impl<'input> EventIter<'input> {
                                 // When the tag scanner stopped at a plain non-tag char like
                                 // `<`, the tag ended naturally and the content is the value
                                 // (e.g. `!foo<bar val` → tag=`!foo`, scalar=`<bar val`).
+                                let is_verbatim = after_bang.starts_with('<');
                                 if had_inline && spaces == 0 {
                                     let first = inline.chars().next().unwrap_or('\0');
-                                    if first == '!'
+                                    if is_verbatim
+                                        || first == '!'
                                         || first == '%'
                                         || matches!(first, ',' | '[' | ']' | '{' | '}')
                                     {

@@ -110,8 +110,9 @@ fn verbatim_tag_uri_invalid_chars_rejected(#[case] input: &str) {
 
 #[test]
 fn verbatim_tag_uri_embedded_close_delimiter_terminates_uri() {
-    // First `>` closes the verbatim tag; `bar>` becomes part of the scalar value.
-    let events = evs("!<foo>bar>\n");
+    // First `>` closes the verbatim tag; content after a separator becomes the scalar value.
+    // With a space separator: `!<foo> bar>` — tag is `foo`, scalar value is `bar>`.
+    let events = evs("!<foo> bar>\n");
     assert!(
         events
             .iter()
@@ -120,7 +121,70 @@ fn verbatim_tag_uri_embedded_close_delimiter_terminates_uri() {
             } else {
                 false
             }),
-        "first '>' must close the verbatim tag URI; remainder is scalar content"
+        "first '>' must close the verbatim tag URI; remainder after separator is scalar content"
+    );
+}
+
+#[test]
+fn verbatim_tag_no_separator_returns_error() {
+    // `!<foo>bar>` — no whitespace between `>` and `bar` — must return an error.
+    assert!(
+        has_error("!<foo>bar>\n"),
+        "verbatim tag followed immediately by content with no whitespace must return an error"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Group A3: Verbatim tag admissibility — YAML 1.2 §6.9.1
+// -----------------------------------------------------------------------
+
+// Invalid: body does not start with `!` (local) or ASCII letter (global URI scheme)
+#[rstest]
+#[case::dollar_colon("!<$:?> foo\n")] // Example 6.25: starts with `$`
+#[case::colon_foo("!<:foo> bar\n")] // Example 6.25: starts with `:`
+#[case::bare_exclamation("!<!> foo\n")] // Example 6.25: bare `!` body
+fn verbatim_tag_inadmissible_body_returns_error(#[case] input: &str) {
+    assert!(
+        has_error(input),
+        "verbatim tag with inadmissible body must return an error: {input:?}"
+    );
+}
+
+// Valid: global URI (starts with ASCII letter)
+#[test]
+fn verbatim_tag_valid_global_uri_accepted() {
+    // `!<tag:yaml.org,2002:str> foo` — body starts with `t` (ASCII letter)
+    assert!(
+        !has_error("!<tag:yaml.org,2002:str> foo\n"),
+        "verbatim global URI tag must be accepted"
+    );
+}
+
+// Valid: local tag (starts with `!`, body length > 1)
+#[test]
+fn verbatim_tag_valid_local_tag_accepted() {
+    // `!<!local> foo` — body starts with `!` and has additional chars
+    assert!(
+        !has_error("!<!local> foo\n"),
+        "verbatim local tag must be accepted"
+    );
+}
+
+// Separator: missing whitespace between `>` and content returns error
+#[test]
+fn verbatim_tag_missing_separator_returns_error() {
+    assert!(
+        has_error("!<tag:yaml.org,2002:str>foo\n"),
+        "verbatim tag followed immediately by content without whitespace must return an error"
+    );
+}
+
+// Separator: whitespace present — accepted
+#[test]
+fn verbatim_tag_with_separator_accepted() {
+    assert!(
+        !has_error("!<tag:yaml.org,2002:str> foo\n"),
+        "verbatim tag followed by whitespace and content must be accepted"
     );
 }
 

@@ -158,6 +158,28 @@ pub(in crate::event_iter) fn scan_tag<'i>(
                 message: format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
             });
         }
+        // §6.9.1: verbatim tag must begin with `!` (local tag) or be a valid URI (global tag).
+        // Pragmatic check: body must start with `!` (local tag form), an ASCII letter (URI
+        // absolute-scheme per RFC 3986), or `%` (valid percent-encoded URI character).
+        // Example 6.25 lists `!<!>` (bare `!`), `!<$:?>` (starts with `$`), and `!<:foo>`
+        // (starts with `:`) as errors — all start with a character that cannot begin a local
+        // tag or a valid URI scheme.
+        // Safety: `uri.is_empty()` is checked above; `uri` has at least one byte here.
+        let admissible = match uri.as_bytes().first() {
+            Some(&b'!') => uri.len() > 1, // bare `!` is invalid; `!something` is a valid local tag
+            // ASCII letter starts a URI scheme; `%` starts a percent-encoded character,
+            // which is valid in a URI reference even at the first position.
+            Some(&b) => b.is_ascii_alphabetic() || b == b'%',
+            None => false, // unreachable: uri is non-empty
+        };
+        if !admissible {
+            return Err(Error {
+                pos: indicator_pos,
+                message:
+                    "verbatim tag must begin with '!' (local tag) or be a valid URI (global tag)"
+                        .into(),
+            });
+        }
         // advance = 1 (for '<') + uri.len() + 1 (for '>') bytes past the `!`
         let advance = 1 + uri.len() + 1;
         return Ok((uri, advance));
@@ -810,5 +832,44 @@ mod tests {
         let full = format!("!<{uri_body}>");
         let err = scan(&full).unwrap_err();
         assert!(err.message.contains("exceeds maximum length"));
+    }
+
+    // -----------------------------------------------------------------------
+    // scan_tag — verbatim tag: admissibility (§6.9.1)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scan_tag_verbatim_rejects_bare_exclamation_body() {
+        // `!<!>` — body is `!` alone; bare `!` is inadmissible per Example 6.25.
+        let err = scan("!<!>").unwrap_err();
+        assert!(err.message.contains("local tag") || err.message.contains("global tag"));
+    }
+
+    #[test]
+    fn scan_tag_verbatim_rejects_dollar_prefix_body() {
+        // `!<$:?>` — body starts with `$`; inadmissible per Example 6.25.
+        let err = scan("!<$:?>").unwrap_err();
+        assert!(err.message.contains("local tag") || err.message.contains("global tag"));
+    }
+
+    #[test]
+    fn scan_tag_verbatim_rejects_colon_prefix_body() {
+        // `!<:foo>` — body starts with `:`; inadmissible per Example 6.25.
+        let err = scan("!<:foo>").unwrap_err();
+        assert!(err.message.contains("local tag") || err.message.contains("global tag"));
+    }
+
+    #[test]
+    fn scan_tag_verbatim_accepts_local_tag_with_suffix() {
+        // `!<!local>` — body starts with `!` and has additional chars; valid local tag.
+        let (uri, _) = scan("!<!local>").unwrap();
+        assert_eq!(uri, "!local");
+    }
+
+    #[test]
+    fn scan_tag_verbatim_accepts_global_uri_starting_with_letter() {
+        // `!<tag:yaml.org,2002:str>` — body starts with `t`; valid global URI.
+        let (uri, _) = scan("!<tag:yaml.org,2002:str>").unwrap();
+        assert_eq!(uri, "tag:yaml.org,2002:str");
     }
 }
