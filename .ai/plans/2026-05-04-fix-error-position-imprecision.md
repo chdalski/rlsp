@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -34,12 +34,12 @@ Improve error-position precision across 6 error classes identified by the Phase 
 ## Steps
 
 - [x] Fix parser-side error positions (classes 1-5)
-- [ ] Add `pos` field to `LoadError` variants (class 6)
-- [ ] Update `LoadError` consumers in `rlsp-yaml`
-- [ ] Add tests for precise positions
-- [ ] Update follow-up queue: remove L12-L17 entry
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Add `pos` field to `LoadError` variants (class 6)
+- [x] Update `LoadError` consumers in `rlsp-yaml`
+- [x] Add tests for precise positions
+- [x] Update follow-up queue: remove L12-L17 entry
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
@@ -61,20 +61,22 @@ Adjust 5 error construction sites to point to the precise offending byte instead
 
 ### Task 2: Add position fields to `LoadError` variants (class 6)
 
+**Completed:** commit `503b677` (2026-05-04)
+
 Add a `pos: Pos` field to the 5 `LoadError` variants that currently carry no position information, and update all construction sites and consumers.
 
-- [ ] Add `pos: Pos` field to `NestingDepthLimitExceeded`, `AnchorCountLimitExceeded`, `AliasExpansionLimitExceeded`, `CircularAlias`, `UndefinedAlias` in `loader.rs`
-- [ ] At each construction site in the loader, capture the span/position of the triggering event (the event that caused the nesting/anchor/alias/expansion to fire) and pass it as the `pos` field
-- [ ] Update `rlsp-yaml/src/parser.rs` `LoadError` match arms to use the new `pos` field for diagnostic position reporting (currently these variants fall through to a position-less diagnostic)
-- [ ] Update any test code that pattern-matches on these `LoadError` variants to include the new `pos` field
-- [ ] Unit tests verifying that each variant carries a position pointing to the triggering node
-- [ ] `cargo test -p rlsp-yaml-parser` passes with zero failures
-- [ ] `cargo test -p rlsp-yaml` passes with zero failures (LSP consumer updated)
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove error-position imprecision entry (L12-L17) from `project_followup_plans.md`
-- [ ] In the conformance doc rewrite entry in `project_followup_plans.md`, update the architectural-findings bullet about position-precision: change "position-precision design contract is implicit (most errors point to start-of-construct rather than offending-byte)" to note that the 6 audited error classes are now fixed but the broader contract remains implicit — the doc rewrite should still add a per-error-class position table
-- [ ] Single commit: `fix(rlsp-yaml-parser): add position fields to LoadError variants`
+- [x] Add `pos: Pos` field to `NestingDepthLimitExceeded`, `AnchorCountLimitExceeded`, `AliasExpansionLimitExceeded`, `CircularAlias`, `UndefinedAlias` in `loader.rs`
+- [x] At each construction site in the loader, capture the span/position of the triggering event (the event that caused the nesting/anchor/alias/expansion to fire) and pass it as the `pos` field
+- [x] Update `rlsp-yaml/src/parser.rs` `LoadError` match arms to use the new `pos` field for diagnostic position reporting (currently these variants fall through to a position-less diagnostic)
+- [x] Update any test code that pattern-matches on these `LoadError` variants to include the new `pos` field
+- [x] Unit tests verifying that each variant carries a position pointing to the triggering node
+- [x] `cargo test -p rlsp-yaml-parser` passes with zero failures
+- [x] `cargo test -p rlsp-yaml` passes with zero failures (LSP consumer updated)
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove error-position imprecision entry (L12-L17) from `project_followup_plans.md`
+- [x] In the conformance doc rewrite entry in `project_followup_plans.md`, update the architectural-findings bullet about position-precision: change "position-precision design contract is implicit (most errors point to start-of-construct rather than offending-byte)" to note that the 6 audited error classes are now fixed but the broader contract remains implicit — the doc rewrite should still add a per-error-class position table
+- [x] Single commit: `fix(rlsp-yaml-parser): add position fields to LoadError variants`
 
 ## Decisions
 

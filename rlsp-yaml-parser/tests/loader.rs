@@ -253,7 +253,7 @@ fn it_16_undefined_alias_in_resolved_mode_returns_error() {
         .load("val: *missing\n");
     assert!(result.is_err(), "expected Err");
     assert!(
-        matches!(result.unwrap_err(), LoadError::UndefinedAlias { name } if name == "missing"),
+        matches!(result.unwrap_err(), LoadError::UndefinedAlias { name, .. } if name == "missing"),
         "expected UndefinedAlias for 'missing'"
     );
 }
@@ -1700,4 +1700,163 @@ fn anchor_and_tag_both_flow_through_loader_when_colocated_on_scalar() {
         root.tag_loc().is_some(),
         "tag_loc must be Some when tag is present"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Group P — LoadError position fields
+//
+// Each test verifies that the new `pos` field on the relevant LoadError variant
+// points to the triggering node in the source, not to Pos::ORIGIN.
+// ---------------------------------------------------------------------------
+
+/// UT-1: `NestingDepthLimitExceeded` pos points to the triggering `MappingStart`.
+/// "a:\n  b:\n    c: v\n" with `max_nesting_depth(2)` — third level at byte 12, line 3, col 4.
+#[test]
+fn load_error_nesting_depth_pos_points_to_triggering_mapping_start() {
+    let result = LoaderBuilder::new()
+        .max_nesting_depth(2)
+        .build()
+        .load("a:\n  b:\n    c: v\n");
+    let Err(LoadError::NestingDepthLimitExceeded { limit, pos }) = result else {
+        panic!("expected NestingDepthLimitExceeded, got: {result:?}");
+    };
+    assert_eq!(limit, 2);
+    assert_eq!(
+        pos.byte_offset, 12,
+        "pos must point to the 'c' key at byte 12"
+    );
+    assert_eq!(pos.line, 3, "pos must be on line 3");
+    assert_eq!(pos.column, 4, "pos must be at column 4");
+}
+
+/// UT-2: `NestingDepthLimitExceeded` pos points to the triggering `SequenceStart`.
+/// "- - - leaf\n" with `max_nesting_depth(2)` — third sequence at byte 4, line 1, col 4.
+#[test]
+fn load_error_nesting_depth_pos_points_to_triggering_sequence_start() {
+    let result = LoaderBuilder::new()
+        .max_nesting_depth(2)
+        .build()
+        .load("- - - leaf\n");
+    let Err(LoadError::NestingDepthLimitExceeded { limit, pos }) = result else {
+        panic!("expected NestingDepthLimitExceeded, got: {result:?}");
+    };
+    assert_eq!(limit, 2);
+    assert_eq!(
+        pos.byte_offset, 4,
+        "pos must point to the third '-' at byte 4"
+    );
+    assert_eq!(pos.line, 1, "pos must be on line 1");
+    assert_eq!(pos.column, 4, "pos must be at column 4");
+}
+
+/// UT-3: `AnchorCountLimitExceeded` pos points to the anchor that trips the limit.
+/// "- &a x\n- &b y\n- &c z\n" with `max_anchors(2)` — third anchor &c at byte 16, line 3, col 2.
+#[test]
+fn load_error_anchor_count_pos_points_to_tripping_anchor() {
+    let result = LoaderBuilder::new()
+        .max_anchors(2)
+        .build()
+        .load("- &a x\n- &b y\n- &c z\n");
+    let Err(LoadError::AnchorCountLimitExceeded { limit, pos }) = result else {
+        panic!("expected AnchorCountLimitExceeded, got: {result:?}");
+    };
+    assert_eq!(limit, 2);
+    assert_eq!(pos.byte_offset, 16, "pos must point to &c at byte 16");
+    assert_eq!(pos.line, 3, "pos must be on line 3");
+    assert_eq!(pos.column, 2, "pos must be at column 2");
+}
+
+/// UT-4: `AliasExpansionLimitExceeded` pos in `register_anchor` path.
+/// `max_expanded_nodes(0)` means the first anchor node counted during registration
+/// immediately exceeds the limit. Anchor &a is at byte 0, line 1, col 0.
+#[test]
+fn load_error_alias_expansion_register_anchor_path_pos() {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .max_expanded_nodes(0)
+        .build()
+        .load("&a x\n");
+    let Err(LoadError::AliasExpansionLimitExceeded { limit, pos }) = result else {
+        panic!("expected AliasExpansionLimitExceeded, got: {result:?}");
+    };
+    assert_eq!(limit, 0);
+    assert_eq!(pos.byte_offset, 0, "pos must point to &a at byte 0");
+    assert_eq!(pos.line, 1, "pos must be on line 1");
+    assert_eq!(pos.column, 0, "pos must be at column 0");
+}
+
+/// UT-5: `AliasExpansionLimitExceeded` pos in `expand_node` path.
+/// "a: &a [x, y, z]\nb: *a\n" with `max_expanded_nodes(3)` — expansion of *a
+/// exceeds the limit; pos points to the *a alias at byte 19, line 2, col 3.
+#[test]
+fn load_error_alias_expansion_expand_node_path_pos() {
+    let input = "a: &a [x, y, z]\nb: *a\n";
+    let result = LoaderBuilder::new()
+        .resolved()
+        .max_expanded_nodes(3)
+        .build()
+        .load(input);
+    let Err(LoadError::AliasExpansionLimitExceeded { limit, pos }) = result else {
+        panic!("expected AliasExpansionLimitExceeded, got: {result:?}");
+    };
+    assert_eq!(limit, 3);
+    assert_eq!(pos.byte_offset, 19, "pos must point to *a alias at byte 19");
+    assert_eq!(pos.line, 2, "pos must be on line 2");
+    assert_eq!(pos.column, 3, "pos must be at column 3");
+}
+
+/// UT-6: `CircularAlias` pos — the guard in `expand_node` is defensive and cannot be
+/// triggered via the public API: anchors are registered post-content, so by the
+/// time an alias expands, no registration is in-progress for the same anchor.
+/// Verify the variant is constructable and matchable with a pos field.
+#[test]
+fn load_error_circular_alias_variant_has_pos_field() {
+    use rlsp_yaml_parser::Pos;
+    // Construct the variant directly to confirm the pos field exists and is matchable.
+    let err = LoadError::CircularAlias {
+        name: "x".to_owned(),
+        pos: Pos::ORIGIN,
+    };
+    assert!(
+        matches!(err, LoadError::CircularAlias { ref name, pos } if name == "x" && pos == Pos::ORIGIN),
+        "CircularAlias must have a pos field; got: {err:?}"
+    );
+}
+
+/// UT-7: `UndefinedAlias` pos points to the alias site (`resolve_alias` path).
+/// "val: *missing\n" in resolved mode — *missing at byte 5, line 1, col 5.
+#[test]
+fn load_error_undefined_alias_resolve_alias_path_pos() {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("val: *missing\n");
+    let Err(LoadError::UndefinedAlias { name, pos }) = result else {
+        panic!("expected UndefinedAlias, got: {result:?}");
+    };
+    assert_eq!(name, "missing");
+    assert_eq!(pos.byte_offset, 5, "pos must point to *missing at byte 5");
+    assert_eq!(pos.line, 1, "pos must be on line 1");
+    assert_eq!(pos.column, 5, "pos must be at column 5");
+}
+
+/// UT-8: `UndefinedAlias` pos points to the alias site (`expand_node` path).
+/// A forward alias inside an expanded anchor produces `UndefinedAlias` from
+/// `expand_node`. The *b forward reference is at byte 13, line 2, col 7.
+#[test]
+fn load_error_undefined_alias_expand_node_path_pos() {
+    let input = "a: &a\n  ref: *b\nb: &b\n  ref: *a\n";
+    let result = LoaderBuilder::new().resolved().build().load(input);
+    let Err(LoadError::UndefinedAlias { name, pos }) = result else {
+        panic!("expected UndefinedAlias, got: {result:?}");
+    };
+    assert_eq!(name, "b", "the forward-referenced alias must be 'b'");
+    assert!(
+        pos.byte_offset > 0,
+        "pos must not be ORIGIN; got byte_offset={}",
+        pos.byte_offset
+    );
+    assert_eq!(pos.byte_offset, 13, "pos must point to *b at byte 13");
+    assert_eq!(pos.line, 2, "pos must be on line 2");
+    assert_eq!(pos.column, 7, "pos must be at column 7");
 }

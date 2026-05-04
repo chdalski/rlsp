@@ -721,7 +721,7 @@ fn undefined_alias_in_resolved_mode_returns_error() {
         .build()
         .load("key: *undefined\n");
     assert!(
-        matches!(result, Err(LoadError::UndefinedAlias { ref name }) if name == "undefined"),
+        matches!(result, Err(LoadError::UndefinedAlias { ref name, .. }) if name == "undefined"),
         "expected UndefinedAlias, got: {result:?}"
     );
 }
@@ -735,7 +735,7 @@ fn nesting_depth_limit_exceeded_returns_error() {
     assert!(
         matches!(
             result,
-            Err(LoadError::NestingDepthLimitExceeded { limit: 2 })
+            Err(LoadError::NestingDepthLimitExceeded { limit: 2, .. })
         ),
         "expected NestingDepthLimitExceeded(2), got: {result:?}"
     );
@@ -749,7 +749,7 @@ fn anchor_count_limit_exceeded_returns_error() {
     assert!(
         matches!(
             result,
-            Err(LoadError::AnchorCountLimitExceeded { limit: 2 })
+            Err(LoadError::AnchorCountLimitExceeded { limit: 2, .. })
         ),
         "expected AnchorCountLimitExceeded(2), got: {result:?}"
     );

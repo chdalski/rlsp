@@ -35,7 +35,7 @@ d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]
     assert!(
         matches!(
             result,
-            Err(LoadError::AliasExpansionLimitExceeded { limit: 500 })
+            Err(LoadError::AliasExpansionLimitExceeded { limit: 500, .. })
         ),
         "expected AliasExpansionLimitExceeded, got: {result:?}"
     );
@@ -126,7 +126,7 @@ fn anchor_count_limit_triggers_at_configured_threshold() {
     assert!(
         matches!(
             result,
-            Err(LoadError::AnchorCountLimitExceeded { limit: 10 })
+            Err(LoadError::AnchorCountLimitExceeded { limit: 10, .. })
         ),
         "expected AnchorCountLimitExceeded, got: {result:?}"
     );
@@ -160,7 +160,7 @@ fn nesting_depth_limit_triggers_at_configured_threshold() {
     assert!(
         matches!(
             result,
-            Err(LoadError::NestingDepthLimitExceeded { limit: 5 })
+            Err(LoadError::NestingDepthLimitExceeded { limit: 5, .. })
         ),
         "expected NestingDepthLimitExceeded, got: {result:?}"
     );
@@ -203,7 +203,7 @@ fn nesting_depth_one_over_limit_is_rejected() {
     assert!(
         matches!(
             result,
-            Err(LoadError::NestingDepthLimitExceeded { limit: 100 })
+            Err(LoadError::NestingDepthLimitExceeded { limit: 100, .. })
         ),
         "expected NestingDepthLimitExceeded, got: {result:?}"
     );

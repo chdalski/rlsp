@@ -46,6 +46,22 @@ overhead on valid YAML (which contains no non-printables) is near-zero.
 
 ---
 
+### LoadError Position Fields [completed]
+
+**Description:** Five `LoadError` variants (`NestingDepthLimitExceeded`,
+`AnchorCountLimitExceeded`, `AliasExpansionLimitExceeded`, `CircularAlias`,
+`UndefinedAlias`) now carry a `pos: Pos` field that identifies the source
+position of the node that triggered the error. LSP diagnostics produced from
+these errors now point to the offending node rather than line 0, column 0.
+**Complexity:** Low
+**Comment:** Previously these variants reported `Pos::ORIGIN` in the LSP
+diagnostic range, sending users to the start of the file regardless of where
+the error occurred. The position is sourced from existing span tracking —
+no new parser state was required.
+**Tier:** 1
+
+---
+
 ### Single-comparison document dispatch [completed]
 
 **Description:** The core parse loop's per-line handler selection now performs a

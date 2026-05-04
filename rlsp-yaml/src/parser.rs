@@ -36,15 +36,17 @@ pub fn parse_yaml(text: &str) -> ParseResult {
                 rlsp_yaml_parser::loader::LoadError::Parse { pos, message } => {
                     (*pos, message.clone())
                 }
-                rlsp_yaml_parser::loader::LoadError::UnresolvedScalar { pos, .. } => {
+                rlsp_yaml_parser::loader::LoadError::UnresolvedScalar { pos, .. }
+                | rlsp_yaml_parser::loader::LoadError::NestingDepthLimitExceeded { pos, .. }
+                | rlsp_yaml_parser::loader::LoadError::AnchorCountLimitExceeded { pos, .. }
+                | rlsp_yaml_parser::loader::LoadError::AliasExpansionLimitExceeded {
+                    pos, ..
+                }
+                | rlsp_yaml_parser::loader::LoadError::CircularAlias { pos, .. }
+                | rlsp_yaml_parser::loader::LoadError::UndefinedAlias { pos, .. } => {
                     (*pos, err.to_string())
                 }
-                rlsp_yaml_parser::loader::LoadError::NestingDepthLimitExceeded { .. }
-                | rlsp_yaml_parser::loader::LoadError::AnchorCountLimitExceeded { .. }
-                | rlsp_yaml_parser::loader::LoadError::AliasExpansionLimitExceeded { .. }
-                | rlsp_yaml_parser::loader::LoadError::CircularAlias { .. }
-                | rlsp_yaml_parser::loader::LoadError::UndefinedAlias { .. }
-                | rlsp_yaml_parser::loader::LoadError::UnexpectedEndOfStream => {
+                rlsp_yaml_parser::loader::LoadError::UnexpectedEndOfStream => {
                     (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())
                 }
             };
@@ -340,7 +342,7 @@ mod tests {
             .join()
             .expect("thread join");
 
-        // NestingDepthLimitExceeded maps to Pos::ORIGIN — diagnostic should be reported
+        // NestingDepthLimitExceeded now carries the position of the triggering node
         assert!(
             !result.diagnostics.is_empty(),
             "expected diagnostic for deep nesting"
@@ -348,6 +350,40 @@ mod tests {
         assert!(
             result.documents.is_empty(),
             "expected no documents on error"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_nesting_depth_limit_diagnostic_has_non_origin_position() {
+        // Before this fix, NestingDepthLimitExceeded mapped to Pos::ORIGIN so the
+        // diagnostic was always on line 0. After the fix the variant carries the
+        // position of the node that exceeded the limit, which for 260 levels of
+        // nesting is approximately line 256 (0-based in LSP).
+        let result = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let mut text = String::new();
+                for i in 0..260usize {
+                    let indent = "  ".repeat(i);
+                    writeln!(text, "{indent}level{i}:").unwrap();
+                }
+                let leaf_indent = "  ".repeat(260);
+                writeln!(text, "{leaf_indent}leaf: value").unwrap();
+                parse_yaml(&text)
+            })
+            .expect("thread spawn")
+            .join()
+            .expect("thread join");
+
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected diagnostic for deep nesting"
+        );
+        assert!(
+            result.diagnostics[0].range.start.line >= 255,
+            "diagnostic should be on or after line 255 (the triggering nesting level), \
+             got line {}",
+            result.diagnostics[0].range.start.line
         );
     }
 

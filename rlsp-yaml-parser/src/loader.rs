@@ -73,38 +73,48 @@ pub enum LoadError {
     UnexpectedEndOfStream,
 
     /// Nesting depth exceeded the configured limit.
-    #[error("nesting depth limit exceeded (max: {limit})")]
+    #[error("nesting depth limit exceeded at {pos:?} (max: {limit})")]
     NestingDepthLimitExceeded {
         /// The configured nesting depth limit that was exceeded.
         limit: usize,
+        /// Source position of the collection start that exceeded the limit.
+        pos: Pos,
     },
 
     /// Too many distinct anchor names were defined.
-    #[error("anchor count limit exceeded (max: {limit})")]
+    #[error("anchor count limit exceeded at {pos:?} (max: {limit})")]
     AnchorCountLimitExceeded {
         /// The configured anchor count limit that was exceeded.
         limit: usize,
+        /// Source position of the anchor that exceeded the limit.
+        pos: Pos,
     },
 
     /// Alias expansion produced more nodes than the configured limit.
-    #[error("alias expansion node limit exceeded (max: {limit})")]
+    #[error("alias expansion node limit exceeded at {pos:?} (max: {limit})")]
     AliasExpansionLimitExceeded {
         /// The configured expansion node limit that was exceeded.
         limit: usize,
+        /// Source position of the node that exceeded the expansion limit.
+        pos: Pos,
     },
 
     /// A circular alias reference was detected.
-    #[error("circular alias reference: '{name}'")]
+    #[error("circular alias reference at {pos:?}: '{name}'")]
     CircularAlias {
         /// The anchor name involved in the cycle.
         name: String,
+        /// Source position of the alias that triggered the cycle detection.
+        pos: Pos,
     },
 
     /// An alias referred to an anchor that was never defined.
-    #[error("undefined alias: '{name}'")]
+    #[error("undefined alias at {pos:?}: '{name}'")]
     UndefinedAlias {
         /// The alias name that had no corresponding anchor definition.
         name: String,
+        /// Source position of the alias reference.
+        pos: Pos,
     },
 
     /// A plain scalar could not be resolved under the JSON schema.
@@ -484,6 +494,8 @@ impl<'opt> LoadState<'opt> {
             Event::Scalar { value, style, meta } => {
                 let (anchor, anchor_loc, tag, tag_loc) = unpack_meta(meta);
                 let anchor = anchor.map(str::to_owned);
+                // Capture the anchor span before it moves into NodeMeta.
+                let anchor_span = anchor_loc.unwrap_or(span);
                 let mut node = Node::Scalar {
                     value: value.into_owned(),
                     style,
@@ -500,7 +512,7 @@ impl<'opt> LoadState<'opt> {
                 };
                 apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = node.anchor() {
-                    self.register_anchor(name.to_owned(), &node)?;
+                    self.register_anchor(name.to_owned(), &node, anchor_span)?;
                 }
                 Ok(node)
             }
@@ -510,11 +522,14 @@ impl<'opt> LoadState<'opt> {
                 let anchor = event_anchor.map(str::to_owned);
                 let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
                 let anchor_for_registration = anchor.clone();
+                // Capture the anchor span before it moves into NodeMeta.
+                let anchor_span = anchor_loc.unwrap_or(span);
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
                     return Err(LoadError::NestingDepthLimitExceeded {
                         limit: self.options.max_nesting_depth,
+                        pos: span_start_to_pos(span.start, &self.line_index),
                     });
                 }
 
@@ -611,7 +626,7 @@ impl<'opt> LoadState<'opt> {
                 };
                 apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = anchor_for_registration {
-                    self.register_anchor(name, &node)?;
+                    self.register_anchor(name, &node, anchor_span)?;
                 }
                 Ok(node)
             }
@@ -621,11 +636,14 @@ impl<'opt> LoadState<'opt> {
                 let anchor = event_anchor.map(str::to_owned);
                 let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
                 let anchor_for_registration = anchor.clone();
+                // Capture the anchor span before it moves into NodeMeta.
+                let anchor_span = anchor_loc.unwrap_or(span);
 
                 self.depth += 1;
                 if self.depth > self.options.max_nesting_depth {
                     return Err(LoadError::NestingDepthLimitExceeded {
                         limit: self.options.max_nesting_depth,
+                        pos: span_start_to_pos(span.start, &self.line_index),
                     });
                 }
 
@@ -718,7 +736,7 @@ impl<'opt> LoadState<'opt> {
                 };
                 apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
                 if let Some(name) = anchor_for_registration {
-                    self.register_anchor(name, &node)?;
+                    self.register_anchor(name, &node, anchor_span)?;
                 }
                 Ok(node)
             }
@@ -750,12 +768,19 @@ impl<'opt> LoadState<'opt> {
         }
     }
 
-    fn register_anchor(&mut self, name: String, node: &Node<Span>) -> Result<()> {
+    fn register_anchor(
+        &mut self,
+        name: String,
+        node: &Node<Span>,
+        anchor_span: Span,
+    ) -> Result<()> {
+        let pos = span_start_to_pos(anchor_span.start, &self.line_index);
         if !self.anchor_map.contains_key(&name) {
             self.anchor_count += 1;
             if self.anchor_count > self.options.max_anchors {
                 return Err(LoadError::AnchorCountLimitExceeded {
                     limit: self.options.max_anchors,
+                    pos,
                 });
             }
         }
@@ -767,6 +792,7 @@ impl<'opt> LoadState<'opt> {
             if self.expanded_nodes > self.options.max_expanded_nodes {
                 return Err(LoadError::AliasExpansionLimitExceeded {
                     limit: self.options.max_expanded_nodes,
+                    pos,
                 });
             }
             self.anchor_map.insert(name, node.clone());
@@ -787,23 +813,30 @@ impl<'opt> LoadState<'opt> {
                 trailing_comment: None,
             }),
             LoadMode::Resolved => {
+                let pos = span_start_to_pos(loc.start, &self.line_index);
                 let anchored = self.anchor_map.get(name).cloned().ok_or_else(|| {
                     LoadError::UndefinedAlias {
                         name: name.to_owned(),
+                        pos,
                     }
                 })?;
                 let mut in_progress: HashSet<String> = HashSet::new();
-                self.expand_node(anchored, &mut in_progress)
+                self.expand_node(anchored, &mut in_progress, loc)
             }
         }
     }
 
     /// Recursively expand a node, counting every node produced against the
     /// expansion limit and checking for cycles via `in_progress`.
+    ///
+    /// `alias_loc` is the span of the alias site that triggered this expansion
+    /// chain; it is used for error positions when the limit or a cycle is
+    /// detected inside expanded content.
     fn expand_node(
         &mut self,
         node: Node<Span>,
         in_progress: &mut HashSet<String>,
+        alias_loc: Span,
     ) -> Result<Node<Span>> {
         // Increment at the top — before child recursion — so every node
         // (including non-alias nodes inside expanded trees) counts against the
@@ -812,21 +845,28 @@ impl<'opt> LoadState<'opt> {
         if self.expanded_nodes > self.options.max_expanded_nodes {
             return Err(LoadError::AliasExpansionLimitExceeded {
                 limit: self.options.max_expanded_nodes,
+                pos: span_start_to_pos(alias_loc.start, &self.line_index),
             });
         }
 
         match node {
             Node::Alias { ref name, loc, .. } => {
+                let pos = span_start_to_pos(loc.start, &self.line_index);
                 if in_progress.contains(name) {
-                    return Err(LoadError::CircularAlias { name: name.clone() });
+                    return Err(LoadError::CircularAlias {
+                        name: name.clone(),
+                        pos,
+                    });
                 }
-                let target = self
-                    .anchor_map
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| LoadError::UndefinedAlias { name: name.clone() })?;
+                let target = self.anchor_map.get(name).cloned().ok_or_else(|| {
+                    LoadError::UndefinedAlias {
+                        name: name.clone(),
+                        pos,
+                    }
+                })?;
                 in_progress.insert(name.clone());
-                let expanded = self.expand_node(target, in_progress)?;
+                // Pass the inner alias loc as the new alias_loc for deeper expansion.
+                let expanded = self.expand_node(target, in_progress, loc)?;
                 in_progress.remove(name);
                 // Re-stamp with the alias site's location.
                 Ok(reloc(expanded, loc))
@@ -840,8 +880,8 @@ impl<'opt> LoadState<'opt> {
             } => {
                 let mut expanded_entries = Vec::with_capacity(entries.len());
                 for (k, v) in entries {
-                    let ek = self.expand_node(k, in_progress)?;
-                    let ev = self.expand_node(v, in_progress)?;
+                    let ek = self.expand_node(k, in_progress, alias_loc)?;
+                    let ev = self.expand_node(v, in_progress, alias_loc)?;
                     expanded_entries.push((ek, ev));
                 }
                 Ok(Node::Mapping {
@@ -861,7 +901,7 @@ impl<'opt> LoadState<'opt> {
             } => {
                 let mut expanded_items = Vec::with_capacity(items.len());
                 for item in items {
-                    expanded_items.push(self.expand_node(item, in_progress)?);
+                    expanded_items.push(self.expand_node(item, in_progress, alias_loc)?);
                 }
                 Ok(Node::Sequence {
                     items: expanded_items,
@@ -1128,14 +1168,23 @@ mod tests {
             loc: Span { start: 0, end: 0 },
             meta: None,
         };
-        assert!(state.register_anchor("a".to_owned(), &node).is_ok());
-        assert!(state.register_anchor("b".to_owned(), &node).is_ok());
+        let dummy_span = Span { start: 0, end: 0 };
+        assert!(
+            state
+                .register_anchor("a".to_owned(), &node, dummy_span)
+                .is_ok()
+        );
+        assert!(
+            state
+                .register_anchor("b".to_owned(), &node, dummy_span)
+                .is_ok()
+        );
         let err = state
-            .register_anchor("c".to_owned(), &node)
+            .register_anchor("c".to_owned(), &node, dummy_span)
             .expect_err("expected AnchorCountLimitExceeded");
         assert!(matches!(
             err,
-            LoadError::AnchorCountLimitExceeded { limit: 2 }
+            LoadError::AnchorCountLimitExceeded { limit: 2, .. }
         ));
     }
 
@@ -1155,7 +1204,8 @@ mod tests {
         };
         state.anchor_map.insert("a".to_owned(), alias_node.clone());
         let mut in_progress = HashSet::new();
-        let result = state.expand_node(alias_node, &mut in_progress);
+        let alias_loc = Span { start: 0, end: 0 };
+        let result = state.expand_node(alias_node, &mut in_progress, alias_loc);
         assert!(
             matches!(result, Err(LoadError::CircularAlias { .. })),
             "expected CircularAlias, got: {result:?}"
