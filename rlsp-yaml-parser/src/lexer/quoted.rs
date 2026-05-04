@@ -112,9 +112,9 @@ impl<'input> Lexer<'input> {
 
         loop {
             let Some(next) = self.buf.peek_next() else {
-                // EOF without closing quote.
+                // EOF without closing quote — point to the opening `'`, not EOF.
                 return Err(Error {
-                    pos: self.current_pos,
+                    pos: open_pos,
                     message: "unterminated single-quoted scalar".to_owned(),
                 });
             };
@@ -907,6 +907,7 @@ fn ensure_owned<'s>(owned: &'s mut Option<String>, prefix: &str) -> &'s mut Stri
 }
 
 #[cfg(test)]
+#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use std::borrow::Cow;
 
@@ -2232,5 +2233,47 @@ mod tests {
             "expected '1' (found count) in error message, got: {}",
             e.message
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Class 3: unterminated single-quoted scalar — error pos is opening `'`
+    // -----------------------------------------------------------------------
+
+    // 3a. Single-line input, EOF immediately after the body (harness spike).
+    // `'hello world` — opening `'` at byte 0, line 1, col 0.
+    #[test]
+    fn single_quoted_unterminated_eof_pos_is_open_quote_col_0() {
+        let e = sq_err("'hello world");
+        assert_eq!(e.pos.byte_offset, 0, "byte_offset");
+        assert_eq!(e.pos.line, 1, "line");
+        assert_eq!(e.pos.column, 0, "column");
+        assert!(e.message.contains("unterminated"), "message");
+    }
+
+    // 3b. Multi-line: quote opens on line 1, continuation line exists, then EOF.
+    // Input: `'hello\n  world` — `'` at byte 0, line 1, col 0.
+    #[test]
+    fn single_quoted_unterminated_multiline_pos_is_open_quote() {
+        let e = sq_err("'hello\n  world");
+        assert_eq!(e.pos.byte_offset, 0, "byte_offset");
+        assert_eq!(e.pos.line, 1, "line");
+        assert_eq!(e.pos.column, 0, "column");
+        assert!(e.message.contains("unterminated"), "message");
+    }
+
+    // 3c. Opening quote not at column 0 — verify open_pos tracks leading content.
+    // `key: 'value\n  continuation` — `'` is at byte 5, line 1, col 5.
+    // Drive through parse_events since the lexer is called by the event iterator
+    // with context that establishes leading bytes.
+    #[test]
+    fn single_quoted_unterminated_non_zero_col_pos_is_open_quote() {
+        // Use parse_events to get the full context where `'` is past leading content.
+        let e = crate::parse_events("key: 'value\n  continuation")
+            .find_map(Result::err)
+            .expect("expected an error");
+        assert_eq!(e.pos.byte_offset, 5, "byte_offset");
+        assert_eq!(e.pos.line, 1, "line");
+        assert_eq!(e.pos.column, 5, "column");
+        assert!(e.message.contains("unterminated"), "message");
     }
 }

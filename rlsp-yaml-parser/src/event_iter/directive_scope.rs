@@ -228,6 +228,7 @@ impl DirectiveScope {
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::field_reassign_with_default,
     reason = "test code"
 )]
@@ -496,5 +497,34 @@ mod tests {
         scope.version = Some((1, 2));
         let reset_scope = DirectiveScope::default();
         assert_eq!(reset_scope.version, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Class 4 integration: resolved-tag overflow via step.rs path
+    //
+    // Trigger: bare `---` inside a document with an inline tag whose resolved
+    // length exceeds MAX_RESOLVED_TAG_LEN.  Before the fix, the Pos constructed
+    // in step.rs used `line: 0`; after the fix it uses the real line from
+    // `marker_pos`.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolved_tag_overflow_on_bare_doc_marker_pos_is_bang_not_line_zero() {
+        // Build a suffix long enough that `tag:yaml.org,2002:` + suffix exceeds
+        // MAX_RESOLVED_TAG_LEN (4096 bytes).
+        let prefix = "tag:yaml.org,2002:";
+        let suffix = "a".repeat(MAX_RESOLVED_TAG_LEN - prefix.len() + 1);
+        // `---` is on line 2; `!!suffix` inline starts at byte 10 (after "foo\n--- ").
+        // "foo\n" = 4 bytes, "--- " = 4 bytes → `!` at byte 8, col 4 on line 2.
+        let input = format!("foo\n--- !!{suffix}");
+        let err = crate::parse_events(&input)
+            .find_map(Result::err)
+            .expect("expected a resolved-tag overflow error");
+        // The `!` of `!!suffix` is at byte 8 on line 2.
+        assert_eq!(err.pos.byte_offset, 8, "byte_offset should point to `!`");
+        assert_ne!(err.pos.line, 0, "line must not be 0 (was the pre-fix bug)");
+        assert_eq!(err.pos.line, 2, "line should be 2 (the --- line)");
+        assert_eq!(err.pos.column, 4, "column should be 4 (past '--- ')");
+        assert!(err.message.contains("exceeds maximum length"), "message");
     }
 }

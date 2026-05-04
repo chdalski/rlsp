@@ -106,8 +106,14 @@ impl<'input> EventIter<'input> {
             }
         }
 
+        // Compute the byte offset of `rest` (params) from the start of `content`
+        // (`%`), so that parse_yaml_directive can compute precise digit positions.
+        // SAFETY: both `content` and `rest` are slices of the same input string;
+        // `rest` is a trimmed sub-slice of `after_percent[name_end..]`.
+        // The subtraction gives the number of bytes from `%` to the start of params.
+        let params_offset = rest.as_ptr() as usize - content.as_ptr() as usize;
         match name {
-            "YAML" => self.parse_yaml_directive(rest, dir_pos),
+            "YAML" => self.parse_yaml_directive(rest, dir_pos, params_offset),
             "TAG" => self.parse_tag_directive(rest, dir_pos),
             _ => {
                 // Reserved directive — validate parameters then silently ignore per YAML 1.2 spec.
@@ -131,7 +137,17 @@ impl<'input> EventIter<'input> {
     }
 
     /// Parse `%YAML major.minor` and store in directive scope.
-    pub(crate) fn parse_yaml_directive(&mut self, params: &str, dir_pos: Pos) -> Result<(), Error> {
+    ///
+    /// `params_offset` is the byte distance from the `%` character (`dir_pos`)
+    /// to the start of `params` within the directive line.  It is used to
+    /// compute precise error positions pointing at individual version digits
+    /// instead of the `%` sign.
+    pub(crate) fn parse_yaml_directive(
+        &mut self,
+        params: &str,
+        dir_pos: Pos,
+        params_offset: usize,
+    ) -> Result<(), Error> {
         if self.directive_scope.version.is_some() {
             return Err(Error {
                 pos: dir_pos,
@@ -178,19 +194,34 @@ impl<'input> EventIter<'input> {
             });
         }
 
+        // Compute positions of the major and minor digit strings within the line.
+        // `params_offset` bytes from `%` to the start of params; major_str starts
+        // at params[0], so major is at dir_pos + params_offset bytes.
+        // `minor_str` follows the dot: dir_pos + params_offset + dot + 1 bytes.
+        let major_pos = Pos {
+            byte_offset: dir_pos.byte_offset + params_offset,
+            line: dir_pos.line,
+            column: dir_pos.column + params_offset,
+        };
+        let minor_pos = Pos {
+            byte_offset: dir_pos.byte_offset + params_offset + dot + 1,
+            line: dir_pos.line,
+            column: dir_pos.column + params_offset + dot + 1,
+        };
+
         let major = major_str.parse::<u8>().map_err(|_| Error {
-            pos: dir_pos,
+            pos: major_pos,
             message: format!("malformed %YAML major version: {major_str:?}"),
         })?;
         let minor = minor_str.parse::<u8>().map_err(|_| Error {
-            pos: dir_pos,
+            pos: minor_pos,
             message: format!("malformed %YAML minor version: {minor_str:?}"),
         })?;
 
         // Only major version 1 is accepted; 2+ is a hard error.
         if major != 1 {
             return Err(Error {
-                pos: dir_pos,
+                pos: major_pos,
                 message: format!("unsupported YAML version {major}.{minor}: only 1.x is supported"),
             });
         }
@@ -483,4 +514,106 @@ fn validate_tag_prefix(prefix: &str) -> Result<(), usize> {
         pos += ch.len_utf8();
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used, reason = "test code")]
+mod tests {
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /// Collect the first `Err` event from the event stream, panicking if none.
+    fn first_err(input: &str) -> crate::Error {
+        crate::parse_events(input)
+            .find_map(Result::err)
+            .expect("expected an error in the event stream")
+    }
+
+    // -------------------------------------------------------------------------
+    // Class 1: %YAML major != 1 — error points to the major digit
+    // -------------------------------------------------------------------------
+
+    // 1a. Major 2 — single-digit, input `%YAML 2.1`
+    // Byte layout: %=0 Y=1 A=2 M=3 L=4 ' '=5 2=6  →  error at byte 6, col 6.
+    #[test]
+    fn yaml_directive_unsupported_major_2_pos_is_major_digit() {
+        let err = first_err("%YAML 2.1\n");
+        assert_eq!(err.pos.byte_offset, 6, "byte_offset");
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 6, "column");
+        assert!(
+            err.message.contains("2.1"),
+            "message should mention version"
+        );
+    }
+
+    // 1b. Major 0.
+    #[test]
+    fn yaml_directive_unsupported_major_0_pos_is_major_digit() {
+        let err = first_err("%YAML 0.1\n");
+        assert_eq!(err.pos.byte_offset, 6, "byte_offset");
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 6, "column");
+    }
+
+    // 1c. Major 3.
+    #[test]
+    fn yaml_directive_unsupported_major_3_pos_is_major_digit() {
+        let err = first_err("%YAML 3.2\n");
+        assert_eq!(err.pos.byte_offset, 6, "byte_offset");
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 6, "column");
+    }
+
+    // 1d. Non-zero line: directive on second line.
+    // Input: "\n%YAML 2.1\n" — `%` at byte 1, line 2, col 0.
+    // Major at byte 1+6=7, line 2, col 6.
+    #[test]
+    fn yaml_directive_unsupported_major_non_zero_offset() {
+        let err = first_err("\n%YAML 2.1\n");
+        assert_eq!(err.pos.byte_offset, 7, "byte_offset");
+        assert_eq!(err.pos.line, 2, "line");
+        assert_eq!(err.pos.column, 6, "column");
+    }
+
+    // -------------------------------------------------------------------------
+    // Class 2: %YAML version digit overflows u8 — error points to first digit
+    // -------------------------------------------------------------------------
+
+    // 2a. Major 256 overflow — first digit of "256" is at byte 6.
+    #[test]
+    fn yaml_directive_major_overflow_pos_is_first_digit_of_major() {
+        let err = first_err("%YAML 256.0\n");
+        assert_eq!(err.pos.byte_offset, 6, "byte_offset");
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 6, "column");
+        assert!(
+            err.message.contains("major"),
+            "message should mention major"
+        );
+    }
+
+    // 2b. Minor 256 overflow — dot is at byte 7, minor "2" is at byte 8.
+    #[test]
+    fn yaml_directive_minor_overflow_pos_is_first_digit_of_minor() {
+        let err = first_err("%YAML 1.256\n");
+        assert_eq!(err.pos.byte_offset, 8, "byte_offset");
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 8, "column");
+        assert!(
+            err.message.contains("minor"),
+            "message should mention minor"
+        );
+    }
+
+    // 2c. Major overflow on non-first line.
+    // Input: "\n%YAML 256.0\n" — `%` at byte 1, line 2, col 0; major "2" at byte 7, col 6.
+    #[test]
+    fn yaml_directive_major_overflow_non_zero_offset() {
+        let err = first_err("\n%YAML 256.0\n");
+        assert_eq!(err.pos.byte_offset, 7, "byte_offset");
+        assert_eq!(err.pos.line, 2, "line");
+        assert_eq!(err.pos.column, 6, "column");
+    }
 }

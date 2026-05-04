@@ -176,10 +176,15 @@ impl<'input> EventIter<'input> {
             // must fail immediately.
             if let Some((tag_val, tag_offset)) = self.lexer.peek_inline_scalar() {
                 if tag_val.starts_with('!') {
+                    // The inline scalar starts at `tag_offset` bytes from the
+                    // start of the input.  Reconstruct the full Pos by computing
+                    // the column as the byte distance from the `---` line start —
+                    // tags are ASCII-only, so byte distance == codepoint distance.
+                    let col_from_line_start = tag_offset as usize - marker_pos.byte_offset;
                     let tag_pos = Pos {
                         byte_offset: tag_offset as usize,
-                        line: 0,
-                        column: 0,
+                        line: marker_pos.line,
+                        column: col_from_line_start,
                     };
                     if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
                         self.lexer.drain_inline_scalar();

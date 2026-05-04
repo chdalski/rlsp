@@ -36,8 +36,23 @@ pub(in crate::event_iter) fn scan_anchor_name(
         });
     }
     if end > MAX_ANCHOR_NAME_BYTES {
+        // Point to the first byte beyond the limit, not the `&`/`*` indicator.
+        // Count codepoints up to the byte limit to compute the column correctly
+        // even when multi-byte characters are present.
+        let codepoints = content
+            .char_indices()
+            .take_while(|&(i, _)| i < MAX_ANCHOR_NAME_BYTES)
+            .count();
+        // `indicator_pos` is the `&`/`*` indicator (1 byte); `content` starts
+        // one byte after it.  The first overflow byte in the name is therefore
+        // at absolute offset indicator_pos + 1 (indicator) + MAX_ANCHOR_NAME_BYTES.
+        let overflow_pos = Pos {
+            byte_offset: indicator_pos.byte_offset + 1 + MAX_ANCHOR_NAME_BYTES,
+            line: indicator_pos.line,
+            column: indicator_pos.column + 1 + codepoints,
+        };
         return Err(Error {
-            pos: indicator_pos,
+            pos: overflow_pos,
             message: format!("anchor name exceeds maximum length of {MAX_ANCHOR_NAME_BYTES} bytes"),
         });
     }
@@ -432,6 +447,61 @@ mod tests {
         let name = "a".repeat(MAX_ANCHOR_NAME_BYTES);
         let result = scan_anchor_name(&name, POS).unwrap();
         assert_eq!(result.len(), MAX_ANCHOR_NAME_BYTES);
+    }
+
+    // 5b. Name one byte over limit — error pos is first overflow byte.
+    // indicator_pos = ORIGIN (byte 0, the `&`); name starts at byte 1;
+    // overflow byte is at byte 1 + MAX_ANCHOR_NAME_BYTES = 1025.
+    #[test]
+    fn scan_anchor_name_overflow_pos_is_first_overflow_byte() {
+        let long = "a".repeat(MAX_ANCHOR_NAME_BYTES + 1);
+        let err = scan_anchor_name(&long, POS).unwrap_err();
+        assert_eq!(
+            err.pos.byte_offset,
+            1 + MAX_ANCHOR_NAME_BYTES,
+            "byte_offset"
+        );
+        assert_eq!(err.pos.line, 1, "line");
+        assert_eq!(err.pos.column, 1 + MAX_ANCHOR_NAME_BYTES, "column");
+    }
+
+    // 5c. Non-zero indicator_pos — overflow pos is indicator + 1 + limit.
+    // `&` at byte 10; name starts at byte 11; overflow at byte 11 + 1024 = 1035.
+    #[test]
+    fn scan_anchor_name_overflow_pos_with_nonzero_indicator() {
+        let long = "a".repeat(MAX_ANCHOR_NAME_BYTES + 1);
+        let indicator = Pos {
+            byte_offset: 10,
+            line: 1,
+            column: 10,
+        };
+        let err = scan_anchor_name(&long, indicator).unwrap_err();
+        assert_eq!(
+            err.pos.byte_offset,
+            11 + MAX_ANCHOR_NAME_BYTES,
+            "byte_offset"
+        );
+        assert_eq!(err.pos.column, 11 + MAX_ANCHOR_NAME_BYTES, "column");
+        assert_eq!(err.pos.line, 1, "line");
+    }
+
+    // 5d. Multi-byte Unicode name exceeds limit — overflow at byte boundary.
+    // `锚` is 3 UTF-8 bytes. Repeat enough to exceed MAX_ANCHOR_NAME_BYTES (1024).
+    // 342 * 3 = 1026 bytes, overflow detected at end of scan (1026 > 1024).
+    // `&` at byte 0; name starts at byte 1; overflow at byte 1 + 1024 = 1025.
+    // column = 1 (indicator) + 342 (codepoints at byte indices 0..1023 in name).
+    #[test]
+    fn scan_anchor_name_overflow_pos_multibyte_unicode() {
+        let name = "锚".repeat(MAX_ANCHOR_NAME_BYTES / 3 + 1);
+        let err = scan_anchor_name(&name, POS).unwrap_err();
+        assert_eq!(
+            err.pos.byte_offset,
+            1 + MAX_ANCHOR_NAME_BYTES,
+            "byte_offset"
+        );
+        assert_eq!(err.pos.line, 1, "line");
+        // 1 (indicator col) + 342 codepoints at byte indices 0,3,...,1023 in name.
+        assert_eq!(err.pos.column, 1 + 342, "column");
     }
 
     // -----------------------------------------------------------------------

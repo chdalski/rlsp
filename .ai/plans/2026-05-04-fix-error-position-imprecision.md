@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-04
 
 ## Goal
@@ -33,7 +33,7 @@ Improve error-position precision across 6 error classes identified by the Phase 
 
 ## Steps
 
-- [ ] Fix parser-side error positions (classes 1-5)
+- [x] Fix parser-side error positions (classes 1-5)
 - [ ] Add `pos` field to `LoadError` variants (class 6)
 - [ ] Update `LoadError` consumers in `rlsp-yaml`
 - [ ] Add tests for precise positions
@@ -45,17 +45,19 @@ Improve error-position precision across 6 error classes identified by the Phase 
 
 ### Task 1: Fix parser-side error positions (classes 1-5)
 
+**Completed:** commit `0e33612` (2026-05-04)
+
 Adjust 5 error construction sites to point to the precise offending byte instead of start-of-construct.
 
-- [ ] Class 1 (`%YAML` major-0): compute position of the major digit within the directive line (offset from `dir_pos` past `%YAML ` to the major digit start)
-- [ ] Class 2 (`%YAML` u8 overflow): compute position of the overflowing digit (same approach — offset from `dir_pos` to the digit position within `params`)
-- [ ] Class 3 (unterminated single-quoted): use the opening `'` position (`open_pos`) instead of `self.current_pos` (EOF). The `open_pos` variable is already in scope at the function level.
-- [ ] Class 4 (resolved-tag overflow): grep all call sites of `resolve_tag` and verify each passes the tag's `!` indicator position (not the `---` marker position). Document in the commit message which call sites were checked and whether any needed fixing. Fix any that pass the wrong position.
-- [ ] Class 5 (anchor name overflow): offset from `indicator_pos` by the byte length of the name up to the overflow point, so the position points to the first byte beyond `MAX_ANCHOR_NAME_BYTES`
-- [ ] Unit tests verifying precise byte positions for each class (compare `err.pos.byte_offset` or `err.pos.column` against expected values)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
+- [x] Class 1 (`%YAML` major-0): compute position of the major digit within the directive line (offset from `dir_pos` past `%YAML ` to the major digit start)
+- [x] Class 2 (`%YAML` u8 overflow): compute position of the overflowing digit (same approach — offset from `dir_pos` to the digit position within `params`)
+- [x] Class 3 (unterminated single-quoted): use the opening `'` position (`open_pos`) instead of `self.current_pos` (EOF). The `open_pos` variable is already in scope at the function level.
+- [x] Class 4 (resolved-tag overflow): grep all call sites of `resolve_tag` and verify each passes the tag's `!` indicator position (not the `---` marker position). Document in the commit message which call sites were checked and whether any needed fixing. Fix any that pass the wrong position.
+- [x] Class 5 (anchor name overflow): offset from `indicator_pos` by the byte length of the name up to the overflow point, so the position points to the first byte beyond `MAX_ANCHOR_NAME_BYTES`
+- [x] Unit tests verifying precise byte positions for each class (compare `err.pos.byte_offset` or `err.pos.column` against expected values)
+- [x] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
 
 ### Task 2: Add position fields to `LoadError` variants (class 6)
 
