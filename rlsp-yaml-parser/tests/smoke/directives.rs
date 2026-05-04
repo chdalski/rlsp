@@ -1006,3 +1006,59 @@ fn tag_prefix_with_backslash_returns_error() {
         "%TAG prefix containing '\\' must return an error (not ns-uri-char)"
     );
 }
+
+// -----------------------------------------------------------------------
+// Group Q — %TAG trailing comment and trailing garbage (REQ-23 / §6.8.2)
+// -----------------------------------------------------------------------
+
+// Q-1: %TAG with inline trailing comment: prefix is the bare prefix, comment ignored.
+// Bug case: previously `# comment` was absorbed into the prefix.
+#[test]
+fn tag_directive_trailing_comment_not_absorbed_into_prefix() {
+    let events = event_variants("%TAG ! ! # primary\n---\nscalar\n");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::DocumentStart { tag_directives, .. }
+                if tag_directives.iter().any(|(h, p)| h == "!" && p == "!")
+        )),
+        "%TAG ! ! # primary must store prefix '!' (not '! # primary'); comment must be ignored"
+    );
+}
+
+// Q-2: %TAG standard secondary handle with trailing comment: prefix is the URI, comment ignored.
+#[test]
+fn tag_directive_secondary_handle_trailing_comment_not_absorbed() {
+    let events = event_variants("%TAG !! tag:yaml.org,2002: # standard\n---\nscalar\n");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::DocumentStart { tag_directives, .. }
+                if tag_directives.iter().any(|(h, p)| h == "!!" && p == "tag:yaml.org,2002:")
+        )),
+        "%TAG !! tag:yaml.org,2002: # standard must store prefix 'tag:yaml.org,2002:'; comment must be ignored"
+    );
+}
+
+// Q-3: %TAG without comment still works (regression guard).
+#[test]
+fn tag_directive_without_comment_accepted() {
+    let events = event_variants("%TAG !e! tag:example.com,2026:\n---\nscalar\n");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::DocumentStart { tag_directives, .. }
+                if tag_directives.iter().any(|(h, p)| h == "!e!" && p == "tag:example.com,2026:")
+        )),
+        "%TAG !e! tag:example.com,2026: (no comment) must store prefix 'tag:example.com,2026:'"
+    );
+}
+
+// Q-4: %TAG with trailing garbage (non-comment) after prefix returns error.
+#[test]
+fn tag_directive_trailing_garbage_returns_error() {
+    assert!(
+        has_error("%TAG ! ! garbage\n---\nscalar\n"),
+        "%TAG with trailing non-comment content after prefix must return an error"
+    );
+}

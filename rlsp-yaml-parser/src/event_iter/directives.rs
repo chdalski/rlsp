@@ -227,12 +227,30 @@ impl<'input> EventIter<'input> {
             message: format!("malformed %TAG directive: expected 'handle prefix', got {params:?}"),
         })?;
         let handle = &params[..handle_end];
-        let prefix = params[handle_end..].trim_start_matches([' ', '\t']);
+        let raw_prefix = params[handle_end..].trim_start_matches([' ', '\t']);
 
-        if prefix.is_empty() {
+        if raw_prefix.is_empty() {
             return Err(Error {
                 pos: dir_pos,
                 message: "malformed %TAG directive: missing prefix".into(),
+            });
+        }
+
+        // Split the raw prefix at the first space/tab: everything before is the
+        // prefix body (ns-tag-prefix); everything after must be empty or a comment.
+        // YAML 1.2.2 §6.8.2 grammar: `ns-tag-prefix` is followed by `s-l-comments`,
+        // not by arbitrary content — `#` is a valid ns-uri-char but only inside the
+        // prefix body before any whitespace. The correct terminator is whitespace
+        // because ns-uri-char excludes space/tab.
+        let prefix_body = raw_prefix
+            .find([' ', '\t'])
+            .map_or(raw_prefix, |ws| &raw_prefix[..ws]);
+        let trailing_after_prefix = raw_prefix[prefix_body.len()..].trim_start_matches([' ', '\t']);
+        if !trailing_after_prefix.is_empty() && !trailing_after_prefix.starts_with('#') {
+            return Err(Error {
+                pos: dir_pos,
+                message: "malformed %TAG directive: unexpected trailing content after prefix"
+                    .into(),
             });
         }
 
@@ -257,7 +275,7 @@ impl<'input> EventIter<'input> {
         }
 
         // Validate prefix length.
-        if prefix.len() > MAX_TAG_LEN {
+        if prefix_body.len() > MAX_TAG_LEN {
             return Err(Error {
                 pos: dir_pos,
                 message: format!("tag prefix exceeds maximum length of {MAX_TAG_LEN} bytes"),
@@ -265,7 +283,7 @@ impl<'input> EventIter<'input> {
         }
 
         // Validate prefix against ns-uri-char ([93]/[94]/[95]).
-        validate_tag_prefix(prefix).map_err(|offset| Error {
+        validate_tag_prefix(prefix_body).map_err(|offset| Error {
             pos: dir_pos,
             message: format!(
                 "tag prefix contains character not allowed in URI at byte offset {offset}"
@@ -282,7 +300,7 @@ impl<'input> EventIter<'input> {
 
         self.directive_scope
             .tag_handles
-            .insert(handle.to_owned(), prefix.to_owned());
+            .insert(handle.to_owned(), prefix_body.to_owned());
         self.directive_scope.directive_count += 1;
         Ok(())
     }

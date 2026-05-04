@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-04)
 **Created:** 2026-05-04
 
 ## Goal
@@ -18,31 +18,33 @@ Stop `%TAG` directives from absorbing trailing comments into the prefix per YAML
 
 ## Steps
 
-- [ ] Trim prefix at first trailing whitespace in `parse_tag_directive`
-- [ ] Add tests for comment-after-prefix handling
-- [ ] Update follow-up queue: remove L4 entry
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Trim prefix at first trailing whitespace in `parse_tag_directive`
+- [x] Add tests for comment-after-prefix handling
+- [x] Update follow-up queue: remove L4 entry
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Terminate tag prefix at trailing whitespace
 
+**Completed:** commit `8375b0a` (2026-05-04)
+
 After extracting the raw prefix from the `%TAG` line, find the end of the actual prefix body by locating the first whitespace character within the prefix string. Validate that any trailing content is either empty or a comment.
 
-- [ ] In `parse_tag_directive()`, after extracting raw `prefix` at line 230, find the first space/tab within `prefix` — that marks the end of the prefix body. Split into `prefix_body` and `trailing`. Validate that `trailing` (after stripping whitespace) is empty or starts with `#`. If it contains non-comment content, return an error.
-- [ ] Use `prefix_body` (not `prefix`) for all downstream validation (length check, `validate_tag_prefix`, storage in `tag_handles`)
-- [ ] Error message for non-comment trailing content: `"malformed %TAG directive: unexpected trailing content after prefix"` (consistent with `parse_yaml_directive`'s trailing content error)
-- [ ] Integration tests:
+- [x] In `parse_tag_directive()`, after extracting raw `prefix` at line 230, find the first space/tab within `prefix` — that marks the end of the prefix body. Split into `prefix_body` and `trailing`. Validate that `trailing` (after stripping whitespace) is empty or starts with `#`. If it contains non-comment content, return an error.
+- [x] Use `prefix_body` (not `prefix`) for all downstream validation (length check, `validate_tag_prefix`, storage in `tag_handles`)
+- [x] Error message for non-comment trailing content: `"malformed %TAG directive: unexpected trailing content after prefix"` (consistent with `parse_yaml_directive`'s trailing content error)
+- [x] Integration tests:
   - `%TAG ! ! # comment` → prefix is `!`, comment ignored (the bug case)
   - `%TAG !! tag:yaml.org,2002: # standard` → prefix is `tag:yaml.org,2002:`, comment ignored
   - `%TAG !e! tag:example.com,2026:` → prefix is `tag:example.com,2026:` (no comment — regression guard)
   - `%TAG ! ! garbage` → error (trailing non-comment content)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove `%TAG` comment-after-prefix entry from `project_followup_plans.md`
-- [ ] Single commit: `fix(rlsp-yaml-parser): stop %TAG prefix from absorbing trailing comments`
+- [x] Existing `cargo test -p rlsp-yaml-parser` suite passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove `%TAG` comment-after-prefix entry from `project_followup_plans.md`
+- [x] Single commit: `fix(rlsp-yaml-parser): stop %TAG prefix from absorbing trailing comments`
 
 ## Decisions
 
