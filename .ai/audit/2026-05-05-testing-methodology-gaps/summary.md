@@ -221,16 +221,18 @@ invariance. This audit surveys whether the same pattern repeats elsewhere.
 
 ## Differential Testing Candidates
 
-### GAP-D1: No libyaml / PyYAML comparison harness
+### ~~GAP-D1: No libyaml / PyYAML comparison harness~~ — DOWNGRADED (Not Recommended)
+
 - **Description:** No differential testing compares `parse_events()` output against a reference
-  implementation for arbitrary inputs. The YAML Test Suite validates against fixed expected output
-  files, but does not cover all real-world YAML patterns.
-- **Bug class:** Silent spec deviation on YAML inputs outside the test suite.
-- **Severity:** High — most impactful opportunity; catches a whole class of bugs invisible to
-  current testing.
-- **Fix:** Build a differential test harness (standalone binary or integration test) that feeds
-  generated YAML to both `parse_events()` and libyaml (via `unsafe` FFI or a subprocess call),
-  comparing event sequences. Start with the yaml-test-suite inputs as a seed corpus.
+  implementation for arbitrary inputs.
+- **Reassessment (2026-05-05):** Not recommended. libyaml and PyYAML are YAML 1.1, not 1.2.2 —
+  most divergences would be spec-version differences (octal syntax, boolean values, tag
+  resolution), not bugs. snakeyaml-engine is 1.2 but has its own known deviations. The parser
+  has 5 deliberate Stricter-than-spec decisions that would all appear as false-positive
+  "differences." The YAML Test Suite (368/368 pass) already serves as the spec-derived reference
+  — it IS the differential test. Signal-to-noise ratio of comparing against another
+  implementation would be poor.
+- **Severity:** ~~High~~ Low — not cost-effective given existing YAML Test Suite coverage.
 
 ### GAP-D2: No cross-schema structural consistency check
 - **Description:** Given the same YAML text loaded with all three schemas, the AST structure
@@ -343,7 +345,7 @@ invariance. This audit surveys whether the same pattern repeats elsewhere.
 | GAP-P3 | Proptest | Low | No schema resolution determinism property |
 | GAP-P4 | Proptest | Medium | Formatter idempotency proptest limited to default options |
 | GAP-P5 | Proptest | Low | Encoding detection proptest restricted to ASCII strategy |
-| GAP-D1 | Differential | High | No libyaml/PyYAML comparison harness |
+| ~~GAP-D1~~ | ~~Differential~~ | ~~High~~ | DOWNGRADED — not cost-effective; YAML Test Suite is the spec-derived reference |
 | GAP-D2 | Differential | Medium | No cross-schema structural consistency check |
 | ~~GAP-Y1~~ | ~~rlsp-yaml I10~~ | ~~High~~ | FALSE POSITIVE — I10 already catches via loader-injected resolved tags |
 | GAP-Y2 | rlsp-yaml | Medium | No formatter preserves explicit user-tag invariant |
