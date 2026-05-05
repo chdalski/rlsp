@@ -38,7 +38,7 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 
 ## Steps
 
-- [ ] Create `docs/conformance/` folder structure with README
+- [x] Create `docs/conformance/` folder structure with README
 - [ ] Populate per-chapter BNF conformance entries
 - [ ] Write prose findings and design decisions files
 - [ ] Add `///` doc comments at enforcement sites
@@ -52,16 +52,18 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 
 ### Task 1: Create `docs/conformance/` structure and README
 
+**Completed:** commit `5cf6178` (2026-05-05)
+
 Create the folder and write `README.md` with methodology, taxonomy, and summary table.
 
-- [ ] Create `docs/conformance/` directory
-- [ ] Write `README.md` with:
+- [x] Create `docs/conformance/` directory
+- [x] Write `README.md` with:
   - Methodology section (dual-track A/B independent audit, lead reconciliation, symmetric reconciliation principle)
   - Verdict taxonomy table (Strict-conformant, Stricter-than-spec, Not-applicable; note that no Lenient entries remain after fixes)
   - Summary verdict counts (Phase 1: 213 entries; Phase 2: per-section counts)
   - One-line-per-production summary table with verdict and link to detail file
   - References to audit source files (`.ai/audit/`) as historical records
-- [ ] `cargo fmt --check` passes (no code changes yet)
+- [x] `cargo fmt --check` passes (no code changes yet)
 
 ### Task 2: Populate per-chapter BNF entries (§5-§9)
 
