@@ -1,6 +1,8 @@
 # Changelog
 
 
+## [0.1.8] - 2026-05-05
+
 ## Documentation
 
 - Add feature-log.md for rlsp-yaml-parser and rlsp-fmt (5aa4b8b)

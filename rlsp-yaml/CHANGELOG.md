@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.11.0] - 2026-05-05
+
+### Bug Fixes
+
+- Clear properties from cloned scalar in string_to_block_scalar (6e3abf3)
+- Preserve node properties across cursor-driven code actions (daf3d21)
+- Add position fields to LoadError variants (4f4a840)
+
+### Features
+
+- Plumb YamlFormatOptions through code_actions dispatch (79a95fc)
+
+### Refactoring
+
+- Drop block_to_flow's hardcoded long-line warning (2e7f088)
+- Extract shared integration-test helpers to tests/common (3098cd3)
+- Resolve flow-style severity at the validator (cd95297)
+- Resolve duplicate-key severity at the validator (bca67ff)
+
 ## [0.10.1] - 2026-04-27
 
 ### Bug Fixes
