@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-05)
 **Created:** 2026-05-05
 
 ## Goal
@@ -27,38 +27,32 @@ Survey `rlsp-yaml-parser` in depth for testing-methodology gaps — spec tables 
 
 ## Steps
 
-- [ ] Audit spec-table coverage in rlsp-yaml-parser
-- [ ] Identify behavioral invariant candidates for proptest
-- [ ] Identify differential testing opportunities
-- [ ] Write summary document
-- [ ] Commit
+- [x] Audit spec-table coverage in rlsp-yaml-parser
+- [x] Identify behavioral invariant candidates for proptest
+- [x] Identify differential testing opportunities
+- [x] Write summary document
+- [x] Commit
 
 ## Tasks
 
 ### Task 1: Audit spec-table coverage and write summary
 
+**Completed:** commit `c12d40f` (2026-05-05)
+
 Survey all normative spec tables the implementation dispatches on. For each table, check whether every row/case is exercised by at least one positive test. Identify proptest candidates and differential testing opportunities. Write the output document.
 
-- [ ] **§5.2 encoding detection table** — check `tests/encoding.rs` covers all 6 rows of the BOM detection table (UTF-8 no BOM, UTF-8 BOM, UTF-16LE BOM, UTF-16BE BOM, UTF-32LE BOM, UTF-32BE BOM) plus the null-byte heuristic fallbacks. Note which rows lack a fixture.
-- [ ] **§5 character-set tables** — check that `chars.rs` predicates (`is_c_printable`, `is_ns_char`, `is_ns_uri_char_single`, `is_ns_tag_char_single`) have boundary tests at codepoint edges (e.g., U+0000 rejected, U+0020 at boundary, U+FFFE rejected, supplementary plane boundary). Note gaps.
-- [ ] **§10.2/§10.3 integer/float regex tables** — check `tests/schema_resolution.rs` covers all regex rows: decimal `[1-9][0-9]*`, octal `0o[0-7]+`, hex `0x[0-9a-fA-F]+`, and the float patterns (inf, nan, scientific, fixed). Note edge cases not covered (e.g., `+0`, `-0`, maximum-length values).
-- [ ] **§6.9.1 tag resolution rules** — check tag-resolution dispatch (default tag assignment by kind: mapping → `tag:yaml.org,2002:map`, sequence → `tag:yaml.org,2002:seq`, scalar with/without tag). Note uncovered rule branches.
-- [ ] **§10.1 default-tag-by-kind** — check Failsafe/JSON/Core schema selection coverage. Note whether all three schemas are tested for all node kinds.
-- [ ] **Proptest candidates** — identify behavioral invariants suitable for property-based testing:
-  - Round-trip: `parse_events(input) → reconstruct → parse_events(output)` preserves event sequence
-  - Character predicate consistency: for any char in U+0000..U+10FFFF, `is_ns_char(c)` implies `is_c_printable(c)` (subset relationships hold)
-  - Schema resolution determinism: `resolve_scalar(s, schema)` is pure (same input → same tag)
-  - Formatter idempotency: `format(format(input)) == format(input)` (already partially tested, expand to proptest)
-  - Encoding detection determinism: encoding detection on any valid YAML byte sequence is idempotent
-- [ ] **Differential testing candidates** — identify behaviors where comparing against libyaml/PyYAML/snakeyaml would catch bugs:
-  - Full §5.2 encoding detection table against libyaml
-  - Schema resolution (Core schema) for scalar values against PyYAML/snakeyaml
-  - Event-stream output for YAML Test Suite cases vs libyaml events
-- [ ] **rlsp-yaml testing gaps** — survey `corpus_invariants.rs` (I1-I10) for invariant coverage gaps, check formatter round-trip fixture completeness (does `formatter_conformance.rs` cover all YAML Test Suite categories?), check whether `code_action_fixtures` covers all code-action types. Note gaps.
-- [ ] **rlsp-fmt testing gaps** — survey `printer.rs` unit tests for algorithm coverage gaps. Check whether edge cases are tested: zero-width groups, deeply nested groups, break-mode vs flat-mode transitions at width boundary, empty documents. Note gaps.
-- [ ] Write `.ai/audit/2026-05-05-testing-methodology-gaps/summary.md` with one entry per gap. Each entry: gap ID, gap description, what bug class it would catch, severity (high/medium/low), specific fix recommendation (fixture/property/differential).
-- [ ] Summary document exists at `.ai/audit/2026-05-05-testing-methodology-gaps/summary.md` and contains at least one entry per surveyed area (encoding, character predicates, schema resolution, tag rules, proptest candidates, differential candidates, rlsp-yaml gaps, rlsp-fmt gaps)
-- [ ] Single commit: `docs(audit): add testing methodology gap survey`
+- [x] **§5.2 encoding detection table** — check `tests/encoding.rs` covers all 6 rows of the BOM detection table (UTF-8 no BOM, UTF-8 BOM, UTF-16LE BOM, UTF-16BE BOM, UTF-32LE BOM, UTF-32BE BOM) plus the null-byte heuristic fallbacks. Note which rows lack a fixture.
+- [x] **§5 character-set tables** — check that `chars.rs` predicates (`is_c_printable`, `is_ns_char`, `is_ns_uri_char_single`, `is_ns_tag_char_single`) have boundary tests at codepoint edges (e.g., U+0000 rejected, U+0020 at boundary, U+FFFE rejected, supplementary plane boundary). Note gaps.
+- [x] **§10.2/§10.3 integer/float regex tables** — check `tests/schema_resolution.rs` covers all regex rows: decimal `[1-9][0-9]*`, octal `0o[0-7]+`, hex `0x[0-9a-fA-F]+`, and the float patterns (inf, nan, scientific, fixed). Note edge cases not covered (e.g., `+0`, `-0`, maximum-length values).
+- [x] **§6.9.1 tag resolution rules** — check tag-resolution dispatch (default tag assignment by kind: mapping → `tag:yaml.org,2002:map`, sequence → `tag:yaml.org,2002:seq`, scalar with/without tag). Note uncovered rule branches.
+- [x] **§10.1 default-tag-by-kind** — check Failsafe/JSON/Core schema selection coverage. Note whether all three schemas are tested for all node kinds.
+- [x] **Proptest candidates** — identify behavioral invariants suitable for property-based testing
+- [x] **Differential testing candidates** — libyaml/PyYAML/snakeyaml comparisons
+- [x] **rlsp-yaml testing gaps** — survey `corpus_invariants.rs` (I1-I10) for invariant coverage gaps, check formatter round-trip fixture completeness, check code-action fixture coverage
+- [x] **rlsp-fmt testing gaps** — survey `printer.rs` unit tests for algorithm coverage gaps
+- [x] Write `.ai/audit/2026-05-05-testing-methodology-gaps/summary.md` — 28 gaps identified (3 High, 11 Medium, 14 Low)
+- [x] Summary document contains at least one entry per surveyed area
+- [x] Single commit: `docs(audit): add testing methodology gap survey`
 
 ## Decisions
 
