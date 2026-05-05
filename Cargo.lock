@@ -1140,6 +1140,7 @@ dependencies = [
  "idna",
  "iri-string",
  "once_cell",
+ "proptest",
  "regex",
  "rlsp-fmt",
  "rlsp-yaml-parser",

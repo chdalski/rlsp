@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-05)
 **Created:** 2026-05-05
 
 ## Goal
@@ -21,9 +21,9 @@ Fix all 21 remaining testing methodology gaps from the 2026-05-05 audit. Task 1 
 ## Steps
 
 - [x] Add parser test hardening (Task 1)
-- [ ] Add rlsp-yaml + rlsp-fmt test hardening (Task 2)
-- [ ] Verify all tests pass
-- [ ] Commit
+- [x] Add rlsp-yaml + rlsp-fmt test hardening (Task 2)
+- [x] Verify all tests pass
+- [x] Commit
 
 ## Tasks
 
@@ -62,24 +62,26 @@ Add boundary fixtures, standalone unit tests, proptests, and a cross-schema stru
 
 ### Task 2: rlsp-yaml + rlsp-fmt test hardening (6 gaps)
 
+**Completed:** commit `882faf6` (2026-05-05)
+
 Add formatter/code-action invariants and printer edge-case tests.
 
 **rlsp-yaml (4 gaps):**
-- [ ] **GAP-Y2:** Add fixture in `tests/formatter_conformance.rs` (or new `tests/formatter_tags.rs`) with inputs containing explicit tags (`!!custom`, `!local`) asserting the tag string appears unchanged in formatted output. Medium.
-- [ ] **GAP-Y3:** Audit existing code-action fixture files; for each action category missing block or flow context variants, add fixture pairs (input + expected output). Acceptance criterion: each code-action category has at least one block-context fixture and one flow-context fixture. Medium.
-- [ ] **GAP-Y4:** Add a proptest that applies each available code action twice to selected inputs and asserts the second application is a no-op (proptest dev-dep is added for GAP-P4). Low.
-- [ ] **GAP-P4:** Add proptest (add `proptest` to `rlsp-yaml` dev-deps) generating random `YamlFormatOptions` (varying `print_width`, `indent_width`, `single_quote`) combined with yaml-test-suite inputs, asserting `format(format(input)) == format(input)`. Medium.
+- [x] **GAP-Y2:** Add fixture in `tests/formatter_conformance.rs` (or new `tests/formatter_tags.rs`) with inputs containing explicit tags (`!!custom`, `!local`) asserting the tag string appears unchanged in formatted output. Medium.
+- [x] **GAP-Y3:** Audit existing code-action fixture files; for each action category missing block or flow context variants, add fixture pairs (input + expected output). Acceptance criterion: each code-action category has at least one block-context fixture and one flow-context fixture. Medium.
+- [x] **GAP-Y4:** Add a proptest that applies each available code action twice to selected inputs and asserts the second application is a no-op (proptest dev-dep is added for GAP-P4). Low.
+- [x] **GAP-P4:** Add proptest (add `proptest` to `rlsp-yaml` dev-deps) generating random `YamlFormatOptions` (varying `print_width`, `indent_width`, `single_quote`) combined with yaml-test-suite inputs, asserting `format(format(input)) == format(input)`. Medium.
 
 **rlsp-fmt (3 gaps):**
-- [ ] **GAP-F1:** Add unit test in `src/printer.rs` constructing `Doc::Group(Doc::FlatAlt { flat: short_doc, expanded: long_doc })` where `short_doc` fits, asserting flat mode and flat variant used. Medium.
-- [ ] **GAP-F2:** Add unit test in `src/printer.rs` calling `indent_width(3, true)` asserting returns `3` (not `3 * tab_stop`), with comment explaining tab-as-1-column. Low.
-- [ ] **GAP-F3:** Add unit test in `src/printer.rs` asserting `format(Doc::Concat(vec![]), ...)` returns empty string. Low.
+- [x] **GAP-F1:** Add unit test in `src/printer.rs` constructing `Doc::Group(Doc::FlatAlt { flat: short_doc, expanded: long_doc })` where `short_doc` fits, asserting flat mode and flat variant used. Medium.
+- [x] **GAP-F2:** Add unit test in `src/printer.rs` calling `indent_width(3, true)` asserting returns `3` (not `3 * tab_stop`), with comment explaining tab-as-1-column. Low.
+- [x] **GAP-F3:** Add unit test in `src/printer.rs` asserting `format(Doc::Concat(vec![]), ...)` returns empty string. Low.
 
 **Verification:**
-- [ ] `cargo test -p rlsp-yaml` passes
-- [ ] `cargo test -p rlsp-fmt` passes
-- [ ] `cargo clippy --all-targets` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo test -p rlsp-yaml` passes
+- [x] `cargo test -p rlsp-fmt` passes
+- [x] `cargo clippy --all-targets` passes
+- [x] `cargo fmt --check` passes
 
 ## Decisions
 

@@ -368,4 +368,44 @@ mod tests {
         let narrow = format(&doc, &opts(10));
         assert!(narrow.contains('\n'));
     }
+
+    // GAP-F1: Group(FlatAlt { flat: short_doc, expanded: long_doc }) where short_doc
+    // fits — printer must choose flat mode and render the flat variant.
+    #[test]
+    fn group_flat_alt_short_fits_uses_flat_variant() {
+        // "ok" (2 chars) fits in any reasonable width; long_doc is long enough to
+        // guarantee break mode if the printer were to mis-choose.
+        let short_doc = text("ok");
+        let long_doc = text("this_is_a_very_long_expanded_form_that_would_not_fit");
+        let doc = Doc::Group(Box::new(Doc::FlatAlt {
+            flat: Box::new(short_doc),
+            break_: Box::new(long_doc),
+        }));
+        let result = format(&doc, &opts(80));
+        // Flat mode selected because "ok" fits; flat variant ("ok") must be rendered.
+        assert_eq!(result, "ok");
+    }
+
+    // GAP-F2: indent_width with use_tabs=true returns the indent level itself (1 per
+    // tab, not 1 * tab_width), because tabs are counted as 1 column for fit checks.
+    #[test]
+    fn indent_width_use_tabs_counts_tabs_as_one_column_each() {
+        // With use_tabs=true, indent_width(3, options) must return 3 (not 3 * tab_width).
+        // This prevents over-estimating available width when computing fits() with tabs.
+        let options = FormatOptions {
+            print_width: 80,
+            tab_width: 4, // tab_stop is 4, but must NOT be multiplied
+            use_tabs: true,
+        };
+        // indent_width(3, ...) → 3 (each tab = 1 column for width accounting)
+        assert_eq!(indent_width(3, &options), 3);
+    }
+
+    // GAP-F3: format(Doc::Concat(vec![]), ...) returns an empty string.
+    #[test]
+    fn concat_empty_vec_renders_empty_string() {
+        let doc = Doc::Concat(vec![]);
+        let result = format(&doc, &opts(80));
+        assert_eq!(result, "");
+    }
 }
