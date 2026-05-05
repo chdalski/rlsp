@@ -246,17 +246,17 @@ invariance. This audit surveys whether the same pattern repeats elsewhere.
 
 ## rlsp-yaml Testing Gaps
 
-### GAP-Y1: I10 round-trip invariant ignores scalar style changes
-- **Description:** `documents_equivalent` explicitly ignores style. A formatter that drops quotes
-  from `"null"` (changing a string to a null-typed value) would pass I10 because the decoded
-  value string `"null"` matches on both sides. The invariant does not catch style-changing
-  round-trip bugs.
-- **Bug class:** Formatter incorrectly changing scalar style (e.g., `"null"` → unquoted `null`).
-- **Severity:** High — inherent limitation of the current I10 design.
-- **Fix:** Add a separate I10b invariant (or extend I10) that checks scalar style is preserved for
-  scalars where style is semantically load-bearing: quoted strings whose unquoted form resolves to
-  a different type (`"null"`, `"true"`, `"1"`, etc.). Use a dedicated fixture set rather than the
-  full corpus so the check stays fast.
+### ~~GAP-Y1: I10 round-trip invariant ignores scalar style changes~~ — FALSE POSITIVE
+
+- **Description:** `documents_equivalent` explicitly ignores style. The audit claimed a formatter
+  that drops quotes from `"null"` would pass I10 undetected.
+- **Verification (2026-05-05):** FALSE POSITIVE. The loader (`loader.rs:1055-1057`) calls
+  `resolve_scalar()` and injects the resolved tag directly into the AST `Node::Scalar.tag` field.
+  `documents_equivalent()` compares tags via `node_tag_str()` at lines 793-796. So `"null"`
+  (quoted → `!!str`) reformatted to `null` (plain → `!!null`) produces different tag values in
+  the pre- and post-format ASTs, and I10 already detects this. The audit confused "ignores style"
+  with "ignores the semantic effect of style changes."
+- **Severity:** ~~High~~ N/A — no gap exists.
 
 ### GAP-Y2: No invariant for formatter preserving explicit user-authored tags
 - **Description:** There is no isolated invariant testing that a user-authored explicit tag
@@ -345,7 +345,7 @@ invariance. This audit surveys whether the same pattern repeats elsewhere.
 | GAP-P5 | Proptest | Low | Encoding detection proptest restricted to ASCII strategy |
 | GAP-D1 | Differential | High | No libyaml/PyYAML comparison harness |
 | GAP-D2 | Differential | Medium | No cross-schema structural consistency check |
-| GAP-Y1 | rlsp-yaml I10 | High | I10 round-trip ignores scalar style changes |
+| ~~GAP-Y1~~ | ~~rlsp-yaml I10~~ | ~~High~~ | FALSE POSITIVE — I10 already catches via loader-injected resolved tags |
 | GAP-Y2 | rlsp-yaml | Medium | No formatter preserves explicit user-tag invariant |
 | GAP-Y3 | rlsp-yaml | Medium | Code-action fixture coverage incomplete by category |
 | GAP-Y4 | rlsp-yaml | Low | No code-action idempotency proptest |
