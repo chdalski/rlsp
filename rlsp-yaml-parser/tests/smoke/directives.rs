@@ -1008,6 +1008,26 @@ fn tag_prefix_with_backslash_returns_error() {
 }
 
 // -----------------------------------------------------------------------
+// Group P-T1 — Primary `!` handle with invalid percent-decoded suffix
+// -----------------------------------------------------------------------
+
+// T1-1: Primary `!` handle with `%20` suffix — `%20` decodes to space, which
+// is not a valid ns-uri-char, so the resolved tag URI is invalid → error.
+// The `!!` and named handle paths are already tested in Groups N and D;
+// this case specifically targets the primary handle defined via %TAG.
+#[test]
+fn primary_handle_with_percent_encoded_space_suffix_returns_error() {
+    // `%TAG ! tag:example.com,2026:` declares the primary `!` handle.
+    // `!%20invalid` uses that handle; suffix `%20` decodes to space (U+0020),
+    // which is not allowed in a URI → the resolved tag is rejected.
+    let input = "%TAG ! tag:example.com,2026:\n---\n!%20invalid val\n";
+    assert!(
+        has_error(input),
+        "primary handle with %20 (space) suffix must return an error (space is not ns-uri-char)"
+    );
+}
+
+// -----------------------------------------------------------------------
 // Group Q — %TAG trailing comment and trailing garbage (REQ-23 / §6.8.2)
 // -----------------------------------------------------------------------
 

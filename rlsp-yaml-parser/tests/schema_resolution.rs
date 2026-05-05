@@ -300,6 +300,13 @@ fn core_nan_resolves_to_float() {
     assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:float"));
 }
 
+// IT-GAP-S2: `1.e5` (trailing-dot-with-exponent) → !!float under Core schema
+#[test]
+fn core_trailing_dot_with_exponent_resolves_to_float() {
+    let tag = scalar_tag("1.e5\n", Schema::Core);
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:float"));
+}
+
 // IT-23: `+12` → !!int (Core allows leading `+`)
 #[test]
 fn core_positive_signed_int_resolves_to_int() {
@@ -416,6 +423,13 @@ fn json_plain_null_resolves_to_null() {
 #[test]
 fn json_plain_float_resolves_to_float() {
     let tag = scalar_tag("3.14\n", Schema::Json);
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:float"));
+}
+
+// IT-GAP-S3: `0e5` (bare-zero-with-exponent) → !!float under JSON schema
+#[test]
+fn json_zero_with_exponent_resolves_to_float() {
+    let tag = scalar_tag("0e5\n", Schema::Json);
     assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:float"));
 }
 

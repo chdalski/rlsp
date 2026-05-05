@@ -658,6 +658,24 @@ mod tests {
     }
 
     #[test]
+    fn find_non_c_printable_rejects_u0084() {
+        // U+0084 (IND, C1 control immediately below NEL) is not c-printable;
+        // encodes as [0xC2, 0x84].
+        let input = "foo\u{84}bar";
+        let result = find_non_c_printable(input.as_bytes());
+        assert_eq!(result, Some((3, '\u{84}')));
+    }
+
+    #[test]
+    fn find_non_c_printable_rejects_u0086() {
+        // U+0086 (SSA, C1 control immediately above NEL) is not c-printable;
+        // encodes as [0xC2, 0x86].
+        let input = "foo\u{86}bar";
+        let result = find_non_c_printable(input.as_bytes());
+        assert_eq!(result, Some((3, '\u{86}')));
+    }
+
+    #[test]
     fn find_non_c_printable_detects_fffe() {
         // U+FFFE encodes as [0xEF, 0xBF, 0xBE]
         let input = "foo\u{FFFE}bar";

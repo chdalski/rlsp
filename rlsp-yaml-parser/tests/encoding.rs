@@ -399,6 +399,26 @@ fn parse_events_accepts_arabic_in_mapping_key() {
 }
 
 // ===========================================================================
+// decode() — BOM priority ordering (GAP-E2)
+// ===========================================================================
+//
+// The 4-byte UTF-32-BE BOM [00 00 FE FF] contains the 2-byte UTF-16-BE BOM
+// [FE FF] at offset 2.  Detection must check 4-byte BOMs before 2-byte BOMs;
+// otherwise a UTF-32-BE stream would be misidentified as UTF-16-BE.
+
+#[test]
+fn utf32_be_bom_takes_priority_over_utf16_be_prefix() {
+    // UTF-32-BE BOM [00 00 FE FF] followed by a single LF (U+000A) encoded as
+    // the 4-byte UTF-32-BE codepoint [00 00 00 0A].  Total: 8 bytes.
+    // If detection incorrectly matched [FE FF] (at offset 2) as UTF-16-BE,
+    // the leading [00 00] would become the first code unit (U+0000), causing a
+    // truncated or invalid decode instead of a clean newline string.
+    let input: &[u8] = &[0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x0A];
+    assert_eq!(detect_encoding(input), Encoding::Utf32Be);
+    assert_eq!(decode(input).unwrap(), "\n");
+}
+
+// ===========================================================================
 // detect_encoding() — YAML 1.2 §5.2 detection-table spec fixture
 // ===========================================================================
 //

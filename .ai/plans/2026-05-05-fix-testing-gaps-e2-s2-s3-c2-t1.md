@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-05)
 **Created:** 2026-05-05
 
 ## Goal
@@ -19,28 +19,30 @@ Fix five testing methodology gaps identified in the 2026-05-05 audit by adding t
 
 ## Steps
 
-- [ ] Add encoding ordering test (GAP-E2)
-- [ ] Add schema resolution edge-case tests (GAP-S2, GAP-S3)
-- [ ] Add character boundary tests (GAP-C2)
-- [ ] Add primary handle percent-decode test (GAP-T1)
-- [ ] Verify all tests pass
-- [ ] Commit
+- [x] Add encoding ordering test (GAP-E2)
+- [x] Add schema resolution edge-case tests (GAP-S2, GAP-S3)
+- [x] Add character boundary tests (GAP-C2)
+- [x] Add primary handle percent-decode test (GAP-T1)
+- [x] Verify all tests pass
+- [x] Commit
 
 ## Tasks
 
 ### Task 1: Add five targeted test cases
 
+**Completed:** commit `845aa87` (2026-05-05)
+
 All five gaps are small, independent test additions to existing files in `rlsp-yaml-parser`. One commit.
 
-- [ ] **GAP-E2:** Add test `utf32_be_bom_takes_priority_over_utf16_be_prefix` in `tests/encoding.rs`. Feed `[0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x0A]` (UTF-32-BE BOM + newline content) and assert `Encoding::Utf32Be`. Add a comment: the 4-byte UTF-32-BE BOM `[00 00 FE FF]` contains the 2-byte UTF-16-BE BOM `[FE FF]` at offset 2 — the detection must check 4-byte BOMs before 2-byte BOMs.
-- [ ] **GAP-S2:** Add rstest case `trailing_dot_with_exponent` for `1.e5` in `tests/schema_resolution.rs`. Assert it resolves to `!!float` under `Schema::Core`.
-- [ ] **GAP-S3:** Add rstest case `zero_with_exponent` for `0e5` in `tests/schema_resolution.rs`. Assert it resolves to `!!float` under `Schema::Json`.
-- [ ] **GAP-C2:** Add inline `#[cfg(test)]` fixtures in `src/chars.rs` for `find_non_c_printable` (or the appropriate boundary-test section): U+0084 (`\xC2\x84`) → rejected (returns `Some`), U+0086 (`\xC2\x86`) → rejected (returns `Some`), U+0085 (NEL, `\xC2\x85`) → accepted (returns `None`). The NEL test may already exist — if so, just add the two adjacent-codepoint tests.
-- [ ] **GAP-T1:** Add a test for the primary `!` handle with invalid percent-decoded suffix. Use a YAML input like `%TAG ! tag:example.com,\n---\n!%20invalid val\n` and assert it produces a parse/load error (the `%20` decodes to space, which is not a valid URI character). Place in `tests/smoke/directives.rs` alongside existing tag validation tests.
-- [ ] `cargo test -p rlsp-yaml-parser` passes (all new tests pass, no regressions)
-- [ ] `cargo clippy --all-targets` passes
-- [ ] `cargo fmt --check` passes
-- [ ] **Consolidation check:** Review `tests/encoding.rs` and `tests/smoke/directives.rs` for duplicate helpers, overlapping test patterns, or structural issues introduced by repeated additions across prior plans. Note whether consolidation is needed or "reviewed, no consolidation required."
+- [x] **GAP-E2:** Add test `utf32_be_bom_takes_priority_over_utf16_be_prefix` in `tests/encoding.rs`. Feed `[0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x0A]` (UTF-32-BE BOM + newline content) and assert `Encoding::Utf32Be`. Add a comment: the 4-byte UTF-32-BE BOM `[00 00 FE FF]` contains the 2-byte UTF-16-BE BOM `[FE FF]` at offset 2 — the detection must check 4-byte BOMs before 2-byte BOMs.
+- [x] **GAP-S2:** Add rstest case `trailing_dot_with_exponent` for `1.e5` in `tests/schema_resolution.rs`. Assert it resolves to `!!float` under `Schema::Core`.
+- [x] **GAP-S3:** Add rstest case `zero_with_exponent` for `0e5` in `tests/schema_resolution.rs`. Assert it resolves to `!!float` under `Schema::Json`.
+- [x] **GAP-C2:** Add inline `#[cfg(test)]` fixtures in `src/chars.rs` for `find_non_c_printable` (or the appropriate boundary-test section): U+0084 (`\xC2\x84`) → rejected (returns `Some`), U+0086 (`\xC2\x86`) → rejected (returns `Some`), U+0085 (NEL, `\xC2\x85`) → accepted (returns `None`). The NEL test may already exist — if so, just add the two adjacent-codepoint tests.
+- [x] **GAP-T1:** Add a test for the primary `!` handle with invalid percent-decoded suffix. Use a YAML input like `%TAG ! tag:example.com,\n---\n!%20invalid val\n` and assert it produces a parse/load error (the `%20` decodes to space, which is not a valid URI character). Place in `tests/smoke/directives.rs` alongside existing tag validation tests.
+- [x] `cargo test -p rlsp-yaml-parser` passes (all new tests pass, no regressions)
+- [x] `cargo clippy --all-targets` passes
+- [x] `cargo fmt --check` passes
+- [x] **Consolidation check:** Review `tests/encoding.rs` and `tests/smoke/directives.rs` for duplicate helpers, overlapping test patterns, or structural issues introduced by repeated additions across prior plans. Note whether consolidation is needed or "reviewed, no consolidation required."
 
 ## Decisions
 
