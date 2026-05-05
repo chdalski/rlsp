@@ -12,6 +12,12 @@
 // ---------------------------------------------------------------------------
 
 /// [1] c-printable — printable Unicode characters allowed in YAML.
+///
+/// Enforced stream-wide on plain scalar content, block scalar content, and
+/// comment bodies.  C0 controls (except TAB), DEL (U+007F), C1 controls
+/// (except NEL U+0085), and non-characters U+FFFE/U+FFFF are rejected.
+/// Quoted scalars use the broader [`is_nb_json`] / [`find_non_nb_json`] check
+/// per the §5.1 JSON-compatibility mandate.
 pub const fn is_c_printable(ch: char) -> bool {
     matches!(ch,
         '\t'            // x09
@@ -205,6 +211,10 @@ pub const fn is_c_flow_indicator(ch: char) -> bool {
 // ---------------------------------------------------------------------------
 
 /// [34] ns-char — non-break, non-white printable character.
+///
+/// Enforced on directive names and parameters (§6.8) and as the base character
+/// class for URI/tag/anchor chars.  Space, tab, line-break, and BOM are
+/// explicitly excluded so that delimiters are never misread as name content.
 pub const fn is_ns_char(ch: char) -> bool {
     !matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{FEFF}')
         && matches!(ch,
@@ -226,6 +236,10 @@ pub const fn is_ns_char(ch: char) -> bool {
 /// Note: the percent-encoded form (`%HH`) is a two-character sequence and
 /// must be handled at the scanner level.  This predicate covers all
 /// single-character URI members.
+///
+/// Used in tag-prefix and verbatim-tag URI validation (§6.8.1 / §6.9.1) to
+/// reject characters such as spaces, `{`, `}`, `^`, `\`, and `` ` `` that
+/// are not permitted in a URI reference.
 pub const fn is_ns_uri_char_single(ch: char) -> bool {
     ch.is_ascii_alphanumeric()
         || matches!(
@@ -259,6 +273,11 @@ pub const fn is_ns_uri_char_single(ch: char) -> bool {
 ///
 /// Same note as [`is_ns_uri_char_single`]: percent-encoded form handled in
 /// the scanner.
+///
+/// `!` is excluded because it is the tag-handle delimiter; flow indicators
+/// (`,`, `[`, `]`, `{`, `}`) are excluded so a tag cannot bleed into a
+/// surrounding flow collection.  Used in shorthand-tag suffix scanning
+/// (§6.8.1 production [40]) and named tag-handle validation.
 pub const fn is_ns_tag_char_single(ch: char) -> bool {
     ch.is_ascii_alphanumeric()
         || matches!(

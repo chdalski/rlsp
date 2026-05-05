@@ -264,6 +264,12 @@ impl<'input> LineBuffer<'input> {
     /// If `next` starts with U+FEFF, content, offset, and byte position are
     /// advanced past the 3-byte UTF-8 encoding.  Only the first BOM is stripped;
     /// a second consecutive BOM in the same line is left as illegal content.
+    ///
+    /// Rationale: a BOM inside document body content (not at a document boundary)
+    /// is illegal per §5.2 and should be surfaced as a parse error, not silently
+    /// consumed.  Centralising stripping here ensures the lexer sees a BOM-free
+    /// first byte at every valid boundary position, and sees a raw `U+FEFF` (which
+    /// fails `c-printable`) everywhere else.
     pub fn signal_document_boundary(&mut self) {
         // Strip at most one BOM from the already-primed next line.
         if let Some(ref mut next) = self.next {

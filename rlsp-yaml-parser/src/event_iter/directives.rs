@@ -472,6 +472,11 @@ impl<'input> EventIter<'input> {
 ///
 /// Returns `Ok(())` on success, or `Err(byte_offset)` where `byte_offset` is
 /// the position of the first invalid byte within `prefix`.
+///
+/// Rationale: the prefix stored at `%TAG` registration is later concatenated
+/// with a decoded suffix to form the resolved tag URI.  Rejecting invalid URI
+/// characters at registration time (rather than at resolution time) gives
+/// early, precise errors and prevents malformed URIs from entering the AST.
 fn validate_tag_prefix(prefix: &str) -> Result<(), usize> {
     let bytes = prefix.as_bytes();
 

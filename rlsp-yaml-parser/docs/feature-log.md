@@ -203,7 +203,7 @@ codepoint; non-printable hex-escape sequences are rejected with a parse error;
 `\e`, `\N`, etc.) are intentionally exempt from both checks — they produce
 well-known control characters whose semantics are unambiguous. This is a
 deliberate divergence from the spec, recorded as `Strict (security-hardened)`
-in `docs/yaml-spec-conformance.md` entries [59]–[61].
+in `docs/conformance/bnf-§5.md` entries [59]–[61].
 **Complexity:** Low
 **Comment:** The spec permits any codepoint via hex escapes, but accepting
 arbitrary non-printable or bidi-override codepoints through a YAML file is a

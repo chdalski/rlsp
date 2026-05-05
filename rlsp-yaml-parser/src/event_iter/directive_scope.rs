@@ -58,6 +58,11 @@ fn percent_decode(s: &str) -> Cow<'_, str> {
 ///
 /// Returns `Ok(())` on success, or `Err(byte_offset)` where `byte_offset` is
 /// the position of the first invalid byte within `resolved`.
+///
+/// Rationale: §6.8.1 requires the resolved tag to be a valid `ns-uri-char*`
+/// string.  A percent-decoded suffix may introduce bytes (e.g., spaces decoded
+/// from `%20`) that are not valid URI characters — post-concatenation
+/// validation catches these cases that per-component validation misses.
 fn validate_resolved_tag(resolved: &str) -> Result<(), usize> {
     let bytes = resolved.as_bytes();
     let mut pos = 0usize;
@@ -145,6 +150,8 @@ impl DirectiveScope {
                     ),
                 });
             }
+            // Post-concatenation check: percent-decoding the suffix may produce bytes
+            // (e.g., space from `%20`) that are not valid ns-uri-char [38].
             validate_resolved_tag(&resolved).map_err(|offset| Error {
                 pos: indicator_pos,
                 message: format!(

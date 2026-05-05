@@ -288,6 +288,16 @@ pub fn is_core_bool(value: &str) -> bool {
 /// The `[-+]?` prefix appears **only** on the decimal row of the §10.3.2 table.
 /// Octal and hex rows are unsigned — a leading sign (`-0o10`, `+0xFF`) does not
 /// match any int row and must resolve to `!!str` instead.
+///
+/// **Sign gate:** the signed-prefix check gates immediately after stripping the
+/// sign — if the rest starts with `0o` or `0x`, the sign cannot belong to an
+/// int row and returns `false` without further scanning.
+///
+/// **Leading-zero rejection:** decimal integers with more than one digit that
+/// start with `0` (e.g., `007`) are rejected — `0` alone is the only
+/// single-`0` decimal form.  This is stricter than the YAML 1.2.2 spec permits
+/// but is intentional: `007` is ambiguous with YAML 1.1 octal literals, and
+/// rejection enables the LSP to surface a targeted diagnostic and quick-fix.
 #[must_use]
 pub fn is_core_int(value: &str) -> bool {
     // Strip optional leading sign; the sign itself is never valid.

@@ -41,11 +41,11 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 - [x] Create `docs/conformance/` folder structure with README
 - [x] Populate per-chapter BNF conformance entries
 - [x] Write prose findings and design decisions files
-- [ ] Add `///` doc comments at enforcement sites
-- [ ] Create `rlsp-yaml-parser/CLAUDE.md` with Conformance Sync section
-- [ ] Delete old `docs/yaml-spec-conformance.md`
-- [ ] Update root CLAUDE.md component table if needed
-- [ ] Verify build passes (doc comments are compiled)
+- [x] Add `///` doc comments at enforcement sites
+- [x] Create `rlsp-yaml-parser/CLAUDE.md` with Conformance Sync section
+- [x] Delete old `docs/yaml-spec-conformance.md`
+- [x] Update root CLAUDE.md component table if needed
+- [x] Verify build passes (doc comments are compiled)
 - [ ] Mark plan Completed and commit
 
 ## Tasks
@@ -97,9 +97,11 @@ Write `prose.md` (Phase 2 normative prose) and `design-decisions.md` (Stricter-t
 
 ### Task 4: Add `///` doc comments at enforcement sites and create CLAUDE.md
 
+**Completed:** commit `cc8b54f` (2026-05-05)
+
 Add concise `///` doc comments at key validation enforcement functions, and create `rlsp-yaml-parser/CLAUDE.md`.
 
-- [ ] Add `///` doc comments at these enforcement sites (one-line spec citation + rationale):
+- [x] Add `///` doc comments at these enforcement sites (one-line spec citation + rationale):
   - `chars.rs`: `is_ns_char`, `is_c_printable`, `is_ns_uri_char_single`, `is_ns_tag_char_single`
   - `directives.rs`: ns-char pre-validation block, `validate_tag_prefix()`, tag-comment trailing-content check
   - `properties.rs`: verbatim admissibility check, empty-suffix rejection, `scan_tag_suffix()`
@@ -107,19 +109,19 @@ Add concise `///` doc comments at key validation enforcement functions, and crea
   - `schema.rs`: `is_core_int()` sign-gate and leading-zero rejection
   - `lexer/quoted.rs`: `s-indent(n)` enforcement in continuation loops
   - `lines.rs`: `signal_document_boundary()` BOM-strip rationale
-- [ ] Create `rlsp-yaml-parser/CLAUDE.md` with:
+- [x] Create `rlsp-yaml-parser/CLAUDE.md` with:
   - Brief crate description (streaming YAML 1.2.2 parser)
   - Conformance Sync section with table (source of truth, consumers, sync-when trigger)
   - Reference to `docs/conformance/README.md` for full conformance status
-- [ ] Delete old `docs/yaml-spec-conformance.md` (replaced by `docs/conformance/`)
-- [ ] Update `rlsp-yaml-parser/README.md` Documentation section: change link from `docs/yaml-spec-conformance.md` to `docs/conformance/README.md`
-- [ ] Update `rlsp-yaml-parser/docs/feature-log.md` hex-escape security-hardening entry: change path reference from `docs/yaml-spec-conformance.md entries [59]–[61]` to `docs/conformance/bnf-§5.md entries [59]–[61]`
-- [ ] Update root `CLAUDE.md` Components table path if needed (`docs/conformance/` replaces `docs/yaml-spec-conformance.md`)
-- [ ] `cargo build -p rlsp-yaml-parser` passes (doc comments are compiled)
-- [ ] `cargo clippy --all-targets` passes
-- [ ] `cargo fmt --check` passes
-- [ ] Remove the "Conformance doc rewrite to reflect audit findings" bullet from `project_followup_plans.md`; trim the "Post-Phase-2 conformance workflow" orchestration entry's step 5 (now satisfied) and note step 6 (public conformance declaration) remains as a future follow-up
-- [ ] Single commit: `docs(rlsp-yaml-parser): rewrite conformance documentation`
+- [x] Delete old `docs/yaml-spec-conformance.md` (replaced by `docs/conformance/`)
+- [x] Update `rlsp-yaml-parser/README.md` Documentation section: change link from `docs/yaml-spec-conformance.md` to `docs/conformance/README.md`
+- [x] Update `rlsp-yaml-parser/docs/feature-log.md` hex-escape security-hardening entry: change path reference from `docs/yaml-spec-conformance.md entries [59]–[61]` to `docs/conformance/bnf-§5.md entries [59]–[61]`
+- [x] Update root `CLAUDE.md` Components table path if needed (`docs/conformance/` replaces `docs/yaml-spec-conformance.md`)
+- [x] `cargo build -p rlsp-yaml-parser` passes (doc comments are compiled)
+- [x] `cargo clippy --all-targets` passes
+- [x] `cargo fmt --check` passes
+- [x] Remove the "Conformance doc rewrite to reflect audit findings" bullet from `project_followup_plans.md`; trim the "Post-Phase-2 conformance workflow" orchestration entry's step 5 (now satisfied) and note step 6 (public conformance declaration) remains as a future follow-up
+- [x] Single commit: `docs(rlsp-yaml-parser): rewrite conformance documentation`
 
 ## Decisions
 

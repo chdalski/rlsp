@@ -145,7 +145,9 @@ impl<'input> Lexer<'input> {
                 // Blank line: trim all leading whitespace.
                 trimmed_blank_check
             } else {
-                // Non-blank: enforce s-indent(n) when in block context (n > 0).
+                // s-indent(n) enforcement — §6.3 production [66].
+                // Non-blank continuation lines must have at least `parent_indent`
+                // leading spaces when in block context; blank lines are exempt.
                 if parent_indent > 0 {
                     let found = consumed.indent;
                     if found < parent_indent {
@@ -366,11 +368,13 @@ impl<'input> Lexer<'input> {
             // Determine if this line is blank (all whitespace).
             let is_blank = next.content.trim_matches([' ', '\t']).is_empty();
 
-            // In block context (Some(n)), non-blank continuation lines must
-            // satisfy s-indent(n+1): at least n+1 SPACE characters (strictly
-            // more than the enclosing block's indent n). Tabs do not contribute
-            // to indent (YAML 1.2.2 §6.3 s-flow-line-prefix, block context).
-            // Blank lines bypass the indent check (l-empty allows any indentation).
+            // s-indent(n+1) enforcement — YAML 1.2.2 §6.3 / production [66].
+            // In block context (Some(n)), non-blank continuation lines must have
+            // at least n+1 leading SPACE characters (strictly more than the
+            // enclosing block's indent n).  Tabs do not count toward indent.
+            // Blank lines bypass the check: l-empty (§6.5) allows any indentation.
+            // Rationale: without this check a quoted scalar can "escape" its block
+            // by dedenting, silently absorbing lines that belong to a sibling node.
             if let Some(n) = block_context_indent {
                 if !is_blank {
                     let found = next.indent;

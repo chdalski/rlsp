@@ -173,12 +173,10 @@ pub(in crate::event_iter) fn scan_tag<'i>(
                 message: format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
             });
         }
-        // §6.9.1: verbatim tag must begin with `!` (local tag) or be a valid URI (global tag).
-        // Pragmatic check: body must start with `!` (local tag form), an ASCII letter (URI
-        // absolute-scheme per RFC 3986), or `%` (valid percent-encoded URI character).
-        // Example 6.25 lists `!<!>` (bare `!`), `!<$:?>` (starts with `$`), and `!<:foo>`
-        // (starts with `:`) as errors — all start with a character that cannot begin a local
-        // tag or a valid URI scheme.
+        // §6.9.1 admissibility: verbatim tag must begin with `!` (local tag) or be a valid URI
+        // (global tag per RFC 3986 absolute-URI).  A bare `!` alone is invalid (no suffix);
+        // `$`, `:`, and other non-letter, non-`!`, non-`%` first characters cannot start either
+        // form.  This matches Example 6.25 error cases in the spec.
         // Safety: `uri.is_empty()` is checked above; `uri` has at least one byte here.
         let admissible = match uri.as_bytes().first() {
             Some(&b'!') => uri.len() > 1, // bare `!` is invalid; `!something` is a valid local tag
@@ -204,8 +202,9 @@ pub(in crate::event_iter) fn scan_tag<'i>(
     if let Some(suffix) = content.strip_prefix('!') {
         // suffix starts after the second `!`
         let suffix_bytes = scan_tag_suffix(suffix);
-        // Per YAML 1.2 §6.9.1 production [99], c-ns-shorthand-tag requires
-        // ns-tag-char+ (one or more suffix characters). Empty suffix is invalid.
+        // §6.9.1 production [99] c-ns-shorthand-tag requires ns-tag-char+ (at least one
+        // suffix character after the handle).  An empty suffix like `!!` is not a valid
+        // shorthand tag — it would be indistinguishable from the secondary handle alone.
         if suffix_bytes == 0 {
             return Err(Error {
                 pos: indicator_pos,
@@ -292,6 +291,11 @@ pub(in crate::event_iter) fn scan_tag<'i>(
 /// A tag suffix is a sequence of `ns-tag-char` characters and percent-encoded
 /// `%HH` sequences (YAML 1.2 §6.8.1).  Scanning stops at the first character
 /// that does not satisfy either condition.
+///
+/// Production [40] `ns-tag-char` excludes `!` and flow indicators so that tag
+/// scanning halts naturally at collection delimiters without lookahead.
+/// A bare `%` (not followed by two hex digits) also stops the scan — it is
+/// not a valid `ns-tag-char` and signals that the tag token has ended.
 pub(in crate::event_iter) fn scan_tag_suffix(s: &str) -> usize {
     let bytes = s.as_bytes();
     let mut pos = 0;
