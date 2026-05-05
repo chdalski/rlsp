@@ -39,7 +39,7 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 ## Steps
 
 - [x] Create `docs/conformance/` folder structure with README
-- [ ] Populate per-chapter BNF conformance entries
+- [x] Populate per-chapter BNF conformance entries
 - [ ] Write prose findings and design decisions files
 - [ ] Add `///` doc comments at enforcement sites
 - [ ] Create `rlsp-yaml-parser/CLAUDE.md` with Conformance Sync section
@@ -67,15 +67,17 @@ Create the folder and write `README.md` with methodology, taxonomy, and summary 
 
 ### Task 2: Populate per-chapter BNF entries (§5-§9)
 
+**Completed:** commit `6e52ac6` (2026-05-05)
+
 Write the five per-chapter files with entries for all 213 BNF productions.
 
-- [ ] Write `bnf-§5.md` — §5 character productions. For each entry: production number, BNF, verdict, implementation function name (not line number), test reference, and for non-trivial verdicts a one-paragraph rationale.
-- [ ] Write `bnf-§6.md` — §6 structural productions. Include the formerly-Lenient entries ([69], [84], [85], [93]-[95], [99]) with updated verdicts (now Strict-conformant after fixes) and commit references.
-- [ ] Write `bnf-§7.md` — §7 flow/block styles. Embed the §7.3.x-vs-§7.4.2 BNF-trace analysis verbatim from `reconciliation-§7.md` entry [110] for the flow-key terminology trap.
-- [ ] Write `bnf-§8.md` — §8 block styles.
-- [ ] Write `bnf-§9.md` — §9 document stream.
-- [ ] Each file uses function-name citations (e.g., `scan_tag()` in `properties.rs`) NOT line numbers
-- [ ] `cargo clippy --all-targets` passes (no code changes in this task)
+- [x] Write `bnf-§5.md` — §5 character productions. For each entry: production number, BNF, verdict, implementation function name (not line number), test reference, and for non-trivial verdicts a one-paragraph rationale.
+- [x] Write `bnf-§6.md` — §6 structural productions. Include the formerly-Lenient entries ([69], [84], [85], [93]-[95], [99]) with updated verdicts (now Strict-conformant after fixes) and commit references.
+- [x] Write `bnf-§7.md` — §7 flow/block styles. Embed the §7.3.x-vs-§7.4.2 BNF-trace analysis verbatim from `reconciliation-§7.md` entry [110] for the flow-key terminology trap.
+- [x] Write `bnf-§8.md` — §8 block styles.
+- [x] Write `bnf-§9.md` — §9 document stream.
+- [x] Each file uses function-name citations (e.g., `scan_tag()` in `properties.rs`) NOT line numbers
+- [x] `cargo clippy --all-targets` passes (no code changes in this task)
 
 ### Task 3: Write prose findings and design decisions
 
