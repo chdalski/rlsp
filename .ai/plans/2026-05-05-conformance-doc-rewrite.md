@@ -40,7 +40,7 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 
 - [x] Create `docs/conformance/` folder structure with README
 - [x] Populate per-chapter BNF conformance entries
-- [ ] Write prose findings and design decisions files
+- [x] Write prose findings and design decisions files
 - [ ] Add `///` doc comments at enforcement sites
 - [ ] Create `rlsp-yaml-parser/CLAUDE.md` with Conformance Sync section
 - [ ] Delete old `docs/yaml-spec-conformance.md`
@@ -81,17 +81,19 @@ Write the five per-chapter files with entries for all 213 BNF productions.
 
 ### Task 3: Write prose findings and design decisions
 
+**Completed:** commit `79d7c3d` (2026-05-05)
+
 Write `prose.md` (Phase 2 normative prose) and `design-decisions.md` (Stricter-than-spec rationales).
 
-- [ ] Write `prose.md` covering Phase 2 audit areas: §5.2 encoding, §6.8 directives, §6.9.1 tags, §10.1-§10.3 schema, error-and-limits. For each requirement: the spec quote, the implementation verdict (now Strict-conformant after fixes), the fix commit reference.
-- [ ] Write `design-decisions.md` with:
+- [x] Write `prose.md` covering Phase 2 audit areas: §5.2 encoding, §6.8 directives, §6.9.1 tags, §10.1-§10.3 schema, error-and-limits. For each requirement: the spec quote, the implementation verdict (now Strict-conformant after fixes), the fix commit reference.
+- [x] Write `design-decisions.md` with:
   - MAX_DIRECTIVES_PER_DOC=64 — rationale (DoS protection), user decision (keep), enforcement site
   - Leading-zero decimal rejection — rationale (YAML 1.1 octal confusion + LSP diagnostic), user decision (keep), enforcement site
   - Phase 1 Stricter entries: [59]/[60]/[61] (Trojan Source mitigation), [86] (major-0 rejection), [87] (u8 digit limit) — existing rationales from Phase 1 audit
   - The "should is non-mandatory" precedent ([83] ns-reserved-directive)
-- [ ] Embed the §7 BNF-trace analysis in `design-decisions.md` (or cross-reference `bnf-§7.md` if already embedded there)
-- [ ] Note the spec errata: §10.2 `-0` worked example contradicts int regex; parser follows regex
-- [ ] `cargo fmt --check` passes
+- [x] Embed the §7 BNF-trace analysis in `design-decisions.md` (or cross-reference `bnf-§7.md` if already embedded there)
+- [x] Note the spec errata: §10.2 `-0` worked example contradicts int regex; parser follows regex
+- [x] `cargo fmt --check` passes
 
 ### Task 4: Add `///` doc comments at enforcement sites and create CLAUDE.md
 
