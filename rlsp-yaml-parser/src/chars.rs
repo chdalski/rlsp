@@ -381,6 +381,7 @@ fn decode_hex_escape(input: &str, start: usize, digit_count: usize) -> Option<(c
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use rstest::rstest;
 
     use super::*;
@@ -415,6 +416,49 @@ mod tests {
     #[case::ffff('\u{FFFF}')]
     fn c_printable_rejects(#[case] ch: char) {
         assert!(!is_c_printable(ch));
+    }
+
+    // -----------------------------------------------------------------------
+    // GAP-C1: is_c_printable D7FF/E000/FFFD/FFFE boundary
+    // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::last_before_surrogates('\u{D7FF}')] // last BMP before surrogate range
+    #[case::first_after_surrogates('\u{E000}')] // first BMP after surrogate range
+    #[case::fffd('\u{FFFD}')] // last accepted specials codepoint
+    fn c_printable_accepts_boundary_codepoints(#[case] ch: char) {
+        assert!(is_c_printable(ch));
+    }
+
+    #[test]
+    fn c_printable_rejects_fffe_boundary() {
+        // U+FFFE is the first non-character excluded from c-printable.
+        assert!(!is_c_printable('\u{FFFE}'));
+    }
+
+    // -----------------------------------------------------------------------
+    // GAP-C3: decode_escape literal-tab arm ('\t' escape code)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_escape_literal_tab_returns_tab() {
+        // The `'\t'` arm in `decode_escape` handles a literal tab character
+        // as the escape code (distinct from the `'t'` letter arm).
+        assert_eq!(decode_escape("\t"), Some(('\t', 1)));
+    }
+
+    // -----------------------------------------------------------------------
+    // GAP-C4: is_ns_char supplementary-plane boundary
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ns_char_accepts_first_supplementary_plane_codepoint() {
+        assert!(is_ns_char('\u{10000}'));
+    }
+
+    #[test]
+    fn ns_char_accepts_last_unicode_codepoint() {
+        assert!(is_ns_char('\u{10FFFF}'));
     }
 
     // -----------------------------------------------------------------------
@@ -741,5 +785,33 @@ mod tests {
     fn find_non_nb_json_detects_nul() {
         let result = find_non_nb_json(b"foo\x00bar");
         assert_eq!(result, Some((3, '\x00')));
+    }
+
+    // -----------------------------------------------------------------------
+    // GAP-P2: proptest — ns-tag-char ⊆ ns-uri-char ⊆ c-printable
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn ns_tag_char_implies_ns_uri_char(ch in proptest::char::any()) {
+            if is_ns_tag_char_single(ch) {
+                prop_assert!(
+                    is_ns_uri_char_single(ch),
+                    "ns-tag-char(U+{:04X}) -> ns-uri-char must hold",
+                    u32::from(ch)
+                );
+            }
+        }
+
+        #[test]
+        fn ns_uri_char_implies_c_printable(ch in proptest::char::any()) {
+            if is_ns_uri_char_single(ch) {
+                prop_assert!(
+                    is_c_printable(ch),
+                    "ns-uri-char(U+{:04X}) -> c-printable must hold",
+                    u32::from(ch)
+                );
+            }
+        }
     }
 }

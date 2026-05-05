@@ -15,8 +15,10 @@
 
 use std::borrow::Cow;
 
+use proptest::prelude::*;
 use rlsp_yaml_parser::loader::LoaderBuilder;
-use rlsp_yaml_parser::{LoadError, Node, Schema};
+use rlsp_yaml_parser::schema::resolve_scalar;
+use rlsp_yaml_parser::{LoadError, Node, ScalarStyle, Schema};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -861,6 +863,232 @@ fn resolver_tags_not_reallocated_in_nested_structure() {
         assert!(
             matches!(tag, Some(Cow::Borrowed(_))),
             "scalar item tag must be Borrowed, got: {tag:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GAP-S1: Long octal input resolves to !!int (unbounded length)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn core_long_octal_string_resolves_to_int() {
+    // 0o + 100 '7' digits — valid octal, must resolve to !!int.
+    let value = format!("0o{}\n", "7".repeat(100));
+    let tag = scalar_tag(&value, Schema::Core);
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
+}
+
+// ---------------------------------------------------------------------------
+// GAP-S4: Untagged [1, 2, 3] root tag is !!seq under all three schemas
+// ---------------------------------------------------------------------------
+
+#[test]
+fn all_schemas_resolve_untagged_sequence_root_tag_to_seq() {
+    let input = "[1, 2, 3]\n";
+    for schema in [Schema::Core, Schema::Json, Schema::Failsafe] {
+        let docs = LoaderBuilder::new()
+            .schema(schema)
+            .build()
+            .load(input)
+            .expect("load failed");
+        assert_eq!(docs.len(), 1, "expected one document");
+        let Node::Sequence { tag, .. } = &docs[0].root else {
+            panic!("expected root sequence for schema {schema:?}");
+        };
+        assert_eq!(
+            tag.as_deref(),
+            Some("tag:yaml.org,2002:seq"),
+            "schema {schema:?}: expected !!seq"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GAP-K1: JSON schema bare `!` on sequence and mapping → local tag
+// ---------------------------------------------------------------------------
+
+#[test]
+fn json_bare_excl_on_sequence_resolves_to_seq() {
+    // `![1, 2]` — bare `!` is a non-specific tag. Under JSON schema the
+    // collection kind wins: sequence → !!seq.
+    let tag = sequence_tag("! [1, 2]\n", Schema::Json);
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:seq"));
+}
+
+#[test]
+fn json_bare_excl_on_mapping_resolves_to_map() {
+    // `! {"a": "b"}` — bare `!` on a mapping → !!map under JSON schema.
+    // Double-quoted keys/values so JSON schema does not reject plain scalars.
+    let tag = mapping_tag("! {\"a\": \"b\"}\n", Schema::Json);
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:map"));
+}
+
+// ---------------------------------------------------------------------------
+// GAP-P3: resolve_scalar is deterministic (same result when called twice)
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn resolve_scalar_is_deterministic(
+        value in "[a-zA-Z0-9._~-]{0,20}"
+    ) {
+        for schema in [Schema::Core, Schema::Failsafe] {
+            let r1 = resolve_scalar(schema, ScalarStyle::Plain, &value, None);
+            let r2 = resolve_scalar(schema, ScalarStyle::Plain, &value, None);
+            prop_assert_eq!(
+                r1, r2,
+                "resolve_scalar({:?}, {:?}) was not deterministic",
+                schema, value
+            );
+        }
+        // JSON schema may error; still must be deterministic.
+        let r1 = resolve_scalar(Schema::Json, ScalarStyle::Plain, &value, None);
+        let r2 = resolve_scalar(Schema::Json, ScalarStyle::Plain, &value, None);
+        prop_assert_eq!(
+            r1, r2,
+            "resolve_scalar(Json, {:?}) was not deterministic",
+            value
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GAP-D2: same input under all three schemas has equal structural shape
+//         (node kinds, children count, anchor names) — only tags may differ
+// ---------------------------------------------------------------------------
+
+/// Structural shape of a node — kind, child count, and anchor name.
+/// Tags are intentionally excluded so we can compare across schemas.
+#[derive(Debug, PartialEq)]
+enum NodeShape {
+    Scalar {
+        anchor: Option<String>,
+    },
+    Mapping {
+        children: usize,
+        anchor: Option<String>,
+    },
+    Sequence {
+        children: usize,
+        anchor: Option<String>,
+    },
+    Alias {
+        name: String,
+    },
+}
+
+fn shape(node: &Node) -> NodeShape {
+    match node {
+        Node::Scalar { meta, .. } => NodeShape::Scalar {
+            anchor: meta.as_ref().and_then(|m| m.anchor.clone()),
+        },
+        Node::Mapping { entries, meta, .. } => NodeShape::Mapping {
+            children: entries.len(),
+            anchor: meta.as_ref().and_then(|m| m.anchor.clone()),
+        },
+        Node::Sequence { items, meta, .. } => NodeShape::Sequence {
+            children: items.len(),
+            anchor: meta.as_ref().and_then(|m| m.anchor.clone()),
+        },
+        Node::Alias { name, .. } => NodeShape::Alias { name: name.clone() },
+    }
+}
+
+#[test]
+fn all_schemas_produce_same_structural_shape_for_mixed_document() {
+    // A document with a mapping, sequence, and mixed scalars.
+    // Use double-quoted mapping key so JSON schema accepts it (JSON schema
+    // rejects unquoted string keys like plain `items`).
+    let input = "{\"items\": [1, true, null]}\n";
+
+    let docs_core = LoaderBuilder::new()
+        .schema(Schema::Core)
+        .build()
+        .load(input)
+        .expect("Core load failed");
+    let docs_json = LoaderBuilder::new()
+        .schema(Schema::Json)
+        .build()
+        .load(input)
+        .expect("JSON load failed");
+    let docs_failsafe = LoaderBuilder::new()
+        .schema(Schema::Failsafe)
+        .build()
+        .load(input)
+        .expect("Failsafe load failed");
+
+    let root_core = &docs_core[0].root;
+    let root_json = &docs_json[0].root;
+    let root_failsafe = &docs_failsafe[0].root;
+
+    // Root must be a mapping with 1 entry under all schemas.
+    assert_eq!(shape(root_core), shape(root_json));
+    assert_eq!(shape(root_core), shape(root_failsafe));
+
+    // Descend into the mapping value (the sequence).
+    let Node::Mapping {
+        entries: entries_core,
+        ..
+    } = root_core
+    else {
+        panic!()
+    };
+    let Node::Mapping {
+        entries: entries_json,
+        ..
+    } = root_json
+    else {
+        panic!()
+    };
+    let Node::Mapping {
+        entries: entries_failsafe,
+        ..
+    } = root_failsafe
+    else {
+        panic!()
+    };
+
+    let seq_core = &entries_core[0].1;
+    let seq_json = &entries_json[0].1;
+    let seq_failsafe = &entries_failsafe[0].1;
+
+    assert_eq!(shape(seq_core), shape(seq_json));
+    assert_eq!(shape(seq_core), shape(seq_failsafe));
+
+    // Each sequence item must have the same shape (all scalars).
+    let Node::Sequence {
+        items: items_core, ..
+    } = seq_core
+    else {
+        panic!()
+    };
+    let Node::Sequence {
+        items: items_json, ..
+    } = seq_json
+    else {
+        panic!()
+    };
+    let Node::Sequence {
+        items: items_failsafe,
+        ..
+    } = seq_failsafe
+    else {
+        panic!()
+    };
+
+    assert_eq!(items_core.len(), items_json.len());
+    assert_eq!(items_core.len(), items_failsafe.len());
+    for i in 0..items_core.len() {
+        assert_eq!(
+            shape(&items_core[i]),
+            shape(&items_json[i]),
+            "item {i} Core vs JSON shape differs"
+        );
+        assert_eq!(
+            shape(&items_core[i]),
+            shape(&items_failsafe[i]),
+            "item {i} Core vs Failsafe shape differs"
         );
     }
 }

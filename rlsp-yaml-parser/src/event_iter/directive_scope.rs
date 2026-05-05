@@ -507,6 +507,64 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // GAP-T2: percent_decode unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn percent_decode_valid_sequence_decodes_correctly() {
+        // %2F → '/' (forward slash)
+        let result = percent_decode("%2F");
+        assert_eq!(result.as_ref(), "/");
+    }
+
+    #[test]
+    fn percent_decode_invalid_hex_digits_passes_through() {
+        // %GG — 'G' is not a hex digit; pass through as-is.
+        let result = percent_decode("%GG");
+        assert_eq!(result.as_ref(), "%GG");
+    }
+
+    #[test]
+    fn percent_decode_truncated_sequence_passes_through() {
+        // %0 — only one digit after %; pass through as-is.
+        let result = percent_decode("%0");
+        assert_eq!(result.as_ref(), "%0");
+    }
+
+    // -----------------------------------------------------------------------
+    // GAP-T2: end-to-end — !!foo%2Fbar expands to tag:yaml.org,2002:foo/bar
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn double_bang_percent_encoded_suffix_expands_to_decoded_uri() {
+        // `!!foo%2Fbar` → `tag:yaml.org,2002:foo/bar`
+        // The `%2F` is percent-decoded by resolve_tag to produce `/`.
+        let scope = DirectiveScope::default();
+        let result = scope.resolve_tag("!!foo%2Fbar", POS).unwrap();
+        assert_eq!(result.as_ref(), "tag:yaml.org,2002:foo/bar");
+    }
+
+    #[test]
+    fn parse_events_percent_encoded_tag_suffix_expands_end_to_end() {
+        // `!!foo%2Fbar scalar` — the parser must expand `%2F` to `/` and
+        // the scalar event must carry the resolved tag `tag:yaml.org,2002:foo/bar`.
+        let input = "!!foo%2Fbar scalar\n";
+        let events: Vec<_> = crate::parse_events(input).filter_map(Result::ok).collect();
+        let scalar_tag = events.iter().find_map(|(event, _)| {
+            if matches!(event, crate::event::Event::Scalar { .. }) {
+                event.tag()
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            scalar_tag,
+            Some("tag:yaml.org,2002:foo/bar"),
+            "expected tag:yaml.org,2002:foo/bar, got: {scalar_tag:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // Class 4 integration: resolved-tag overflow via step.rs path
     //
     // Trigger: bare `---` inside a document with an inline tag whose resolved

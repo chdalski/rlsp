@@ -497,6 +497,67 @@ fn prepend_bom(encoding: Encoding, payload: &[u8]) -> Vec<u8> {
     out
 }
 
+// ===========================================================================
+// GAP-E1: UTF-8 BOM minimum 3-byte case (no content byte)
+// ===========================================================================
+
+#[test]
+fn decode_utf8_bom_only_three_bytes_detected_as_utf8() {
+    // The UTF-8 BOM [EF BB BF] with no following content. Detection must
+    // recognise this as UTF-8 and strip the BOM, yielding an empty string.
+    let input: &[u8] = &[0xEF, 0xBB, 0xBF];
+    assert_eq!(detect_encoding(input), Encoding::Utf8);
+    assert_eq!(decode(input).unwrap(), "");
+}
+
+// ===========================================================================
+// GAP-E3: BOM-less UTF-16 LE odd-length input → TruncatedUtf16
+// ===========================================================================
+
+#[test]
+fn decode_bomless_utf16_le_odd_length_returns_truncated_utf16() {
+    // [0x41, 0x00, 0x42] — detected as UTF-16 LE by the null-byte heuristic
+    // (byte 1 is 0x00), but has 3 bytes (odd), so decode must return
+    // TruncatedUtf16.
+    use rlsp_yaml_parser::encoding::EncodingError;
+    let input: &[u8] = &[0x41, 0x00, 0x42];
+    assert_eq!(detect_encoding(input), Encoding::Utf16Le);
+    assert_eq!(decode(input), Err(EncodingError::TruncatedUtf16));
+}
+
+// ===========================================================================
+// GAP-P5: encoding proptest extended to non-ASCII unicode scalars
+// ===========================================================================
+
+proptest! {
+    #[test]
+    fn encoding_choice_invariant_for_nonascii_utf8_scalars(
+        ch in proptest::char::range('\u{0080}', '\u{07FF}')
+    ) {
+        // 2-byte UTF-8 codepoints (U+0080..=U+07FF). Parse as a double-quoted
+        // scalar value so the parser sees the character as nb-json content.
+        let yaml = format!("key: \"{ch}\"\n");
+        // Must parse without error and produce a scalar containing the character.
+        let events: Vec<_> = parse_events(yaml.as_str())
+            .map(|r| r.map(|(e, _)| e))
+            .collect();
+        prop_assert!(
+            events.iter().all(Result::is_ok),
+            "parse error for char U+{:04X}: {:?}",
+            u32::from(ch),
+            events
+        );
+        let has_scalar = events.iter().any(|r| {
+            matches!(r, Ok(Event::Scalar { value, .. }) if value.contains(ch))
+        });
+        prop_assert!(
+            has_scalar,
+            "expected scalar containing U+{:04X}",
+            u32::from(ch)
+        );
+    }
+}
+
 proptest! {
     #[test]
     fn encoding_choice_invariant_under_parse(
