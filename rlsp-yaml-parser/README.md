@@ -22,11 +22,19 @@ event stream and builds an AST when a tree representation is needed.
 
 ## Conformance
 
+rlsp-yaml-parser is YAML 1.2.2 conformant per §3–§9 BNF productions
+(213 entries) and normative-prose requirements (130 entries). Documented
+exceptions are listed under Stricter-than-spec in
+[`docs/conformance/design-decisions.md`](docs/conformance/design-decisions.md).
+
 Tested against the [YAML Test Suite](https://github.com/yaml/yaml-test-suite):
 
 ```
 368 / 368 test cases pass
 ```
+
+For the full per-production audit, see
+[docs/conformance/README.md](docs/conformance/README.md).
 
 Run it yourself:
 
