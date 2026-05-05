@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-05)
 **Created:** 2026-05-05
 
 ## Goal
@@ -46,7 +46,7 @@ Rewrite the YAML 1.2.2 conformance documentation to reflect all Phase 1 + Phase 
 - [x] Delete old `docs/yaml-spec-conformance.md`
 - [x] Update root CLAUDE.md component table if needed
 - [x] Verify build passes (doc comments are compiled)
-- [ ] Mark plan Completed and commit
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
