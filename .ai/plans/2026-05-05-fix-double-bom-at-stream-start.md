@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-05)
 **Created:** 2026-05-05
 
 ## Goal
@@ -23,30 +23,32 @@ Reject double BOM at stream start per YAML 1.2.2 §5.2 production [202], closing
 
 ## Steps
 
-- [ ] Remove BOM stripping from `scan_line` first-line path
-- [ ] Ensure `signal_document_boundary` is called before first document processing
-- [ ] Add integration test for double BOM at stream start → error
-- [ ] Update follow-up queue: remove L1 entry
-- [ ] Verify all tests pass
-- [ ] Mark plan Completed and commit
+- [x] Remove BOM stripping from `scan_line` first-line path
+- [x] Ensure `signal_document_boundary` is called before first document processing
+- [x] Add integration test for double BOM at stream start → error
+- [x] Update follow-up queue: remove L1 entry
+- [x] Verify all tests pass
+- [x] Mark plan Completed and commit
 
 ## Tasks
 
 ### Task 1: Unify BOM stripping to single site
 
+**Completed:** commit `6f55282` (2026-05-05)
+
 Remove the `is_first` BOM-stripping path from `scan_line` and rely solely on `signal_document_boundary` for BOM stripping at all document prefixes (including stream start).
 
-- [ ] In `scan_line` (lines 115-127), remove the `is_first` BOM-strip conditional. The `is_first` parameter may become unused — if so, remove it from the function signature and all call sites. If `is_first` serves other purposes beyond BOM stripping, keep the parameter but remove only the BOM logic.
-- [ ] Update or remove the existing unit test `bom_stripped_line_offset_starts_after_bom_bytes` at `lines.rs:789-798` — it directly tests the `is_first` BOM path being removed. Update it to test BOM stripping via `signal_document_boundary` instead, or remove it if the new integration tests cover the behavior. Also verify `bom_not_stripped_on_non_boundary_mid_content_line` still holds.
-- [ ] Verify that `signal_document_boundary` is called for the first document before the first line is consumed. Trace the call path from `LineBuffer::new` through the event iterator's initial state to confirm the first document's BOM is stripped by `signal_document_boundary`.
-- [ ] Add integration test: `"\u{FEFF}\u{FEFF}key: v\n"` (double BOM at stream start) → produces at least one parse error (the second BOM is not stripped and appears as illegal content)
-- [ ] Add integration test: `"\u{FEFF}key: v\n"` (single BOM at stream start) → parses correctly (regression guard)
-- [ ] Add integration test: `"key: v\n...\n\u{FEFF}\u{FEFF}key: b\n"` (double BOM at inter-doc) → still produces error (existing behavior preserved)
-- [ ] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo fmt --check` passes
-- [ ] Remove double-BOM entry (L1) from `project_followup_plans.md`
-- [ ] Single commit: `fix(rlsp-yaml-parser): reject double BOM at stream start`
+- [x] In `scan_line` (lines 115-127), remove the `is_first` BOM-strip conditional. The `is_first` parameter may become unused — if so, remove it from the function signature and all call sites. If `is_first` serves other purposes beyond BOM stripping, keep the parameter but remove only the BOM logic.
+- [x] Update or remove the existing unit test `bom_stripped_line_offset_starts_after_bom_bytes` at `lines.rs:789-798` — it directly tests the `is_first` BOM path being removed. Update it to test BOM stripping via `signal_document_boundary` instead, or remove it if the new integration tests cover the behavior. Also verify `bom_not_stripped_on_non_boundary_mid_content_line` still holds.
+- [x] Verify that `signal_document_boundary` is called for the first document before the first line is consumed. Trace the call path from `LineBuffer::new` through the event iterator's initial state to confirm the first document's BOM is stripped by `signal_document_boundary`.
+- [x] Add integration test: `"\u{FEFF}\u{FEFF}key: v\n"` (double BOM at stream start) → produces at least one parse error (the second BOM is not stripped and appears as illegal content)
+- [x] Add integration test: `"\u{FEFF}key: v\n"` (single BOM at stream start) → parses correctly (regression guard)
+- [x] Add integration test: `"key: v\n...\n\u{FEFF}\u{FEFF}key: b\n"` (double BOM at inter-doc) → still produces error (existing behavior preserved)
+- [x] Existing `cargo test -p rlsp-yaml-parser` passes with zero failures
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo fmt --check` passes
+- [x] Remove double-BOM entry (L1) from `project_followup_plans.md`
+- [x] Single commit: `fix(rlsp-yaml-parser): reject double BOM at stream start`
 
 ## Decisions
 

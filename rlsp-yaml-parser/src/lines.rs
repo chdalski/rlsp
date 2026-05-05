@@ -76,7 +76,7 @@ pub struct Line<'input> {
     pub indent: usize,
     /// The terminator that ends this line.
     pub break_type: BreakType,
-    /// Position of the first byte of this line (after BOM stripping on line 1).
+    /// Position of the first byte of this line (after BOM stripping when applicable).
     pub pos: Pos,
 }
 
@@ -103,36 +103,17 @@ fn detect_break(s: &str) -> (BreakType, &str) {
 
 /// Scan one line from `remaining`, starting at `pos`.
 ///
-/// `is_first` controls BOM stripping: if `true` and the slice starts with
-/// U+FEFF (UTF-8 BOM, 3 bytes), the BOM is skipped before content begins.
-///
 /// Returns `Some((line, rest))` or `None` if `remaining` is empty.
-fn scan_line(remaining: &str, pos: Pos, is_first: bool) -> Option<(Line<'_>, &str)> {
+fn scan_line(remaining: &str, pos: Pos) -> Option<(Line<'_>, &str)> {
     if remaining.is_empty() {
         return None;
     }
 
-    // Strip BOM on first line only.
-    let (content_start, pos) = if is_first && remaining.starts_with('\u{FEFF}') {
-        let bom_len = '\u{FEFF}'.len_utf8(); // 3 bytes
-        (
-            &remaining[bom_len..],
-            Pos {
-                byte_offset: pos.byte_offset + bom_len,
-                ..pos
-            },
-        )
-    } else {
-        (remaining, pos)
-    };
-
     // Find the end of line content (position of the first \n or \r).
-    let line_end = content_start
-        .find(['\n', '\r'])
-        .unwrap_or(content_start.len());
+    let line_end = remaining.find(['\n', '\r']).unwrap_or(remaining.len());
 
-    let content = &content_start[..line_end];
-    let after_content = &content_start[line_end..];
+    let content = &remaining[..line_end];
+    let after_content = &remaining[line_end..];
 
     // Determine break type and advance past the terminator.
     // Try CRLF first (must be checked before bare CR).
@@ -141,8 +122,7 @@ fn scan_line(remaining: &str, pos: Pos, is_first: bool) -> Option<(Line<'_>, &st
     // Count leading SPACE characters only (tabs do not count).
     let indent = content.chars().take_while(|&ch| ch == ' ').count();
 
-    // `offset` is the byte offset of `content` within the *original* input.
-    // `pos` already reflects the position after any BOM skip.
+    // `offset` is the byte offset of `content` within the original input.
     let offset = pos.byte_offset;
 
     let line = Line {
@@ -176,11 +156,6 @@ pub struct LineBuffer<'input> {
     next: Option<Line<'input>>,
     /// Position at the start of `remaining`.
     remaining_pos: Pos,
-    /// Whether the next line to be parsed from `remaining` is a document-prefix
-    /// position — the first line of input or the first line after a `...`
-    /// document-end marker.  When `true`, `scan_line` strips a leading BOM per
-    /// YAML 1.2 §5.2 / production [202] `l-document-prefix`.
-    remaining_is_first: bool,
     /// Lookahead buffer for [`Self::peek_until_dedent`].
     lookahead: Vec<Line<'input>>,
 }
@@ -194,7 +169,6 @@ impl<'input> LineBuffer<'input> {
             prepend: VecDeque::new(),
             next: None,
             remaining_pos: Pos::ORIGIN,
-            remaining_is_first: true,
             lookahead: Vec::new(),
         };
         buf.prime();
@@ -253,7 +227,7 @@ impl<'input> LineBuffer<'input> {
         }
         // First line is self.next. Second is the first line from `remaining`.
         self.next.as_ref()?; // ensure first exists
-        scan_line(self.remaining, self.remaining_pos, self.remaining_is_first).map(|(line, _)| line)
+        scan_line(self.remaining, self.remaining_pos).map(|(line, _)| line)
     }
 
     /// Advance: return the currently primed next line and prime the following
@@ -281,10 +255,11 @@ impl<'input> LineBuffer<'input> {
 
     /// Strip a leading BOM from the already-primed `next` line if present.
     ///
-    /// Called after each blank-line-skip in the inter-document preamble
-    /// (`skip_blank_lines_between_docs`).  Per YAML 1.2 §5.2 / production [202]
+    /// This is the **sole BOM-strip site**.  It must be called at every document
+    /// prefix position — including stream start and each position after a `...`
+    /// document-end marker.  Per YAML 1.2 §5.2 / production [202]
     /// `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is valid at
-    /// the start of any document prefix — not only at stream start.
+    /// the start of any document prefix.
     ///
     /// If `next` starts with U+FEFF, content, offset, and byte position are
     /// advanced past the 3-byte UTF-8 encoding.  Only the first BOM is stripped;
@@ -324,7 +299,6 @@ impl<'input> LineBuffer<'input> {
         // from `remaining`.  Use a local cursor.
         let mut cursor_remaining = self.remaining;
         let mut cursor_pos = self.remaining_pos;
-        let mut cursor_is_first = self.remaining_is_first;
 
         // The first line in the lookahead is `self.next` (if any).
         // We include it if it is blank or its indent > base_indent.
@@ -342,12 +316,11 @@ impl<'input> LineBuffer<'input> {
                 Some(l) => l,
                 None => {
                     // Fetch from remaining input.
-                    match scan_line(cursor_remaining, cursor_pos, cursor_is_first) {
+                    match scan_line(cursor_remaining, cursor_pos) {
                         None => break,
                         Some((l, rest)) => {
                             cursor_pos = pos_after_line(&l);
                             cursor_remaining = rest;
-                            cursor_is_first = false;
                             l
                         }
                     }
@@ -380,7 +353,7 @@ impl<'input> LineBuffer<'input> {
 
     /// Parse one more line from `remaining` into `self.next`.
     fn prime(&mut self) {
-        match scan_line(self.remaining, self.remaining_pos, self.remaining_is_first) {
+        match scan_line(self.remaining, self.remaining_pos) {
             None => {
                 self.next = None;
             }
@@ -389,7 +362,6 @@ impl<'input> LineBuffer<'input> {
                 let new_pos = pos_after_line(&line);
                 self.remaining_pos = new_pos;
                 self.remaining = rest;
-                self.remaining_is_first = false;
                 self.next = Some(line);
             }
         }
@@ -776,22 +748,29 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn bom_is_stripped_from_content_of_first_line() {
+    fn bom_not_stripped_by_new_before_boundary_signal() {
+        // LineBuffer::new no longer strips the BOM — signal_document_boundary
+        // is the sole BOM-strip site, and it must be called before the first
+        // line is consumed.
         let input = "\u{FEFF}foo\n";
         let buf = LineBuffer::new(input);
+        let Some(line) = buf.peek_next() else {
+            unreachable!("expected a line");
+        };
+        assert_eq!(line.content, "\u{FEFF}foo");
+    }
+
+    #[test]
+    fn bom_stripped_from_first_line_via_boundary_signal() {
+        // signal_document_boundary() strips the BOM from the primed first line,
+        // advancing offset and pos.byte_offset past the 3-byte BOM.
+        let input = "\u{FEFF}foo\n";
+        let mut buf = LineBuffer::new(input);
+        buf.signal_document_boundary();
         let Some(line) = buf.peek_next() else {
             unreachable!("expected a line");
         };
         assert_eq!(line.content, "foo");
-    }
-
-    #[test]
-    fn bom_stripped_line_offset_starts_after_bom_bytes() {
-        let input = "\u{FEFF}foo\n";
-        let buf = LineBuffer::new(input);
-        let Some(line) = buf.peek_next() else {
-            unreachable!("expected a line");
-        };
         // BOM is U+FEFF = 3 bytes in UTF-8
         assert_eq!(line.offset, 3);
         assert_eq!(line.pos.byte_offset, 3);
@@ -845,7 +824,7 @@ mod tests {
             "BOM stripped from primed next by signal"
         );
 
-        // The following line was scanned by prime() with remaining_is_first=false,
+        // The following line was scanned by prime() without a boundary signal,
         // so its BOM is NOT stripped — it is illegal content (as in a real stream,
         // signal_document_boundary would be called again for the next boundary).
         let second = buf.peek_next().expect("second line");
@@ -859,10 +838,11 @@ mod tests {
     fn bom_stripped_line_offset_correct_after_boundary_signal() {
         // After signal_document_boundary(), offset and pos.byte_offset advance
         // past the 3-byte BOM.
+
+        // Stream start: signal strips BOM from the primed first line.
         let input = "\u{FEFF}key: value\n";
-        let buf = LineBuffer::new(input);
-        // Stream start: BOM already stripped by remaining_is_first=true at new().
-        // Verify the offset is 3 (past the BOM).
+        let mut buf = LineBuffer::new(input);
+        buf.signal_document_boundary();
         let Some(line) = buf.peek_next() else {
             unreachable!("expected line");
         };
@@ -870,7 +850,7 @@ mod tests {
         assert_eq!(line.pos.byte_offset, 3);
         assert_eq!(line.content, "key: value");
 
-        // Now test via explicit signal on a second document.
+        // Inter-document: signal strips BOM from the line after "...".
         let input2 = "...\n\u{FEFF}key: value\n";
         let mut buf2 = LineBuffer::new(input2);
         buf2.consume_next(); // consume "..."

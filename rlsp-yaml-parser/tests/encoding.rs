@@ -324,6 +324,42 @@ fn parse_events_rejects_double_bom_at_document_prefix() {
     );
 }
 
+#[test]
+fn parse_events_rejects_double_bom_at_stream_start() {
+    // Two BOMs at the very start of the stream — only one is stripped at the
+    // document-prefix position; the second is illegal content.
+    let input = "\u{FEFF}\u{FEFF}key: v\n";
+    assert!(
+        has_parse_error(input),
+        "double BOM at stream start must produce a parse error"
+    );
+}
+
+#[test]
+fn parse_events_accepts_single_bom_at_stream_start_regression() {
+    // Regression guard: a single BOM at stream start must still be accepted.
+    let input = "\u{FEFF}key: v\n";
+    assert!(
+        !has_parse_error(input),
+        "single BOM at stream start must be accepted"
+    );
+    let values = scalar_values(input);
+    assert!(
+        values.contains(&"v".to_string()),
+        "expected scalar 'v', got: {values:?}"
+    );
+}
+
+#[test]
+fn parse_events_rejects_double_bom_at_inter_doc_regression() {
+    // Regression guard: double BOM at inter-document prefix still produces an error.
+    let input = "key: a\n...\n\u{FEFF}\u{FEFF}key: b\n";
+    assert!(
+        has_parse_error(input),
+        "double BOM at inter-document prefix must produce a parse error"
+    );
+}
+
 // ===========================================================================
 // parse_events() — valid multibyte content
 // ===========================================================================
