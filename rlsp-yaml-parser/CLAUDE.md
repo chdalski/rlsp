@@ -7,6 +7,8 @@ for full conformance status.
 
 ## Conformance Sync
 
+<!-- Agents: update this table when new enforcement sites or conformance consumers are added. When fixing a conformance finding, update the corresponding docs/conformance/ entry and add a /// doc comment at the enforcement site in the same commit. -->
+
 The parser enforces YAML 1.2.2 BNF productions and normative prose. When
 adding or changing enforcement, keep the following locations in sync:
 
