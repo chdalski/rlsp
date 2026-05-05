@@ -8,7 +8,7 @@
 
 use std::borrow::Cow;
 
-use crate::chars::is_ns_anchor_char;
+use crate::chars::{find_non_c_printable, is_ns_anchor_char};
 use crate::error::Error;
 use crate::lines::{Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
@@ -75,6 +75,13 @@ pub struct Lexer<'input> {
     /// Drained by the callers in `lib.rs` immediately after calling
     /// `consume_marker_line`.
     pub marker_inline_error: Option<Error>,
+    /// `true` when the entire input contains no non-c-printable bytes.
+    ///
+    /// Set once at construction by a single O(n) pre-scan.  When `true`, all
+    /// per-scanner `find_non_c_printable` / `find_non_nb_json` calls are
+    /// skipped — valid YAML never contains non-printable bytes, so the
+    /// common case pays no per-scalar validation overhead.
+    pub(super) input_all_printable: bool,
 }
 
 impl<'input> Lexer<'input> {
@@ -89,6 +96,7 @@ impl<'input> Lexer<'input> {
             pending_multiline_tail: None,
             plain_scalar_suffix_error: None,
             marker_inline_error: None,
+            input_all_printable: find_non_c_printable(input.as_bytes()).is_none(),
         }
     }
 

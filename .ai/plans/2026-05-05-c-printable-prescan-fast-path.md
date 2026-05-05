@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-05
 
 ## Goal
@@ -25,15 +25,15 @@ Expected user-measurable outcome: recovery of the 10-12% throughput regression o
 
 ## Steps
 
-- [ ] Add `input_all_printable: bool` field to `Lexer` and set it in `Lexer::new()`
-- [ ] Guard all 11 `find_non_c_printable` / `find_non_nb_json` call sites with the flag
-- [ ] Pass the flag to `scan_double_quoted_line` as a parameter
-- [ ] Verify all existing tests pass (correctness preserved)
-- [ ] Update `.ai/memory/potential-performance-optimizations.md` to reflect applied state
+- [x] Add `input_all_printable: bool` field to `Lexer` and set it in `Lexer::new()`
+- [x] Guard all 11 `find_non_c_printable` / `find_non_nb_json` call sites with the flag
+- [x] Pass the flag to `scan_double_quoted_line` as a parameter
+- [x] Verify all existing tests pass (correctness preserved)
+- [x] Update `.ai/memory/potential-performance-optimizations.md` to reflect applied state
 
 ## Tasks
 
-### Task 1: Add pre-scan flag and guard all validation call sites
+### Task 1: Add pre-scan flag and guard all validation call sites — `c85873e`
 
 Add an `input_all_printable: bool` field to the `Lexer` struct that is computed once in `Lexer::new()` by calling `find_non_c_printable(input.as_bytes()).is_none()`. Then guard every per-scanner validation call site with `if !self.input_all_printable { ... }` (or pass the flag as a parameter for the free function case).
 

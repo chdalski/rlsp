@@ -233,22 +233,25 @@ impl<'input> Lexer<'input> {
                 // Validate c-printable before consuming the line so we can report
                 // the correct position.  LF/CR are already stripped by the line
                 // splitter; BOM at the content start is checked elsewhere.
-                if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
-                    let after_indent_offset = next.content.len() - after_indent.len();
-                    let bad_col = crate::pos::column_at(next.content, after_indent_offset + bad_i);
-                    let bad_pos = Pos {
-                        byte_offset: next.offset + after_indent_offset + bad_i,
-                        line: next.pos.line,
-                        column: next.pos.column + bad_col,
-                    };
-                    let Some(consumed) = self.buf.consume_next() else {
-                        unreachable!("consume content line failed")
-                    };
-                    self.current_pos = pos_after_line(&consumed);
-                    return Some(Err(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "block scalar"),
-                    }));
+                if !self.input_all_printable {
+                    if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
+                        let after_indent_offset = next.content.len() - after_indent.len();
+                        let bad_col =
+                            crate::pos::column_at(next.content, after_indent_offset + bad_i);
+                        let bad_pos = Pos {
+                            byte_offset: next.offset + after_indent_offset + bad_i,
+                            line: next.pos.line,
+                            column: next.pos.column + bad_col,
+                        };
+                        let Some(consumed) = self.buf.consume_next() else {
+                            unreachable!("consume content line failed")
+                        };
+                        self.current_pos = pos_after_line(&consumed);
+                        return Some(Err(Error {
+                            pos: bad_pos,
+                            message: non_printable_error_message(bad_ch, "block scalar"),
+                        }));
+                    }
                 }
 
                 // SAFETY: peek succeeded on this loop iteration; LineBuffer invariant.
@@ -462,25 +465,28 @@ impl<'input> Lexer<'input> {
                 trailing_newlines = 0;
 
                 // Validate c-printable before consuming.
-                if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
-                    let after_indent_offset = next.content.len() - after_indent.len();
-                    let bad_col = crate::pos::column_at(next.content, after_indent_offset + bad_i);
-                    let bad_pos = Pos {
-                        byte_offset: next.offset + after_indent_offset + bad_i,
-                        line: next.pos.line,
-                        column: next.pos.column + bad_col,
-                    };
-                    let Some(consumed) = self.buf.consume_next() else {
-                        unreachable!("consume content line failed")
-                    };
-                    self.current_pos = pos_after_line(&consumed);
-                    return (
-                        Err(Error {
-                            pos: bad_pos,
-                            message: non_printable_error_message(bad_ch, "block scalar"),
-                        }),
-                        0,
-                    );
+                if !self.input_all_printable {
+                    if let Some((bad_i, bad_ch)) = find_non_c_printable(after_indent.as_bytes()) {
+                        let after_indent_offset = next.content.len() - after_indent.len();
+                        let bad_col =
+                            crate::pos::column_at(next.content, after_indent_offset + bad_i);
+                        let bad_pos = Pos {
+                            byte_offset: next.offset + after_indent_offset + bad_i,
+                            line: next.pos.line,
+                            column: next.pos.column + bad_col,
+                        };
+                        let Some(consumed) = self.buf.consume_next() else {
+                            unreachable!("consume content line failed")
+                        };
+                        self.current_pos = pos_after_line(&consumed);
+                        return (
+                            Err(Error {
+                                pos: bad_pos,
+                                message: non_printable_error_message(bad_ch, "block scalar"),
+                            }),
+                            0,
+                        );
+                    }
                 }
 
                 let Some(consumed) = self.buf.consume_next() else {

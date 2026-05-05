@@ -73,14 +73,18 @@ impl<'input> Lexer<'input> {
             }
             // Validate nb-json on the literal source bytes (single-quoted scalars
             // allow all non-C0 characters per YAML §5.1 JSON-compatibility clause).
-            let body_slice = body_start.get(..value.quoted_len).unwrap_or_default();
-            if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
-                let bad_pos =
-                    crate::pos::advance_within_line(open_pos.advance('\''), &body_slice[..bad_i]);
-                return Err(Error {
-                    pos: bad_pos,
-                    message: non_printable_error_message(bad_ch, "single-quoted scalar"),
-                });
+            if !self.input_all_printable {
+                let body_slice = body_start.get(..value.quoted_len).unwrap_or_default();
+                if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
+                    let bad_pos = crate::pos::advance_within_line(
+                        open_pos.advance('\''),
+                        &body_slice[..bad_i],
+                    );
+                    return Err(Error {
+                        pos: bad_pos,
+                        message: non_printable_error_message(bad_ch, "single-quoted scalar"),
+                    });
+                }
             }
             // Span: from open `'` through closing `'`.
             let end_pos = crate::pos::advance_within_line(
@@ -96,7 +100,7 @@ impl<'input> Lexer<'input> {
 
         // Multi-line: YAML §7.3.3 trims trailing whitespace from each line.
         // Validate nb-json on the first line's source bytes before building owned.
-        {
+        if !self.input_all_printable {
             let body_slice = body_start.get(..value.quoted_len).unwrap_or_default();
             if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
                 let bad_pos =
@@ -185,7 +189,7 @@ impl<'input> Lexer<'input> {
             let (cont_value, cont_closed) = scan_single_quoted_line(trimmed);
 
             // Validate nb-json on the source bytes of this continuation line.
-            {
+            if !self.input_all_printable {
                 let cont_slice = trimmed.get(..cont_value.quoted_len).unwrap_or_default();
                 if let Some((bad_i, bad_ch)) = find_non_nb_json(cont_slice.as_bytes()) {
                     let leading_len = line_content.len() - trimmed.len();
@@ -299,7 +303,11 @@ impl<'input> Lexer<'input> {
         let body_start = &consumed_first.content[leading_bytes + 1..];
 
         // Try to scan on a single line (fast path / borrow path).
-        let (value, span) = match scan_double_quoted_line(body_start, open_pos.advance('"'))? {
+        let (value, span) = match scan_double_quoted_line(
+            body_start,
+            open_pos.advance('"'),
+            self.input_all_printable,
+        )? {
             DoubleQuotedLine::Closed {
                 value,
                 close_pos: end_pos,
@@ -426,7 +434,7 @@ impl<'input> Lexer<'input> {
             self.current_pos = pos_after_line(&consumed);
 
             let line_start_pos = consumed.pos;
-            match scan_double_quoted_line(trimmed, line_start_pos)? {
+            match scan_double_quoted_line(trimmed, line_start_pos, self.input_all_printable)? {
                 DoubleQuotedLine::Closed {
                     value,
                     close_pos,
@@ -730,6 +738,9 @@ fn decode_and_push_escape(
 
 /// `start_pos` is the position of the first character of `body` (i.e. the byte
 /// after the opening `"`), used only for error reporting.
+///
+/// `skip_char_validation` suppresses the two `find_non_nb_json` passes when the
+/// caller's pre-scan has already confirmed the input contains no non-printable bytes.
 #[expect(
     clippy::too_many_lines,
     reason = "length cap checks added to borrow paths increase line count beyond 100"
@@ -737,6 +748,7 @@ fn decode_and_push_escape(
 pub(super) fn scan_double_quoted_line(
     body: &str,
     start_pos: Pos,
+    skip_char_validation: bool,
 ) -> Result<DoubleQuotedLine<'_>, Error> {
     let bytes = body.as_bytes();
     let mut i = 0;
@@ -758,15 +770,17 @@ pub(super) fn scan_double_quoted_line(
             let span = body.get(i..hit).unwrap_or_default();
             // Validate nb-json on the literal span (quoted scalars allow all
             // non-C0 characters per YAML §5.1 JSON-compatibility clause).
-            if let Some((bad_i, bad_ch)) = find_non_nb_json(span.as_bytes()) {
-                let bad_pos = crate::pos::advance_within_line(
-                    start_pos,
-                    body.get(..i + bad_i).unwrap_or_default(),
-                );
-                return Err(Error {
-                    pos: bad_pos,
-                    message: non_printable_error_message(bad_ch, "double-quoted scalar"),
-                });
+            if !skip_char_validation {
+                if let Some((bad_i, bad_ch)) = find_non_nb_json(span.as_bytes()) {
+                    let bad_pos = crate::pos::advance_within_line(
+                        start_pos,
+                        body.get(..i + bad_i).unwrap_or_default(),
+                    );
+                    return Err(Error {
+                        pos: bad_pos,
+                        message: non_printable_error_message(bad_ch, "double-quoted scalar"),
+                    });
+                }
             }
             if let Some(buf) = owned.as_mut() {
                 buf.push_str(span);
@@ -843,13 +857,17 @@ pub(super) fn scan_double_quoted_line(
     // No more `"` or `\` — consume the rest of the line as plain content.
     let rest = body.get(i..).unwrap_or_default();
     // Validate nb-json on the trailing literal span.
-    if let Some((bad_i, bad_ch)) = find_non_nb_json(rest.as_bytes()) {
-        let bad_pos =
-            crate::pos::advance_within_line(start_pos, body.get(..i + bad_i).unwrap_or_default());
-        return Err(Error {
-            pos: bad_pos,
-            message: non_printable_error_message(bad_ch, "double-quoted scalar"),
-        });
+    if !skip_char_validation {
+        if let Some((bad_i, bad_ch)) = find_non_nb_json(rest.as_bytes()) {
+            let bad_pos = crate::pos::advance_within_line(
+                start_pos,
+                body.get(..i + bad_i).unwrap_or_default(),
+            );
+            return Err(Error {
+                pos: bad_pos,
+                message: non_printable_error_message(bad_ch, "double-quoted scalar"),
+            });
+        }
     }
     if let Some(buf) = owned.as_mut() {
         if !rest.is_empty() {
@@ -1137,7 +1155,8 @@ mod tests {
     // ── scan_double_quoted_line ──────────────────────────────────────────────
 
     fn dq_ok(input: &str) -> DoubleQuotedLine<'_> {
-        scan_double_quoted_line(input, START)
+        // Pass skip_char_validation=false in tests so validation is always active.
+        scan_double_quoted_line(input, START, false)
             .unwrap_or_else(|e| unreachable!("unexpected error: {}", e.message))
     }
 
@@ -1201,7 +1220,7 @@ mod tests {
 
     #[test]
     fn dq_bidi_escape_is_rejected() {
-        match scan_double_quoted_line("\\u202A\"", START) {
+        match scan_double_quoted_line("\\u202A\"", START, false) {
             Err(e) => assert!(
                 e.message.contains("bidirectional"),
                 "message: {}",
@@ -1213,7 +1232,7 @@ mod tests {
 
     #[test]
     fn dq_non_printable_hex_escape_is_rejected() {
-        match scan_double_quoted_line("\\x01\"", START) {
+        match scan_double_quoted_line("\\x01\"", START, false) {
             Err(e) => assert!(
                 e.message.contains("non-printable"),
                 "message: {}",
@@ -1225,7 +1244,7 @@ mod tests {
 
     #[test]
     fn dq_unknown_escape_is_rejected() {
-        match scan_double_quoted_line("\\q\"", START) {
+        match scan_double_quoted_line("\\q\"", START, false) {
             Err(e) => assert!(
                 e.message.contains("invalid escape"),
                 "message: {}",

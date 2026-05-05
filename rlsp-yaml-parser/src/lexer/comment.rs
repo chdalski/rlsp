@@ -61,17 +61,19 @@ impl<'input> Lexer<'input> {
         }
 
         // Validate c-printable on the comment body.
-        if let Some((bad_i, bad_ch)) = find_non_c_printable(text.as_bytes()) {
-            let bad_char_count = text[..bad_i].chars().count();
-            let bad_pos = Pos {
-                byte_offset: hash_pos.byte_offset + 1 + bad_i,
-                line: hash_pos.line,
-                column: hash_pos.column + 1 + bad_char_count,
-            };
-            return Err(Error {
-                pos: bad_pos,
-                message: non_printable_error_message(bad_ch, "comment"),
-            });
+        if !self.input_all_printable {
+            if let Some((bad_i, bad_ch)) = find_non_c_printable(text.as_bytes()) {
+                let bad_char_count = text[..bad_i].chars().count();
+                let bad_pos = Pos {
+                    byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                    line: hash_pos.line,
+                    column: hash_pos.column + 1 + bad_char_count,
+                };
+                return Err(Error {
+                    pos: bad_pos,
+                    message: non_printable_error_message(bad_ch, "comment"),
+                });
+            }
         }
 
         // Span: from `#` through end of text (not the newline).
