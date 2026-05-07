@@ -5,6 +5,7 @@ use crate::pos::Pos;
 /// A parse error produced by the streaming parser.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("parse error at {pos:?}: {message}")]
+#[non_exhaustive]
 pub struct Error {
     /// Source position where the parse error was detected.
     pub pos: Pos,

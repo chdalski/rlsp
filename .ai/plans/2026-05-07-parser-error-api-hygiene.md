@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-07
 
 # Parser Error API Hygiene
@@ -182,7 +182,7 @@ wishlist.
 
 ## Steps
 
-- [ ] Mark `Error`, `LoadError`, and `LoadError::Parse`
+- [x] Mark `Error`, `LoadError`, and `LoadError::Parse`
   `#[non_exhaustive]`; add LSP-side compile-fix
   (`..` rest pattern + `_ =>` wildcard arm)
 - [ ] Introduce `pub enum ErrorKind` and `kind: ErrorKind`
@@ -216,17 +216,17 @@ alone does not change runtime behavior, only future
 flexibility. Tasks 2 and 3 then add fields without
 breaking anyone.
 
-- [ ] Add `#[non_exhaustive]` to `Error` in
+- [x] Add `#[non_exhaustive]` to `Error` in
   `rlsp-yaml-parser/src/error.rs`
-- [ ] Add `#[non_exhaustive]` to `LoadError` enum and to
+- [x] Add `#[non_exhaustive]` to `LoadError` enum and to
   `LoadError::Parse` variant in
   `rlsp-yaml-parser/src/loader.rs`
-- [ ] Update `rlsp-yaml/src/parser.rs:36` from
+- [x] Update `rlsp-yaml/src/parser.rs:36` from
   `Parse { pos, message }` to `Parse { pos, message, .. }`
-- [ ] Add `_ => (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())`
+- [x] Add `_ => (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())`
   wildcard arm at the end of the match in
   `rlsp-yaml/src/parser.rs`
-- [ ] `cargo fmt`, `cargo clippy --all-targets --workspace`,
+- [x] `cargo fmt`, `cargo clippy --all-targets --workspace`,
   `cargo build --workspace`, `cargo test --workspace`
   all pass with zero warnings
 
@@ -238,6 +238,8 @@ attributes applied; the convention this task encodes is
 already documented in `rlsp-yaml-parser/CLAUDE.md` under
 the existing `## Conventions` heading and is the rule
 this task implements.
+
+**Commit:** dbade5b
 
 ### Task 2: Introduce ErrorKind on the event-stream API
 

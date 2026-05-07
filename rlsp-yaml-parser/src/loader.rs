@@ -58,9 +58,11 @@ mod stream;
 
 /// Errors produced by the loader.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum LoadError {
     /// The event stream contained a parse error.
     #[error("parse error at {pos:?}: {message}")]
+    #[non_exhaustive]
     Parse {
         /// Source position where the parse error was detected.
         pos: Pos,

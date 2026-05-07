@@ -33,7 +33,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
         },
         Err(err) => {
             let (pos, message) = match &err {
-                rlsp_yaml_parser::loader::LoadError::Parse { pos, message } => {
+                rlsp_yaml_parser::loader::LoadError::Parse { pos, message, .. } => {
                     (*pos, message.clone())
                 }
                 rlsp_yaml_parser::loader::LoadError::UnresolvedScalar { pos, .. }
@@ -49,6 +49,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
                 rlsp_yaml_parser::loader::LoadError::UnexpectedEndOfStream => {
                     (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())
                 }
+                _ => (rlsp_yaml_parser::Pos::ORIGIN, err.to_string()),
             };
             #[expect(
                 clippy::cast_possible_truncation,
