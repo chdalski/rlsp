@@ -491,3 +491,25 @@ fn parse_events_unterminated_flow_sequence_produces_syntax_kind() {
         err.kind
     );
 }
+
+// ===========================================================================
+// Group G: LoadError::Parse carries kind — load() API propagates ErrorKind
+// ===========================================================================
+
+#[test]
+fn load_parse_error_carries_kind_invalid_character_for_non_printable_in_comment() {
+    // U+0080 (PAD, a C1 control character) in a comment body is non-printable
+    // and forbidden by YAML 1.2.2 c-printable. Feeding it through load()
+    // verifies that LoadError::Parse.kind is forwarded from the event-stream Error.
+    let input = "key: value # comment\u{0080}here\n";
+    match load(input) {
+        Err(LoadError::Parse { kind, .. }) => {
+            assert_eq!(
+                kind,
+                ErrorKind::InvalidCharacter,
+                "LoadError::Parse.kind should be InvalidCharacter for U+0080 in comment, got: {kind:?}"
+            );
+        }
+        other => panic!("expected Err(LoadError::Parse), got: {other:?}"),
+    }
+}

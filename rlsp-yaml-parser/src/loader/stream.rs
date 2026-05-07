@@ -32,6 +32,7 @@ pub(super) fn next_from<'a>(stream: &mut EventStream<'a>) -> Result<Option<(Even
         Some(Err(e)) => Err(LoadError::Parse {
             pos: e.pos,
             message: e.message,
+            kind: e.kind,
         }),
     }
 }
@@ -183,6 +184,7 @@ mod tests {
             Err(LoadError::Parse {
                 pos: p,
                 message: "unexpected token".to_string(),
+                kind: crate::error::ErrorKind::Syntax,
             })
         );
     }

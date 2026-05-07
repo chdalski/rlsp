@@ -90,7 +90,7 @@ convert byte offsets to `(line, column)` pairs with `idx.line_column(offset)`.
 **Comment:** `Span` is the most-allocated type in the parser — every AST node and
 event carries one. Shrinking it from 48 to 8 bytes reduces peak heap usage and
 improves cache locality for batch parsing workloads. The `Pos` type is retained
-for error reporting (`LoadError::Parse { pos: Pos }`). The `LineIndex` is built
+for error reporting (`LoadError::Parse.pos`). The `LineIndex` is built
 once per input string and shared via `Arc` across multi-document streams so the
 newline table is not duplicated.
 **Tier:** 1

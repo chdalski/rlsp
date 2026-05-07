@@ -604,6 +604,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::error::ErrorKind;
     use std::borrow::Cow;
 
     fn make_lexer(input: &str) -> super::super::Lexer<'_> {
@@ -1196,13 +1197,13 @@ mod tests {
         // If we got here without panic, the acceptance criterion is satisfied.
         // Verify no error event is emitted when NEL appears.
         let events: Vec<_> = crate::parse_events("key: val\u{0085}ue\n").collect();
-        let has_non_printable_error = events.iter().any(|r| {
+        let has_invalid_character_error = events.iter().any(|r| {
             r.as_ref()
                 .err()
-                .is_some_and(|e| e.message.contains("non-printable"))
+                .is_some_and(|e| e.kind == ErrorKind::InvalidCharacter)
         });
         assert!(
-            !has_non_printable_error,
+            !has_invalid_character_error,
             "NEL must not be rejected as non-printable"
         );
     }
@@ -1220,13 +1221,13 @@ mod tests {
             );
         }
         let events: Vec<_> = crate::parse_events("key: val\u{00A0}ue\n").collect();
-        let has_non_printable_error = events.iter().any(|r| {
+        let has_invalid_character_error = events.iter().any(|r| {
             r.as_ref()
                 .err()
-                .is_some_and(|e| e.message.contains("non-printable"))
+                .is_some_and(|e| e.kind == ErrorKind::InvalidCharacter)
         });
         assert!(
-            !has_non_printable_error,
+            !has_invalid_character_error,
             "NBSP must not be rejected as non-printable"
         );
     }

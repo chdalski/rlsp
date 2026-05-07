@@ -191,7 +191,7 @@ wishlist.
   all internal `Error { pos, message }` constructions to
   the constructors; populate `InvalidCharacter` at the
   character-violation sites
-- [ ] Add `kind: ErrorKind` field on `LoadError::Parse`;
+- [x] Add `kind: ErrorKind` field on `LoadError::Parse`;
   forward `kind: e.kind` at the four internal conversion
   sites; migrate internal substring-message tests to
   typed `kind` assertions; add an integration test on
@@ -334,36 +334,36 @@ After this task, both parser APIs (`parse_events()` and
 layer's destructure (already updated to use `..` in
 Task 1) absorbs the new field automatically.
 
-- [ ] Add `kind: ErrorKind` field to `LoadError::Parse`
+- [x] Add `kind: ErrorKind` field to `LoadError::Parse`
   variant in `rlsp-yaml-parser/src/loader.rs`
-- [ ] Update conversion site at `loader.rs:402` to forward
+- [x] Update conversion site at `loader.rs:402` to forward
   `kind: e.kind`
-- [ ] Update conversion site at `loader.rs:568` to forward
+- [x] Update conversion site at `loader.rs:568` to forward
   `kind: e.kind`
-- [ ] Update conversion site at `loader.rs:683` to forward
+- [x] Update conversion site at `loader.rs:683` to forward
   `kind: e.kind`
-- [ ] Update conversion site at `loader/stream.rs:34`
+- [x] Update conversion site at `loader/stream.rs:34`
   (and the surrounding match) to forward `kind: e.kind`
-- [ ] Migrate internal tests in `lexer/block.rs`,
+- [x] Migrate internal tests in `lexer/block.rs`,
   `lexer/comment.rs`, `lexer/plain.rs` from
   `e.message.contains("non-printable")` to
   `e.kind == ErrorKind::InvalidCharacter` — every
   occurrence in those three files
-- [ ] Add an integration test in
+- [x] Add an integration test in
   `rlsp-yaml-parser/tests/error_reporting.rs`: feed a
   comment containing U+0080 to `load()`, assert
   `Err(LoadError::Parse { kind: ErrorKind::InvalidCharacter, .. })`
-- [ ] Update the parenthetical
+- [x] Update the parenthetical
   `(LoadError::Parse { pos: Pos })` in
   `rlsp-yaml-parser/docs/feature-log.md:93` to
   `(LoadError::Parse.pos)` — keeps the entry's intent
   (noting `Pos` is retained for error reporting) without
   inlining a struct shape that re-stales every time the
   variant gains a field
-- [ ] Verify `rlsp-yaml/src/parser.rs` continues to
+- [x] Verify `rlsp-yaml/src/parser.rs` continues to
   compile without further edit (the `..` from Task 1
   already absorbs the new field)
-- [ ] `cargo fmt`, `cargo clippy --all-targets --workspace`,
+- [x] `cargo fmt`, `cargo clippy --all-targets --workspace`,
   `cargo build --workspace`, `cargo test --workspace`
   all pass with zero warnings
 
@@ -375,6 +375,8 @@ assertions in `lexer/block.rs`, `lexer/comment.rs`,
 assertions; the new `tests/error_reporting.rs` integration
 test passes; the rlsp-yaml workspace builds without
 modification beyond Task 1's compile-fix.
+
+**Commit:** de20ddc
 
 ## Decisions
 

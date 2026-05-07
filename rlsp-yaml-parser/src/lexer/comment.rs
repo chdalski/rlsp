@@ -93,6 +93,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::error::ErrorKind;
 
     fn make_lexer(input: &str) -> Lexer<'_> {
         Lexer::new(input)
@@ -270,10 +271,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+0000"),
-            "expected non-printable error for NUL, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for NUL, got: {:?}",
+            err.kind
         );
     }
 
@@ -283,10 +285,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+0001"),
-            "expected non-printable error for SOH, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for SOH, got: {:?}",
+            err.kind
         );
     }
 
@@ -296,10 +299,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+007F"),
-            "expected non-printable error for DEL, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for DEL, got: {:?}",
+            err.kind
         );
     }
 
@@ -309,10 +313,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+0080"),
-            "expected non-printable error for U+0080, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for U+0080, got: {:?}",
+            err.kind
         );
     }
 
@@ -322,10 +327,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+FFFE"),
-            "expected non-printable error for U+FFFE, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for U+FFFE, got: {:?}",
+            err.kind
         );
     }
 
@@ -335,10 +341,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+FFFF"),
-            "expected non-printable error for U+FFFF, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for U+FFFF, got: {:?}",
+            err.kind
         );
     }
 
@@ -349,10 +356,11 @@ mod tests {
         let Err(err) = lex.try_consume_comment(1024) else {
             unreachable!("expected Err, got Ok")
         };
-        assert!(
-            err.message.contains("non-printable") || err.message.contains("U+0007"),
-            "expected non-printable error for BEL as first body char, got: {}",
-            err.message
+        assert_eq!(
+            err.kind,
+            ErrorKind::InvalidCharacter,
+            "expected InvalidCharacter for BEL as first body char, got: {:?}",
+            err.kind
         );
     }
 
@@ -374,14 +382,14 @@ mod tests {
         // Trailing comment on a content line: the non-printable must be caught
         // when the comment is parsed (exercise through parse_events).
         let events: Vec<_> = crate::parse_events("key: value # comment\x07here\n").collect();
-        let has_non_printable_error = events.iter().any(|r| {
+        let has_invalid_character_error = events.iter().any(|r| {
             r.as_ref()
                 .err()
-                .is_some_and(|e| e.message.contains("non-printable"))
+                .is_some_and(|e| e.kind == ErrorKind::InvalidCharacter)
         });
         assert!(
-            has_non_printable_error,
-            "expected non-printable error for BEL in trailing comment"
+            has_invalid_character_error,
+            "expected InvalidCharacter error for BEL in trailing comment"
         );
     }
 
@@ -403,13 +411,14 @@ mod tests {
     fn comment_accepts_nel_0x85() {
         // NEL (U+0085) is allowed by c-printable; in a single-line comment it
         // acts as a line terminator, so the body is truncated before it. No
-        // non-printable error should be emitted.
+        // InvalidCharacter error should be emitted.
         let mut lex = make_lexer("# val\u{0085}ue\n");
         if let Err(e) = lex.try_consume_comment(1024) {
-            assert!(
-                !e.message.contains("non-printable"),
-                "NEL must not be rejected as non-printable in comment, got: {}",
-                e.message
+            assert_ne!(
+                e.kind,
+                ErrorKind::InvalidCharacter,
+                "NEL must not be rejected as InvalidCharacter in comment, got: {:?}",
+                e.kind
             );
         }
     }

@@ -35,7 +35,7 @@ use std::iter::Peekable;
 
 use std::sync::Arc;
 
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::event::{Event, EventMeta, ScalarStyle};
 use crate::node::{Document, Node, NodeMeta};
 use crate::pos::{LineIndex, Pos, Span};
@@ -68,6 +68,8 @@ pub enum LoadError {
         pos: Pos,
         /// Human-readable description of the error.
         message: String,
+        /// Broad category of the error, for routing without message-string matching.
+        kind: ErrorKind,
     },
 
     /// The event stream ended unexpectedly mid-document.
@@ -402,6 +404,7 @@ impl<'opt> LoadState<'opt> {
                 return Err(LoadError::Parse {
                     pos: e.pos,
                     message: e.message,
+                    kind: e.kind,
                 });
             }
         }
@@ -568,6 +571,7 @@ impl<'opt> LoadState<'opt> {
                                 Some(Err(e)) => LoadError::Parse {
                                     pos: e.pos,
                                     message: e.message,
+                                    kind: e.kind,
                                 },
                                 _ => LoadError::UnexpectedEndOfStream,
                             });
@@ -683,6 +687,7 @@ impl<'opt> LoadState<'opt> {
                                 Some(Err(e)) => LoadError::Parse {
                                     pos: e.pos,
                                     message: e.message,
+                                    kind: e.kind,
                                 },
                                 _ => LoadError::UnexpectedEndOfStream,
                             });
