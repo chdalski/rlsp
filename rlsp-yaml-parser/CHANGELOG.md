@@ -1,6 +1,38 @@
 # Changelog
 
 
+## [0.10.0] - 2026-05-05
+
+### Bug Fixes
+
+- Detect BOM-less UTF-32 input per YAML §5.2 table (f16a0cf)
+- Enforce 1 MiB cap on all quoted-scalar paths (0c19f25)
+- Reject non-c-printable characters in literal stream input (666e2f2)
+- Validate directive names and parameters against ns-char (51cdfdd)
+- Validate tag prefix against ns-uri-char and reject empty shorthand suffix (4a6d2ee)
+- Enforce s-indent(n) on quoted scalar continuation lines (1ed7c94)
+- Reject signed octal and hex integers under Core schema (2865a74)
+- Stop %TAG prefix from absorbing trailing comments (9056eed)
+- Enforce verbatim tag admissibility and separator (02babe6)
+- Validate resolved tag URI after handle+suffix concatenation (0a6f09e)
+- Point error positions to precise offending byte (4eaed0f)
+- Add position fields to LoadError variants (4f4a840)
+- Reject double BOM at stream start (6b8219e)
+
+### Documentation
+
+- Clarify flow-pair single-line check rationale (4f03136)
+- Create conformance documentation structure and README (e37bf1e)
+- Add per-chapter BNF conformance entries (§5–§9) (665e506)
+- Add Phase 2 prose findings and design decisions (cb59538)
+- Add inline conformance doc comments and create crate CLAUDE.md (cc59519)
+- Add agent instruction comment to Conformance Sync section (5f83ef6)
+- Add public conformance status declaration to README (a226202)
+
+### Performance
+
+- Add c-printable pre-scan flag to skip per-scalar validation (5ffda4b)
+
 ## [0.6.1] - 2026-04-27
 
 ### Bug Fixes
