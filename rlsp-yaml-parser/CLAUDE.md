@@ -5,6 +5,12 @@ conformance-tested APIs: a flat event stream (`parse_events()`) and an AST
 loader (`load()`). See `README.md` for usage and `docs/conformance/README.md`
 for full conformance status.
 
+## Conventions
+
+<!-- Agents: add non-obvious project conventions discovered during work — things a future agent would need to know to avoid mistakes. One line each. Remove when no longer true. -->
+
+- Public `pub struct` and `pub enum` types must be `#[non_exhaustive]` — internal evolution stays semver-compatible for external consumers; mark individual variants `#[non_exhaustive]` when they gain new fields.
+
 ## Conformance Sync
 
 <!-- Agents: update this table when new enforcement sites or conformance consumers are added. When fixing a conformance finding, update the corresponding docs/conformance/ entry and add a /// doc comment at the enforcement site in the same commit. -->
