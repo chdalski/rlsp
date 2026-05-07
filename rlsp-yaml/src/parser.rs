@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::ErrorKind;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::loader::LoaderBuilder;
 use rlsp_yaml_parser::node::Document;
@@ -32,9 +33,16 @@ pub fn parse_yaml(text: &str) -> ParseResult {
             diagnostics: Vec::new(),
         },
         Err(err) => {
-            let (pos, message) = match &err {
-                rlsp_yaml_parser::loader::LoadError::Parse { pos, message, .. } => {
-                    (*pos, message.clone())
+            let (pos, message, code) = match &err {
+                rlsp_yaml_parser::loader::LoadError::Parse {
+                    pos, message, kind, ..
+                } => {
+                    let code = if *kind == ErrorKind::InvalidCharacter {
+                        "invalidCharacter"
+                    } else {
+                        "yamlSyntax"
+                    };
+                    (*pos, message.clone(), code)
                 }
                 rlsp_yaml_parser::loader::LoadError::UnresolvedScalar { pos, .. }
                 | rlsp_yaml_parser::loader::LoadError::NestingDepthLimitExceeded { pos, .. }
@@ -44,12 +52,12 @@ pub fn parse_yaml(text: &str) -> ParseResult {
                 }
                 | rlsp_yaml_parser::loader::LoadError::CircularAlias { pos, .. }
                 | rlsp_yaml_parser::loader::LoadError::UndefinedAlias { pos, .. } => {
-                    (*pos, err.to_string())
+                    (*pos, err.to_string(), "yamlSyntax")
                 }
                 rlsp_yaml_parser::loader::LoadError::UnexpectedEndOfStream => {
-                    (rlsp_yaml_parser::Pos::ORIGIN, err.to_string())
+                    (rlsp_yaml_parser::Pos::ORIGIN, err.to_string(), "yamlSyntax")
                 }
-                _ => (rlsp_yaml_parser::Pos::ORIGIN, err.to_string()),
+                _ => (rlsp_yaml_parser::Pos::ORIGIN, err.to_string(), "yamlSyntax"),
             };
             #[expect(
                 clippy::cast_possible_truncation,
@@ -66,7 +74,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
             let diagnostic = Diagnostic {
                 range: Range::new(start, end),
                 severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("yamlSyntax".to_string())),
+                code: Some(NumberOrString::String(code.to_string())),
                 message,
                 source: Some("rlsp-yaml".to_string()),
                 ..Diagnostic::default()
@@ -284,6 +292,29 @@ mod tests {
         let result = parse_yaml("key: [bad\n");
 
         assert!(result.documents.is_empty());
+    }
+
+    #[test]
+    fn non_printable_character_produces_invalid_character_code() {
+        // U+0080 is not c-printable and triggers ErrorKind::InvalidCharacter in the parser.
+        let result = parse_yaml("# comment \u{0080}\n");
+
+        assert!(!result.diagnostics.is_empty(), "expected a diagnostic");
+        assert_eq!(
+            result.diagnostics[0].code,
+            Some(NumberOrString::String("invalidCharacter".to_string()))
+        );
+    }
+
+    #[test]
+    fn grammar_error_produces_yaml_syntax_code() {
+        let result = parse_yaml("key: [bad\n");
+
+        assert!(!result.diagnostics.is_empty(), "expected a diagnostic");
+        assert_eq!(
+            result.diagnostics[0].code,
+            Some(NumberOrString::String("yamlSyntax".to_string()))
+        );
     }
 
     // TE tests for Task 23 Phase A: API adaptation verification

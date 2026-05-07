@@ -31,6 +31,13 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `invalidCharacter` Diagnostic Code [completed]
+
+**Description:** YAML files containing non-printable characters (bytes or code points not in the YAML 1.2 c-printable or nb-json sets) now produce diagnostics with code `invalidCharacter` instead of the generic `yamlSyntax` code. Editors can use this code to distinguish character-set violations from grammar errors and apply different highlighting or suppression rules.
+**Complexity:** Low
+**Comment:** The parser already detected these violations; this change surfaces the distinction through to LSP clients with no new processing cost.
+**Tier:** 2
+
 ### Code Actions Honor Formatter Settings [completed]
 
 **Description:** All code actions now respect the user's formatter settings (`formatPrintWidth`, `formatSingleQuote`, `formatBracketSpacing`, `formatPreserveQuotes`) consistently with the document formatter. Previously, code actions used hardcoded defaults regardless of user configuration. The `Convert block to flow style` action's output now wraps at the user's configured `formatPrintWidth` (default 80) instead of a hardcoded value, and the action title no longer appends a `(long line)` suffix when the result is long — the formatter handles wrapping automatically.

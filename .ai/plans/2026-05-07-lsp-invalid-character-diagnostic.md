@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-07)
 **Created:** 2026-05-07
 
 # LSP invalidCharacter Diagnostic Code
@@ -68,16 +68,16 @@ filter.
 
 ## Steps
 
-- [ ] Map `ErrorKind::InvalidCharacter` to diagnostic code
+- [x] Map `ErrorKind::InvalidCharacter` to diagnostic code
   `"invalidCharacter"` in `rlsp-yaml/src/parser.rs`; keep
   all other parse errors as `"yamlSyntax"`
-- [ ] Add unit tests verifying the code mapping
-- [ ] Add `invalidCharacter` to the diagnostic codes table
+- [x] Add unit tests verifying the code mapping
+- [x] Add `invalidCharacter` to the diagnostic codes table
   in `rlsp-yaml/docs/configuration.md`; update the
   `yamlSyntax` description
-- [ ] Add a `feature-log.md` entry for the new diagnostic
+- [x] Add a `feature-log.md` entry for the new diagnostic
   code
-- [ ] Remove the follow-up item from
+- [x] Remove the follow-up item from
   `.ai/memory/project_followup_plans.md`
 
 ## Tasks
@@ -89,36 +89,36 @@ to diagnostic code `"invalidCharacter"` in the LSP layer.
 Add unit tests. Update documentation. Remove the follow-up
 tracking item.
 
-- [ ] In `rlsp-yaml/src/parser.rs:36`, change the `Parse`
+- [x] In `rlsp-yaml/src/parser.rs:36`, change the `Parse`
   match arm to extract `kind` and compute the diagnostic
   code: `ErrorKind::InvalidCharacter` → `"invalidCharacter"`,
   `ErrorKind::Syntax` and `_ =>` → `"yamlSyntax"`
-- [ ] Use the computed code at line 69 instead of the
+- [x] Use the computed code at line 69 instead of the
   hardcoded `"yamlSyntax"` string
-- [ ] Add a unit test: `parse_yaml("# comment \x80\n")`
+- [x] Add a unit test: `parse_yaml("# comment \x80\n")`
   produces a diagnostic with
   `code: Some(NumberOrString::String("invalidCharacter"))`
-- [ ] Add a unit test: `parse_yaml("key: [bad\n")` still
+- [x] Add a unit test: `parse_yaml("key: [bad\n")` still
   produces `code: Some(NumberOrString::String("yamlSyntax"))`
-- [ ] Add `invalidCharacter` row to the diagnostic codes
+- [x] Add `invalidCharacter` row to the diagnostic codes
   table in `rlsp-yaml/docs/configuration.md` (after the
   `yamlSyntax` row): code `invalidCharacter`, description
   "Non-printable character not allowed by YAML 1.2
   character-set rules (c-printable, nb-json)"
-- [ ] Update the `yamlSyntax` row description from
+- [x] Update the `yamlSyntax` row description from
   "YAML parse error" to "YAML grammar or structure error"
   (the generic category after `invalidCharacter` was
   split out)
-- [ ] Add a `feature-log.md` entry for the
+- [x] Add a `feature-log.md` entry for the
   `invalidCharacter` diagnostic code in
   `rlsp-yaml/docs/feature-log.md` (newest-first ordering),
   following the Description / Complexity / Comment / Tier
   format — user-visible: editors can now distinguish
   character-set violations from grammar errors by code
-- [ ] Remove the "Non-printable unicode character
+- [x] Remove the "Non-printable unicode character
   diagnostic (LSP layer only)" item from
   `.ai/memory/project_followup_plans.md`
-- [ ] `cargo fmt`, `cargo clippy --all-targets --workspace`,
+- [x] `cargo fmt`, `cargo clippy --all-targets --workspace`,
   `cargo build --workspace`, `cargo test --workspace`
   all pass with zero warnings
 
@@ -129,6 +129,8 @@ produces `"yamlSyntax"`; the diagnostic codes table in
 `configuration.md` lists both codes; `feature-log.md` has
 a new entry for the `invalidCharacter` diagnostic; the
 follow-up item is removed from `project_followup_plans.md`.
+
+**Commit:** ebec83f
 
 ## Decisions
 

@@ -479,7 +479,8 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 | `unresolvedAlias` | Alias references an undefined anchor |
 | `unknownTag` | Tag not in the allowed `customTags` list |
 | `mapKeyOrder` | Mapping keys not in alphabetical order (requires `keyOrdering: true`) |
-| `yamlSyntax` | YAML parse error |
+| `yamlSyntax` | YAML grammar or structure error |
+| `invalidCharacter` | Non-printable character not allowed by YAML 1.2 character-set rules (c-printable, nb-json) |
 | `schemaRequired` | Required property missing (JSON Schema `required`) |
 | `schemaType` | Value does not match declared JSON Schema type |
 | `schemaEnum` | Value not in the declared `enum` list |
