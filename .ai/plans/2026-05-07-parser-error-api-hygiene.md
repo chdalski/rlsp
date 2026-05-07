@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-07)
 **Created:** 2026-05-07
 
 # Parser Error API Hygiene
