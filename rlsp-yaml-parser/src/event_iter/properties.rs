@@ -30,10 +30,10 @@ pub(in crate::event_iter) fn scan_anchor_name(
         .last()
         .map_or(0, |(i, ch)| i + ch.len_utf8());
     if end == 0 {
-        return Err(Error {
-            pos: indicator_pos,
-            message: "anchor name must not be empty".into(),
-        });
+        return Err(Error::syntax(
+            indicator_pos,
+            "anchor name must not be empty".into(),
+        ));
     }
     if end > MAX_ANCHOR_NAME_BYTES {
         // Point to the first byte beyond the limit, not the `&`/`*` indicator.
@@ -51,10 +51,10 @@ pub(in crate::event_iter) fn scan_anchor_name(
             line: indicator_pos.line,
             column: indicator_pos.column + 1 + codepoints,
         };
-        return Err(Error {
-            pos: overflow_pos,
-            message: format!("anchor name exceeds maximum length of {MAX_ANCHOR_NAME_BYTES} bytes"),
-        });
+        return Err(Error::syntax(
+            overflow_pos,
+            format!("anchor name exceeds maximum length of {MAX_ANCHOR_NAME_BYTES} bytes"),
+        ));
     }
     Ok(&content[..end])
 }
@@ -117,10 +117,10 @@ pub(in crate::event_iter) fn scan_tag<'i>(
         let mut byte_offset = 0usize;
         loop {
             let Some(&b) = bytes.get(byte_offset) else {
-                return Err(Error {
-                    pos: indicator_pos,
-                    message: "verbatim tag missing closing '>'".into(),
-                });
+                return Err(Error::syntax(
+                    indicator_pos,
+                    "verbatim tag missing closing '>'".into(),
+                ));
             };
             if b == b'>' {
                 break; // found the closing delimiter
@@ -140,38 +140,38 @@ pub(in crate::event_iter) fn scan_tag<'i>(
                     byte_offset += 3;
                     continue;
                 }
-                return Err(Error {
-                    pos: indicator_pos,
-                    message: format!(
+                return Err(Error::syntax(
+                    indicator_pos,
+                    format!(
                         "verbatim tag URI contains invalid percent-encoding at byte offset {byte_offset}"
                     ),
-                });
+                ));
             }
             // Decode the next char; all valid ns-uri-char singles are ASCII,
             // so a non-ASCII leading byte will fail the predicate and be rejected.
             let ch = after_open[byte_offset..].chars().next().unwrap_or('\0');
             if !is_ns_uri_char_single(ch) {
-                return Err(Error {
-                    pos: indicator_pos,
-                    message: format!(
+                return Err(Error::syntax(
+                    indicator_pos,
+                    format!(
                         "verbatim tag URI contains character not allowed by YAML 1.2 §6.8.1 at byte offset {byte_offset}"
                     ),
-                });
+                ));
             }
             byte_offset += ch.len_utf8();
         }
         let uri = &after_open[..byte_offset];
         if uri.is_empty() {
-            return Err(Error {
-                pos: indicator_pos,
-                message: "verbatim tag URI must not be empty".into(),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                "verbatim tag URI must not be empty".into(),
+            ));
         }
         if uri.len() > MAX_TAG_LEN {
-            return Err(Error {
-                pos: indicator_pos,
-                message: format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                format!("verbatim tag URI exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            ));
         }
         // §6.9.1 admissibility: verbatim tag must begin with `!` (local tag) or be a valid URI
         // (global tag per RFC 3986 absolute-URI).  A bare `!` alone is invalid (no suffix);
@@ -186,12 +186,11 @@ pub(in crate::event_iter) fn scan_tag<'i>(
             None => false, // unreachable: uri is non-empty
         };
         if !admissible {
-            return Err(Error {
-                pos: indicator_pos,
-                message:
-                    "verbatim tag must begin with '!' (local tag) or be a valid URI (global tag)"
-                        .into(),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                "verbatim tag must begin with '!' (local tag) or be a valid URI (global tag)"
+                    .into(),
+            ));
         }
         // advance = 1 (for '<') + uri.len() + 1 (for '>') bytes past the `!`
         let advance = 1 + uri.len() + 1;
@@ -206,16 +205,16 @@ pub(in crate::event_iter) fn scan_tag<'i>(
         // suffix character after the handle).  An empty suffix like `!!` is not a valid
         // shorthand tag — it would be indistinguishable from the secondary handle alone.
         if suffix_bytes == 0 {
-            return Err(Error {
-                pos: indicator_pos,
-                message: "shorthand tag requires a non-empty suffix".into(),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                "shorthand tag requires a non-empty suffix".into(),
+            ));
         }
         if suffix_bytes > MAX_TAG_LEN {
-            return Err(Error {
-                pos: indicator_pos,
-                message: format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            ));
         }
         // tag_slice = `!!suffix` — one byte back for the first `!` (in `tag_start`)
         // plus `!` in content plus suffix.
@@ -268,17 +267,17 @@ pub(in crate::event_iter) fn scan_tag<'i>(
     // ns-tag-char+ (one or more suffix characters). Reject empty suffix on
     // named handles (e.g., `!handle!` with nothing after the closing `!`).
     if found_inner_bang && named_handle_suffix_bytes == 0 {
-        return Err(Error {
-            pos: indicator_pos,
-            message: "shorthand tag requires a non-empty suffix".into(),
-        });
+        return Err(Error::syntax(
+            indicator_pos,
+            "shorthand tag requires a non-empty suffix".into(),
+        ));
     }
 
     if end > MAX_TAG_LEN {
-        return Err(Error {
-            pos: indicator_pos,
-            message: format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
-        });
+        return Err(Error::syntax(
+            indicator_pos,
+            format!("tag exceeds maximum length of {MAX_TAG_LEN} bytes"),
+        ));
     }
 
     // tag_slice = `!` + content[..end] — includes the leading `!` from tag_start.

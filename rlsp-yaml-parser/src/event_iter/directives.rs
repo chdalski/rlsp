@@ -75,12 +75,10 @@ impl<'input> EventIter<'input> {
     ) -> Result<(), Error> {
         // Enforce per-document directive count limit.
         if self.directive_scope.directive_count >= MAX_DIRECTIVES_PER_DOC {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!(
-                    "directive count exceeds maximum of {MAX_DIRECTIVES_PER_DOC} per document"
-                ),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("directive count exceeds maximum of {MAX_DIRECTIVES_PER_DOC} per document"),
+            ));
         }
 
         // `content` starts with `%`; the rest is `NAME[ params...]`.
@@ -96,13 +94,13 @@ impl<'input> EventIter<'input> {
         // Validate directive name: every character must be ns-char ([84]).
         for ch in name.chars() {
             if !is_ns_char(ch) {
-                return Err(Error {
-                    pos: dir_pos,
-                    message: format!(
+                return Err(Error::invalid_character(
+                    dir_pos,
+                    format!(
                         "directive name contains non-printable character U+{:04X}",
                         ch as u32
                     ),
-                });
+                ));
             }
         }
 
@@ -120,13 +118,13 @@ impl<'input> EventIter<'input> {
                 for token in rest.split_ascii_whitespace() {
                     for ch in token.chars() {
                         if !is_ns_char(ch) {
-                            return Err(Error {
-                                pos: dir_pos,
-                                message: format!(
+                            return Err(Error::invalid_character(
+                                dir_pos,
+                                format!(
                                     "directive parameter contains non-printable character U+{:04X}",
                                     ch as u32
                                 ),
-                            });
+                            ));
                         }
                     }
                 }
@@ -149,10 +147,10 @@ impl<'input> EventIter<'input> {
         params_offset: usize,
     ) -> Result<(), Error> {
         if self.directive_scope.version.is_some() {
-            return Err(Error {
-                pos: dir_pos,
-                message: "duplicate %YAML directive in the same document".into(),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                "duplicate %YAML directive in the same document".into(),
+            ));
         }
 
         // Pre-validate: every character in the parameter must be ns-char ([85]).
@@ -163,20 +161,22 @@ impl<'input> EventIter<'input> {
         });
         for ch in param_body.chars() {
             if !is_ns_char(ch) {
-                return Err(Error {
-                    pos: dir_pos,
-                    message: format!(
+                return Err(Error::invalid_character(
+                    dir_pos,
+                    format!(
                         "directive parameter contains non-printable character U+{:04X}",
                         ch as u32
                     ),
-                });
+                ));
             }
         }
 
         // Parse `major.minor`.
-        let dot = params.find('.').ok_or_else(|| Error {
-            pos: dir_pos,
-            message: format!("malformed %YAML directive: expected 'major.minor', got {params:?}"),
+        let dot = params.find('.').ok_or_else(|| {
+            Error::syntax(
+                dir_pos,
+                format!("malformed %YAML directive: expected 'major.minor', got {params:?}"),
+            )
         })?;
         let major_str = &params[..dot];
         let after_dot = &params[dot + 1..];
@@ -186,12 +186,10 @@ impl<'input> EventIter<'input> {
         // Anything after the minor version must be empty or a comment (# ...).
         let trailing = after_dot[minor_end..].trim_start_matches([' ', '\t']);
         if !trailing.is_empty() && !trailing.starts_with('#') {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!(
-                    "malformed %YAML directive: unexpected trailing content {trailing:?}"
-                ),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("malformed %YAML directive: unexpected trailing content {trailing:?}"),
+            ));
         }
 
         // Compute positions of the major and minor digit strings within the line.
@@ -209,21 +207,25 @@ impl<'input> EventIter<'input> {
             column: dir_pos.column + params_offset + dot + 1,
         };
 
-        let major = major_str.parse::<u8>().map_err(|_| Error {
-            pos: major_pos,
-            message: format!("malformed %YAML major version: {major_str:?}"),
+        let major = major_str.parse::<u8>().map_err(|_| {
+            Error::syntax(
+                major_pos,
+                format!("malformed %YAML major version: {major_str:?}"),
+            )
         })?;
-        let minor = minor_str.parse::<u8>().map_err(|_| Error {
-            pos: minor_pos,
-            message: format!("malformed %YAML minor version: {minor_str:?}"),
+        let minor = minor_str.parse::<u8>().map_err(|_| {
+            Error::syntax(
+                minor_pos,
+                format!("malformed %YAML minor version: {minor_str:?}"),
+            )
         })?;
 
         // Only major version 1 is accepted; 2+ is a hard error.
         if major != 1 {
-            return Err(Error {
-                pos: major_pos,
-                message: format!("unsupported YAML version {major}.{minor}: only 1.x is supported"),
-            });
+            return Err(Error::syntax(
+                major_pos,
+                format!("unsupported YAML version {major}.{minor}: only 1.x is supported"),
+            ));
         }
 
         self.directive_scope.version = Some((major, minor));
@@ -241,30 +243,32 @@ impl<'input> EventIter<'input> {
         for token in params.split_ascii_whitespace() {
             for ch in token.chars() {
                 if !is_ns_char(ch) {
-                    return Err(Error {
-                        pos: dir_pos,
-                        message: format!(
+                    return Err(Error::invalid_character(
+                        dir_pos,
+                        format!(
                             "directive parameter contains non-printable character U+{:04X}",
                             ch as u32
                         ),
-                    });
+                    ));
                 }
             }
         }
 
         // Split on whitespace to get handle and prefix.
-        let handle_end = params.find([' ', '\t']).ok_or_else(|| Error {
-            pos: dir_pos,
-            message: format!("malformed %TAG directive: expected 'handle prefix', got {params:?}"),
+        let handle_end = params.find([' ', '\t']).ok_or_else(|| {
+            Error::syntax(
+                dir_pos,
+                format!("malformed %TAG directive: expected 'handle prefix', got {params:?}"),
+            )
         })?;
         let handle = &params[..handle_end];
         let raw_prefix = params[handle_end..].trim_start_matches([' ', '\t']);
 
         if raw_prefix.is_empty() {
-            return Err(Error {
-                pos: dir_pos,
-                message: "malformed %TAG directive: missing prefix".into(),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                "malformed %TAG directive: missing prefix".into(),
+            ));
         }
 
         // Split the raw prefix at the first space/tab: everything before is the
@@ -278,55 +282,52 @@ impl<'input> EventIter<'input> {
             .map_or(raw_prefix, |ws| &raw_prefix[..ws]);
         let trailing_after_prefix = raw_prefix[prefix_body.len()..].trim_start_matches([' ', '\t']);
         if !trailing_after_prefix.is_empty() && !trailing_after_prefix.starts_with('#') {
-            return Err(Error {
-                pos: dir_pos,
-                message: "malformed %TAG directive: unexpected trailing content after prefix"
-                    .into(),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                "malformed %TAG directive: unexpected trailing content after prefix".into(),
+            ));
         }
 
         // Validate handle shape: must be `!`, `!!`, or `!<word-chars>!`
         // where word chars are ASCII alphanumeric or `-`
         // (YAML 1.2 §6.8.1 productions [89]–[92]).
         if !is_valid_tag_handle(handle) {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!("malformed %TAG handle: {handle:?} is not a valid tag handle"),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("malformed %TAG handle: {handle:?} is not a valid tag handle"),
+            ));
         }
 
         // Validate handle length.
         if handle.len() > MAX_TAG_HANDLE_BYTES {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!(
-                    "tag handle exceeds maximum length of {MAX_TAG_HANDLE_BYTES} bytes"
-                ),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("tag handle exceeds maximum length of {MAX_TAG_HANDLE_BYTES} bytes"),
+            ));
         }
 
         // Validate prefix length.
         if prefix_body.len() > MAX_TAG_LEN {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!("tag prefix exceeds maximum length of {MAX_TAG_LEN} bytes"),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("tag prefix exceeds maximum length of {MAX_TAG_LEN} bytes"),
+            ));
         }
 
         // Validate prefix against ns-uri-char ([93]/[94]/[95]).
-        validate_tag_prefix(prefix_body).map_err(|offset| Error {
-            pos: dir_pos,
-            message: format!(
-                "tag prefix contains character not allowed in URI at byte offset {offset}"
-            ),
+        validate_tag_prefix(prefix_body).map_err(|offset| {
+            Error::syntax(
+                dir_pos,
+                format!("tag prefix contains character not allowed in URI at byte offset {offset}"),
+            )
         })?;
 
         // Duplicate handle check.
         if self.directive_scope.tag_handles.contains_key(handle) {
-            return Err(Error {
-                pos: dir_pos,
-                message: format!("duplicate %TAG directive for handle {handle:?}"),
-            });
+            return Err(Error::syntax(
+                dir_pos,
+                format!("duplicate %TAG directive for handle {handle:?}"),
+            ));
         }
 
         self.directive_scope
@@ -382,10 +383,10 @@ impl<'input> EventIter<'input> {
             if self.directive_scope.directive_count > 0 {
                 let pos = self.lexer.current_pos();
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
+                return StepResult::Yield(Err(Error::syntax(
                     pos,
-                    message: "directives must be followed by a '---' document-start marker".into(),
-                }));
+                    "directives must be followed by a '---' document-start marker".into(),
+                )));
             }
             let end = self.lexer.current_pos();
             self.state = IterState::Done;
@@ -419,10 +420,10 @@ impl<'input> EventIter<'input> {
             if self.directive_scope.directive_count > 0 {
                 let pos = self.lexer.current_pos();
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
+                return StepResult::Yield(Err(Error::syntax(
                     pos,
-                    message: "directives must be followed by a '---' document-start marker".into(),
-                }));
+                    "directives must be followed by a '---' document-start marker".into(),
+                )));
             }
             self.lexer.consume_marker_line(true);
             if let Some(e) = self.lexer.marker_inline_error.take() {
@@ -437,10 +438,10 @@ impl<'input> EventIter<'input> {
         if self.directive_scope.directive_count > 0 {
             let pos = self.lexer.current_pos();
             self.state = IterState::Done;
-            return StepResult::Yield(Err(Error {
+            return StepResult::Yield(Err(Error::syntax(
                 pos,
-                message: "directives must be followed by a '---' document-start marker".into(),
-            }));
+                "directives must be followed by a '---' document-start marker".into(),
+            )));
         }
         debug_assert!(
             self.lexer.has_content(),

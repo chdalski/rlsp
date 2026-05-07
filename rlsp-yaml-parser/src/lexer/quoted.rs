@@ -66,10 +66,10 @@ impl<'input> Lexer<'input> {
         if closed {
             // Entire scalar on one line.
             if value.quoted_len > MAX_SCALAR_LEN {
-                return Err(Error {
-                    pos: open_pos,
-                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                });
+                return Err(Error::syntax(
+                    open_pos,
+                    "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                ));
             }
             // Validate nb-json on the literal source bytes (single-quoted scalars
             // allow all non-C0 characters per YAML §5.1 JSON-compatibility clause).
@@ -80,10 +80,10 @@ impl<'input> Lexer<'input> {
                         open_pos.advance('\''),
                         &body_slice[..bad_i],
                     );
-                    return Err(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "single-quoted scalar"),
-                    });
+                    return Err(Error::invalid_character(
+                        bad_pos,
+                        non_printable_error_message(bad_ch, "single-quoted scalar"),
+                    ));
                 }
             }
             // Span: from open `'` through closing `'`.
@@ -105,10 +105,10 @@ impl<'input> Lexer<'input> {
             if let Some((bad_i, bad_ch)) = find_non_nb_json(body_slice.as_bytes()) {
                 let bad_pos =
                     crate::pos::advance_within_line(open_pos.advance('\''), &body_slice[..bad_i]);
-                return Err(Error {
-                    pos: bad_pos,
-                    message: non_printable_error_message(bad_ch, "single-quoted scalar"),
-                });
+                return Err(Error::invalid_character(
+                    bad_pos,
+                    non_printable_error_message(bad_ch, "single-quoted scalar"),
+                ));
             }
         }
         let mut owned = value.as_owned_string(body_start);
@@ -117,20 +117,20 @@ impl<'input> Lexer<'input> {
         loop {
             let Some(next) = self.buf.peek_next() else {
                 // EOF without closing quote — point to the opening `'`, not EOF.
-                return Err(Error {
-                    pos: open_pos,
-                    message: "unterminated single-quoted scalar".to_owned(),
-                });
+                return Err(Error::syntax(
+                    open_pos,
+                    "unterminated single-quoted scalar".to_owned(),
+                ));
             };
 
             // Document markers at column 0 terminate the document even inside
             // quoted scalars (YAML spec §6.5 / test suite RXY3).
             if is_doc_marker_line(next.content) {
-                return Err(Error {
-                    pos: next.pos,
-                    message: "document marker '...' or '---' is not allowed inside a quoted scalar"
+                return Err(Error::syntax(
+                    next.pos,
+                    "document marker '...' or '---' is not allowed inside a quoted scalar"
                         .to_owned(),
-                });
+                ));
             }
 
             // SAFETY: peek succeeded in the let-else above; LineBuffer invariant.
@@ -155,13 +155,13 @@ impl<'input> Lexer<'input> {
                 if parent_indent > 0 {
                     let found = consumed.indent;
                     if found < parent_indent {
-                        return Err(Error {
-                            pos: line_start_pos,
-                            message: format!(
+                        return Err(Error::syntax(
+                            line_start_pos,
+                            format!(
                                 "continuation line does not have enough indentation \
                                  (expected at least {parent_indent} spaces, found {found})"
                             ),
-                        });
+                        ));
                     }
                 }
                 // Strip indent (n spaces) + separation (remaining whitespace including tabs).
@@ -172,10 +172,10 @@ impl<'input> Lexer<'input> {
                 // Blank continuation line: counts as a literal newline.
                 owned.push('\n');
                 if owned.len() > MAX_SCALAR_LEN {
-                    return Err(Error {
-                        pos: self.current_pos,
-                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                    });
+                    return Err(Error::syntax(
+                        self.current_pos,
+                        "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    ));
                 }
                 continue;
             }
@@ -197,10 +197,10 @@ impl<'input> Lexer<'input> {
                         line_start_pos,
                         &line_content[..leading_len + bad_i],
                     );
-                    return Err(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "single-quoted scalar"),
-                    });
+                    return Err(Error::invalid_character(
+                        bad_pos,
+                        non_printable_error_message(bad_ch, "single-quoted scalar"),
+                    ));
                 }
             }
 
@@ -211,10 +211,10 @@ impl<'input> Lexer<'input> {
                     owned.push_str(&trimmed[..cont_value.quoted_len]);
                 }
                 if owned.len() > MAX_SCALAR_LEN {
-                    return Err(Error {
-                        pos: self.current_pos,
-                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                    });
+                    return Err(Error::syntax(
+                        self.current_pos,
+                        "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    ));
                 }
                 // Compute position right after the closing `'` by advancing from
                 // the line start over leading whitespace + content + closing `'`.
@@ -241,10 +241,10 @@ impl<'input> Lexer<'input> {
             };
             owned.push_str(line_str.trim_end_matches([' ', '\t']));
             if owned.len() > MAX_SCALAR_LEN {
-                return Err(Error {
-                    pos: self.current_pos,
-                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                });
+                return Err(Error::syntax(
+                    self.current_pos,
+                    "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                ));
             }
         }
     }
@@ -357,20 +357,20 @@ impl<'input> Lexer<'input> {
 
         loop {
             let Some(next) = self.buf.peek_next() else {
-                return Err(Error {
-                    pos: self.current_pos,
-                    message: "unterminated double-quoted scalar".to_owned(),
-                });
+                return Err(Error::syntax(
+                    self.current_pos,
+                    "unterminated double-quoted scalar".to_owned(),
+                ));
             };
 
             // Document markers at column 0 terminate the document even inside
             // quoted scalars (YAML spec §6.5 / test suite 5TRB).
             if is_doc_marker_line(next.content) {
-                return Err(Error {
-                    pos: next.pos,
-                    message: "document marker '...' or '---' is not allowed inside a quoted scalar"
+                return Err(Error::syntax(
+                    next.pos,
+                    "document marker '...' or '---' is not allowed inside a quoted scalar"
                         .to_owned(),
-                });
+                ));
             }
 
             // Determine if this line is blank (all whitespace).
@@ -387,14 +387,14 @@ impl<'input> Lexer<'input> {
                 if !is_blank {
                     let found = next.indent;
                     if found <= n {
-                        return Err(Error {
-                            pos: next.pos,
-                            message: format!(
+                        return Err(Error::syntax(
+                            next.pos,
+                            format!(
                                 "continuation line does not have enough indentation \
                                  (expected at least {} spaces, found {found})",
                                 n + 1
                             ),
-                        });
+                        ));
                     }
                 }
             }
@@ -442,10 +442,10 @@ impl<'input> Lexer<'input> {
                 } => {
                     value.push_into(owned);
                     if owned.len() > MAX_SCALAR_LEN {
-                        return Err(Error {
-                            pos: line_start_pos,
-                            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                        });
+                        return Err(Error::syntax(
+                            line_start_pos,
+                            "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                        ));
                     }
                     // Store the tail (content after closing `"` on the closing
                     // line) so the flow parser can prepend it as a synthetic
@@ -461,10 +461,10 @@ impl<'input> Lexer<'input> {
                 } => {
                     value.push_into(owned);
                     if owned.len() > MAX_SCALAR_LEN {
-                        return Err(Error {
-                            pos: line_start_pos,
-                            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                        });
+                        return Err(Error::syntax(
+                            line_start_pos,
+                            "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                        ));
                     }
                     line_continuation = next_cont;
                     // continue loop
@@ -684,16 +684,16 @@ fn decode_and_push_escape(
     prefix: &str,
 ) -> Result<usize, Error> {
     let Some((decoded_ch, consumed)) = decode_escape(after_backslash) else {
-        return Err(Error {
-            pos: escape_pos,
-            message: format!(
+        return Err(Error::syntax(
+            escape_pos,
+            format!(
                 "invalid escape sequence '\\{}'",
                 after_backslash
                     .chars()
                     .next()
                     .map_or_else(|| "EOF".to_owned(), |c| c.to_string())
             ),
-        });
+        ));
     };
 
     // Security: for hex escapes (\x, \u, \U), the decoded character must
@@ -701,25 +701,25 @@ fn decode_and_push_escape(
     // produce well-known control chars and are exempt from this check.
     let escape_prefix = after_backslash.chars().next().unwrap_or('\0');
     if matches!(escape_prefix, 'x' | 'u' | 'U') && !is_c_printable(decoded_ch) {
-        return Err(Error {
-            pos: escape_pos,
-            message: format!(
+        return Err(Error::invalid_character(
+            escape_pos,
+            format!(
                 "escape produces non-printable character U+{:04X}",
                 u32::from(decoded_ch)
             ),
-        });
+        ));
     }
 
     // Security: reject bidi override characters produced by numeric
     // escapes (\u and \U can reach the bidi range; \x max is U+00FF).
     if is_bidi_control(decoded_ch) {
-        return Err(Error {
-            pos: escape_pos,
-            message: format!(
+        return Err(Error::syntax(
+            escape_pos,
+            format!(
                 "escape produces bidirectional control character U+{:04X}",
                 u32::from(decoded_ch)
             ),
-        });
+        ));
     }
 
     let buf = ensure_owned(owned, prefix);
@@ -727,10 +727,10 @@ fn decode_and_push_escape(
 
     // Maximum scalar length cap.
     if buf.len() > MAX_SCALAR_LEN {
-        return Err(Error {
-            pos: escape_pos,
-            message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-        });
+        return Err(Error::syntax(
+            escape_pos,
+            "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+        ));
     }
 
     Ok(consumed)
@@ -776,19 +776,19 @@ pub(super) fn scan_double_quoted_line(
                         start_pos,
                         body.get(..i + bad_i).unwrap_or_default(),
                     );
-                    return Err(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "double-quoted scalar"),
-                    });
+                    return Err(Error::invalid_character(
+                        bad_pos,
+                        non_printable_error_message(bad_ch, "double-quoted scalar"),
+                    ));
                 }
             }
             if let Some(buf) = owned.as_mut() {
                 buf.push_str(span);
                 if buf.len() > MAX_SCALAR_LEN {
-                    return Err(Error {
-                        pos: start_pos,
-                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                    });
+                    return Err(Error::syntax(
+                        start_pos,
+                        "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    ));
                 }
                 // owned_non_ws_len is updated after each escape decode; see below.
                 // If the next hit is `"` (return) or `\` (escape decode updates it),
@@ -796,10 +796,10 @@ pub(super) fn scan_double_quoted_line(
             } else {
                 borrow_end = hit;
                 if borrow_end > MAX_SCALAR_LEN {
-                    return Err(Error {
-                        pos: start_pos,
-                        message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                    });
+                    return Err(Error::syntax(
+                        start_pos,
+                        "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                    ));
                 }
             }
         }
@@ -863,20 +863,20 @@ pub(super) fn scan_double_quoted_line(
                 start_pos,
                 body.get(..i + bad_i).unwrap_or_default(),
             );
-            return Err(Error {
-                pos: bad_pos,
-                message: non_printable_error_message(bad_ch, "double-quoted scalar"),
-            });
+            return Err(Error::invalid_character(
+                bad_pos,
+                non_printable_error_message(bad_ch, "double-quoted scalar"),
+            ));
         }
     }
     if let Some(buf) = owned.as_mut() {
         if !rest.is_empty() {
             buf.push_str(rest);
             if buf.len() > MAX_SCALAR_LEN {
-                return Err(Error {
-                    pos: start_pos,
-                    message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-                });
+                return Err(Error::syntax(
+                    start_pos,
+                    "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+                ));
             }
             // Update non-ws checkpoint for the remaining literal span.
             if let Some(last_non_ws) = rest.rfind(|c: char| c != ' ' && c != '\t') {
@@ -891,10 +891,10 @@ pub(super) fn scan_double_quoted_line(
     } else {
         borrow_end = body.len();
         if borrow_end > MAX_SCALAR_LEN {
-            return Err(Error {
-                pos: start_pos,
-                message: "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
-            });
+            return Err(Error::syntax(
+                start_pos,
+                "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
+            ));
         }
     }
 

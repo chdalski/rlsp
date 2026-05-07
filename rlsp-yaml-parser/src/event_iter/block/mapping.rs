@@ -235,32 +235,26 @@ impl<'input> EventIter<'input> {
                 match self.lexer.try_consume_single_quoted(0) {
                     Ok(Some((value, _))) => (value, ScalarStyle::SingleQuoted),
                     Ok(None) => {
-                        return ConsumedMapping::QuotedKeyError {
-                            pos: key_start_pos,
-                            message: "single-quoted key could not be parsed".into(),
-                        };
+                        return ConsumedMapping::QuotedKeyError(
+                            key_start_pos,
+                            "single-quoted key could not be parsed".into(),
+                        );
                     }
                     Err(e) => {
-                        return ConsumedMapping::QuotedKeyError {
-                            pos: e.pos,
-                            message: e.message,
-                        };
+                        return ConsumedMapping::QuotedKeyError(e.pos, e.message);
                     }
                 }
             } else {
                 match self.lexer.try_consume_double_quoted(None) {
                     Ok(Some((value, _))) => (value, ScalarStyle::DoubleQuoted),
                     Ok(None) => {
-                        return ConsumedMapping::QuotedKeyError {
-                            pos: key_start_pos,
-                            message: "double-quoted key could not be parsed".into(),
-                        };
+                        return ConsumedMapping::QuotedKeyError(
+                            key_start_pos,
+                            "double-quoted key could not be parsed".into(),
+                        );
                     }
                     Err(e) => {
-                        return ConsumedMapping::QuotedKeyError {
-                            pos: e.pos,
-                            message: e.message,
-                        };
+                        return ConsumedMapping::QuotedKeyError(e.pos, e.message);
                     }
                 }
             }
@@ -454,12 +448,11 @@ impl<'input> EventIter<'input> {
             match self.coll_stack.last() {
                 Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == effective_key_indent => {
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: key_pos,
-                        message:
-                            "invalid mapping entry at block sequence indent level: expected '- '"
-                                .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        key_pos,
+                        "invalid mapping entry at block sequence indent level: expected '- '"
+                            .into(),
+                    )));
                 }
                 Some(&CollectionEntry::Mapping(map_col, MappingPhase::Key, true))
                     if map_col < effective_key_indent
@@ -468,10 +461,10 @@ impl<'input> EventIter<'input> {
                         && !self.is_value_indicator_line() =>
                 {
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: key_pos,
-                        message: "wrong indentation: mapping key is more indented than the enclosing mapping".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        key_pos,
+                        "wrong indentation: mapping key is more indented than the enclosing mapping".into(),
+                    )));
                 }
                 _ => {}
             }
@@ -493,10 +486,10 @@ impl<'input> EventIter<'input> {
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
-                    pos: key_pos,
-                    message: "collection nesting depth exceeds limit".into(),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    key_pos,
+                    "collection nesting depth exceeds limit".into(),
+                )));
             }
             // Mark the parent sequence (if any) as having started an item.
             if let Some(CollectionEntry::Sequence(_, current_item_started)) =
@@ -627,10 +620,10 @@ impl<'input> EventIter<'input> {
                             let err_pos = line.pos;
                             self.state = IterState::Done;
                             self.lexer.consume_line();
-                            return StepResult::Yield(Err(Error {
-                                pos: err_pos,
-                                message: "tab character is not valid block indentation".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                err_pos,
+                                "tab character is not valid block indentation".into(),
+                            )));
                         }
                     }
                 }
@@ -710,10 +703,10 @@ impl<'input> EventIter<'input> {
                         let err_pos = line.pos;
                         self.state = IterState::Done;
                         self.lexer.consume_line();
-                        return StepResult::Yield(Err(Error {
-                            pos: err_pos,
-                            message: "tab character is not valid block indentation".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            err_pos,
+                            "tab character is not valid block indentation".into(),
+                        )));
                     }
                 }
             }
@@ -759,29 +752,27 @@ impl<'input> EventIter<'input> {
                 ));
                 self.advance_mapping_to_value();
             }
-            ConsumedMapping::QuotedKeyError { pos, message } => {
+            ConsumedMapping::QuotedKeyError(pos, message) => {
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error { pos, message }));
+                return StepResult::Yield(Err(Error::syntax(pos, message)));
             }
             ConsumedMapping::InlineImplicitMappingError { pos } => {
                 // The inline value is a block node (mapping or sequence indicator)
                 // which cannot appear inline as a mapping value — block nodes must
                 // start on a new line.
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
+                return StepResult::Yield(Err(Error::syntax(
                     pos,
-                    message:
-                        "block node cannot appear as inline value; use a new line or a flow node"
-                            .into(),
-                }));
+                    "block node cannot appear as inline value; use a new line or a flow node"
+                        .into(),
+                )));
             }
             ConsumedMapping::ImplicitKeyTooLongError { pos } => {
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
+                return StepResult::Yield(Err(Error::syntax(
                     pos,
-                    message: "implicit block key exceeds 1024 Unicode characters (YAML 1.2 §8.2.2)"
-                        .into(),
-                }));
+                    "implicit block key exceeds 1024 Unicode characters (YAML 1.2 §8.2.2)".into(),
+                )));
             }
         }
         StepResult::Continue

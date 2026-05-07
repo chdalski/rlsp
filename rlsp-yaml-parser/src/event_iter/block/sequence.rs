@@ -154,10 +154,10 @@ impl<'input> EventIter<'input> {
             ) && !self.explicit_key_pending
             {
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
-                    pos: dash_pos,
-                    message: "block sequence cannot appear as an implicit mapping key".into(),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    dash_pos,
+                    "block sequence cannot appear as an implicit mapping key".into(),
+                )));
             }
             // A block sequence item at a wrong indent level is invalid.  When the
             // parent is a sequence that has already completed at least one item
@@ -167,18 +167,18 @@ impl<'input> EventIter<'input> {
             if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last() {
                 if dash_indent != parent_col {
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: dash_pos,
-                        message: "block sequence entry at wrong indentation level".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        dash_pos,
+                        "block sequence entry at wrong indentation level".into(),
+                    )));
                 }
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
-                    pos: dash_pos,
-                    message: "collection nesting depth exceeds limit".into(),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    dash_pos,
+                    "collection nesting depth exceeds limit".into(),
+                )));
             }
             // Sequence opening consumes any pending explicit-key context.
             self.explicit_key_pending = false;
@@ -265,10 +265,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "tab character is not valid block indentation".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "tab character is not valid block indentation".into(),
+                    )));
                 }
             }
         }
@@ -375,10 +375,10 @@ impl<'input> EventIter<'input> {
                                         line: hash_pos.line,
                                         column: hash_pos.column + 1 + bad_char_i,
                                     };
-                                    suffix_error = Some(Error {
-                                        pos: bad_pos,
-                                        message: "invalid character U+0000 in comment".to_owned(),
-                                    });
+                                    suffix_error = Some(Error::syntax(
+                                        bad_pos,
+                                        "invalid character U+0000 in comment".to_owned(),
+                                    ));
                                 } else {
                                     // Valid comment: stash for drain_trailing_comment.
                                     // Assert no stale comment from prior call (security finding 2).
@@ -418,13 +418,13 @@ impl<'input> EventIter<'input> {
                                     line: scalar_start_pos.line,
                                     column: scalar_start_pos.column + bad_col_offset,
                                 };
-                                suffix_error = Some(Error {
-                                    pos: bad_pos,
-                                    message: format!(
+                                suffix_error = Some(Error::invalid_character(
+                                    bad_pos,
+                                    format!(
                                         "invalid character U+{:04X} in plain scalar",
                                         bad_ch as u32
                                     ),
-                                });
+                                ));
                             } else {
                                 suffix_error = None;
                             }

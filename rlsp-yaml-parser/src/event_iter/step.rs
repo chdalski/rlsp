@@ -53,10 +53,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
+                    )));
                 }
             }
         }
@@ -74,10 +74,10 @@ impl<'input> EventIter<'input> {
                 let err_pos = line.pos;
                 self.state = IterState::Done;
                 self.lexer.consume_line();
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: "invalid character U+FEFF in document".into(),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    "invalid character U+FEFF in document".into(),
+                )));
             }
         }
 
@@ -238,12 +238,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message:
-                            "directive '%' is only valid before the document-start marker '---'"
-                                .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "directive '%' is only valid before the document-start marker '---'".into(),
+                    )));
                 }
             }
         }
@@ -258,10 +256,10 @@ impl<'input> EventIter<'input> {
                 let err_pos = line.pos;
                 self.state = IterState::Done;
                 self.lexer.consume_line();
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: "unexpected content after document root node".into(),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    "unexpected content after document root node".into(),
+                )));
             }
         }
 
@@ -308,10 +306,10 @@ impl<'input> EventIter<'input> {
                     let ch = trimmed.chars().next().unwrap_or(']');
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: format!("unexpected '{ch}' outside flow collection"),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        format!("unexpected '{ch}' outside flow collection"),
+                    )));
                 }
             }
 
@@ -332,20 +330,20 @@ impl<'input> EventIter<'input> {
                         // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
                         if self.pending_tag.is_some() {
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: star_pos,
-                                message: "alias node cannot have a tag property".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                star_pos,
+                                "alias node cannot have a tag property".into(),
+                            )));
                         }
                         // An Inline anchor preceding `*alias` is an error — it would annotate
                         // the alias node, which is illegal.  A Standalone anchor belongs to
                         // the surrounding collection, not the alias, so it is not an error here.
                         if matches!(self.pending_anchor, Some(PendingAnchor::Inline(..))) {
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: star_pos,
-                                message: "alias node cannot have an anchor property".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                star_pos,
+                                "alias node cannot have an anchor property".into(),
+                            )));
                         }
                         match scan_anchor_name(after_star, star_pos) {
                             Err(e) => {
@@ -517,12 +515,11 @@ impl<'input> EventIter<'input> {
                                         || matches!(first, ',' | '[' | ']' | '{' | '}')
                                     {
                                         self.state = IterState::Done;
-                                        return StepResult::Yield(Err(Error {
-                                    pos: bang_pos,
-                                    message:
-                                        "tag must be separated from node content by whitespace"
-                                            .into(),
-                                }));
+                                        return StepResult::Yield(Err(Error::syntax(
+                                            bang_pos,
+                                            "tag must be separated from node content by whitespace"
+                                                .into(),
+                                        )));
                                     }
                                 }
                                 let inline_offset =
@@ -542,10 +539,10 @@ impl<'input> EventIter<'input> {
                                         && inline_contains_mapping_key(inline);
                                     if !is_different_node {
                                         self.state = IterState::Done;
-                                        return StepResult::Yield(Err(Error {
-                                            pos: bang_pos,
-                                            message: "a node may not have more than one tag".into(),
-                                        }));
+                                        return StepResult::Yield(Err(Error::syntax(
+                                            bang_pos,
+                                            "a node may not have more than one tag".into(),
+                                        )));
                                     }
                                 }
                                 // Resolve tag handle against directive scope at scan time.
@@ -614,12 +611,11 @@ impl<'input> EventIter<'input> {
                                     let min = self.min_standalone_property_indent();
                                     if line_indent < min {
                                         self.state = IterState::Done;
-                                        return StepResult::Yield(Err(Error {
-                                    pos: bang_pos,
-                                    message:
-                                        "node property is not indented enough for this context"
-                                            .into(),
-                                }));
+                                        return StepResult::Yield(Err(Error::syntax(
+                                            bang_pos,
+                                            "node property is not indented enough for this context"
+                                                .into(),
+                                        )));
                                     }
                                     self.pending_tag =
                                         Some(PendingTag::Standalone(resolved_tag, tag_span));
@@ -749,10 +745,10 @@ impl<'input> EventIter<'input> {
                                 };
                                 if is_duplicate {
                                     self.state = IterState::Done;
-                                    return StepResult::Yield(Err(Error {
-                                        pos: amp_pos2,
-                                        message: "a node may not have more than one anchor".into(),
-                                    }));
+                                    return StepResult::Yield(Err(Error::syntax(
+                                        amp_pos2,
+                                        "a node may not have more than one anchor".into(),
+                                    )));
                                 }
                                 self.lexer.consume_line();
                                 if had_inline {
@@ -771,12 +767,11 @@ impl<'input> EventIter<'input> {
                                             line: line_pos.line,
                                             column: inline_col,
                                         };
-                                        return StepResult::Yield(Err(Error {
-                                    pos: seq_pos,
-                                    message:
-                                        "block sequence indicator cannot appear inline after a node property"
-                                            .into(),
-                                }));
+                                        return StepResult::Yield(Err(Error::syntax(
+                                    seq_pos,
+                                    "block sequence indicator cannot appear inline after a node property"
+                                        .into(),
+                                )));
                                     }
                                     // Inline content after anchor — anchor applies to the
                                     // inline node (scalar or key), not to any enclosing
@@ -844,12 +839,11 @@ impl<'input> EventIter<'input> {
                                     if line_indent < min {
                                         self.state = IterState::Done;
                                         let err_pos = amp_pos;
-                                        return StepResult::Yield(Err(Error {
-                                    pos: err_pos,
-                                    message:
-                                        "node property is not indented enough for this context"
-                                            .into(),
-                                }));
+                                        return StepResult::Yield(Err(Error::syntax(
+                                            err_pos,
+                                            "node property is not indented enough for this context"
+                                                .into(),
+                                        )));
                                     }
                                     self.pending_anchor =
                                         Some(PendingAnchor::Standalone(name, anchor_span));
@@ -947,11 +941,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "invalid content at block sequence indent level: expected '- '"
-                            .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "invalid content at block sequence indent level: expected '- '".into(),
+                    )));
                 }
                 Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, _))
                     if line_indent == map_indent =>
@@ -959,12 +952,11 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message:
-                            "invalid content at block mapping indent level: expected mapping key"
-                                .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "invalid content at block mapping indent level: expected mapping key"
+                            .into(),
+                    )));
                 }
                 // Content more deeply indented than the mapping key level is only
                 // valid as an explicit-key continuation (explicit_key_pending=true)
@@ -980,10 +972,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "unexpected indented content after mapping value".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "unexpected indented content after mapping value".into(),
+                    )));
                 }
                 _ => {}
             }
@@ -1047,10 +1039,10 @@ impl<'input> EventIter<'input> {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: format!("invalid character U+{:04X} in document", ch as u32),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        format!("invalid character U+{:04X} in document", ch as u32),
+                    )));
                 }
             }
         }

@@ -21,7 +21,7 @@ pub mod node;
 mod pos;
 /// YAML 1.2.2 §10 schema tag resolution.
 pub mod schema;
-pub use error::Error;
+pub use error::{Error, ErrorKind};
 pub use event::{Chomp, CollectionStyle, Event, EventMeta, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
 pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};

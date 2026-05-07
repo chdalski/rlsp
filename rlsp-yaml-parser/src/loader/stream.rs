@@ -175,10 +175,7 @@ mod tests {
     #[test]
     fn next_from_propagates_parse_error_as_load_error() {
         let p = pos(3);
-        let err = Error {
-            pos: p,
-            message: "unexpected token".to_string(),
-        };
+        let err = Error::syntax(p, "unexpected token".to_string());
         let mut stream = make_stream(vec![Err(err)]);
         let result = next_from(&mut stream);
         assert_eq!(
@@ -289,10 +286,7 @@ mod tests {
     #[test]
     fn consume_leading_comments_returns_empty_vec_when_next_is_error_event() {
         let p = pos(1);
-        let err = Error {
-            pos: p,
-            message: "bad".to_string(),
-        };
+        let err = Error::syntax(p, "bad".to_string());
         let mut stream = make_stream(vec![Err(err)]);
         let result = consume_leading_comments(&mut stream);
         assert_eq!(result, Ok(vec![]));
@@ -398,10 +392,7 @@ mod tests {
     fn consume_leading_comments_stops_before_error_event_in_stream() {
         let sp = span(1, 1);
         let p = pos(2);
-        let err = Error {
-            pos: p,
-            message: "oops".to_string(),
-        };
+        let err = Error::syntax(p, "oops".to_string());
         let mut stream = make_stream(vec![Ok((Event::Comment { text: " ok" }, sp)), Err(err)]);
         let result = consume_leading_comments(&mut stream);
         assert_eq!(result, Ok(vec!["# ok".to_string()]));

@@ -401,16 +401,16 @@ impl<'input> EventIter<'input> {
                         let ws_len = tail.len() - first_non_ws.len();
                         if first_non_ws.starts_with('#') && ws_len == 0 {
                             // `#` immediately after closing quote — not a comment.
-                            return Err(Error {
-                                pos: tail_pos,
-                                message: "comment requires at least one space before '#'".into(),
-                            });
+                            return Err(Error::syntax(
+                                tail_pos,
+                                "comment requires at least one space before '#'".into(),
+                            ));
                         } else if !first_non_ws.starts_with('#') {
                             // Non-comment content after quoted scalar.
-                            return Err(Error {
-                                pos: tail_pos,
-                                message: "unexpected content after quoted scalar".into(),
-                            });
+                            return Err(Error::syntax(
+                                tail_pos,
+                                "unexpected content after quoted scalar".into(),
+                            ));
                         }
                         // Valid comment: discard (the comment event is not emitted
                         // in block context here; it will be picked up by drain_trailing_comment

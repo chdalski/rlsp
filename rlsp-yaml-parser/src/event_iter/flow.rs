@@ -265,10 +265,10 @@ impl<'input> EventIter<'input> {
                 if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, 0);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "document marker is not allowed inside a flow collection".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "document marker is not allowed inside a flow collection".into(),
+                    )));
                 }
             }
 
@@ -290,11 +290,10 @@ impl<'input> EventIter<'input> {
                 if has_tab_indent {
                     let err_pos = abs_pos(cur_base_pos, cur_content, 0);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "tab character is not allowed as indentation in flow context"
-                            .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "tab character is not allowed as indentation in flow context".into(),
+                    )));
                 }
             }
 
@@ -353,10 +352,10 @@ impl<'input> EventIter<'input> {
                 if cur_content.is_empty() && self.lexer.at_eof() {
                     let err_pos = self.lexer.current_pos();
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "unterminated flow collection: unexpected end of input".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "unterminated flow collection: unexpected end of input".into(),
+                    )));
                 }
 
                 // Flow continuation lines must be indented more than the
@@ -371,11 +370,10 @@ impl<'input> EventIter<'input> {
                         if !trimmed.is_empty() && next_line.indent <= min_indent {
                             let err_pos = next_line.pos;
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: err_pos,
-                                message: "flow collection continuation line is not indented enough"
-                                    .into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                err_pos,
+                                "flow collection continuation line is not indented enough".into(),
+                            )));
                         }
                     }
                 }
@@ -397,10 +395,10 @@ impl<'input> EventIter<'input> {
                 if total_depth >= MAX_COLLECTION_DEPTH {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "collection nesting depth exceeds limit".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "collection nesting depth exceeds limit".into(),
+                    )));
                 }
 
                 let open_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
@@ -480,10 +478,10 @@ impl<'input> EventIter<'input> {
                 let Some(top) = flow_stack.pop() else {
                     // Closing delimiter with empty stack — mismatched.
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: close_pos,
-                        message: format!("unexpected '{ch}' in flow context"),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        close_pos,
+                        format!("unexpected '{ch}' in flow context"),
+                    )));
                 };
 
                 match (ch, top) {
@@ -520,17 +518,17 @@ impl<'input> EventIter<'input> {
                     }
                     (']', FlowFrame::Mapping { .. }) => {
                         self.state = IterState::Done;
-                        return StepResult::Yield(Err(Error {
-                            pos: close_pos,
-                            message: "expected '}' to close flow mapping, found ']'".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            close_pos,
+                            "expected '}' to close flow mapping, found ']'".into(),
+                        )));
                     }
                     ('}', FlowFrame::Sequence { .. }) => {
                         self.state = IterState::Done;
-                        return StepResult::Yield(Err(Error {
-                            pos: close_pos,
-                            message: "expected ']' to close flow sequence, found '}'".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            close_pos,
+                            "expected ']' to close flow sequence, found '}'".into(),
+                        )));
                     }
                     _ => unreachable!("all (ch, top) combinations covered above"),
                 }
@@ -592,10 +590,10 @@ impl<'input> EventIter<'input> {
                         if !has_space_before_hash {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: err_pos,
-                                message: "comment requires at least one space before '#'".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                err_pos,
+                                "comment requires at least one space before '#'".into(),
+                            )));
                         }
                     }
                     // A flow collection used as an implicit mapping key must
@@ -606,10 +604,11 @@ impl<'input> EventIter<'input> {
                     if tail_trimmed.starts_with(':') && cur_base_pos.line != start_line {
                         let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                         self.state = IterState::Done;
-                        return StepResult::Yield(Err(Error {
-                            pos: err_pos,
-                            message: "multi-line flow collection cannot be used as an implicit mapping key".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            err_pos,
+                            "multi-line flow collection cannot be used as an implicit mapping key"
+                                .into(),
+                        )));
                     }
                     // If the tail starts with `:` and there is not already an
                     // explicit-key mapping opened at this indent, this flow
@@ -673,10 +672,10 @@ impl<'input> EventIter<'input> {
                 if leading {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "invalid leading comma in flow collection".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "invalid leading comma in flow collection".into(),
+                    )));
                 }
 
                 pos_in_line += 1;
@@ -693,11 +692,10 @@ impl<'input> EventIter<'input> {
                 if cur_content[pos_in_line..].starts_with(',') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "invalid empty entry: consecutive commas in flow collection"
-                            .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "invalid empty entry: consecutive commas in flow collection".into(),
+                    )));
                 }
 
                 // Emit an implicit empty-scalar node when the comma terminates
@@ -836,12 +834,12 @@ impl<'input> EventIter<'input> {
             if ch == '|' || ch == '>' {
                 let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: format!(
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    format!(
                         "block scalar indicator '{ch}' is not allowed inside a flow collection"
                     ),
-                }));
+                )));
             }
 
             // ----------------------------------------------------------------
@@ -859,11 +857,10 @@ impl<'input> EventIter<'input> {
                 if next_c.is_none_or(|c| matches!(c, ' ' | '\t')) {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "block sequence entry '-' is not allowed inside a flow collection"
-                            .into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "block sequence entry '-' is not allowed inside a flow collection".into(),
+                    )));
                 }
             }
 
@@ -926,10 +923,10 @@ impl<'input> EventIter<'input> {
                     Ok(Some(vs)) => vs,
                     Ok(None) => {
                         self.state = IterState::Done;
-                        return StepResult::Yield(Err(Error {
-                            pos: cur_abs_pos,
-                            message: "expected quoted scalar".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            cur_abs_pos,
+                            "expected quoted scalar".into(),
+                        )));
                     }
                     Err(e) => {
                         self.state = IterState::Done;
@@ -1008,10 +1005,10 @@ impl<'input> EventIter<'input> {
                 if cur_content.is_empty() && self.lexer.at_eof() && !flow_stack.is_empty() {
                     let err_pos = self.lexer.current_pos();
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: "unterminated flow collection: unexpected end of input".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "unterminated flow collection: unexpected end of input".into(),
+                    )));
                 }
 
                 // Advance mapping phase for the emitted scalar; mark frame as having a value.
@@ -1136,10 +1133,11 @@ impl<'input> EventIter<'input> {
                     if in_sequence && cur_base_pos.line != last_token_line && !explicit_key_in_seq {
                         let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                         self.state = IterState::Done;
-                        return StepResult::Yield(Err(Error {
-                            pos: colon_pos,
-                            message: "single-pair mapping key in a flow sequence must be on a single line".into(),
-                        }));
+                        return StepResult::Yield(Err(Error::syntax(
+                            colon_pos,
+                            "single-pair mapping key in a flow sequence must be on a single line"
+                                .into(),
+                        )));
                     }
                     // YAML 1.2 §7.4.3: implicit flow keys are limited to 1024 Unicode
                     // characters. The check applies to both [154] plain YAML-key and
@@ -1161,10 +1159,10 @@ impl<'input> EventIter<'input> {
                         if self.input[key_start_byte..colon_byte].chars().count() > 1024 {
                             let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: colon_pos,
-                                message: "implicit flow key exceeds 1024 Unicode characters (YAML 1.2 §7.4.3)".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                colon_pos,
+                                "implicit flow key exceeds 1024 Unicode characters (YAML 1.2 §7.4.3)".into(),
+                            )));
                         }
                     }
                     key_is_explicit = false;
@@ -1280,10 +1278,10 @@ impl<'input> EventIter<'input> {
                         // `!` alone: advance_past_bang = 0
                         if pending_flow_tag.is_some() {
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: bang_pos,
-                                message: "a node may not have more than one tag".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                bang_pos,
+                                "a node may not have more than one tag".into(),
+                            )));
                         }
                         // Resolve tag handle against directive scope at scan time.
                         let resolved_flow_tag =
@@ -1316,12 +1314,11 @@ impl<'input> EventIter<'input> {
                             if let Some(first) = after_tag.chars().next() {
                                 if first != ' ' && first != '\t' {
                                     self.state = IterState::Done;
-                                    return StepResult::Yield(Err(Error {
-                                        pos: bang_pos,
-                                        message:
-                                            "tag must be separated from node content by whitespace"
-                                                .into(),
-                                    }));
+                                    return StepResult::Yield(Err(Error::syntax(
+                                        bang_pos,
+                                        "tag must be separated from node content by whitespace"
+                                            .into(),
+                                    )));
                                 }
                             }
                         }
@@ -1353,10 +1350,10 @@ impl<'input> EventIter<'input> {
                         if pending_flow_anchor.is_some() {
                             let amp_pos2 = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: amp_pos2,
-                                message: "a node may not have more than one anchor".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                amp_pos2,
+                                "a node may not have more than one anchor".into(),
+                            )));
                         }
                         let anchor_end =
                             crate::pos::advance_within_line(amp_pos.advance('&'), name);
@@ -1384,17 +1381,17 @@ impl<'input> EventIter<'input> {
                 // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
                 if pending_flow_tag.is_some() {
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: star_pos,
-                        message: "alias node cannot have a tag property".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        star_pos,
+                        "alias node cannot have a tag property".into(),
+                    )));
                 }
                 if pending_flow_anchor.is_some() {
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: star_pos,
-                        message: "alias node cannot have an anchor property".into(),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        star_pos,
+                        "alias node cannot have an anchor property".into(),
+                    )));
                 }
                 match scan_anchor_name(after_star, star_pos) {
                     Err(e) => {
@@ -1599,10 +1596,10 @@ impl<'input> EventIter<'input> {
                         }) => {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: err_pos,
-                                message: "missing comma between flow mapping entries".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                err_pos,
+                                "missing comma between flow mapping entries".into(),
+                            )));
                         }
                         Some(FlowFrame::Sequence {
                             has_value: true,
@@ -1612,10 +1609,10 @@ impl<'input> EventIter<'input> {
                         }) => {
                             let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error {
-                                pos: err_pos,
-                                message: "missing comma between flow sequence entries".into(),
-                            }));
+                            return StepResult::Yield(Err(Error::syntax(
+                                err_pos,
+                                "missing comma between flow sequence entries".into(),
+                            )));
                         }
                         _ => {}
                     }
@@ -1708,12 +1705,10 @@ impl<'input> EventIter<'input> {
                 if matches!(ch, '%' | '@' | '`') {
                     let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                     self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error {
-                        pos: err_pos,
-                        message: format!(
-                            "indicator '{ch}' inside flow collection is not yet supported"
-                        ),
-                    }));
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        format!("indicator '{ch}' inside flow collection is not yet supported"),
+                    )));
                 }
 
                 // Any other character that is not a plain-scalar start and is
@@ -1722,10 +1717,10 @@ impl<'input> EventIter<'input> {
                 // than panicking — this is user-supplied input.
                 let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                 self.state = IterState::Done;
-                return StepResult::Yield(Err(Error {
-                    pos: err_pos,
-                    message: format!("invalid character {ch:?} inside flow collection"),
-                }));
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    format!("invalid character {ch:?} inside flow collection"),
+                )));
             }
         }
 

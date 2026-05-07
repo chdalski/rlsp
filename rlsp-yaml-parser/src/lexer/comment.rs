@@ -52,12 +52,10 @@ impl<'input> Lexer<'input> {
         let text: &'input str = &line.content[text_start..];
 
         if text.len() > max_comment_len {
-            return Err(Error {
-                pos: hash_pos,
-                message: format!(
-                    "comment exceeds maximum allowed length ({max_comment_len} bytes)"
-                ),
-            });
+            return Err(Error::syntax(
+                hash_pos,
+                format!("comment exceeds maximum allowed length ({max_comment_len} bytes)"),
+            ));
         }
 
         // Validate c-printable on the comment body.
@@ -69,10 +67,10 @@ impl<'input> Lexer<'input> {
                     line: hash_pos.line,
                     column: hash_pos.column + 1 + bad_char_count,
                 };
-                return Err(Error {
-                    pos: bad_pos,
-                    message: non_printable_error_message(bad_ch, "comment"),
-                });
+                return Err(Error::invalid_character(
+                    bad_pos,
+                    non_printable_error_message(bad_ch, "comment"),
+                ));
             }
         }
 

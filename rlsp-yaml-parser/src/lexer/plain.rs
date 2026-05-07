@@ -91,10 +91,10 @@ impl<'input> Lexer<'input> {
                         line: hash_pos.line,
                         column: hash_pos.column + 1 + bad_char_i,
                     };
-                    self.plain_scalar_suffix_error = Some(Error {
-                        pos: bad_pos,
-                        message: "invalid character U+0000 in comment".to_owned(),
-                    });
+                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                        bad_pos,
+                        "invalid character U+0000 in comment".to_owned(),
+                    ));
                 } else if !self.input_all_printable {
                     if let Some((bad_i, bad_ch)) = find_non_c_printable(comment_text.as_bytes()) {
                         let bad_char_count = comment_text[..bad_i].chars().count();
@@ -103,10 +103,10 @@ impl<'input> Lexer<'input> {
                             line: hash_pos.line,
                             column: hash_pos.column + 1 + bad_char_count,
                         };
-                        self.plain_scalar_suffix_error = Some(Error {
-                            pos: bad_pos,
-                            message: non_printable_error_message(bad_ch, "comment"),
-                        });
+                        self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                            bad_pos,
+                            non_printable_error_message(bad_ch, "comment"),
+                        ));
                     } else {
                         self.trailing_comment =
                             Some((comment_text, Span::from_pos(hash_pos, span_end)));
@@ -128,10 +128,10 @@ impl<'input> Lexer<'input> {
                     line: consumed_first.pos.line,
                     column: consumed_first.pos.column + bad_col_offset,
                 };
-                self.plain_scalar_suffix_error = Some(Error {
-                    pos: bad_pos,
-                    message: format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
-                });
+                self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                    bad_pos,
+                    format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
+                ));
             } else if !self.input_all_printable {
                 if let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes()) {
                     // General c-printable backstop: any non-printable byte in the
@@ -143,10 +143,10 @@ impl<'input> Lexer<'input> {
                         line: consumed_first.pos.line,
                         column: consumed_first.pos.column + bad_col_offset,
                     };
-                    self.plain_scalar_suffix_error = Some(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "plain scalar"),
-                    });
+                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                        bad_pos,
+                        non_printable_error_message(bad_ch, "plain scalar"),
+                    ));
                 }
             }
         }
@@ -258,10 +258,10 @@ impl<'input> Lexer<'input> {
                         unreachable!("consume cont line failed")
                     };
                     self.current_pos = pos_after_line(&consumed);
-                    self.plain_scalar_suffix_error = Some(Error {
-                        pos: bad_pos,
-                        message: non_printable_error_message(bad_ch, "plain scalar"),
-                    });
+                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                        bad_pos,
+                        non_printable_error_message(bad_ch, "plain scalar"),
+                    ));
                     return result;
                 }
             }

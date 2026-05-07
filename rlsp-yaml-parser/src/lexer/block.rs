@@ -139,10 +139,10 @@ impl<'input> Lexer<'input> {
                     unreachable!("consume failed")
                 };
                 self.current_pos = pos_after_line(&consumed);
-                return Some(Err(Error {
-                    pos: tab_pos,
-                    message: "tab character is not valid indentation in a block scalar".to_owned(),
-                }));
+                return Some(Err(Error::syntax(
+                    tab_pos,
+                    "tab character is not valid indentation in a block scalar".to_owned(),
+                )));
             }
 
             // Document markers (`---` / `...`) at column 0 always terminate a
@@ -216,11 +216,10 @@ impl<'input> Lexer<'input> {
                         unreachable!("consume over-indented blank failed")
                     };
                     self.current_pos = pos_after_line(&consumed);
-                    return Some(Err(Error {
-                        pos: blank_pos,
-                        message: "block scalar blank line has more indentation than the content"
-                            .to_owned(),
-                    }));
+                    return Some(Err(Error::syntax(
+                        blank_pos,
+                        "block scalar blank line has more indentation than the content".to_owned(),
+                    )));
                 }
                 if has_real_content {
                     before_first_real_content = false;
@@ -247,10 +246,10 @@ impl<'input> Lexer<'input> {
                             unreachable!("consume content line failed")
                         };
                         self.current_pos = pos_after_line(&consumed);
-                        return Some(Err(Error {
-                            pos: bad_pos,
-                            message: non_printable_error_message(bad_ch, "block scalar"),
-                        }));
+                        return Some(Err(Error::invalid_character(
+                            bad_pos,
+                            non_printable_error_message(bad_ch, "block scalar"),
+                        )));
                     }
                 }
 
@@ -401,11 +400,10 @@ impl<'input> Lexer<'input> {
                 };
                 self.current_pos = pos_after_line(&consumed);
                 return (
-                    Err(Error {
-                        pos: tab_pos,
-                        message: "tab character is not valid indentation in a block scalar"
-                            .to_owned(),
-                    }),
+                    Err(Error::syntax(
+                        tab_pos,
+                        "tab character is not valid indentation in a block scalar".to_owned(),
+                    )),
                     0,
                 );
             }
@@ -480,10 +478,10 @@ impl<'input> Lexer<'input> {
                         };
                         self.current_pos = pos_after_line(&consumed);
                         return (
-                            Err(Error {
-                                pos: bad_pos,
-                                message: non_printable_error_message(bad_ch, "block scalar"),
-                            }),
+                            Err(Error::invalid_character(
+                                bad_pos,
+                                non_printable_error_message(bad_ch, "block scalar"),
+                            )),
                             0,
                         );
                     }
@@ -513,12 +511,11 @@ impl<'input> Lexer<'input> {
                     };
                     self.current_pos = pos_after_line(&consumed);
                     return (
-                        Err(Error {
-                            pos: blank_pos,
-                            message:
-                                "block scalar blank line has more indentation than the content"
-                                    .to_owned(),
-                        }),
+                        Err(Error::syntax(
+                            blank_pos,
+                            "block scalar blank line has more indentation than the content"
+                                .to_owned(),
+                        )),
                         0,
                     );
                 }
@@ -575,12 +572,11 @@ pub(super) fn parse_block_header(
                 return (
                     Chomp::Clip,
                     None,
-                    Some(Error {
+                    Some(Error::syntax(
                         pos,
-                        message:
-                            "comment after block scalar indicator requires at least one space before '#'"
-                                .to_owned(),
-                    }),
+                        "comment after block scalar indicator requires at least one space before '#'"
+                            .to_owned(),
+                    )),
                 );
             }
             Some('+') => {
@@ -588,10 +584,10 @@ pub(super) fn parse_block_header(
                     return (
                         Chomp::Clip,
                         None,
-                        Some(Error {
+                        Some(Error::syntax(
                             pos,
-                            message: "duplicate chomp indicator in block scalar header".to_owned(),
-                        }),
+                            "duplicate chomp indicator in block scalar header".to_owned(),
+                        )),
                     );
                 }
                 chomp = Some(Chomp::Keep);
@@ -603,10 +599,10 @@ pub(super) fn parse_block_header(
                     return (
                         Chomp::Clip,
                         None,
-                        Some(Error {
+                        Some(Error::syntax(
                             pos,
-                            message: "duplicate chomp indicator in block scalar header".to_owned(),
-                        }),
+                            "duplicate chomp indicator in block scalar header".to_owned(),
+                        )),
                     );
                 }
                 chomp = Some(Chomp::Strip);
@@ -617,11 +613,10 @@ pub(super) fn parse_block_header(
                 return (
                     Chomp::Clip,
                     None,
-                    Some(Error {
+                    Some(Error::syntax(
                         pos,
-                        message: "indent indicator '0' is not valid in block scalar header"
-                            .to_owned(),
-                    }),
+                        "indent indicator '0' is not valid in block scalar header".to_owned(),
+                    )),
                 );
             }
             Some(ch @ '1'..='9') => {
@@ -629,10 +624,10 @@ pub(super) fn parse_block_header(
                     return (
                         Chomp::Clip,
                         None,
-                        Some(Error {
+                        Some(Error::syntax(
                             pos,
-                            message: "duplicate indent indicator in block scalar header".to_owned(),
-                        }),
+                            "duplicate indent indicator in block scalar header".to_owned(),
+                        )),
                     );
                 }
                 explicit_indent = Some(ch as usize - '0' as usize);
@@ -644,10 +639,10 @@ pub(super) fn parse_block_header(
                 return (
                     Chomp::Clip,
                     None,
-                    Some(Error {
+                    Some(Error::syntax(
                         pos,
-                        message: format!("invalid block scalar indicator character '{ch}'"),
-                    }),
+                        format!("invalid block scalar indicator character '{ch}'"),
+                    )),
                 );
             }
         }
@@ -662,10 +657,10 @@ pub(super) fn parse_block_header(
         return (
             Chomp::Clip,
             None,
-            Some(Error {
+            Some(Error::syntax(
                 pos,
-                message: "invalid content after block scalar indicator".to_owned(),
-            }),
+                "invalid content after block scalar indicator".to_owned(),
+            )),
         );
     }
 

@@ -286,10 +286,10 @@ impl<'input> Lexer<'input> {
             self.trailing_comment = Some((comment_text, Span::from_pos(inline_start, comment_end)));
         } else if reject_all_inline {
             // `...` markers must not have non-comment inline content.
-            self.marker_inline_error = Some(Error {
-                pos: inline_start,
-                message: "invalid content after document-end marker '...'".into(),
-            });
+            self.marker_inline_error = Some(Error::syntax(
+                inline_start,
+                "invalid content after document-end marker '...'".into(),
+            ));
         } else if let Some(early) =
             self.handle_marker_inline(inline, inline_start, &line, marker_pos, after)
         {
@@ -331,10 +331,10 @@ impl<'input> Lexer<'input> {
         } else if first_byte == Some(b'&') {
             // Anchor — reject if a block mapping entry follows (CXX2).
             if anchor_followed_by_block_mapping(inline) {
-                self.marker_inline_error = Some(Error {
-                    pos: inline_start,
-                    message: "invalid content after document-start marker '---'".into(),
-                });
+                self.marker_inline_error = Some(Error::syntax(
+                    inline_start,
+                    "invalid content after document-start marker '---'".into(),
+                ));
             } else {
                 self.buf.prepend_line(Line {
                     content: inline,
@@ -365,20 +365,20 @@ impl<'input> Lexer<'input> {
         if scanned.is_empty() {
             // First character cannot start a plain scalar (e.g. `*`, `%`,
             // `{`, `[`) — invalid inline content after `---`.
-            self.marker_inline_error = Some(Error {
-                pos: inline_start,
-                message: "invalid content after document-start marker '---'".into(),
-            });
+            self.marker_inline_error = Some(Error::syntax(
+                inline_start,
+                "invalid content after document-start marker '---'".into(),
+            ));
             return;
         }
         // Any non-whitespace residual that is not a comment is invalid
         // (e.g. `--- key: value` where `: value` is left after scanning `key`).
         let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
         if !residual.is_empty() && !residual.starts_with('#') {
-            self.marker_inline_error = Some(Error {
-                pos: inline_start,
-                message: "invalid content after document-start marker '---'".into(),
-            });
+            self.marker_inline_error = Some(Error::syntax(
+                inline_start,
+                "invalid content after document-start marker '---'".into(),
+            ));
         } else {
             let inline_end = crate::pos::advance_within_line(inline_start, scanned);
             self.inline_scalar = Some((

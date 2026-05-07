@@ -161,7 +161,7 @@ pub enum ConsumedMapping<'input> {
     /// The error position points to the start of the inline value content.
     InlineImplicitMappingError { pos: Pos },
     /// A quoted implicit key could not be decoded (e.g. bad escape sequence).
-    QuotedKeyError { pos: Pos, message: String },
+    QuotedKeyError(Pos, String),
     /// An implicit key exceeds the 1024-Unicode-character limit (YAML 1.2 §8.2.2).
     /// The error position points to the `:` indicator.
     ImplicitKeyTooLongError { pos: Pos },

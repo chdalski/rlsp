@@ -185,7 +185,7 @@ wishlist.
 - [x] Mark `Error`, `LoadError`, and `LoadError::Parse`
   `#[non_exhaustive]`; add LSP-side compile-fix
   (`..` rest pattern + `_ =>` wildcard arm)
-- [ ] Introduce `pub enum ErrorKind` and `kind: ErrorKind`
+- [x] Introduce `pub enum ErrorKind` and `kind: ErrorKind`
   field on `Error`; add `Error::syntax(...)` and
   `Error::invalid_character(...)` constructors; migrate
   all internal `Error { pos, message }` constructions to
@@ -271,20 +271,20 @@ wires the four sites in one step. Workspace builds
 remain green at end of Task 2 because no external
 `LoadError::Parse` shape change has happened yet.
 
-- [ ] Add `pub enum ErrorKind` (`#[non_exhaustive]`,
+- [x] Add `pub enum ErrorKind` (`#[non_exhaustive]`,
   derives `Debug, Clone, PartialEq, Eq`) with variants
   `InvalidCharacter` and `Syntax` in
   `rlsp-yaml-parser/src/error.rs`
-- [ ] Add `kind: ErrorKind` field to `Error`
-- [ ] Add `pub use error::ErrorKind;` to
+- [x] Add `kind: ErrorKind` field to `Error`
+- [x] Add `pub use error::ErrorKind;` to
   `rlsp-yaml-parser/src/lib.rs`
-- [ ] Add `Error::syntax(pos: Pos, message: String) -> Error`
+- [x] Add `Error::syntax(pos: Pos, message: String) -> Error`
   and `Error::invalid_character(pos: Pos, message: String) -> Error`
   constructor helpers
-- [ ] Migrate every `Error { pos, message }` literal
+- [x] Migrate every `Error { pos, message }` literal
   construction in `rlsp-yaml-parser/src/` to one of the
   two constructors
-- [ ] Use `Error::invalid_character` at the
+- [x] Use `Error::invalid_character` at the
   character-violation sites:
   - `chars.rs::non_printable_error_message` callers
     (`lexer/comment.rs`, `lexer/plain.rs`,
@@ -294,15 +294,15 @@ remain green at end of Task 2 because no external
     character")
   - `event_iter/directives.rs:102, 126, 169, 247`
     (directive name and parameter non-printable)
-- [ ] Use `Error::syntax` at all other sites
-- [ ] Add inline tests in `rlsp-yaml-parser/src/error.rs`
+- [x] Use `Error::syntax` at all other sites
+- [x] Add inline tests in `rlsp-yaml-parser/src/error.rs`
   asserting representative inputs produce the expected
   `kind`: comment with NUL → `InvalidCharacter`,
   directive parameter with non-printable →
   `InvalidCharacter`, escape `\x07` →
   `InvalidCharacter`, unclosed flow sequence → `Syntax`,
   bad indent → `Syntax`
-- [ ] `cargo fmt`, `cargo clippy --all-targets --workspace`,
+- [x] `cargo fmt`, `cargo clippy --all-targets --workspace`,
   `cargo build --workspace`, `cargo test --workspace`
   all pass with zero warnings
 
@@ -313,6 +313,8 @@ violations enumerated in Context all produce
 produce `ErrorKind::Syntax`; new tests prove the kind is
 set correctly for at least one representative input per
 character-violation site listed in Context.
+
+**Commit:** 6f4f003
 
 ### Task 3: Propagate kind through `LoadError::Parse`
 

@@ -17,7 +17,7 @@ use rstest::rstest;
 
 use rlsp_yaml_parser::loader::LoadError;
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Error, Event, load, parse_events};
+use rlsp_yaml_parser::{Error, ErrorKind, Event, load, parse_events};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -313,4 +313,181 @@ fn invalid_merge_key_value_is_accepted_or_errors_gracefully() {
         assert_eq!(docs.len(), 1, "expected 1 document");
     }
     // If Err, the parser rejected merge key with scalar value — also acceptable.
+}
+
+// ===========================================================================
+// Group F: ErrorKind — kind field is set correctly on parse errors
+// ===========================================================================
+
+#[test]
+fn error_kind_for_non_printable_in_plain_scalar_is_invalid_character() {
+    // U+0001 (SOH) is a non-printable, non-c-printable character forbidden in
+    // plain scalars. Inserting it as the second byte of the content triggers
+    // an InvalidCharacter error.
+    let input = "key: val\u{0001}ue\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in plain scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_unterminated_single_quoted_scalar_is_syntax() {
+    let input = "key: 'unterminated\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::Syntax,
+        "expected Syntax for unterminated single-quoted scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_unterminated_double_quoted_scalar_is_syntax() {
+    let input = "key: \"unterminated\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::Syntax,
+        "expected Syntax for unterminated double-quoted scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_non_printable_in_double_quoted_scalar_is_invalid_character() {
+    // U+0001 inside a double-quoted scalar (not as a \x01 escape, but literal).
+    let input = "key: \"val\u{0001}ue\"\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in double-quoted scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_non_printable_in_single_quoted_scalar_is_invalid_character() {
+    // U+0001 inside a single-quoted scalar (literal byte).
+    let input = "key: 'val\u{0001}ue'\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in single-quoted scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_non_printable_in_block_scalar_is_invalid_character() {
+    // U+0001 inside a literal block scalar body.
+    let input = "key: |\n  val\u{0001}ue\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in block scalar, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_duplicate_yaml_directive_is_syntax() {
+    // Two %YAML directives in one document is a structural/grammar error.
+    let input = "%YAML 1.2\n%YAML 1.2\n---\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::Syntax,
+        "expected Syntax for duplicate YAML directive, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn error_kind_for_non_printable_in_directive_name_is_invalid_character() {
+    // U+0001 in a directive parameter triggers an InvalidCharacter error.
+    // %TAG directives with a non-printable in the handle/prefix are rejected.
+    let input = "%TAG !\u{0001} tag:example.com,2024:\n---\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in directive parameter, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn parse_events_comment_non_printable_produces_invalid_character_kind() {
+    // SOH (U+0001) in a comment body — hits lexer/comment.rs non_printable_error_message path.
+    let input = "# hello\x01world\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in comment, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn parse_events_quoted_scalar_escape_non_printable_produces_invalid_character_kind() {
+    // \x01 escape sequence in a double-quoted scalar decodes to U+0001, which is
+    // non-printable — hits decode_and_push_escape at lexer/quoted.rs:703.
+    let input = "key: \"\\x01\"\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for \\x01 escape producing non-printable, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn parse_events_directive_parameter_non_printable_produces_invalid_character_kind() {
+    // Non-printable in a reserved directive's parameter — hits directives.rs line 123
+    // loop for reserved directives.
+    let input = "%FOO bar\x01baz\n---\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in reserved directive parameter, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn parse_events_yaml_directive_parameter_non_printable_produces_invalid_character_kind() {
+    // Non-printable in a %YAML directive parameter — hits directives.rs line 166
+    // pre-validate loop for %YAML directives.
+    let input = "%YAML 1\x01.2\n---\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::InvalidCharacter,
+        "expected InvalidCharacter for non-printable in %YAML directive parameter, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn parse_events_unterminated_flow_sequence_produces_syntax_kind() {
+    // Unterminated flow sequence — structural/grammar error, not a character violation.
+    let input = "[a, b, c\n";
+    let err = first_error(input).expect("expected parse error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::Syntax,
+        "expected Syntax for unterminated flow sequence, got: {:?}",
+        err.kind
+    );
 }

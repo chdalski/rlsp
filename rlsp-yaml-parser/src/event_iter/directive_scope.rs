@@ -143,20 +143,20 @@ impl DirectiveScope {
             let decoded_suffix = percent_decode(suffix);
             let resolved = format!("{prefix}{decoded_suffix}");
             if resolved.len() > MAX_RESOLVED_TAG_LEN {
-                return Err(Error {
-                    pos: indicator_pos,
-                    message: format!(
-                        "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
-                    ),
-                });
+                return Err(Error::syntax(
+                    indicator_pos,
+                    format!("resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"),
+                ));
             }
             // Post-concatenation check: percent-decoding the suffix may produce bytes
             // (e.g., space from `%20`) that are not valid ns-uri-char [38].
-            validate_resolved_tag(&resolved).map_err(|offset| Error {
-                pos: indicator_pos,
-                message: format!(
-                    "resolved tag contains character not allowed in URI at byte offset {offset}"
-                ),
+            validate_resolved_tag(&resolved).map_err(|offset| {
+                Error::syntax(
+                    indicator_pos,
+                    format!(
+                        "resolved tag contains character not allowed in URI at byte offset {offset}"
+                    ),
+                )
             })?;
             return Ok(Cow::Owned(resolved));
         }
@@ -169,25 +169,25 @@ impl DirectiveScope {
                 let decoded_suffix = percent_decode(suffix);
                 let resolved = format!("{prefix}{decoded_suffix}");
                 if resolved.len() > MAX_RESOLVED_TAG_LEN {
-                    return Err(Error {
-                        pos: indicator_pos,
-                        message: format!(
+                    return Err(Error::syntax(
+                        indicator_pos,
+                        format!(
                             "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
                         ),
-                    });
+                    ));
                 }
-                validate_resolved_tag(&resolved).map_err(|offset| Error {
-                    pos: indicator_pos,
-                    message: format!(
+                validate_resolved_tag(&resolved).map_err(|offset| Error::syntax(
+                    indicator_pos,
+                    format!(
                         "resolved tag contains character not allowed in URI at byte offset {offset}"
                     ),
-                })?;
+                ))?;
                 return Ok(Cow::Owned(resolved));
             }
-            return Err(Error {
-                pos: indicator_pos,
-                message: format!("undefined tag handle: {handle}"),
-            });
+            return Err(Error::syntax(
+                indicator_pos,
+                format!("undefined tag handle: {handle}"),
+            ));
         }
 
         // `!suffix` — check for a registered primary `!` handle (set via `%TAG ! prefix`).
@@ -198,19 +198,19 @@ impl DirectiveScope {
                 let decoded_suffix = percent_decode(after_first_bang);
                 let resolved = format!("{prefix}{decoded_suffix}");
                 if resolved.len() > MAX_RESOLVED_TAG_LEN {
-                    return Err(Error {
-                        pos: indicator_pos,
-                        message: format!(
+                    return Err(Error::syntax(
+                        indicator_pos,
+                        format!(
                             "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
                         ),
-                    });
+                    ));
                 }
-                validate_resolved_tag(&resolved).map_err(|offset| Error {
-                    pos: indicator_pos,
-                    message: format!(
+                validate_resolved_tag(&resolved).map_err(|offset| Error::syntax(
+                    indicator_pos,
+                    format!(
                         "resolved tag contains character not allowed in URI at byte offset {offset}"
                     ),
-                })?;
+                ))?;
                 return Ok(Cow::Owned(resolved));
             }
         }
