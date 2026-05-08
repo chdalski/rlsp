@@ -12,20 +12,6 @@ type: project
 
 ## Open: rlsp-yaml
 
-<!-- helper-of: convention — an allow-list entry marked `HelperOf` exists because its root
-     feature function is also allow-listed as a `TodoRetrofit`. When the root's retrofit plan
-     lands, all `HelperOf` entries pointing at that root are removed from the allow-list at the
-     same time; they are NOT independent retrofit items and do NOT need their own follow-up
-     plans. -->
-
-<!-- Audit-v2 feature-level retrofits — 12 public feature entry points that hand-roll YAML
-     scanning instead of consuming the parser AST. Each item below has its signature, violation
-     shape, replacement sketch, and the private helpers retired when the root retrofit lands.
-     These were surfaced and allow-listed in commit c70f642 under
-     .ai/plans/2026-04-18-parser-boundary-audit-v2.md Task 1. -->
-
-
-
 - **`block_to_flow` policy enforcement against `formatEnforceBlockStyle`** — When the user sets `formatEnforceBlockStyle: true`, the workspace formatter rewrites all flow-style collections back to block style on save. The `block_to_flow` code action contradicts this policy: applying it produces flow output that the next save reverts. Open question: should `block_to_flow` be suppressed (not offered) when `formatEnforceBlockStyle: true`, or should it remain offered with a UI hint, or is the conflict acceptable as user-driven? Surfaced during the code-action user-format-config plan audit (`.ai/plans/2026-04-27-code-action-respect-user-format-config.md`, in Decisions/Non-Goals). Separate plan needed — the question is policy/UX, not a correctness bug. Related but distinct: are there other code actions whose existence violates user formatter policy when settings are non-default?
 
 - **`autoWrapFlowStyle` opt-out for `block_to_flow`** — The code-action user-format-config plan (`.ai/plans/2026-04-27-code-action-respect-user-format-config.md`) sets `block_to_flow`'s default to auto-wrap output to fit `formatPrintWidth`, removing the misleading `(long line)` title suffix. If users later report wanting single-line flow output regardless of length (e.g., for tooling that prefers compact JSON-like flow), add a setting like `autoWrapFlowStyle: false` (default `true`) so the action emits unwrapped flow when the user opts out. Defer until evidence shows demand — pre-emptively shipping the setting risks configuration sprawl across all code actions. Bias: do nothing unless a user explicitly asks for it.
