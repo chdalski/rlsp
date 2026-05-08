@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-08)
 **Created:** 2026-05-08
 
 # Corpus invariant I11: validator stability under format-equivalent re-emit
