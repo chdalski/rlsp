@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-08
 
 # Corpus invariant I11: validator stability under format-equivalent re-emit
@@ -155,27 +155,29 @@ fixed first.
 
 ## Steps
 
-- [ ] Add `check_i11_validator_stability_under_reemit` to
+- [x] Add `check_i11_validator_stability_under_reemit` to
   `rlsp-yaml/tests/corpus_invariants.rs`
-- [ ] Add a private helper that runs all seven validators
+- [x] Add a private helper that runs all seven validators
   (six built-ins + `validate_schema` with the synthetic
   schema) and returns a sorted multiset key vector
-- [ ] Add a private helper that builds the synthetic
+- [x] Add a private helper that builds the synthetic
   schema once
-- [ ] Register I11 in the `INVARIANTS` array
-- [ ] Add unit tests for the multiset-comparison helper
+- [x] Register I11 in the `INVARIANTS` array
+- [x] Add unit tests for the multiset-comparison helper
   (matching, mismatching, duplicate-count differences)
-- [ ] Run the harness; on any surprise failure, follow the
+- [x] Run the harness; on any surprise failure, follow the
   Surprise Failure Protocol (report to lead, receive
   follow-up plan path, add skip-list entry plus
   `WORKLIST.md` row)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`,
+- [x] `cargo fmt`, `cargo clippy --all-targets`,
   `cargo test -p rlsp-yaml --test corpus_invariants` all
   pass with zero warnings
 
 ## Tasks
 
 ### Task 1: Add I11 corpus invariant for validator stability under format-equivalent re-emit
+
+**Commit:** `1fabc706a251aac01832e3248408fc609af387db`
 
 Implement the new corpus invariant that runs all seven
 validators on a corpus file's original text and on
@@ -184,7 +186,7 @@ multisets are identical modulo range. This is a single
 committable slice — invariant code, helper functions,
 unit tests, and registration land together.
 
-- [ ] Add a private function in
+- [x] Add a private function in
   `rlsp-yaml/tests/corpus_invariants.rs` that builds the
   synthetic schema by calling
   `rlsp_yaml::schema::parse_schema(&serde_json::json!({
@@ -193,18 +195,18 @@ unit tests, and registration land together.
   }))` and unwrapping with `.expect(...)` at the test
   call site. Match the in-test schema construction style
   from `configmap_schema()` in `lsp_lifecycle.rs`.
-- [ ] Add a private function `i11_collect_diagnostics(docs, schema)`
+- [x] Add a private function `i11_collect_diagnostics(docs, schema)`
   that runs all six built-in validators (mirroring the
   call shapes in `collect_all_diagnostics`) plus
   `validate_schema(docs, schema, false, YamlVersion::V1_2)`
   and returns the concatenated `Vec<Diagnostic>`. Do not
   modify the existing `collect_all_diagnostics` — other
   invariants depend on its current behavior.
-- [ ] Add a private function `diagnostic_identity_multiset(diags)`
+- [x] Add a private function `diagnostic_identity_multiset(diags)`
   that returns a sorted
   `Vec<(String, Option<DiagnosticSeverity>, String)>`
   where each tuple is `(format!("{:?}", d.code), d.severity, d.message.clone())`.
-- [ ] Add `check_i11_validator_stability_under_reemit(_path, text) -> Result<(), String>`:
+- [x] Add `check_i11_validator_stability_under_reemit(_path, text) -> Result<(), String>`:
   parse `text`; if the document set is empty, return
   `Ok(())` (matches I10's empty-input behavior and avoids
   asserting on degenerate parses). Otherwise build the
@@ -217,13 +219,13 @@ unit tests, and registration land together.
   an error string identifying the first differing
   diagnostic identity and whether it is missing,
   duplicated, or new.
-- [ ] Append a new `Invariant { id: "I11", description:
+- [x] Append a new `Invariant { id: "I11", description:
   "Validator stability under format-equivalent re-emit:
   diagnostic identities (code, severity, message) match
   pre- and post-format on AST-equivalent input", check:
   check_i11_validator_stability_under_reemit }` entry to
   the `INVARIANTS` array.
-- [ ] Add unit tests in the existing `mod tests` block
+- [x] Add unit tests in the existing `mod tests` block
   for `diagnostic_identity_multiset`:
   - identical inputs produce equal multisets
   - reordering the input vector does not change the
@@ -232,23 +234,23 @@ unit tests, and registration land together.
   - same identity appearing twice in one input but once
     in the other produces different multisets
   - empty input produces an empty multiset
-- [ ] Add a unit test that asserts the I11 entry exists
+- [x] Add a unit test that asserts the I11 entry exists
   in `INVARIANTS` with id `"I11"`. This guards against
   accidental removal during future refactors.
-- [ ] Run `cargo test -p rlsp-yaml --test corpus_invariants`.
+- [x] Run `cargo test -p rlsp-yaml --test corpus_invariants`.
   If a `(file, I11)` pair fails on the existing four
   corpus files, follow the Surprise Failure Protocol:
   pause, report the failure detail to the lead, wait for
   a follow-up plan path, then add a `SKIP_LIST` entry
   `(file_name, "I11", plan_path_string)` and append a
   matching row to `rlsp-yaml/tests/corpus/WORKLIST.md`.
-- [ ] After all corpus files either pass I11 or are
+- [x] After all corpus files either pass I11 or are
   skip-listed with referenced plans, the test command
   must pass: `cargo test -p rlsp-yaml --test corpus_invariants`
   exits 0 with the harness reporting `11 invariants × 4
   files = 44 checks`.
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets -p rlsp-yaml` reports
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets -p rlsp-yaml` reports
   zero warnings
 
 ## Decisions
