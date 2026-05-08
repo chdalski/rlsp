@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Block-to-Flow Code Action Handles Nested Collections [completed]
+
+**Description:** The "Convert block to flow style" code action now handles block collections that contain nested block collections — previously these inputs were silently skipped with no action offered. Supported shapes include: block mapping containing a block mapping value (`outer: {inner: {a: 1}}`), block sequence whose items are block mappings (the Kubernetes `containers:` shape: `containers: [{name: web, image: nginx}, {name: db, image: postgres}]`), block sequence whose items are block sequences, and arbitrarily deep nesting across all combinations. Anchors and tags on inner nested collections are preserved in the flow output.
+**Complexity:** Low
+**Comment:** The recursive style-flip is local to the code action — no formatter changes required. Comments inside a flipped subtree are not preserved, consistent with the existing flat block-to-flow behavior.
+**Tier:** 2
+
+---
+
 ### `invalidCharacter` Diagnostic Code [completed]
 
 **Description:** YAML files containing non-printable characters (bytes or code points not in the YAML 1.2 c-printable or nb-json sets) now produce diagnostics with code `invalidCharacter` instead of the generic `yamlSyntax` code. Editors can use this code to distinguish character-set violations from grammar errors and apply different highlighting or suppression rules.

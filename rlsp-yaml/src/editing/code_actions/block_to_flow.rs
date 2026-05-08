@@ -24,15 +24,9 @@ pub(super) fn block_to_flow(
         return None;
     }
 
-    if has_nested_collection_child(node) {
-        return None;
-    }
-
     let mut flow_node = node.clone();
     match &mut flow_node {
-        Node::Mapping { style, .. } | Node::Sequence { style, .. } => {
-            *style = CollectionStyle::Flow;
-        }
+        Node::Mapping { .. } | Node::Sequence { .. } => flip_to_flow(&mut flow_node),
         Node::Scalar { .. } | Node::Alias { .. } => return None,
     }
 
@@ -40,7 +34,7 @@ pub(super) fn block_to_flow(
     let base_indent = key_start_col as usize + 2;
     let key_line = key_start_line_1based.saturating_sub(1); // 0-based
     let formatted = format_subtree(&flow_node, options, base_indent);
-    let new_text = format!(" {formatted}");
+    let new_text = format!(" {formatted}\n");
 
     if new_text.trim().is_empty() {
         return None;
@@ -65,7 +59,7 @@ pub(super) fn block_to_flow(
     )]
     let edit_range = Range::new(
         Position::new(key_line, edit_start_col as u32),
-        Position::new(loc_end_line.saturating_sub(1), loc_end_col + 1),
+        Position::new(loc_end_line.saturating_sub(1), loc_end_col),
     );
 
     Some(make_action(
@@ -175,13 +169,23 @@ const fn is_block_collection(node: &Node<Span>) -> bool {
     )
 }
 
-/// Return true if any direct child of the given block collection node is
-/// itself a block-style `Mapping` or `Sequence`.
-pub(super) fn has_nested_collection_child(node: &Node<Span>) -> bool {
+/// Recursively set `CollectionStyle::Flow` on every `Mapping` and `Sequence` in the subtree.
+fn flip_to_flow(node: &mut Node<Span>) {
     match node {
-        Node::Mapping { entries, .. } => entries.iter().any(|(_, v)| is_block_collection(v)),
-        Node::Sequence { items, .. } => items.iter().any(is_block_collection),
-        Node::Scalar { .. } | Node::Alias { .. } => false,
+        Node::Mapping { style, entries, .. } => {
+            *style = CollectionStyle::Flow;
+            for (k, v) in entries {
+                flip_to_flow(k);
+                flip_to_flow(v);
+            }
+        }
+        Node::Sequence { style, items, .. } => {
+            *style = CollectionStyle::Flow;
+            for item in items {
+                flip_to_flow(item);
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
@@ -223,6 +227,42 @@ mod tests {
     fn should_produce_reparseable_yaml_when_long_nested_mapping_wraps() {
         let text = "outer:\n  inner:\n    key_aaa: val_aaa\n    key_bbb: val_bbb\n    key_ccc: val_ccc\n    key_ddd: val_ddd\n    key_eee: val_eee\n";
         let result = apply_block_to_flow_edit(text, 1);
+        let parse_result = parse_yaml(&result);
+        assert!(
+            parse_result.diagnostics.is_empty(),
+            "edited YAML must reparse without diagnostics; got: {:?}\nresult text:\n{result}",
+            parse_result.diagnostics
+        );
+        assert_eq!(
+            parse_result.documents.len(),
+            1,
+            "edited YAML must produce exactly one document; result text:\n{result}"
+        );
+    }
+
+    // Pattern C: re-parseability assertion — nested mapping converts recursively.
+    #[test]
+    fn should_produce_reparseable_yaml_when_nested_mapping_converts() {
+        let text = "outer:\n  inner:\n    a: 1\n    b: 2\n";
+        let result = apply_block_to_flow_edit(text, 0);
+        let parse_result = parse_yaml(&result);
+        assert!(
+            parse_result.diagnostics.is_empty(),
+            "edited YAML must reparse without diagnostics; got: {:?}\nresult text:\n{result}",
+            parse_result.diagnostics
+        );
+        assert_eq!(
+            parse_result.documents.len(),
+            1,
+            "edited YAML must produce exactly one document; result text:\n{result}"
+        );
+    }
+
+    // Pattern C: re-parseability assertion — nested sequence converts recursively.
+    #[test]
+    fn should_produce_reparseable_yaml_when_nested_sequence_converts() {
+        let text = "items:\n  - - a\n    - b\n  - - c\n    - d\n";
+        let result = apply_block_to_flow_edit(text, 0);
         let parse_result = parse_yaml(&result);
         assert!(
             parse_result.diagnostics.is_empty(),

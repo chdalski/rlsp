@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-08)
 **Created:** 2026-05-08
 
 ## Goal
@@ -82,25 +82,25 @@ production approach this plan extends to `block_to_flow`.
 
 ## Steps
 
-- [ ] Add `flip_to_flow` recursive helper in `block_to_flow.rs`
-- [ ] Replace the early-exit guard with the recursive flip call
-- [ ] Remove the now-dead `has_nested_collection_child` (after
+- [x] Add `flip_to_flow` recursive helper in `block_to_flow.rs`
+- [x] Replace the early-exit guard with the recursive flip call
+- [x] Remove the now-dead `has_nested_collection_child` (after
       grepping for other call sites)
-- [ ] Delete the three `omits-action` fixtures whose
+- [x] Delete the three `omits-action` fixtures whose
       asserted absence is being inverted by this change:
       `block-to-flow-nested-structures-omits.md`,
       `block-to-flow-sequence-item-is-nested-sequence-omits.md`,
       `block-to-flow-sequence-items-are-mappings-omits.md`
-- [ ] Add fixture: nested mapping in mapping value
-- [ ] Add fixture: sequence-of-mappings (Kubernetes
+- [x] Add fixture: nested mapping in mapping value
+- [x] Add fixture: sequence-of-mappings (Kubernetes
       `containers:` shape)
-- [ ] Add fixture: nested sequence in mapping value
-- [ ] Add fixture: deep nesting (≥3 levels)
-- [ ] Add fixture: anchors/tags on inner nested collection
-- [ ] Add inline re-parseability test: nested mapping
-- [ ] Add inline re-parseability test: nested sequence
-- [ ] Add user-facing entry to `rlsp-yaml/docs/feature-log.md`
-- [ ] Run `cargo fmt`, `cargo clippy --all-targets`,
+- [x] Add fixture: nested sequence in mapping value
+- [x] Add fixture: deep nesting (≥3 levels)
+- [x] Add fixture: anchors/tags on inner nested collection
+- [x] Add inline re-parseability test: nested mapping
+- [x] Add inline re-parseability test: nested sequence
+- [x] Add user-facing entry to `rlsp-yaml/docs/feature-log.md`
+- [x] Run `cargo fmt`, `cargo clippy --all-targets`,
       `cargo test`
 
 ## Tasks
@@ -123,20 +123,20 @@ existing inline re-parseability test pattern.
 
 #### Production code
 
-- [ ] Add `flip_to_flow(&mut Node<Span>)` private helper
+- [x] Add `flip_to_flow(&mut Node<Span>)` private helper
       in `block_to_flow.rs` that walks the subtree and
       sets `*style = CollectionStyle::Flow` on every
       `Mapping` and `Sequence`, recursing into entries
       and items. Scalars and aliases are leaves.
-- [ ] Remove the early-exit guard at
+- [x] Remove the early-exit guard at
       `block_to_flow.rs:27-29` (the
       `has_nested_collection_child(node)` check).
-- [ ] Replace the outer-only style mutation at
+- [x] Replace the outer-only style mutation at
       `block_to_flow.rs:31-37` with a Mapping/Sequence
       type-check (returning `None` for Scalar/Alias)
       followed by a single `flip_to_flow(&mut flow_node)`
       call.
-- [ ] Grep the workspace for `has_nested_collection_child`
+- [x] Grep the workspace for `has_nested_collection_child`
       to confirm `block_to_flow.rs` is the only caller,
       then delete the function at
       `block_to_flow.rs:180-186`.
@@ -157,28 +157,28 @@ they must be deleted as part of this task or the
 `omits-action` assertions will fail when the action is
 now offered:
 
-- [ ] Delete `tests/fixtures/code_actions/block-to-flow-nested-structures-omits.md`
-- [ ] Delete `tests/fixtures/code_actions/block-to-flow-sequence-item-is-nested-sequence-omits.md`
-- [ ] Delete `tests/fixtures/code_actions/block-to-flow-sequence-items-are-mappings-omits.md`
+- [x] Delete `tests/fixtures/code_actions/block-to-flow-nested-structures-omits.md`
+- [x] Delete `tests/fixtures/code_actions/block-to-flow-sequence-item-is-nested-sequence-omits.md`
+- [x] Delete `tests/fixtures/code_actions/block-to-flow-sequence-items-are-mappings-omits.md`
 
 New fixtures to add (each replaces one of the deleted
 omits cases with a concrete `applies-action` assertion):
 
-- [ ] `block-to-flow-nested-mapping.md` — input:
+- [x] `block-to-flow-nested-mapping.md` — input:
       `outer:\n  inner:\n    a: 1\n    b: 2`; expected:
       `outer: {inner: {a: 1, b: 2}}`.
-- [ ] `block-to-flow-sequence-of-mappings.md` — input:
+- [x] `block-to-flow-sequence-of-mappings.md` — input:
       Kubernetes-style `containers:` with two block
       mappings as items; expected: flow output preserving
       every key/value across both items.
-- [ ] `block-to-flow-nested-sequence.md` — input: block
+- [x] `block-to-flow-nested-sequence.md` — input: block
       sequence whose items are block sequences (e.g.
       `items:\n  - - a\n    - b\n  - - c\n    - d`);
       expected: `items: [[a, b], [c, d]]`.
-- [ ] `block-to-flow-deep-nesting.md` — input with 3
+- [x] `block-to-flow-deep-nesting.md` — input with 3
       levels of block nesting; expected: a single flow
       output with all three levels flow-flattened.
-- [ ] `block-to-flow-anchor-on-inner.md` — input where
+- [x] `block-to-flow-anchor-on-inner.md` — input where
       an inner nested collection carries an anchor or
       tag; expected: the inner anchor/tag re-emits in
       flow context exactly once.
@@ -190,11 +190,11 @@ follow Pattern C from `tests/fixtures/CLAUDE.md`
 (re-parseability assertion on the applied edit). Two new
 inline tests extend that pattern to nested cases:
 
-- [ ] `should_produce_reparseable_yaml_when_nested_mapping_converts`
+- [x] `should_produce_reparseable_yaml_when_nested_mapping_converts`
       — applies the action to a nested-mapping input and
       asserts `parse_yaml(&result).diagnostics.is_empty()`
       and `documents.len() == 1`.
-- [ ] `should_produce_reparseable_yaml_when_nested_sequence_converts`
+- [x] `should_produce_reparseable_yaml_when_nested_sequence_converts`
       — same shape, nested-sequence input.
 
 #### User-facing documentation
@@ -206,7 +206,7 @@ children, including the common Kubernetes `containers:`
 shape). Per the project `CLAUDE.md`, user-facing behavior
 changes belong in `feature-log.md`.
 
-- [ ] Add a `feature-log.md` entry titled "Block-to-Flow
+- [x] Add a `feature-log.md` entry titled "Block-to-Flow
       Code Action Handles Nested Collections [completed]"
       describing: (a) the previously-unsupported input
       shapes the action now handles (mapping-in-mapping,
@@ -216,23 +216,44 @@ changes belong in `feature-log.md`.
 
 #### Acceptance criteria
 
-- [ ] `flip_to_flow` recursive helper added; outer-only
+- [x] `flip_to_flow` recursive helper added; outer-only
       style mutation replaced with a single call to it.
-- [ ] `has_nested_collection_child` deleted (no remaining
+- [x] `has_nested_collection_child` deleted (no remaining
       callers).
-- [ ] Three obsolete `omits-action` fixtures deleted
+- [x] Three obsolete `omits-action` fixtures deleted
       (`block-to-flow-nested-structures-omits.md`,
       `block-to-flow-sequence-item-is-nested-sequence-omits.md`,
       `block-to-flow-sequence-items-are-mappings-omits.md`).
-- [ ] Five new fixtures present and passing under
+- [x] Five new fixtures present and passing under
       `cargo test --test code_action_fixtures`.
-- [ ] Two new inline re-parseability tests passing under
+- [x] Two new inline re-parseability tests passing under
       `cargo test --lib -p rlsp-yaml`.
-- [ ] New entry present in `rlsp-yaml/docs/feature-log.md`
+- [x] New entry present in `rlsp-yaml/docs/feature-log.md`
       describing the user-visible change.
-- [ ] `cargo fmt --check` clean.
-- [ ] `cargo clippy --all-targets` zero warnings.
-- [ ] `cargo test` green across the workspace.
+- [x] `cargo fmt --check` clean.
+- [x] `cargo clippy --all-targets` zero warnings.
+- [x] `cargo test` green across the workspace.
+
+**Commit:** 027969fe0528a14c88d60e24e818e8cc917203b9
+
+### Execution note (added at completion)
+
+Removing the `has_nested_collection_child` guard exposed a
+latent edit-range bug in `block_to_flow.rs` (replacement
+text lacked a trailing newline; edit range used
+`loc_end_col + 1` instead of `loc_end_col`). The bug was
+masked while the guard was in place because it only
+manifested on multi-section documents the action
+previously refused to convert. The reviewer independently
+verified at the baseline SHA that removing only the guard
+(without the fix) caused I4 corpus invariant
+(`docker-compose.yml`) to fail by dropping the `"deploy"`
+scalar. The fix was bundled into Task 1's commit because
+the plan's acceptance criterion `cargo test green across
+the workspace` made it a precondition for completion. The
+fix is in the same file as the helper change and is not
+user-visible beyond what the feature-log entry already
+describes — internal hygiene, not a separate feature.
 
 ## Decisions
 
