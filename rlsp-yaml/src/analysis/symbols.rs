@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-use std::fmt::Write;
-
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
@@ -31,6 +29,43 @@ fn yaml_to_symbols(node: &Node<Span>, idx: &LineIndex) -> Vec<DocumentSymbol> {
             .map(|(key, value)| make_symbol(&node_to_string(key), key, value, idx))
             .collect(),
         Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => Vec::new(),
+    }
+}
+
+/// Truncate a string to at most 60 Unicode scalar values, appending `…` if truncated.
+fn truncate_detail(s: &str) -> String {
+    const LIMIT: usize = 60;
+    let mut chars = s.chars();
+    let collected: String = chars.by_ref().take(LIMIT).collect();
+    if chars.next().is_some() {
+        // There are more chars beyond the limit
+        format!("{collected}…")
+    } else {
+        collected
+    }
+}
+
+/// Compute the `detail` string for a value node.
+fn value_detail(value: &Node<Span>) -> Option<String> {
+    match value {
+        Node::Scalar { value, .. } => Some(truncate_detail(value)),
+        Node::Mapping { entries, .. } => {
+            let n = entries.len();
+            if n == 1 {
+                Some("1 key".to_string())
+            } else {
+                Some(format!("{n} keys"))
+            }
+        }
+        Node::Sequence { items, .. } => {
+            let n = items.len();
+            if n == 1 {
+                Some("1 item".to_string())
+            } else {
+                Some(format!("{n} items"))
+            }
+        }
+        Node::Alias { .. } => None,
     }
 }
 
@@ -79,13 +114,35 @@ fn make_symbol(
 
     DocumentSymbol {
         name: key_name.to_string(),
-        detail: None,
+        detail: value_detail(value),
         kind: node_symbol_kind(value),
         tags: None,
         deprecated: None,
         range,
         selection_range,
         children,
+    }
+}
+
+/// Label keys checked (in order) against the first mapping entry's key.
+const LABEL_KEYS: &[&str] = &["name", "id", "key"];
+
+/// Try to extract a label from a mapping item's first entry.
+///
+/// Returns `Some(label_value)` when the first key matches one of `LABEL_KEYS`
+/// and its value is a scalar. Returns `None` otherwise.
+fn label_from_mapping(entries: &[(Node<Span>, Node<Span>)]) -> Option<&str> {
+    let (first_key, first_value) = entries.first()?;
+    let key_str = match first_key {
+        Node::Scalar { value, .. } => value.as_str(),
+        Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => return None,
+    };
+    if !LABEL_KEYS.contains(&key_str) {
+        return None;
+    }
+    match first_value {
+        Node::Scalar { value, .. } => Some(value.as_str()),
+        Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
     }
 }
 
@@ -100,8 +157,18 @@ fn make_sequence_children(items: &[Node<Span>], idx: &LineIndex) -> Vec<Document
     for (i, item) in items.iter().enumerate() {
         let item_loc = node_loc(item);
 
-        let mut name = String::new();
-        let _ = write!(name, "[{i}]");
+        let index_name = format!("[{i}]");
+
+        // Determine name and detail using label-key heuristic.
+        let (name, detail) = match item {
+            Node::Mapping { entries, .. } => label_from_mapping(entries).map_or_else(
+                || (index_name.clone(), None),
+                |label| (label.to_string(), Some(index_name.clone())),
+            ),
+            Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
+                (index_name.clone(), None)
+            }
+        };
 
         let range = span_to_lsp(item_loc, idx);
         // selection_range is a single character at the item content start (AST-derived).
@@ -122,7 +189,7 @@ fn make_sequence_children(items: &[Node<Span>], idx: &LineIndex) -> Vec<Document
 
         children.push(DocumentSymbol {
             name,
-            detail: None,
+            detail,
             kind: node_symbol_kind(item),
             tags: None,
             deprecated: None,
@@ -582,8 +649,9 @@ mod tests {
         );
     }
 
-    // UT-NEW-C: Sequence-of-mappings produces [0], [1] children with mapping-key grand-children
-    // and selection_range is a single character at item content start (AST-derived)
+    // UT-NEW-C: Sequence-of-mappings uses label-key heuristic to name children.
+    // YAML has `name` as first key, so items are named by the value, not [0]/[1].
+    // detail shows the original index when label-key is used.
     #[test]
     fn sequence_of_mappings_indexed_children_with_grandchildren() {
         let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
@@ -596,18 +664,27 @@ mod tests {
         assert_eq!(children.len(), 2, "should have exactly 2 sequence items");
 
         let item0 = &children[0];
-        assert_eq!(item0.name, "[0]");
+        assert_eq!(item0.name, "Alice", "first item should use label-key value");
+        assert_eq!(
+            item0.detail.as_deref(),
+            Some("[0]"),
+            "detail shows original index when label-key used"
+        );
         let item1 = &children[1];
-        assert_eq!(item1.name, "[1]");
+        assert_eq!(item1.name, "Bob", "second item should use label-key value");
+        assert_eq!(
+            item1.detail.as_deref(),
+            Some("[1]"),
+            "detail shows original index when label-key used"
+        );
 
-        // [0] should have name and age as grand-children
-        let gc0 = item0.children.as_ref().expect("[0] should have children");
-        assert!(gc0.iter().any(|c| c.name == "name"), "[0] missing 'name'");
-        assert!(gc0.iter().any(|c| c.name == "age"), "[0] missing 'age'");
+        // Items should have name and age as grand-children
+        let gc0 = item0.children.as_ref().expect("Alice should have children");
+        assert!(gc0.iter().any(|c| c.name == "name"), "Alice missing 'name'");
+        assert!(gc0.iter().any(|c| c.name == "age"), "Alice missing 'age'");
 
-        // [1] should have name as grand-child
-        let gc1 = item1.children.as_ref().expect("[1] should have children");
-        assert!(gc1.iter().any(|c| c.name == "name"), "[1] missing 'name'");
+        let gc1 = item1.children.as_ref().expect("Bob should have children");
+        assert!(gc1.iter().any(|c| c.name == "name"), "Bob missing 'name'");
 
         // selection_range is exactly 1 character wide (item content start, AST-derived)
         assert_eq!(
@@ -688,5 +765,212 @@ mod tests {
             "selection_range end.character should be 3 (codepoints), not 9 (bytes), got {}",
             sym.selection_range.end.character
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // U-NEW: detail text and label-key heuristic tests
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // U-NEW-1: short scalar value appears verbatim in detail
+    #[test]
+    fn scalar_detail_short_value_appears_verbatim() {
+        let text = "key: hello\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols[0].detail.as_deref(), Some("hello"));
+    }
+
+    // U-NEW-2: scalar value of exactly 60 chars appears verbatim (no truncation at boundary)
+    #[test]
+    fn scalar_detail_exact_60_chars_appears_verbatim() {
+        let value: String = "x".repeat(60);
+        let text = format!("key: {value}\n");
+        let docs = parse_docs(&text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            symbols[0].detail.as_deref(),
+            Some(value.as_str()),
+            "exactly 60 chars should not be truncated"
+        );
+    }
+
+    // U-NEW-3: scalar value of 61 chars is truncated with ellipsis suffix
+    #[test]
+    fn scalar_detail_over_60_chars_is_truncated_with_ellipsis() {
+        let value: String = "x".repeat(61);
+        let text = format!("key: {value}\n");
+        let docs = parse_docs(&text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let detail = symbols[0].detail.as_deref().expect("should have detail");
+        assert!(
+            detail.ends_with('…'),
+            "detail should end with ellipsis, got: {detail}"
+        );
+        let without_ellipsis: String = detail.chars().filter(|&c| c != '…').collect();
+        assert_eq!(
+            without_ellipsis.chars().count(),
+            60,
+            "content before ellipsis should be exactly 60 chars"
+        );
+    }
+
+    // U-NEW-4: mapping value detail shows "N keys"
+    #[test]
+    fn mapping_value_detail_shows_n_keys() {
+        let text = "server:\n  host: localhost\n  port: 8080\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let server = find_symbol(&symbols, "server").expect("should have 'server'");
+        assert_eq!(server.detail.as_deref(), Some("2 keys"));
+    }
+
+    // U-NEW-5: mapping value detail singular and plural
+    #[rstest]
+    #[case::one_key("cfg:\n  debug: true\n", "1 key")]
+    #[case::two_keys("cfg:\n  a: 1\n  b: 2\n", "2 keys")]
+    fn mapping_value_detail_singular_and_plural(#[case] text: &str, #[case] expected: &str) {
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let cfg = find_symbol(&symbols, "cfg").expect("should have 'cfg'");
+        assert_eq!(cfg.detail.as_deref(), Some(expected));
+    }
+
+    // U-NEW-6: sequence value detail shows "N items"
+    #[test]
+    fn sequence_value_detail_shows_n_items() {
+        let text = "tags:\n  - alpha\n  - beta\n  - gamma\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let tags = find_symbol(&symbols, "tags").expect("should have 'tags'");
+        assert_eq!(tags.detail.as_deref(), Some("3 items"));
+    }
+
+    // U-NEW-7: sequence value detail singular and plural
+    #[rstest]
+    #[case::one_item("tags:\n  - only\n", "1 item")]
+    #[case::two_items("tags:\n  - a\n  - b\n", "2 items")]
+    fn sequence_value_detail_singular_and_plural(#[case] text: &str, #[case] expected: &str) {
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let tags = find_symbol(&symbols, "tags").expect("should have 'tags'");
+        assert_eq!(tags.detail.as_deref(), Some(expected));
+    }
+
+    // U-NEW-8: label key "name" used as sequence item name
+    #[test]
+    fn label_key_name_used_as_sequence_item_name() {
+        let text = "items:\n  - name: nginx\n    image: nginx:latest\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let items = find_symbol(&symbols, "items").expect("should have 'items'");
+        let children = items.children.as_ref().expect("items should have children");
+        assert_eq!(children[0].name, "nginx");
+        assert_eq!(children[0].detail.as_deref(), Some("[0]"));
+    }
+
+    // U-NEW-9: label key "id" used as sequence item name
+    #[test]
+    fn label_key_id_used_as_sequence_item_name() {
+        let text = "rules:\n  - id: rule-001\n    action: allow\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let rules = find_symbol(&symbols, "rules").expect("should have 'rules'");
+        let children = rules.children.as_ref().expect("rules should have children");
+        assert_eq!(children[0].name, "rule-001");
+        assert_eq!(children[0].detail.as_deref(), Some("[0]"));
+    }
+
+    // U-NEW-10: label key "key" used as sequence item name
+    #[test]
+    fn label_key_key_used_as_sequence_item_name() {
+        let text = "entries:\n  - key: primary\n    value: 1\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let entries = find_symbol(&symbols, "entries").expect("should have 'entries'");
+        let children = entries
+            .children
+            .as_ref()
+            .expect("entries should have children");
+        assert_eq!(children[0].name, "primary");
+        assert_eq!(children[0].detail.as_deref(), Some("[0]"));
+    }
+
+    // U-NEW-11: non-label first key falls back to index
+    #[test]
+    fn non_label_first_key_falls_back_to_index() {
+        let text = "list:\n  - host: db.local\n    port: 5432\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let list = find_symbol(&symbols, "list").expect("should have 'list'");
+        let children = list.children.as_ref().expect("list should have children");
+        assert_eq!(children[0].name, "[0]");
+        assert!(children[0].detail.is_none());
+    }
+
+    // U-NEW-12: label key present but value is not a scalar falls back to index
+    #[test]
+    fn label_key_present_but_value_not_scalar_falls_back_to_index() {
+        let text = "items:\n  - name:\n      nested: true\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let items = find_symbol(&symbols, "items").expect("should have 'items'");
+        let children = items.children.as_ref().expect("items should have children");
+        assert_eq!(children[0].name, "[0]");
+        assert!(children[0].detail.is_none());
+    }
+
+    // U-NEW-13: sequence item that is a scalar falls back to index
+    #[test]
+    fn sequence_item_not_a_mapping_falls_back_to_index() {
+        let text = "tags:\n  - alpha\n  - beta\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let tags = find_symbol(&symbols, "tags").expect("should have 'tags'");
+        let children = tags.children.as_ref().expect("tags should have children");
+        assert_eq!(children[0].name, "[0]");
+        assert!(children[0].detail.is_none());
+        assert_eq!(children[1].name, "[1]");
+        assert!(children[1].detail.is_none());
+    }
+
+    // U-NEW-14: label key check uses first entry only — "name" as second key does not match
+    #[test]
+    fn label_key_check_uses_first_entry_only() {
+        let text = "items:\n  - value: first\n    name: alice\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let items = find_symbol(&symbols, "items").expect("should have 'items'");
+        let children = items.children.as_ref().expect("items should have children");
+        assert_eq!(
+            children[0].name, "[0]",
+            "should fall back because 'value' (first key) is not in label list"
+        );
+        assert!(children[0].detail.is_none());
+    }
+
+    // U-NEW-15: mixed sequence — some items labeled, some fallback
+    #[test]
+    fn mixed_sequence_items_some_labeled_some_fallback() {
+        let text = "items:\n  - name: web\n    port: 80\n  - host: db\n    port: 5432\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let items = find_symbol(&symbols, "items").expect("should have 'items'");
+        let children = items.children.as_ref().expect("items should have children");
+        assert_eq!(children[0].name, "web");
+        assert_eq!(children[0].detail.as_deref(), Some("[0]"));
+        assert_eq!(children[1].name, "[1]");
+        assert!(children[1].detail.is_none());
+    }
+
+    // U-NEW-16: empty mapping sequence item falls back to index
+    #[test]
+    fn empty_mapping_sequence_item_falls_back_to_index() {
+        let text = "items:\n  - {}\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        let items = find_symbol(&symbols, "items").expect("should have 'items'");
+        let children = items.children.as_ref().expect("items should have children");
+        assert_eq!(children[0].name, "[0]");
+        assert!(children[0].detail.is_none());
     }
 }

@@ -2440,6 +2440,58 @@ async fn document_symbols_uses_default_5000_limit_when_setting_absent() {
     );
 }
 
+// IT-NEW-1: Kubernetes-style YAML — container name used as sequence item label
+#[tokio::test]
+async fn document_symbols_kubernetes_style_container_name_used_as_label() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/k8s_container.yaml";
+    let yaml = "spec:\n  containers:\n    - name: nginx\n      image: nginx:latest\n      ports:\n        - containerPort: 80\n";
+    send(&mut service, did_open_notification(uri, yaml)).await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    assert!(!result.is_null(), "result should not be null");
+
+    let arr = result.as_array().expect("result should be an array");
+    assert!(!arr.is_empty(), "should have symbols");
+
+    // Find `spec` symbol
+    let spec = arr
+        .iter()
+        .find(|s| s["name"] == "spec")
+        .expect("should have 'spec'");
+    assert_eq!(spec["detail"], "1 key", "spec detail should be '1 key'");
+
+    // Navigate to `containers` child
+    let spec_children = spec["children"]
+        .as_array()
+        .expect("spec should have children");
+    let containers = spec_children
+        .iter()
+        .find(|s| s["name"] == "containers")
+        .expect("should have 'containers'");
+    assert_eq!(
+        containers["detail"], "1 item",
+        "containers detail should be '1 item'"
+    );
+
+    // Navigate to first sequence item — should be named "nginx" by label-key heuristic
+    let container_children = containers["children"]
+        .as_array()
+        .expect("containers should have children");
+    let nginx = &container_children[0];
+    assert_eq!(
+        nginx["name"], "nginx",
+        "first container should be named by 'name' key value"
+    );
+    assert_eq!(nginx["detail"], "[0]", "detail should show original index");
+}
+
 #[tokio::test]
 async fn folding_ranges_returns_results_for_nested_yaml() {
     let (mut service, socket) = LspService::new(Backend::new);
