@@ -69,7 +69,7 @@ Key settings (configured under `rlsp-yaml.*` in VS Code settings):
 | `formatPrintWidth` | `80` | Line width for formatting |
 | `formatSingleQuote` | `false` | Use single quotes in formatted output |
 | `formatPreserveQuotes` | `false` | Reproduce source scalar quoting style verbatim (spec-forced double quoting still applies) |
-| `customTags` | `[]` | Custom YAML tags to recognize |
+| `customTags` | `[]` | Custom YAML tags to recognize. Entries are tag names (`"!include"`) or tag names with a type annotation (`"!include scalar"`, `"!Ref mapping"`, `"!Sub sequence"`). Type annotations emit `tagTypeMismatch` when the node structure doesn't match. |
 | `httpProxy` | `""` | HTTP proxy URL for schema fetching |
 
 See [docs/configuration.md](https://github.com/chdalski/rlsp/blob/main/rlsp-yaml/docs/configuration.md) for the full settings reference — modelines, validators, formatting, and schema fetching.

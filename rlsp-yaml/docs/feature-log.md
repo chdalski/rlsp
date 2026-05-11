@@ -31,6 +31,14 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Custom Tag Type Annotations [completed]
+
+**Description:** The `customTags` setting (and the `$tags=` modeline) now accepts optional type annotations. Append ` scalar`, ` mapping`, or ` sequence` (case-insensitive) to any tag entry to declare the expected node structure. When a tagged node's actual structure doesn't match the declared type, the server emits a `tagTypeMismatch` warning diagnostic. Tags without a type annotation continue to suppress `unknownTag` warnings with no structure check. This format is compatible with the RedHat yaml-language-server `customTags` setting, so existing configurations migrate unchanged. When both workspace settings and a modeline declare the same tag name, the modeline wins.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Document Symbols [completed]
 
 **Description:** `textDocument/documentSymbol` is now fully implemented, enabling outline view, breadcrumbs, and Go to Symbol in VS Code. YAML keys map to `SymbolKind` (`OBJECT` for mappings, `ARRAY` for sequences, `STRING`/`NUMBER`/`BOOLEAN`/`NULL` for scalars) using the parser's tag-URI output rather than heuristics, so `"42"` (quoted) correctly shows as `STRING` while `42` shows as `NUMBER`. Sequence items under mapping keys show as children with index labels `[0]`, `[1]`, etc.; when the first key of a mapping item is `name`, `id`, or `key`, its value is used as the item's display name and the index becomes the detail text (e.g. name `nginx`, detail `[0]`). Scalar value nodes show the value itself as detail text, truncated to 60 characters with an ellipsis suffix. Non-mapping root documents are now supported: a sequence root produces one symbol per item; a scalar root produces a single symbol whose name is the scalar value. Multi-document YAML files (two or more documents) wrap each document in a `NAMESPACE` symbol named `Document 1`, `Document 2`, etc.; single-document files produce a flat symbol list with no wrapper.

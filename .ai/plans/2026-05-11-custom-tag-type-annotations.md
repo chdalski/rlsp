@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-11)
 **Created:** 2026-05-11
 
 ## Goal
@@ -19,14 +19,14 @@ Add type annotation support to the `customTags` setting so users can declare the
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Parse type annotations from custom tag strings
-- [ ] Validate tagged node structure against declared type
-- [ ] Update modeline parsing for type annotations
-- [ ] Update documentation and VS Code extension
+- [x] Parse type annotations from custom tag strings
+- [x] Validate tagged node structure against declared type
+- [x] Update modeline parsing for type annotations
+- [x] Update documentation and VS Code extension
 
 ## Tasks
 
-### Task 1: Parse type annotations and validate tagged node structure
+### Task 1: Parse type annotations and validate tagged node structure ✅ `174ebcf`
 
 Introduce a `CustomTag` struct that holds the tag name and an optional expected node type (`scalar`, `mapping`, `sequence`). Parse each entry in `custom_tags: Vec<String>` by splitting on the last space — `"!include scalar"` → name `"!include"`, expected type `Scalar`; `"!include"` → name `"!include"`, expected type `None` (any structure allowed).
 
@@ -34,31 +34,31 @@ Modify `validate_custom_tags` to accept parsed `CustomTag` entries instead of a 
 
 Modify the merge point in `server.rs:503-504` to parse both workspace settings and modeline tags into `CustomTag` structs before merging. Modeline tags use the same `"!tag type"` format: `# yaml-language-server: $tags=!include scalar,!Ref mapping`.
 
-- [ ] Add `CustomTag` struct with `name: String` and `expected_type: Option<TagNodeType>` where `TagNodeType` is an enum `{ Scalar, Mapping, Sequence }`
-- [ ] Add parsing function `parse_custom_tag(input: &str) -> CustomTag` that splits on trailing ` scalar`/` mapping`/` sequence`
-- [ ] Parsing is case-insensitive for the type suffix (`Scalar`, `SCALAR`, `scalar` all work)
-- [ ] Unknown type suffixes (e.g., `"!foo unknown"`) treat the entire string as the tag name (backward compatible — a tag could legitimately contain spaces in theory, though rare)
-- [ ] Update `validate_custom_tags` signature to accept `&[CustomTag]` instead of `&HashSet<String>`
-- [ ] Tag name lookup uses the `CustomTag.name` field for matching (same `unknownTag` logic as before)
-- [ ] When a tag name matches but `expected_type` is `Some` and the node type doesn't match, emit `tagTypeMismatch` diagnostic (warning severity)
-- [ ] When a tag name matches and `expected_type` is `None`, no structure check (existing behavior preserved)
-- [ ] Update `server.rs` merge point to parse `Vec<String>` from settings and modeline into `Vec<CustomTag>`, deduplicate by tag name
-- [ ] Update `extract_custom_tags` in `association.rs` to preserve the full `"!tag type"` string (it already does — just verify)
-- [ ] Unit tests: parse `"!include scalar"`, `"!include"`, `"!Ref mapping"`, `"!Sub sequence"`, case-insensitive suffix, unknown suffix treated as tag name
-- [ ] Unit tests: tag type mismatch produces `tagTypeMismatch` diagnostic; matching type produces no diagnostic; no type annotation produces no diagnostic
-- [ ] Unit tests: `unknownTag` still fires for tags not in the list
-- [ ] Integration test: configure `customTags` with type annotations via settings, open document with matching and mismatching tagged nodes, verify both `unknownTag` and `tagTypeMismatch` diagnostics
-- [ ] Update the three `validate_custom_tags` call sites in `rlsp-yaml/tests/corpus_invariants.rs` (~lines 163, 775, 1082) to pass `&[]` (empty slice satisfies the "no custom tags" case); remove the now-unused `let allowed_tags: HashSet<String> = HashSet::new()` bindings that fed them
-- [ ] Update `validate_custom_tags` call sites in `rlsp-yaml/benches/insight.rs` (~line 48) and `rlsp-yaml/benches/hot_path.rs` (~line 45) to use the new `&[CustomTag]` signature
-- [ ] Update the `generic_validate_fn_detected` test in `rlsp-yaml/tests/parser_boundary_audit.rs` (~line 801) to reflect the new `validate_custom_tags` signature
-- [ ] All existing tests and benchmarks pass — tests that construct `HashSet<String>` for `validate_custom_tags` are updated to use the new `CustomTag` type
-- [ ] Update `docs/configuration.md`: document the type annotation syntax in the `customTags` section with examples
-- [ ] Update `docs/configuration.md`: update the `### Custom tags modeline` section to show the type annotation form (e.g., `$tags=!include scalar,!Ref mapping`)
-- [ ] Update `docs/configuration.md`: add `tagTypeMismatch` to the diagnostic codes table
-- [ ] Update VS Code `package.json`: enhance the `customTags` description to mention type annotations
-- [ ] Update `rlsp-yaml/README.md`: amend one quickstart `customTags` example to show the type annotation form
-- [ ] Update `rlsp-yaml/integrations/vscode/README.md`: update the `customTags` settings table description to mention type annotations
-- [ ] Update `feature-log.md` with an entry describing the custom tag type annotation feature
+- [x] Add `CustomTag` struct with `name: String` and `expected_type: Option<TagNodeType>` where `TagNodeType` is an enum `{ Scalar, Mapping, Sequence }`
+- [x] Add parsing function `parse_custom_tag(input: &str) -> CustomTag` that splits on trailing ` scalar`/` mapping`/` sequence`
+- [x] Parsing is case-insensitive for the type suffix (`Scalar`, `SCALAR`, `scalar` all work)
+- [x] Unknown type suffixes (e.g., `"!foo unknown"`) treat the entire string as the tag name (backward compatible — a tag could legitimately contain spaces in theory, though rare)
+- [x] Update `validate_custom_tags` signature to accept `&[CustomTag]` instead of `&HashSet<String>`
+- [x] Tag name lookup uses the `CustomTag.name` field for matching (same `unknownTag` logic as before)
+- [x] When a tag name matches but `expected_type` is `Some` and the node type doesn't match, emit `tagTypeMismatch` diagnostic (warning severity)
+- [x] When a tag name matches and `expected_type` is `None`, no structure check (existing behavior preserved)
+- [x] Update `server.rs` merge point to parse `Vec<String>` from settings and modeline into `Vec<CustomTag>`, deduplicate by tag name
+- [x] Update `extract_custom_tags` in `association.rs` to preserve the full `"!tag type"` string (it already does — just verify)
+- [x] Unit tests: parse `"!include scalar"`, `"!include"`, `"!Ref mapping"`, `"!Sub sequence"`, case-insensitive suffix, unknown suffix treated as tag name
+- [x] Unit tests: tag type mismatch produces `tagTypeMismatch` diagnostic; matching type produces no diagnostic; no type annotation produces no diagnostic
+- [x] Unit tests: `unknownTag` still fires for tags not in the list
+- [x] Integration test: configure `customTags` with type annotations via settings, open document with matching and mismatching tagged nodes, verify both `unknownTag` and `tagTypeMismatch` diagnostics
+- [x] Update the three `validate_custom_tags` call sites in `rlsp-yaml/tests/corpus_invariants.rs` (~lines 163, 775, 1082) to pass `&[]` (empty slice satisfies the "no custom tags" case); remove the now-unused `let allowed_tags: HashSet<String> = HashSet::new()` bindings that fed them
+- [x] Update `validate_custom_tags` call sites in `rlsp-yaml/benches/insight.rs` (~line 48) and `rlsp-yaml/benches/hot_path.rs` (~line 45) to use the new `&[CustomTag]` signature
+- [x] Update the `generic_validate_fn_detected` test in `rlsp-yaml/tests/parser_boundary_audit.rs` (~line 801) to reflect the new `validate_custom_tags` signature
+- [x] All existing tests and benchmarks pass — tests that construct `HashSet<String>` for `validate_custom_tags` are updated to use the new `CustomTag` type
+- [x] Update `docs/configuration.md`: document the type annotation syntax in the `customTags` section with examples
+- [x] Update `docs/configuration.md`: update the `### Custom tags modeline` section to show the type annotation form (e.g., `$tags=!include scalar,!Ref mapping`)
+- [x] Update `docs/configuration.md`: add `tagTypeMismatch` to the diagnostic codes table
+- [x] Update VS Code `package.json`: enhance the `customTags` description to mention type annotations
+- [x] Update `rlsp-yaml/README.md`: amend one quickstart `customTags` example to show the type annotation form
+- [x] Update `rlsp-yaml/integrations/vscode/README.md`: update the `customTags` settings table description to mention type annotations
+- [x] Update `feature-log.md` with an entry describing the custom tag type annotation feature
 
 ## Non-Goals
 

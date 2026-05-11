@@ -32,8 +32,6 @@ fn bench_validators_individual(c: &mut Criterion) {
     let text = fixtures::large();
     // Validators now use rlsp-yaml-parser types.
     let docs: Vec<Document<Span>> = rlsp_yaml_parser::load(&text).unwrap_or_default();
-    let allowed_tags = std::collections::HashSet::new();
-
     let mut group = c.benchmark_group("validators_individual");
 
     group.bench_function("validate_unused_anchors", |b| {
@@ -45,7 +43,7 @@ fn bench_validators_individual(c: &mut Criterion) {
     });
 
     group.bench_function("validate_custom_tags", |b| {
-        b.iter(|| validate_custom_tags(&docs, &allowed_tags));
+        b.iter(|| validate_custom_tags(&docs, &[]));
     });
 
     group.bench_function("validate_key_ordering", |b| {

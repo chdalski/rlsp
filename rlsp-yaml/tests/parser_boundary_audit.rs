@@ -152,6 +152,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
             reason: "pre-parse lexical: custom tag modeline extraction",
         },
     },
+    AllowEntry {
+        file: "validation/validators.rs",
+        func: "parse_custom_tag",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: splits a settings/modeline config string into tag name and type suffix — no YAML parsing",
+        },
+    },
     // -----------------------------------------------------------------------
     // CarveOut — test fixtures inside #[cfg(test)] blocks
     // -----------------------------------------------------------------------
@@ -798,12 +805,13 @@ mod detection_tests {
 
     #[test]
     fn generic_validate_fn_detected() {
-        let line = "pub fn validate_custom_tags<S: std::hash::BuildHasher>(";
+        // Tests the regex extractor on a generic function signature.
+        let line = "pub fn validate_foo<S: std::hash::BuildHasher>(";
         let next = "    text: &str,";
         let combined = format!("{line} {next}");
         assert!(is_candidate_fn_line(line));
         let name = extract_fn_name(line).unwrap();
-        assert_eq!(name, "validate_custom_tags");
+        assert_eq!(name, "validate_foo");
         let params = extract_param_block(&combined);
         assert!(has_text_str_param(&params));
     }

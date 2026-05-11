@@ -11,6 +11,66 @@ use tower_lsp::lsp_types::{
 use crate::lsp_util::span_to_lsp;
 use crate::validation::{DiagnosticCategory, ValidationSettings};
 
+/// The expected YAML node type for a custom tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagNodeType {
+    /// The tagged node must be a scalar.
+    Scalar,
+    /// The tagged node must be a mapping.
+    Mapping,
+    /// The tagged node must be a sequence.
+    Sequence,
+}
+
+/// A parsed custom tag entry, optionally carrying a node-type annotation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomTag {
+    /// The tag name, e.g. `"!include"`.
+    pub name: String,
+    /// The expected node type, if specified.
+    pub expected_type: Option<TagNodeType>,
+}
+
+/// Parse a custom tag string into a `CustomTag`.
+///
+/// The input is the raw string from the `customTags` setting or modeline, e.g.
+/// `"!include scalar"`, `"!Ref mapping"`, or `"!bare"`.
+///
+/// - If the string ends with a single space followed by `scalar`, `mapping`, or
+///   `sequence` (case-insensitive), the suffix is parsed as the expected type and
+///   the tag name is the remainder.
+/// - Any other suffix (unknown type word, double space, etc.) leaves the entire
+///   string as the tag name with no type annotation, preserving backward
+///   compatibility.
+#[must_use]
+pub fn parse_custom_tag(input: &str) -> CustomTag {
+    if let Some(space_pos) = input.rfind(' ') {
+        let suffix = &input[space_pos + 1..];
+        let node_type = match suffix.to_ascii_lowercase().as_str() {
+            "scalar" => Some(TagNodeType::Scalar),
+            "mapping" => Some(TagNodeType::Mapping),
+            "sequence" => Some(TagNodeType::Sequence),
+            _ => None,
+        };
+        if let Some(expected_type) = node_type {
+            // Only split if the preceding part is a single space (not double-space).
+            // rfind gives us the last space; we need exactly one space at that position.
+            let prefix = &input[..space_pos];
+            // Ensure prefix doesn't end with a space (would mean double-space before suffix).
+            if !prefix.ends_with(' ') {
+                return CustomTag {
+                    name: prefix.to_string(),
+                    expected_type: Some(expected_type),
+                };
+            }
+        }
+    }
+    CustomTag {
+        name: input.to_string(),
+        expected_type: None,
+    }
+}
+
 /// An anchor definition collected from the AST.
 struct AnchorEntry {
     name: String,
@@ -242,34 +302,40 @@ fn flow_diagnostic(
 /// Validate custom YAML tags against an allowed set.
 ///
 /// Returns warning diagnostics for any `!tag` found in the YAML documents that is not
-/// listed in `allowed_tags`. When `allowed_tags` is empty, validation is skipped and
-/// an empty vec is returned — no tags configured means no warnings.
+/// listed in `allowed`. When `allowed` is empty, validation is skipped and an empty
+/// vec is returned — no tags configured means no warnings.
+///
+/// When a tag name matches an entry that carries an `expected_type`, the node's actual
+/// structure is compared against the expected type. A mismatch emits a `tagTypeMismatch`
+/// diagnostic. Tags without a type annotation only emit `unknownTag` on non-match.
 ///
 /// Diagnostic ranges use the tagged node's full `loc` span. Quoted scalars are never
 /// flagged because the parser stores `tag: None` for them.
 #[must_use]
-pub fn validate_custom_tags<S: std::hash::BuildHasher>(
-    docs: &[Document<Span>],
-    allowed_tags: &HashSet<String, S>,
-) -> Vec<Diagnostic> {
-    if allowed_tags.is_empty() {
+pub fn validate_custom_tags(docs: &[Document<Span>], allowed: &[CustomTag]) -> Vec<Diagnostic> {
+    if allowed.is_empty() {
         return Vec::new();
     }
+
+    // Build a name-keyed lookup. First entry for a given name wins (modeline dedup
+    // happens upstream in server.rs).
+    let tag_map: HashMap<&str, &CustomTag> =
+        allowed.iter().rev().map(|t| (t.name.as_str(), t)).collect();
 
     let mut diagnostics = Vec::new();
 
     for doc in docs {
         let idx = doc.line_index();
-        collect_tag_diagnostics(&doc.root, allowed_tags, &mut diagnostics, 0, idx);
+        collect_tag_diagnostics(&doc.root, &tag_map, &mut diagnostics, 0, idx);
     }
 
     diagnostics
 }
 
-/// Recursively walk a YAML node and emit diagnostics for unknown tags.
-fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
-    node: &Node<Span>,
-    allowed_tags: &HashSet<String, S>,
+/// Recursively walk a YAML node and emit diagnostics for unknown or mismatched tags.
+fn collect_tag_diagnostics<'a>(
+    node: &'a Node<Span>,
+    tag_map: &HashMap<&str, &'a CustomTag>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
     idx: &LineIndex,
@@ -290,7 +356,40 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
         // Skip tags injected by the Core schema resolver — these are never user-supplied.
         if tag_str.starts_with("tag:yaml.org,2002:") {
             // Fall through to child recursion only.
-        } else if !allowed_tags.contains(tag_str) {
+        } else if let Some(custom_tag) = tag_map.get(tag_str) {
+            // Tag is in the allowed set — check type annotation if present.
+            if let Some(expected) = custom_tag.expected_type {
+                let actual_matches = match expected {
+                    TagNodeType::Scalar => matches!(node, Node::Scalar { .. }),
+                    TagNodeType::Mapping => matches!(node, Node::Mapping { .. }),
+                    TagNodeType::Sequence => matches!(node, Node::Sequence { .. }),
+                };
+                if !actual_matches {
+                    let expected_name = match expected {
+                        TagNodeType::Scalar => "scalar",
+                        TagNodeType::Mapping => "mapping",
+                        TagNodeType::Sequence => "sequence",
+                    };
+                    let actual_name = match node {
+                        Node::Scalar { .. } => "scalar",
+                        Node::Mapping { .. } => "mapping",
+                        Node::Sequence { .. } => "sequence",
+                        Node::Alias { .. } => "alias",
+                    };
+                    let range = span_to_lsp(*loc, idx);
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("tagTypeMismatch".to_string())),
+                        message: format!(
+                            "Tag {tag_str} expects a {expected_name} but got a {actual_name}"
+                        ),
+                        source: Some("rlsp-yaml".to_string()),
+                        ..Diagnostic::default()
+                    });
+                }
+            }
+        } else {
             let range = span_to_lsp(*loc, idx);
             diagnostics.push(Diagnostic {
                 range,
@@ -307,13 +406,13 @@ fn collect_tag_diagnostics<S: std::hash::BuildHasher>(
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_tag_diagnostics(key, allowed_tags, diagnostics, depth + 1, idx);
-                collect_tag_diagnostics(value, allowed_tags, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(key, tag_map, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(value, tag_map, diagnostics, depth + 1, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_tag_diagnostics(item, allowed_tags, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(item, tag_map, diagnostics, depth + 1, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -1359,14 +1458,24 @@ jobs:
 
     // ---- Custom Tags Validator: Happy Paths / Multi-document / Nested ----
 
+    fn tags_no_type(names: &[&str]) -> Vec<CustomTag> {
+        names
+            .iter()
+            .map(|&n| CustomTag {
+                name: n.to_string(),
+                expected_type: None,
+            })
+            .collect()
+    }
+
     #[rstest]
     #[case::allowed_tag_no_diagnostic("value: !include foo.yaml\n", &["!include"] as &[&str])]
     #[case::empty_allowed_skips_validation("value: !include foo.yaml\n", &[])]
     #[case::no_tags_in_document("key: value\nother: 123\n", &["!include"])]
     #[case::multi_doc_both_allowed("a: !include foo.yaml\n---\nb: !ref bar.yaml\n", &["!include", "!ref"])]
-    fn custom_tags_returns_empty(#[case] input: &str, #[case] allowed_tags: &[&str]) {
+    fn custom_tags_returns_empty(#[case] input: &str, #[case] allowed_names: &[&str]) {
         let docs = parse_docs(input);
-        let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
+        let allowed = tags_no_type(allowed_names);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert!(result.is_empty());
@@ -1376,9 +1485,9 @@ jobs:
     #[case::unknown_tag("value: !include foo.yaml\n", &["!other"] as &[&str])]
     #[case::multiple_tags_only_unknown_flagged("a: !include foo.yaml\nb: !ref bar.yaml\n", &["!include"])]
     #[case::nested_tagged_value("outer:\n  inner: !include nested.yaml\n", &["!other"])]
-    fn custom_tags_single_diagnostic(#[case] input: &str, #[case] allowed_tags: &[&str]) {
+    fn custom_tags_single_diagnostic(#[case] input: &str, #[case] allowed_names: &[&str]) {
         let docs = parse_docs(input);
-        let allowed: HashSet<String> = allowed_tags.iter().map(|s| (*s).to_string()).collect();
+        let allowed = tags_no_type(allowed_names);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
@@ -1390,7 +1499,7 @@ jobs:
     fn unknown_tag_produces_warning_with_unknown_tag_code() {
         let text = "value: !include foo.yaml\n";
         let docs = parse_docs(text);
-        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let allowed = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
@@ -1408,12 +1517,12 @@ jobs:
         let docs = parse_docs(text);
 
         // Neither allowed
-        let neither: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let neither = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &neither);
         assert_eq!(result.len(), 2);
 
         // Both allowed
-        let both: HashSet<String> = HashSet::from(["!include".to_string(), "!ref".to_string()]);
+        let both = tags_no_type(&["!include", "!ref"]);
         let result = validate_custom_tags(&docs, &both);
         assert!(result.is_empty());
     }
@@ -1424,7 +1533,7 @@ jobs:
     fn tag_on_mapping_value_range_equals_scalar_loc() {
         let text = "key: !custom value\n";
         let docs = parse_docs(text);
-        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let allowed = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
@@ -1442,7 +1551,7 @@ jobs:
     fn tag_on_sequence_item_range_equals_scalar_loc() {
         let text = "items:\n  - !custom value\n";
         let docs = parse_docs(text);
-        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let allowed = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 1);
@@ -1458,7 +1567,7 @@ jobs:
     fn repeated_tag_strings_each_emit_own_diagnostic() {
         let text = "a: !include file1.yaml\nb: !include file2.yaml\n";
         let docs = parse_docs(text);
-        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let allowed = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert_eq!(result.len(), 2);
@@ -1470,13 +1579,266 @@ jobs:
     fn quoted_scalar_text_containing_tag_syntax_not_flagged() {
         let text = "note: \"use !include for files\"\n";
         let docs = parse_docs(text);
-        let allowed: HashSet<String> = HashSet::from(["!other".to_string()]);
+        let allowed = tags_no_type(&["!other"]);
         let result = validate_custom_tags(&docs, &allowed);
 
         assert!(
             result.is_empty(),
             "quoted scalar has tag: None — no diagnostic expected"
         );
+    }
+
+    // ---- parse_custom_tag unit tests ----
+
+    #[test]
+    fn parse_custom_tag_scalar_suffix_recognized() {
+        let result = parse_custom_tag("!include scalar");
+        assert_eq!(result.name, "!include");
+        assert_eq!(result.expected_type, Some(TagNodeType::Scalar));
+    }
+
+    #[test]
+    fn parse_custom_tag_mapping_suffix_recognized() {
+        let result = parse_custom_tag("!ref mapping");
+        assert_eq!(result.name, "!ref");
+        assert_eq!(result.expected_type, Some(TagNodeType::Mapping));
+    }
+
+    #[test]
+    fn parse_custom_tag_sequence_suffix_recognized() {
+        let result = parse_custom_tag("!env sequence");
+        assert_eq!(result.name, "!env");
+        assert_eq!(result.expected_type, Some(TagNodeType::Sequence));
+    }
+
+    #[test]
+    fn parse_custom_tag_no_suffix_produces_none() {
+        let result = parse_custom_tag("!include");
+        assert_eq!(result.name, "!include");
+        assert_eq!(result.expected_type, None);
+    }
+
+    #[test]
+    fn parse_custom_tag_unknown_suffix_becomes_name() {
+        let result = parse_custom_tag("!include blob");
+        assert_eq!(result.name, "!include blob");
+        assert_eq!(result.expected_type, None);
+    }
+
+    #[rstest]
+    #[case("!include SCALAR", TagNodeType::Scalar)]
+    #[case("!include Mapping", TagNodeType::Mapping)]
+    #[case("!include SEQUENCE", TagNodeType::Sequence)]
+    fn parse_custom_tag_suffix_case_insensitive(
+        #[case] input: &str,
+        #[case] expected: TagNodeType,
+    ) {
+        let result = parse_custom_tag(input);
+        assert_eq!(result.expected_type, Some(expected));
+    }
+
+    #[test]
+    fn parse_custom_tag_double_space_before_suffix_not_recognized() {
+        // Two spaces before suffix → not a recognized annotation, entire string is name.
+        let result = parse_custom_tag("!include  scalar");
+        assert_eq!(result.name, "!include  scalar");
+        assert_eq!(result.expected_type, None);
+    }
+
+    #[test]
+    fn parse_custom_tag_empty_string() {
+        let result = parse_custom_tag("");
+        assert_eq!(result.name, "");
+        assert_eq!(result.expected_type, None);
+    }
+
+    #[test]
+    fn parse_custom_tag_name_only_no_space() {
+        let result = parse_custom_tag("!no-space-at-all");
+        assert_eq!(result.name, "!no-space-at-all");
+        assert_eq!(result.expected_type, None);
+    }
+
+    // ---- validate_custom_tags: new type-annotation tests ----
+
+    #[test]
+    fn validate_custom_tags_empty_slice_skips_validation() {
+        let docs = parse_docs("value: !include foo\n");
+        let result = validate_custom_tags(&docs, &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_tag_in_allowed_no_type_annotation_no_diagnostic() {
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: None,
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_tag_not_in_allowed_emits_unknown_tag() {
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = tags_no_type(&["!ref"]);
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "unknownTag")
+        );
+    }
+
+    #[test]
+    fn validate_custom_tags_type_match_scalar_no_diagnostic() {
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Scalar),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_type_match_mapping_no_diagnostic() {
+        let docs = parse_docs("value: !include {key: val}\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Mapping),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_type_match_sequence_no_diagnostic() {
+        let docs = parse_docs("value: !include [a, b]\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Sequence),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_type_mismatch_scalar_expected_mapping_emits_tag_type_mismatch() {
+        // scalar node tagged !include, but allowed expects mapping
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Mapping),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
+        );
+        assert!(result[0].message.contains("!include"));
+    }
+
+    #[test]
+    fn validate_custom_tags_type_mismatch_mapping_expected_sequence_emits_tag_type_mismatch() {
+        let docs = parse_docs("value: !include {key: val}\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Sequence),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
+        );
+    }
+
+    #[test]
+    fn validate_custom_tags_type_mismatch_sequence_expected_scalar_emits_tag_type_mismatch() {
+        let docs = parse_docs("value: !include [a, b]\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Scalar),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
+        );
+    }
+
+    #[test]
+    fn validate_custom_tags_tag_type_mismatch_severity_and_code() {
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Mapping),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
+        );
+        assert_eq!(result[0].source.as_deref(), Some("rlsp-yaml"));
+    }
+
+    #[test]
+    fn validate_custom_tags_duplicate_tag_names_first_entry_wins() {
+        // Two entries for "!include" — first has Scalar, second has Mapping.
+        // YAML has !include on a scalar. First entry wins → type matches → no diagnostic.
+        let docs = parse_docs("value: !include foo\n");
+        let allowed = vec![
+            CustomTag {
+                name: "!include".to_string(),
+                expected_type: Some(TagNodeType::Scalar),
+            },
+            CustomTag {
+                name: "!include".to_string(),
+                expected_type: Some(TagNodeType::Mapping),
+            },
+        ];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert!(
+            result.is_empty(),
+            "first entry (Scalar) should win; scalar node matches → no diagnostic"
+        );
+    }
+
+    #[test]
+    fn validate_custom_tags_alias_node_not_flagged() {
+        let docs = parse_docs("a: &anchor value\nb: *anchor\n");
+        let allowed = tags_no_type(&["!ref"]);
+        let result = validate_custom_tags(&docs, &allowed);
+        // No tags in this document — only anchors/aliases, no tagged nodes.
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_yaml_org_tag_not_flagged() {
+        // tag:yaml.org,2002: tags are injected by Core schema and must be silently skipped.
+        // The parser may inject these; we verify no diagnostic is emitted even when they appear.
+        let docs = parse_docs("key: value\n");
+        let allowed = tags_no_type(&["!ref"]);
+        let result = validate_custom_tags(&docs, &allowed);
+        // No user-supplied tags in this document.
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn validate_custom_tags_nested_type_mismatch_in_mapping_value() {
+        // !include on a nested mapping value when scalar is expected → tagTypeMismatch
+        let docs = parse_docs("outer:\n  inner: !include {key: val}\n");
+        let allowed = [CustomTag {
+            name: "!include".to_string(),
+            expected_type: Some(TagNodeType::Scalar),
+        }];
+        let result = validate_custom_tags(&docs, &allowed);
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
+        );
+        assert_eq!(result[0].range.start.line, 1, "inner is on line 1");
     }
 
     // ---- Key Ordering Validator: AST-range regression tests ----

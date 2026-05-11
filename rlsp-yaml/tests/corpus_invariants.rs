@@ -37,8 +37,7 @@
 )]
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
@@ -158,11 +157,8 @@ fn check_i1_no_panics(_path: &Path, text: &str) -> Result<(), String> {
     .map_err(|e| format!("panic in validate_flow_style: {}", panic_message(&e)))?;
 
     // Stage 4: validate_custom_tags (empty allowed set — all tags are unknown)
-    let allowed_tags: HashSet<String> = HashSet::new();
-    catch_unwind(AssertUnwindSafe(|| {
-        validate_custom_tags(&docs, &allowed_tags)
-    }))
-    .map_err(|e| format!("panic in validate_custom_tags: {}", panic_message(&e)))?;
+    catch_unwind(AssertUnwindSafe(|| validate_custom_tags(&docs, &[])))
+        .map_err(|e| format!("panic in validate_custom_tags: {}", panic_message(&e)))?;
 
     // Stage 5: validate_key_ordering
     catch_unwind(AssertUnwindSafe(|| validate_key_ordering(&docs)))
@@ -768,11 +764,10 @@ fn i11_collect_diagnostics(
     docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
     schema: &rlsp_yaml::schema::JsonSchema,
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(docs));
     all.extend(validate_flow_style(docs, &ValidationSettings::default()));
-    all.extend(validate_custom_tags(docs, &allowed_tags));
+    all.extend(validate_custom_tags(docs, &[]));
     all.extend(validate_key_ordering(docs));
     all.extend(validate_duplicate_keys(
         docs,
@@ -1075,11 +1070,10 @@ fn lsp_pos_to_byte_offset(text: &str, pos: Position) -> usize {
 fn collect_all_diagnostics(
     docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let allowed_tags: HashSet<String> = HashSet::new();
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(docs));
     all.extend(validate_flow_style(docs, &ValidationSettings::default()));
-    all.extend(validate_custom_tags(docs, &allowed_tags));
+    all.extend(validate_custom_tags(docs, &[]));
     all.extend(validate_key_ordering(docs));
     all.extend(validate_duplicate_keys(
         docs,

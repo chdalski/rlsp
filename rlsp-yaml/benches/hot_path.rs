@@ -4,8 +4,6 @@
 
 mod fixtures;
 
-use std::collections::HashSet;
-
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
@@ -33,8 +31,6 @@ fn bench_parse_and_validate(c: &mut Criterion) {
         ("huge", fixtures::huge()),
     ];
 
-    let allowed_tags: HashSet<String> = HashSet::new();
-
     let mut group = c.benchmark_group("parse_and_validate");
     for (name, text) in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
@@ -42,10 +38,8 @@ fn bench_parse_and_validate(c: &mut Criterion) {
                 let result = parse_yaml(text);
                 let _ = validate_unused_anchors(&result.documents);
                 let _ = validate_flow_style(&result.documents, &ValidationSettings::default());
-                let _ = rlsp_yaml::validation::validators::validate_custom_tags(
-                    &result.documents,
-                    &allowed_tags,
-                );
+                let _ =
+                    rlsp_yaml::validation::validators::validate_custom_tags(&result.documents, &[]);
                 let _ = validate_key_ordering(&result.documents);
                 let _ = validate_duplicate_keys(&result.documents, &ValidationSettings::default());
             });

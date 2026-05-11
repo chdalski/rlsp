@@ -47,7 +47,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Custom YAML tags to recognize"
+          "description": "Custom YAML tags to recognize. Each entry is a tag name (e.g. \"!include\") or a tag name followed by a type annotation (e.g. \"!include scalar\", \"!Ref mapping\", \"!Sub sequence\"). Tags with a type annotation emit a tagTypeMismatch warning when the node structure does not match."
         },
         "rlsp-yaml.keyOrdering": {
           "type": "boolean",

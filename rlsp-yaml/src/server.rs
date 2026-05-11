@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
@@ -500,8 +500,25 @@ impl Backend {
             ));
         }
 
-        let mut allowed_tags: HashSet<String> = self.get_custom_tags().into_iter().collect();
-        allowed_tags.extend(crate::schema::extract_custom_tags(text));
+        // Parse settings tags and modeline tags into CustomTag entries.
+        // Modeline wins on name collision: insert settings first, then let modeline overwrite.
+        let mut tag_map: std::collections::HashMap<
+            String,
+            crate::validation::validators::CustomTag,
+        > = self
+            .get_custom_tags()
+            .into_iter()
+            .map(|s| {
+                let ct = crate::validation::validators::parse_custom_tag(&s);
+                (ct.name.clone(), ct)
+            })
+            .collect();
+        for s in crate::schema::extract_custom_tags(text) {
+            let ct = crate::validation::validators::parse_custom_tag(&s);
+            tag_map.insert(ct.name.clone(), ct);
+        }
+        let allowed_tags: Vec<crate::validation::validators::CustomTag> =
+            tag_map.into_values().collect();
         diagnostics.extend(crate::validation::validators::validate_custom_tags(
             &result.documents,
             &allowed_tags,

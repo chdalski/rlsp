@@ -39,7 +39,33 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
 
 A list of allowed YAML custom tag names. When non-empty, documents are validated against this list and unknown tags produce diagnostics.
 
-Tags from the workspace setting are merged with any tags declared via modeline (see below).
+Each entry is either a bare tag name or a tag name followed by a space and a type annotation:
+
+```json
+{
+  "customTags": [
+    "!include",
+    "!include scalar",
+    "!Ref mapping",
+    "!Sub sequence"
+  ]
+}
+```
+
+**Type annotations** — when a tag entry ends with ` scalar`, ` mapping`, or ` sequence` (case-insensitive), the server checks that the tagged node's structure matches the declared type. A mismatch emits a `tagTypeMismatch` diagnostic. Tags without a type annotation suppress `unknownTag` diagnostics without any structure check.
+
+| Entry | Tag name | Type check |
+|-------|----------|------------|
+| `"!include"` | `!include` | none |
+| `"!include scalar"` | `!include` | node must be a scalar |
+| `"!Ref mapping"` | `!Ref` | node must be a mapping |
+| `"!Sub SEQUENCE"` | `!Sub` | node must be a sequence |
+
+Unknown type words (e.g. `"!foo unknown"`) are treated as the entire tag name — no type annotation is parsed — preserving compatibility with entries that happen to contain a space.
+
+This format is compatible with the [RedHat yaml-language-server](https://github.com/redhat-developer/yaml-language-server) `customTags` setting, so existing configurations can be reused unchanged.
+
+Tags from the workspace setting are merged with any tags declared via modeline (see below). When both sources declare the same tag name, the modeline entry wins.
 
 ### `keyOrdering`
 
@@ -411,10 +437,12 @@ The `none` sentinel (case-insensitive) disables schema fetching and schema-drive
 ### Custom tags modeline
 
 ```yaml
-# yaml-language-server: $tags=!include,!ref,!custom
+# yaml-language-server: $tags=!include scalar,!ref mapping,!custom
 ```
 
-Declares additional custom tags for the document. These are merged with the workspace `customTags` setting — both sources contribute to the allowed tag set.
+Declares additional custom tags for the document. Type annotations (` scalar`, ` mapping`, ` sequence`) are supported in the same format as the workspace `customTags` setting. Tags are comma-separated; whitespace around each entry is trimmed.
+
+These tags are merged with the workspace `customTags` setting — both sources contribute to the allowed tag set. When both declare the same tag name, the modeline entry wins.
 
 ### YAML version modeline
 
@@ -480,6 +508,7 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 | `unusedAnchor` | Anchor defined but never aliased |
 | `unresolvedAlias` | Alias references an undefined anchor |
 | `unknownTag` | Tag not in the allowed `customTags` list |
+| `tagTypeMismatch` | Tag is in the `customTags` list but the node's structure does not match the declared type annotation |
 | `mapKeyOrder` | Mapping keys not in alphabetical order (requires `keyOrdering: true`) |
 | `yamlSyntax` | YAML grammar or structure error |
 | `invalidCharacter` | Non-printable character not allowed by YAML 1.2 character-set rules (c-printable, nb-json) |

@@ -86,7 +86,7 @@ Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.jso
         "path": "/path/to/rlsp-yaml"
       },
       "initialization_options": {
-        "customTags": ["!include", "!ref"],
+        "customTags": ["!include scalar", "!ref mapping"],
         "keyOrdering": false,
         "kubernetesVersion": "master",
         "schemaStore": true,
