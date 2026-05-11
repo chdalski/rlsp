@@ -2,7 +2,7 @@
 test-name: block-scalar-single-quoted-apostrophe-resolved
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Single-quoted '' escape resolves to a literal apostrophe in the block scalar output

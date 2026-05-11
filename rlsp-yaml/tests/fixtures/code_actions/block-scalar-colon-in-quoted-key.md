@@ -2,7 +2,7 @@
 test-name: block-scalar-colon-in-quoted-key
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Mapping value is converted correctly when the key itself is a quoted string containing a colon

@@ -1,11 +1,11 @@
 ---
-test-name: block-scalar-converts-long-string
+test-name: block-scalar-folded-converts-long-string
 category: block-scalar
 cursor: 0:0
-applies-action: literal
+applies-action: folded
 ---
 
-# Test: Convert long double-quoted string to block scalar
+# Test: Convert long double-quoted string to folded block scalar
 
 ## Test-Document
 
@@ -16,6 +16,6 @@ description: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ## Expected-Document
 
 ```yaml
-description: |
+description: >
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```

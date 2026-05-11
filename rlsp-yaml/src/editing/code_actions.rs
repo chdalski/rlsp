@@ -79,19 +79,20 @@ pub fn code_actions(
     let line_idx = range.start.line as usize;
     let col = range.start.character as usize;
     let context_actions: Vec<CodeAction> = lines.get(line_idx).map_or(vec![], |line| {
-        [
+        let mut actions: Vec<CodeAction> = [
             if line.contains('\t') {
                 tab_to_spaces(&lines, line_idx, uri, options)
             } else {
                 None
             },
             quoted_bool_to_unquoted(docs, line_idx, col, uri, options),
-            string_to_block_scalar(docs, text, line_idx, uri, options),
             block_to_flow(docs, line_idx, uri, options),
         ]
         .into_iter()
         .flatten()
-        .collect()
+        .collect();
+        actions.extend(string_to_block_scalar(docs, text, line_idx, uri, options));
+        actions
     });
 
     diag_actions.chain(context_actions).collect()
@@ -398,7 +399,7 @@ mod test_helpers {
         apply_first_action_edit(yaml, diag, "Convert to YAML 1.2 octal")
     }
 
-    /// Apply the "Convert to block scalar" edit to `text` at the given line.
+    /// Apply the "Convert to block scalar (literal)" edit to `text` at the given line.
     /// Returns the full edited text and the raw `TextEdit` (for range assertions).
     pub(super) fn apply_block_scalar_edit(text: &str, line: u32) -> (String, TextEdit) {
         let actions = code_actions(
@@ -411,8 +412,8 @@ mod test_helpers {
         );
         let action = actions
             .iter()
-            .find(|a| a.title.contains("block scalar"))
-            .expect("expected block-scalar action");
+            .find(|a| a.title.contains("literal"))
+            .expect("expected block-scalar literal action");
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
         let edit = edits[0].clone();
         let source_lines: Vec<&str> = text.lines().collect();

@@ -1,11 +1,11 @@
 ---
-test-name: block-scalar-title-is-exact
+test-name: block-scalar-folded-title-is-exact
 category: block-scalar
 cursor: 0:0
-applies-action: Convert to block scalar (literal)
+applies-action: Convert to block scalar (folded)
 ---
 
-# Test: Action title is exactly "Convert to block scalar (literal)"
+# Test: Action title is exactly "Convert to block scalar (folded)"
 
 ## Test-Document
 
@@ -16,6 +16,6 @@ key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ## Expected-Document
 
 ```yaml
-key: |
+key: >
   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```

@@ -2,7 +2,7 @@
 test-name: block-scalar-sequence-item-single-quoted-converts
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Convert long single-quoted sequence item to block scalar

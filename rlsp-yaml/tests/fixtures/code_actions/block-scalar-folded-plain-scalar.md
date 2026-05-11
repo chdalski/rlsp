@@ -1,11 +1,11 @@
 ---
-test-name: block-scalar-plain-scalar-mapping-value
+test-name: block-scalar-folded-plain-scalar
 category: block-scalar
 cursor: 0:0
-applies-action: literal
+applies-action: folded
 ---
 
-# Test: Convert a long plain scalar mapping value to block scalar
+# Test: Convert a long plain scalar mapping value to folded block scalar
 
 ## Test-Document
 
@@ -16,6 +16,6 @@ description: this is a very long plain scalar value that exceeds forty chars
 ## Expected-Document
 
 ```yaml
-description: |
+description: >
   this is a very long plain scalar value that exceeds forty chars
 ```

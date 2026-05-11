@@ -1,11 +1,11 @@
 ---
-test-name: block-scalar-indentation-follows-key-column
+test-name: block-scalar-folded-indentation-follows-key-column
 category: block-scalar
 cursor: 0:0
-applies-action: literal
+applies-action: folded
 ---
 
-# Test: Block scalar body indentation tracks the key column (2-space indented key → 4-space body)
+# Test: Folded block scalar body indentation tracks the key column (2-space indented key → 4-space body)
 
 ## Test-Document
 
@@ -16,6 +16,6 @@ applies-action: literal
 ## Expected-Document
 
 ```yaml
-  key: |
+  key: >
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```

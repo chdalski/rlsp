@@ -2,7 +2,7 @@
 test-name: block-scalar-sequence-item-indented-converts
 category: block-scalar
 cursor: 1:2
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Convert indented sequence item to block scalar (non-zero base_indent)

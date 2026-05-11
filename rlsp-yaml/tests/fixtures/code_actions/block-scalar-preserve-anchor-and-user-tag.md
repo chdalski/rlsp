@@ -2,7 +2,7 @@
 test-name: block-scalar-preserve-anchor-and-user-tag
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Anchor and user tag on the scalar value are each preserved once in the block scalar output

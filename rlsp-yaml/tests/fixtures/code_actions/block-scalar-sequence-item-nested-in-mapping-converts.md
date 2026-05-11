@@ -2,7 +2,7 @@
 test-name: block-scalar-sequence-item-nested-in-mapping-converts
 category: block-scalar
 cursor: 1:2
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Convert long sequence item nested inside a mapping value to block scalar

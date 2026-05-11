@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-11)
 **Created:** 2026-05-11
 
 ## Goal
@@ -86,23 +86,25 @@ first. To avoid ambiguity:
 
 ## Steps
 
-- [ ] Refactor `string_to_block_scalar()` to return two
+- [x] Refactor `string_to_block_scalar()` to return two
   actions (literal and folded)
-- [ ] Update the dispatcher to handle the new return type
-- [ ] Update existing fixtures and inline tests for the
+- [x] Update the dispatcher to handle the new return type
+- [x] Update existing fixtures and inline tests for the
   new title
-- [ ] Add folded-specific test fixtures
-- [ ] Verify all tests pass
+- [x] Add folded-specific test fixtures
+- [x] Verify all tests pass
 
 ## Tasks
 
 ### Task 1: Add folded block scalar code action
 
+**Commit:** `55efe504b2f6278f9e751de336e8a2247b8b17d2`
+
 Modify `string_to_block_scalar()` to return both literal
 and folded actions. Update the dispatcher, existing tests,
 and add new fixtures.
 
-- [ ] Change `string_to_block_scalar()` to return
+- [x] Change `string_to_block_scalar()` to return
   `Vec<CodeAction>` instead of `Option<CodeAction>`. Find
   the candidate once, then produce two actions: one with
   `ScalarStyle::Literal(Chomp::Clip)` titled "Convert to
@@ -111,11 +113,11 @@ and add new fixtures.
   block scalar (folded)". If the candidate is `None` or
   either formatted text is empty, omit that action from
   the vector.
-- [ ] In `code_actions.rs`, update the dispatcher call at
+- [x] In `code_actions.rs`, update the dispatcher call at
   line 89 to handle `Vec<CodeAction>` — extend the
   collection with the returned vector instead of using
   `.into_iter().flatten()` on an `Option`.
-- [ ] In `apply_block_scalar_edit()` (in
+- [x] In `apply_block_scalar_edit()` (in
   `code_actions.rs` test_helpers module), replace the
   `.find(|a| a.title.contains("block scalar"))` predicate
   with `.find(|a| a.title.contains("literal"))` so the
@@ -124,40 +126,40 @@ and add new fixtures.
   "Convert to block scalar" to "Convert to block scalar
   (literal)". Existing inline tests continue to test the
   literal path.
-- [ ] Update the existing fixture
+- [x] Update the existing fixture
   `block-scalar-title-is-exact.md`: change the
   `applies-action` frontmatter field to match the new
   literal title, and update the body heading
   (`# Test: Action title is exactly "..."`) to reflect
   the new title "Convert to block scalar (literal)".
-- [ ] Update all existing `applies-action` fixtures that
+- [x] Update all existing `applies-action` fixtures that
   use `applies-action: Convert to block scalar` or
   `applies-action: block scalar` to use
   `applies-action: literal` so they unambiguously match
   the literal action.
-- [ ] Existing `omits-action: block scalar` fixtures
+- [x] Existing `omits-action: block scalar` fixtures
   require no changes — the substring "block scalar" appears
   in both new titles ("Convert to block scalar (literal)"
   and "Convert to block scalar (folded)"), so the harness's
   existing assertion (no action title contains the
   substring) correctly verifies both actions are absent.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-folded-converts-long-string.md` — same
   input as `block-scalar-converts-long-string.md` but
   with `applies-action: folded`. Expected-Document shows
   `>` header with folded content.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-folded-plain-scalar.md` — a plain scalar
   mapping value >= 40 chars with
   `applies-action: folded`.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-folded-title-is-exact.md` — verifies
   the folded action title is exactly "Convert to block
   scalar (folded)".
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets` reports zero warnings
-- [ ] `cargo test -p rlsp-yaml` passes with zero failures
-- [ ] All existing block-scalar fixtures pass with
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets` reports zero warnings
+- [x] `cargo test -p rlsp-yaml` passes with zero failures
+- [x] All existing block-scalar fixtures pass with
   updated `applies-action` values
 
 ## Non-Goals

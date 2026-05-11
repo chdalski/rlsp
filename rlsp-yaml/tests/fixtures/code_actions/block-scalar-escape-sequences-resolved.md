@@ -2,7 +2,7 @@
 test-name: block-scalar-escape-sequences-resolved
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Double-quoted escape sequences (\n, \t, \\, \") are resolved in the block scalar output

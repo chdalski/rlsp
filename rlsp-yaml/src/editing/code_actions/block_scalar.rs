@@ -15,34 +15,14 @@ pub(super) fn string_to_block_scalar(
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
     options: &YamlFormatOptions,
-) -> Option<CodeAction> {
+) -> Vec<CodeAction> {
     let parser_line = line_idx + 1;
-    let (scalar, key_col, scalar_loc, idx) = find_block_scalar_candidate(docs, parser_line)?;
+    let Some((scalar, key_col, scalar_loc, idx)) = find_block_scalar_candidate(docs, parser_line)
+    else {
+        return vec![];
+    };
 
     let base_indent = key_col;
-    let mut block_scalar = scalar.clone();
-    // Clear anchor, anchor_loc, tag, and tag_loc from the clone before formatting.
-    // The edit range covers only the scalar token (not the anchor/tag prefix), so
-    // the source buffer already preserves those properties. If the clone retains
-    // them, format_subtree re-emits them, doubling the properties in the output.
-    if let Node::Scalar {
-        style, tag, meta, ..
-    } = &mut block_scalar
-    {
-        *style = ScalarStyle::Literal(Chomp::Clip);
-        *tag = None;
-        if let Some(m) = meta.as_mut() {
-            m.anchor = None;
-            m.anchor_loc = None;
-            m.tag_loc = None;
-        }
-    }
-
-    let new_text = format_subtree(&block_scalar, options, base_indent);
-
-    if new_text.trim().is_empty() {
-        return None;
-    }
 
     let edit_range = Range::new(
         Position::new(
@@ -55,16 +35,56 @@ pub(super) fn string_to_block_scalar(
         ),
     );
 
-    Some(make_action(
-        "Convert to block scalar".to_string(),
-        uri,
-        vec![TextEdit {
-            range: edit_range,
-            new_text,
-        }],
-        CodeActionKind::REFACTOR_REWRITE,
-        None,
-    ))
+    let make_block_action = |style: ScalarStyle, title: &str| -> Option<CodeAction> {
+        let mut block_scalar = scalar.clone();
+        // Clear anchor, anchor_loc, tag, and tag_loc from the clone before formatting.
+        // The edit range covers only the scalar token (not the anchor/tag prefix), so
+        // the source buffer already preserves those properties. If the clone retains
+        // them, format_subtree re-emits them, doubling the properties in the output.
+        if let Node::Scalar {
+            style: s,
+            tag,
+            meta,
+            ..
+        } = &mut block_scalar
+        {
+            *s = style;
+            *tag = None;
+            if let Some(m) = meta.as_mut() {
+                m.anchor = None;
+                m.anchor_loc = None;
+                m.tag_loc = None;
+            }
+        }
+        let new_text = format_subtree(&block_scalar, options, base_indent);
+        if new_text.trim().is_empty() {
+            return None;
+        }
+        Some(make_action(
+            title.to_string(),
+            uri,
+            vec![TextEdit {
+                range: edit_range,
+                new_text,
+            }],
+            CodeActionKind::REFACTOR_REWRITE,
+            None,
+        ))
+    };
+
+    [
+        make_block_action(
+            ScalarStyle::Literal(Chomp::Clip),
+            "Convert to block scalar (literal)",
+        ),
+        make_block_action(
+            ScalarStyle::Folded(Chomp::Clip),
+            "Convert to block scalar (folded)",
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Walk the AST to find a qualifying scalar mapping value on the given parser line.
@@ -160,8 +180,20 @@ fn find_block_scalar_in_node<'a>(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test code"
+)]
 mod tests {
+    use tower_lsp::lsp_types::Position;
+
+    use crate::editing::formatter::YamlFormatOptions;
+    use crate::test_utils::{parse_docs, test_uri};
+
     use super::super::test_helpers::apply_block_scalar_edit;
+    use super::string_to_block_scalar;
 
     fn count(haystack: &str, needle: &str) -> usize {
         let mut count = 0;
@@ -172,6 +204,114 @@ mod tests {
         }
         count
     }
+
+    fn actions_for(yaml: &str) -> Vec<super::super::CodeAction> {
+        let docs = parse_docs(yaml);
+        string_to_block_scalar(&docs, yaml, 0, &test_uri(), &YamlFormatOptions::default())
+    }
+
+    fn apply_folded_edit(yaml: &str) -> (String, tower_lsp::lsp_types::TextEdit) {
+        use crate::editing::code_actions::code_actions;
+        use tower_lsp::lsp_types::Range;
+        let docs = parse_docs(yaml);
+        let cursor = Range::new(Position::new(0, 0), Position::new(0, 0));
+        let all_actions = code_actions(
+            &docs,
+            yaml,
+            cursor,
+            &[],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
+        let action = all_actions
+            .iter()
+            .find(|a| a.title.contains("folded"))
+            .expect("expected folded action");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        let edit = edits[0].clone();
+        let source_lines: Vec<&str> = yaml.lines().collect();
+        let line_idx = edit.range.start.line as usize;
+        let start_col = edit.range.start.character as usize;
+        let end_col = edit.range.end.character as usize;
+        let src_line = source_lines[line_idx];
+        let new_line = format!(
+            "{}{}{}",
+            &src_line[..start_col],
+            edit.new_text,
+            &src_line[end_col..]
+        );
+        let mut result = String::new();
+        for (i, l) in source_lines.iter().enumerate() {
+            if i == line_idx {
+                result.push_str(&new_line);
+            } else {
+                result.push_str(l);
+            }
+            result.push('\n');
+        }
+        (result, edit)
+    }
+
+    // Group 1 — Vec return: two actions are produced
+
+    #[test]
+    fn returns_two_actions_for_qualifying_scalar() {
+        let text = "key: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let actions = actions_for(text);
+        assert_eq!(
+            actions.len(),
+            2,
+            "expected two actions for qualifying scalar: {actions:?}"
+        );
+    }
+
+    #[test]
+    fn first_action_title_is_literal() {
+        let text = "key: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let actions = actions_for(text);
+        assert_eq!(
+            actions[0].title, "Convert to block scalar (literal)",
+            "first action must be literal"
+        );
+    }
+
+    #[test]
+    fn second_action_title_is_folded() {
+        let text = "key: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let actions = actions_for(text);
+        assert_eq!(
+            actions[1].title, "Convert to block scalar (folded)",
+            "second action must be folded"
+        );
+    }
+
+    #[test]
+    fn literal_action_new_text_starts_with_pipe() {
+        let text = "key: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let actions = actions_for(text);
+        let new_text = actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()][0]
+            .new_text
+            .clone();
+        assert!(
+            new_text.starts_with('|'),
+            "literal action new_text must start with '|': {new_text:?}"
+        );
+    }
+
+    #[test]
+    fn folded_action_new_text_starts_with_gt() {
+        let text = "key: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n";
+        let actions = actions_for(text);
+        let new_text = actions[1].edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()][0]
+            .new_text
+            .clone();
+        assert!(
+            new_text.starts_with('>'),
+            "folded action new_text must start with '>': {new_text:?}"
+        );
+    }
+
+    // Group 2 — Existing inline tests updated to also assert folded sibling exists
 
     // Pattern C (kept inline): column-exact range assertion — edit.range.end.character must equal
     // the exclusive byte end of the scalar span, not the end of the full line. The fixture format
@@ -196,6 +336,12 @@ mod tests {
             result.contains("# keep me"),
             "trailing comment must survive in the final edited text: {result:?}"
         );
+        // folded sibling must also exist
+        let actions = actions_for(text);
+        assert!(
+            actions.iter().any(|a| a.title.contains("folded")),
+            "folded action must also be present: {actions:?}"
+        );
     }
 
     // The edit range covers only the scalar token (not the preceding anchor/tag prefix).
@@ -218,6 +364,11 @@ mod tests {
             1,
             "final document must contain the anchor exactly once: {result:?}"
         );
+        let actions = actions_for(text);
+        assert!(
+            actions.iter().any(|a| a.title.contains("folded")),
+            "folded action must also be present: {actions:?}"
+        );
     }
 
     #[test]
@@ -234,6 +385,11 @@ mod tests {
             count(&result, "!mytag"),
             1,
             "final document must contain the user tag exactly once: {result:?}"
+        );
+        let actions = actions_for(text);
+        assert!(
+            actions.iter().any(|a| a.title.contains("folded")),
+            "folded action must also be present: {actions:?}"
         );
     }
 
@@ -262,6 +418,82 @@ mod tests {
             count(&result, "!mytag"),
             1,
             "final document must contain the user tag exactly once: {result:?}"
+        );
+        let actions = actions_for(text);
+        assert!(
+            actions.iter().any(|a| a.title.contains("folded")),
+            "folded action must also be present: {actions:?}"
+        );
+    }
+
+    // Group 3 — Folded action edit correctness
+
+    #[test]
+    fn folded_action_does_not_duplicate_anchor() {
+        let text = "description: &myanchor \"this is a long string that exceeds forty chars\"\n";
+        let (result, edit) = apply_folded_edit(text);
+        assert_eq!(
+            count(&edit.new_text, "&myanchor"),
+            0,
+            "folded new_text must not contain the anchor (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "&myanchor"),
+            1,
+            "final document must contain the anchor exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn folded_action_does_not_duplicate_user_tag() {
+        let text = "description: !mytag \"this is a long string that exceeds forty chars\"\n";
+        let (result, edit) = apply_folded_edit(text);
+        assert_eq!(
+            count(&edit.new_text, "!mytag"),
+            0,
+            "folded new_text must not contain the user tag (source buffer preserves it): {:?}",
+            edit.new_text
+        );
+        assert_eq!(
+            count(&result, "!mytag"),
+            1,
+            "final document must contain the user tag exactly once: {result:?}"
+        );
+    }
+
+    #[test]
+    fn folded_action_edit_range_end_column_is_exact() {
+        let text = "description: \"this is a long string that exceeds forty chars\"  # keep me\n";
+        let (_, edit) = apply_folded_edit(text);
+        let scalar_end_col =
+            "description: \"this is a long string that exceeds forty chars\"".len();
+        assert_eq!(
+            edit.range.end.character as usize, scalar_end_col,
+            "folded edit end column must equal the exclusive end of the scalar span: range={:?}",
+            edit.range
+        );
+    }
+
+    // Group 4 — Empty Vec when no candidate (regression guard)
+
+    #[test]
+    fn returns_empty_vec_for_short_scalar() {
+        let text = "key: \"short\"\n";
+        let actions = actions_for(text);
+        assert!(
+            actions.is_empty(),
+            "expected empty Vec for short scalar, got: {actions:?}"
+        );
+    }
+
+    #[test]
+    fn returns_empty_vec_for_already_literal_scalar() {
+        let text = "key: |\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n";
+        let actions = actions_for(text);
+        assert!(
+            actions.is_empty(),
+            "expected empty Vec for already-literal scalar, got: {actions:?}"
         );
     }
 }

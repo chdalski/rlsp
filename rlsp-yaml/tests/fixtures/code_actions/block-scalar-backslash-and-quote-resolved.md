@@ -2,7 +2,7 @@
 test-name: block-scalar-backslash-and-quote-resolved
 category: block-scalar
 cursor: 0:0
-applies-action: block scalar
+applies-action: literal
 ---
 
 # Test: Double-quoted \\ and \" escape sequences resolve to literal backslash and double-quote
