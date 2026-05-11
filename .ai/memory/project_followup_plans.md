@@ -16,6 +16,16 @@ type: project
 
 - **Document rlsp-yaml ↔ prettier (and other formatters) interop** — The code-action user-format-config plan (`.ai/plans/2026-04-27-code-action-respect-user-format-config.md`) made code-action output use rlsp-yaml's `formatPrintWidth`. Many users run rlsp-yaml as their LSP server but prettier (or a different formatter) as their format-on-save formatter. In that setup the user maintains two parallel print-width settings: rlsp-yaml's `formatPrintWidth` (controls code-action output shape) and prettier's `printWidth` (controls save-time reformatting). Both default to 80, so most users won't notice — but a customized one without the other produces mid-edit visual jitter (code action wraps for 80; save reformats to 100 or vice versa). Documentation-only follow-up: add a section to `rlsp-yaml/docs/configuration.md` explaining the interaction, listing which rlsp-yaml settings have prettier equivalents (`formatPrintWidth`/`printWidth`, `formatSingleQuote`/`singleQuote`, `formatBracketSpacing`/`bracketSpacing`), and recommending users keep them aligned when both formatters are active. **Out of scope:** automatic cross-formatter config awareness (e.g., reading `.prettierrc` for fallback values) — that's a much heavier change and invites a "which other prettier knobs do we honor?" rabbit hole. Start with documentation; consider richer interop only if user demand emerges.
 
+- **Go to definition (`textDocument/definition`)** — Jump from alias to its anchor declaration. Natural complement to existing anchor/alias validation which already tracks anchor→alias relationships.
+
+- **Find references (`textDocument/references`)** — "Who uses this anchor?" — given an anchor, find all aliases that reference it (and vice versa). Builds on the same anchor/alias tracking as go-to-definition.
+
+- **Rename symbol (`textDocument/rename`)** — Rename an anchor and update all its aliases atomically. Requires `prepareRename` support. Builds on anchor/alias infrastructure.
+
+- **Folding ranges (`textDocument/foldingRange`)** — Collapse mappings, sequences, block scalars, and comment blocks. Quality-of-life for large YAML files. AST already has the span information needed.
+
+- **Selection ranges (`textDocument/selectionRange`)** — Smart expand/shrink selection following YAML structure (value → key-value pair → parent mapping → document). AST provides the nesting hierarchy.
+
 - **Custom tag type annotations** — RedHat's customTags supports `!include scalar`, `!ref mapping` type annotations. Ours is a plain string allowlist — add type annotation support.
 
 - **Expand corpus beyond the 4 seed files** — Move 0 seeded the corpus with `release-plz-workflow.yml`, `kubernetes-deployment.yaml`, `docker-compose.yml`, `github-actions-matrix.yml`. Real-world YAML covers many more shapes: Ansible playbooks, Helm chart templates, GitLab CI pipelines, CloudFormation/CDK YAML, Prometheus alert rules, SOPS-encrypted files, Swagger/OpenAPI specs, Argo CD `Application` manifests, Flux CD `Kustomization`s, Tekton `Pipeline`/`Task` resources. Each adds new coverage. File as one plan per shape, or a batch-add plan for 3-5 at a time. Each new file may surface new I4 failures that flag latent bugs — treat those under the Surprise Failure Protocol.

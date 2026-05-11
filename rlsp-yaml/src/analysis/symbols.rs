@@ -8,27 +8,84 @@ use crate::lsp_util::{offset_to_lsp, span_to_lsp};
 
 /// Produce a hierarchical list of document symbols for the given YAML documents.
 ///
-/// Returns an empty vector if `docs` is empty or every document root is a
-/// non-mapping node (scalar, sequence, alias).
+/// Returns an empty vector if `docs` is empty.
+///
+/// - Single-document files: returns symbols for the root node directly (flat
+///   output, no wrapper symbol).
+/// - Multi-document files (2 or more documents): each document is wrapped in a
+///   `NAMESPACE` symbol named `"Document N"` (1-based). The wrapper's children
+///   are the symbols for that document's root node.
+/// - Non-mapping roots (`Sequence`, `Scalar`) produce symbols: a sequence root
+///   produces one symbol per item (via `make_sequence_children`); a scalar root
+///   produces a single symbol whose name is the scalar value.
 #[must_use]
+#[expect(
+    deprecated,
+    reason = "DocumentSymbol.deprecated field is required by LSP spec"
+)]
 pub fn document_symbols(docs: &[Document<Span>]) -> Vec<DocumentSymbol> {
     if docs.is_empty() {
         return Vec::new();
     }
 
+    if let [doc] = docs {
+        return yaml_to_symbols(&doc.root, doc.line_index());
+    }
+
+    // Multi-document: wrap each document in a NAMESPACE symbol.
     docs.iter()
-        .flat_map(|doc| yaml_to_symbols(&doc.root, doc.line_index()))
+        .enumerate()
+        .map(|(i, doc)| {
+            let idx = doc.line_index();
+            let root_loc = node_loc(&doc.root);
+            let range = span_to_lsp(root_loc, idx);
+            let selection_range = Range::new(range.start, range.start);
+            let children = yaml_to_symbols(&doc.root, idx);
+            DocumentSymbol {
+                name: format!("Document {}", i + 1),
+                detail: None,
+                kind: SymbolKind::NAMESPACE,
+                tags: None,
+                deprecated: None,
+                range,
+                selection_range,
+                children: if children.is_empty() {
+                    None
+                } else {
+                    Some(children)
+                },
+            }
+        })
         .collect()
 }
 
 /// Convert a `Node<Span>` into `DocumentSymbol` objects.
+#[expect(
+    deprecated,
+    reason = "DocumentSymbol.deprecated field is required by LSP spec"
+)]
 fn yaml_to_symbols(node: &Node<Span>, idx: &LineIndex) -> Vec<DocumentSymbol> {
     match node {
         Node::Mapping { entries, .. } => entries
             .iter()
             .map(|(key, value)| make_symbol(&node_to_string(key), key, value, idx))
             .collect(),
-        Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => Vec::new(),
+        Node::Sequence { items, .. } => make_sequence_children(items, idx),
+        Node::Scalar { value, .. } => {
+            let loc = node_loc(node);
+            let range = span_to_lsp(loc, idx);
+            vec![DocumentSymbol {
+                name: value.clone(),
+                detail: None,
+                kind: node_symbol_kind(node),
+                tags: None,
+                deprecated: None,
+                range,
+                selection_range: range,
+                children: None,
+            }]
+        }
+        Node::Alias { .. } => Vec::new(),
     }
 }
 
@@ -397,27 +454,26 @@ mod tests {
         assert!(symbols.is_empty());
     }
 
-    // Test 10
+    // Test 10 — updated for wrapped multi-doc structure
     #[test]
     fn should_return_symbols_for_multi_document_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
         let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
-        let has_doc1 = symbols.iter().any(|s| s.name == "doc1key")
-            || symbols.iter().any(|s| {
-                s.children
-                    .as_ref()
-                    .is_some_and(|c| c.iter().any(|ch| ch.name == "doc1key"))
-            });
-        let has_doc2 = symbols.iter().any(|s| s.name == "doc2key")
-            || symbols.iter().any(|s| {
-                s.children
-                    .as_ref()
-                    .is_some_and(|c| c.iter().any(|ch| ch.name == "doc2key"))
-            });
-        assert!(has_doc1, "should contain doc1key");
-        assert!(has_doc2, "should contain doc2key");
+        // Multi-doc: doc1key and doc2key are inside NAMESPACE wrapper children
+        let has_doc1 = symbols.iter().any(|s| {
+            s.children
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|ch| ch.name == "doc1key"))
+        });
+        let has_doc2 = symbols.iter().any(|s| {
+            s.children
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|ch| ch.name == "doc2key"))
+        });
+        assert!(has_doc1, "should contain doc1key inside a wrapper");
+        assert!(has_doc2, "should contain doc2key inside a wrapper");
     }
 
     // Test 11
@@ -499,16 +555,29 @@ mod tests {
         let _ = symbols;
     }
 
-    // Tests 16-17 — yaml_to_symbols: non-mapping root returns empty
-    #[rstest]
-    #[case::sequence_root("- one\n- two\n- three\n")]
-    #[case::scalar_root("just a scalar\n")]
-    fn returns_empty_for_non_mapping_root(#[case] text: &str) {
+    // Tests 16-17 — split into standalone tests (assertion shapes differ)
+    // Test 16
+    #[test]
+    fn sequence_root_produces_symbols() {
+        let text = "- one\n- two\n- three\n";
         let docs = parse_docs(text);
         let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
         assert!(
-            symbols.is_empty(),
-            "non-mapping root should produce no symbols, got: {symbols:?}"
+            !symbols.is_empty(),
+            "sequence root should produce symbols, got: {symbols:?}"
+        );
+    }
+
+    // Test 17
+    #[test]
+    fn scalar_root_produces_single_symbol() {
+        let text = "just a scalar\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            symbols.len(),
+            1,
+            "scalar root should produce exactly 1 symbol, got: {symbols:?}"
         );
     }
 
@@ -532,18 +601,26 @@ mod tests {
         let _symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
     }
 
-    // Test 20 — renamed from should_include_pre_separator_region_when_content_precedes_first_separator
-    // Validates correct multi-doc handling through AST path (no longer tests split_document_regions).
+    // Test 20 — updated for wrapped multi-doc structure
     #[test]
     fn should_return_symbols_from_both_docs_when_content_precedes_separator() {
         let text = "before: separator\n---\nafter: separator\n";
         let docs = parse_docs(text);
         let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
-        let has_before = symbols.iter().any(|s| s.name == "before");
-        let has_after = symbols.iter().any(|s| s.name == "after");
-        assert!(has_before, "should have 'before' symbol");
-        assert!(has_after, "should have 'after' symbol");
+        // Multi-doc: "before" and "after" are inside NAMESPACE wrapper children
+        let has_before = symbols.iter().any(|s| {
+            s.children
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|ch| ch.name == "before"))
+        });
+        let has_after = symbols.iter().any(|s| {
+            s.children
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|ch| ch.name == "after"))
+        });
+        assert!(has_before, "should have 'before' symbol inside a wrapper");
+        assert!(has_after, "should have 'after' symbol inside a wrapper");
     }
 
     // Test 21 — sequence item with Mapping value
@@ -698,18 +775,40 @@ mod tests {
         );
     }
 
-    // UT-NEW-D: Multi-document YAML produces symbols from every doc, each scoped to its root
+    // UT-NEW-D: Multi-document YAML produces NAMESPACE wrappers, each scoped to its root
     #[test]
     fn multi_document_symbols_scoped_per_doc() {
         let text = "doc1: v1\n---\ndoc2: v2\n---\ndoc3: v3\n";
         let docs = parse_docs(text);
         let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
-        let doc1_sym = find_symbol(&symbols, "doc1").expect("should have doc1");
-        let doc3_sym = find_symbol(&symbols, "doc3").expect("should have doc3");
-        assert!(find_symbol(&symbols, "doc2").is_some(), "should have doc2");
+        // Three docs → three NAMESPACE wrappers
+        assert_eq!(symbols.len(), 3, "should have 3 NAMESPACE wrapper symbols");
 
+        // Navigate into wrapper 0 (Document 1) to find "doc1"
+        let doc1_children = symbols[0]
+            .children
+            .as_ref()
+            .expect("Document 1 should have children");
+        let doc1_sym = find_symbol(doc1_children, "doc1").expect("should have doc1 in Document 1");
         assert_eq!(doc1_sym.range.start.line, 0, "doc1 should start at line 0");
+
+        // Navigate into wrapper 1 (Document 2) to find "doc2"
+        let doc2_children = symbols[1]
+            .children
+            .as_ref()
+            .expect("Document 2 should have children");
+        assert!(
+            find_symbol(doc2_children, "doc2").is_some(),
+            "should have doc2 in Document 2"
+        );
+
+        // Navigate into wrapper 2 (Document 3) to find "doc3"
+        let doc3_children = symbols[2]
+            .children
+            .as_ref()
+            .expect("Document 3 should have children");
+        let doc3_sym = find_symbol(doc3_children, "doc3").expect("should have doc3 in Document 3");
         assert_eq!(doc3_sym.range.start.line, 4, "doc3 should start at line 4");
     }
 
@@ -972,5 +1071,265 @@ mod tests {
         let children = items.children.as_ref().expect("items should have children");
         assert_eq!(children[0].name, "[0]");
         assert!(children[0].detail.is_none());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // T-NEW-1 through T-NEW-13: sequence root, scalar root, multi-doc wrappers
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // T-NEW-1: sequence root produces at least 3 symbols with index-convention names
+    #[test]
+    fn sequence_root_produces_sequence_item_symbols() {
+        let text = "- one\n- two\n- three\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert!(
+            symbols.len() >= 3,
+            "should produce at least 3 items, got: {symbols:?}"
+        );
+        assert_eq!(symbols[0].name, "[0]");
+        assert_eq!(symbols[1].name, "[1]");
+        assert_eq!(symbols[2].name, "[2]");
+    }
+
+    // T-NEW-2: sequence root scalar items use index names and STRING kind
+    #[test]
+    fn sequence_root_item_names_follow_index_convention() {
+        let text = "- alpha\n- beta\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "[0]");
+        assert!(symbols[0].children.is_none());
+        assert_eq!(symbols[0].kind, SymbolKind::STRING);
+        assert_eq!(symbols[1].name, "[1]");
+        assert!(symbols[1].children.is_none());
+        assert_eq!(symbols[1].kind, SymbolKind::STRING);
+    }
+
+    // T-NEW-3: sequence root with labeled mapping items uses label-key heuristic
+    #[test]
+    fn sequence_root_with_labeled_mapping_items_uses_label_key() {
+        let text = "- name: nginx\n  image: nginx:latest\n- name: sidecar\n  image: busybox\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "nginx", "first item should use label-key");
+        assert_eq!(symbols[0].detail.as_deref(), Some("[0]"));
+        assert_eq!(
+            symbols[1].name, "sidecar",
+            "second item should use label-key"
+        );
+        assert_eq!(symbols[1].detail.as_deref(), Some("[1]"));
+    }
+
+    // T-NEW-4: scalar root produces a single symbol with the scalar value as name
+    #[test]
+    fn scalar_root_produces_single_symbol_with_scalar_value_as_name() {
+        let text = "just a scalar\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "just a scalar");
+    }
+
+    // T-NEW-5: scalar root integer has NUMBER kind
+    #[test]
+    fn scalar_root_symbol_has_correct_kind() {
+        let text = "42\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "42");
+        assert_eq!(symbols[0].kind, SymbolKind::NUMBER);
+    }
+
+    // T-NEW-6: scalar root empty quoted string does not panic and produces 1 symbol
+    #[test]
+    fn scalar_root_empty_string() {
+        let text = "\"\"\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            symbols.len(),
+            1,
+            "empty quoted string root should produce 1 symbol"
+        );
+        // name is the empty string — must not panic
+        assert_eq!(symbols[0].name, "");
+    }
+
+    // T-NEW-7: two-doc file wraps each doc in NAMESPACE with correct children
+    #[test]
+    fn two_doc_file_wraps_each_doc_in_namespace_symbol() {
+        let text = "doc1: v1\n---\ndoc2: v2\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            symbols.len(),
+            2,
+            "two-doc file should produce 2 top-level NAMESPACE symbols"
+        );
+        assert_eq!(symbols[0].kind, SymbolKind::NAMESPACE);
+        assert_eq!(symbols[1].kind, SymbolKind::NAMESPACE);
+        let children0 = symbols[0]
+            .children
+            .as_ref()
+            .expect("Document 1 should have children");
+        assert!(
+            find_symbol(children0, "doc1").is_some(),
+            "Document 1 should contain 'doc1'"
+        );
+        let children1 = symbols[1]
+            .children
+            .as_ref()
+            .expect("Document 2 should have children");
+        assert!(
+            find_symbol(children1, "doc2").is_some(),
+            "Document 2 should contain 'doc2'"
+        );
+    }
+
+    // T-NEW-8: two-doc wrapper names are "Document 1" and "Document 2"
+    #[test]
+    fn two_doc_wrapper_names_are_document_1_and_document_2() {
+        let text = "doc1: v1\n---\ndoc2: v2\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "Document 1");
+        assert_eq!(symbols[1].name, "Document 2");
+    }
+
+    // T-NEW-9: three-doc file produces 3 NAMESPACE wrappers, each with correct children
+    #[test]
+    fn three_doc_file_produces_three_namespace_wrappers() {
+        let text = "doc1: v1\n---\ndoc2: v2\n---\ndoc3: v3\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            symbols.len(),
+            3,
+            "three-doc file should produce 3 NAMESPACE wrappers"
+        );
+        let children0 = symbols[0]
+            .children
+            .as_ref()
+            .expect("Document 1 should have children");
+        assert!(find_symbol(children0, "doc1").is_some());
+        let children1 = symbols[1]
+            .children
+            .as_ref()
+            .expect("Document 2 should have children");
+        assert!(find_symbol(children1, "doc2").is_some());
+        let children2 = symbols[2]
+            .children
+            .as_ref()
+            .expect("Document 3 should have children");
+        assert!(find_symbol(children2, "doc3").is_some());
+    }
+
+    // T-NEW-10: multi-doc wrapper range spans the full document content
+    #[test]
+    fn multi_doc_wrapper_range_spans_full_document() {
+        // doc1: lines 0–0, doc2: lines 2–2 (line 1 is the --- separator)
+        let text = "a: 1\n---\nb: 2\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(
+            symbols[0].range.start.line, 0,
+            "wrapper 1 should start at line 0"
+        );
+        assert_eq!(
+            symbols[1].range.start.line, 2,
+            "wrapper 2 should start at line 2"
+        );
+        // wrapper ranges must not overlap: wrapper 1 end <= wrapper 2 start
+        assert!(
+            symbols[0].range.end <= symbols[1].range.start,
+            "wrapper ranges must not overlap: {:?} vs {:?}",
+            symbols[0].range.end,
+            symbols[1].range.start
+        );
+    }
+
+    // T-NEW-11: single-doc file has no NAMESPACE wrapper
+    #[test]
+    fn single_doc_file_has_no_wrapper_symbol() {
+        let text = "name: Alice\nage: 30\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        // Flat output: top-level symbols are "name" and "age", not NAMESPACE wrappers
+        assert_eq!(symbols.len(), 2);
+        assert!(find_symbol(&symbols, "name").is_some());
+        assert!(find_symbol(&symbols, "age").is_some());
+        for sym in &symbols {
+            assert_ne!(
+                sym.kind,
+                SymbolKind::NAMESPACE,
+                "single-doc file must not produce NAMESPACE wrapper symbols"
+            );
+        }
+    }
+
+    // T-NEW-12: multi-doc where one doc has a sequence root still wraps
+    #[test]
+    fn multi_doc_where_one_doc_has_sequence_root_still_wraps() {
+        let text = "mapping: val\n---\n- item1\n- item2\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        assert_eq!(symbols.len(), 2, "should produce 2 NAMESPACE wrappers");
+        assert_eq!(symbols[0].kind, SymbolKind::NAMESPACE);
+        assert_eq!(symbols[1].kind, SymbolKind::NAMESPACE);
+        let children0 = symbols[0]
+            .children
+            .as_ref()
+            .expect("Document 1 should have children");
+        assert!(
+            find_symbol(children0, "mapping").is_some(),
+            "Document 1 should contain 'mapping'"
+        );
+        let children1 = symbols[1]
+            .children
+            .as_ref()
+            .expect("Document 2 should have children");
+        assert!(
+            children1.iter().any(|c| c.name == "[0]"),
+            "Document 2 should contain sequence item '[0]'"
+        );
+        assert!(
+            children1.iter().any(|c| c.name == "[1]"),
+            "Document 2 should contain sequence item '[1]'"
+        );
+    }
+
+    // T-NEW-13: multi-doc where second doc is empty still wraps (no panic)
+    #[test]
+    fn multi_doc_where_one_doc_is_empty_still_wraps() {
+        let text = "key: val\n---\n";
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+        // Must not panic; must produce 2 NAMESPACE wrappers
+        assert_eq!(
+            symbols.len(),
+            2,
+            "should produce 2 NAMESPACE wrappers even if one doc is empty"
+        );
+        assert_eq!(symbols[0].kind, SymbolKind::NAMESPACE);
+        assert_eq!(symbols[1].kind, SymbolKind::NAMESPACE);
+        let children0 = symbols[0]
+            .children
+            .as_ref()
+            .expect("Document 1 should have children");
+        assert!(
+            find_symbol(children0, "key").is_some(),
+            "Document 1 should contain 'key'"
+        );
+        // Document 2 has empty content — children may be None or empty (just no panic)
+        if let Some(children1) = &symbols[1].children {
+            // If children present, they may hold a null scalar symbol — that's acceptable
+            let _ = children1;
+        }
     }
 }

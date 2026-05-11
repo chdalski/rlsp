@@ -2440,6 +2440,70 @@ async fn document_symbols_uses_default_5000_limit_when_setting_absent() {
     );
 }
 
+// IT-NEW-2: Multi-document YAML returns NAMESPACE wrapper symbols
+#[tokio::test]
+async fn document_symbols_multi_doc_returns_namespace_wrappers() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/multi_doc_namespace.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "doc1key: value1\n---\ndoc2key: value2\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, document_symbol_request(2, uri)).await;
+    let resp = resp.expect("documentSymbol should return a response");
+    let result = resp.result().expect("documentSymbol should have a result");
+    assert!(
+        !result.is_null(),
+        "result should not be null for multi-doc YAML"
+    );
+
+    let arr = result.as_array().expect("result should be an array");
+    assert_eq!(
+        arr.len(),
+        2,
+        "two-doc file should return exactly 2 top-level NAMESPACE symbols"
+    );
+
+    assert_eq!(
+        arr[0]["name"], "Document 1",
+        "first wrapper should be named 'Document 1'"
+    );
+    assert_eq!(
+        arr[0]["kind"], 3,
+        "first wrapper kind should be NAMESPACE (3)"
+    );
+    assert_eq!(
+        arr[1]["name"], "Document 2",
+        "second wrapper should be named 'Document 2'"
+    );
+    assert_eq!(
+        arr[1]["kind"], 3,
+        "second wrapper kind should be NAMESPACE (3)"
+    );
+
+    let children0 = arr[0]["children"]
+        .as_array()
+        .expect("Document 1 should have children");
+    assert!(
+        children0.iter().any(|c| c["name"] == "doc1key"),
+        "Document 1 children should contain 'doc1key'"
+    );
+
+    let children1 = arr[1]["children"]
+        .as_array()
+        .expect("Document 2 should have children");
+    assert!(
+        children1.iter().any(|c| c["name"] == "doc2key"),
+        "Document 2 children should contain 'doc2key'"
+    );
+}
+
 // IT-NEW-1: Kubernetes-style YAML — container name used as sequence item label
 #[tokio::test]
 async fn document_symbols_kubernetes_style_container_name_used_as_label() {

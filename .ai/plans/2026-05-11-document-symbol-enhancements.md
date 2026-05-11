@@ -26,8 +26,8 @@ Enhance the existing `textDocument/documentSymbol` implementation to provide a r
 - [x] Clarify requirements with user
 - [x] Add detail text for scalar values
 - [x] Add label-key heuristic for sequence items
-- [ ] Support non-mapping root documents
-- [ ] Wrap multi-document files in document-level symbols
+- [x] Support non-mapping root documents
+- [x] Wrap multi-document files in document-level symbols
 
 ## Tasks
 
@@ -52,23 +52,23 @@ Enhance `make_sequence_children` to detect a "label key" in mapping-typed sequen
 - [x] All existing unit tests pass; tests that previously asserted `detail: None` are updated to assert the new expected value — no test may be deleted or disabled
 - [x] Tests that previously asserted `[0]`/`[1]` names on YAML whose first key matches the heuristic list (specifically `sequence_of_mappings_indexed_children_with_grandchildren` which uses `users: [{name: Alice, ...}]`) are updated to assert the label-key-derived name
 
-### Task 2: Support non-mapping root documents and multi-document wrappers
+### Task 2: Support non-mapping root documents and multi-document wrappers ✅ `981cfe4`
 
 Enhance `yaml_to_symbols` to handle `Sequence` root nodes by producing indexed child symbols (reusing `make_sequence_children`). `Scalar` and `Alias` root nodes produce a single symbol with the value/alias name.
 
 Enhance `document_symbols` to wrap each document's symbols in a top-level `DocumentSymbol` when the input has 2+ documents. The wrapper symbol uses `SymbolKind::NAMESPACE` with name `"Document N"` (1-indexed), range covering the full document span, and children containing the document's symbols. Single-document files remain unwrapped (no behavior change for the common case).
 
-- [ ] `yaml_to_symbols` handles `Sequence` root by calling `make_sequence_children`
-- [ ] `yaml_to_symbols` handles `Scalar` root by producing a single symbol with the scalar value as name
-- [ ] `document_symbols` wraps each document in a `NAMESPACE` symbol when doc count >= 2
-- [ ] Single-document files produce the same flat output as before (no wrapper)
-- [ ] Document wrapper range spans from first to last byte of the document
-- [ ] Unit tests: sequence root, scalar root, multi-doc with wrapper (2 docs), multi-doc with wrapper (3+ docs), single-doc without wrapper
-- [ ] Integration test: multi-document YAML returns `Document 1`, `Document 2` wrapper symbols
-- [ ] Update the `document_symbols` doc comment to reflect that `Sequence` and `Scalar` root nodes now produce symbols
-- [ ] All existing unit tests pass; tests that previously asserted flat multi-doc structure are updated to assert the new wrapped structure — no test may be deleted or disabled
-- [ ] Update `feature-log.md` with an entry describing all four document symbol enhancements (detail text, label-key, non-mapping root, multi-doc wrappers)
-- [ ] Remove the `Document symbols` follow-up entry from `.ai/memory/project_followup_plans.md`
+- [x] `yaml_to_symbols` handles `Sequence` root by calling `make_sequence_children`
+- [x] `yaml_to_symbols` handles `Scalar` root by producing a single symbol with the scalar value as name
+- [x] `document_symbols` wraps each document in a `NAMESPACE` symbol when doc count >= 2
+- [x] Single-document files produce the same flat output as before (no wrapper)
+- [x] Document wrapper range spans from first to last byte of the document
+- [x] Unit tests: sequence root, scalar root, multi-doc with wrapper (2 docs), multi-doc with wrapper (3+ docs), single-doc without wrapper
+- [x] Integration test: multi-document YAML returns `Document 1`, `Document 2` wrapper symbols
+- [x] Update the `document_symbols` doc comment to reflect that `Sequence` and `Scalar` root nodes now produce symbols
+- [x] All existing unit tests pass; tests that previously asserted flat multi-doc structure are updated to assert the new wrapped structure — no test may be deleted or disabled
+- [x] Update `feature-log.md` with an entry describing all four document symbol enhancements (detail text, label-key, non-mapping root, multi-doc wrappers)
+- [x] Remove the `Document symbols` follow-up entry from `.ai/memory/project_followup_plans.md`
 
 ## Decisions
 
