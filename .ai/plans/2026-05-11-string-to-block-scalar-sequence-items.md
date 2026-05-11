@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-11
 
 ## Goal
@@ -86,66 +86,68 @@ correct output.
 
 ## Steps
 
-- [ ] Extend `find_block_scalar_in_node()` to qualify
+- [x] Extend `find_block_scalar_in_node()` to qualify
   sequence-item scalars
-- [ ] Replace the omit fixture with an applies-action
+- [x] Replace the omit fixture with an applies-action
   fixture
-- [ ] Add additional sequence-item test fixtures
-- [ ] Verify all tests pass
+- [x] Add additional sequence-item test fixtures
+- [x] Verify all tests pass
 
 ## Tasks
 
 ### Task 1: Extend string_to_block_scalar to sequence items
+
+**Commit:** `e3b46f24b419539054f22da4f58efb4edf482939`
 
 Modify `find_block_scalar_in_node()` in
 `rlsp-yaml/src/editing/code_actions/block_scalar.rs` to
 also qualify scalars that are direct items of block-style
 sequences. Add test fixtures covering the new behavior.
 
-- [ ] In `find_block_scalar_in_node()`, modify the
+- [x] In `find_block_scalar_in_node()`, modify the
   `Node::Sequence` match arm (line 126–132) to check
   whether each item is a qualifying scalar before
   recursing. The qualifying conditions are the same as
   for mapping values: `Plain`/`SingleQuoted`/`DoubleQuoted`
   style, on the cursor's line, >= 40 characters. The
   sequence must be `CollectionStyle::Block`.
-- [ ] For sequence-item scalars, compute `base_indent` as
+- [x] For sequence-item scalars, compute `base_indent` as
   `idx.line_column(loc.start).1 as usize - 2` — the
   scalar's start column minus 2 for the `- ` prefix. This
   gives the dash column, which `format_subtree()` uses to
   indent continuation lines of the block scalar. This
   mirrors the mapping-value pattern where `base_indent` is
   the key's column (line 112).
-- [ ] Delete the existing
+- [x] Delete the existing
   `block-scalar-sequence-item-omits.md` fixture (it
   asserted the action was NOT offered).
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-sequence-item-converts.md` — a plain
   sequence with a long double-quoted item. `cursor` on
   the item line, `applies-action: Convert to block
   scalar`. Verify the Expected-Document shows correct
   `- |\n  content` output.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-sequence-item-plain-converts.md` — a
   plain scalar sequence item (unquoted) >= 40 chars.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-sequence-item-nested-in-mapping-converts.md`
   — a mapping value that is a block sequence, with a long
   scalar item inside. Verifies the recursive walk finds
   it.
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-sequence-item-in-flow-sequence-omits.md`
   — a long scalar inside a flow-style sequence `[...]`.
   Asserts the action is NOT offered (flow sequences
   excluded, matching the flow-mapping exclusion).
-- [ ] Add fixture
+- [x] Add fixture
   `block-scalar-sequence-item-short-omits.md` — a
   sequence item scalar below 40 characters. Asserts
   the action is NOT offered.
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets` reports zero warnings
-- [ ] `cargo test -p rlsp-yaml` passes with zero failures
-- [ ] The existing block-scalar fixtures (14 applies + 11
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets` reports zero warnings
+- [x] `cargo test -p rlsp-yaml` passes with zero failures
+- [x] The existing block-scalar fixtures (14 applies + 11
   remaining omits after deleting the sequence-item-omits
   fixture) continue to pass unchanged
 

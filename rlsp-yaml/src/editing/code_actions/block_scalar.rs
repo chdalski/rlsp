@@ -123,8 +123,32 @@ fn find_block_scalar_in_node<'a>(
             }
             None
         }
-        Node::Sequence { items, .. } => {
+        Node::Sequence { items, style, .. } => {
+            let is_block = matches!(style, CollectionStyle::Block);
             for item in items {
+                if is_block {
+                    if let Node::Scalar {
+                        style: scalar_style,
+                        value,
+                        loc,
+                        ..
+                    } = item
+                    {
+                        if idx.line_column(loc.start).0 as usize == parser_line
+                            && matches!(
+                                scalar_style,
+                                ScalarStyle::Plain
+                                    | ScalarStyle::SingleQuoted
+                                    | ScalarStyle::DoubleQuoted
+                            )
+                            && value.chars().count() >= 40
+                        {
+                            let scalar_col = idx.line_column(loc.start).1 as usize;
+                            let base_indent = scalar_col.saturating_sub(2);
+                            return Some((item, base_indent, loc));
+                        }
+                    }
+                }
                 if let Some(result) = find_block_scalar_in_node(item, parser_line, idx) {
                     return Some(result);
                 }
