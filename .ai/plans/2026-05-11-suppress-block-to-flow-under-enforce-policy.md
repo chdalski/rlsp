@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-11)
 **Created:** 2026-05-11
 
 ## Goal
@@ -33,51 +33,53 @@ pointless and confusing.
 
 ## Steps
 
-- [ ] Add early return in `block_to_flow()`
-- [ ] Add test fixture
-- [ ] Update documentation
-- [ ] Remove follow-up tracking item
-- [ ] Verify all tests pass
+- [x] Add early return in `block_to_flow()`
+- [x] Add test fixture
+- [x] Update documentation
+- [x] Remove follow-up tracking item
+- [x] Verify all tests pass
 
 ## Tasks
 
 ### Task 1: Suppress block_to_flow under enforce-block policy
 
+**Commit:** `e1ed869099d6938a5b22c592b659d18e00473f2f`
+
 Add a one-line early return, a test fixture, and a docs
 note.
 
-- [ ] In `block_to_flow.rs`, add an early return at the
+- [x] In `block_to_flow.rs`, add an early return at the
   top of `block_to_flow()` (after line 17, before
   `find_innermost_block_collection`): if
   `options.format_enforce_block_style` is `true`, return
   `None`.
-- [ ] Add code-action fixture
+- [x] Add code-action fixture
   `block-to-flow-suppressed-by-enforce-block-style.md` —
   sets `format-options:` with
   `format_enforce_block_style: true`, cursor on a mapping
   key with a block value, `omits-action: flow style`.
   Verifies the action is not offered when the policy is
   active.
-- [ ] Verify that the existing `block-to-flow` applies-
+- [x] Verify that the existing `block-to-flow` applies-
   action fixtures (which use default options where
   `format_enforce_block_style` is `false`) continue to
   pass — the action is still offered under the default.
-- [ ] Add a `format_enforce_block_style` branch to
+- [x] Add a `format_enforce_block_style` branch to
   `apply_format_option` in `code_action_fixtures.rs` — it
   is not currently handled. Without this, the fixture's
   `format-options:` key is silently ignored and the early
   return is never exercised.
-- [ ] Add a note to `docs/configuration.md` in the
+- [x] Add a note to `docs/configuration.md` in the
   `formatEnforceBlockStyle` section (around line 133):
   "When enabled, the 'Convert block to flow style' code
   action is suppressed — the formatter would revert the
   conversion on save."
-- [ ] Remove the `block_to_flow` policy enforcement
+- [x] Remove the `block_to_flow` policy enforcement
   follow-up item from
   `.ai/memory/project_followup_plans.md`.
-- [ ] `cargo fmt` produces no diff
-- [ ] `cargo clippy --all-targets` reports zero warnings
-- [ ] `cargo test -p rlsp-yaml` passes with zero failures
+- [x] `cargo fmt` produces no diff
+- [x] `cargo clippy --all-targets` reports zero warnings
+- [x] `cargo test -p rlsp-yaml` passes with zero failures
 
 ## Non-Goals
 

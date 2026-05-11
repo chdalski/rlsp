@@ -132,6 +132,8 @@ When `true`, the formatter converts all flow-style collections to block style du
 
 When `false` (the default), the formatter preserves the original style — block collections stay block and flow collections stay flow.
 
+When enabled, the "Convert block to flow style" code action is suppressed — the formatter would revert the conversion on save.
+
 ```json
 { "formatEnforceBlockStyle": true }
 ```

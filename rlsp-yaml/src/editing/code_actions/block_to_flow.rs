@@ -15,6 +15,9 @@ pub(super) fn block_to_flow(
     uri: &tower_lsp::lsp_types::Url,
     options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
+    if options.format_enforce_block_style {
+        return None;
+    }
     let (node, key_loc, idx) = find_innermost_block_collection(docs, line_idx)?;
     let loc = node_loc(node);
 

@@ -203,6 +203,9 @@ fn apply_format_option(options: &mut YamlFormatOptions, key: &str, value: &str) 
         "bracket_spacing" => {
             options.bracket_spacing = value == "true";
         }
+        "format_enforce_block_style" => {
+            options.format_enforce_block_style = value == "true";
+        }
         _ => {}
     }
 }
