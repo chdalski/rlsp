@@ -14,5 +14,12 @@ stable when formatted a second time.
 ## Test-Document
 
 ```yaml
-items: [alpha, bravo, charlie, delta, echo, foxtrot]
+items: [
+  alpha,
+  bravo,
+  charlie,
+  delta,
+  echo,
+  foxtrot
+]
 ```

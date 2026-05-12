@@ -13,6 +13,7 @@ Formatting a block sequence key twice gives the same result.
 ```yaml
 ? - a
   - b
-: - c
+:
+  - c
   - d
 ```

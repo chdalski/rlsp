@@ -12,6 +12,6 @@ Formatting a literal block scalar key twice gives the same result.
 
 ```yaml
 ? |
-  block key
+    block key
 : value
 ```

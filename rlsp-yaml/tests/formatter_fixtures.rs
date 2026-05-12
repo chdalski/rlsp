@@ -50,8 +50,8 @@ struct FixtureSpec {
     test_name: String,
     /// Formatting options derived from frontmatter `settings:`.
     options: YamlFormatOptions,
-    /// When `true`, assert `format(format(input)) == format(input)`.
-    /// No `Expected-Document` section is required.
+    /// When `true`, assert `format(input) == input` — the Test-Document must
+    /// already be in formatted form. No `Expected-Document` section is required.
     idempotent: bool,
     /// Raw YAML from the `## Test-Document` fenced block.
     test_document: String,
@@ -274,7 +274,8 @@ fn formatter_fixture(#[files("tests/fixtures/formatter/*.md")] path: PathBuf) {
     let first = format_yaml(&fixture.test_document, &fixture.options);
 
     if fixture.idempotent {
-        // Idempotency mode: assert format(format(input)) == format(input).
+        // Idempotency mode: assert format(input) == input — the Test-Document
+        // must already be in formatted form.
         // Also assert that a non-empty input produces non-empty output (guards
         // against a formatter that silently returns empty string for all inputs).
         if !fixture.test_document.trim().is_empty() {
@@ -286,15 +287,14 @@ fn formatter_fixture(#[files("tests/fixtures/formatter/*.md")] path: PathBuf) {
                 fixture.test_document,
             );
         }
-        let second = format_yaml(&first, &fixture.options);
         assert_eq!(
             first,
-            second,
-            "fixture {}: formatter is not idempotent\ntest-name: {}\nfirst:  {:?}\nsecond: {:?}",
+            fixture.test_document,
+            "fixture {}: Test-Document is not in formatted form\ntest-name: {}\nexpected (formatted): {:?}\ngot (test document): {:?}",
             path.display(),
             fixture.test_name,
             first,
-            second,
+            fixture.test_document,
         );
     } else {
         assert_eq!(

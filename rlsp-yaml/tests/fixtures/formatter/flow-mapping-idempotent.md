@@ -11,5 +11,5 @@ Formatting a short flow mapping twice produces the same result.
 ## Test-Document
 
 ```yaml
-meta: {a: 1, b: 2}
+meta: { a: 1, b: 2 }
 ```

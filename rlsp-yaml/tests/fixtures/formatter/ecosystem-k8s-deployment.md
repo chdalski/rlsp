@@ -32,7 +32,7 @@ spec:
       containers:
         - name: web
           image: python:3.11
-          command: ["python", "-m", "http.server", "5000"]
+          command: [python, "-m", http.server, "5000"]
           ports:
             - containerPort: 5000
           resources:

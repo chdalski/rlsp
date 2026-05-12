@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-12
 
 ## Goal
@@ -59,15 +59,15 @@ Key files:
 
 ## Steps
 
-- [ ] Strengthen idempotent assertion in harness
-- [ ] Delete redundant fixture
-- [ ] Fix 7 idempotent fixtures to use formatted input
+- [x] Strengthen idempotent assertion in harness
+- [x] Delete redundant fixture
+- [x] Fix 7 idempotent fixtures to use formatted input
 - [ ] Fix 4 code-action fixtures with unspaced flow mappings
 - [ ] All tests pass (`cargo test --package rlsp-yaml`)
 
 ## Tasks
 
-### Task 1: Strengthen harness and fix idempotent fixtures
+### Task 1: Strengthen harness and fix idempotent fixtures — `962e36e`
 
 Change the `idempotent` branch in `formatter_fixture()`
 (`formatter_fixtures.rs:276-298`) to assert
@@ -99,13 +99,13 @@ Then fix all 8 failing fixtures:
   sequence on next line after `:`
 
 Acceptance criteria:
-- [ ] `cargo test --package rlsp-yaml --test formatter_fixtures` passes
-- [ ] The idempotent branch asserts `first == fixture.test_document`
-- [ ] The `idempotent` field doc comment in `FixtureSpec`
+- [x] `cargo test --package rlsp-yaml --test formatter_fixtures` passes
+- [x] The idempotent branch asserts `first == fixture.test_document`
+- [x] The `idempotent` field doc comment in `FixtureSpec`
       (`formatter_fixtures.rs:53`) is updated to describe
       the new `format(input) == input` assertion
-- [ ] `block-enforce-idempotent.md` is deleted
-- [ ] 7 remaining idempotent fixtures have Test-Documents
+- [x] `block-enforce-idempotent.md` is deleted
+- [x] 7 remaining idempotent fixtures have Test-Documents
       that match their formatted output
 
 ### Task 2: Fix code-action fixtures with unspaced flow mappings

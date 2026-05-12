@@ -26,11 +26,10 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myapp"]
+      test: [CMD-SHELL, pg_isready -U myapp]
       interval: 10s
       timeout: 5s
       retries: 5
-
   api:
     image: myapp:latest
     environment:
@@ -43,7 +42,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
 volumes:
   db_data: {}
 ```
