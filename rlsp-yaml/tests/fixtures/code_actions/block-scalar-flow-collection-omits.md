@@ -10,5 +10,5 @@ omits-action: block scalar
 ## Test-Document
 
 ```yaml
-key: {aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1}
+key: { aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: 1 }
 ```

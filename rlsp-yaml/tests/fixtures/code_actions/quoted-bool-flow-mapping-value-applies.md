@@ -10,11 +10,11 @@ applies-action: Convert quoted
 ## Test-Document
 
 ```yaml
-config: {enabled: "true"}
+config: { enabled: "true" }
 ```
 
 ## Expected-Document
 
 ```yaml
-config: {enabled: true}
+config: { enabled: true }
 ```

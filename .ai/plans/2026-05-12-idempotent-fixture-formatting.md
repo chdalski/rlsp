@@ -62,8 +62,8 @@ Key files:
 - [x] Strengthen idempotent assertion in harness
 - [x] Delete redundant fixture
 - [x] Fix 7 idempotent fixtures to use formatted input
-- [ ] Fix 4 code-action fixtures with unspaced flow mappings
-- [ ] All tests pass (`cargo test --package rlsp-yaml`)
+- [x] Fix 4 code-action fixtures with unspaced flow mappings
+- [x] All tests pass (`cargo test --package rlsp-yaml`)
 
 ## Tasks
 
@@ -108,7 +108,7 @@ Acceptance criteria:
 - [x] 7 remaining idempotent fixtures have Test-Documents
       that match their formatted output
 
-### Task 2: Fix code-action fixtures with unspaced flow mappings
+### Task 2: Fix code-action fixtures with unspaced flow mappings — `aa8928c`
 
 Update flow mapping YAML in these code-action fixtures to
 use bracket spacing (`{ key: val }` not `{key: val}`):
@@ -133,8 +133,8 @@ spacing — the formatter only applies bracket spacing to
 flow mappings. These are already correct.
 
 Acceptance criteria:
-- [ ] `cargo test --package rlsp-yaml --test code_action_fixtures` passes
-- [ ] All 4 updated fixtures use `{ ... }` with spaces
+- [x] `cargo test --package rlsp-yaml --test code_action_fixtures` passes
+- [x] All 4 updated fixtures use `{ ... }` with spaces
       inside braces
 
 ## Decisions
