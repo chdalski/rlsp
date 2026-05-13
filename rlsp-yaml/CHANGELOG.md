@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.12.1] - 2026-05-13
+
+### Bug Fixes
+
+- Pin patched fast-uri and serialize-javascript via pnpm overrides (b909efd)
+
+### Documentation
+
+- Document Zed extension across project docs (57171ee)
+- Document Zed multi-LSP coexistence (4e0c30e)
+
 ## [0.12.0] - 2026-05-13
 
 ### Bug Fixes
