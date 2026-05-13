@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-13
 
 ## Goal
@@ -87,19 +87,21 @@ lockfile resolution.
 
 ## Steps
 
-- [ ] Add `fast-uri` and `serialize-javascript` entries to
+- [x] Add `fast-uri` and `serialize-javascript` entries to
   `pnpm.overrides` in
   `rlsp-yaml/integrations/vscode/package.json`
-- [ ] Regenerate `pnpm-lock.yaml` via `pnpm install`
-- [ ] Verify resolved versions in the lockfile
-- [ ] Run lint, unit tests, and integration tests
-- [ ] Confirm all four Dependabot alerts will close once
+- [x] Regenerate `pnpm-lock.yaml` via `pnpm install`
+- [x] Verify resolved versions in the lockfile
+- [x] Run lint, unit tests, and integration tests
+- [x] Confirm all four Dependabot alerts will close once
   the change lands on `main` (verify alert auto-resolution
   state via the resolved versions)
 
 ## Tasks
 
 ### Task 1: Pin patched versions via pnpm.overrides
+
+**Commit:** `83c17a1fc2ab7cb210c0126b73d52db4bea26f6f`
 
 Add `fast-uri: ^3.1.2` and `serialize-javascript: ^7.0.5`
 to the existing `pnpm.overrides` block in
@@ -119,27 +121,27 @@ Files involved:
 
 Sub-tasks (all must be true to pass):
 
-- [ ] `pnpm.overrides` in `package.json` contains
+- [x] `pnpm.overrides` in `package.json` contains
   `"fast-uri": "^3.1.2"` and
   `"serialize-javascript": "^7.0.5"` alongside the
   existing `"lodash": ">=4.18.0"` entry
-- [ ] `pnpm install` completes without error and updates
+- [x] `pnpm install` completes without error and updates
   `pnpm-lock.yaml`
-- [ ] The top-level `overrides:` block in
+- [x] The top-level `overrides:` block in
   `pnpm-lock.yaml` contains both new entries
-- [ ] `grep "fast-uri@" pnpm-lock.yaml` returns only
+- [x] `grep "fast-uri@" pnpm-lock.yaml` returns only
   versions `>= 3.1.2` (no `3.1.0` or `3.1.1` resolutions
   remain)
-- [ ] `grep "serialize-javascript@" pnpm-lock.yaml`
+- [x] `grep "serialize-javascript@" pnpm-lock.yaml`
   returns only versions `>= 7.0.5` (no `6.x` or
   `<7.0.5` resolutions remain)
-- [ ] `pnpm run lint` exits zero
-- [ ] `pnpm run format` exits zero
-- [ ] `pnpm run build` exits zero
-- [ ] `pnpm run test` exits zero
-- [ ] `pnpm run test:integration` exits zero
-  (uses `xvfb-run -a` on Linux per root CLAUDE.md)
-- [ ] Security-engineer sign-off: the resolved lockfile
+- [x] `pnpm run lint` exits zero
+- [x] `pnpm run format` exits zero
+- [x] `pnpm run build` exits zero
+- [x] `pnpm run test` exits zero — 28/28 vitest passing
+- [x] `pnpm run test:integration` exits zero — 19/19
+  passing (uses `xvfb-run -a` on Linux per root CLAUDE.md)
+- [x] Security-engineer sign-off: the resolved lockfile
   versions for `fast-uri` and `serialize-javascript`
   meet or exceed the `first_patched_version` of every
   affected advisory (#5, #6, #15, #16)
