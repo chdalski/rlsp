@@ -162,4 +162,4 @@ jobs:
             --title "rlsp-yaml: bump to ${VERSION}" \
             --body "Bumps rlsp-yaml Zed extension to v${VERSION}.
 
-Upstream tag: https://github.com/chdalski/rlsp/releases/tag/zed-v${VERSION}"
+          Upstream tag: https://github.com/chdalski/rlsp/releases/tag/zed-v${VERSION}"
