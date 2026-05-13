@@ -64,7 +64,7 @@ registry.
 - [x] Clarify requirements with user
 - [x] Create Zed extension crate
 - [x] Add CI workflow for Zed extension
-- [ ] Add release automation (trigger job + release workflow)
+- [x] Add release automation (trigger job + release workflow)
 - [ ] Update documentation (CLAUDE.md, rlsp-yaml README)
 
 ## Tasks
@@ -143,6 +143,8 @@ check/lint of the Zed extension crate on PRs and pushes.
 
 ### Task 3: Add release automation
 
+**Completed:** commit `0834ba4`
+
 Wire the Zed extension into the release pipeline with two
 changes:
 
@@ -172,13 +174,13 @@ changes:
   step
 - Permissions: `contents: write` for commit/tag/push
 
-- [ ] `trigger-zed` job added to `release-plz.yml`
-- [ ] `release` job added to `zed-extension.yml` with
+- [x] `trigger-zed` job added to `release-plz.yml`
+- [x] `release` job added to `zed-extension.yml` with
   version bump, commit, tag, push
-- [ ] Registry PR step using `ZED_REGISTRY_PAT`
-- [ ] `workflow_dispatch` trigger added to
+- [x] Registry PR step using `ZED_REGISTRY_PAT`
+- [x] `workflow_dispatch` trigger added to
   `zed-extension.yml`
-- [ ] Release job is conditional on `workflow_dispatch`
+- [x] Release job is conditional on `workflow_dispatch`
   event (CI checks still run on push/PR without releasing)
 
 **Acceptance criteria:**
