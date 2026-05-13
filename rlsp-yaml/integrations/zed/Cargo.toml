@@ -1,0 +1,20 @@
+[package]
+name = "rlsp-yaml-zed"
+version = "0.1.0"
+edition = "2021"
+description = "Zed extension for rlsp-yaml YAML language server"
+authors = ["Christoph Dalski", "Kirill Semenov"]
+repository = "https://github.com/chdalski/rlsp"
+license = "MIT"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zed_extension_api = "0.7"
+serde_json = "1"
+
+[dev-dependencies]
+rstest = "0.26"

@@ -62,7 +62,7 @@ registry.
 ## Steps
 
 - [x] Clarify requirements with user
-- [ ] Create Zed extension crate
+- [x] Create Zed extension crate
 - [ ] Add CI workflow for Zed extension
 - [ ] Add release automation (trigger job + release workflow)
 - [ ] Update documentation (CLAUDE.md, rlsp-yaml README)
@@ -76,16 +76,18 @@ standalone Rust crate (not part of the workspace — declares
 its own `[workspace]` in `Cargo.toml`, same pattern as the
 VS Code extension being outside the Cargo workspace).
 
-- [ ] `extension.toml` — manifest with `schema_version = 1`,
+**Completed:** commit `303b839`
+
+- [x] `extension.toml` — manifest with `schema_version = 1`,
   `id = "rlsp-yaml"`, SemVer version `0.1.0`,
   authors `["Christoph Dalski", "Kirill Semenov"]`,
   repo `https://github.com/chdalski/rlsp`,
   language server entry for YAML
-- [ ] `Cargo.toml` — standalone crate `rlsp-yaml-zed`,
+- [x] `Cargo.toml` — standalone crate `rlsp-yaml-zed`,
   `cdylib` crate type, deps: `zed_extension_api = "0.7"`,
   `serde_json = "1"`. Declares `[workspace]` to stay
   isolated from root workspace. License `MIT`.
-- [ ] `src/lib.rs` — implements `zed::Extension` trait:
+- [x] `src/lib.rs` — implements `zed::Extension` trait:
   - `new()` — returns `Self`
   - `language_server_command()` — PATH lookup via
     `worktree.which("rlsp-yaml")`, then GitHub release
@@ -103,9 +105,9 @@ VS Code extension being outside the Cargo workspace).
     to Rust target triples (5 supported:
     x86_64/aarch64 linux-gnu, x86_64/aarch64 apple-darwin,
     x86_64 windows-msvc)
-- [ ] `LICENSE` file — copy of root MIT license (required
+- [x] `LICENSE` file — copy of root MIT license (required
   by Zed registry for subdirectory extensions)
-- [ ] `README.md` — user-facing extension documentation:
+- [x] `README.md` — user-facing extension documentation:
   installation from Zed marketplace, configuration via
   `settings.json`, link to `docs/configuration.md` for
   full settings reference

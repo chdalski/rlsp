@@ -1,0 +1,11 @@
+schema_version = 1
+id = "rlsp-yaml"
+name = "rlsp-yaml"
+version = "0.1.0"
+description = "YAML language server powered by rlsp-yaml"
+authors = ["Christoph Dalski", "Kirill Semenov"]
+repository = "https://github.com/chdalski/rlsp"
+
+[language_servers.rlsp-yaml]
+name = "rlsp-yaml"
+languages = ["YAML"]
