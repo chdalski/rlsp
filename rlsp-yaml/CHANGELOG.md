@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.12.0] - 2026-05-13
+
+### Bug Fixes
+
+- Strengthen idempotent fixture assertion to format(input) == input (f1830cf)
+- Add bracket spacing to code-action flow mapping fixtures (b85330c)
+
+### Features
+
+- Mark error types non_exhaustive (90e5b7c)
+- Map InvalidCharacter errors to distinct LSP diagnostic code (ce9f439)
+- Block-to-flow handles nested collections (5dfb268)
+- Extend string_to_block_scalar to sequence items (af42644)
+- Add "Convert to block scalar (folded)" code action (b65a661)
+- Suppress block-to-flow action under enforce-block policy (8e12e69)
+- Add detail text and label-key heuristic to document symbols (6258d06)
+- Support non-mapping roots and multi-doc wrappers in document symbols (c2a631e)
+- Add custom tag type annotations with tagTypeMismatch diagnostic (19790bb)
+
 ## [0.11.0] - 2026-05-05
 
 ### Bug Fixes

@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.11.0] - 2026-05-13
+
+### Documentation
+
+- Add Conventions section with non-exhaustive rule (cd6e80c)
+- Update benchmark numbers from 2026-05-13 baremetal run (806c1a2)
+
+### Features
+
+- Mark error types non_exhaustive (90e5b7c)
+- Introduce ErrorKind enum on event-stream API (bd31fec)
+- Propagate ErrorKind through LoadError::Parse (4763e70)
+
 ## [0.10.0] - 2026-05-05
 
 ### Bug Fixes
