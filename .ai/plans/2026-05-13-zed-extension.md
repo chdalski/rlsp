@@ -63,7 +63,7 @@ registry.
 
 - [x] Clarify requirements with user
 - [x] Create Zed extension crate
-- [ ] Add CI workflow for Zed extension
+- [x] Add CI workflow for Zed extension
 - [ ] Add release automation (trigger job + release workflow)
 - [ ] Update documentation (CLAUDE.md, rlsp-yaml README)
 
@@ -123,14 +123,16 @@ VS Code extension being outside the Cargo workspace).
 Create `.github/workflows/zed-extension.yml` for
 check/lint of the Zed extension crate on PRs and pushes.
 
-- [ ] Workflow triggers: push to main + PRs when files
+**Completed:** commit `243ddd3`
+
+- [x] Workflow triggers: push to main + PRs when files
   under `rlsp-yaml/integrations/zed/**` change
-- [ ] Job `check`: install `wasm32-wasip2` target via
+- [x] Job `check`: install `wasm32-wasip2` target via
   `rustup target add`, run `cargo check` and
   `cargo clippy --all-targets` targeting `wasm32-wasip2`,
   using `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml`
-- [ ] Explicit `permissions: contents: read`
-- [ ] Uses latest stable action versions (`actions/checkout@v6`,
+- [x] Explicit `permissions: contents: read`
+- [x] Uses latest stable action versions (`actions/checkout@v6`,
   `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache@v2`)
 
 **Acceptance criteria:**

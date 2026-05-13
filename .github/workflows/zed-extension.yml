@@ -1,0 +1,35 @@
+name: Zed Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rlsp-yaml/integrations/zed/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'rlsp-yaml/integrations/zed/**'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check + Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rlsp-yaml/integrations/zed
+      - name: cargo check
+        run: cargo check --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2
+      - name: cargo clippy
+        run: cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
