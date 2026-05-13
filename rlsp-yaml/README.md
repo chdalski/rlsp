@@ -78,6 +78,22 @@ language-servers = ["rlsp-yaml"]
 
 A dedicated Zed extension is available in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Search for `rlsp-yaml` and install — no manual server configuration required.
 
+**Coexistence with other YAML language servers**
+
+If the Red Hat `yaml-language-server` (or another YAML LSP) is also installed, tell Zed to use `rlsp-yaml` and disable the other one:
+
+```json
+{
+  "languages": {
+    "YAML": {
+      "language_servers": ["rlsp-yaml", "!yaml-language-server"]
+    }
+  }
+}
+```
+
+The leading `!` disables a language server that would otherwise activate by default. List any other YAML LSP names you want to suppress the same way.
+
 **Alternative: manual LSP configuration**
 
 If you prefer to point Zed at a locally installed binary, add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.json`):
