@@ -35,16 +35,37 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
 
+  # Preflight: verify rlsp-yaml is registered in the upstream Zed registry
+  # before doing any release work. The version bump and registry PR steps both
+  # assume the [rlsp-yaml] entry already exists in extensions.toml — that's the
+  # one-time manual registration. Failing here keeps main clean of dangling tags
+  # when the workflow is triggered before registration is merged.
+  preflight:
+    name: Verify upstream registration
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check rlsp-yaml entry exists in upstream extensions.toml
+        run: |
+          TOML=$(curl --retry 3 --retry-delay 2 -fsSL \
+            "https://raw.githubusercontent.com/zed-industries/extensions/main/extensions.toml")
+          if ! printf '%s\n' "$TOML" | grep -qFx '[rlsp-yaml]'; then
+            echo "::error::rlsp-yaml is not registered in zed-industries/extensions yet."
+            echo "::error::The initial registration PR must be merged before automated releases can run."
+            exit 1
+          fi
+          echo "Found [rlsp-yaml] entry in upstream extensions.toml"
+
   # Runs only on workflow_dispatch (triggered by trigger-zed in release-plz.yml).
   # Reads current version from extension.toml, increments the patch component,
   # commits and tags in this repo, then open-registry-pr creates the registry PR.
   #
-  # ZED_REGISTRY_PAT must be a fine-grained PAT scoped to the fork of
-  # zed-industries/extensions only, with repository permissions:
-  #   Contents: write, Pull requests: write
-  # A classic repo-scoped PAT grants write to all accessible repos — do NOT use one.
+  # ZED_REGISTRY_PAT must be a classic PAT with `public_repo` scope — required
+  # for cross-repo PR creation against zed-industries/extensions.
   commit-and-tag:
     name: Bump version and tag
+    needs: preflight
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
@@ -111,9 +132,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
         run: |
-          gh repo fork zed-industries/extensions --clone=false
+          # --fork-name renames the fork so it doesn't sit as a generic
+          # "extensions" repo in the owner's namespace. If a fork with the
+          # target name already exists, gh repo fork is a no-op.
+          gh repo fork zed-industries/extensions \
+            --fork-name=zed-editor-extensions \
+            --clone=false
           FORK_OWNER=$(gh api user --jq '.login')
-          gh repo clone "${FORK_OWNER}/extensions" /tmp/extensions -- --depth=1
+          gh repo clone "${FORK_OWNER}/zed-editor-extensions" /tmp/extensions -- --depth=1
 
       - name: Bump version in fork's extensions.toml
         env:
