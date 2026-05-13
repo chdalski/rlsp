@@ -31,6 +31,14 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Zed Editor Extension [completed]
+
+**Description:** rlsp-yaml is now available as a native Zed extension in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Install by searching for `rlsp-yaml` in Zed's extension panel — the extension bundles the server and requires no manual LSP configuration. Extension releases are published automatically when a new `rlsp-yaml` crate version is released.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Custom Tag Type Annotations [completed]
 
 **Description:** The `customTags` setting (and the `$tags=` modeline) now accepts optional type annotations. Append ` scalar`, ` mapping`, or ` sequence` (case-insensitive) to any tag entry to declare the expected node structure. When a tagged node's actual structure doesn't match the declared type, the server emits a `tagTypeMismatch` warning diagnostic. Tags without a type annotation continue to suppress `unknownTag` warnings with no structure check. This format is compatible with the RedHat yaml-language-server `customTags` setting, so existing configurations migrate unchanged. When both workspace settings and a modeline declare the same tag name, the modeline wins.

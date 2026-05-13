@@ -12,9 +12,11 @@ Small, fast language server implementations written in Rust with minimal memory 
 | [rlsp-yaml-parser](rlsp-yaml-parser/README.md) | Spec-faithful streaming YAML 1.2 parser |
 | [rlsp-fmt](rlsp-fmt/README.md) | Generic Wadler-Lindig pretty-printing engine |
 
-## VS Code Extension
+## Editor Extensions
 
-A dedicated VS Code extension for `rlsp-yaml` is included at [`rlsp-yaml/integrations/vscode/`](rlsp-yaml/integrations/vscode/). It bundles the compiled server binary and provides full YAML language support — hover, completion, validation, formatting, and more — without any manual configuration. Platform-specific VSIX packages are built for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64).
+**VS Code** — a dedicated extension is included at [`rlsp-yaml/integrations/vscode/`](rlsp-yaml/integrations/vscode/). It bundles the compiled server binary and provides full YAML language support — hover, completion, validation, formatting, and more — without any manual configuration. Platform-specific VSIX packages are built for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64).
+
+**Zed** — a Zed extension is available in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Search for `rlsp-yaml` and install — no manual server configuration required. The extension is at [`rlsp-yaml/integrations/zed/`](rlsp-yaml/integrations/zed/).
 
 ## Contributing
 

@@ -76,7 +76,11 @@ language-servers = ["rlsp-yaml"]
 
 ### Zed
 
-Add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.json`):
+A dedicated Zed extension is available in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Search for `rlsp-yaml` and install — no manual server configuration required.
+
+**Alternative: manual LSP configuration**
+
+If you prefer to point Zed at a locally installed binary, add to Zed settings (`~/.config/zed/settings.json` or project `.zed/settings.json`):
 
 ```json
 {

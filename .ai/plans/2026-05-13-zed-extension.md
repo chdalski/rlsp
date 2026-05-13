@@ -65,7 +65,7 @@ registry.
 - [x] Create Zed extension crate
 - [x] Add CI workflow for Zed extension
 - [x] Add release automation (trigger job + release workflow)
-- [ ] Update documentation (CLAUDE.md, rlsp-yaml README)
+- [x] Update documentation (CLAUDE.md, rlsp-yaml README)
 
 ## Tasks
 
@@ -198,25 +198,27 @@ changes:
 
 ### Task 4: Update documentation
 
+**Completed:** commit `781d7e4`
+
 Update project documentation to reflect the new Zed
 integration.
 
-- [ ] Root `CLAUDE.md` — add
+- [x] Root `CLAUDE.md` — add
   `rlsp-yaml/integrations/zed/` row to Components table
-- [ ] Root `CLAUDE.md` — add Zed extension tag format to
+- [x] Root `CLAUDE.md` — add Zed extension tag format to
   Conventions: `zed-v<semver>` for Zed extension releases
-- [ ] `rlsp-yaml/README.md` — update Zed section to
+- [x] `rlsp-yaml/README.md` — update Zed section to
   reference the extension (install from marketplace) while
   keeping the manual config as alternative. Follow the
   same pattern as the VS Code section.
-- [ ] Root `CLAUDE.md` — add `### Zed Extension` subsection
+- [x] Root `CLAUDE.md` — add `### Zed Extension` subsection
   to Build and Test with `cargo check` / `cargo clippy`
   commands for `wasm32-wasip2` target, parallel to the
   existing `### VS Code Extension` subsection
-- [ ] Root `README.md` — rename "VS Code Extension" section
+- [x] Root `README.md` — rename "VS Code Extension" section
   to "Editor Extensions" (or similar) and add a Zed entry
   alongside the VS Code entry
-- [ ] `rlsp-yaml/docs/feature-log.md` — add entry for Zed
+- [x] `rlsp-yaml/docs/feature-log.md` — add entry for Zed
   extension (user-facing feature)
 
 **Acceptance criteria:**
