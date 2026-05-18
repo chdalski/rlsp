@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-18
 
 # Refresh GitHub Issue Templates for Multi-Component Repo
@@ -104,13 +104,15 @@ blue, `#d876e3` pink, `#0e8a16` green, `#ffffff` white,
 
 ## Steps
 
-- [ ] Add five per-component bug templates and a unified
+- [x] Add five per-component bug templates and a unified
       feature template, remove the obsolete generic bug
       template, and update `CONTRIBUTING.md` to match.
 
 ## Tasks
 
 ### Task 1: Restructure issue templates and align CONTRIBUTING.md
+
+**Commit:** `5fd7155`
 
 Replace `bug_report.yml` with five per-component bug
 templates, replace `feature_request.yml` with a unified
@@ -142,7 +144,7 @@ Files deleted:
 
 Sub-tasks (each lists the exact field shape required):
 
-- [ ] Create `.github/ISSUE_TEMPLATE/bug_rlsp_yaml.yml`.
+- [x] Create `.github/ISSUE_TEMPLATE/bug_rlsp_yaml.yml`.
   Metadata: `name: "Bug Report: rlsp-yaml (language
   server)"`, `description: "Report a bug in the rlsp-yaml
   language server"`, `labels: ["bug", "rlsp-yaml"]`.
@@ -153,7 +155,7 @@ Sub-tasks (each lists the exact field shape required):
   `e.g. Neovim 0.10, VS Code 1.88`), Operating System
   (input, placeholder `e.g. Ubuntu 24.04, macOS 14,
   Windows 11`), YAML Sample (textarea, `render: yaml`).
-- [ ] Create
+- [x] Create
   `.github/ISSUE_TEMPLATE/bug_rlsp_yaml_parser.yml`.
   Metadata: `name: "Bug Report: rlsp-yaml-parser"`,
   `description: "Report a bug in the YAML 1.2 parser
@@ -168,7 +170,7 @@ Sub-tasks (each lists the exact field shape required):
   Test Suite reference (input, placeholder `e.g. 6XDY`).
   Editor/OS fields are omitted — the parser is a library
   and does not depend on either.
-- [ ] Create `.github/ISSUE_TEMPLATE/bug_rlsp_fmt.yml`.
+- [x] Create `.github/ISSUE_TEMPLATE/bug_rlsp_fmt.yml`.
   Metadata: `name: "Bug Report: rlsp-fmt"`,
   `description: "Report a bug in the pretty-printing
   engine"`, `labels: ["bug", "rlsp-fmt"]`. Required
@@ -179,7 +181,7 @@ Sub-tasks (each lists the exact field shape required):
   Editor/OS fields are omitted — the engine is
   language-agnostic and does not run inside an editor on
   its own.
-- [ ] Create
+- [x] Create
   `.github/ISSUE_TEMPLATE/bug_vscode_extension.yml`.
   Metadata: `name: "Bug Report: VS Code Extension"`,
   `description: "Report a bug in the rlsp-yaml VS Code
@@ -194,7 +196,7 @@ Sub-tasks (each lists the exact field shape required):
   Windows 11`), Architecture (dropdown, options: `x64`,
   `arm64`, `Unsure`), YAML Sample (textarea,
   `render: yaml`), OUTPUT panel log (textarea).
-- [ ] Create
+- [x] Create
   `.github/ISSUE_TEMPLATE/bug_zed_extension.yml`.
   Metadata: `name: "Bug Report: Zed Extension"`,
   `description: "Report a bug in the rlsp-yaml Zed
@@ -207,7 +209,7 @@ Sub-tasks (each lists the exact field shape required):
   (input, placeholder `e.g. Ubuntu 24.04, macOS 14,
   Windows 11`), YAML Sample (textarea, `render: yaml`),
   Zed log excerpt (textarea).
-- [ ] Replace `.github/ISSUE_TEMPLATE/feature_request.yml`
+- [x] Replace `.github/ISSUE_TEMPLATE/feature_request.yml`
   with a unified form. Metadata: `name: "Feature
   Request"`, `description: "Suggest a feature for one of
   the RLSP crates or editor extensions"`,
@@ -220,11 +222,11 @@ Sub-tasks (each lists the exact field shape required):
   Behavior (textarea). Optional: Alternatives Considered
   (textarea), Example (textarea — generic so the field
   fits non-YAML components; no `render` directive).
-- [ ] Delete `.github/ISSUE_TEMPLATE/bug_report.yml`. The
+- [x] Delete `.github/ISSUE_TEMPLATE/bug_report.yml`. The
   five per-component bug templates replace it; leaving
   the generic file alongside would show users a duplicate
   generic entry in the chooser.
-- [ ] Update `CONTRIBUTING.md` "Bug Reports" section:
+- [x] Update `CONTRIBUTING.md` "Bug Reports" section:
   replace the sentence "Open an issue using the bug
   report template." with "Open the bug report template
   for the affected component — `rlsp-yaml`,
@@ -234,14 +236,14 @@ Sub-tasks (each lists the exact field shape required):
   bullets: "Version of the affected component (required)"
   and "Editor and OS — optional, but helpful for
   `rlsp-yaml` and editor extension bugs".
-- [ ] Update `CONTRIBUTING.md` "Recommended GitHub Labels"
+- [x] Update `CONTRIBUTING.md` "Recommended GitHub Labels"
   table: append five rows with the colors listed in this
   plan's Context section — `rlsp-yaml` (`#fbca04`),
   `rlsp-yaml-parser` (`#fef2c0`), `rlsp-fmt` (`#c5def5`),
   `vscode-extension` (`#0052cc`), `zed-extension`
   (`#5319e7`). Each row's description matches the table
   in the Context section.
-- [ ] Verify every new and modified `.yml` file in
+- [x] Verify every new and modified `.yml` file in
   `.github/ISSUE_TEMPLATE/` parses as valid YAML. Use any
   YAML parser available in the environment (`node -e
   "require('js-yaml').load(require('fs').readFileSync('PATH','utf8'))"`
@@ -251,7 +253,7 @@ Sub-tasks (each lists the exact field shape required):
   `bug_vscode_extension.yml`, `bug_zed_extension.yml`,
   `feature_request.yml`). Record the verifier command and
   its zero-exit output in the handoff.
-- [ ] Verify `.github/ISSUE_TEMPLATE/` after the change
+- [x] Verify `.github/ISSUE_TEMPLATE/` after the change
   contains exactly these seven files and no others:
   `bug_rlsp_yaml.yml`, `bug_rlsp_yaml_parser.yml`,
   `bug_rlsp_fmt.yml`, `bug_vscode_extension.yml`,

@@ -1,6 +1,6 @@
-name: Bug Report
-description: Report a bug in rlsp-yaml
-labels: ["bug"]
+name: "Bug Report: rlsp-yaml (language server)"
+description: "Report a bug in the rlsp-yaml language server"
+labels: ["bug", "rlsp-yaml"]
 body:
   - type: textarea
     id: description
@@ -41,7 +41,7 @@ body:
     id: version
     attributes:
       label: rlsp-yaml Version
-      placeholder: "e.g. 0.1.0"
+      placeholder: "e.g. 0.3.1"
     validations:
       required: true
 
@@ -51,7 +51,7 @@ body:
       label: Editor / LSP Client
       placeholder: "e.g. Neovim 0.10, VS Code 1.88"
     validations:
-      required: true
+      required: false
 
   - type: input
     id: os
@@ -59,7 +59,7 @@ body:
       label: Operating System
       placeholder: "e.g. Ubuntu 24.04, macOS 14, Windows 11"
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: yaml_sample

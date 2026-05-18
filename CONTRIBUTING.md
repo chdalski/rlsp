@@ -10,12 +10,13 @@ and patches from external contributors are not accepted.
 
 ### Bug Reports
 
-Open an issue using the bug report template. Include:
+Open the bug report template for the affected component — `rlsp-yaml`, `rlsp-yaml-parser`, `rlsp-fmt`, the VS Code extension, or the Zed extension. Include:
 
 - A clear description of the problem
 - Steps to reproduce
 - Expected vs actual behavior
-- Version of `rlsp-yaml` and your editor/LSP client
+- Version of the affected component (required)
+- Editor and OS — optional, but helpful for `rlsp-yaml` and editor extension bugs
 
 ### Feature Requests
 
@@ -36,3 +37,8 @@ Templates are in [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
 | `accepted` | `#0e8a16` | Issue accepted for implementation |
 | `wontfix` | `#ffffff` | Will not be addressed |
 | `duplicate` | `#cfd3d7` | Duplicate of another issue |
+| `rlsp-yaml` | `#fbca04` | Affects the YAML language server |
+| `rlsp-yaml-parser` | `#fef2c0` | Affects the YAML 1.2 parser library |
+| `rlsp-fmt` | `#c5def5` | Affects the pretty-printing engine |
+| `vscode-extension` | `#0052cc` | Affects the VS Code extension |
+| `zed-extension` | `#5319e7` | Affects the Zed extension |

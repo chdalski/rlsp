@@ -1,0 +1,63 @@
+name: "Bug Report: rlsp-yaml-parser"
+description: "Report a bug in the YAML 1.2 parser library"
+labels: ["bug", "rlsp-yaml-parser"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: yaml_sample
+    attributes:
+      label: YAML Sample
+      description: A minimal YAML snippet that reproduces the issue.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_result
+    attributes:
+      label: Expected Parse Result
+      description: The events from `parse_events()` or AST from `load()` you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_result
+    attributes:
+      label: Actual Parse Result
+      description: The events or AST you actually received.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: rlsp-yaml-parser Version
+      placeholder: "e.g. 0.3.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api
+    attributes:
+      label: API Used
+      options:
+        - "parse_events()"
+        - "load()"
+        - "Unsure"
+    validations:
+      required: false
+
+  - type: input
+    id: yaml_test_suite
+    attributes:
+      label: YAML Test Suite Reference
+      placeholder: "e.g. 6XDY"
+    validations:
+      required: false
