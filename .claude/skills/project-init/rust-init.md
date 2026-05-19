@@ -72,3 +72,21 @@ duplicating config across crates.
 If a `Cargo.toml` already has a lints section, merge these
 entries into it. If any lint conflicts with an existing entry,
 keep the stricter setting (`"deny"` over `"warn"` over `"allow"`).
+
+## `clippy.toml`
+
+Create a `clippy.toml` at the workspace root (or project root
+for single-crate projects) with these test-specific allowances:
+
+```toml
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+```
+
+These options tell Clippy not to fire `unwrap_used`,
+`expect_used`, `panic`, and `indexing_slicing` inside `#[cfg(test)]`
+modules and integration test files, so test code does not need
+`#[expect]` suppressions for these lints. The workspace-level
+`"deny"` settings in `Cargo.toml` still apply to production code.

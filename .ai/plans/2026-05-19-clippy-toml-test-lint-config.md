@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-19)
 **Created:** 2026-05-19
 
 ## Goal
@@ -92,8 +92,8 @@ while keeping the lints enforced in production code.
       test/bench files
 - [x] Simplify or remove `#[expect]` blocks that become
       empty or single-lint after removal
-- [ ] Update CLAUDE.md conventions section
-- [ ] Update project-init skill template
+- [x] Update CLAUDE.md conventions section
+- [x] Update project-init skill template
 - [x] Verify `cargo clippy --all-targets` passes with zero
       warnings
 - [x] Verify `cargo test` passes
@@ -141,23 +141,25 @@ in a single atomic change.
 
 ### Task 2: Update conventions documentation
 
+**Commit:** 3fe15b2
+
 Update project documentation to reflect the new clippy.toml
 configuration so future agents and contributors know the
 convention.
 
-- [ ] Update `CLAUDE.md` conventions section: add a bullet
+- [x] Update `CLAUDE.md` conventions section: add a bullet
   explaining that `clippy.toml` at the workspace root
   configures test-specific lint allowances, and that the
   four lints (`unwrap_used`, `expect_used`, `panic`,
   `indexing_slicing`) do not need `#[expect]` in test code
-- [ ] Update `.claude/skills/project-init/rust-init.md`:
+- [x] Update `.claude/skills/project-init/rust-init.md`:
   add a section for `clippy.toml` generation with the four
   test-specific options, following the same pattern as the
   existing `Cargo.toml` lint configuration sections
-- [ ] The CLAUDE.md convention about `#[expect]` over
+- [x] The CLAUDE.md convention about `#[expect]` over
   `#[allow]` remains unchanged — it still applies to any
   lint that *does* fire and needs suppression
-- [ ] No changes to `Cargo.toml` workspace lint config
+- [x] No changes to `Cargo.toml` workspace lint config
 
 ## Decisions
 
