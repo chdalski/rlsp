@@ -234,7 +234,6 @@ fn find_yaml11_octal_in_node<'a>(
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use tower_lsp::lsp_types::NumberOrString;
 

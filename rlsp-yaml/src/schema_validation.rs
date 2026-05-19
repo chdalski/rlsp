@@ -1648,13 +1648,6 @@ fn format_path(path: &[String]) -> String {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use std::sync::{Arc, Mutex};
 

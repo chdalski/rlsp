@@ -299,7 +299,6 @@ fn find_yaml11_bool_in_node<'a>(
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

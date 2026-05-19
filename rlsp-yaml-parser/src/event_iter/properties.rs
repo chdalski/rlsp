@@ -352,7 +352,6 @@ pub(in crate::event_iter) fn is_valid_tag_handle(handle: &str) -> bool {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::limits::{MAX_ANCHOR_NAME_BYTES, MAX_TAG_LEN};

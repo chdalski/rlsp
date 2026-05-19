@@ -295,7 +295,6 @@ fn node_to_string(node: &Node<Span>) -> String {
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

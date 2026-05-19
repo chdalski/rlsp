@@ -233,12 +233,7 @@ impl DirectiveScope {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::field_reassign_with_default,
-    reason = "test code"
-)]
+#[expect(clippy::field_reassign_with_default, reason = "test code")]
 mod tests {
     use super::*;
     use crate::limits::MAX_RESOLVED_TAG_LEN;

@@ -16,7 +16,6 @@
 // These lints are expected in test code and suppressed module-wide.
 #![expect(
     clippy::panic,
-    clippy::expect_used,
     clippy::indexing_slicing,
     clippy::too_many_lines,
     clippy::wildcard_enum_match_arm,

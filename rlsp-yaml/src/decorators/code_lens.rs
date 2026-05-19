@@ -36,7 +36,6 @@ pub fn code_lenses(schema_url: &str, schema: Option<&JsonSchema>) -> Vec<CodeLen
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
     use crate::schema::JsonSchema;

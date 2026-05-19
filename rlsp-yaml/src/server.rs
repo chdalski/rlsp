@@ -1453,13 +1453,6 @@ impl LanguageServer for Backend {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::{

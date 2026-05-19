@@ -1388,13 +1388,7 @@ fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_possible_truncation,
-    reason = "test code"
-)]
+#[expect(clippy::cast_possible_truncation, reason = "test code")]
 mod tests {
     use std::io::Read as _;
 

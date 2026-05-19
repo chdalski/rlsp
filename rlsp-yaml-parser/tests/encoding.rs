@@ -9,15 +9,7 @@
 // NUL (0x00) is valid UTF-8 but excluded from YAML's c-printable production,
 // so it is tested via `parse_events` at the semantic level.
 
-#![expect(
-    clippy::panic,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::wildcard_enum_match_arm,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(clippy::wildcard_enum_match_arm, missing_docs, reason = "test code")]
 
 use proptest::prelude::*;
 use rstest::rstest;

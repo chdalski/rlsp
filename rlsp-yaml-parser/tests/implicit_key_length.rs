@@ -4,12 +4,7 @@
 // not exceed 1024 Unicode characters.  Groups A–G cover block context;
 // groups H–N cover flow context (both §7.4.3 [154] and [155]).
 
-#![expect(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml_parser::{load, parse_events};
 

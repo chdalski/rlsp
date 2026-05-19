@@ -142,12 +142,6 @@ pub(super) fn make_action(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "test helper code"
-)]
 mod test_helpers {
     use tower_lsp::lsp_types::{CodeAction, Diagnostic, NumberOrString, Position, Range, TextEdit};
 

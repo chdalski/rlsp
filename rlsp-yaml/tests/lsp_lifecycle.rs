@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: MIT
-#![expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(clippy::expect_used, missing_docs, reason = "test code")]
 
 use std::fmt::Write as _;
 

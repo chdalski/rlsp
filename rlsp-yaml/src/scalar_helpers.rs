@@ -124,7 +124,7 @@ pub fn parse_float(value: &str) -> Option<f64> {
 }
 
 #[cfg(test)]
-#[expect(clippy::approx_constant, clippy::unwrap_used, reason = "test code")]
+#[expect(clippy::approx_constant, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

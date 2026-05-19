@@ -180,12 +180,6 @@ fn find_block_scalar_in_node<'a>(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "test code"
-)]
 mod tests {
     use tower_lsp::lsp_types::Position;
 

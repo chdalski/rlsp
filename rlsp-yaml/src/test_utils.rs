@@ -16,7 +16,6 @@ pub fn parse_docs(text: &str) -> Vec<Document<Span>> {
 ///
 /// Never panics — the literal `"file:///test.yaml"` is always a valid URL.
 #[must_use]
-#[expect(clippy::expect_used, reason = "literal URL is always valid")]
 pub fn test_uri() -> Url {
     Url::parse("file:///test.yaml").expect("valid test URI")
 }

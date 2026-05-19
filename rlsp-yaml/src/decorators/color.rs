@@ -660,7 +660,6 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

@@ -186,13 +186,7 @@ fn collect_ancestor_spans(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::cast_possible_truncation,
-    reason = "test code"
-)]
+#[expect(clippy::cast_possible_truncation, reason = "test code")]
 mod tests {
     use std::fmt::Write as _;
 

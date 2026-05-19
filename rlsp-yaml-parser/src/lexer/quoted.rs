@@ -929,7 +929,6 @@ fn ensure_owned<'s>(owned: &'s mut Option<String>, prefix: &str) -> &'s mut Stri
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use std::borrow::Cow;
 

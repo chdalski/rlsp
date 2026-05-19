@@ -307,13 +307,6 @@ fn split_digits(s: &str) -> (&str, &str) {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use rstest::rstest;
 

@@ -401,12 +401,6 @@ fn json_value_to_display_string(value: &serde_json::Value) -> String {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use std::collections::HashMap;
 

@@ -84,12 +84,6 @@ impl DocumentStore {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use rlsp_yaml_parser::node::Node;
 

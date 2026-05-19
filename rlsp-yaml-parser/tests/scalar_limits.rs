@@ -4,7 +4,7 @@
 // Covers double-quoted (borrow path) and single-quoted (borrow and owned paths)
 // via both `parse_events()` and `load()`.
 
-#![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
+#![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml_parser::{MAX_SCALAR_LEN, load, parse_events};
 

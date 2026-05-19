@@ -11,7 +11,6 @@
 // delete_anchor is intentionally excluded — its purpose is to remove an anchor.
 
 #![expect(missing_docs, reason = "test code")]
-#![expect(clippy::panic, reason = "test harness reports failures via panic")]
 
 mod common;
 use common::*;

@@ -697,7 +697,6 @@ fn push_duplicate_diagnostic(
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use std::fmt::Write as _;
 

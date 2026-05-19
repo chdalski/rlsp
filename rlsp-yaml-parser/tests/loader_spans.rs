@@ -4,14 +4,7 @@
 // full spans — `loc.start` from the opening token, `loc.end` from the closing
 // token. These tests exercise the public `load()` API.
 
-#![expect(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(missing_docs, reason = "test code")]
 
 use rstest::rstest;
 

@@ -60,13 +60,7 @@ pub(super) fn reloc(node: Node<Span>, loc: Span) -> Node<Span> {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::wildcard_enum_match_arm,
-    clippy::expect_used,
-    reason = "test code"
-)]
+#[expect(clippy::wildcard_enum_match_arm, reason = "test code")]
 mod tests {
     use std::borrow::Cow;
 

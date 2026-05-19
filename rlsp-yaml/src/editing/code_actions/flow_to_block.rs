@@ -248,13 +248,7 @@ fn find_flow_sequence_in_node<'a>(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::items_after_statements,
-    reason = "test code"
-)]
+#[expect(clippy::items_after_statements, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

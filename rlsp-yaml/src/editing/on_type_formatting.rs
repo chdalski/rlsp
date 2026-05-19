@@ -160,7 +160,6 @@ const fn is_block_scalar_node(node: &Node<Span>) -> bool {
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

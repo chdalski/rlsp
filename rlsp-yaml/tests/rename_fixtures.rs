@@ -303,7 +303,6 @@ fn rename_fixture(#[files("tests/fixtures/rename/rename-*.md")] path: PathBuf) {
 // ---- Self-tests for harness helpers -----------------------------------------
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod self_tests {
     use tower_lsp::lsp_types::{Position, Range};
 

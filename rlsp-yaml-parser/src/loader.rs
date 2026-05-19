@@ -1133,13 +1133,6 @@ const fn empty_scalar() -> Node<Span> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    reason = "test code"
-)]
 mod tests {
     use super::*;
     use rstest::rstest;

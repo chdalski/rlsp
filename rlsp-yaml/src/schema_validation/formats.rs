@@ -434,7 +434,6 @@ pub(super) fn is_valid_iri_reference(s: &str) -> bool {
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, reason = "test code")]
 mod tests {
     use rstest::rstest;
     use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};

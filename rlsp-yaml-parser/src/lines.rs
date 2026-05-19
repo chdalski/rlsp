@@ -812,7 +812,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::expect_used, reason = "test code")]
     fn signal_document_boundary_strips_bom_from_primed_next_line() {
         // signal_document_boundary() strips the BOM from the already-primed
         // next line only.  Subsequent lines are not affected — the signal is

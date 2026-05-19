@@ -1707,7 +1707,6 @@ fn dedup_mapping_keys(node: &mut Node<Span>) {
 }
 
 #[cfg(test)]
-#[expect(clippy::panic, clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

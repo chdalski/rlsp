@@ -3,14 +3,7 @@
 // Integration tests for anchor_loc threading from events through the loader
 // into AST nodes.
 
-#![expect(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    missing_docs,
-    reason = "test code"
-)]
+#![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml_parser::loader::load;
 use rlsp_yaml_parser::node::Node;

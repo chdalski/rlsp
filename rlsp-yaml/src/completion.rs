@@ -1063,14 +1063,7 @@ fn collect_sequence_sibling_keys(sequence: &Node<Span>) -> HashSet<String> {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::wildcard_enum_match_arm,
-    clippy::indexing_slicing,
-    reason = "test code"
-)]
+#[expect(clippy::wildcard_enum_match_arm, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

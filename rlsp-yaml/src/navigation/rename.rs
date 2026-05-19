@@ -193,7 +193,6 @@ fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
 

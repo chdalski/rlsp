@@ -116,7 +116,6 @@ fn find_anchored_node_in<'a>(
 }
 
 #[cfg(test)]
-#[expect(clippy::indexing_slicing, clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::super::code_actions;
     use super::super::test_helpers::{docs_for, line_range, make_diagnostic};

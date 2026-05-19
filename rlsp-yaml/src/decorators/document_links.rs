@@ -200,12 +200,7 @@ fn byte_to_utf16_offset(s: &str, byte_offset: usize) -> u32 {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::cast_possible_truncation,
-    reason = "test code"
-)]
+#[expect(clippy::cast_possible_truncation, reason = "test code")]
 mod tests {
     use rlsp_yaml_parser::Span;
     use rlsp_yaml_parser::node::Document;

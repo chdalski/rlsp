@@ -370,12 +370,6 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
 // ---- Self-tests for harness helpers -----------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    reason = "test code"
-)]
 mod self_tests {
     use super::*;
 

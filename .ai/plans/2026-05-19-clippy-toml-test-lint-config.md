@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-19
 
 ## Goal
@@ -87,55 +87,57 @@ while keeping the lints enforced in production code.
 
 ## Steps
 
-- [ ] Create `clippy.toml` at workspace root
-- [ ] Remove redundant `#[expect]` entries from all
+- [x] Create `clippy.toml` at workspace root
+- [x] Remove redundant `#[expect]` entries from all
       test/bench files
-- [ ] Simplify or remove `#[expect]` blocks that become
+- [x] Simplify or remove `#[expect]` blocks that become
       empty or single-lint after removal
 - [ ] Update CLAUDE.md conventions section
 - [ ] Update project-init skill template
-- [ ] Verify `cargo clippy --all-targets` passes with zero
+- [x] Verify `cargo clippy --all-targets` passes with zero
       warnings
-- [ ] Verify `cargo test` passes
+- [x] Verify `cargo test` passes
 
 ## Tasks
 
 ### Task 1: Create clippy.toml and remove redundant test lint attributes
 
+**Commit:** 8bde12a
+
 Create the workspace-level `clippy.toml` and remove all
 now-redundant `#[expect]` entries from test and bench files
 in a single atomic change.
 
-- [ ] Create `/workspace/clippy.toml` with:
+- [x] Create `/workspace/clippy.toml` with:
   ```toml
   allow-unwrap-in-tests = true
   allow-expect-in-tests = true
   allow-panic-in-tests = true
   allow-indexing-slicing-in-tests = true
   ```
-- [ ] For every location in `rlsp-yaml-parser/` and
+- [x] For every location in `rlsp-yaml-parser/` and
   `rlsp-yaml/` — integration test files (`tests/**/*.rs`),
   bench files (`benches/**/*.rs`), and inline
   `#[cfg(test)] mod tests` blocks inside source files —
   remove `clippy::unwrap_used`, `clippy::expect_used`,
   `clippy::panic`, and `clippy::indexing_slicing` from
   `#[expect(...)]` attributes
-- [ ] No `#![expect(...)]` block in any modified file
+- [x] No `#![expect(...)]` block in any modified file
   contains only lints from the four removable lints —
   blocks that become empty after removal are deleted
   entirely
-- [ ] No multi-line `#![expect(...)]` block remains with
+- [x] No multi-line `#![expect(...)]` block remains with
   exactly one lint — single-lint blocks use single-line
   form
-- [ ] Preserve all remaining lints in their `#![expect]`
+- [x] Preserve all remaining lints in their `#![expect]`
   blocks unchanged (`missing_docs`,
   `wildcard_enum_match_arm`, `too_many_lines`,
   `cast_possible_truncation`, `significant_drop_tightening`,
   `missing_panics_doc`, `dead_code`, `unsafe_code`)
-- [ ] Preserve `reason = "..."` strings on remaining
+- [x] Preserve `reason = "..."` strings on remaining
   `#![expect]` attributes
-- [ ] `cargo clippy --all-targets` passes with zero warnings
-- [ ] `cargo test` passes
+- [x] `cargo clippy --all-targets` passes with zero warnings
+- [x] `cargo test` passes
 
 ### Task 2: Update conventions documentation
 

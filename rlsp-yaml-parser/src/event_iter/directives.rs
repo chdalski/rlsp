@@ -523,7 +523,6 @@ fn validate_tag_prefix(prefix: &str) -> Result<(), usize> {
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     // -------------------------------------------------------------------------
     // Helpers

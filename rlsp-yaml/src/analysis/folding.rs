@@ -178,7 +178,6 @@ fn push_fold(ranges: &mut Vec<FoldingRange>, start: u32, end: u32, kind: Option<
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test code")]
 mod tests {
     use rstest::rstest;
     use tower_lsp::lsp_types::FoldingRangeKind;

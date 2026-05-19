@@ -313,7 +313,6 @@ fn formatter_fixture(#[files("tests/fixtures/formatter/*.md")] path: PathBuf) {
 // ---- Unit tests for harness helpers -----------------------------------------
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 

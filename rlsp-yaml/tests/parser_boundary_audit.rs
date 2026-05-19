@@ -33,10 +33,6 @@
 
 #![expect(missing_docs, reason = "test code")]
 #![expect(
-    clippy::unwrap_used,
-    reason = "test code — unwrap on infallible regex and Option values"
-)]
-#![expect(
     clippy::expect_used,
     reason = "test code — expect on infallible filesystem operations"
 )]

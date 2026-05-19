@@ -527,9 +527,8 @@ mod tests {
         // RT-1: ASCII inputs
         #[test]
         #[expect(
-            clippy::unwrap_used,
             clippy::cast_possible_truncation,
-            reason = "proptest: regex strategy is valid; offset fits u32 for any string of length <= 50"
+            reason = "proptest: offset fits u32 for any string of length <= 50"
         )]
         fn line_index_line_column_matches_advance_loop_ascii(
             input in proptest::string::string_regex("[a-z\n]{0,50}").unwrap()
@@ -556,9 +555,8 @@ mod tests {
         // RT-2: Unicode inputs including multibyte characters
         #[test]
         #[expect(
-            clippy::unwrap_used,
             clippy::cast_possible_truncation,
-            reason = "proptest: regex strategy is valid; offset fits u32 for any string of length <= 30"
+            reason = "proptest: offset fits u32 for any string of length <= 30"
         )]
         fn line_index_line_column_matches_advance_loop_multibyte(
             input in proptest::string::string_regex("[a-z\n\u{4E00}-\u{4E10}]{0,30}").unwrap()

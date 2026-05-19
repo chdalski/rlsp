@@ -19,11 +19,6 @@
 
 #![expect(missing_docs, reason = "test code")]
 #![expect(
-    clippy::panic,
-    clippy::unwrap_used,
-    reason = "test code — panics are intentional assertion failures"
-)]
-#![expect(
     clippy::expect_used,
     reason = "test code — expect on infallible operations"
 )]
