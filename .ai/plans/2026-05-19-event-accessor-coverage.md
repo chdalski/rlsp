@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-19)
 **Created:** 2026-05-19
 
 # event.rs accessor coverage
@@ -66,14 +66,16 @@ Total: 21 missed lines, all inside accessor `None` arms.
 
 ## Steps
 
-- [ ] Add parameterized unit tests for the four accessors
+- [x] Add parameterized unit tests for the four accessors
       covering every `Event` variant in every meta state
-- [ ] Verify `cargo llvm-cov` reports 100% line coverage on
+- [x] Verify `cargo llvm-cov` reports 100% line coverage on
       event.rs
 
 ## Tasks
 
 ### Task 1: Add accessor coverage tests
+
+**Committed:** 38a760b24c8f6ba4dc5bbbd08ce29c3ee04b48a7
 
 Add inline unit tests to `rlsp-yaml-parser/src/event.rs` that
 directly invoke `Event::anchor()`, `Event::anchor_loc()`,
@@ -102,20 +104,20 @@ Required coverage matrix per accessor:
 
 Acceptance criteria:
 
-- [ ] All 11 `Event` variants appear in at least one test case
-- [ ] All four accessors are called against every variant — no
+- [x] All 11 `Event` variants appear in at least one test case
+- [x] All four accessors are called against every variant — no
       variant skipped for any accessor
-- [ ] Both `meta = None` and `meta = Some` paths are exercised
+- [x] Both `meta = None` and `meta = Some` paths are exercised
       for each of the three Node-typed variants
-- [ ] All four meta states (None, anchor-only, tag-only, both)
+- [x] All four meta states (None, anchor-only, tag-only, both)
       are exercised for at least one Node-typed variant per
       accessor
-- [ ] `cargo fmt --check` passes
-- [ ] `cargo test -p rlsp-yaml-parser` passes (no regressions
+- [x] `cargo fmt --check` passes
+- [x] `cargo test -p rlsp-yaml-parser` passes (no regressions
       and all new tests pass)
-- [ ] `cargo clippy -p rlsp-yaml-parser --all-targets -- -D
+- [x] `cargo clippy -p rlsp-yaml-parser --all-targets -- -D
       warnings` passes
-- [ ] `cargo llvm-cov -p rlsp-yaml-parser --summary-only`
+- [x] `cargo llvm-cov -p rlsp-yaml-parser --summary-only`
       reports `event.rs` at 100.00% line coverage
 
 ## Decisions

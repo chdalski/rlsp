@@ -306,10 +306,13 @@ const _: () = assert!(
 mod tests {
     use std::borrow::Cow;
 
+    use rstest::rstest;
+
     use super::*;
     use crate::pos::Span;
 
     const SPAN: Span = Span { start: 0, end: 4 };
+    const SPAN2: Span = Span { start: 5, end: 9 };
 
     // EM-1: meta is None when all four fields are absent.
     #[test]
@@ -363,5 +366,142 @@ mod tests {
             "Event size {} exceeds 56 bytes",
             std::mem::size_of::<Event<'_>>()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Accessor tests — anchor(), anchor_loc(), tag(), tag_loc()
+    //
+    // EA-1..EA-4: Each parameterized test covers all 11 Event variants.
+    // Node-typed variants (Scalar, SequenceStart, MappingStart) are exercised
+    // with both meta=None and meta=Some to hit both arms of the accessor.
+    // -----------------------------------------------------------------------
+
+    fn meta_anchor_only() -> Option<Box<EventMeta<'static>>> {
+        make_meta(Some("anc"), Some(SPAN), None, None)
+    }
+
+    fn meta_tag_only() -> Option<Box<EventMeta<'static>>> {
+        make_meta(None, None, Some(Cow::Borrowed("!str")), Some(SPAN2))
+    }
+
+    fn meta_both() -> Option<Box<EventMeta<'static>>> {
+        make_meta(
+            Some("anc"),
+            Some(SPAN),
+            Some(Cow::Borrowed("!str")),
+            Some(SPAN2),
+        )
+    }
+
+    // EA-1: anchor() returns Some for node-typed variants with anchor meta,
+    //       and None for all non-node variants and node variants without anchor.
+    #[rstest]
+    // Node-typed, meta=None → None
+    #[case::scalar_no_meta(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: None }, None)]
+    #[case::sequence_start_no_meta(Event::SequenceStart { style: CollectionStyle::Block, meta: None }, None)]
+    #[case::mapping_start_no_meta(Event::MappingStart { style: CollectionStyle::Block, meta: None }, None)]
+    // Node-typed, meta=Some anchor-only → Some
+    #[case::scalar_anchor_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_anchor_only() }, Some("anc"))]
+    #[case::sequence_start_anchor_only(Event::SequenceStart { style: CollectionStyle::Block, meta: meta_anchor_only() }, Some("anc"))]
+    #[case::mapping_start_anchor_only(Event::MappingStart { style: CollectionStyle::Block, meta: meta_anchor_only() }, Some("anc"))]
+    // Node-typed, meta=Some tag-only → None (no anchor)
+    #[case::scalar_tag_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_tag_only() }, None)]
+    // Node-typed, meta=Some both → Some
+    #[case::scalar_both(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_both() }, Some("anc"))]
+    // Non-node variants → None
+    #[case::stream_start(Event::StreamStart, None)]
+    #[case::stream_end(Event::StreamEnd, None)]
+    #[case::comment(Event::Comment { text: "hi" }, None)]
+    #[case::alias(Event::Alias { name: "x" }, None)]
+    #[case::document_start(Event::DocumentStart { explicit: false, version: None, tag_directives: vec![] }, None)]
+    #[case::document_end(Event::DocumentEnd { explicit: false }, None)]
+    #[case::sequence_end(Event::SequenceEnd, None)]
+    #[case::mapping_end(Event::MappingEnd, None)]
+    fn anchor_returns_expected(#[case] event: Event<'_>, #[case] expected: Option<&str>) {
+        assert_eq!(event.anchor(), expected);
+    }
+
+    // EA-2: anchor_loc() returns Some(Span) for node-typed variants with anchor meta,
+    //       and None for all non-node variants and node variants without anchor.
+    #[rstest]
+    // Node-typed, meta=None → None
+    #[case::scalar_no_meta(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: None }, None)]
+    #[case::sequence_start_no_meta(Event::SequenceStart { style: CollectionStyle::Block, meta: None }, None)]
+    #[case::mapping_start_no_meta(Event::MappingStart { style: CollectionStyle::Block, meta: None }, None)]
+    // Node-typed, meta=Some anchor-only → Some(SPAN)
+    #[case::scalar_anchor_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_anchor_only() }, Some(SPAN))]
+    #[case::sequence_start_anchor_only(Event::SequenceStart { style: CollectionStyle::Block, meta: meta_anchor_only() }, Some(SPAN))]
+    #[case::mapping_start_anchor_only(Event::MappingStart { style: CollectionStyle::Block, meta: meta_anchor_only() }, Some(SPAN))]
+    // Node-typed, meta=Some tag-only → None (no anchor_loc)
+    #[case::scalar_tag_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_tag_only() }, None)]
+    // Node-typed, meta=Some both → Some(SPAN)
+    #[case::scalar_both(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_both() }, Some(SPAN))]
+    // Non-node variants → None
+    #[case::stream_start(Event::StreamStart, None)]
+    #[case::stream_end(Event::StreamEnd, None)]
+    #[case::comment(Event::Comment { text: "hi" }, None)]
+    #[case::alias(Event::Alias { name: "x" }, None)]
+    #[case::document_start(Event::DocumentStart { explicit: false, version: None, tag_directives: vec![] }, None)]
+    #[case::document_end(Event::DocumentEnd { explicit: false }, None)]
+    #[case::sequence_end(Event::SequenceEnd, None)]
+    #[case::mapping_end(Event::MappingEnd, None)]
+    fn anchor_loc_returns_expected(#[case] event: Event<'_>, #[case] expected: Option<Span>) {
+        assert_eq!(event.anchor_loc(), expected);
+    }
+
+    // EA-3: tag() returns Some for node-typed variants with tag meta,
+    //       and None for all non-node variants and node variants without tag.
+    #[rstest]
+    // Node-typed, meta=None → None
+    #[case::scalar_no_meta(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: None }, None)]
+    #[case::sequence_start_no_meta(Event::SequenceStart { style: CollectionStyle::Block, meta: None }, None)]
+    #[case::mapping_start_no_meta(Event::MappingStart { style: CollectionStyle::Block, meta: None }, None)]
+    // Node-typed, meta=Some anchor-only → None (no tag)
+    #[case::scalar_anchor_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_anchor_only() }, None)]
+    // Node-typed, meta=Some tag-only → Some
+    #[case::scalar_tag_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_tag_only() }, Some("!str"))]
+    #[case::sequence_start_tag_only(Event::SequenceStart { style: CollectionStyle::Block, meta: meta_tag_only() }, Some("!str"))]
+    #[case::mapping_start_tag_only(Event::MappingStart { style: CollectionStyle::Block, meta: meta_tag_only() }, Some("!str"))]
+    // Node-typed, meta=Some both → Some
+    #[case::scalar_both(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_both() }, Some("!str"))]
+    // Non-node variants → None
+    #[case::stream_start(Event::StreamStart, None)]
+    #[case::stream_end(Event::StreamEnd, None)]
+    #[case::comment(Event::Comment { text: "hi" }, None)]
+    #[case::alias(Event::Alias { name: "x" }, None)]
+    #[case::document_start(Event::DocumentStart { explicit: false, version: None, tag_directives: vec![] }, None)]
+    #[case::document_end(Event::DocumentEnd { explicit: false }, None)]
+    #[case::sequence_end(Event::SequenceEnd, None)]
+    #[case::mapping_end(Event::MappingEnd, None)]
+    fn tag_returns_expected(#[case] event: Event<'_>, #[case] expected: Option<&str>) {
+        assert_eq!(event.tag(), expected);
+    }
+
+    // EA-4: tag_loc() returns Some(Span) for node-typed variants with tag meta,
+    //       and None for all non-node variants and node variants without tag.
+    #[rstest]
+    // Node-typed, meta=None → None
+    #[case::scalar_no_meta(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: None }, None)]
+    #[case::sequence_start_no_meta(Event::SequenceStart { style: CollectionStyle::Block, meta: None }, None)]
+    #[case::mapping_start_no_meta(Event::MappingStart { style: CollectionStyle::Block, meta: None }, None)]
+    // Node-typed, meta=Some anchor-only → None (no tag_loc)
+    #[case::scalar_anchor_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_anchor_only() }, None)]
+    // Node-typed, meta=Some tag-only → Some(SPAN2)
+    #[case::scalar_tag_only(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_tag_only() }, Some(SPAN2))]
+    #[case::sequence_start_tag_only(Event::SequenceStart { style: CollectionStyle::Block, meta: meta_tag_only() }, Some(SPAN2))]
+    #[case::mapping_start_tag_only(Event::MappingStart { style: CollectionStyle::Block, meta: meta_tag_only() }, Some(SPAN2))]
+    // Node-typed, meta=Some both → Some(SPAN2)
+    #[case::scalar_both(Event::Scalar { value: Cow::Borrowed("v"), style: ScalarStyle::Plain, meta: meta_both() }, Some(SPAN2))]
+    // Non-node variants → None
+    #[case::stream_start(Event::StreamStart, None)]
+    #[case::stream_end(Event::StreamEnd, None)]
+    #[case::comment(Event::Comment { text: "hi" }, None)]
+    #[case::alias(Event::Alias { name: "x" }, None)]
+    #[case::document_start(Event::DocumentStart { explicit: false, version: None, tag_directives: vec![] }, None)]
+    #[case::document_end(Event::DocumentEnd { explicit: false }, None)]
+    #[case::sequence_end(Event::SequenceEnd, None)]
+    #[case::mapping_end(Event::MappingEnd, None)]
+    fn tag_loc_returns_expected(#[case] event: Event<'_>, #[case] expected: Option<Span>) {
+        assert_eq!(event.tag_loc(), expected);
     }
 }
