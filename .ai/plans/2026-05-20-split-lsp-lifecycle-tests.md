@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-20
 
 # Split `tests/lsp_lifecycle.rs` into per-LSP-capability modules
@@ -64,7 +64,7 @@ built and run as a single Cargo integration test binary named
 
 ## Steps
 
-- [ ] Migrate the file into the new directory layout
+- [x] Migrate the file into the new directory layout
 - [ ] Extract the shared LSP request/response helpers into a
       `helpers` module
 - [ ] Extract per-LSP-capability tests (small modules)
@@ -86,15 +86,17 @@ exists as a separate slice so the rename is visible in
 and so subsequent tasks start from a known-green baseline in
 the new layout.
 
-- [ ] `git mv rlsp-yaml/tests/lsp_lifecycle.rs
+- [x] `git mv rlsp-yaml/tests/lsp_lifecycle.rs
       rlsp-yaml/tests/lsp_lifecycle/main.rs`
-- [ ] `cargo test --test lsp_lifecycle` runs successfully
-- [ ] The test count reported by `cargo test --test
+- [x] `cargo test --test lsp_lifecycle` runs successfully
+- [x] The test count reported by `cargo test --test
       lsp_lifecycle -- --list 2>&1 | grep -c '^test '`
       equals 118 (the baseline before the rename); record
       both numbers in the commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `b1bf55d` (amended; see `git log -- rlsp-yaml/tests/lsp_lifecycle/main.rs`)
 
 ### Task 2: Extract shared LSP test helpers
 
