@@ -67,7 +67,7 @@ built and run as a single Cargo integration test binary named
 - [x] Migrate the file into the new directory layout
 - [x] Extract the shared LSP request/response helpers into a
       `helpers` module
-- [ ] Extract per-LSP-capability tests (small modules)
+- [x] Extract per-LSP-capability tests (small modules)
 - [ ] Extract configuration, watched-files, custom-tags, and
       schema-routing modules
 - [ ] Extract the validators integration test group
@@ -155,15 +155,17 @@ Sibling modules to create under `tests/lsp_lifecycle/`:
 
 Acceptance:
 
-- [ ] Each module above exists in
+- [x] Each module above exists in
       `rlsp-yaml/tests/lsp_lifecycle/` with the tests and
       helper(s) listed
-- [ ] `tests/lsp_lifecycle/main.rs` declares each module via
+- [x] `tests/lsp_lifecycle/main.rs` declares each module via
       `mod <name>;` and no longer contains any of the moved
       tests or helpers
-- [ ] `cargo test --test lsp_lifecycle` reports the same
+- [x] `cargo test --test lsp_lifecycle` reports the same
       118-test total as the Task 1 baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `52f7ebe` (amended; see `git log --follow rlsp-yaml/tests/lsp_lifecycle/hover.rs`)
 
 ### Task 4: Extract configuration and schema-routing modules
 
