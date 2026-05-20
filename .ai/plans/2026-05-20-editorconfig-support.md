@@ -214,12 +214,12 @@ content with a YAML input and expected formatted output.
 
 ## Steps
 
-- [ ] Add `ec4rs` to `rlsp-yaml/Cargo.toml`
-- [ ] Implement `editor_config.rs` module: URI →
+- [x] Add `ec4rs` to `rlsp-yaml/Cargo.toml`
+- [x] Implement `editor_config.rs` module: URI →
       filesystem path, walk-up to find `.editorconfig`,
       parse via `ec4rs`, return resolved YAML-relevant
       settings, cache by directory, invalidate function
-- [ ] Unit tests for `editor_config.rs`: walking,
+- [x] Unit tests for `editor_config.rs`: walking,
       `root = true` semantics, glob matching against
       `[*.yaml]` / `[*.yml]` / `[*]`, key-precedence,
       malformed-file handling
@@ -260,15 +260,17 @@ content with a YAML input and expected formatted output.
 
 ### Task 1: `.editorconfig` parser module and cache
 
+**Commit:** d05abd5
+
 Implement the `.editorconfig` resolution, parsing, and
 caching infrastructure as a standalone module. No
 integration with the format handlers in this task — the
 module is exercised entirely through unit tests.
 
-- [ ] Add `ec4rs` to `rlsp-yaml/Cargo.toml` with a
+- [x] Add `ec4rs` to `rlsp-yaml/Cargo.toml` with a
       conservative version (latest stable on crates.io
       as of plan execution; the developer pins it)
-- [ ] Create `rlsp-yaml/src/editing/editor_config.rs`
+- [x] Create `rlsp-yaml/src/editing/editor_config.rs`
       exposing:
   - `EditorConfigSettings` struct with the YAML-relevant
     resolved fields:
@@ -291,7 +293,7 @@ module is exercised entirely through unit tests.
     the directory hierarchy).
   - `invalidate_all()` function: clears the cache.
     Called by `did_change_watched_files` in Task 3.
-- [ ] Handle the failure modes explicitly:
+- [x] Handle the failure modes explicitly:
   - Non-file URI (e.g. `untitled:`, `inmemory:`) — return
     empty settings, do not panic
   - File path resolves but no `.editorconfig` exists in
@@ -305,7 +307,7 @@ module is exercised entirely through unit tests.
     file — recognized but silently dropped (YAML forbids
     tabs; this is consistent with `insertSpaces: false`
     handling)
-- [ ] Unit tests in `#[cfg(test)] mod tests` covering:
+- [x] Unit tests in `#[cfg(test)] mod tests` covering:
   - **resolves an empty result when no `.editorconfig`
     exists** — fixture: temp dir with only a YAML file;
     expect all fields `None`
@@ -333,11 +335,11 @@ module is exercised entirely through unit tests.
     panic
   - **non-file URI returns empty** — pass an
     `untitled:Untitled-1` URI; expect empty settings
-- [ ] **Cause line not applicable** (new feature, not a
+- [x] **Cause line not applicable** (new feature, not a
       fix). Include a one-line implementation summary in
       the handoff describing the cache strategy and walk
       semantics.
-- [ ] **Advisors:**
+- [x] **Advisors:**
   - **test-engineer** required. **Input gate:** consult
     before implementing for a test list (greenfield code
     with no existing test patterns for filesystem
@@ -352,7 +354,7 @@ module is exercised entirely through unit tests.
     long lines, pathological glob patterns, deeply
     nested directory walks). **Output gate:** security
     sign-off on the completed implementation
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` all pass with zero warnings
 
 ### Task 2: VS Code `formatPrintWidth` defaults fix
