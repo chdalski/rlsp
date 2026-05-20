@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-05-20)
 **Created:** 2026-05-20
 
 # Formatter disable switch and interop documentation
