@@ -223,12 +223,12 @@ content with a YAML input and expected formatted output.
       `root = true` semantics, glob matching against
       `[*.yaml]` / `[*.yml]` / `[*]`, key-precedence,
       malformed-file handling
-- [ ] Fix VS Code `config.ts` to use
+- [x] Fix VS Code `config.ts` to use
       `WorkspaceConfiguration.inspect('formatPrintWidth')`
       and omit the field when the user has not set it
-- [ ] Make `formatPrintWidth?: number` optional in
+- [x] Make `formatPrintWidth?: number` optional in
       `ServerSettings` (TypeScript)
-- [ ] Vitest tests for the `config.ts` change
+- [x] Vitest tests for the `config.ts` change
 - [ ] Wire the format handlers to read `.editorconfig`
       and overlay onto LSP settings with the correct
       precedence (explicit LSP > `.editorconfig` >
@@ -359,6 +359,8 @@ module is exercised entirely through unit tests.
 
 ### Task 2: VS Code `formatPrintWidth` defaults fix
 
+**Commit:** c5bc5e8
+
 The current `config.ts:34` sends `formatPrintWidth: 80`
 to the server when the user has not set the value (the
 `package.json` default fills in). The server treats this
@@ -368,7 +370,7 @@ out `.editorconfig`'s `max_line_length`. Fix by using
 `WorkspaceConfiguration.inspect()` to detect the user-set
 state and omit the field when unset.
 
-- [ ] Modify `rlsp-yaml/integrations/vscode/src/config.ts`
+- [x] Modify `rlsp-yaml/integrations/vscode/src/config.ts`
       to read `formatPrintWidth` via
       `cfg.inspect<number>('formatPrintWidth')`:
   - If `globalValue`, `workspaceValue`, or
@@ -376,18 +378,18 @@ state and omit the field when unset.
     include the field in the result with that value
   - Otherwise, omit the field from the returned object
     entirely (use a conditional spread)
-- [ ] Update `ServerSettings` (TypeScript) to declare
+- [x] Update `ServerSettings` (TypeScript) to declare
       `formatPrintWidth?: number` (optional)
-- [ ] Leave other formatter settings unchanged in this
+- [x] Leave other formatter settings unchanged in this
       task — only `formatPrintWidth` needs `.editorconfig`
       override capability. Other `format*` settings have
       no `.editorconfig` equivalent in this plan
-- [ ] Keep `rlsp-yaml.formatPrintWidth`'s `"default": 80`
+- [x] Keep `rlsp-yaml.formatPrintWidth`'s `"default": 80`
       in `package.json` so the VS Code settings UI still
       shows the default visibly to users — `inspect()`
       already distinguishes the package.json default
       from a user-set value
-- [ ] Vitest unit tests in
+- [x] Vitest unit tests in
       `rlsp-yaml/integrations/vscode/src/config.test.ts`
       (create if absent, otherwise extend) covering:
   - When the user has not set `formatPrintWidth`,
@@ -398,11 +400,11 @@ state and omit the field when unset.
     the returned object includes `formatPrintWidth: 80`
   - When the user explicitly sets `formatPrintWidth: 100`,
     the returned object includes `formatPrintWidth: 100`
-- [ ] No server-side changes in this task — the existing
+- [x] No server-side changes in this task — the existing
       `Settings.format_print_width: Option<usize>` field
       already deserializes a missing JSON key to `None`,
       which is the behavior we want
-- [ ] **Advisors:**
+- [x] **Advisors:**
   - **test-engineer** required. **Input gate:** consult
     for a test list (changes a public-surface client
     behavior; the test approach for mocking VS Code's
@@ -411,7 +413,7 @@ state and omit the field when unset.
   - **security-engineer** not required (no trust
     boundary, no untrusted input, no cryptography —
     purely a settings serialization change)
-- [ ] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
+- [x] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
       and `pnpm run test` in
       `rlsp-yaml/integrations/vscode` all pass
 

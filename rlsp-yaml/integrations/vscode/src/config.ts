@@ -6,7 +6,7 @@ export interface ServerSettings {
   kubernetesVersion: string;
   schemaStore: boolean;
   formatValidation: boolean;
-  formatPrintWidth: number;
+  formatPrintWidth?: number;
   formatSingleQuote: boolean;
   formatPreserveQuotes: boolean;
   formatBracketSpacing: boolean;
@@ -25,13 +25,18 @@ export interface ServerSettings {
 
 export function getConfig(): ServerSettings {
   const cfg = workspace.getConfiguration('rlsp-yaml');
+  const printWidthInspect = cfg.inspect<number>('formatPrintWidth');
+  const printWidthValue =
+    printWidthInspect?.workspaceFolderValue ??
+    printWidthInspect?.workspaceValue ??
+    printWidthInspect?.globalValue;
   return {
     customTags: cfg.get<string[]>('customTags', []),
     keyOrdering: cfg.get('keyOrdering', false),
     kubernetesVersion: cfg.get('kubernetesVersion', 'master'),
     schemaStore: cfg.get('schemaStore', true),
     formatValidation: cfg.get('formatValidation', true),
-    formatPrintWidth: cfg.get('formatPrintWidth', 80),
+    ...(printWidthValue !== undefined && { formatPrintWidth: printWidthValue }),
     formatSingleQuote: cfg.get('formatSingleQuote', false),
     formatPreserveQuotes: cfg.get('formatPreserveQuotes', false),
     formatBracketSpacing: cfg.get('formatBracketSpacing', true),
