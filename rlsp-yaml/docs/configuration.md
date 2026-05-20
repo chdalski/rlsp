@@ -203,6 +203,19 @@ All other server features continue to operate normally when `formatEnable` is `f
 { "formatEnable": false }
 ```
 
+### `formatRespectEditorconfig`
+
+- **Type:** `boolean`
+- **Default:** `true`
+
+When `false`, the formatter ignores `.editorconfig` files and uses only LSP settings and built-in defaults. Set this to `false` if your `.editorconfig` conflicts with your rlsp-yaml workspace settings and you want rlsp-yaml's settings to win unconditionally.
+
+See the [.editorconfig support](#editorconfig-support) section for details on which `.editorconfig` properties are honored.
+
+```json
+{ "formatRespectEditorconfig": false }
+```
+
 ### `yamlVersion`
 
 - **Type:** `string` (optional)
@@ -573,6 +586,31 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 
 The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks the parsed AST and emits IR nodes that the engine renders with line-width awareness.
 
+### .editorconfig support
+
+When a YAML file is formatted, rlsp-yaml looks for an `.editorconfig` file starting from the file's directory and walking up to the root. Changes to `.editorconfig` files are detected via the file watcher and take effect immediately without restarting the server.
+
+**Honored properties:**
+
+| Property | Effect |
+|----------|--------|
+| `max_line_length` | Sets the formatter print width (overridden by `formatPrintWidth` if explicitly set) |
+| `end_of_line` | Controls line endings (`lf`, `crlf`) |
+| `insert_final_newline` | Controls whether a newline is appended at the end of the file |
+
+**Not honored:**
+
+| Property | Reason |
+|----------|--------|
+| `indent_size` / `indent_style` | Taken from the LSP `tab_size` from each format request (the editor's own indentation preference) |
+| `trim_trailing_whitespace` | The formatter always trims trailing whitespace; there is no toggle |
+| `charset` | rlsp-yaml processes UTF-8 only |
+| `indent_style = tab` | Silently ignored — YAML 1.2 §6.1 forbids tab characters for indentation |
+
+**Precedence:** explicit LSP setting (e.g. `formatPrintWidth`) > `.editorconfig` > built-in defaults.
+
+To opt out of `.editorconfig` entirely, set `formatRespectEditorconfig: false` — the server will then use only LSP workspace settings and built-in defaults.
+
 ### Interop with external formatters
 
 To use an external YAML formatter (such as Prettier, dprint, or `yamlfmt`) and disable rlsp-yaml's built-in formatter:
@@ -603,7 +641,7 @@ Equivalent Prettier settings to keep in sync with rlsp-yaml:
 | `formatPrintWidth` | `printWidth` | Both default to `80` |
 | `formatSingleQuote` | `singleQuote` | Both default to `false` (double quotes) |
 
-**Not in scope.** rlsp-yaml does not read `.prettierrc`, `.dprint.json`, or `.editorconfig`. Settings must be configured directly in rlsp-yaml's workspace settings. `.editorconfig` support is a separate, planned feature.
+**Not in scope.** rlsp-yaml does not read `.prettierrc` or `.dprint.json`. Settings must be configured directly in rlsp-yaml's workspace settings. For `.editorconfig` interop, see the [.editorconfig support](#editorconfig-support) section above.
 
 ## Schema Resolution Priority
 

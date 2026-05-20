@@ -175,7 +175,7 @@ If you prefer to point Zed at a locally installed binary, add to Zed settings (`
 
 Settings are configured through three mechanisms: modelines (per-document comments), workspace settings (passed via `initializationOptions` or `workspace/didChangeConfiguration`), and built-in defaults.
 
-To use an external formatter instead of the built-in one, set `formatEnable: false` — see [docs/configuration.md](docs/configuration.md) for the full interop guide including the code-action print-width caveat.
+To use an external formatter instead of the built-in one, set `formatEnable: false` — see [docs/configuration.md](docs/configuration.md) for the full interop guide including the code-action print-width caveat. The formatter reads `.editorconfig` files by default (`max_line_length`, `end_of_line`, `insert_final_newline`); see the [.editorconfig support](docs/configuration.md#editorconfig-support) section for details and the `formatRespectEditorconfig` opt-out setting (default `true`).
 
 See [docs/configuration.md](docs/configuration.md) for the full reference — workspace settings, modelines, validators, formatting, and schema fetching details.
 

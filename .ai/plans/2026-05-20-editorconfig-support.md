@@ -243,17 +243,17 @@ content with a YAML input and expected formatted output.
       exercising `max_line_length`, `end_of_line`,
       `insert_final_newline`, walk-up resolution, and
       `root = true` termination
-- [ ] Add `format_respect_editorconfig: Option<bool>`
+- [x] Add `format_respect_editorconfig: Option<bool>`
       (default `true`) to `Settings`; gate the
       `.editorconfig` lookup when `false`
-- [ ] Add `rlsp-yaml.formatRespectEditorconfig` to VS Code
+- [x] Add `rlsp-yaml.formatRespectEditorconfig` to VS Code
       `package.json` and `config.ts`
-- [ ] Document `.editorconfig` support in
+- [x] Document `.editorconfig` support in
       `docs/configuration.md`; update the "Interop with
       external formatters" section to remove the
       ".editorconfig not read" non-promise
-- [ ] Add a README mention and a `feature-log.md` entry
-- [ ] Remove the `.editorconfig` follow-up item from
+- [x] Add a README mention and a `feature-log.md` entry
+- [x] Remove the `.editorconfig` follow-up item from
       `/workspace/.ai/memory/project_followup_plans.md`
 
 ## Tasks
@@ -599,15 +599,17 @@ changes.
 
 ### Task 4: Opt-out setting, documentation, and follow-up cleanup
 
+**Commit:** 884d5d7
+
 Add the `formatRespectEditorconfig` setting (default
 `true`) so users with conflicting `.editorconfig` setups
 can opt out, write user-facing documentation, and clean
 up the stale follow-up item.
 
-- [ ] Add `format_respect_editorconfig: Option<bool>` to
+- [x] Add `format_respect_editorconfig: Option<bool>` to
       the `Settings` struct in `server.rs`, deserialized
       from the JSON key `formatRespectEditorconfig`
-- [ ] At each of the three `YamlFormatOptions`
+- [x] At each of the three `YamlFormatOptions`
       construction sites in `server.rs` (`formatting()`
       at line 1110, `range_formatting()` at line 1210,
       `code_action()` at line 1006), gate the
@@ -617,15 +619,15 @@ up the stale follow-up item.
       defaults. No additional gating in
       `yaml11_octal.rs` or `yaml11_bool.rs` — they
       inherit via `..options.clone()`
-- [ ] Add `rlsp-yaml.formatRespectEditorconfig` to VS Code
+- [x] Add `rlsp-yaml.formatRespectEditorconfig` to VS Code
       `package.json` with type `boolean`, default `true`,
       description: "When false, ignore `.editorconfig`
       files for YAML formatting. Defaults to true."
-- [ ] Add `formatRespectEditorconfig: boolean` to the
+- [x] Add `formatRespectEditorconfig: boolean` to the
       VS Code `ServerSettings` interface and read it via
       `cfg.get('formatRespectEditorconfig', true)` in
       `getConfig()`
-- [ ] `docs/configuration.md`:
+- [x] `docs/configuration.md`:
   - Add a `formatRespectEditorconfig` entry in the
     workspace settings reference, adjacent to the other
     `format*` settings. The entry states the default and
@@ -650,20 +652,20 @@ up the stale follow-up item.
     `.editorconfig` is not read. Replace with a one-line
     note pointing to the new ".editorconfig support"
     section
-- [ ] `rlsp-yaml/README.md`: add a one-sentence mention
+- [x] `rlsp-yaml/README.md`: add a one-sentence mention
       in the existing formatter section pointing to the
       ".editorconfig support" section of
       `docs/configuration.md`
-- [ ] `rlsp-yaml/docs/feature-log.md`: add a single entry
+- [x] `rlsp-yaml/docs/feature-log.md`: add a single entry
       with date and a one-line user-facing description
       of the new behavior
-- [ ] Verify cross-references: the configuration.md
+- [x] Verify cross-references: the configuration.md
       section, the README mention, and the feature-log
       entry use the same name (`formatRespectEditorconfig`)
       and the same default (`true`). No stale references
       to "we do not read .editorconfig" remain in any doc
       file
-- [ ] Remove the ".editorconfig support for the
+- [x] Remove the ".editorconfig support for the
       formatter" item from
       `/workspace/.ai/memory/project_followup_plans.md` —
       this plan fully delivers the follow-up. The memory
@@ -671,14 +673,14 @@ up the stale follow-up item.
       lead-side edit, not part of the task commit, but
       remind the lead in the handoff that this cleanup
       is pending
-- [ ] **Advisors:** no advisor consultation required
+- [x] **Advisors:** no advisor consultation required
       (small Rust setting addition, small VS Code config
       addition, documentation, and memory cleanup — no
       behavior change beyond the gating expression, which
       is one method call)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` all pass with zero warnings
-- [ ] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
+- [x] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
       and `pnpm run test` in
       `rlsp-yaml/integrations/vscode` all pass
 

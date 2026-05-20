@@ -103,6 +103,8 @@ pub struct Settings {
     /// matches Red Hat yaml-language-server / VS Code HTML/JSON convention; avoids dynamic
     /// capability re-registration.
     pub format_enable: Option<bool>,
+    /// When `false`, `.editorconfig` files are not read during formatting. Defaults to `true`.
+    pub format_respect_editorconfig: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -658,6 +660,17 @@ impl Backend {
             .and_then(|s| s.max_items_computed)
             .unwrap_or(5000)
     }
+
+    fn resolve_editor_config(
+        uri: &Url,
+        respect: bool,
+    ) -> crate::editing::editor_config::EditorConfigSettings {
+        if respect {
+            crate::editing::editor_config::resolve(uri)
+        } else {
+            crate::editing::editor_config::EditorConfigSettings::default()
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1016,7 +1029,11 @@ impl LanguageServer for Backend {
 
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
-        let ec = crate::editing::editor_config::resolve(&uri);
+        let respect_ec = settings
+            .as_ref()
+            .and_then(|s| s.format_respect_editorconfig)
+            .unwrap_or(true);
+        let ec = Self::resolve_editor_config(&uri, respect_ec);
         let format_options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
@@ -1126,7 +1143,11 @@ impl LanguageServer for Backend {
         let tab_size = params.options.tab_size as usize;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
-        let ec = crate::editing::editor_config::resolve(&uri);
+        let respect_ec = settings
+            .as_ref()
+            .and_then(|s| s.format_respect_editorconfig)
+            .unwrap_or(true);
+        let ec = Self::resolve_editor_config(&uri, respect_ec);
         let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
@@ -1232,7 +1253,11 @@ impl LanguageServer for Backend {
         let tab_size = params.options.tab_size as usize;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
-        let ec = crate::editing::editor_config::resolve(&uri);
+        let respect_ec = settings
+            .as_ref()
+            .and_then(|s| s.format_respect_editorconfig)
+            .unwrap_or(true);
+        let ec = Self::resolve_editor_config(&uri, respect_ec);
         let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()

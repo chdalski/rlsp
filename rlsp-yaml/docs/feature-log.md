@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `.editorconfig` Support for the Formatter [completed]
+
+**Date:** 2026-05-20
+**Description:** The formatter now reads `.editorconfig` files automatically. When a `.editorconfig` is present, `max_line_length` sets the print width, `end_of_line` controls line endings, and `insert_final_newline` controls whether a trailing newline is appended. Changes to `.editorconfig` files are picked up live without restarting the server. Users who prefer rlsp-yaml's workspace settings to take unconditional precedence can opt out via `formatRespectEditorconfig: false` (default `true`).
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### `formatEnable` Setting [completed]
 
 **Date:** 2026-05-20

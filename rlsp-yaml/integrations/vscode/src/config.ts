@@ -21,6 +21,7 @@ export interface ServerSettings {
   formatRemoveDuplicateKeys: boolean;
   formatIndentSequences: boolean;
   formatEnable: boolean;
+  formatRespectEditorconfig: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -51,5 +52,6 @@ export function getConfig(): ServerSettings {
     formatRemoveDuplicateKeys: cfg.get<boolean>('formatRemoveDuplicateKeys', false),
     formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true),
     formatEnable: cfg.get<boolean>('formatEnable', true),
+    formatRespectEditorconfig: cfg.get<boolean>('formatRespectEditorconfig', true),
   };
 }
