@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `formatEnable` Setting [completed]
+
+**Date:** 2026-05-20
+**Description:** New `formatEnable` setting (boolean, default `true`) lets users disable rlsp-yaml's built-in YAML formatter while keeping all other features active. When `false`, formatting requests (`textDocument/formatting`, `textDocument/rangeFormatting`, `textDocument/onTypeFormatting`) return no edits. Diagnostics, hover, completion, and code actions continue to work normally. Intended for users who prefer an external formatter (Prettier, dprint, etc.) but still want rlsp-yaml's diagnostics and code actions.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Zed Editor Extension [completed]
 
 **Description:** rlsp-yaml is now available as a native Zed extension in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Install by searching for `rlsp-yaml` in Zed's extension panel — the extension bundles the server and requires no manual LSP configuration. Extension releases are published automatically when a new `rlsp-yaml` crate version is released.

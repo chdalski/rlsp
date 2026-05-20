@@ -16,6 +16,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "keyOrdering": false,
   "kubernetesVersion": "master",
   "schemaStore": true,
+  "formatEnable": true,
   "formatValidation": true,
   "formatPrintWidth": 80,
   "formatSingleQuote": false,
@@ -187,6 +188,19 @@ script:
 
 ```json
 { "formatIndentSequences": false }
+```
+
+### `formatEnable`
+
+- **Type:** `boolean`
+- **Default:** `true`
+
+Enable or disable the built-in YAML formatter. When `false`, the server returns no edits for `textDocument/formatting`, `textDocument/rangeFormatting`, and `textDocument/onTypeFormatting` requests. Formatting capabilities remain advertised so clients do not fall back to their own YAML formatting.
+
+All other server features continue to operate normally when `formatEnable` is `false`: diagnostics, hover, completion, code actions, and all other LSP requests are unaffected. Code-action text edits (such as block-to-flow conversions) still emit in rlsp-yaml's own style and still use `formatPrintWidth` and the other `format_*` settings — only the dedicated formatting handlers are gated.
+
+```json
+{ "formatEnable": false }
 ```
 
 ### `yamlVersion`
@@ -558,6 +572,38 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 **Range formatting** uses the same settings and formatter as full-document formatting. The full document is formatted internally and the resulting lines that correspond to the requested range are returned as the edit. This ensures consistent line-breaking decisions — the printer needs surrounding context to make correct choices.
 
 The formatter is built on `rlsp-fmt`, an internal Wadler-Lindig pretty-printing engine. It walks the parsed AST and emits IR nodes that the engine renders with line-width awareness.
+
+### Interop with external formatters
+
+To use an external YAML formatter (such as Prettier, dprint, or `yamlfmt`) and disable rlsp-yaml's built-in formatter:
+
+```json
+{ "formatEnable": false }
+```
+
+**VS Code users** typically also set a default formatter for YAML to tell VS Code which formatter to invoke on save:
+
+```json
+{
+  "rlsp-yaml.formatEnable": false,
+  "[yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}
+```
+
+Other editors have analogous mechanisms — consult your editor's documentation for how to select a default formatter per language type.
+
+**Code-action print-width caveat.** Even when `formatEnable` is `false`, code-action text edits (such as block-to-flow conversions) still emit in rlsp-yaml's own style and still use `formatPrintWidth`. If your external formatter uses a different print width, this can cause jitter: a code action wraps at rlsp-yaml's `formatPrintWidth` (e.g. 80), and then the external formatter rewraps at its own width (e.g. 100) on save. To avoid this, keep rlsp-yaml's `formatPrintWidth` aligned with your external formatter's equivalent setting.
+
+Equivalent Prettier settings to keep in sync with rlsp-yaml:
+
+| rlsp-yaml setting | Prettier equivalent | Notes |
+|---|---|---|
+| `formatPrintWidth` | `printWidth` | Both default to `80` |
+| `formatSingleQuote` | `singleQuote` | Both default to `false` (double quotes) |
+
+**Not in scope.** rlsp-yaml does not read `.prettierrc`, `.dprint.json`, or `.editorconfig`. Settings must be configured directly in rlsp-yaml's workspace settings. `.editorconfig` support is a separate, planned feature.
 
 ## Schema Resolution Priority
 

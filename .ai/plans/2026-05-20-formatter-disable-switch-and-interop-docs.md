@@ -140,15 +140,15 @@ one.
       `package.json` configuration block
 - [x] Extend the VS Code `ServerSettings` interface and
       `getConfig()` to map the new setting
-- [ ] Document `formatEnable` in `docs/configuration.md`
-- [ ] Add an "Interop with external formatters" subsection
+- [x] Document `formatEnable` in `docs/configuration.md`
+- [x] Add an "Interop with external formatters" subsection
       to `docs/configuration.md` covering the disable
       switch, the code-action print-width alignment caveat,
       and the explicit non-promises (no `.prettierrc` /
       `.editorconfig` reading in this plan)
-- [ ] Reference the disable switch in `rlsp-yaml/README.md`
+- [x] Reference the disable switch in `rlsp-yaml/README.md`
       where the formatter is mentioned
-- [ ] Add a `feature-log.md` entry for the new setting
+- [x] Add a `feature-log.md` entry for the new setting
 
 ## Tasks
 
@@ -211,13 +211,15 @@ so existing users see no behavioral change.
 
 ### Task 2: Document the setting and external-formatter interop
 
+**Commit:** 5a71f68
+
 Add user-facing documentation describing the new setting,
 the recommended workflow for users who use an external
 formatter, and the print-width alignment caveat raised by
 code actions that consume `formatPrintWidth`. No source
 code changes.
 
-- [ ] `docs/configuration.md` gains a `formatEnable` entry
+- [x] `docs/configuration.md` gains a `formatEnable` entry
       in the workspace settings reference, placed adjacent
       to the other `format*` settings. The entry states
       the default, the LSP requests it gates, and what the
@@ -225,7 +227,7 @@ code changes.
       (diagnostics, hover, completion, code actions all
       continue to work; code-action edits still emit in
       rlsp-yaml's own style)
-- [ ] `docs/configuration.md` gains an "Interop with
+- [x] `docs/configuration.md` gains an "Interop with
       external formatters" subsection in the Formatting
       section that covers:
   - How to disable the built-in formatter via
@@ -247,20 +249,20 @@ code changes.
     read `.prettierrc`, `.dprint.json`, or `.editorconfig`
     today. `.editorconfig` support is a separate, planned
     feature
-- [ ] `rlsp-yaml/README.md` — in the existing formatter
+- [x] `rlsp-yaml/README.md` — in the existing formatter
       mention, add one sentence pointing to
       `formatEnable` and the configuration doc for the
       interop story
-- [ ] `rlsp-yaml/docs/feature-log.md` gains a single entry
+- [x] `rlsp-yaml/docs/feature-log.md` gains a single entry
       for `formatEnable` with date and one-line
       description of user-facing behavior
-- [ ] Verify cross-references: the configuration.md entry,
+- [x] Verify cross-references: the configuration.md entry,
       the README mention, and the feature-log entry use
       the same name (`formatEnable`) and the same default
       (`true`). No stale references to "format is always
       on" or "formatter cannot be disabled" remain in any
       doc file
-- [ ] Remove the "Document rlsp-yaml ↔ prettier (and other
+- [x] Remove the "Document rlsp-yaml ↔ prettier (and other
       formatters) interop" item from
       `/workspace/.ai/memory/project_followup_plans.md` —
       this plan fully delivers the follow-up, and leaving
@@ -270,7 +272,7 @@ code changes.
       a separate lead-side edit, not committed as part of
       Task 2 — but the change is the responsibility of
       this task's completion)
-- [ ] **Advisors:** no advisor consultation required
+- [x] **Advisors:** no advisor consultation required
       (documentation-only task, no behavior change, no test
       coverage gap)
 

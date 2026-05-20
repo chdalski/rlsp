@@ -175,6 +175,8 @@ If you prefer to point Zed at a locally installed binary, add to Zed settings (`
 
 Settings are configured through three mechanisms: modelines (per-document comments), workspace settings (passed via `initializationOptions` or `workspace/didChangeConfiguration`), and built-in defaults.
 
+To use an external formatter instead of the built-in one, set `formatEnable: false` — see [docs/configuration.md](docs/configuration.md) for the full interop guide including the code-action print-width caveat.
+
 See [docs/configuration.md](docs/configuration.md) for the full reference — workspace settings, modelines, validators, formatting, and schema fetching details.
 
 ## Architecture
