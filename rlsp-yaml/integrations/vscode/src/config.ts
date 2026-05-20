@@ -20,6 +20,7 @@ export interface ServerSettings {
   duplicateKeys: string;
   formatRemoveDuplicateKeys: boolean;
   formatIndentSequences: boolean;
+  formatEnable: boolean;
 }
 
 export function getConfig(): ServerSettings {
@@ -44,5 +45,6 @@ export function getConfig(): ServerSettings {
     duplicateKeys: cfg.get<string>('duplicateKeys', 'error'),
     formatRemoveDuplicateKeys: cfg.get<boolean>('formatRemoveDuplicateKeys', false),
     formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true),
+    formatEnable: cfg.get<boolean>('formatEnable', true),
   };
 }

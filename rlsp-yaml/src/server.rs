@@ -97,6 +97,12 @@ pub struct Settings {
     pub format_bracket_spacing: Option<bool>,
     /// Indent block sequences that are values of mapping keys. Defaults to `true` when absent.
     pub format_indent_sequences: Option<bool>,
+    /// Enable the built-in formatter. Defaults to `true` when absent. When `false`, all three
+    /// formatting handlers (`textDocument/formatting`, `textDocument/rangeFormatting`,
+    /// `textDocument/onTypeFormatting`) return no edits. Capabilities remain advertised —
+    /// matches Red Hat yaml-language-server / VS Code HTML/JSON convention; avoids dynamic
+    /// capability re-registration.
+    pub format_enable: Option<bool>,
 }
 
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
@@ -1078,6 +1084,15 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
 
+        if !self
+            .settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.format_enable.unwrap_or(true))
+        {
+            return Ok(None);
+        }
+
         let text = if let Ok(store) = self.document_store.lock() {
             store.get(&uri).map(str::to_string)
         } else {
@@ -1167,6 +1182,16 @@ impl LanguageServer for Backend {
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
+
+        if !self
+            .settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.format_enable.unwrap_or(true))
+        {
+            return Ok(None);
+        }
+
         let requested = params.range;
 
         let text = if let Ok(store) = self.document_store.lock() {
@@ -1276,6 +1301,16 @@ impl LanguageServer for Backend {
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document_position.text_document.uri;
+
+        if !self
+            .settings
+            .lock()
+            .ok()
+            .is_none_or(|s| s.format_enable.unwrap_or(true))
+        {
+            return Ok(None);
+        }
+
         let position = params.text_document_position.position;
         let ch = &params.ch;
         let tab_size = params.options.tab_size;
@@ -2477,5 +2512,28 @@ mod tests {
         let json = serde_json::json!({});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert!(settings.format_remove_duplicate_keys.is_none());
+    }
+
+    // ---- formatEnable setting ----
+
+    #[test]
+    fn settings_deserializes_format_enable_true() {
+        let json = serde_json::json!({ "formatEnable": true });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_enable, Some(true));
+    }
+
+    #[test]
+    fn settings_deserializes_format_enable_false() {
+        let json = serde_json::json!({ "formatEnable": false });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_enable, Some(false));
+    }
+
+    #[test]
+    fn settings_defaults_format_enable_to_none_when_missing() {
+        let json = serde_json::json!({});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.format_enable, None);
     }
 }

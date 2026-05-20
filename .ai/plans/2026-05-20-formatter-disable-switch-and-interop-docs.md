@@ -128,17 +128,17 @@ one.
 
 ## Steps
 
-- [ ] Add `formatEnable` (default `true`) to the Rust
+- [x] Add `formatEnable` (default `true`) to the Rust
       `Settings` struct
-- [ ] Gate the three formatting handlers (`formatting`,
+- [x] Gate the three formatting handlers (`formatting`,
       `range_formatting`, `on_type_formatting`) to return
       `Ok(None)` when `formatEnable` is `false`
-- [ ] Add integration tests exercising each of the three
+- [x] Add integration tests exercising each of the three
       handlers with `formatEnable` set to `false`, and a
       sanity test that default-on behavior is unchanged
-- [ ] Add `rlsp-yaml.formatEnable` to the VS Code
+- [x] Add `rlsp-yaml.formatEnable` to the VS Code
       `package.json` configuration block
-- [ ] Extend the VS Code `ServerSettings` interface and
+- [x] Extend the VS Code `ServerSettings` interface and
       `getConfig()` to map the new setting
 - [ ] Document `formatEnable` in `docs/configuration.md`
 - [ ] Add an "Interop with external formatters" subsection
@@ -154,29 +154,31 @@ one.
 
 ### Task 1: Implement the `formatEnable` setting end-to-end
 
+**Commit:** 33cceb6
+
 Add the new setting to the Rust server and the VS Code
 extension, gate the three formatting LSP handlers, and add
 integration tests that exercise each handler through the
 production LSP entry point. The setting defaults to `true`
 so existing users see no behavioral change.
 
-- [ ] `Settings` struct in `rlsp-yaml/src/server.rs` gains
+- [x] `Settings` struct in `rlsp-yaml/src/server.rs` gains
       a `format_enable: Option<bool>` field deserialized
       from the JSON key `formatEnable`
-- [ ] `formatting()`, `range_formatting()`, and
+- [x] `formatting()`, `range_formatting()`, and
       `on_type_formatting()` each check the setting at
       request time and return `Ok(None)` when
       `formatEnable` resolves to `false`. The setting check
       is the first action after extracting the URI — it
       runs before document lookup or option construction
       so disabled-state requests do no extra work
-- [ ] Capability advertisement at lines 596–601 of
+- [x] Capability advertisement at lines 596–601 of
       `server.rs` is unchanged. Document the rationale in
       the test module: matches industry convention, avoids
       dynamic capability re-registration on config change.
       Setting takes effect immediately for any new request
       without reinitialization
-- [ ] Integration tests in the appropriate test file
+- [x] Integration tests in the appropriate test file
       (follow the existing pattern in
       `rlsp-yaml/tests/`):
   - `formatting` returns `None` when `formatEnable: false`
@@ -187,20 +189,20 @@ so existing users see no behavioral change.
   - Each handler returns its usual edits when
     `formatEnable` is unset (default-on) and when
     explicitly `true`
-- [ ] VS Code `package.json` adds the
+- [x] VS Code `package.json` adds the
       `rlsp-yaml.formatEnable` property with type
       `boolean`, default `true`, and a description that
       mentions the LSP behavior and references
       `docs/configuration.md` for the interop story
-- [ ] VS Code `ServerSettings` interface adds
+- [x] VS Code `ServerSettings` interface adds
       `formatEnable: boolean` and `getConfig()` reads it
       with default `true`
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` all pass with zero warnings
-- [ ] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
+- [x] `pnpm run lint`, `pnpm run format`, `pnpm run build`,
       and `pnpm run test` in
       `rlsp-yaml/integrations/vscode` all pass
-- [ ] **Advisors:** consult test-engineer for a test list
+- [x] **Advisors:** consult test-engineer for a test list
       before implementing; get test-engineer sign-off on the
       completed implementation before submitting to the
       reviewer. No security-engineer consultation required

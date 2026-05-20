@@ -3903,3 +3903,201 @@ async fn should_complete_at_sequence_item_key_suggests_sibling_from_other_item()
         "should suggest sibling key 'age' from another item, got: {result_str}"
     );
 }
+
+// ---- formatEnable setting ----
+
+fn range_formatting_request(id: i64, uri: &str, start_line: u32, end_line: u32) -> Request {
+    Request::build("textDocument/rangeFormatting")
+        .id(id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": 0 },
+                "end": { "line": end_line, "character": 0 }
+            },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }))
+        .finish()
+}
+
+#[tokio::test]
+async fn format_enable_false_formatting_returns_null() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({
+            "formatEnable": false,
+            "formatEnforceBlockStyle": true
+        })),
+    )
+    .await;
+
+    let uri = "file:///test/fmt-enable-false.yaml";
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+    assert!(
+        result.is_null(),
+        "formatting should return null when formatEnable is false; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn format_enable_false_range_formatting_returns_null() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({
+            "formatEnable": false,
+            "formatEnforceBlockStyle": true
+        })),
+    )
+    .await;
+
+    let uri = "file:///test/range-fmt-enable-false.yaml";
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let resp = send(&mut service, range_formatting_request(2, uri, 0, 1)).await;
+    let resp = resp.expect("rangeFormatting should return a response");
+    let result = resp.result().expect("rangeFormatting should have a result");
+    assert!(
+        result.is_null(),
+        "rangeFormatting should return null when formatEnable is false; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn format_enable_false_on_type_formatting_returns_null() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatEnable": false })),
+    )
+    .await;
+
+    let uri = "file:///test/on-type-fmt-enable-false.yaml";
+    send(&mut service, did_open_notification(uri, "server:\n\n")).await;
+
+    let resp = send(&mut service, on_type_formatting_request(2, uri, 1, 0, "\n")).await;
+    let resp = resp.expect("onTypeFormatting should return a response");
+    let result = resp
+        .result()
+        .expect("onTypeFormatting should have a result");
+    assert!(
+        result.is_null(),
+        "onTypeFormatting should return null when formatEnable is false; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn format_enable_explicit_true_formatting_returns_edits() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({
+            "formatEnable": true,
+            "formatEnforceBlockStyle": true
+        })),
+    )
+    .await;
+
+    let uri = "file:///test/fmt-enable-true.yaml";
+    send(&mut service, did_open_notification(uri, "key: {a: 1}\n")).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    let result = resp.result().expect("formatting should have a result");
+    assert!(
+        !result.is_null(),
+        "formatting should return edits when formatEnable is true; got null"
+    );
+    let edits = result
+        .as_array()
+        .expect("formatting result should be an array");
+    assert!(
+        !edits.is_empty(),
+        "formatting should return at least one edit when formatEnable is true"
+    );
+}
+
+#[tokio::test]
+async fn format_enable_default_on_type_formatting_works() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    // No formatEnable setting — default is true; existing behavior must be preserved.
+    let uri = "file:///test/on-type-fmt-default.yaml";
+    send(&mut service, did_open_notification(uri, "server:\n\n")).await;
+
+    let resp = send(&mut service, on_type_formatting_request(2, uri, 1, 0, "\n")).await;
+    let resp = resp.expect("onTypeFormatting should return a response");
+    let result = resp
+        .result()
+        .expect("onTypeFormatting should have a result");
+    assert!(
+        !result.is_null(),
+        "onTypeFormatting should work when formatEnable is absent (default true); got null"
+    );
+}
+
+#[tokio::test]
+async fn format_enable_false_does_not_gate_code_action() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&json!({ "formatEnable": false })),
+    )
+    .await;
+
+    let uri = "file:///test/code-action-fmt-disabled.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "config: {key: value}\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, code_action_request(2, uri, 0, 1)).await;
+    let resp = resp.expect("codeAction should return a response");
+    let result = resp.result().expect("codeAction should have a result");
+    assert!(
+        !result.is_null(),
+        "codeAction should not be gated by formatEnable; got null"
+    );
+    let actions = result
+        .as_array()
+        .expect("codeAction result should be an array");
+    assert!(
+        !actions.is_empty(),
+        "codeAction should return at least one action when formatEnable is false"
+    );
+}

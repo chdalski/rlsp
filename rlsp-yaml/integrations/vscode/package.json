@@ -152,6 +152,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable all YAML diagnostics."
+        },
+        "rlsp-yaml.formatEnable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the built-in YAML formatter. When false, textDocument/formatting, textDocument/rangeFormatting, and textDocument/onTypeFormatting return no edits. Diagnostics, hover, completion, and code actions remain active. See docs/configuration.md for interop notes."
         }
       }
     },
