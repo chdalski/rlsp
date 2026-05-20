@@ -70,7 +70,7 @@ built and run as a single Cargo integration test binary named
 - [x] Extract per-LSP-capability tests (small modules)
 - [x] Extract configuration, watched-files, custom-tags, and
       schema-routing modules
-- [ ] Extract the validators integration test group
+- [x] Extract the validators integration test group
 - [ ] Extract the formatting integration test group
 - [ ] Verify `main.rs` is orchestration only
 
@@ -209,15 +209,17 @@ in the original file) into
 exercise the validator pipeline through the LSP diagnostics
 flow and are large enough to warrant a dedicated module.
 
-- [ ] `validators_integration.rs` exists and contains every
+- [x] `validators_integration.rs` exists and contains every
       test originally located under the three section
       headers listed above
-- [ ] `tests/lsp_lifecycle/main.rs` declares
+- [x] `tests/lsp_lifecycle/main.rs` declares
       `mod validators_integration;` and no longer contains
       any of those tests
-- [ ] `cargo test --test lsp_lifecycle` test count remains
+- [x] `cargo test --test lsp_lifecycle` test count remains
       118
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `104c454` (amended; see `git log --follow rlsp-yaml/tests/lsp_lifecycle/validators_integration.rs`)
 
 ### Task 6: Extract formatting integration module
 
