@@ -68,7 +68,7 @@ built and run as a single Cargo integration test binary named
 - [x] Extract the shared LSP request/response helpers into a
       `helpers` module
 - [x] Extract per-LSP-capability tests (small modules)
-- [ ] Extract configuration, watched-files, custom-tags, and
+- [x] Extract configuration, watched-files, custom-tags, and
       schema-routing modules
 - [ ] Extract the validators integration test group
 - [ ] Extract the formatting integration test group
@@ -189,13 +189,15 @@ auto-detection.
 
 Acceptance:
 
-- [ ] Each module above exists with the tests and helpers
+- [x] Each module above exists with the tests and helpers
       listed
-- [ ] `tests/lsp_lifecycle/main.rs` declares each module and
+- [x] `tests/lsp_lifecycle/main.rs` declares each module and
       no longer contains any of the moved tests or helpers
-- [ ] `cargo test --test lsp_lifecycle` test count remains
+- [x] `cargo test --test lsp_lifecycle` test count remains
       118
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `f1e5f4d` (amended; see `git log --follow rlsp-yaml/tests/lsp_lifecycle/configuration.rs`)
 
 ### Task 5: Extract validators integration module
 
