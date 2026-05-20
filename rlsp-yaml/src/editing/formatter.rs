@@ -11,6 +11,7 @@ use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{Chomp, ScalarStyle, Span};
 
+use crate::editing::editor_config::LineEnding;
 use crate::server::YamlVersion;
 
 /// A document-prefix leading comment extracted from raw YAML text.
@@ -344,6 +345,10 @@ pub struct YamlFormatOptions {
     pub format_remove_duplicate_keys: bool,
     /// Indent block sequences that are values of mapping keys. Default: true.
     pub format_indent_sequences: bool,
+    /// Line-ending style for output. Default: `LineEnding::Lf`.
+    pub line_ending: LineEnding,
+    /// Whether to append a trailing newline to the output. Default: `true`.
+    pub insert_final_newline: bool,
 }
 
 impl Default for YamlFormatOptions {
@@ -358,6 +363,8 @@ impl Default for YamlFormatOptions {
             format_enforce_block_style: false,
             format_remove_duplicate_keys: false,
             format_indent_sequences: true,
+            line_ending: LineEnding::Lf,
+            insert_final_newline: true,
         }
     }
 }
@@ -476,15 +483,51 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
 
     let mut result = fmt_format(&joined, &fmt_options);
 
-    // Ensure output ends with a single newline.
+    // Ensure output ends with a single newline before attach_comments.
+    // attach_comments also guarantees a trailing newline, but the guard here
+    // keeps the contract clear for readers.
     if !result.ends_with('\n') {
         result.push('\n');
     }
 
     // Reattach document-prefix comments and blank lines to the formatted output.
     // Always runs — blank line preservation requires a pass even when there are no comments.
+    // attach_comments always produces LF output with a trailing newline.
     let last_content_hint = last_content_line_from_ast(&documents);
     result = attach_comments(text_input, &result, &prefix_comments, last_content_hint);
+
+    // Apply line-ending substitution: replace all LF with the requested terminator.
+    // attach_comments produces only LF, so this replace is safe (no CR complications).
+    match options.line_ending {
+        LineEnding::Lf => {}
+        LineEnding::Crlf => {
+            result = result.replace('\n', "\r\n");
+        }
+        LineEnding::Cr => {
+            result = result.replace('\n', "\r");
+        }
+    }
+
+    // Apply insert_final_newline policy: strip exactly one trailing terminator.
+    if !options.insert_final_newline {
+        match options.line_ending {
+            LineEnding::Lf => {
+                if result.ends_with('\n') {
+                    result.pop();
+                }
+            }
+            LineEnding::Crlf => {
+                if result.ends_with("\r\n") {
+                    result.truncate(result.len() - 2);
+                }
+            }
+            LineEnding::Cr => {
+                if result.ends_with('\r') {
+                    result.pop();
+                }
+            }
+        }
+    }
 
     result
 }
@@ -2552,5 +2595,108 @@ mod tests {
             }
             other => panic!("expected at least 2 lines, got: {other:?}"),
         }
+    }
+
+    // ---- line_ending and insert_final_newline fields ------------------------
+
+    // F1: LineEnding::Crlf replaces all LF with CRLF.
+    #[test]
+    fn line_ending_crlf_replaces_all_newlines() {
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Crlf,
+            ..default_opts()
+        };
+        let output = format_yaml("a: 1\nb: 2\n", &opts);
+        assert!(output.contains("\r\n"), "output should contain CRLF");
+        for (i, ch) in output.char_indices() {
+            if ch == '\n' {
+                assert!(
+                    i > 0 && output.as_bytes()[i - 1] == b'\r',
+                    "bare LF at byte {i}"
+                );
+            }
+        }
+    }
+
+    // F2: LineEnding::Cr replaces all LF with CR.
+    #[test]
+    fn line_ending_cr_replaces_all_newlines() {
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Cr,
+            ..default_opts()
+        };
+        let output = format_yaml("a: 1\nb: 2\n", &opts);
+        assert!(!output.contains('\n'), "output should have no LF");
+        assert!(output.contains('\r'), "output should have at least one CR");
+        assert!(!output.contains("\r\n"), "output should have no CRLF");
+    }
+
+    // F3: LineEnding::Lf leaves output unchanged (LF in, LF out).
+    #[test]
+    fn line_ending_lf_leaves_output_unchanged() {
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Lf,
+            ..default_opts()
+        };
+        let output = format_yaml("a: 1\nb: 2\n", &opts);
+        assert!(!output.contains('\r'), "LF mode should produce no CR");
+        assert!(output.ends_with('\n'), "LF mode should end with LF");
+    }
+
+    // F4: insert_final_newline = false strips the trailing LF.
+    #[test]
+    fn insert_final_newline_false_strips_trailing_newline() {
+        let opts = YamlFormatOptions {
+            insert_final_newline: false,
+            ..default_opts()
+        };
+        let output = format_yaml("key: value\n", &opts);
+        assert_eq!(
+            output, "key: value",
+            "trailing newline should be stripped; got: {output:?}"
+        );
+    }
+
+    // F5: insert_final_newline = true leaves the trailing LF in place.
+    #[test]
+    fn insert_final_newline_true_leaves_trailing_newline() {
+        let opts = YamlFormatOptions {
+            insert_final_newline: true,
+            ..default_opts()
+        };
+        let output = format_yaml("key: value\n", &opts);
+        assert!(
+            output.ends_with('\n'),
+            "trailing newline should be preserved; got: {output:?}"
+        );
+    }
+
+    // F6: insert_final_newline = false with Crlf strips the trailing CRLF.
+    #[test]
+    fn insert_final_newline_false_with_crlf_strips_crlf_terminator() {
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Crlf,
+            insert_final_newline: false,
+            ..default_opts()
+        };
+        let output = format_yaml("key: value\n", &opts);
+        assert!(
+            !output.ends_with("\r\n") && !output.ends_with('\n') && !output.ends_with('\r'),
+            "trailing CRLF terminator should be stripped; got: {output:?}"
+        );
+        assert!(
+            output.ends_with("value"),
+            "content should be intact; got: {output:?}"
+        );
+    }
+
+    // F7: Default options still end with newline (regression guard).
+    #[test]
+    fn format_yaml_default_options_still_ends_with_newline() {
+        let output = format_yaml("key: value\n", &default_opts());
+        assert!(
+            output.ends_with('\n'),
+            "default options should preserve trailing newline; got: {output:?}"
+        );
     }
 }

@@ -694,6 +694,10 @@ impl LanguageServer for Backend {
                 glob_pattern: GlobPattern::String("**/*.yml".to_string()),
                 kind: Some(WatchKind::all()),
             },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/.editorconfig".to_string()),
+                kind: Some(WatchKind::all()),
+            },
         ];
         let registration = Registration {
             id: "yaml-file-watcher".to_string(),
@@ -713,7 +717,16 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        // Invalidate the .editorconfig cache if any changed file is a .editorconfig.
+        let has_editorconfig_change = params
+            .changes
+            .iter()
+            .any(|c| c.uri.path().ends_with("/.editorconfig"));
+        if has_editorconfig_change {
+            crate::editing::editor_config::invalidate_all();
+        }
+
         // Collect open documents, releasing the lock before any async work.
         let docs: Vec<(Url, String)> = if let Ok(store) = self.document_store.lock() {
             store.all_documents()
@@ -1003,10 +1016,12 @@ impl LanguageServer for Backend {
 
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
+        let ec = crate::editing::editor_config::resolve(&uri);
         let format_options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
                 .and_then(|s| s.format_print_width)
+                .or(ec.max_line_length)
                 .unwrap_or(80),
             tab_width: 2,
             single_quote: settings
@@ -1034,6 +1049,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_indent_sequences)
                 .unwrap_or(true),
+            line_ending: ec
+                .end_of_line
+                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
+            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
         };
         drop(settings);
 
@@ -1107,10 +1126,12 @@ impl LanguageServer for Backend {
         let tab_size = params.options.tab_size as usize;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
+        let ec = crate::editing::editor_config::resolve(&uri);
         let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
                 .and_then(|s| s.format_print_width)
+                .or(ec.max_line_length)
                 .unwrap_or(80),
             tab_width: tab_size,
             single_quote: settings
@@ -1138,6 +1159,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_indent_sequences)
                 .unwrap_or(true),
+            line_ending: ec
+                .end_of_line
+                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
+            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
         };
         drop(settings);
 
@@ -1207,10 +1232,12 @@ impl LanguageServer for Backend {
         let tab_size = params.options.tab_size as usize;
         let yaml_version = self.get_yaml_version(&text);
         let settings = self.settings.lock().ok();
+        let ec = crate::editing::editor_config::resolve(&uri);
         let options = crate::editing::formatter::YamlFormatOptions {
             print_width: settings
                 .as_ref()
                 .and_then(|s| s.format_print_width)
+                .or(ec.max_line_length)
                 .unwrap_or(80),
             tab_width: tab_size,
             single_quote: settings
@@ -1238,6 +1265,10 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .and_then(|s| s.format_indent_sequences)
                 .unwrap_or(true),
+            line_ending: ec
+                .end_of_line
+                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
+            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
         };
         drop(settings);
 

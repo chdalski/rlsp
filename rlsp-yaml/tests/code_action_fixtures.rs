@@ -48,6 +48,7 @@ use common::*;
 use std::path::{Path, PathBuf};
 
 use rlsp_yaml::editing::code_actions::code_actions;
+use rlsp_yaml::editing::editor_config::LineEnding;
 use rlsp_yaml::editing::formatter::YamlFormatOptions;
 use rstest::rstest;
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url};
@@ -205,6 +206,17 @@ fn apply_format_option(options: &mut YamlFormatOptions, key: &str, value: &str) 
         }
         "format_enforce_block_style" => {
             options.format_enforce_block_style = value == "true";
+        }
+        "line_ending" => {
+            options.line_ending = match value {
+                "lf" => LineEnding::Lf,
+                "crlf" => LineEnding::Crlf,
+                "cr" => LineEnding::Cr,
+                other => panic!("fixture format-options: unknown line_ending: {other:?}"),
+            };
+        }
+        "insert_final_newline" => {
+            options.insert_final_newline = value == "true";
         }
         _ => {}
     }

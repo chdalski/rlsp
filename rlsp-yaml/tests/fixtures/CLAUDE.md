@@ -111,6 +111,8 @@ Supported keys (mirror the formatter fixtures' `settings:` block convention):
 | `single_quote` | bool | Prefer single-quoted strings (default: false) |
 | `bracket_spacing` | bool | Spaces inside flow braces `{ a: 1 }` vs `{a: 1}` (default: true) |
 | `preserve_quotes` | bool | Preserve source quote style (default: false) |
+| `line_ending` | `lf`/`crlf`/`cr` | Line-ending style for output (default: `lf`) |
+| `insert_final_newline` | bool | Whether to append a trailing newline (default: true) |
 
 Unknown keys are silently ignored — forward-compatible with future options.
 

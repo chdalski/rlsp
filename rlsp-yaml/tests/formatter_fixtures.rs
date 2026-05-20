@@ -37,6 +37,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rlsp_yaml::editing::editor_config::LineEnding;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::server::YamlVersion;
 use rstest::rstest;
@@ -221,6 +222,19 @@ fn apply_setting(options: &mut YamlFormatOptions, key: &str, value: &str, path_s
         }
         "format_indent_sequences" => {
             options.format_indent_sequences = value == "true";
+        }
+        "line_ending" => {
+            options.line_ending = match value {
+                "lf" => LineEnding::Lf,
+                "crlf" => LineEnding::Crlf,
+                "cr" => LineEnding::Cr,
+                other => panic_with_message(&format!(
+                    "fixture {path_str}: unknown line_ending: {other:?} (expected \"lf\", \"crlf\", or \"cr\")"
+                )),
+            };
+        }
+        "insert_final_newline" => {
+            options.insert_final_newline = value == "true";
         }
         // Unknown settings keys are silently ignored.
         _ => {}
@@ -527,5 +541,21 @@ mod tests {
         assert_eq!(fixture.options.print_width, default.print_width);
         assert_eq!(fixture.options.single_quote, default.single_quote);
         assert!(!fixture.idempotent);
+    }
+
+    // G1. line_ending: crlf is parsed.
+    #[test]
+    fn apply_setting_parses_line_ending_crlf() {
+        let mut opts = YamlFormatOptions::default();
+        apply_setting(&mut opts, "line_ending", "crlf", "test.md");
+        assert_eq!(opts.line_ending, LineEnding::Crlf);
+    }
+
+    // G2. insert_final_newline: false is parsed.
+    #[test]
+    fn apply_setting_parses_insert_final_newline_false() {
+        let mut opts = YamlFormatOptions::default();
+        apply_setting(&mut opts, "insert_final_newline", "false", "test.md");
+        assert!(!opts.insert_final_newline);
     }
 }

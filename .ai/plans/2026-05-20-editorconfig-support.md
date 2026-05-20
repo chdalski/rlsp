@@ -229,17 +229,17 @@ content with a YAML input and expected formatted output.
 - [x] Make `formatPrintWidth?: number` optional in
       `ServerSettings` (TypeScript)
 - [x] Vitest tests for the `config.ts` change
-- [ ] Wire the format handlers to read `.editorconfig`
+- [x] Wire the format handlers to read `.editorconfig`
       and overlay onto LSP settings with the correct
       precedence (explicit LSP > `.editorconfig` >
       defaults)
-- [ ] Extend `YamlFormatOptions` with line-ending and
+- [x] Extend `YamlFormatOptions` with line-ending and
       trailing-newline fields; thread them through the
       formatter
-- [ ] Register a `**/.editorconfig` FileSystemWatcher in
+- [x] Register a `**/.editorconfig` FileSystemWatcher in
       `initialized` and invalidate the cache in
       `did_change_watched_files`
-- [ ] Integration tests with `.editorconfig` fixtures
+- [x] Integration tests with `.editorconfig` fixtures
       exercising `max_line_length`, `end_of_line`,
       `insert_final_newline`, walk-up resolution, and
       `root = true` termination
@@ -419,6 +419,8 @@ state and omit the field when unset.
 
 ### Task 3: Integrate `.editorconfig` into format handlers and watcher
 
+**Commit:** 2e0a0e8
+
 Wire the `editor_config.rs` module from Task 1 into the
 three format handlers, extend `YamlFormatOptions` with
 line-ending and trailing-newline fields, modify the
@@ -426,12 +428,12 @@ formatter to honor those fields, register a third file
 watcher, and invalidate the cache on `.editorconfig`
 changes.
 
-- [ ] Extend `YamlFormatOptions` in
+- [x] Extend `YamlFormatOptions` in
       `rlsp-yaml/src/editing/formatter.rs` with:
   - `line_ending: LineEnding` (default `LineEnding::Lf`)
     — same enum as the `editor_config.rs` module exposes
   - `insert_final_newline: bool` (default `true`)
-- [ ] Modify the formatter output to honor these fields.
+- [x] Modify the formatter output to honor these fields.
       `format_yaml` calls `attach_comments` as its last
       step (`formatter.rs:487`), and `attach_comments`
       currently joins lines with `"\n"` at line 310 and
@@ -471,7 +473,7 @@ changes.
   one function — both produce identical output. State
   the choice in the handoff so the reviewer can verify
   the design.
-- [ ] Update the three `YamlFormatOptions` construction
+- [x] Update the three `YamlFormatOptions` construction
       sites in `server.rs` to apply the `.editorconfig`
       overlay. These are:
   - `formatting()` at `server.rs:1110`
@@ -505,7 +507,7 @@ changes.
     - `insert_final_newline`: only set by
       `.editorconfig`; `Some(v)` → use `v`; else `true`
   - Keep all other field handling unchanged
-- [ ] At the `code_action()` construction site
+- [x] At the `code_action()` construction site
       (`server.rs:1006`), the struct literal exhaustively
       initializes all 9 existing fields. The two new
       fields (`line_ending`, `insert_final_newline`) must
@@ -516,7 +518,7 @@ changes.
       `..options.clone()` struct-update syntax and
       automatically inherit the two new fields from the
       cloned `options`; they require no changes
-- [ ] Update the fixture-harness `apply_setting`
+- [x] Update the fixture-harness `apply_setting`
       functions per the Settings Sync table in the root
       `CLAUDE.md` (which mandates this whenever
       `YamlFormatOptions` gains a field). Specifically:
@@ -540,17 +542,17 @@ changes.
   (existing harness comment: "Unknown settings keys are
   silently ignored"), producing tests that look correct
   but exercise the wrong configuration
-- [ ] Register a third FileSystemWatcher in the
+- [x] Register a third FileSystemWatcher in the
       `initialized` handler (`server.rs:688–710`):
   - Glob pattern: `**/.editorconfig`
   - Watch kind: `WatchKind::all()`
-- [ ] In `did_change_watched_files` (`server.rs:716`),
+- [x] In `did_change_watched_files` (`server.rs:716`),
       when any received change has a URI matching
       `.editorconfig` (file name ends with
       `.editorconfig`), call
       `editor_config::invalidate_all()`. The next format
       request re-resolves
-- [ ] Code-action edits inherit the `.editorconfig`
+- [x] Code-action edits inherit the `.editorconfig`
       overlay automatically because their source
       `options` is the `code_action()` handler's
       `YamlFormatOptions` (now updated above), and
@@ -561,7 +563,7 @@ changes.
       output respects `.editorconfig` — consistent with
       the precedent set by the 2026-04-27 code-action-
       respect-user-format-config plan
-- [ ] Integration tests in `rlsp-yaml/tests/` (a new file
+- [x] Integration tests in `rlsp-yaml/tests/` (a new file
       `editorconfig_integration.rs` or extension of an
       existing one — developer chooses based on file
       sizes):
@@ -579,11 +581,11 @@ changes.
   - Walk-up resolution: `.editorconfig` two directories
     above the YAML file is found and applied
   - `root = true` in the inner file terminates the walk
-- [ ] **Cause line not applicable** (feature
+- [x] **Cause line not applicable** (feature
       integration). Include in the handoff: an
       implementation summary describing the precedence
       logic and the watcher invalidation flow
-- [ ] **Advisors:**
+- [x] **Advisors:**
   - **test-engineer** required. **Input gate:** consult
     for a test list (cross-component integration with
     file I/O, watchers, and formatter output — high
@@ -592,7 +594,7 @@ changes.
   - **security-engineer** not required (no new trust
     boundary in this task — Task 1 already covered
     untrusted-input parsing concerns)
-- [ ] `cargo fmt`, `cargo clippy --all-targets`, and
+- [x] `cargo fmt`, `cargo clippy --all-targets`, and
       `cargo test` all pass with zero warnings
 
 ### Task 4: Opt-out setting, documentation, and follow-up cleanup
