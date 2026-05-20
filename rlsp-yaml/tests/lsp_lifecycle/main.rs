@@ -1,78 +1,20 @@
 // SPDX-License-Identifier: MIT
 #![expect(clippy::expect_used, missing_docs, reason = "test code")]
 
+mod helpers;
+
 use std::fmt::Write as _;
 
 use futures::StreamExt;
+use helpers::*;
 use rlsp_yaml::server::Backend;
 use serde_json::json;
-use tower::Service;
 use tower_lsp::LspService;
-use tower_lsp::jsonrpc::{Request, Response};
+use tower_lsp::jsonrpc::Request;
 use tower_lsp::lsp_types::{
     DiagnosticSeverity, HoverProviderCapability, InitializeResult, NumberOrString, OneOf,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
-
-fn initialize_request(id: i64) -> Request {
-    Request::build("initialize")
-        .id(id)
-        .params(json!({
-            "capabilities": {},
-            "processId": null,
-            "rootUri": null
-        }))
-        .finish()
-}
-
-fn initialized_notification() -> Request {
-    Request::build("initialized").params(json!({})).finish()
-}
-
-fn shutdown_request(id: i64) -> Request {
-    Request::build("shutdown").id(id).finish()
-}
-
-fn did_open_notification(uri: &str, text: &str) -> Request {
-    Request::build("textDocument/didOpen")
-        .params(json!({
-            "textDocument": {
-                "uri": uri,
-                "languageId": "yaml",
-                "version": 1,
-                "text": text
-            }
-        }))
-        .finish()
-}
-
-fn did_change_notification(uri: &str, text: &str, version: i32) -> Request {
-    Request::build("textDocument/didChange")
-        .params(json!({
-            "textDocument": {
-                "uri": uri,
-                "version": version
-            },
-            "contentChanges": [
-                { "text": text }
-            ]
-        }))
-        .finish()
-}
-
-fn did_close_notification(uri: &str) -> Request {
-    Request::build("textDocument/didClose")
-        .params(json!({
-            "textDocument": {
-                "uri": uri
-            }
-        }))
-        .finish()
-}
-
-async fn send(service: &mut LspService<Backend>, req: Request) -> Option<Response> {
-    service.call(req).await.expect("service call failed")
-}
 
 #[tokio::test]
 async fn should_complete_initialize_shutdown_lifecycle() {

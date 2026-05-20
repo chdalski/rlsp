@@ -65,7 +65,7 @@ built and run as a single Cargo integration test binary named
 ## Steps
 
 - [x] Migrate the file into the new directory layout
-- [ ] Extract the shared LSP request/response helpers into a
+- [x] Extract the shared LSP request/response helpers into a
       `helpers` module
 - [ ] Extract per-LSP-capability tests (small modules)
 - [ ] Extract configuration, watched-files, custom-tags, and
@@ -108,13 +108,15 @@ are used by every test group. Move them into
 `rlsp-yaml/tests/lsp_lifecycle/helpers.rs` and declare
 `mod helpers;` plus `use helpers::*;` in `main.rs`.
 
-- [ ] `tests/lsp_lifecycle/helpers.rs` exists and contains
+- [x] `tests/lsp_lifecycle/helpers.rs` exists and contains
       exactly the seven helpers listed above and no other
       functions
-- [ ] `tests/lsp_lifecycle/main.rs` declares `mod helpers;`
+- [x] `tests/lsp_lifecycle/main.rs` declares `mod helpers;`
       and references the helpers via `use helpers::*;`
-- [ ] All 118 tests still compile and pass
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] All 118 tests still compile and pass
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `a0ffa0c` (amended; see `git log -- rlsp-yaml/tests/lsp_lifecycle/helpers.rs`)
 
 ### Task 3: Extract per-capability test modules
 
