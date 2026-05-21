@@ -194,14 +194,14 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "validation/validators.rs",
+        file: "validation/validators/duplicate_keys.rs",
         func: "parse_duplicate",
         marker: AllowMarker::CarveOut {
             reason: "test fixture",
         },
     },
     AllowEntry {
-        file: "validation/validators.rs",
+        file: "validation/validators/yaml11_compat.rs",
         func: "parse_yaml11",
         marker: AllowMarker::CarveOut {
             reason: "test fixture",

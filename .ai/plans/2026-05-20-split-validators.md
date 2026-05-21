@@ -121,7 +121,7 @@ integration test binaries.
 
 - [x] Extract `custom_tag` (types + parser) and `anchors`
 - [x] Extract `flow_style` and `key_ordering`
-- [ ] Extract `duplicate_keys` and `yaml11_compat`
+- [x] Extract `duplicate_keys` and `yaml11_compat`
 - [ ] Extract `custom_tags_validation`
 - [ ] Verify `validators.rs` is orchestration only and the
       external call sites continue to compile unchanged
@@ -211,7 +211,7 @@ Commit: `a46b142` (amended; see `git log --follow rlsp-yaml/src/validation/valid
 
 ### Task 3: Extract `duplicate_keys` and `yaml11_compat`
 
-- [ ] `src/validation/validators/duplicate_keys.rs` exists
+- [x] `src/validation/validators/duplicate_keys.rs` exists
       and contains:
   - `pub fn validate_duplicate_keys`
   - `fn check_node_for_duplicate_keys`
@@ -220,22 +220,24 @@ Commit: `a46b142` (amended; see `git log --follow rlsp-yaml/src/validation/valid
     duplicate-key tests (lines 1911–2188 of the original
     `mod tests` block) and the `parse_duplicate` test
     helper
-- [ ] `src/validation/validators/yaml11_compat.rs` exists
+- [x] `src/validation/validators/yaml11_compat.rs` exists
       and contains:
   - `pub fn validate_yaml11_compat`
   - `fn collect_yaml11_diagnostics`
   - a `#[cfg(test)] mod tests` block holding the
     yaml11-compat tests (lines 2224–2487 of the original
     `mod tests` block)
-- [ ] `src/validation/validators.rs` declares both
+- [x] `src/validation/validators.rs` declares both
       submodules and re-exports
       `pub use duplicate_keys::validate_duplicate_keys;`
       and `pub use yaml11_compat::validate_yaml11_compat;`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `ace8172` (amended; see `git log --follow rlsp-yaml/src/validation/validators/duplicate_keys.rs`)
 
 ### Task 4: Extract `custom_tags_validation`
 
