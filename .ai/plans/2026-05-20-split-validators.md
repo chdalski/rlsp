@@ -122,7 +122,7 @@ integration test binaries.
 - [x] Extract `custom_tag` (types + parser) and `anchors`
 - [x] Extract `flow_style` and `key_ordering`
 - [x] Extract `duplicate_keys` and `yaml11_compat`
-- [ ] Extract `custom_tags_validation`
+- [x] Extract `custom_tags_validation`
 - [ ] Verify `validators.rs` is orchestration only and the
       external call sites continue to compile unchanged
 
@@ -248,7 +248,7 @@ that checks whether parsed tags match the configured
 it in its own submodule so the parser-only path and the
 validator-only path can be reasoned about independently.
 
-- [ ] `src/validation/validators/custom_tags_validation.rs`
+- [x] `src/validation/validators/custom_tags_validation.rs`
       exists and contains:
   - `pub fn validate_custom_tags`
   - `fn collect_tag_diagnostics`
@@ -265,14 +265,16 @@ validator-only path can be reasoned about independently.
     into `custom_tag.rs`.
   - any imports needed from `super::custom_tag` for
     `CustomTag` / `TagNodeType`
-- [ ] `src/validation/validators.rs` declares
+- [x] `src/validation/validators.rs` declares
       `pub mod custom_tags_validation;` and re-exports
       `pub use custom_tags_validation::validate_custom_tags;`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `f9217e5` (amended; see `git log --follow rlsp-yaml/src/validation/validators/custom_tags_validation.rs`)
 
 ### Task 5: Verify orchestration-only `validators.rs`
 
