@@ -102,7 +102,7 @@ corpus-runner orchestration stays in `main.rs`.
 - [x] Migrate the file into the new directory layout
 - [x] Extract the cross-invariant shared utilities into a
       `shared` module
-- [ ] Extract invariants I1–I4 (each as its own module with
+- [x] Extract invariants I1–I4 (each as its own module with
       its own `mod tests`)
 - [ ] Extract invariants I5, I6, I8, I9
 - [ ] Extract invariants I10 and I11
@@ -232,18 +232,20 @@ do not leave a test stranded in `shared.rs` or in
 
 Acceptance:
 
-- [ ] Each module listed above exists with the check
+- [x] Each module listed above exists with the check
       function, helpers, and unit tests specified
-- [ ] `tests/corpus_invariants/main.rs` declares `mod
+- [x] `tests/corpus_invariants/main.rs` declares `mod
       i1_no_panics; mod i2_range_validity; mod
       i3_code_action_round_trip; mod i4_scalar_preservation;`
       and imports each check function for the `INVARIANTS`
       array (e.g. `use i1_no_panics::check_i1_no_panics;`)
-- [ ] `main.rs` no longer contains the moved check
+- [x] `main.rs` no longer contains the moved check
       functions, helpers, or unit tests
-- [ ] `cargo test --test corpus_invariants` test count
+- [x] `cargo test --test corpus_invariants` test count
       remains the Task 1 baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `a2425d9` (amended; see `git log --follow rlsp-yaml/tests/corpus_invariants/i2_range_validity.rs`)
 
 ### Task 4: Extract invariant modules I5, I6, I8, I9
 
