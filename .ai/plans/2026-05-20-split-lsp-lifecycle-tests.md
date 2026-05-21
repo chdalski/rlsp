@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-21)
 **Created:** 2026-05-20
 
 # Split `tests/lsp_lifecycle.rs` into per-LSP-capability modules
@@ -72,7 +72,7 @@ built and run as a single Cargo integration test binary named
       schema-routing modules
 - [x] Extract the validators integration test group
 - [x] Extract the formatting integration test group
-- [ ] Verify `main.rs` is orchestration only
+- [x] Verify `main.rs` is orchestration only
 
 ## Tasks
 
@@ -248,19 +248,21 @@ comment, and `mod <name>;` declarations — no
 `#[tokio::test]` attributes and no `fn` items other than
 the module declarations.
 
-- [ ] `tests/lsp_lifecycle/main.rs` contains zero
+- [x] `tests/lsp_lifecycle/main.rs` contains zero
       `#[tokio::test]` or `#[test]` attributes
-- [ ] `tests/lsp_lifecycle/main.rs` contains zero `fn`
+- [x] `tests/lsp_lifecycle/main.rs` contains zero `fn`
       definitions other than module declarations
-- [ ] Every sibling `.rs` file in `tests/lsp_lifecycle/`
+- [x] Every sibling `.rs` file in `tests/lsp_lifecycle/`
       corresponds to a `mod <name>;` declaration in
       `main.rs`, and every `mod <name>;` declaration
       corresponds to an existing sibling file
-- [ ] `cargo test --test lsp_lifecycle` reports 118 tests,
+- [x] `cargo test --test lsp_lifecycle` reports 118 tests,
       matching the Task 1 baseline; record the final count
       and the baseline count in the commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `8ab612b` (plan completion + Task 7 verification record)
 
 ## Decisions
 
