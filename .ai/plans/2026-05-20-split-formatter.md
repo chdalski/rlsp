@@ -139,7 +139,7 @@ tests compiles without source changes.
 ## Steps
 
 - [x] Extract `options` and `scalar_render`
-- [ ] Extract `dedup`
+- [x] Extract `dedup`
 - [ ] Extract `sequence_render` and `mapping_render`
 - [ ] Extract `comment_preservation` and `content_tracking`
 - [ ] Extract `node_to_doc` (the AST→Doc dispatcher)
@@ -206,7 +206,7 @@ under the `remove_duplicate_keys` option. The two
 functions (`dedup_key_str`, `dedup_mapping_keys`) have ~35
 dedicated unit tests in the original `mod tests` block.
 
-- [ ] `src/editing/formatter/dedup.rs` exists and contains:
+- [x] `src/editing/formatter/dedup.rs` exists and contains:
   - `fn dedup_key_str` (visibility `pub(super)` so
     `format_yaml` can call it indirectly through
     `dedup_mapping_keys`)
@@ -214,14 +214,16 @@ dedicated unit tests in the original `mod tests` block.
   - a `#[cfg(test)] mod tests` block holding every
     `dedup_*` unit test from the original `mod tests`
     block, including the `dedup_opts` test helper
-- [ ] `src/editing/formatter.rs` declares `mod dedup;` and
+- [x] `src/editing/formatter.rs` declares `mod dedup;` and
       uses `dedup::dedup_mapping_keys` where it previously
       called the local function
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `c5f0cb5` (amended; see `git log --follow rlsp-yaml/src/editing/formatter/dedup.rs`)
 
 ### Task 3: Extract `sequence_render` and `mapping_render`
 
