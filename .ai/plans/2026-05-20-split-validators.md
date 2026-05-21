@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-21)
 **Created:** 2026-05-20
 
 # Split `src/validation/validators.rs` into per-validator submodules
@@ -123,7 +123,7 @@ integration test binaries.
 - [x] Extract `flow_style` and `key_ordering`
 - [x] Extract `duplicate_keys` and `yaml11_compat`
 - [x] Extract `custom_tags_validation`
-- [ ] Verify `validators.rs` is orchestration only and the
+- [x] Verify `validators.rs` is orchestration only and the
       external call sites continue to compile unchanged
 
 ## Tasks
@@ -302,29 +302,31 @@ contains only:
 No `fn` items, no `struct`/`enum` items, no `mod tests`
 block.
 
-- [ ] `src/validation/validators.rs` contains zero `fn`
+- [x] `src/validation/validators.rs` contains zero `fn`
       definitions, zero `struct`/`enum`/`type`
       definitions, and zero `#[cfg(test)]` blocks
-- [ ] Every sibling `.rs` file under
+- [x] Every sibling `.rs` file under
       `src/validation/validators/` corresponds to a `pub
       mod <name>;` declaration in `validators.rs`, and
       every declaration corresponds to an existing sibling
       file
-- [ ] The set of public symbols re-exported by
+- [x] The set of public symbols re-exported by
       `validators.rs` is exactly:
       `TagNodeType, CustomTag, parse_custom_tag,
       validate_unused_anchors, validate_flow_style,
       validate_custom_tags, validate_key_ordering,
       validate_duplicate_keys, validate_yaml11_compat`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-Task-1 baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
-- [ ] None of the five external call sites listed in
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+- [x] None of the five external call sites listed in
       Context were modified (`git diff --stat` shows
       `validators.rs` plus new submodule files only)
+
+Commit: `dd5a6e5` (Task 5 verification + plan completion)
 
 ## Decisions
 
