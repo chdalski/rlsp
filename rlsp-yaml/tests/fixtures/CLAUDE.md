@@ -11,7 +11,7 @@ interact when enabling both produces behavior that differs
 from enabling either alone.
 
 Derive interacting pairs by reading `YamlFormatOptions` in
-`rlsp-yaml/src/editing/formatter.rs` and tracing which
+`rlsp-yaml/src/editing/formatter/options.rs` and tracing which
 settings affect the same formatting pass or decision point.
 Do not rely on a hardcoded list — the struct is the source
 of truth.

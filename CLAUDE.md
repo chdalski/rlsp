@@ -92,7 +92,7 @@ Formatter settings flow through three locations that must stay in sync:
 
 | Source of truth | Consumers | Sync when |
 |----------------|-----------|-----------|
-| `YamlFormatOptions` in `formatter.rs` | VS Code `package.json` + `config.ts`, fixture files in `tests/fixtures/formatter/` | Any setting added, renamed, or removed |
+| `YamlFormatOptions` in `src/editing/formatter/options.rs` | VS Code `package.json` + `config.ts`, fixture files in `tests/fixtures/formatter/` | Any setting added, renamed, or removed |
 
 ## References
 

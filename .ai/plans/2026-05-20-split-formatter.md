@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-20
 
 # Split `src/editing/formatter.rs` into per-phase submodules
@@ -138,7 +138,7 @@ tests compiles without source changes.
 
 ## Steps
 
-- [ ] Extract `options` and `scalar_render`
+- [x] Extract `options` and `scalar_render`
 - [ ] Extract `dedup`
 - [ ] Extract `sequence_render` and `mapping_render`
 - [ ] Extract `comment_preservation` and `content_tracking`
@@ -157,14 +157,14 @@ leaves of the call graph. This task also updates two
 documentation cross-references that name the pre-split
 location of `YamlFormatOptions`.
 
-- [ ] `src/editing/formatter/options.rs` exists and
+- [x] `src/editing/formatter/options.rs` exists and
       contains:
   - `pub struct YamlFormatOptions`
   - `impl Default for YamlFormatOptions`
   - any `#[cfg(test)] mod tests` block holding unit tests
     that exercise only the option defaults or option
     field defaults (no scalar/mapping/sequence behavior)
-- [ ] `src/editing/formatter/scalar_render.rs` exists and
+- [x] `src/editing/formatter/scalar_render.rs` exists and
       contains the nine scalar helpers listed under
       "Scalar rendering" in Context, plus a
       `#[cfg(test)] mod tests` block holding the
@@ -173,29 +173,31 @@ location of `YamlFormatOptions`.
       `needs_quoting_returns_false`, and
       `looks_like_number`-style unit tests from the
       original `mod tests` block
-- [ ] `src/editing/formatter.rs` declares
+- [x] `src/editing/formatter.rs` declares
       `pub mod options;` and `mod scalar_render;`
-- [ ] `src/editing/formatter.rs` re-exports
+- [x] `src/editing/formatter.rs` re-exports
       `pub use options::YamlFormatOptions;`
-- [ ] `src/editing/formatter.rs` no longer defines the
+- [x] `src/editing/formatter.rs` no longer defines the
       moved items or contains the moved unit tests
-- [ ] `/workspace/CLAUDE.md` line 95 (the "Settings Sync"
+- [x] `/workspace/CLAUDE.md` line 95 (the "Settings Sync"
       table row) names
       `` `YamlFormatOptions` in
       `src/editing/formatter/options.rs` `` as the source
       of truth — the pre-split path `formatter.rs` is no
       longer cited
-- [ ] `/workspace/rlsp-yaml/tests/fixtures/CLAUDE.md`
+- [x] `/workspace/rlsp-yaml/tests/fixtures/CLAUDE.md`
       lines 13–14 reference
       `rlsp-yaml/src/editing/formatter/options.rs` as the
       file to read `YamlFormatOptions` from — the
       pre-split path is no longer cited
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-task baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `62b4bb0` (amended; see `git log --follow rlsp-yaml/src/editing/formatter/options.rs`)
 
 ### Task 2: Extract `dedup`
 
