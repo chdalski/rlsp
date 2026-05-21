@@ -105,7 +105,7 @@ corpus-runner orchestration stays in `main.rs`.
 - [x] Extract invariants I1–I4 (each as its own module with
       its own `mod tests`)
 - [x] Extract invariants I5, I6, I8, I9
-- [ ] Extract invariants I10 and I11
+- [x] Extract invariants I10 and I11
 - [ ] Verify `main.rs` contains only the corpus runner and
       module declarations
 
@@ -298,14 +298,16 @@ Commit: `044cc90` (amended; see `git log --follow rlsp-yaml/tests/corpus_invaria
 
 Acceptance:
 
-- [ ] Both modules exist with the check function, helpers,
+- [x] Both modules exist with the check function, helpers,
       and unit tests specified
-- [ ] `main.rs` declares both modules and imports each
+- [x] `main.rs` declares both modules and imports each
       check function for the `INVARIANTS` array
-- [ ] `main.rs` no longer contains the moved content
-- [ ] `cargo test --test corpus_invariants` test count
+- [x] `main.rs` no longer contains the moved content
+- [x] `cargo test --test corpus_invariants` test count
       remains the Task 1 baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+
+Commit: `b6bf0ea` (amended; see `git log --follow rlsp-yaml/tests/corpus_invariants/i11_validator_stability.rs`)
 
 ### Task 6: Verify orchestration-only `main.rs`
 
