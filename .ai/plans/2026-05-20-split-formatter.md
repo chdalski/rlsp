@@ -141,7 +141,7 @@ tests compiles without source changes.
 - [x] Extract `options` and `scalar_render`
 - [x] Extract `dedup`
 - [x] Extract `sequence_render` and `mapping_render`
-- [ ] Extract `comment_preservation` and `content_tracking`
+- [x] Extract `comment_preservation` and `content_tracking`
 - [ ] Extract `node_to_doc` (the AST→Doc dispatcher)
 - [ ] Verify `formatter.rs` is orchestration only and every
       external caller continues to compile unchanged
@@ -288,7 +288,7 @@ prefix-comment cases) that stay in the parent file. Both
 new submodules therefore contain no `#[cfg(test)] mod
 tests` block.
 
-- [ ] `src/editing/formatter/content_tracking.rs` exists
+- [x] `src/editing/formatter/content_tracking.rs` exists
       and contains exactly:
   - `struct ContentEntry`
   - `pub(super) fn content_signature`
@@ -296,7 +296,7 @@ tests` block.
   - `pub(super) fn last_content_line_idx`
   - no `#[cfg(test)] mod tests` block (no test in the
     original block targets these helpers directly)
-- [ ] `src/editing/formatter/comment_preservation.rs`
+- [x] `src/editing/formatter/comment_preservation.rs`
       exists and contains exactly:
   - `struct Comment`
   - `pub(super) fn find_comment_on_line`
@@ -304,12 +304,27 @@ tests` block.
   - `pub(super) fn attach_comments`
   - no `#[cfg(test)] mod tests` block (no test in the
     original block targets these helpers directly)
-- [ ] `src/editing/formatter.rs` declares both submodules
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
-      task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `src/editing/formatter.rs` declares both submodules
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
+      task's baseline (6217 formatter tests + 2 new audit
+      scanner detection unit tests = 6219)
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `2702b4d` (amended; see `git log --follow rlsp-yaml/src/editing/formatter/comment_preservation.rs`)
+
+Note: this task also updated `rlsp-yaml/tests/parser_boundary_audit.rs`
+to widen the audit scanner regex to recognise `pub(super) fn` /
+`pub(crate) fn` (the moved helpers' new visibility forms), update the
+three relocated CarveOut entries' file paths, and classify eight
+pre-existing functions the previous bare-`fn` regex did not detect.
+This is a strict deviation from plan Non-Goal #5 ("Modifying any
+integration test or benchmark") but was unavoidable to keep the audit
+enforcing the One-Parser-One-AST rule for the relocated helpers — the
+alternative (leaving the audit broken) is worse than the deviation.
+Two new audit scanner unit tests (`pub_super_fn_detected`,
+`pub_crate_fn_detected`) accompany the regex widening.
 
 ### Task 5: Extract `node_to_doc`
 

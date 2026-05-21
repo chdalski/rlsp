@@ -104,24 +104,38 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "editing/formatter.rs",
+        file: "editing/formatter/comment_preservation.rs",
         func: "extract_doc_prefix_comments",
         marker: AllowMarker::CarveOut {
             reason: "pre-parse lexical: document-prefix comment extraction",
         },
     },
     AllowEntry {
-        file: "editing/formatter.rs",
+        file: "editing/formatter/comment_preservation.rs",
         func: "find_comment_on_line",
         marker: AllowMarker::CarveOut {
             reason: "pre-parse lexical: comment-boundary scan helper for document-prefix extraction",
         },
     },
     AllowEntry {
-        file: "editing/formatter.rs",
+        file: "editing/formatter/content_tracking.rs",
         func: "content_signature",
         marker: AllowMarker::CarveOut {
             reason: "pre-parse lexical: helper of find_comment_on_line",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions/tab_to_spaces.rs",
+        func: "tab_to_spaces",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse whitespace: YAML forbids tabs for indentation (§6.1); operates on raw text before parsing",
+        },
+    },
+    AllowEntry {
+        file: "server.rs",
+        func: "get_yaml_version",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: reads modeline from raw text to determine YAML version before parsing",
         },
     },
     // -----------------------------------------------------------------------
@@ -214,16 +228,62 @@ const ALLOW_LIST: &[AllowEntry] = &[
             reason: "test fixture — builds LineIndex from source for lsp_util unit tests",
         },
     },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "docs_for",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — parses raw text into AST for code-action unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_diags_for",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — builds diagnostics from raw text for code-action unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_map_action",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — drives code action from raw text for unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "flow_seq_action",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — drives code action from raw text for unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "apply_block_to_flow_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — applies edit on raw text for code-action unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "apply_block_scalar_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — applies edit on raw text for code-action unit tests",
+        },
+    },
 ];
 
 // ---------------------------------------------------------------------------
 // Detection helpers (also exercised by unit tests below)
 // ---------------------------------------------------------------------------
 
-/// Returns `true` if `line` starts any function declaration: `(pub )?fn <name>`.
+/// Returns `true` if `line` starts any function declaration: `(pub(\(…\))? )?fn <name>`.
+///
+/// Recognises bare `fn`, `pub fn`, and restricted-visibility forms such as
+/// `pub(super) fn`, `pub(crate) fn`, and `pub(in path) fn`.
 fn is_candidate_fn_line(line: &str) -> bool {
     static CANDIDATE_FN_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"^(?:pub\s+)?fn\s+\w").unwrap_or_else(|_| unreachable!("static regex is valid"))
+        Regex::new(r"^(?:pub(?:\s*\([^)]+\))?\s+)?fn\s+\w")
+            .unwrap_or_else(|_| unreachable!("static regex is valid"))
     });
     CANDIDATE_FN_REGEX.is_match(line.trim_start())
 }
@@ -231,19 +291,27 @@ fn is_candidate_fn_line(line: &str) -> bool {
 /// Extracts the bare function name from a function declaration line.
 ///
 /// Handles generics: `pub fn validate_foo<S>(` → `"validate_foo"`.
+/// Handles restricted visibility: `pub(super) fn foo(` → `"foo"`.
 /// Works for both public and private functions.
 fn extract_fn_name(line: &str) -> Option<&str> {
+    static FN_NAME_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        // Match optional visibility (pub or pub(...)) then `fn ` then capture the name.
+        Regex::new(r"^(?:pub(?:\s*\([^)]+\))?\s+)?fn\s+([A-Za-z_]\w*)")
+            .unwrap_or_else(|_| unreachable!("static regex is valid"))
+    });
     let trimmed = line.trim_start();
-    // Strip optional `pub ` prefix
-    let rest = trimmed
-        .strip_prefix("pub ")
-        .map_or(trimmed, |r| r.trim_start());
-    let rest = rest.strip_prefix("fn ")?;
-    // Name ends at `<`, `(`, or whitespace.
-    let end = rest
+    // Find `fn <name>` in the line and return a slice into the original string so
+    // that the returned reference has the lifetime of the input.
+    let m = FN_NAME_REGEX.find(trimmed)?;
+    // The name always follows `fn ` (one or more spaces); locate it by finding
+    // the last word in the match (after the final whitespace run).
+    let matched = &trimmed[m.start()..m.end()];
+    let fn_kw = matched.find("fn ")?;
+    let after_fn = matched[fn_kw + 3..].trim_start();
+    let end = after_fn
         .find(|c: char| c == '<' || c == '(' || c.is_whitespace())
-        .unwrap_or(rest.len());
-    let name = &rest[..end];
+        .unwrap_or(after_fn.len());
+    let name = &after_fn[..end];
     if name.is_empty() { None } else { Some(name) }
 }
 
@@ -301,7 +369,13 @@ fn scan_file(rel_path: &str, source: &str) -> Vec<Violation> {
             // multi-line signatures.
             let window: Vec<&str> = lines.iter().skip(i).take(10).copied().collect();
             let combined = window.join(" ");
-            let param_block = extract_param_block(&combined);
+            // Skip past `fn <name>` so that visibility-modifier parens (e.g.
+            // `pub(super)`) are not mistaken for the function's parameter list.
+            let fn_marker = format!("fn {func_name}");
+            let after_fn_name = combined
+                .find(fn_marker.as_str())
+                .map_or(combined.as_str(), |pos| &combined[pos..]);
+            let param_block = extract_param_block(after_fn_name);
             if has_text_str_param(&param_block) {
                 Some(Violation {
                     rel_path: rel_path.to_owned(),
@@ -459,6 +533,20 @@ mod detection_tests {
     fn pub_fn_arbitrary_name_detected() {
         let line = "pub fn apply_fix(text: &str) {";
         assert!(is_candidate_fn_line(line));
+    }
+
+    #[test]
+    fn pub_super_fn_detected() {
+        let line = "pub(super) fn find_comment_on_line(line: &str) -> Option<(usize, String)> {";
+        assert!(is_candidate_fn_line(line));
+        assert_eq!(extract_fn_name(line), Some("find_comment_on_line"));
+    }
+
+    #[test]
+    fn pub_crate_fn_detected() {
+        let line = "pub(crate) fn get_yaml_version(text: &str) -> YamlVersion {";
+        assert!(is_candidate_fn_line(line));
+        assert_eq!(extract_fn_name(line), Some("get_yaml_version"));
     }
 
     #[test]
