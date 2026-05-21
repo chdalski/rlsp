@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-20
 
 # Split `tests/corpus_invariants.rs` into per-invariant modules
@@ -99,7 +99,7 @@ corpus-runner orchestration stays in `main.rs`.
 
 ## Steps
 
-- [ ] Migrate the file into the new directory layout
+- [x] Migrate the file into the new directory layout
 - [ ] Extract the cross-invariant shared utilities into a
       `shared` module
 - [ ] Extract invariants I1–I4 (each as its own module with
@@ -117,16 +117,18 @@ Rename `rlsp-yaml/tests/corpus_invariants.rs` to
 `rlsp-yaml/tests/corpus_invariants/main.rs` via `git mv`,
 keeping the content byte-identical.
 
-- [ ] `git mv rlsp-yaml/tests/corpus_invariants.rs
+- [x] `git mv rlsp-yaml/tests/corpus_invariants.rs
       rlsp-yaml/tests/corpus_invariants/main.rs`
-- [ ] `cargo test --test corpus_invariants` runs
+- [x] `cargo test --test corpus_invariants` runs
       successfully
-- [ ] The test count reported by `cargo test --test
+- [x] The test count reported by `cargo test --test
       corpus_invariants -- --list 2>&1 | grep -c '^test '`
       matches the count produced from the pre-rename file;
       record both numbers in the commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `7982ff5` (amended; see `git log --follow rlsp-yaml/tests/corpus_invariants/main.rs`)
 
 ### Task 2: Extract cross-invariant shared utilities
 
