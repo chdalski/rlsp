@@ -140,7 +140,7 @@ tests compiles without source changes.
 
 - [x] Extract `options` and `scalar_render`
 - [x] Extract `dedup`
-- [ ] Extract `sequence_render` and `mapping_render`
+- [x] Extract `sequence_render` and `mapping_render`
 - [ ] Extract `comment_preservation` and `content_tracking`
 - [ ] Extract `node_to_doc` (the AST→Doc dispatcher)
 - [ ] Verify `formatter.rs` is orchestration only and every
@@ -242,14 +242,14 @@ format_subtree_*) which stay in the parent file. Both new
 submodules therefore contain no `#[cfg(test)] mod tests`
 block.
 
-- [ ] `src/editing/formatter/sequence_render.rs` exists
+- [x] `src/editing/formatter/sequence_render.rs` exists
       and contains exactly:
   - `pub(super) fn sequence_to_doc`
   - `pub(super) fn flow_sequence_to_doc`
   - `pub(super) fn sequence_item_to_doc`
   - no `#[cfg(test)] mod tests` block (no test in the
     original block targets these helpers directly)
-- [ ] `src/editing/formatter/mapping_render.rs` exists and
+- [x] `src/editing/formatter/mapping_render.rs` exists and
       contains exactly:
   - `pub(super) fn mapping_to_doc`
   - `pub(super) fn flow_mapping_to_doc`
@@ -261,13 +261,15 @@ block.
   - `pub(super) fn prepend_collection_properties`
   - no `#[cfg(test)] mod tests` block (no test in the
     original block targets these helpers directly)
-- [ ] `src/editing/formatter.rs` declares `mod
+- [x] `src/editing/formatter.rs` declares `mod
       sequence_render;` and `mod mapping_render;`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `bf79bd0` (amended; see `git log --follow rlsp-yaml/src/editing/formatter/mapping_render.rs`)
 
 ### Task 4: Extract `comment_preservation` and `content_tracking`
 
