@@ -120,7 +120,7 @@ integration test binaries.
 ## Steps
 
 - [x] Extract `custom_tag` (types + parser) and `anchors`
-- [ ] Extract `flow_style` and `key_ordering`
+- [x] Extract `flow_style` and `key_ordering`
 - [ ] Extract `duplicate_keys` and `yaml11_compat`
 - [ ] Extract `custom_tags_validation`
 - [ ] Verify `validators.rs` is orchestration only and the
@@ -178,7 +178,7 @@ Commit: `06ff9a3` (amended; see `git log --follow rlsp-yaml/src/validation/valid
 
 ### Task 2: Extract `flow_style` and `key_ordering`
 
-- [ ] `src/validation/validators/flow_style.rs` exists and
+- [x] `src/validation/validators/flow_style.rs` exists and
       contains:
   - `pub fn validate_flow_style`
   - `fn collect_flow_style_diagnostics`
@@ -186,26 +186,28 @@ Commit: `06ff9a3` (amended; see `git log --follow rlsp-yaml/src/validation/valid
   - a `#[cfg(test)] mod tests` block holding the
     flow-style tests (lines 1055–1365 of the original
     `mod tests` block)
-- [ ] `src/validation/validators/key_ordering.rs` exists
+- [x] `src/validation/validators/key_ordering.rs` exists
       and contains:
   - `pub fn validate_key_ordering`
   - `fn check_yaml_ordering`
   - a `#[cfg(test)] mod tests` block holding the
     key-ordering tests (lines 1381–1434 of the original
     `mod tests` block)
-- [ ] `src/validation/validators.rs` declares both
+- [x] `src/validation/validators.rs` declares both
       submodules and re-exports
       `pub use flow_style::validate_flow_style;` and
       `pub use key_ordering::validate_key_ordering;`
-- [ ] `src/validation/validators.rs` no longer defines the
+- [x] `src/validation/validators.rs` no longer defines the
       moved items or contains the moved unit tests
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
-- [ ] All five external call sites listed in Context still
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+- [x] All five external call sites listed in Context still
       compile without source changes
+
+Commit: `a46b142` (amended; see `git log --follow rlsp-yaml/src/validation/validators/flow_style.rs`)
 
 ### Task 3: Extract `duplicate_keys` and `yaml11_compat`
 
