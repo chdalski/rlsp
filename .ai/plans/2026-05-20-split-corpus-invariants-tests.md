@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-21)
 **Created:** 2026-05-20
 
 # Split `tests/corpus_invariants.rs` into per-invariant modules
@@ -106,7 +106,7 @@ corpus-runner orchestration stays in `main.rs`.
       its own `mod tests`)
 - [x] Extract invariants I5, I6, I8, I9
 - [x] Extract invariants I10 and I11
-- [ ] Verify `main.rs` contains only the corpus runner and
+- [x] Verify `main.rs` contains only the corpus runner and
       module declarations
 
 ## Tasks
@@ -337,28 +337,30 @@ contains only:
 No other `fn` items, no leftover helper functions, no
 leftover `mod tests` block.
 
-- [ ] `tests/corpus_invariants/main.rs` contains exactly
+- [x] `tests/corpus_invariants/main.rs` contains exactly
       one `#[test]` attribute (the `corpus_invariants`
       function); no other test attributes appear
-- [ ] `tests/corpus_invariants/main.rs` contains no
+- [x] `tests/corpus_invariants/main.rs` contains no
       `#[cfg(test)]` block
-- [ ] Every sibling `.rs` file in
+- [x] Every sibling `.rs` file in
       `tests/corpus_invariants/` corresponds to a `mod
       <name>;` declaration in `main.rs`, and every `mod
       <name>;` declaration corresponds to an existing
       sibling file
-- [ ] No sibling `.rs` file contains an empty
+- [x] No sibling `.rs` file contains an empty
       `#[cfg(test)] mod tests {}` block — `i1_no_panics.rs`
       and `i5_anchor_loc_invariant.rs` deliberately have
       no `mod tests` block at all, and every other sibling
       module has a `mod tests` block with at least one
       `#[test]` function inside
-- [ ] `cargo test --test corpus_invariants` reports the
+- [x] `cargo test --test corpus_invariants` reports the
       same total test count as the Task 1 baseline; record
       the final count and the baseline count in the commit
       message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `d27a361` (Task 6 sweep + plan completion)
 
 ## Decisions
 
