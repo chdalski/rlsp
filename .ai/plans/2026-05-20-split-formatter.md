@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-05-21)
 **Created:** 2026-05-20
 
 # Split `src/editing/formatter.rs` into per-phase submodules
@@ -143,7 +143,7 @@ tests compiles without source changes.
 - [x] Extract `sequence_render` and `mapping_render`
 - [x] Extract `comment_preservation` and `content_tracking`
 - [x] Extract `node_to_doc` (the AST→Doc dispatcher)
-- [ ] Verify `formatter.rs` is orchestration only and every
+- [x] Verify `formatter.rs` is orchestration only and every
       external caller continues to compile unchanged
 
 ## Tasks
@@ -391,40 +391,42 @@ only:
 No internal helper `fn` items, no `struct`/`enum` items,
 no per-phase unit tests remain in `formatter.rs`.
 
-- [ ] `src/editing/formatter.rs` contains exactly two
+- [x] `src/editing/formatter.rs` contains exactly two
       `pub fn` items (`format_subtree`, `format_yaml`),
       one `pub use` re-export
       (`pub use options::YamlFormatOptions;`), eight `mod`
       declarations, and one `#[cfg(test)] mod tests`
       block; nothing else at the item level
-- [ ] Every sibling `.rs` file under
+- [x] Every sibling `.rs` file under
       `src/editing/formatter/` corresponds to a `mod
       <name>;` declaration in `formatter.rs`, and every
       declaration corresponds to an existing sibling file
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-Task-1 baseline; record both numbers in the
       commit message
-- [ ] `cargo bench --no-run` succeeds (compile-only check;
+- [x] `cargo bench --no-run` succeeds (compile-only check;
       do not execute benches by default)
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
-- [ ] No external caller listed in Context was modified
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+- [x] No external caller listed in Context was modified
       (`git diff --stat` shows only `formatter.rs` and new
       submodule files under `formatter/`)
-- [ ] `/workspace/CLAUDE.md` references
+- [x] `/workspace/CLAUDE.md` references
       `src/editing/formatter/options.rs` as the source of
       truth for `YamlFormatOptions`; the pre-split path
       `formatter.rs` no longer appears in line 95 of that
       file (this verification stands independently of
       whether Task 1 already applied the update)
-- [ ] `/workspace/rlsp-yaml/tests/fixtures/CLAUDE.md`
+- [x] `/workspace/rlsp-yaml/tests/fixtures/CLAUDE.md`
       references
       `rlsp-yaml/src/editing/formatter/options.rs` as the
       file to read `YamlFormatOptions` from; the pre-split
       path no longer appears in lines 13–14 of that file
       (this verification stands independently of whether
       Task 1 already applied the update)
+
+Commit: `ddfd5ee` (Task 6 verification + plan completion)
 
 ## Decisions
 
