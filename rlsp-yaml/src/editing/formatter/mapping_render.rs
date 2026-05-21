@@ -101,8 +101,8 @@ pub(super) fn flow_mapping_to_doc(
     let items: Vec<Doc> = entries
         .iter()
         .map(|(key, value)| {
-            let key_doc = super::flow_item_to_doc(key, options, true);
-            let val_doc = super::flow_item_to_doc(value, options, false);
+            let key_doc = super::node_to_doc::flow_item_to_doc(key, options, true);
+            let val_doc = super::node_to_doc::flow_item_to_doc(value, options, false);
             // Alias keys and tagged empty scalar keys require a space before `:`
             // to prevent ambiguous re-parsing:
             //   - `*a: v` → alias name `a:` (alias consumes the colon)
@@ -229,7 +229,7 @@ pub(super) fn explicit_key_to_doc(
     value: &Node<Span>,
     options: &YamlFormatOptions,
 ) -> Doc {
-    let key_doc = super::node_to_doc(key, options, true);
+    let key_doc = super::node_to_doc::node_to_doc(key, options, true);
     let value_is_empty = matches!(value, Node::Scalar { value, .. } if value.is_empty());
 
     // `? key_doc` — the key part.
@@ -298,7 +298,7 @@ pub(super) fn explicit_key_to_doc(
             | Node::Mapping { .. }
             | Node::Sequence { .. }
             | Node::Alias { .. } => {
-                let value_doc = super::node_to_doc(value, options, false);
+                let value_doc = super::node_to_doc::node_to_doc(value, options, false);
                 concat(vec![text(": "), value_doc])
             }
         }
@@ -338,14 +338,14 @@ pub(super) fn key_value_to_doc(
         explicit_key_to_doc(key, value, options)
     } else if is_empty_key(key) {
         // Empty key: emit `: value` (no `?` prefix).
-        let value_doc = super::node_to_doc(value, options, false);
+        let value_doc = super::node_to_doc::node_to_doc(value, options, false);
         if matches!(value, Node::Scalar { value, .. } if value.is_empty()) {
             text(":")
         } else {
             concat(vec![text(": "), value_doc])
         }
     } else {
-        let key_doc = super::node_to_doc(key, options, true);
+        let key_doc = super::node_to_doc::node_to_doc(key, options, true);
         match value {
             // Block mappings: `key:\n  child: val` — hard_line inside indent.
             // With anchor: `key: &anchor\n  child: val`.
@@ -411,7 +411,7 @@ pub(super) fn key_value_to_doc(
             | Node::Mapping { .. }
             | Node::Sequence { .. }
             | Node::Alias { .. } => {
-                let value_doc = super::node_to_doc(value, options, false);
+                let value_doc = super::node_to_doc::node_to_doc(value, options, false);
                 // When the key's rendered form ends with a tag, a space before `:` is
                 // required to prevent the colon from being parsed as part of the tag URI.
                 let sep = if key_needs_space_before_colon(key) {

@@ -142,7 +142,7 @@ tests compiles without source changes.
 - [x] Extract `dedup`
 - [x] Extract `sequence_render` and `mapping_render`
 - [x] Extract `comment_preservation` and `content_tracking`
-- [ ] Extract `node_to_doc` (the AST→Doc dispatcher)
+- [x] Extract `node_to_doc` (the AST→Doc dispatcher)
 - [ ] Verify `formatter.rs` is orchestration only and every
       external caller continues to compile unchanged
 
@@ -332,7 +332,7 @@ Two new audit scanner unit tests (`pub_super_fn_detected`,
 internal helper (~189 lines). It calls into every
 per-shape module already extracted.
 
-- [ ] `src/editing/formatter/node_to_doc.rs` exists and
+- [x] `src/editing/formatter/node_to_doc.rs` exists and
       contains:
   - `pub(super) fn node_to_doc`
   - `pub(super) fn flow_item_to_doc`
@@ -340,15 +340,17 @@ per-shape module already extracted.
     (`use super::scalar_render::*;`,
     `use super::mapping_render::*;`,
     `use super::sequence_render::*;`)
-- [ ] `src/editing/formatter.rs` declares `mod
+- [x] `src/editing/formatter.rs` declares `mod
       node_to_doc;` and uses
       `node_to_doc::node_to_doc` from `format_yaml` and
       `format_subtree`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `662b5f7` (amended; see `git log --follow rlsp-yaml/src/editing/formatter/node_to_doc.rs`)
 
 ### Task 6: Verify orchestration-only `formatter.rs`
 

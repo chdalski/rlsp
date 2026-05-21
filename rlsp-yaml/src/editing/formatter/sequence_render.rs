@@ -42,7 +42,7 @@ pub(super) fn sequence_to_doc(
 pub(super) fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptions) -> Doc {
     let items: Vec<Doc> = seq
         .iter()
-        .map(|item| super::flow_item_to_doc(item, options, false))
+        .map(|item| super::node_to_doc::flow_item_to_doc(item, options, false))
         .collect();
     let sep = concat(vec![text(","), line()]);
     let inner = join(&sep, items);
@@ -127,7 +127,10 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
         }
         // Flow collections, scalars, empty collections, aliases — inline under `- `.
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            concat(vec![text("- "), super::node_to_doc(item, options, false)])
+            concat(vec![
+                text("- "),
+                super::node_to_doc::node_to_doc(item, options, false),
+            ])
         }
     };
 
