@@ -35,16 +35,15 @@ mod i1_no_panics;
 mod i2_range_validity;
 mod i3_code_action_round_trip;
 mod i4_scalar_preservation;
+mod i5_anchor_loc_invariant;
+mod i6_tag_loc_invariant;
+mod i8_selection_no_panic;
+mod i9_complete_at_no_panics;
 mod shared;
 
-use std::borrow::Cow;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
-use rlsp_yaml::analysis::selection::selection_ranges;
-use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
-use rlsp_yaml::navigation::references::{find_references, goto_definition};
 use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml::schema::parse_schema;
 use rlsp_yaml::schema_validation::validate_schema;
@@ -54,14 +53,17 @@ use rlsp_yaml::validation::validators::{
     validate_custom_tags, validate_duplicate_keys, validate_flow_style, validate_key_ordering,
     validate_unused_anchors, validate_yaml11_compat,
 };
-use rlsp_yaml_parser::{Node, Span};
-use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
+use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use i1_no_panics::check_i1_no_panics;
-use i2_range_validity::{check_i2_range_validity, utf16_len};
+use i2_range_validity::check_i2_range_validity;
 use i3_code_action_round_trip::check_i3_code_action_round_trip;
 use i4_scalar_preservation::check_i4_scalar_preservation;
-use shared::{CheckOutcome, collect_corpus_files, documents_equivalent, panic_message, run_check};
+use i5_anchor_loc_invariant::check_i5_anchor_loc_invariant;
+use i6_tag_loc_invariant::{check_i6_references_no_panics, check_i6_tag_loc_invariant};
+use i8_selection_no_panic::check_i8_selection_no_panic;
+use i9_complete_at_no_panics::check_i9_complete_at_no_panics;
+use shared::{CheckOutcome, collect_corpus_files, documents_equivalent, run_check};
 
 /// Each registered invariant has an id, description, and a check function.
 pub(crate) struct Invariant {
@@ -132,232 +134,6 @@ const INVARIANTS: &[Invariant] = &[
         check: check_i11_validator_stability_under_reemit,
     },
 ];
-
-// ---------------------------------------------------------------------------
-// I5: AST anchor_loc invariant
-// ---------------------------------------------------------------------------
-
-fn check_i5_anchor_loc_invariant(_path: &Path, text: &str) -> Result<(), String> {
-    let Ok(docs) = rlsp_yaml_parser::loader::load(text) else {
-        return Ok(()); // invalid YAML has no AST to check
-    };
-    for doc in &docs {
-        check_i5_node(&doc.root)?;
-    }
-    Ok(())
-}
-
-fn check_i5_node(node: &Node<Span>) -> Result<(), String> {
-    match node {
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
-            let anchor = node.anchor();
-            let anchor_loc = node.anchor_loc();
-            if anchor.is_some() != anchor_loc.is_some() {
-                return Err(format!(
-                    "I5 invariant violated: anchor={anchor:?} but anchor_loc={anchor_loc:?}"
-                ));
-            }
-        }
-        Node::Alias { .. } => {}
-    }
-    match node {
-        Node::Mapping { entries, .. } => {
-            for (k, v) in entries {
-                check_i5_node(k)?;
-                check_i5_node(v)?;
-            }
-        }
-        Node::Sequence { items, .. } => {
-            for item in items {
-                check_i5_node(item)?;
-            }
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => {}
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// I6: AST tag_loc invariant
-// ---------------------------------------------------------------------------
-
-fn check_i6_tag_loc_invariant(_path: &Path, text: &str) -> Result<(), String> {
-    let Ok(docs) = rlsp_yaml_parser::loader::load(text) else {
-        return Ok(()); // invalid YAML has no AST to check
-    };
-    for doc in &docs {
-        check_i6_node(&doc.root)?;
-    }
-    Ok(())
-}
-
-fn check_i6_node(node: &Node<Span>) -> Result<(), String> {
-    match node {
-        Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
-            // Resolver-injected core schema tags (`tag:yaml.org,2002:*`) have no source
-            // position (`tag_loc: None`) by design — they were inferred, not written in
-            // the source.  Allow those through.  Any other tag that is present must have
-            // a corresponding source location.
-            let tag_loc = node.tag_loc();
-            let is_resolver_injected = tag
-                .as_deref()
-                .is_some_and(|t| t.starts_with("tag:yaml.org,2002:"));
-            if tag.is_some() && tag_loc.is_none() && !is_resolver_injected {
-                return Err(format!(
-                    "I6 invariant violated: tag={tag:?} but tag_loc={tag_loc:?}"
-                ));
-            }
-        }
-        Node::Alias { .. } => {}
-    }
-    match node {
-        Node::Mapping { entries, .. } => {
-            for (k, v) in entries {
-                check_i6_node(k)?;
-                check_i6_node(v)?;
-            }
-        }
-        Node::Sequence { items, .. } => {
-            for item in items {
-                check_i6_node(item)?;
-            }
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => {}
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// I7: goto_definition and find_references never panic
-// ---------------------------------------------------------------------------
-
-fn check_i6_references_no_panics(path: &Path, text: &str) -> Result<(), String> {
-    let docs = rlsp_yaml_parser::load(text).unwrap_or_default();
-    let last_line = text.lines().count().saturating_sub(1) as u32;
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-    let fake_uri = tower_lsp::lsp_types::Url::parse(&format!("file:///corpus/{file_name}"))
-        .expect("valid URI");
-
-    for line in [0u32, last_line] {
-        let pos = Position::new(line, 0);
-        catch_unwind(AssertUnwindSafe(|| goto_definition(&docs, &fake_uri, pos))).map_err(|e| {
-            format!(
-                "panic in goto_definition at line {line}: {}",
-                panic_message(&e)
-            )
-        })?;
-        catch_unwind(AssertUnwindSafe(|| {
-            find_references(&docs, &fake_uri, pos, false)
-        }))
-        .map_err(|e| {
-            format!(
-                "panic in find_references at line {line}: {}",
-                panic_message(&e)
-            )
-        })?;
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// I8: selection_ranges never panics; outermost range valid for (0,0)
-// ---------------------------------------------------------------------------
-
-fn check_i8_selection_no_panic(_path: &Path, text: &str) -> Result<(), String> {
-    let docs = rlsp_yaml_parser::load(text).unwrap_or_default();
-    let pos = Position::new(0, 0);
-
-    let result = catch_unwind(AssertUnwindSafe(|| selection_ranges(&docs, &[pos])))
-        .map_err(|e| format!("panic in selection_ranges: {}", panic_message(&e)))?;
-
-    if let Some(sr) = result.first() {
-        let mut outermost = sr;
-        while let Some(ref p) = outermost.parent {
-            outermost = p;
-        }
-        if outermost.range.start.line != 0 {
-            return Err(format!(
-                "outermost range start.line is {} (expected 0) for position (0,0)",
-                outermost.range.start.line
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// I9: complete_at never panics; result length <= MAX_COMPLETION_ITEMS
-// ---------------------------------------------------------------------------
-
-// Mirrors the private constant in completion.rs — must be kept in sync.
-const MAX_COMPLETION_ITEMS: usize = 100;
-
-fn check_i9_complete_at_no_panics(_path: &Path, text: &str) -> Result<(), String> {
-    let docs = parse_yaml(text).documents;
-
-    for (line, line_text) in text.lines().enumerate() {
-        let line_utf16 = utf16_len(line_text) as u32;
-        let col_0: u32 = 0;
-        let col_mid: u32 = safe_utf16_midpoint(line_text);
-        let col_end: u32 = line_utf16;
-
-        // Deduplicate: avoid redundant calls on very short lines.
-        let mut cols = vec![col_0];
-        if col_mid != col_0 {
-            cols.push(col_mid);
-        }
-        if col_end != col_mid {
-            cols.push(col_end);
-        }
-
-        for col in cols {
-            let pos = Position::new(line as u32, col);
-            let result =
-                catch_unwind(AssertUnwindSafe(|| complete_at(&docs, pos, None))).map_err(|e| {
-                    format!(
-                        "panic in complete_at at line {line} col {col}: {}",
-                        panic_message(&e)
-                    )
-                })?;
-            let n = result.len();
-            if n > MAX_COMPLETION_ITEMS {
-                return Err(format!(
-                    "complete_at at line {line} col {col} returned {n} items (> MAX_COMPLETION_ITEMS {MAX_COMPLETION_ITEMS})"
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Compute the UTF-16 midpoint of a line string, guarding against landing
-/// inside a surrogate pair (supplementary-plane characters take 2 UTF-16
-/// units; if `len / 2` falls on the second unit, advance by 1).
-fn safe_utf16_midpoint(line: &str) -> u32 {
-    let len = utf16_len(line) as u32;
-    let mut mid = len / 2;
-    // Walk UTF-16 units to verify `mid` lands on a code-point boundary.
-    let mut units: u32 = 0;
-    for ch in line.chars() {
-        let ch_units = ch.len_utf16() as u32;
-        if units == mid {
-            return mid; // already on a boundary
-        }
-        if units + ch_units > mid {
-            // `mid` falls inside a surrogate pair — advance past it.
-            mid = units + ch_units;
-            return mid;
-        }
-        units += ch_units;
-    }
-    mid
-}
 
 // ---------------------------------------------------------------------------
 // I10: Formatter round-trip — format(text) re-parses to an equivalent AST
@@ -501,11 +277,9 @@ fn corpus_invariants() {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Write as _;
     use std::io::Write as _;
     use std::path::Path;
 
-    use rlsp_yaml_parser::{Node, ScalarStyle, Span};
     use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range};
 
     use super::*;
@@ -533,117 +307,6 @@ mod tests {
             &[("seed.yaml", "round-trip", ".ai/plans/stub.md: example")];
         let path = Path::new("/abs/path/to/other.yaml");
         assert!(!skip_list_contains(skip, path, "round-trip"));
-    }
-
-    // ---------------------------------------------------------------------------
-    // I9 unit tests (UT-I9-1 through UT-I9-7)
-    // ---------------------------------------------------------------------------
-
-    fn run_i9(text: &str) -> Result<(), String> {
-        check_i9_complete_at_no_panics(Path::new("test.yaml"), text)
-    }
-
-    // UT-I9-1: empty file — zero lines, returns Ok immediately
-    #[test]
-    fn i9_ut1_empty_file_returns_ok() {
-        assert!(run_i9("").is_ok());
-    }
-
-    // UT-I9-2: newline-only — one empty line, all cols collapse to 0, single call at (0,0)
-    #[test]
-    fn i9_ut2_newline_only_file_returns_ok() {
-        assert!(run_i9("\n").is_ok());
-    }
-
-    // UT-I9-3: single-line YAML without trailing newline
-    #[test]
-    fn i9_ut3_single_line_no_newline_returns_ok() {
-        assert!(run_i9("key: value").is_ok());
-    }
-
-    // UT-I9-4: multi-line YAML
-    #[test]
-    fn i9_ut4_multiline_yaml_returns_ok() {
-        assert!(run_i9("a: 1\nb: 2\nc: 3\n").is_ok());
-    }
-
-    // UT-I9-5: BMP multi-byte UTF-8 ('é' = 2 UTF-8 bytes, 1 UTF-16 unit)
-    #[test]
-    fn i9_ut5_line_with_bmp_multibyte_char_returns_ok() {
-        assert!(run_i9("café: value\n").is_ok());
-    }
-
-    // UT-I9-6: supplementary-plane emoji (😀 = 4 UTF-8 bytes, 2 UTF-16 units)
-    #[test]
-    fn i9_ut6_line_with_supplementary_plane_char_returns_ok() {
-        assert!(run_i9("a\u{1F600}b: v\n").is_ok());
-    }
-
-    // UT-I9-7: 110-key mapping — exercises the len <= MAX_COMPLETION_ITEMS branch
-    #[test]
-    fn i9_ut7_large_mapping_respects_item_cap() {
-        let mut yaml = String::new();
-        for i in 1..=110_u32 {
-            writeln!(yaml, "k{i}: v").expect("write to String is infallible");
-        }
-        assert!(run_i9(&yaml).is_ok());
-    }
-
-    // ---------------------------------------------------------------------------
-    // I6 unit tests
-    // ---------------------------------------------------------------------------
-
-    // UT-I6-1: plain mapping YAML — resolver injects tag:yaml.org,2002:map with
-    // no tag_loc.  The narrowed I6 assertion must pass for this case.
-    #[test]
-    fn i6_resolver_injected_tag_no_tag_loc_passes() {
-        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "key: value\n");
-        assert!(
-            result.is_ok(),
-            "resolver-injected core tag with tag_loc=None should pass I6: {result:?}"
-        );
-    }
-
-    // UT-I6-2: explicit user tag on a scalar — tag_loc is Some (source position
-    // from the `!custom` token).  The invariant must pass.
-    #[test]
-    fn i6_explicit_user_tag_with_tag_loc_passes() {
-        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "!custom value\n");
-        assert!(
-            result.is_ok(),
-            "explicit user tag with tag_loc=Some should pass I6: {result:?}"
-        );
-    }
-
-    // UT-I6-3: synthetically constructed node with a non-core tag but no tag_loc —
-    // simulates a hypothetical loader bug.  The narrowed assertion must still catch
-    // this case.
-    #[test]
-    fn i6_missing_tag_loc_for_non_core_tag_fails() {
-        let origin = Span { start: 0, end: 0 };
-        let node = Node::Scalar {
-            value: String::new(),
-            style: ScalarStyle::Plain,
-            tag: Some(Cow::Owned("!custom".to_owned())),
-            loc: origin,
-            // Simulated loader bug: user tag with no source position (meta: None).
-            meta: None,
-        };
-        let result = check_i6_node(&node);
-        assert!(
-            result.is_err(),
-            "non-core tag with tag_loc=None should fail I6"
-        );
-    }
-
-    // UT-I6-4: no tag, no tag_loc — the zero-tag baseline must pass I6.
-    #[test]
-    fn i6_no_tag_no_tag_loc_passes() {
-        let result = check_i6_tag_loc_invariant(Path::new("test.yaml"), "key: value\n");
-        assert!(
-            result.is_ok(),
-            "node with no tag and no tag_loc should pass I6: {result:?}"
-        );
     }
 
     // ---------------------------------------------------------------------------
