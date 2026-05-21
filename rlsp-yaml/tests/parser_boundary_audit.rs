@@ -149,7 +149,7 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "validation/validators.rs",
+        file: "validation/validators/custom_tag.rs",
         func: "parse_custom_tag",
         marker: AllowMarker::CarveOut {
             reason: "pre-parse lexical: splits a settings/modeline config string into tag name and type suffix — no YAML parsing",

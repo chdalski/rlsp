@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-20
 
 # Split `src/validation/validators.rs` into per-validator submodules
@@ -119,7 +119,7 @@ integration test binaries.
 
 ## Steps
 
-- [ ] Extract `custom_tag` (types + parser) and `anchors`
+- [x] Extract `custom_tag` (types + parser) and `anchors`
 - [ ] Extract `flow_style` and `key_ordering`
 - [ ] Extract `duplicate_keys` and `yaml11_compat`
 - [ ] Extract `custom_tags_validation`
@@ -136,7 +136,7 @@ the string parser (no dependency on any validator).
 `anchors` contains the anchor-unused validator and its
 internal data structures.
 
-- [ ] `src/validation/validators/custom_tag.rs` exists and
+- [x] `src/validation/validators/custom_tag.rs` exists and
       contains:
   - `pub enum TagNodeType`
   - `pub struct CustomTag`
@@ -145,7 +145,7 @@ internal data structures.
     existing unit test that calls `parse_custom_tag`
     (sourced from the custom-tag parsing block in the
     original `mod tests`)
-- [ ] `src/validation/validators/anchors.rs` exists and
+- [x] `src/validation/validators/anchors.rs` exists and
       contains:
   - `struct AnchorEntry`
   - `pub fn validate_unused_anchors`
@@ -154,25 +154,27 @@ internal data structures.
     unused-anchor / unresolved-alias tests (lines 729–1026
     of the original `mod tests` block) and the
     `parse_anchors` test helper
-- [ ] `src/validation/validators.rs` declares
+- [x] `src/validation/validators.rs` declares
       `pub mod custom_tag;` and `pub mod anchors;`
-- [ ] `src/validation/validators.rs` re-exports
+- [x] `src/validation/validators.rs` re-exports
       `pub use custom_tag::{TagNodeType, CustomTag,
       parse_custom_tag};` and
       `pub use anchors::validate_unused_anchors;`
-- [ ] `src/validation/validators.rs` no longer defines the
+- [x] `src/validation/validators.rs` no longer defines the
       moved items or contains the moved unit tests
-- [ ] `cargo build` succeeds without any new compiler
+- [x] `cargo build` succeeds without any new compiler
       warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo test` reports the same total test count as
       the pre-task baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
-- [ ] `grep -rn "validation::validators::\\(TagNodeType\\|CustomTag\\|parse_custom_tag\\|validate_unused_anchors\\)"
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+- [x] `grep -rn "validation::validators::\\(TagNodeType\\|CustomTag\\|parse_custom_tag\\|validate_unused_anchors\\)"
       rlsp-yaml/src rlsp-yaml/tests` returns the same set
       of call sites as before this task — no caller paths
       were rewritten
+
+Commit: `06ff9a3` (amended; see `git log --follow rlsp-yaml/src/validation/validators/anchors.rs`)
 
 ### Task 2: Extract `flow_style` and `key_ordering`
 
