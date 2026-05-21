@@ -1,7 +1,7 @@
 # Corpus Invariant Worklist
 
 This file is the human-readable mirror of the `SKIP_LIST` constant in
-`rlsp-yaml/tests/corpus_invariants.rs`. **The Rust constant is the source
+`rlsp-yaml/tests/corpus_invariants/shared.rs`. **The Rust constant is the source
 of truth** — the test enforces it at every CI run. This file exists so
 reviewers and follow-up-plan authors can scan the current failure set
 without reading Rust source.

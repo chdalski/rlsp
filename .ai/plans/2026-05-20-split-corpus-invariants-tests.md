@@ -100,7 +100,7 @@ corpus-runner orchestration stays in `main.rs`.
 ## Steps
 
 - [x] Migrate the file into the new directory layout
-- [ ] Extract the cross-invariant shared utilities into a
+- [x] Extract the cross-invariant shared utilities into a
       `shared` module
 - [ ] Extract invariants I1–I4 (each as its own module with
       its own `mod tests`)
@@ -171,21 +171,23 @@ names the moved path.
 
 Acceptance:
 
-- [ ] `tests/corpus_invariants/shared.rs` exists and
+- [x] `tests/corpus_invariants/shared.rs` exists and
       contains exactly the symbols listed above
-- [ ] `tests/corpus_invariants/main.rs` declares `mod
+- [x] `tests/corpus_invariants/main.rs` declares `mod
       shared;` and references the moved items via `use
       shared::*;` (or qualified paths) — no duplicate
       definitions remain
-- [ ] `rlsp-yaml/tests/corpus/WORKLIST.md` names
+- [x] `rlsp-yaml/tests/corpus/WORKLIST.md` names
       `rlsp-yaml/tests/corpus_invariants/shared.rs` as the
       location of `SKIP_LIST`; the pre-split path
       `rlsp-yaml/tests/corpus_invariants.rs` no longer
       appears anywhere in that file
-- [ ] `cargo test --test corpus_invariants` test count is
+- [x] `cargo test --test corpus_invariants` test count is
       unchanged from the Task 1 baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `a4f5757` (amended; see `git log --follow rlsp-yaml/tests/corpus_invariants/shared.rs`)
 
 ### Task 3: Extract invariant modules I1, I2, I3, I4
 
