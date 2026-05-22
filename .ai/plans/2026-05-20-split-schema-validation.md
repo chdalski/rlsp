@@ -165,7 +165,7 @@ unchanged.
 
 - [x] Extract `context` and `support`
 - [x] Extract `type_validation`
-- [ ] Extract `composition`
+- [x] Extract `composition`
 - [ ] Extract `array_constraints`
 - [ ] Extract `scalar_constraints`
 - [ ] Extract `mapping_constraints`
@@ -258,7 +258,7 @@ Commit: `40a0faa` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
 
 ### Task 3: Extract `composition`
 
-- [ ] `src/schema_validation/composition.rs` exists and
+- [x] `src/schema_validation/composition.rs` exists and
       contains:
   - `pub(super) fn validate_composition` (the
     allOf/anyOf/oneOf implementation)
@@ -266,14 +266,16 @@ Commit: `40a0faa` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
   - a `#[cfg(test)] mod tests` block holding the
     composition tests (lines 2053–2201 of the original
     `mod tests` block, ~6 tests)
-- [ ] `src/schema_validation.rs` declares `mod
+- [x] `src/schema_validation.rs` declares `mod
       composition;` and `validate_node` now calls
       `composition::validate_composition`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `c9f9981` (amended; see `git log --follow rlsp-yaml/src/schema_validation/composition.rs`)
 
 ### Task 4: Extract `array_constraints`
 
