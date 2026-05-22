@@ -194,7 +194,7 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "schema_validation.rs",
+        file: "schema_validation/scalar_constraints.rs",
         func: "run_content",
         marker: AllowMarker::CarveOut {
             reason: "test fixture",

@@ -169,7 +169,7 @@ unchanged.
 - [x] Extract `array_constraints`
 - [x] Extract `scalar_constraints`
 - [x] Extract `mapping_constraints`
-- [ ] Verify `schema_validation.rs` is dispatcher-only and
+- [x] Verify `schema_validation.rs` is dispatcher-only and
       every external caller continues to compile unchanged
 
 ## Tasks
@@ -393,27 +393,29 @@ No constraint-family helpers, no per-constraint unit
 tests, no thread-locals, no `struct`/`enum` items remain
 in `schema_validation.rs`.
 
-- [ ] `src/schema_validation.rs` contains exactly one
+- [x] `src/schema_validation.rs` contains exactly one
       `pub fn` item (`validate_schema`), one private `fn`
       item (`validate_node`), eight `mod` declarations,
       and one `#[cfg(test)] mod tests` block; nothing
       else at the item level
-- [ ] Every sibling `.rs` file under
+- [x] Every sibling `.rs` file under
       `src/schema_validation/` corresponds to a `mod
       <name>;` declaration in `schema_validation.rs`, and
       every declaration corresponds to an existing
       sibling file (including the pre-existing
       `formats.rs`)
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-Task-1 baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
-- [ ] Neither external caller listed in Context was
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+- [x] Neither external caller listed in Context was
       modified (`git diff --stat` shows only
       `schema_validation.rs` and new submodule files
       under `schema_validation/`)
+
+Commit: `e367915` (amended; see `git log --follow rlsp-yaml/src/schema_validation.rs`)
 
 ## Decisions
 
