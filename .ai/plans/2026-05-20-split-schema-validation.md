@@ -166,7 +166,7 @@ unchanged.
 - [x] Extract `context` and `support`
 - [x] Extract `type_validation`
 - [x] Extract `composition`
-- [ ] Extract `array_constraints`
+- [x] Extract `array_constraints`
 - [ ] Extract `scalar_constraints`
 - [ ] Extract `mapping_constraints`
 - [ ] Verify `schema_validation.rs` is dispatcher-only and
@@ -279,7 +279,7 @@ Commit: `c9f9981` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
 
 ### Task 4: Extract `array_constraints`
 
-- [ ] `src/schema_validation/array_constraints.rs` exists
+- [x] `src/schema_validation/array_constraints.rs` exists
       and contains:
   - `pub(super) fn validate_sequence`
   - `pub(super) fn validate_array_constraints`
@@ -290,14 +290,16 @@ Commit: `c9f9981` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
     recursive-validation tests (lines 2201–2283 of the
     original `mod tests` block, ~5 tests covering nested
     array items)
-- [ ] `src/schema_validation.rs` declares `mod
+- [x] `src/schema_validation.rs` declares `mod
       array_constraints;` and routes its existing calls
       through the submodule
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `9b41cdb` (amended; see `git log --follow rlsp-yaml/src/schema_validation/array_constraints.rs`)
 
 ### Task 5: Extract `scalar_constraints`
 

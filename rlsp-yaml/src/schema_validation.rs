@@ -13,6 +13,7 @@ use crate::scalar_helpers;
 use crate::schema::{AdditionalProperties, JsonSchema};
 use crate::server::YamlVersion;
 
+mod array_constraints;
 mod composition;
 mod context;
 mod formats;
@@ -21,9 +22,9 @@ mod type_validation;
 
 use context::Ctx;
 use support::{
-    MAX_ENUM_DISPLAY, MAX_PATTERN_LEN, MAX_VALIDATION_DEPTH, collect_evaluated_item_count,
-    collect_evaluated_properties, entries_contains_key, format_path, get_regex, make_diagnostic,
-    node_key_str, node_loc, yaml_to_json,
+    MAX_ENUM_DISPLAY, MAX_PATTERN_LEN, MAX_VALIDATION_DEPTH, collect_evaluated_properties,
+    entries_contains_key, format_path, get_regex, make_diagnostic, node_key_str, node_loc,
+    yaml_to_json,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ fn validate_node(
 
     // Sequence-specific checks
     if let Node::Sequence { items, loc, .. } = node {
-        validate_sequence(items, *loc, schema, path, ctx, depth);
+        array_constraints::validate_sequence(items, *loc, schema, path, ctx, depth);
     }
 
     // Composition
@@ -137,7 +138,7 @@ fn validate_node(
     // unevaluatedItems (Draft 2019-09)
     if schema.unevaluated_items.is_some() {
         if let Node::Sequence { items, .. } = node {
-            validate_unevaluated_items(items, schema, path, ctx, depth);
+            array_constraints::validate_unevaluated_items(items, schema, path, ctx, depth);
         }
     }
 }
@@ -180,145 +181,6 @@ fn validate_unevaluated_properties(
     }
 }
 
-fn validate_unevaluated_items(
-    seq: &[Node<Span>],
-    schema: &JsonSchema,
-    path: &[String],
-    ctx: &mut Ctx<'_>,
-    depth: usize,
-) {
-    let evaluated_count = collect_evaluated_item_count(schema);
-    let Some(unevaluated_schema) = &schema.unevaluated_items else {
-        return;
-    };
-    for (i, item) in seq.iter().enumerate() {
-        if evaluated_count == usize::MAX || i < evaluated_count {
-            continue;
-        }
-        let mut item_path = path.to_vec();
-        item_path.push(format!("[{i}]"));
-        validate_node(item, unevaluated_schema, &item_path, ctx, depth + 1);
-    }
-}
-
-fn validate_sequence(
-    seq: &[Node<Span>],
-    seq_loc: Span,
-    schema: &JsonSchema,
-    path: &[String],
-    ctx: &mut Ctx<'_>,
-    depth: usize,
-) {
-    // prefixItems — validate each element at its positional schema
-    let prefix_len = schema.prefix_items.as_ref().map_or(0, Vec::len);
-    if let Some(prefix_schemas) = &schema.prefix_items {
-        for (i, (item, item_schema)) in seq.iter().zip(prefix_schemas.iter()).enumerate() {
-            let mut item_path = path.to_vec();
-            item_path.push(format!("[{i}]"));
-            validate_node(item, item_schema, &item_path, ctx, depth + 1);
-        }
-    }
-    // items — applies to elements beyond prefixItems
-    if let Some(items_schema) = &schema.items {
-        for (i, item) in seq.iter().enumerate().skip(prefix_len) {
-            let mut item_path = path.to_vec();
-            item_path.push(format!("[{i}]"));
-            validate_node(item, items_schema, &item_path, ctx, depth + 1);
-        }
-    } else if let Some(additional_items) = &schema.additional_items {
-        // additionalItems (Draft-04/07) — applies to elements beyond the tuple prefix
-        for (i, item) in seq.iter().enumerate().skip(prefix_len) {
-            let mut item_path = path.to_vec();
-            item_path.push(format!("[{i}]"));
-            match additional_items {
-                AdditionalProperties::Denied => {
-                    let range = span_to_lsp(node_loc(item), ctx.idx);
-                    ctx.diagnostics.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        "schemaAdditionalItems",
-                        format!(
-                            "Additional item at {}[{i}] is not allowed",
-                            format_path(path)
-                        ),
-                    ));
-                }
-                AdditionalProperties::Schema(extra_schema) => {
-                    validate_node(item, extra_schema, &item_path, ctx, depth + 1);
-                }
-            }
-        }
-    }
-    validate_array_constraints(seq, seq_loc, schema, path, ctx, depth);
-}
-
-fn validate_array_constraints(
-    seq: &[Node<Span>],
-    seq_loc: Span,
-    schema: &JsonSchema,
-    path: &[String],
-    ctx: &mut Ctx<'_>,
-    depth: usize,
-) {
-    let len = seq.len() as u64;
-
-    if let Some(min) = schema.min_items {
-        if len < min {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMinItems",
-                format!(
-                    "Array at {} has {} items, minimum is {}",
-                    format_path(path),
-                    len,
-                    min
-                ),
-            ));
-        }
-    }
-
-    if let Some(max) = schema.max_items {
-        if len > max {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMaxItems",
-                format!(
-                    "Array at {} has {} items, maximum is {}",
-                    format_path(path),
-                    len,
-                    max
-                ),
-            ));
-        }
-    }
-
-    if schema.unique_items == Some(true) {
-        let json_items: Vec<serde_json::Value> = seq.iter().filter_map(yaml_to_json).collect();
-        let has_duplicate = json_items.iter().enumerate().any(|(i, a)| {
-            json_items
-                .get(..i)
-                .is_some_and(|prev| prev.iter().any(|b| a == b))
-        });
-        if has_duplicate {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaUniqueItems",
-                format!("Array at {} contains duplicate items", format_path(path)),
-            ));
-        }
-    }
-
-    if let Some(contains_schema) = &schema.contains {
-        validate_contains(seq, seq_loc, contains_schema, schema, path, ctx, depth);
-    }
-}
-
 fn validate_mapping_constraints(
     entries: &[(Node<Span>, Node<Span>)],
     mapping_loc: Span,
@@ -357,63 +219,6 @@ fn validate_mapping_constraints(
                     format_path(path),
                     len,
                     max
-                ),
-            ));
-        }
-    }
-}
-
-fn validate_contains(
-    seq: &[Node<Span>],
-    seq_loc: Span,
-    contains_schema: &JsonSchema,
-    schema: &JsonSchema,
-    path: &[String],
-    ctx: &mut Ctx<'_>,
-    depth: usize,
-) {
-    let format_validation = ctx.format_validation;
-    let yaml_version = ctx.yaml_version;
-    let match_count = seq
-        .iter()
-        .filter(|item| {
-            let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-            validate_node(item, contains_schema, path, &mut probe, depth + 1);
-            scratch.is_empty()
-        })
-        .count() as u64;
-
-    // Default min is 1 when `contains` is present without `minContains`
-    let effective_min = schema.min_contains.unwrap_or(1);
-
-    if match_count < effective_min {
-        let range = span_to_lsp(seq_loc, ctx.idx);
-        ctx.diagnostics.push(make_diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            "schemaContains",
-            format!(
-                "Array at {} must contain at least {} item(s) matching the schema, found {}",
-                format_path(path),
-                effective_min,
-                match_count
-            ),
-        ));
-    }
-
-    if let Some(max) = schema.max_contains {
-        if match_count > max {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaContains",
-                format!(
-                    "Array at {} must contain at most {} item(s) matching the schema, found {}",
-                    format_path(path),
-                    max,
-                    match_count
                 ),
             ));
         }
@@ -1346,41 +1151,6 @@ mod tests {
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 37
-    #[test]
-    fn should_validate_array_items_against_items_schema() {
-        let schema = object_schema_with_props(vec![(
-            "ports",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("array".to_string())),
-                items: Some(Box::new(integer_schema())),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "ports:\n  - 8080\n  - not-an-int";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert_eq!(result.len(), 1);
-        assert_eq!(code_of(&result[0]), "schemaType");
-    }
-
-    // Test 38
-    #[test]
-    fn should_produce_no_diagnostics_for_valid_array_items() {
-        let schema = object_schema_with_props(vec![(
-            "ports",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("array".to_string())),
-                items: Some(Box::new(integer_schema())),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "ports:\n  - 8080\n  - 9090";
-        let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        assert!(result.is_empty());
     }
 
     // Test 39
