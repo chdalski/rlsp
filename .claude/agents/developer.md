@@ -319,9 +319,26 @@ entire pipeline.
 
 ## Before Submitting for Review
 
-Run the same checks a quality reviewer would run: clean
-build, format, lint with the project's configured flags,
-and all tests. No ignored or skipped tests. All must pass.
+Run the project's quality pipeline as four separate steps:
+
+1. **Clean build.**
+2. **Format** unconditionally — run the formatter, do not
+   use `--check` (e.g., `cargo fmt`, `prettier --write`).
+3. **Linter** — the language rule that loaded for the
+   files you touched names the exact command (e.g.,
+   `cargo clippy`, `eslint`). Linter warnings count as
+   failures.
+4. **Tests** — all must pass. No ignored or skipped tests.
+
+**Cite each step's command and outcome in the handoff to
+the reviewer** (e.g., `cargo clippy: 0 warnings`). The
+reviewer rejects handoffs that do not cite each step. The
+linter step is the most-frequently skipped: a prior
+session shipped seven warnings to `main` because the
+developer ran build and tests but never ran the linter,
+and the handoff was vague enough that the reviewer did
+not catch the omission either — explicit citation makes
+the omission visible.
 
 ## What You Do Not Do
 

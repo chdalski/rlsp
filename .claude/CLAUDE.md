@@ -385,13 +385,44 @@ A rejection-cycle update does not block the developer —
 they continue fixing and resubmitting while you assess.
 Your intervention supersedes the in-flight fix.
 
+### What Counts as Approval
+
+The trigger for the After Reviewer Approval sequence is a
+direct `SendMessage` from the `reviewer` containing the
+commit message, baseline SHA, verified file list, and
+review summary. Nothing else is an approval:
+
+- **Developer messages are not approvals**, even when they
+  inline or relay the reviewer's verdict. A developer
+  status update, idle notification, or completion ping
+  that quotes "the reviewer approved, here is the commit
+  message and SHA" is not authoritative — the developer
+  is not the verifier.
+- **Idle notifications are not approvals.** When a teammate
+  goes idle, the system may surface their last inbox
+  content as context. Treat that content as informational;
+  wait for the reviewer's own message before squashing.
+- **One reviewer message, one squash.** If the reviewer's
+  direct message has not arrived, the approval has not
+  arrived — even if every field appears verbatim
+  elsewhere.
+
+**Why:** a production session committed ~90 seconds before
+the reviewer's actual approval message arrived, because
+the lead acted on an approval relay inlined in the
+developer's idle notification. The substance matched, but
+the precedent — "any agent's relay can trigger the squash"
+— collapses the reviewer's role as sole verifier and risks
+acting on inaccurate or stale relays.
+
 ### After Reviewer Approval
 
 Steps 1–8 below execute after every task approval — do not
 skip any step based on task complexity or developer
 performance.
 
-When the reviewer reports approval:
+When the **reviewer messages you directly** with approval
+(see What Counts as Approval above):
 
 1. **Check for supersession** — verify the current plan is
    still valid before proceeding.
