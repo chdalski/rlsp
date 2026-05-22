@@ -222,6 +222,17 @@ changed files:
   producing inconsistent behaviour between development
   and production environments.
 - All tests pass and the build is clean.
+- The implementor's handoff cites both ends of each
+  operation the dispatch named (move, modify, delete,
+  add, refactor). A scope citation that names only the
+  destination of a move — "created `support.rs`" without
+  naming what was removed from `schema.rs` — is a copy,
+  not a move. Reject and ask for both-end citations. A
+  prior session created two extracted files without
+  modifying the parent or removing the originals; the
+  build was clean (orphan files were not mod-declared)
+  and tests passed (originals still in place), so the
+  misread was invisible from quality signals alone.
 - The implementor's handoff cites a clean linter result
   for every step in their Before Submitting for Review
   procedure (e.g., `cargo clippy: 0 warnings`). If the

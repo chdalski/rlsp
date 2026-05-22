@@ -319,7 +319,42 @@ entire pipeline.
 
 ## Before Submitting for Review
 
-Run the project's quality pipeline as four separate steps:
+Two pre-submission checks. The reviewer rejects handoffs
+missing either citation.
+
+### Scope Coverage
+
+For each operation the dispatch named — move, modify,
+delete, add, refactor — cite both ends of the operation
+in the handoff. Use the dispatch's own language, then
+state what you did at each end:
+
+> "Move `validate_schema` from `schema.rs` to `support.rs`:
+> added `support.rs:validate_schema()` (lines 12–47);
+> removed from `schema.rs:201–236`; updated 3 callers in
+> `loader.rs`, `runner.rs`, `cli.rs` to import from the
+> new location."
+
+A citation that names only the destination ("created
+`support.rs`") without naming what changed at the source
+is a copy, not the operation the dispatch requested. The
+reviewer rejects scope citations that read as
+one-directional when the dispatch named a move, refactor,
+or replacement.
+
+**Why:** a production session had the developer create
+two extracted files for a "move these items" task without
+modifying the parent file or removing the originals. The
+build stayed clean (orphan files were not mod-declared)
+and tests passed (originals still in place), so the
+misread was invisible from quality signals alone. Citing
+both ends of each operation makes the gap detectable at
+the handoff boundary instead of after manual lead
+detection.
+
+### Quality Pipeline
+
+Run as four separate steps:
 
 1. **Clean build.**
 2. **Format** unconditionally — run the formatter, do not
@@ -330,15 +365,50 @@ Run the project's quality pipeline as four separate steps:
    failures.
 4. **Tests** — all must pass. No ignored or skipped tests.
 
-**Cite each step's command and outcome in the handoff to
-the reviewer** (e.g., `cargo clippy: 0 warnings`). The
-reviewer rejects handoffs that do not cite each step. The
-linter step is the most-frequently skipped: a prior
-session shipped seven warnings to `main` because the
-developer ran build and tests but never ran the linter,
-and the handoff was vague enough that the reviewer did
-not catch the omission either — explicit citation makes
-the omission visible.
+Cite each step's command and outcome in the handoff (e.g.,
+`cargo clippy: 0 warnings`). The linter step is the
+most-frequently skipped: a prior session shipped seven
+warnings to `main` because the developer ran build and
+tests but never ran the linter, and the handoff was vague
+enough that the reviewer did not catch the omission
+either — explicit citation makes the omission visible.
+
+## Closing the Turn
+
+Every turn must end in one of three deliberate states.
+Going idle without producing one of these signals strands
+the pipeline — the requester cannot tell whether you are
+still working, paused, or done.
+
+1. **Handoff submitted** — `SendMessage` to the review
+   agent with the full submission format from "After
+   Implementation" step 4.
+
+2. **Consult in flight** — `SendMessage` to a named
+   advisor requesting input or sign-off; you are waiting
+   for their response.
+
+3. **Blocker reported** — `SendMessage` to the requester
+   describing what is missing, what you tried, and what
+   input you need. Be specific per `claim-verification.md`
+   — name the file, function, and scope rather than a
+   category label.
+
+**WIP commits do not close the turn.** A WIP commit
+protects work from loss; the requester cannot read your
+working tree. Until you produce one of the three signals
+above, no one knows the turn has ended.
+
+**Why:** a production session had the developer create
+two new files for an extraction task but never modify the
+parent file or notify the reviewer. The developer
+interpreted "move these items" as a one-directional copy,
+the build stayed clean (orphan files were not mod-declared,
+so they were not compiled), tests still passed (the
+originals were still doing the work), and the developer
+went idle without sending any message. The lead detected
+the stall manually. Even when scope is misread, a
+deliberate terminal signal must precede idle.
 
 ## What You Do Not Do
 
