@@ -164,7 +164,7 @@ unchanged.
 ## Steps
 
 - [x] Extract `context` and `support`
-- [ ] Extract `type_validation`
+- [x] Extract `type_validation`
 - [ ] Extract `composition`
 - [ ] Extract `array_constraints`
 - [ ] Extract `scalar_constraints`
@@ -233,7 +233,7 @@ Commit: `89b9d40` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
 
 ### Task 2: Extract `type_validation`
 
-- [ ] `src/schema_validation/type_validation.rs` exists
+- [x] `src/schema_validation/type_validation.rs` exists
       and contains:
   - `pub(super) fn effective_yaml_type`
   - `pub(super) fn validate_type`
@@ -244,15 +244,17 @@ Commit: `89b9d40` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
   - a `#[cfg(test)] mod tests` block holding the
     type-mismatch tests (lines 1823–1879 of the original
     `mod tests` block, ~9 tests)
-- [ ] `src/schema_validation.rs` declares `mod
+- [x] `src/schema_validation.rs` declares `mod
       type_validation;` and routes its existing calls
       through the submodule (e.g., `validate_node` now
       calls `type_validation::validate_type`)
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `40a0faa` (amended; see `git log --follow rlsp-yaml/src/schema_validation/type_validation.rs`)
 
 ### Task 3: Extract `composition`
 
