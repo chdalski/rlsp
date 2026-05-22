@@ -167,7 +167,7 @@ unchanged.
 - [x] Extract `type_validation`
 - [x] Extract `composition`
 - [x] Extract `array_constraints`
-- [ ] Extract `scalar_constraints`
+- [x] Extract `scalar_constraints`
 - [ ] Extract `mapping_constraints`
 - [ ] Verify `schema_validation.rs` is dispatcher-only and
       every external caller continues to compile unchanged
@@ -303,7 +303,7 @@ Commit: `9b41cdb` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
 
 ### Task 5: Extract `scalar_constraints`
 
-- [ ] `src/schema_validation/scalar_constraints.rs` exists
+- [x] `src/schema_validation/scalar_constraints.rs` exists
       and contains:
   - `pub(super) fn validate_scalar_constraints`
   - `pub(super) fn validate_string_constraints`
@@ -319,14 +319,16 @@ Commit: `9b41cdb` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
     numeric-constraints tests (lines 2951–3159, ~8), and
     const-validation tests (lines 3159–3184, ~2) — all
     from the original `mod tests` block
-- [ ] `src/schema_validation.rs` declares `mod
+- [x] `src/schema_validation.rs` declares `mod
       scalar_constraints;` and routes its existing calls
       through the submodule
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `7500f74` (amended; see `git log --follow rlsp-yaml/src/schema_validation/scalar_constraints.rs`)
 
 ### Task 6: Extract `mapping_constraints`
 
