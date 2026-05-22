@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed
 **Created:** 2026-05-20
 
 # Split `src/schema_validation.rs` into per-constraint submodules
