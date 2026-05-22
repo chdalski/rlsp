@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-20
 
 # Split `src/schema_validation.rs` into per-constraint submodules
@@ -163,7 +163,7 @@ unchanged.
 
 ## Steps
 
-- [ ] Extract `context` and `support`
+- [x] Extract `context` and `support`
 - [ ] Extract `type_validation`
 - [ ] Extract `composition`
 - [ ] Extract `array_constraints`
@@ -183,11 +183,11 @@ type-matching utilities, diagnostic builders, and the
 test fixtures shared by every constraint-family test
 block.
 
-- [ ] `src/schema_validation/context.rs` exists and
+- [x] `src/schema_validation/context.rs` exists and
       contains:
   - `pub(super) struct Ctx<'a>` and `impl Ctx<'_>` (with
     `pub(super)` constructor)
-- [ ] `src/schema_validation/support.rs` exists and
+- [x] `src/schema_validation/support.rs` exists and
       contains:
   - `pub(super) const MAX_PATTERN_LEN`,
     `REGEX_SIZE_LIMIT`, `MAX_VALIDATION_DEPTH`,
@@ -217,17 +217,19 @@ block.
   - a `#[cfg(test)] mod tests` block holding the
     cache-poison-handling unit test (lines 2723–2749 of
     the original `mod tests` block)
-- [ ] `src/schema_validation.rs` declares `mod context;`
+- [x] `src/schema_validation.rs` declares `mod context;`
       and `mod support;`
-- [ ] `src/schema_validation.rs` no longer defines the
+- [x] `src/schema_validation.rs` no longer defines the
       moved constants, statics, structs, functions, or
       unit tests
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-task baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `89b9d40` (amended; see `git log --follow rlsp-yaml/src/schema_validation/context.rs`)
 
 ### Task 2: Extract `type_validation`
 

@@ -2,6 +2,8 @@
 
 use regex::RegexBuilder;
 
+use super::support::{MAX_PATTERN_LEN, REGEX_SIZE_LIMIT};
+
 /// RFC 3339 full date-time: `YYYY-MM-DDTHH:MM:SS[.frac](Z|+HH:MM|-HH:MM)`.
 pub(super) fn is_valid_date_time(s: &str) -> bool {
     // Split on 'T' or 't'
@@ -361,11 +363,11 @@ pub(super) fn is_valid_uuid(s: &str) -> bool {
 
 /// Validate a JSON Schema `regex` value by trying to compile it with the `regex` crate.
 pub(super) fn is_valid_regex(s: &str) -> bool {
-    if s.len() > super::MAX_PATTERN_LEN {
+    if s.len() > MAX_PATTERN_LEN {
         return false;
     }
     RegexBuilder::new(s)
-        .size_limit(super::REGEX_SIZE_LIMIT)
+        .size_limit(REGEX_SIZE_LIMIT)
         .build()
         .is_ok()
 }
