@@ -168,7 +168,7 @@ unchanged.
 - [x] Extract `composition`
 - [x] Extract `array_constraints`
 - [x] Extract `scalar_constraints`
-- [ ] Extract `mapping_constraints`
+- [x] Extract `mapping_constraints`
 - [ ] Verify `schema_validation.rs` is dispatcher-only and
       every external caller continues to compile unchanged
 
@@ -332,7 +332,7 @@ Commit: `7500f74` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
 
 ### Task 6: Extract `mapping_constraints`
 
-- [ ] `src/schema_validation/mapping_constraints.rs`
+- [x] `src/schema_validation/mapping_constraints.rs`
       exists and contains:
   - `pub(super) fn validate_mapping`
   - `pub(super) fn validate_mapping_constraints`
@@ -345,14 +345,16 @@ Commit: `7500f74` (amended; see `git log --follow rlsp-yaml/src/schema_validatio
     enum-validation tests (lines 1913–1958, ~7), and
     additional-properties tests (lines 1971–2033, ~6) —
     all from the original `mod tests` block
-- [ ] `src/schema_validation.rs` declares `mod
+- [x] `src/schema_validation.rs` declares `mod
       mapping_constraints;` and routes its existing calls
       through the submodule
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Commit: `e53e32d` (amended; see `git log --follow rlsp-yaml/src/schema_validation/mapping_constraints.rs`)
 
 ### Task 7: Verify dispatcher-only `schema_validation.rs`
 
