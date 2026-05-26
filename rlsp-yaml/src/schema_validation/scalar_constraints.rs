@@ -465,7 +465,6 @@ mod tests {
     // Scalar constraints — pattern
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 68
     #[test]
     fn should_produce_no_diagnostics_when_string_matches_pattern() {
         let schema = object_schema_with_props(vec![(
@@ -481,7 +480,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 69
     #[test]
     fn should_produce_error_when_string_does_not_match_pattern() {
         let schema = object_schema_with_props(vec![(
@@ -499,7 +497,6 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 114
     #[test]
     fn should_still_match_valid_string_against_pattern_after_hardening() {
         // Regression: hardening must not break valid pattern matching
@@ -697,7 +694,7 @@ mod tests {
         assert_eq!(code_of(&result[0]), expected_code);
     }
 
-    // Test 81: exclusive=false at boundary → no error (unique schema combination)
+    // exclusive=false at boundary → no error (unique schema combination)
     #[test]
     fn should_produce_no_diagnostics_when_value_equals_minimum_and_not_exclusive_draft04() {
         let schema = object_schema_with_props(vec![(
@@ -775,7 +772,6 @@ mod tests {
     // Scalar constraints — multipleOf
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 87
     #[test]
     fn should_produce_no_diagnostics_when_value_is_multiple_of() {
         let schema = object_schema_with_props(vec![(
@@ -791,7 +787,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 88
     #[test]
     fn should_produce_error_when_value_is_not_multiple_of() {
         let schema = object_schema_with_props(vec![(
@@ -835,7 +830,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 90: const mismatch → schemaConst ERROR (standalone)
+    // const mismatch → schemaConst ERROR (standalone)
     #[test]
     fn should_produce_error_when_value_does_not_equal_const() {
         let schema = object_schema_with_props(vec![(
@@ -852,7 +847,6 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 92
     #[test]
     fn should_skip_const_check_for_mapping_node() {
         let schema = object_schema_with_props(vec![(
@@ -881,7 +875,7 @@ mod tests {
         }
     }
 
-    // T2.1 — plain string scalar applies string constraints
+    // plain string scalar applies string constraints
     #[test]
     fn tag_driven_string_scalar_applies_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
@@ -893,7 +887,7 @@ mod tests {
         );
     }
 
-    // T2.2 — plain null scalar skips string constraints
+    // plain null scalar skips string constraints
     #[test]
     fn tag_driven_null_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
@@ -905,7 +899,7 @@ mod tests {
         );
     }
 
-    // T2.3 — plain bool scalar skips string constraints
+    // plain bool scalar skips string constraints
     #[test]
     fn tag_driven_bool_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
@@ -917,7 +911,7 @@ mod tests {
         );
     }
 
-    // T2.4 — plain integer scalar skips string constraints
+    // plain integer scalar skips string constraints
     #[test]
     fn tag_driven_integer_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
@@ -929,7 +923,7 @@ mod tests {
         );
     }
 
-    // T2.5 — double-quoted scalar applies string constraints
+    // double-quoted scalar applies string constraints
     #[test]
     fn tag_driven_quoted_scalar_applies_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
@@ -952,7 +946,7 @@ mod tests {
         }
     }
 
-    // T3.1 — null-tagged scalar converts to JSON null
+    // null-tagged scalar converts to JSON null
     #[test]
     fn tag_driven_null_tagged_scalar_matches_const_null() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
@@ -961,7 +955,7 @@ mod tests {
         assert!(result.is_empty(), "null scalar must match const: null");
     }
 
-    // T3.2 — bool-tagged scalar converts to correct JSON bool (true)
+    // bool-tagged scalar converts to correct JSON bool (true)
     #[test]
     fn tag_driven_true_bool_matches_const_true() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
@@ -970,7 +964,7 @@ mod tests {
         assert!(result.is_empty(), "true scalar must match const: true");
     }
 
-    // T3.3 — bool-tagged scalar (false) does not match const: true
+    // bool-tagged scalar (false) does not match const: true
     #[test]
     fn tag_driven_false_bool_does_not_match_const_true() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
@@ -982,7 +976,7 @@ mod tests {
         );
     }
 
-    // T3.4 — integer-tagged scalar converts to JSON number
+    // integer-tagged scalar converts to JSON number
     #[test]
     fn tag_driven_integer_scalar_matches_const_number() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(42)))]);
@@ -991,7 +985,7 @@ mod tests {
         assert!(result.is_empty(), "integer 42 must match const: 42");
     }
 
-    // T3.5 — quoted scalar whose content looks like null is a JSON string, not null
+    // quoted scalar whose content looks like null is a JSON string, not null
     #[test]
     fn tag_driven_quoted_null_looking_scalar_is_string_not_null() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
@@ -1003,7 +997,7 @@ mod tests {
         );
     }
 
-    // T3.6 — quoted scalar whose content looks like bool is a JSON string
+    // quoted scalar whose content looks like bool is a JSON string
     #[test]
     fn tag_driven_quoted_bool_looking_scalar_is_string_not_bool() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
@@ -1058,13 +1052,13 @@ mod tests {
         assert_eq!(run_content(value, Some(encoding), None).len(), 1);
     }
 
-    // Test 195 — contentEncoding unknown: silently ignored
+    // contentEncoding unknown: silently ignored
     #[test]
     fn content_encoding_unknown_ignored() {
         assert!(run_content("anything", Some("base58"), None).is_empty());
     }
 
-    // Test 196 — contentMediaType application/json: valid (no encoding)
+    // contentMediaType application/json: valid (no encoding)
     // The value must be a YAML string (quoted) so it reaches validate_string_constraints.
     // Values starting with { or [ are YAML flow collections; use quoted YAML.
     #[test]
@@ -1075,7 +1069,7 @@ mod tests {
         assert!(validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty());
     }
 
-    // Test 197 — contentMediaType application/json: invalid (no encoding)
+    // contentMediaType application/json: invalid (no encoding)
     #[test]
     fn content_media_type_json_invalid_no_encoding() {
         assert_eq!(
@@ -1084,7 +1078,7 @@ mod tests {
         );
     }
 
-    // Test 198 — contentEncoding + contentMediaType: valid base64-encoded JSON
+    // contentEncoding + contentMediaType: valid base64-encoded JSON
     #[test]
     fn content_encoding_and_media_type_valid() {
         // base64("{"key":"value"}") = "eyJrZXkiOiJ2YWx1ZSJ9"
@@ -1098,7 +1092,7 @@ mod tests {
         );
     }
 
-    // Test 199 — contentEncoding + contentMediaType: encoding fails → only encoding diagnostic
+    // contentEncoding + contentMediaType: encoding fails → only encoding diagnostic
     #[test]
     fn content_encoding_fails_skips_media_type_check() {
         use tower_lsp::lsp_types::NumberOrString;
@@ -1111,7 +1105,7 @@ mod tests {
         assert!(diags[0].code == Some(NumberOrString::String("schemaContentEncoding".to_string())));
     }
 
-    // Test 200 — contentEncoding + contentMediaType: valid encoding but invalid JSON
+    // contentEncoding + contentMediaType: valid encoding but invalid JSON
     #[test]
     fn content_encoding_valid_media_type_invalid() {
         use tower_lsp::lsp_types::NumberOrString;
@@ -1123,13 +1117,13 @@ mod tests {
         );
     }
 
-    // Test 201 — contentMediaType unknown: silently ignored
+    // contentMediaType unknown: silently ignored
     #[test]
     fn content_media_type_unknown_ignored() {
         assert!(run_content("anything", None, Some("text/plain")).is_empty());
     }
 
-    // Test 202 — format_validation disabled: content checks also skipped
+    // format_validation disabled: content checks also skipped
     #[test]
     fn content_validation_disabled_when_format_validation_off() {
         let schema = content_schema_helper(Some("base64"), Some("application/json"));

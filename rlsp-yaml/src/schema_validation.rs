@@ -160,7 +160,6 @@ mod tests {
     // Nested validation
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 36
     #[test]
     fn should_validate_properties_recursively() {
         let server_schema = JsonSchema {
@@ -176,7 +175,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaType");
     }
 
-    // Test 39
     #[test]
     fn should_validate_deeply_nested_schema_five_levels() {
         // Build 5 levels: root → a → b → c → d → {type: string}
@@ -207,7 +205,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 40
     #[test]
     fn should_not_stack_overflow_on_deep_nesting() {
         // Build 25 levels of nested object schemas programmatically
@@ -233,7 +230,6 @@ mod tests {
     // Diagnostic format
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 41
     #[test]
     fn should_set_source_to_rlsp_yaml() {
         let schema = JsonSchema {
@@ -287,7 +283,6 @@ mod tests {
         );
     }
 
-    // Test 45
     #[test]
     fn should_set_correct_code_for_additional_property_violation() {
         let schema = JsonSchema {
@@ -337,7 +332,6 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 49
     #[test]
     fn should_set_warning_severity_for_additional_property_violation() {
         let schema = JsonSchema {
@@ -354,7 +348,6 @@ mod tests {
         assert_eq!(ap.severity, Some(DiagnosticSeverity::WARNING));
     }
 
-    // Test 50
     #[test]
     fn should_include_property_path_in_required_diagnostic_message() {
         let spec_schema = JsonSchema {
@@ -374,7 +367,6 @@ mod tests {
         );
     }
 
-    // Test 51
     #[test]
     fn should_include_valid_values_in_enum_diagnostic_message() {
         let schema = object_schema_with_props(vec![(
@@ -396,7 +388,6 @@ mod tests {
     // Edge cases
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 52
     #[test]
     fn should_return_empty_for_empty_yaml_document() {
         let schema = JsonSchema {
@@ -408,7 +399,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 53
     #[test]
     fn should_return_empty_when_docs_is_empty() {
         let schema = JsonSchema {
@@ -419,7 +409,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 54
     #[test]
     fn should_return_empty_for_schema_with_no_constraints() {
         let schema = JsonSchema::default();
@@ -428,7 +417,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 55
     #[test]
     fn should_return_empty_for_yaml_with_parse_errors() {
         let schema = JsonSchema {
@@ -440,7 +428,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 56
     #[test]
     fn should_validate_each_document_in_multi_document_yaml() {
         let schema = JsonSchema {
@@ -460,7 +447,6 @@ mod tests {
         );
     }
 
-    // Test 57
     #[test]
     fn should_produce_no_diagnostics_for_unknown_property_when_no_properties_in_schema() {
         let schema = JsonSchema {
@@ -476,7 +462,6 @@ mod tests {
     // Security: Recursion / Depth Guard
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 58
     #[test]
     fn should_complete_without_panic_for_deeply_nested_yaml_and_schema() {
         // Build 100 levels of nested object schemas
@@ -504,7 +489,6 @@ mod tests {
         let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
-    // Test 59
     #[test]
     fn should_not_recurse_past_depth_limit() {
         // Build 70 levels of nested properties with a string type leaf
@@ -537,7 +521,6 @@ mod tests {
     // Security: Composition Branch Limits
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 60
     #[test]
     fn should_complete_in_bounded_time_for_one_of_with_many_alternatives() {
         // 50 branches, each requiring a unique field not present in the YAML
@@ -556,7 +539,6 @@ mod tests {
         let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
     }
 
-    // Test 61
     #[test]
     fn should_complete_for_all_of_with_many_branches() {
         // 25 branches, each requiring a unique field
@@ -581,7 +563,6 @@ mod tests {
     // Security: Diagnostic Message Truncation
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 62
     #[test]
     fn should_truncate_long_description_in_diagnostic_message() {
         // The implementation does not embed property descriptions in violation
@@ -612,7 +593,6 @@ mod tests {
         }
     }
 
-    // Test 63
     #[test]
     fn should_truncate_long_enum_value_list_in_diagnostic_message() {
         // 50 enum values — the message must not list all 50 verbatim

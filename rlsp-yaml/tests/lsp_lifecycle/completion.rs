@@ -18,7 +18,6 @@ pub fn completion_request(id: i64, uri: &str, line: u32, character: u32) -> Requ
         .finish()
 }
 
-// Test 17 (SPIKE)
 #[tokio::test]
 async fn should_return_completion_items_for_valid_position() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -45,7 +44,6 @@ async fn should_return_completion_items_for_valid_position() {
     );
 }
 
-// Test 18
 #[tokio::test]
 async fn should_return_empty_completions_for_unknown_document() {
     let (mut service, socket) = LspService::new(Backend::new);

@@ -777,7 +777,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 4: !include inside quotes → no link (tag-based: parser won't tag a quoted string as !include)
+    // !include inside quotes → no link (tag-based: parser won't tag a quoted string as !include)
     #[test]
     fn should_skip_include_inside_double_quotes() {
         let text = "note: \"some text with !include in quotes\"\n";
@@ -792,7 +792,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 5: no !include → only URL links returned
+    // no !include → only URL links returned
     #[test]
     fn should_return_only_url_links_when_no_include_present() {
         let text = "url: https://example.com\n";
@@ -806,7 +806,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 6: relative path without base URI → no include link
+    // relative path without base URI → no include link
     #[test]
     fn should_skip_relative_include_when_no_base_uri() {
         let text = "config: !include foo.yaml\n";
@@ -820,7 +820,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 7: multiple !include tags on different lines
+    // multiple !include tags on different lines
     #[test]
     fn should_detect_multiple_includes_on_different_lines() {
         let text = "a: !include a.yaml\nb: !include b.yaml\nc: !include c.yaml\n";
@@ -846,7 +846,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 8: !include with no path → no link
+    // !include with no path → no link
     #[test]
     fn should_skip_include_with_no_path() {
         let text = "config: !include\n";
@@ -861,7 +861,7 @@ url3: https://another-valid.com
         );
     }
 
-    // Test 9: both URL and !include present — URL in comment produces no link; !include is detected
+    // both URL and !include present — URL in comment produces no link; !include is detected
     #[test]
     fn should_detect_include_but_not_comment_url_on_separate_lines() {
         let text = "# https://example.com\nconfig: !include foo.yaml\n";
@@ -880,7 +880,7 @@ url3: https://another-valid.com
         assert_eq!(include_count, 1, "should find one include link");
     }
 
-    // Test 10: !include on a separate mapping entry following a double-quoted value with apostrophe.
+    // !include on a separate mapping entry following a double-quoted value with apostrophe.
     // The old text-scanner tested that apostrophes inside double-quoted strings didn't confuse
     // quote-tracking. With tag-based detection, the parser handles quoting; this test verifies
     // the AST walk finds !include in the same mapping as a double-quoted scalar with apostrophes.

@@ -17,7 +17,6 @@ use super::navigation::document_symbol_request;
 
 // ---- Validator Integration Tests ----
 
-// Test 41 (SPIKE)
 #[tokio::test]
 async fn should_publish_combined_parser_and_validator_diagnostics() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -49,7 +48,6 @@ async fn should_publish_combined_parser_and_validator_diagnostics() {
     assert!(!diags.is_empty(), "should have validator diagnostics");
 }
 
-// Test 42
 #[tokio::test]
 async fn should_publish_validator_diagnostics_on_document_open() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -78,7 +76,6 @@ async fn should_publish_validator_diagnostics_on_document_open() {
     }));
 }
 
-// Test 43
 #[tokio::test]
 async fn should_publish_validator_diagnostics_on_document_change() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -115,7 +112,6 @@ async fn should_publish_validator_diagnostics_on_document_change() {
     );
 }
 
-// Test 44
 #[tokio::test]
 async fn should_clear_diagnostics_on_document_close_validators() {
     let (mut service, socket) = LspService::new(Backend::new);

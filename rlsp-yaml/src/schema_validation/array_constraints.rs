@@ -226,7 +226,6 @@ mod tests {
     };
     use super::super::validate_schema;
 
-    // Test 37
     #[test]
     fn should_validate_array_items_against_items_schema() {
         let schema = object_schema_with_props(vec![(
@@ -244,7 +243,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaType");
     }
 
-    // Test 38
     #[test]
     fn should_produce_no_diagnostics_for_valid_array_items() {
         let schema = object_schema_with_props(vec![(
@@ -345,7 +343,6 @@ mod tests {
         }
     }
 
-    // Test 135
     #[test]
     fn should_produce_no_diagnostics_when_array_has_one_matching_item_no_min_max() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
@@ -354,7 +351,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 136
     #[test]
     fn should_produce_diagnostic_when_no_items_match_contains_schema() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
@@ -364,7 +360,6 @@ mod tests {
         assert!(result[0].message.contains("at least 1"));
     }
 
-    // Test 137
     #[test]
     fn should_produce_diagnostic_when_min_contains_not_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
@@ -374,7 +369,6 @@ mod tests {
         assert!(result[0].message.contains("at least 2"));
     }
 
-    // Test 138
     #[test]
     fn should_produce_no_diagnostics_when_min_contains_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
@@ -383,7 +377,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 139
     #[test]
     fn should_produce_diagnostic_when_max_contains_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
@@ -393,7 +386,6 @@ mod tests {
         assert!(result[0].message.contains("at most 1"));
     }
 
-    // Test 140
     #[test]
     fn should_produce_no_diagnostics_when_max_contains_not_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
@@ -402,7 +394,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 141
     #[test]
     fn should_produce_no_diagnostics_when_min_contains_zero() {
         // minContains: 0 disables the "at least one" requirement
@@ -412,7 +403,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 142
     #[test]
     fn should_ignore_min_contains_and_max_contains_when_contains_absent() {
         // minContains/maxContains without contains are ignored per spec
@@ -439,7 +429,6 @@ mod tests {
         }
     }
 
-    // Test 143
     #[test]
     fn should_produce_diagnostic_when_second_item_fails_prefix_schema() {
         let schema = object_schema_with_props(vec![(
@@ -453,7 +442,6 @@ mod tests {
         assert!(result[0].message.contains("integer"));
     }
 
-    // Test 144
     #[test]
     fn should_produce_no_diagnostics_when_all_items_match_prefix_schemas() {
         let schema = object_schema_with_props(vec![(
@@ -465,7 +453,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 145
     #[test]
     fn should_validate_extra_items_against_items_schema_when_prefix_items_set() {
         let schema = object_schema_with_props(vec![(
@@ -478,7 +465,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 146
     #[test]
     fn should_produce_diagnostic_when_extra_item_fails_items_schema() {
         let schema = object_schema_with_props(vec![(
@@ -492,7 +478,6 @@ mod tests {
         assert!(result[0].message.contains("integer"));
     }
 
-    // Test 147
     #[test]
     fn should_produce_no_diagnostics_when_array_shorter_than_prefix_items() {
         let schema = object_schema_with_props(vec![(
@@ -508,7 +493,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 148 — Draft-04 array-form items parsed as prefixItems
+    // Draft-04 array-form items parsed as prefixItems
     #[test]
     fn should_parse_draft04_array_items_as_prefix_items() {
         let raw = json!({
@@ -534,7 +519,7 @@ mod tests {
         assert!(arr_schema.items.is_none());
     }
 
-    // Test 149 — prefixItems takes precedence over array-form items
+    // prefixItems takes precedence over array-form items
     #[test]
     fn should_prefer_prefix_items_over_draft04_array_items() {
         let raw = json!({
@@ -549,7 +534,7 @@ mod tests {
 
     // ── unevaluatedItems ─────────────────────────────────────────────────────
 
-    // Test 153 — unevaluatedItems with prefixItems — prefix items are evaluated (pass)
+    // unevaluatedItems with prefixItems — prefix items are evaluated (pass)
     #[test]
     fn should_produce_no_diagnostics_when_prefix_items_cover_all_items() {
         let schema = JsonSchema {
@@ -565,7 +550,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 154 — unevaluatedItems — item beyond prefix not evaluated (diagnostic)
+    // unevaluatedItems — item beyond prefix not evaluated (diagnostic)
     #[test]
     fn should_produce_diagnostic_for_unevaluated_item_beyond_prefix() {
         let schema = JsonSchema {
@@ -595,7 +580,6 @@ mod tests {
         }
     }
 
-    // Test 207
     #[test]
     fn should_produce_warning_for_extra_items_when_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
@@ -615,7 +599,6 @@ mod tests {
         );
     }
 
-    // Test 208
     #[test]
     fn should_produce_no_diagnostics_when_array_exactly_matches_prefix_length_with_additional_items_false()
      {
@@ -629,7 +612,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 209
     #[test]
     fn should_produce_no_diagnostics_for_items_within_prefix_with_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
@@ -642,7 +624,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 210
     #[test]
     fn should_produce_one_warning_per_extra_item_when_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
@@ -660,7 +641,6 @@ mod tests {
         );
     }
 
-    // Test 211
     #[test]
     fn should_validate_extra_items_against_additional_items_schema_when_valid() {
         let schema = tuple_schema_with_additional_items(
@@ -673,7 +653,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 212
     #[test]
     fn should_produce_type_diagnostic_when_extra_item_fails_additional_items_schema() {
         let schema = tuple_schema_with_additional_items(
@@ -687,7 +666,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaType");
     }
 
-    // Test 213
     #[test]
     fn should_produce_no_diagnostics_when_additional_items_false_and_prefix_items_set_from_prefix_items_key()
      {
@@ -704,7 +682,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 214
     #[test]
     fn should_produce_no_diagnostics_when_additional_items_absent_and_extra_items_present() {
         let schema = tuple_schema_with_additional_items(vec![string_schema()], None);

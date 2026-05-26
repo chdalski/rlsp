@@ -688,7 +688,7 @@ mod tests {
         );
     }
 
-    // Test 176 — format_validation disabled: no diagnostics emitted
+    // format_validation disabled: no diagnostics emitted
     // Uses validate_schema(..., false) directly — tests the feature flag, not a format value.
     #[test]
     fn format_validation_disabled_produces_no_format_diagnostics() {

@@ -325,7 +325,6 @@ mod tests {
     // Required properties
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 1
     #[test]
     fn should_produce_no_diagnostics_when_required_property_present() {
         let schema = JsonSchema {
@@ -338,7 +337,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 2
     #[test]
     fn should_produce_error_for_missing_required_property() {
         let schema = JsonSchema {
@@ -353,7 +351,6 @@ mod tests {
         assert!(result[0].message.contains("name"));
     }
 
-    // Test 3
     #[test]
     fn should_produce_one_diagnostic_per_missing_required_property() {
         let schema = JsonSchema {
@@ -370,7 +367,6 @@ mod tests {
         assert!(result.iter().all(|d| code_of(d) == "schemaRequired"));
     }
 
-    // Test 4
     #[test]
     fn should_produce_no_diagnostics_when_all_required_present() {
         let schema = JsonSchema {
@@ -382,7 +378,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 5
     #[test]
     fn should_produce_no_diagnostics_for_empty_required_array() {
         let schema = JsonSchema {
@@ -394,7 +389,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 6
     #[test]
     fn should_validate_required_in_nested_mapping() {
         let spec_schema = JsonSchema {
@@ -447,7 +441,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 20: enum value missing — message lists valid values (unique assertion shape)
+    // enum value missing — message lists valid values (unique assertion shape)
     #[test]
     fn should_produce_error_when_value_not_in_enum() {
         let schema = object_schema_with_props(vec![(
@@ -477,7 +471,7 @@ mod tests {
         );
     }
 
-    // Test 22: integer enum mismatch → schemaEnum error
+    // integer enum mismatch → schemaEnum error
     #[rstest]
     #[case::integer_value_not_in_enum(
         object_schema_with_props(vec![("level", JsonSchema {
@@ -497,7 +491,6 @@ mod tests {
     // additionalProperties
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 24
     #[test]
     fn should_produce_no_diagnostics_when_additional_properties_absent() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);
@@ -507,7 +500,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 25
     #[test]
     fn should_produce_warning_for_extra_key_when_additional_properties_false() {
         let schema = JsonSchema {
@@ -525,7 +517,6 @@ mod tests {
         assert!(result[0].message.contains("extra"));
     }
 
-    // Test 26
     #[test]
     fn should_produce_no_diagnostics_for_known_keys_when_additional_properties_false() {
         let schema = JsonSchema {
@@ -539,7 +530,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 27
     #[test]
     fn should_produce_one_warning_per_extra_key() {
         let schema = JsonSchema {
@@ -559,7 +549,6 @@ mod tests {
         );
     }
 
-    // Test 28
     #[test]
     fn should_validate_extra_properties_against_additional_properties_schema() {
         let schema = JsonSchema {
@@ -579,7 +568,6 @@ mod tests {
     // patternProperties
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 99
     #[test]
     fn should_validate_value_against_pattern_properties_schema() {
         let schema = JsonSchema {
@@ -595,7 +583,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaType");
     }
 
-    // Test 100
     #[test]
     fn should_produce_no_diagnostics_when_pattern_property_value_is_valid() {
         let schema = JsonSchema {
@@ -609,7 +596,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 101
     #[test]
     fn should_not_trigger_additional_properties_for_key_matched_by_pattern() {
         let schema = JsonSchema {
@@ -629,7 +615,6 @@ mod tests {
         );
     }
 
-    // Test 102
     #[test]
     fn should_trigger_additional_properties_for_key_not_matched_by_pattern() {
         let schema = JsonSchema {
@@ -646,7 +631,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperty");
     }
 
-    // Test 103
     #[test]
     fn should_prefer_properties_over_pattern_properties_for_known_key() {
         // "name" is in properties (integer), and also matches pattern (string).
@@ -665,7 +649,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 104
     #[test]
     fn should_match_key_against_multiple_patterns_and_validate_all() {
         // "x_num" matches both "^x_" (string) and ".*num.*" (integer).
@@ -689,7 +672,6 @@ mod tests {
         );
     }
 
-    // Test 105
     #[test]
     fn should_emit_warning_for_over_length_pattern_and_fall_through_to_additional_properties() {
         let long_pattern = "a".repeat(1025);
@@ -717,7 +699,6 @@ mod tests {
     // Regex security hardening (patternProperties)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 113
     #[test]
     fn should_emit_warning_when_pattern_limit_exceeded_in_pattern_properties() {
         let schema = JsonSchema {
@@ -733,7 +714,6 @@ mod tests {
             && d.severity == Some(DiagnosticSeverity::WARNING)));
     }
 
-    // Test 115
     #[test]
     fn should_still_match_valid_pattern_property_after_hardening() {
         // Regression: hardening must not break valid patternProperties matching
@@ -753,7 +733,6 @@ mod tests {
     // propertyNames
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 116
     #[test]
     fn should_produce_no_diagnostics_when_all_keys_match_property_names_pattern() {
         let schema = JsonSchema {
@@ -770,7 +749,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 117
     #[test]
     fn should_produce_diagnostic_when_key_violates_property_names_pattern() {
         let schema = JsonSchema {
@@ -790,7 +768,6 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 118
     #[test]
     fn should_produce_diagnostic_when_key_violates_property_names_min_length() {
         let schema = JsonSchema {
@@ -808,7 +785,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
 
-    // Test 119
     #[test]
     fn should_produce_diagnostic_when_key_not_in_property_names_enum() {
         let schema = JsonSchema {
@@ -826,7 +802,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaEnum");
     }
 
-    // Test 120
     #[test]
     fn should_apply_property_names_to_all_keys_regardless_of_properties() {
         // "name" is in properties, "extra" is not — propertyNames applies to both
@@ -846,7 +821,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 121
     #[test]
     fn should_produce_diagnostics_for_all_violating_keys_with_property_names() {
         let schema = JsonSchema {
@@ -873,7 +847,6 @@ mod tests {
     // dependentRequired / dependentSchemas
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 122
     #[test]
     fn should_produce_error_when_trigger_present_and_dependent_required_missing() {
         let schema = JsonSchema {
@@ -898,7 +871,6 @@ mod tests {
         assert!(result[0].message.contains("credit_card"));
     }
 
-    // Test 123
     #[test]
     fn should_produce_no_diagnostics_when_trigger_and_dependency_both_present() {
         let schema = JsonSchema {
@@ -918,7 +890,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 124
     #[test]
     fn should_produce_no_diagnostics_when_trigger_absent_in_dependent_required() {
         let schema = JsonSchema {
@@ -939,7 +910,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 125
     #[test]
     fn should_produce_diagnostic_when_trigger_present_and_dependent_schema_fails() {
         // When "name" is present, the mapping must also have "age" (required by dep schema)
@@ -959,7 +929,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaRequired");
     }
 
-    // Test 126
     #[test]
     fn should_produce_no_diagnostics_when_dependent_schema_passes() {
         let dep_schema = JsonSchema {
@@ -977,7 +946,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 127
     #[test]
     fn should_produce_no_diagnostics_when_dependent_schema_trigger_absent() {
         let dep_schema = JsonSchema {
@@ -1056,7 +1024,6 @@ mod tests {
     // Required properties — message format (Tests 66–67, 229–231)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 66
     #[test]
     fn should_include_expected_properties_in_required_diagnostic_message() {
         let schema = JsonSchema {
@@ -1089,7 +1056,6 @@ mod tests {
         );
     }
 
-    // Test 67
     #[test]
     fn should_truncate_expected_properties_list_when_more_than_max() {
         let schema = JsonSchema {
@@ -1118,7 +1084,6 @@ mod tests {
         );
     }
 
-    // Test 229
     #[test]
     fn required_property_message_uses_object_at_subject() {
         let schema = JsonSchema {
@@ -1143,7 +1108,6 @@ mod tests {
         );
     }
 
-    // Test 230
     #[test]
     fn required_property_message_uses_expected_label() {
         let schema = JsonSchema {
@@ -1164,7 +1128,6 @@ mod tests {
         );
     }
 
-    // Test 231
     #[test]
     fn required_property_message_includes_nested_path() {
         let spec_schema = JsonSchema {
@@ -1279,7 +1242,7 @@ mod tests {
 
     // ── unevaluatedProperties ────────────────────────────────────────────────
 
-    // Test 150 — unevaluatedProperties: false with allOf — properties from allOf evaluated (pass)
+    // unevaluatedProperties: false with allOf — properties from allOf evaluated (pass)
     #[test]
     fn should_produce_no_diagnostics_when_allof_evaluates_all_properties() {
         let schema = JsonSchema {
@@ -1295,7 +1258,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 151 — unevaluatedProperties: false — property not in any sub-schema (diagnostic)
+    // unevaluatedProperties: false — property not in any sub-schema (diagnostic)
     #[test]
     fn should_produce_diagnostic_for_unevaluated_property() {
         let schema = JsonSchema {
@@ -1313,7 +1276,7 @@ mod tests {
         assert!(result[0].message.contains("extra"));
     }
 
-    // Test 152 — unevaluatedProperties with sub-schema — unevaluated validated against it
+    // unevaluatedProperties with sub-schema — unevaluated validated against it
     #[test]
     fn should_validate_unevaluated_property_against_schema() {
         let schema = JsonSchema {
@@ -1332,7 +1295,7 @@ mod tests {
         assert!(result[0].message.contains("integer"));
     }
 
-    // Test 155 — unevaluatedProperties with if/then — then branch properties evaluated
+    // unevaluatedProperties with if/then — then branch properties evaluated
     #[test]
     fn should_evaluate_properties_from_then_branch() {
         let schema = JsonSchema {
@@ -1358,7 +1321,7 @@ mod tests {
         );
     }
 
-    // Test 156 — no unevaluated keywords — existing behavior unchanged (regression)
+    // no unevaluated keywords — existing behavior unchanged (regression)
     #[test]
     fn should_not_change_behavior_when_no_unevaluated_keywords() {
         let schema = object_schema_with_props(vec![("name", string_schema())]);

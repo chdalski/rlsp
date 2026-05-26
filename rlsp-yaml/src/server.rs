@@ -1632,7 +1632,6 @@ mod tests {
         );
     }
 
-    // Test 35
     #[test]
     fn should_advertise_rename_provider_with_prepare_support() {
         let caps = Backend::capabilities();

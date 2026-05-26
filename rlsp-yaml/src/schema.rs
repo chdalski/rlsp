@@ -1409,7 +1409,6 @@ mod tests {
     // parse_schema
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 19
     #[test]
     fn should_parse_minimal_object_schema() {
         let v = json!({"type": "object"});
@@ -1417,7 +1416,6 @@ mod tests {
         assert_eq!(schema_type_str(&s), Some("object"));
     }
 
-    // Test 20
     #[test]
     fn should_parse_schema_with_properties() {
         let v = json!({"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}});
@@ -1433,7 +1431,6 @@ mod tests {
         );
     }
 
-    // Test 21
     #[test]
     fn should_parse_required_fields() {
         let v = json!({"type": "object", "required": ["name", "age"]});
@@ -1443,7 +1440,6 @@ mod tests {
         assert!(req.contains(&"age".to_string()));
     }
 
-    // Test 22
     #[test]
     fn should_parse_enum_values() {
         let v = json!({"type": "string", "enum": ["alpha", "beta", "gamma"]});
@@ -1455,7 +1451,6 @@ mod tests {
         assert!(enums.contains(&json!("gamma")));
     }
 
-    // Test 23
     #[test]
     fn should_parse_description() {
         let v = json!({"type": "string", "description": "A human-readable name"});
@@ -1463,7 +1458,6 @@ mod tests {
         assert_eq!(s.description.as_deref(), Some("A human-readable name"));
     }
 
-    // Test 24
     #[test]
     fn should_parse_default_value() {
         let v = json!({"type": "integer", "default": 42});
@@ -1471,7 +1465,6 @@ mod tests {
         assert_eq!(s.default, Some(json!(42)));
     }
 
-    // Test 25
     #[test]
     fn should_parse_array_schema_with_items() {
         let v = json!({"type": "array", "items": {"type": "string"}});
@@ -1480,7 +1473,6 @@ mod tests {
         assert_eq!(schema_type_str(items), Some("string"));
     }
 
-    // Test 26
     #[test]
     fn should_parse_additional_properties_false() {
         let v = json!({"type": "object", "additionalProperties": false});
@@ -1491,7 +1483,6 @@ mod tests {
         ));
     }
 
-    // Test 27
     #[test]
     fn should_parse_additional_properties_as_schema() {
         let v = json!({"type": "object", "additionalProperties": {"type": "string"}});
@@ -1502,7 +1493,6 @@ mod tests {
         ));
     }
 
-    // Test 27b
     #[test]
     fn should_parse_min_properties_and_max_properties() {
         let v = json!({"type": "object", "minProperties": 1, "maxProperties": 5});
@@ -1550,7 +1540,6 @@ mod tests {
         assert!(s.additional_items.is_none());
     }
 
-    // Test 28
     #[test]
     fn should_parse_all_of() {
         let v = json!({"allOf": [{"type": "object"}, {"required": ["name"]}]});
@@ -1558,7 +1547,6 @@ mod tests {
         assert_eq!(s.all_of.as_ref().map(Vec::len), Some(2));
     }
 
-    // Test 29
     #[test]
     fn should_parse_any_of() {
         let v = json!({"anyOf": [{"type": "string"}, {"type": "integer"}]});
@@ -1566,7 +1554,6 @@ mod tests {
         assert_eq!(s.any_of.as_ref().map(Vec::len), Some(2));
     }
 
-    // Test 30
     #[test]
     fn should_parse_one_of() {
         let v = json!({"oneOf": [{"type": "string"}, {"type": "null"}]});
@@ -1574,19 +1561,16 @@ mod tests {
         assert_eq!(s.one_of.as_ref().map(Vec::len), Some(2));
     }
 
-    // Test 31
     #[test]
     fn should_return_none_for_null_input() {
         assert!(parse_schema(&Value::Null).is_none());
     }
 
-    // Test 32
     #[test]
     fn should_return_none_for_non_object_json() {
         assert!(parse_schema(&Value::String("not a schema".into())).is_none());
     }
 
-    // Test 33
     #[test]
     fn should_parse_empty_object_as_permissive_schema() {
         let v = json!({});
@@ -1596,20 +1580,19 @@ mod tests {
         assert!(s.required.is_none());
     }
 
-    // Test 34 — boolean true → permissive schema
+    // boolean true → permissive schema
     #[test]
     fn should_parse_boolean_true_schema() {
         let s = parse_schema(&Value::Bool(true)).expect("should return Some for true");
         assert!(s.schema_type.is_none());
     }
 
-    // Test 35 — boolean false → None
+    // boolean false → None
     #[test]
     fn should_parse_boolean_false_schema() {
         assert!(parse_schema(&Value::Bool(false)).is_none());
     }
 
-    // Test 36
     #[test]
     fn should_parse_draft04_definitions() {
         let v = json!({"definitions": {"addr": {"type": "string"}}});
@@ -1618,7 +1601,6 @@ mod tests {
         assert!(defs.contains_key("addr"));
     }
 
-    // Test 37
     #[test]
     fn should_parse_draft07_defs() {
         let v = json!({"$defs": {"addr": {"type": "string"}}});
@@ -1627,7 +1609,7 @@ mod tests {
         assert!(defs.contains_key("addr"));
     }
 
-    // Test 38 — deprecated: true parses to Some(true)
+    // deprecated: true parses to Some(true)
     #[test]
     fn should_parse_deprecated_true() {
         let v = json!({"type": "string", "deprecated": true});
@@ -1639,7 +1621,6 @@ mod tests {
     // $ref resolution
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 39
     #[test]
     fn should_resolve_simple_local_ref() {
         let v = json!({
@@ -1650,7 +1631,6 @@ mod tests {
         assert_eq!(schema_type_str(&s), Some("string"));
     }
 
-    // Test 40
     #[test]
     fn should_return_none_for_missing_ref_target() {
         let v = json!({"$ref": "#/definitions/Missing"});
@@ -1658,7 +1638,6 @@ mod tests {
         let _ = parse_schema(&v);
     }
 
-    // Test 40
     #[test]
     fn should_handle_nested_ref_resolution() {
         let v = json!({
@@ -1674,7 +1653,7 @@ mod tests {
         assert_eq!(schema_type_str(foo), Some("integer"));
     }
 
-    // Test 41 — circular ref must terminate
+    // circular ref must terminate
     #[test]
     fn should_not_infinite_loop_on_circular_ref() {
         let v = json!({
@@ -1691,14 +1670,12 @@ mod tests {
     // SchemaCache
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 42
     #[test]
     fn should_return_none_on_cache_miss() {
         let cache = SchemaCache::new();
         assert!(cache.get("https://example.com/schema.json").is_none());
     }
 
-    // Test 43
     #[test]
     fn should_return_cached_schema_on_cache_hit() {
         let mut cache = SchemaCache::new();
@@ -1718,7 +1695,7 @@ mod tests {
         assert_eq!(result.description.as_deref(), Some("test"));
     }
 
-    // Test 44 — first write wins
+    // first write wins
     #[test]
     fn should_not_overwrite_existing_cache_entry() {
         let mut cache = SchemaCache::new();
@@ -1752,7 +1729,7 @@ mod tests {
     // Integration / fetch harness spike (Test 45)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 45 — harness spike: 127.0.0.1 is blocked by SSRF guard before any
+    // harness spike: 127.0.0.1 is blocked by SSRF guard before any
     // network call is made.
     #[test]
     fn should_return_error_for_unreachable_url() {
@@ -1760,7 +1737,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Test 46 — fetch happy path (parse pipeline without network).
+    // fetch happy path (parse pipeline without network).
     // Constructs a minimal JSON Schema string, runs it through the same
     // parse pipeline that `fetch_schema` uses after reading the response body:
     // `serde_json::from_slice` → `check_json_depth` → `parse_schema`.
@@ -1809,7 +1786,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Test 52 — URL exceeding max length rejected (uses runtime format!, cannot be rstest literal)
+    // URL exceeding max length rejected (uses runtime format!, cannot be rstest literal)
     #[test]
     fn should_reject_url_exceeding_max_length_52() {
         let long_url = format!("https://example.com/{}", "a".repeat(2048));
@@ -1887,7 +1864,7 @@ mod tests {
         );
     }
 
-    // Test 55 — response of exactly MAX_SCHEMA_BYTES bytes is accepted.
+    // response of exactly MAX_SCHEMA_BYTES bytes is accepted.
     // The `.take(MAX_SCHEMA_BYTES + 1)` + `> MAX_SCHEMA_BYTES` logic allows
     // responses up to and including MAX_SCHEMA_BYTES.
     #[test]
@@ -1901,7 +1878,7 @@ mod tests {
         );
     }
 
-    // Test 55b — response larger than MAX_SCHEMA_BYTES triggers ResponseTooLarge.
+    // response larger than MAX_SCHEMA_BYTES triggers ResponseTooLarge.
     #[test]
     fn should_return_error_when_response_exceeds_size_limit_over() {
         // Build a body of MAX_SCHEMA_BYTES + 1 bytes (over the cap).
@@ -1919,7 +1896,7 @@ mod tests {
         );
     }
 
-    // Test 56 — schema with 60-level nesting is rejected or truncated (does not hang)
+    // schema with 60-level nesting is rejected or truncated (does not hang)
     #[test]
     fn should_reject_schema_exceeding_nesting_depth() {
         let mut v = json!({"type": "string"});
@@ -1930,7 +1907,7 @@ mod tests {
         let _ = parse_schema(&v);
     }
 
-    // Test 57 — schema with 10-level nesting is accepted
+    // schema with 10-level nesting is accepted
     #[test]
     fn should_accept_schema_within_nesting_depth() {
         let mut v = json!({"type": "string"});
@@ -1944,7 +1921,7 @@ mod tests {
         );
     }
 
-    // Test 58 — two-node circular $ref does not hang
+    // two-node circular $ref does not hang
     #[test]
     fn should_not_hang_on_two_node_circular_ref() {
         let v = json!({
@@ -1958,7 +1935,7 @@ mod tests {
         let _ = parse_schema(&v);
     }
 
-    // Test 59 — trailing-slash path variants produce distinct cache keys.
+    // trailing-slash path variants produce distinct cache keys.
     // `url::Url` treats `/schema` and `/schema/` as different paths; both are
     // preserved after normalization. This test explicitly documents that
     // behavior so any future change is immediately detectable.
@@ -1976,7 +1953,7 @@ mod tests {
         );
     }
 
-    // Test 60 — cache key host case normalization (explicit cache test)
+    // cache key host case normalization (explicit cache test)
     #[test]
     fn should_normalize_cache_key_host_case() {
         let key_upper = validate_and_normalize_url("https://EXAMPLE.COM/schema").expect("valid");
@@ -1987,7 +1964,7 @@ mod tests {
         );
     }
 
-    // Test 61 — redirect must not be followed (max_redirects(0) enforcement).
+    // redirect must not be followed (max_redirects(0) enforcement).
     //
     // With max_redirects(0), ureq returns the 3xx response as-is rather than
     // following it. The test asserts that the status code is 302 — proving the

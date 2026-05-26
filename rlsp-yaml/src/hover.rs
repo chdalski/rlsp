@@ -453,7 +453,6 @@ mod tests {
         );
     }
 
-    // Test 2
     #[test]
     fn should_return_hover_for_simple_value() {
         let text = "name: Alice\n";
@@ -483,7 +482,6 @@ mod tests {
         assert!(result.is_none(), "expected None but got Some hover");
     }
 
-    // Test 7
     #[test]
     fn should_return_hover_for_sequence_item() {
         let text = "items:\n  - first\n  - second\n";
@@ -522,7 +520,6 @@ mod tests {
         );
     }
 
-    // Test 10
     #[test]
     fn should_return_hover_with_scalar_value() {
         let text = "port: 8080\n";
@@ -534,7 +531,6 @@ mod tests {
         assert!(content.contains("8080"), "should contain value '8080'");
     }
 
-    // Test 11
     #[test]
     fn should_format_hover_as_markdown() {
         let text = "key: value\n";
@@ -550,14 +546,13 @@ mod tests {
         }
     }
 
-    // Test 13 (adapted) — empty docs slice simulates failed parse
+    // empty docs slice simulates failed parse
     #[test]
     fn should_return_none_when_document_failed_to_parse() {
         let result = hover_at(&[], pos(0, 0), None);
         assert!(result.is_none());
     }
 
-    // Test 14
     #[test]
     fn should_return_hover_in_multi_document_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
@@ -572,7 +567,6 @@ mod tests {
         );
     }
 
-    // Test 17
     #[test]
     fn should_return_hover_for_boolean_value() {
         let text = "enabled: true\n";
@@ -588,7 +582,6 @@ mod tests {
         assert!(content.contains("true"), "should contain value 'true'");
     }
 
-    // Test 18
     #[test]
     fn should_return_hover_for_null_value() {
         let text = "empty: ~\n";
@@ -607,7 +600,7 @@ mod tests {
     // Group B — Schema info at key position (Tests 19–24)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 19 — schema with description appended below structural hover
+    // schema with description appended below structural hover
     #[test]
     fn schema_description_appended_for_key_at_root() {
         let text = "name: Alice\n";
@@ -632,7 +625,7 @@ mod tests {
         );
     }
 
-    // Test 20 — schema type shown in hover
+    // schema type shown in hover
     #[test]
     fn schema_type_shown_for_key() {
         let text = "port: 8080\n";
@@ -659,7 +652,7 @@ mod tests {
         );
     }
 
-    // Test 21 — schema default shown in hover
+    // schema default shown in hover
     #[test]
     fn schema_default_shown_for_key() {
         let text = "timeout: 30\n";
@@ -687,7 +680,7 @@ mod tests {
         );
     }
 
-    // Test 22 — schema examples shown in hover (up to 3)
+    // schema examples shown in hover (up to 3)
     #[test]
     fn schema_examples_shown_for_key() {
         let text = "name: Alice\n";
@@ -719,7 +712,7 @@ mod tests {
         assert!(content.contains("Bob"), "should show second example");
     }
 
-    // Test 23 — no schema info when key not in schema properties
+    // no schema info when key not in schema properties
     #[test]
     fn no_schema_info_for_unknown_key() {
         let text = "unknown: value\n";
@@ -749,7 +742,7 @@ mod tests {
         );
     }
 
-    // Test 24 — schema info for nested key resolves through properties
+    // schema info for nested key resolves through properties
     #[test]
     fn schema_description_for_nested_key() {
         let text = "server:\n  port: 8080\n";
@@ -793,7 +786,7 @@ mod tests {
     // Group C — Schema info at value position (Tests 25–26)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 25 — hovering on value shows schema description for the parent key
+    // hovering on value shows schema description for the parent key
     #[test]
     fn schema_description_shown_for_value_position() {
         let text = "name: Alice\n";
@@ -817,7 +810,7 @@ mod tests {
         );
     }
 
-    // Test 26 — hovering on value shows schema type for the parent key
+    // hovering on value shows schema type for the parent key
     #[test]
     fn schema_type_shown_for_value_position() {
         let text = "port: 8080\n";
@@ -848,7 +841,7 @@ mod tests {
     // Group D — Formatting and truncation (Tests 27–31)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 27 — existing structural hover section present before schema section
+    // existing structural hover section present before schema section
     #[test]
     fn schema_info_appended_below_structural_hover() {
         let text = "name: Alice\n";
@@ -876,7 +869,7 @@ mod tests {
         );
     }
 
-    // Test 28 — long description is truncated to ≤200 chars + ellipsis
+    // long description is truncated to ≤200 chars + ellipsis
     #[test]
     fn long_description_truncated() {
         let text = "name: Alice\n";
@@ -914,7 +907,7 @@ mod tests {
         );
     }
 
-    // Test 29/30/46 (consolidated) — long example value truncated to ≤100 chars (char-based)
+    // long example value truncated to ≤100 chars (char-based)
     #[rstest]
     #[case::ascii_200("a".repeat(200), 'a')]
     #[case::unicode_200("é".repeat(200), 'é')]
@@ -957,7 +950,7 @@ mod tests {
         );
     }
 
-    // Test 31 — at most 3 examples shown; "and N more" note for overflow
+    // at most 3 examples shown; "and N more" note for overflow
     #[test]
     fn should_show_at_most_3_examples_with_overflow_note() {
         let text = "key: v\n";
@@ -1012,7 +1005,7 @@ mod tests {
     // Group E — Nested paths through schema (Tests 32–33)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 32 — schema info for two-level nested key
+    // schema info for two-level nested key
     #[test]
     fn schema_info_for_two_level_nested_key() {
         let text = "database:\n  host: localhost\n";
@@ -1048,7 +1041,7 @@ mod tests {
         );
     }
 
-    // Test 33 — schema info not shown for key two levels deeper than schema has
+    // schema info not shown for key two levels deeper than schema has
     #[test]
     fn no_schema_info_for_deeper_than_schema_provides() {
         let text = "a:\n  b:\n    c: deep\n";
@@ -1077,7 +1070,7 @@ mod tests {
     // Group F — Composition schemas (allOf / anyOf) (Tests 34–35)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 34 — allOf branch: property description found in first matching branch
+    // allOf branch: property description found in first matching branch
     #[test]
     fn schema_info_from_all_of_branch() {
         let text = "name: Alice\n";
@@ -1104,7 +1097,7 @@ mod tests {
         );
     }
 
-    // Test 35 — anyOf branch: property description found in first matching branch
+    // anyOf branch: property description found in first matching branch
     #[test]
     fn schema_info_from_any_of_branch() {
         let text = "name: Alice\n";
@@ -1135,7 +1128,7 @@ mod tests {
     // Group G — Fallback behaviour (Tests 36–38)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 36 — None schema: structural hover works, no schema section appended
+    // None schema: structural hover works, no schema section appended
     #[test]
     fn no_schema_hover_unchanged() {
         let text = "port: 8080\n";
@@ -1154,7 +1147,7 @@ mod tests {
         );
     }
 
-    // Test 37 — Schema with no properties for cursor key: structural hover only
+    // Schema with no properties for cursor key: structural hover only
     #[test]
     fn schema_without_matching_property_shows_structural_only() {
         let text = "port: 8080\n";
@@ -1172,7 +1165,7 @@ mod tests {
         );
     }
 
-    // Test 38 (adapted) — Schema present but empty docs: returns None
+    // Schema present but empty docs: returns None
     #[test]
     fn schema_present_but_parse_fails_returns_none() {
         let schema = schema_with_description("some desc");
@@ -1185,7 +1178,7 @@ mod tests {
     // Group H — Edge cases (Tests 39–42)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 39 — empty description string: schema section not shown
+    // empty description string: schema section not shown
     #[test]
     fn empty_description_not_shown() {
         let text = "name: Alice\n";
@@ -1215,7 +1208,7 @@ mod tests {
         );
     }
 
-    // Test 40 — title shown when description absent
+    // title shown when description absent
     #[test]
     fn title_shown_when_description_absent() {
         let text = "name: Alice\n";
@@ -1243,7 +1236,7 @@ mod tests {
         );
     }
 
-    // Test 41 — null default value shown
+    // null default value shown
     #[test]
     fn null_default_shown() {
         let text = "name: Alice\n";
@@ -1274,7 +1267,7 @@ mod tests {
         );
     }
 
-    // Test 42 — title NOT shown when description present (description takes priority)
+    // title NOT shown when description present (description takes priority)
     #[test]
     fn description_takes_priority_over_title() {
         let text = "name: Alice\n";
@@ -1307,7 +1300,7 @@ mod tests {
         );
     }
 
-    // Test 42b — 10 examples: show first 3, note "and 7 more"
+    // 10 examples: show first 3, note "and 7 more"
     #[test]
     fn should_show_only_first_3_examples_when_10_provided() {
         let text = "key: v\n";
@@ -1355,7 +1348,7 @@ mod tests {
     // Security tests (Tests 43–47)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 43 — description truncation is char-based (not byte-based), cap is 200 chars
+    // description truncation is char-based (not byte-based), cap is 200 chars
     #[test]
     fn should_truncate_long_description_in_hover_at_200_chars() {
         let text = "name: Alice\n";
@@ -1389,7 +1382,7 @@ mod tests {
         );
     }
 
-    // Test 44 — backtick in schema default value rendered safely
+    // backtick in schema default value rendered safely
     #[test]
     fn should_escape_backtick_in_schema_default_value() {
         let text = "key: value\n";
@@ -1422,7 +1415,7 @@ mod tests {
         );
     }
 
-    // Test 47 — backtick in YAML value escaped in **Value:** code span
+    // backtick in YAML value escaped in **Value:** code span
     #[test]
     fn should_escape_backtick_in_yaml_value_display() {
         // YAML value contains a backtick — must be escaped so the code span doesn't break
@@ -1442,7 +1435,7 @@ mod tests {
         assert!(content.contains("bar"), "value 'bar' must appear in hover");
     }
 
-    // Test 48 — no schema section when schema has no info for the hovered key
+    // no schema section when schema has no info for the hovered key
     #[test]
     fn should_show_structural_only_when_schema_has_no_info_for_hovered_key() {
         let text = "name: Alice\n";
@@ -1473,7 +1466,7 @@ mod tests {
     // Group I — Previously uncovered paths (Tests 56–65, adapted)
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Test 57 — cursor on sequence item
+    // cursor on sequence item
     #[test]
     fn hover_returns_sequence_value_when_cursor_on_item() {
         let text = "items:\n  - first\n";
@@ -1488,7 +1481,7 @@ mod tests {
         );
     }
 
-    // Test 59 — plain scalar sequence item (no colon)
+    // plain scalar sequence item (no colon)
     #[test]
     fn hover_on_plain_scalar_line_returns_value_token() {
         let text = "- plainvalue\n";
@@ -1503,7 +1496,7 @@ mod tests {
         );
     }
 
-    // Test 60 (strengthened) — key with no value: parser produces null scalar, AST finds it
+    // key with no value: parser produces null scalar, AST finds it
     #[test]
     fn hover_on_sequence_item_key_with_no_value_returns_hover() {
         let text = "items:\n  - name:\n";
@@ -1519,7 +1512,7 @@ mod tests {
         );
     }
 
-    // Test 61 — mapping value token when cursor is on value side
+    // mapping value token when cursor is on value side
     #[test]
     fn hover_on_value_side_of_mapping_returns_value_token() {
         let text = "status: active\n";
@@ -1544,7 +1537,7 @@ mod tests {
         assert!(result.is_none(), "expected None but got Some hover");
     }
 
-    // Test 62 — key with empty name after colon strip: must not panic
+    // key with empty name after colon strip: must not panic
     #[test]
     fn hover_does_not_panic_for_line_starting_with_colon() {
         let text = ": orphan\n";
@@ -1584,7 +1577,7 @@ mod tests {
         }
     }
 
-    // Test 51 — object example renders as fenced ```json code block
+    // object example renders as fenced ```json code block
     #[test]
     fn object_example_renders_as_fenced_code_block() {
         let schema = schema_with_examples(vec![json!({"name": "Alice", "age": 30})]);
@@ -1605,7 +1598,7 @@ mod tests {
         );
     }
 
-    // Test 52 — array example renders as fenced ```json code block
+    // array example renders as fenced ```json code block
     #[test]
     fn array_example_renders_as_fenced_code_block() {
         let schema = schema_with_examples(vec![json!(["a", "b", "c"])]);
@@ -1621,7 +1614,7 @@ mod tests {
         );
     }
 
-    // Test 53 — simple value (string, number, bool) uses list-item format, no code block
+    // simple value (string, number, bool) uses list-item format, no code block
     #[test]
     fn simple_value_examples_use_list_item_format() {
         let schema = schema_with_examples(vec![json!("hello"), json!(42), json!(true)]);
@@ -1649,7 +1642,7 @@ mod tests {
         );
     }
 
-    // Test 54 — mixed examples: object gets code block, simple gets list item
+    // mixed examples: object gets code block, simple gets list item
     #[test]
     fn mixed_examples_dispatch_correctly_per_type() {
         let schema = schema_with_examples(vec![json!({"host": "localhost"}), json!("simple")]);
@@ -1669,7 +1662,7 @@ mod tests {
         );
     }
 
-    // Test 55 — long object exceeding MAX_EXAMPLE_LEN falls back to compact inline
+    // long object exceeding MAX_EXAMPLE_LEN falls back to compact inline
     #[test]
     fn long_object_example_falls_back_to_compact_inline() {
         // Build an object whose pretty-printed form exceeds 100 chars

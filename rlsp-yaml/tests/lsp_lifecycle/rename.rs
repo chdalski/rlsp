@@ -28,7 +28,6 @@ pub fn rename_request(id: i64, uri: &str, line: u32, character: u32, new_name: &
         .finish()
 }
 
-// Test 31 (SPIKE)
 #[tokio::test]
 async fn should_return_prepare_rename_range_for_anchor() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -53,7 +52,6 @@ async fn should_return_prepare_rename_range_for_anchor() {
     );
 }
 
-// Test 32
 #[tokio::test]
 async fn should_return_null_prepare_rename_when_not_on_anchor() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -74,7 +72,6 @@ async fn should_return_null_prepare_rename_when_not_on_anchor() {
     );
 }
 
-// Test 33
 #[tokio::test]
 async fn should_return_workspace_edit_on_rename() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -99,7 +96,6 @@ async fn should_return_workspace_edit_on_rename() {
     );
 }
 
-// Test 34
 #[tokio::test]
 async fn should_return_null_rename_for_invalid_new_name() {
     let (mut service, socket) = LspService::new(Backend::new);

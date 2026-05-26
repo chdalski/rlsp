@@ -136,7 +136,6 @@ mod tests {
     // Composition (allOf / anyOf / oneOf)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 29
     #[test]
     fn should_produce_no_diagnostics_when_all_of_all_pass() {
         let schema = JsonSchema {
@@ -157,7 +156,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 30
     #[test]
     fn should_produce_diagnostics_when_any_all_of_fails() {
         let schema = JsonSchema {
@@ -178,7 +176,6 @@ mod tests {
         assert!(!result.is_empty());
     }
 
-    // Test 31
     #[test]
     fn should_produce_no_diagnostics_when_any_of_one_passes() {
         let schema = JsonSchema {
@@ -199,7 +196,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 32
     #[test]
     fn should_produce_diagnostic_when_none_of_any_of_pass() {
         let schema = JsonSchema {
@@ -220,7 +216,6 @@ mod tests {
         assert!(!result.is_empty());
     }
 
-    // Test 33
     #[test]
     fn should_produce_no_diagnostics_when_exactly_one_of_passes() {
         let schema = JsonSchema {
@@ -241,7 +236,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 34
     #[test]
     fn should_produce_diagnostic_when_zero_of_one_of_pass() {
         let schema = JsonSchema {
@@ -262,7 +256,6 @@ mod tests {
         assert!(!result.is_empty());
     }
 
-    // Test 35
     #[test]
     fn should_produce_diagnostic_when_multiple_of_one_of_pass() {
         let schema = JsonSchema {
@@ -284,7 +277,6 @@ mod tests {
     // if / then / else
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 128
     #[test]
     fn should_apply_then_and_pass_when_if_matches_and_then_passes() {
         // if: type string → then: minLength 3
@@ -308,7 +300,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 129
     #[test]
     fn should_apply_then_and_fail_when_if_matches_and_then_fails() {
         let schema = object_schema_with_props(vec![(
@@ -332,7 +323,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
 
-    // Test 130
     #[test]
     fn should_apply_else_and_pass_when_if_does_not_match_and_else_passes() {
         let schema = object_schema_with_props(vec![(
@@ -355,7 +345,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 131
     #[test]
     fn should_apply_else_and_fail_when_if_does_not_match_and_else_fails() {
         let schema = object_schema_with_props(vec![(
@@ -379,7 +368,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
 
-    // Test 132
     #[test]
     fn should_produce_no_diagnostics_when_if_matches_but_no_then() {
         let schema = object_schema_with_props(vec![(
@@ -402,7 +390,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 133
     #[test]
     fn should_produce_no_diagnostics_when_if_does_not_match_and_no_else() {
         let schema = object_schema_with_props(vec![(
@@ -425,7 +412,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 134
     #[test]
     fn should_ignore_then_and_else_when_no_if() {
         let schema = object_schema_with_props(vec![(
@@ -452,7 +438,6 @@ mod tests {
     // not keyword
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 93
     #[test]
     fn should_produce_error_when_value_matches_not_schema() {
         let schema = object_schema_with_props(vec![(
@@ -472,7 +457,6 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 94
     #[test]
     fn should_produce_no_diagnostics_when_value_does_not_match_not_schema() {
         let schema = object_schema_with_props(vec![(
@@ -490,7 +474,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 95
     #[test]
     fn should_reject_string_when_not_type_string() {
         let schema = JsonSchema {
@@ -506,7 +489,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
 
-    // Test 96
     #[test]
     fn should_allow_integer_when_not_type_string() {
         let schema = JsonSchema {
@@ -521,7 +503,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // Test 97
     #[test]
     fn should_produce_error_when_value_matches_not_enum() {
         let schema = object_schema_with_props(vec![(
@@ -540,7 +521,6 @@ mod tests {
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
 
-    // Test 98
     #[test]
     fn should_produce_no_diagnostics_when_value_outside_not_enum() {
         let schema = object_schema_with_props(vec![(
@@ -562,7 +542,6 @@ mod tests {
     // Message consistency — anyOf branch count
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 223
     #[test]
     fn any_of_message_includes_branch_count() {
         let schema = JsonSchema {
@@ -596,7 +575,6 @@ mod tests {
         );
     }
 
-    // Test 224
     #[test]
     fn any_of_message_branch_count_capped_at_max_branch_count() {
         // 25 branches (> MAX_BRANCH_COUNT=20) — message should show 20
@@ -628,7 +606,6 @@ mod tests {
     // Message consistency — oneOf branch count
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 225
     #[test]
     fn one_of_zero_match_message_includes_branch_count() {
         let schema = JsonSchema {
@@ -662,7 +639,6 @@ mod tests {
         );
     }
 
-    // Test 226
     #[test]
     fn one_of_multi_match_message_includes_passing_count() {
         let schema = JsonSchema {
@@ -690,7 +666,6 @@ mod tests {
         );
     }
 
-    // Test 227
     #[test]
     fn one_of_multi_match_message_includes_total_count() {
         let schema = JsonSchema {
@@ -730,7 +705,6 @@ mod tests {
     // Message consistency — not schema wording
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 228
     #[test]
     fn not_schema_message_references_not_keyword() {
         let schema = object_schema_with_props(vec![(

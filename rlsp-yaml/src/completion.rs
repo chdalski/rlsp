@@ -1163,7 +1163,6 @@ mod tests {
         );
     }
 
-    // Test 2
     #[test]
     fn should_not_suggest_keys_already_present_in_mapping() {
         let text = "name: Alice\nage: 30\n";
@@ -1177,7 +1176,6 @@ mod tests {
         );
     }
 
-    // Test 6
     #[test]
     fn should_not_suggest_keys_already_in_current_sequence_item() {
         let text = "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n";
@@ -1191,7 +1189,6 @@ mod tests {
         );
     }
 
-    // Test 7
     #[test]
     fn should_suggest_values_seen_for_same_key_name() {
         let text = "items:\n  - env: production\n  - env: staging\n  - env: \n";
@@ -1215,7 +1212,6 @@ mod tests {
         );
     }
 
-    // Test 8
     #[test]
     fn should_not_suggest_duplicate_values() {
         let text = "items:\n  - env: production\n  - env: production\n  - env: \n";
@@ -1230,7 +1226,6 @@ mod tests {
         );
     }
 
-    // Test 10
     #[test]
     fn should_return_empty_when_ast_is_none() {
         let result = complete_at(&[], pos(0, 0), None);
@@ -1254,7 +1249,6 @@ mod tests {
         assert!(result.is_empty(), "should return empty, got: {result:?}");
     }
 
-    // Test 15
     #[test]
     fn should_return_empty_for_no_documents() {
         let empty: Vec<Document<Span>> = Vec::new();
@@ -1270,7 +1264,6 @@ mod tests {
     // Group B — Schema Key Completion at Key Positions
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 17
     #[test]
     fn should_suggest_schema_properties_at_top_level_key_position() {
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
@@ -1295,7 +1288,6 @@ mod tests {
         );
     }
 
-    // Test 18
     #[test]
     fn should_include_schema_detail_and_documentation_in_key_suggestion() {
         let schema = object_schema(vec![(
@@ -1334,7 +1326,6 @@ mod tests {
         );
     }
 
-    // Test 19
     #[test]
     fn should_suggest_all_schema_properties_when_mapping_is_empty() {
         let schema = object_schema(vec![
@@ -1355,7 +1346,6 @@ mod tests {
         );
     }
 
-    // Test 20
     #[test]
     fn should_not_suggest_schema_properties_already_in_document() {
         let schema = object_schema(vec![
@@ -1383,7 +1373,6 @@ mod tests {
         );
     }
 
-    // Test 21
     #[test]
     fn should_suggest_schema_properties_for_nested_key_position() {
         let schema = object_schema(vec![(
@@ -1406,7 +1395,6 @@ mod tests {
         );
     }
 
-    // Test 22
     #[test]
     fn should_merge_schema_and_structural_suggestions() {
         let schema = object_schema(vec![("kind", string_schema())]);
@@ -1426,7 +1414,6 @@ mod tests {
         );
     }
 
-    // Test 23
     #[test]
     fn should_deduplicate_when_schema_and_structure_both_suggest_same_key() {
         let schema = object_schema(vec![("env", string_schema())]);
@@ -1447,7 +1434,6 @@ mod tests {
     // Group C — Schema Enum Completion at Value Positions
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 24
     #[test]
     fn should_suggest_enum_values_at_value_position() {
         let schema = object_schema(vec![(
@@ -1483,7 +1469,6 @@ mod tests {
         );
     }
 
-    // Test 25
     #[test]
     fn should_include_schema_detail_in_enum_suggestion() {
         let schema = object_schema(vec![(
@@ -1508,7 +1493,6 @@ mod tests {
         );
     }
 
-    // Test 26
     #[test]
     fn should_not_duplicate_enum_value_already_used_in_same_key() {
         let schema = object_schema(vec![(
@@ -1527,7 +1511,6 @@ mod tests {
         assert!(prod_count <= 1, "'production' should appear at most once");
     }
 
-    // Test 27
     #[test]
     fn should_fall_back_to_structural_value_suggestions_when_no_schema_enum() {
         let schema = object_schema(vec![("env", string_schema())]);
@@ -1542,7 +1525,6 @@ mod tests {
         );
     }
 
-    // Test 28
     #[test]
     fn should_suggest_boolean_values_for_boolean_schema_type() {
         let schema = object_schema(vec![("enabled", boolean_schema())]);
@@ -1655,7 +1637,6 @@ mod tests {
     // Group F — Fallback Behavior
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 35
     #[test]
     fn should_fall_back_to_structural_completion_when_schema_is_none() {
         let text = "name: Alice\nage: 30\n";
@@ -1669,7 +1650,6 @@ mod tests {
         );
     }
 
-    // Test 36
     #[test]
     fn should_fall_back_to_structural_when_schema_has_no_properties() {
         let schema = JsonSchema::default();
@@ -1684,7 +1664,6 @@ mod tests {
         );
     }
 
-    // Test 37
     #[test]
     fn should_offer_schema_property_when_structural_has_no_siblings() {
         // Schema has "unrelated"; document only has "name" (no siblings for structural).
@@ -1706,7 +1685,6 @@ mod tests {
     // Group G — Edge Cases
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 38
     #[test]
     fn should_return_empty_for_schema_completion_on_empty_document() {
         let schema = object_schema(vec![("name", string_schema())]);
@@ -1715,7 +1693,6 @@ mod tests {
         assert!(result.is_empty(), "should return empty for empty document");
     }
 
-    // Test 39
     #[test]
     fn should_return_empty_for_schema_completion_on_comment_line() {
         let schema = object_schema(vec![("name", string_schema())]);
@@ -1726,7 +1703,6 @@ mod tests {
         assert!(result.is_empty(), "should return empty for comment line");
     }
 
-    // Test 40
     #[test]
     fn should_return_empty_for_schema_completion_on_document_separator() {
         let schema = object_schema(vec![("name", string_schema())]);
@@ -1740,7 +1716,6 @@ mod tests {
         );
     }
 
-    // Test 41
     #[test]
     fn should_handle_schema_property_with_no_type_gracefully() {
         let schema = object_schema(vec![("data", JsonSchema::default())]);
@@ -1760,7 +1735,6 @@ mod tests {
         }
     }
 
-    // Test 42
     #[test]
     fn should_handle_enum_completion_with_partial_value_at_cursor() {
         let schema = object_schema(vec![(
@@ -1787,7 +1761,7 @@ mod tests {
     // Security Tests (Tests 43–50)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 43 — description truncated at 200 Unicode chars
+    // description truncated at 200 Unicode chars
     #[test]
     fn should_truncate_description_at_200_chars_in_completion_documentation() {
         let long_desc = "x".repeat(500);
@@ -1817,7 +1791,7 @@ mod tests {
         }
     }
 
-    // Test 44 — item count cap at 100
+    // item count cap at 100
     #[test]
     fn should_cap_completion_items_at_100_when_schema_has_many_properties() {
         let properties: std::collections::HashMap<String, JsonSchema> = (0..150)
@@ -1839,7 +1813,7 @@ mod tests {
         );
     }
 
-    // Test 45 — allOf branch walking capped at MAX_BRANCH_COUNT (20)
+    // allOf branch walking capped at MAX_BRANCH_COUNT (20)
     #[test]
     fn should_cap_allof_branch_walking_at_max_branch_count() {
         // 30 branches — only MAX_BRANCH_COUNT (20) should be walked
@@ -1870,7 +1844,7 @@ mod tests {
         );
     }
 
-    // Test 46 — enum labels truncated at 50 chars
+    // enum labels truncated at 50 chars
     #[test]
     fn should_truncate_long_enum_labels_at_50_chars() {
         let long_val = "a".repeat(60);
@@ -1896,7 +1870,7 @@ mod tests {
         }
     }
 
-    // Test 47 — JSON boolean enum values produce YAML scalar labels "true"/"false"
+    // JSON boolean enum values produce YAML scalar labels "true"/"false"
     #[test]
     fn should_convert_json_boolean_enum_to_yaml_scalar_true_false() {
         let schema = object_schema(vec![(
@@ -1929,7 +1903,7 @@ mod tests {
         );
     }
 
-    // Test 48 — path depth exceeds schema depth: graceful bail, no panic
+    // path depth exceeds schema depth: graceful bail, no panic
     #[test]
     fn should_return_no_schema_context_when_yaml_path_exceeds_schema_depth() {
         // Schema is only 2 levels deep; YAML cursor is 5 levels deep.
@@ -1941,7 +1915,7 @@ mod tests {
         let _result = complete_at(&docs, pos(4, 8), Some(&schema));
     }
 
-    // Test 49 — already-present keys excluded from schema suggestions
+    // already-present keys excluded from schema suggestions
     #[test]
     fn should_exclude_already_present_keys_from_schema_suggestions() {
         let schema = object_schema(vec![
@@ -1995,7 +1969,7 @@ mod tests {
         );
     }
 
-    // Test 53 — collect_present_keys_at_indent must not see keys from other document
+    // collect_present_keys_at_indent must not see keys from other document
     #[test]
     fn should_not_suppress_schema_key_present_only_in_other_document() {
         // doc1 has "name: Alice"; doc2 has only "age: 30".
@@ -2014,7 +1988,7 @@ mod tests {
         );
     }
 
-    // Test 55 — is_in_sequence_item must not cross --- boundary
+    // is_in_sequence_item must not cross --- boundary
     #[test]
     fn should_not_detect_sequence_context_from_other_document() {
         // doc1 has a sequence item "- name: Alice"; doc2 has a plain mapping "host: local".
@@ -2035,7 +2009,7 @@ mod tests {
         );
     }
 
-    // Test 56 — cursor on first line (no separator before it)
+    // cursor on first line (no separator before it)
     #[test]
     fn should_handle_cursor_on_first_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\n";
@@ -2050,7 +2024,7 @@ mod tests {
         );
     }
 
-    // Test 57 — cursor on last line of file (no separator after it)
+    // cursor on last line of file (no separator after it)
     #[test]
     fn should_handle_cursor_on_last_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\ngamma: 3\n";
@@ -2069,7 +2043,7 @@ mod tests {
         );
     }
 
-    // Test 58 — consecutive separators (empty document between them)
+    // consecutive separators (empty document between them)
     #[test]
     fn should_handle_consecutive_document_separators() {
         let text = "alpha: 1\n---\n---\nbeta: 2\n";
@@ -2084,7 +2058,7 @@ mod tests {
         );
     }
 
-    // Test 59 — deprecated property gets DEPRECATED tag and tilde sort_text
+    // deprecated property gets DEPRECATED tag and tilde sort_text
     #[test]
     fn should_tag_deprecated_property_with_deprecated_tag_and_tilde_sort_text() {
         let schema = object_schema(vec![(
@@ -2116,7 +2090,7 @@ mod tests {
         );
     }
 
-    // Test 60 — non-deprecated property has no tags and no sort_text
+    // non-deprecated property has no tags and no sort_text
     #[test]
     fn should_not_tag_non_deprecated_property() {
         let schema = object_schema(vec![(
@@ -2144,7 +2118,7 @@ mod tests {
         );
     }
 
-    // Test 61 — only deprecated property is tagged when mixed schema
+    // only deprecated property is tagged when mixed schema
     #[test]
     fn should_only_tag_deprecated_property_in_mixed_schema() {
         let schema = object_schema(vec![
@@ -2200,7 +2174,7 @@ mod tests {
         }
     }
 
-    // Test 62 — 3 required props all missing → snippet item with all 3 tab-stops
+    // 3 required props all missing → snippet item with all 3 tab-stops
     #[test]
     fn should_offer_all_required_snippet_when_three_required_props_missing() {
         let schema = schema_with_required(
@@ -2277,7 +2251,7 @@ mod tests {
         assert!(!has_snippet, "should not offer '(all required)' snippet");
     }
 
-    // Test 65 — type-aware defaults: string → "", integer → 0, boolean → false
+    // type-aware defaults: string → "", integer → 0, boolean → false
     #[test]
     #[expect(
         clippy::literal_string_with_formatting_args,
@@ -2324,7 +2298,7 @@ mod tests {
         );
     }
 
-    // Test 66 — snippet item has InsertTextFormat::SNIPPET
+    // snippet item has InsertTextFormat::SNIPPET
     #[test]
     fn should_set_insert_text_format_to_snippet() {
         let schema = schema_with_required(
@@ -2347,7 +2321,7 @@ mod tests {
         );
     }
 
-    // Test 67 — snippet item sort_text is "!" (sorts to top)
+    // snippet item sort_text is "!" (sorts to top)
     #[test]
     fn should_set_snippet_sort_text_to_exclamation() {
         let schema = schema_with_required(

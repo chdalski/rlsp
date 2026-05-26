@@ -311,7 +311,6 @@ mod tests {
         symbols.iter().find(|s| s.name == name)
     }
 
-    // Test 1
     #[test]
     fn should_return_symbols_for_flat_mapping() {
         let text = "name: Alice\nage: 30\n";
@@ -325,7 +324,6 @@ mod tests {
         assert_eq!(age_sym.kind, SymbolKind::NUMBER);
     }
 
-    // Test 2
     #[test]
     fn should_return_symbol_with_object_kind_for_mapping() {
         let text = "server:\n  port: 8080\n";
@@ -343,7 +341,6 @@ mod tests {
         );
     }
 
-    // Test 3
     #[test]
     fn should_return_symbol_with_array_kind_for_sequence() {
         let text = "items:\n  - one\n  - two\n";
@@ -355,7 +352,6 @@ mod tests {
         assert_eq!(symbols[0].kind, SymbolKind::ARRAY);
     }
 
-    // Test 4
     #[test]
     fn should_return_nested_symbols() {
         let text = "server:\n  host: localhost\n  port: 8080\n";
@@ -371,7 +367,6 @@ mod tests {
         assert!(find_symbol(children, "port").is_some());
     }
 
-    // Test 5
     #[test]
     fn should_return_deeply_nested_symbols() {
         let text = "a:\n  b:\n    c: deep\n";
@@ -387,7 +382,6 @@ mod tests {
         assert!(find_symbol(c_children, "c").is_some(), "should have 'c'");
     }
 
-    // Test 6
     #[test]
     fn should_return_correct_symbol_kinds_for_scalar_types() {
         let text = "str_val: hello\nint_val: 42\nbool_val: true\nnull_val: ~\nfloat_val: 3.14\n";
@@ -417,7 +411,6 @@ mod tests {
         );
     }
 
-    // Test 7
     #[test]
     fn should_return_symbols_for_mixed_types() {
         let text = "name: Alice\naddress:\n  city: Wonderland\nhobbies:\n  - reading\n  - chess\n";
@@ -435,7 +428,6 @@ mod tests {
         assert_eq!(hobbies.kind, SymbolKind::ARRAY);
     }
 
-    // Test 8
     #[test]
     fn should_return_empty_for_empty_document() {
         let text = "";
@@ -445,7 +437,7 @@ mod tests {
         assert!(symbols.is_empty());
     }
 
-    // Test 9 — renamed from should_return_empty_when_ast_is_none
+    // renamed from should_return_empty_when_ast_is_none
     // There is no longer an "AST is None" state; the caller passes an empty slice.
     #[test]
     fn should_return_empty_for_empty_slice() {
@@ -453,7 +445,7 @@ mod tests {
         assert!(symbols.is_empty());
     }
 
-    // Test 10 — updated for wrapped multi-doc structure
+    // updated for wrapped multi-doc structure
     #[test]
     fn should_return_symbols_for_multi_document_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
@@ -475,7 +467,6 @@ mod tests {
         assert!(has_doc2, "should contain doc2key inside a wrapper");
     }
 
-    // Test 11
     #[test]
     fn should_set_ranges_on_symbols() {
         let text = "name: Alice\n";
@@ -488,7 +479,6 @@ mod tests {
         assert_eq!(sym.selection_range.start.line, 0);
     }
 
-    // Test 12
     #[test]
     fn should_set_selection_range_to_key_span() {
         let text = "name: Alice\n";
@@ -501,7 +491,6 @@ mod tests {
         assert_eq!(sym.selection_range.end.character, 4); // "name" is 4 chars
     }
 
-    // Test 13
     #[test]
     fn should_handle_sequence_of_mappings() {
         let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
@@ -533,7 +522,6 @@ mod tests {
         );
     }
 
-    // Test 14
     #[test]
     fn should_return_empty_for_comment_only_document() {
         let text = "# just a comment\n";
@@ -543,7 +531,6 @@ mod tests {
         assert!(symbols.is_empty());
     }
 
-    // Test 15
     #[test]
     fn should_handle_document_with_only_separator() {
         let text = "---\n";
@@ -555,7 +542,6 @@ mod tests {
     }
 
     // Tests 16-17 — split into standalone tests (assertion shapes differ)
-    // Test 16
     #[test]
     fn sequence_root_produces_symbols() {
         let text = "- one\n- two\n- three\n";
@@ -567,7 +553,6 @@ mod tests {
         );
     }
 
-    // Test 17
     #[test]
     fn scalar_root_produces_single_symbol() {
         let text = "just a scalar\n";
@@ -580,7 +565,7 @@ mod tests {
         );
     }
 
-    // Test 18 — bare dash items produce sequence children without panic
+    // bare dash items produce sequence children without panic
     #[test]
     fn should_produce_sequence_children_for_bare_dash_items() {
         let text = "items:\n  -\n  - two\n";
@@ -592,7 +577,7 @@ mod tests {
         assert!(items.is_some(), "should have 'items' symbol");
     }
 
-    // Test 19 — integer-keyed mappings do not panic
+    // integer-keyed mappings do not panic
     #[test]
     fn should_handle_integer_keyed_mapping() {
         let text = "1: one\n2: two\n";
@@ -600,7 +585,7 @@ mod tests {
         let _symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
     }
 
-    // Test 20 — updated for wrapped multi-doc structure
+    // updated for wrapped multi-doc structure
     #[test]
     fn should_return_symbols_from_both_docs_when_content_precedes_separator() {
         let text = "before: separator\n---\nafter: separator\n";
@@ -622,7 +607,7 @@ mod tests {
         assert!(has_after, "should have 'after' symbol inside a wrapper");
     }
 
-    // Test 21 — sequence item with Mapping value
+    // sequence item with Mapping value
     #[test]
     fn should_produce_symbols_for_sequence_of_mappings_with_multiple_keys() {
         let text = "list:\n  - a: 1\n    b: 2\n  - a: 3\n    b: 4\n";
@@ -640,7 +625,7 @@ mod tests {
         assert!(first_children.iter().any(|c| c.name == "b"));
     }
 
-    // Test 22 — value that spans multiple lines
+    // value that spans multiple lines
     #[test]
     fn should_extend_symbol_range_to_last_child_line() {
         let text = "root:\n  child1: a\n  child2: b\n  child3: c\n";
@@ -655,7 +640,7 @@ mod tests {
         );
     }
 
-    // Test 23 — empty documents slice
+    // empty documents slice
     #[test]
     fn should_return_empty_for_empty_documents_vec() {
         let symbols = document_symbols(&[]);
@@ -815,7 +800,7 @@ mod tests {
     // Group 4: node_symbol_kind — tag-URI-driven SymbolKind mapping
     // ══════════════════════════════════════════════════════════════════════════
 
-    // T4.1 — quoted integer-looking value gets STRING kind, not NUMBER
+    // quoted integer-looking value gets STRING kind, not NUMBER
     #[test]
     fn tag_driven_quoted_integer_gets_string_symbol_kind() {
         let text = "count: \"42\"\n";
@@ -829,7 +814,7 @@ mod tests {
         );
     }
 
-    // T4.2 — explicit !!null on a non-null-looking value gets NULL kind
+    // explicit !!null on a non-null-looking value gets NULL kind
     #[test]
     fn tag_driven_explicit_null_tag_gives_null_symbol_kind() {
         let text = "key: !!null foo\n";

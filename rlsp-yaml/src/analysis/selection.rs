@@ -489,7 +489,7 @@ mod tests {
 
     // ---- Tests for real-span traversal (containers have correct spans after loader fix) ----
 
-    /// Test 14 — nested mapping value selection produces correct line bounds.
+    /// nested mapping value selection produces correct line bounds.
     ///
     /// With real container spans, `node.loc` is used directly; no recursive
     /// `effective_start`/`effective_end` fallback is needed.
@@ -526,7 +526,7 @@ mod tests {
         );
     }
 
-    /// Test 15 — sequence item selection produces correct line bounds.
+    /// sequence item selection produces correct line bounds.
     ///
     /// Sequence items were the primary consumer of `effective_start`/`effective_end`
     /// for zero-span containers. With real spans, direct `node.loc` access suffices.
@@ -553,7 +553,7 @@ mod tests {
         );
     }
 
-    /// Test 17 — cursor on key of nested mapping expands correctly.
+    /// cursor on key of nested mapping expands correctly.
     ///
     /// `collect_ancestor_spans` key-detection logic must work after replacing
     /// `effective_end(value).unwrap_or(key_span.end)` with direct `node.loc.end`.
@@ -585,7 +585,7 @@ mod tests {
         );
     }
 
-    /// Test 18 — three-level nesting produces at least 4 levels in the selection chain.
+    /// three-level nesting produces at least 4 levels in the selection chain.
     #[test]
     fn deeply_nested_sequence_selection_chain_depth() {
         let text = "list:\n  - nested:\n      - leaf\n";
@@ -607,7 +607,7 @@ mod tests {
         );
     }
 
-    /// Test 19 — regression: top-level key:value selection has exact line 0 bounds.
+    /// regression: top-level key:value selection has exact line 0 bounds.
     #[test]
     fn regression_value_range_start_line_is_zero_for_top_level_key() {
         let text = "key: value\n";
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(parent.range.end.line, 0, "entry range end should be line 0");
     }
 
-    /// Test 20 — regression: nested mapping selection has correct grandparent line.
+    /// regression: nested mapping selection has correct grandparent line.
     ///
     /// With real container spans, the outer `server` mapping now has a proper span
     /// that covers both lines. The grandparent range should start at line 0.

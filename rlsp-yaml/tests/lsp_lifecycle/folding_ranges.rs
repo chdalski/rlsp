@@ -16,7 +16,6 @@ pub fn folding_range_request(id: i64, uri: &str) -> Request {
         .finish()
 }
 
-// Test 21 (SPIKE)
 #[tokio::test]
 async fn should_return_folding_ranges_for_nested_yaml() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -43,7 +42,6 @@ async fn should_return_folding_ranges_for_nested_yaml() {
     );
 }
 
-// Test 22
 #[tokio::test]
 async fn should_return_empty_folding_ranges_for_unknown_document() {
     let (mut service, socket) = LspService::new(Backend::new);

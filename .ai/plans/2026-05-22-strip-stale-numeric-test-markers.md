@@ -1,5 +1,6 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed
+**Completed:** 2026-05-26
 **Created:** 2026-05-22
 
 # Strip Stale Numeric Test Markers in `rlsp-yaml`
@@ -92,10 +93,10 @@ either say something useful or stop being there at all.
 
 ## Steps
 
-- [ ] Clarify scope and transformation rules with user
-- [ ] Write plan and run plan-reviewer cycle
-- [ ] Apply transformations to all 21 files
-- [ ] Verify cleanup is complete and tests pass
+- [x] Clarify scope and transformation rules with user
+- [x] Write plan and run plan-reviewer cycle
+- [x] Apply transformations to all 21 files
+- [x] Verify cleanup is complete and tests pass
 
 ## Tasks
 
@@ -107,24 +108,26 @@ commit, one task slice — the work is mechanical and
 splitting by file adds no review value (the same
 verification grep covers all files at once).
 
-- [ ] For every line in the inventory: apply the
+- [x] For every line in the inventory: apply the
       number-only rule (delete whole comment line) or the
       number+context rule (strip prefix, keep context) as
       appropriate to its shape. `///` doc-comment lines
       keep their `///` marker; `//` line comments keep
       their `//`.
-- [ ] Verify with
+- [x] Verify with
       `grep -rnE '//\s*(Test [0-9]+|T[0-9]+\.[0-9]+)' rlsp-yaml/src rlsp-yaml/tests`
       → must return zero matches. Cite the result in the
       review handoff.
-- [ ] `cargo build` succeeds without new warnings.
-- [ ] `cargo clippy --all-targets -- -D warnings` passes.
-- [ ] `cargo fmt --check` passes (the change is comments
+- [x] `cargo build` succeeds without new warnings.
+- [x] `cargo clippy --all-targets -- -D warnings` passes.
+- [x] `cargo fmt --check` passes (the change is comments
       only — `fmt` should not flag anything).
-- [ ] `cargo test` reports 6219 passing — matches the
+- [x] `cargo test` reports 6219 passing — matches the
       current baseline. Cite the count.
-- [ ] `git diff --stat` shows only the 21 inventory files
+- [x] `git diff --stat` shows only the 21 inventory files
       modified (no other source files touched).
+
+Commit: `af0f0a5` (amended; see `git log --follow rlsp-yaml/src/schema_validation/scalar_constraints.rs`)
 
 ## Non-Goals
 

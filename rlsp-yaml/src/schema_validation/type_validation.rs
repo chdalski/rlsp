@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    // Test 8: message names the expected type
+    // message names the expected type
     #[test]
     fn type_mismatch_message_names_expected_type() {
         let schema = object_schema_with_props(vec![("count", integer_schema())]);
@@ -291,7 +291,6 @@ mod tests {
     // Message consistency — type mismatch format
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Test 215
     #[test]
     fn type_mismatch_message_uses_value_at_path_subject() {
         let schema = object_schema_with_props(vec![("replicas", integer_schema())]);
@@ -318,7 +317,6 @@ mod tests {
         );
     }
 
-    // Test 216
     #[test]
     fn type_mismatch_message_includes_property_path() {
         let spec_schema = JsonSchema {
@@ -877,7 +875,7 @@ mod tests {
     // Group 1: yaml_type_name — tag-URI-driven classification
     // ══════════════════════════════════════════════════════════════════════════
 
-    // T1.1 — plain null tagged as null → "null"
+    // plain null tagged as null → "null"
     #[test]
     fn tag_driven_null_classified_as_null_type() {
         let schema = object_schema_with_props(vec![("value", string_schema())]);
@@ -891,7 +889,7 @@ mod tests {
         );
     }
 
-    // T1.2 — plain bool tagged as bool → "boolean"
+    // plain bool tagged as bool → "boolean"
     #[test]
     fn tag_driven_bool_classified_as_boolean_type() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);
@@ -905,7 +903,7 @@ mod tests {
         );
     }
 
-    // T1.3 — plain integer tagged as int → "integer"
+    // plain integer tagged as int → "integer"
     #[test]
     fn tag_driven_integer_classified_as_integer_type() {
         let schema = object_schema_with_props(vec![("value", string_schema())]);
@@ -919,7 +917,7 @@ mod tests {
         );
     }
 
-    // T1.4 — plain float tagged as float → "number"
+    // plain float tagged as float → "number"
     #[test]
     fn tag_driven_float_classified_as_number_type() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);
@@ -933,7 +931,7 @@ mod tests {
         );
     }
 
-    // T1.5 — plain string tagged as str → "string"
+    // plain string tagged as str → "string"
     #[test]
     fn tag_driven_string_classified_as_string_type() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);
@@ -947,7 +945,7 @@ mod tests {
         );
     }
 
-    // T1.6 — double-quoted scalar → always "string" regardless of content
+    // double-quoted scalar → always "string" regardless of content
     #[test]
     fn tag_driven_quoted_integer_looking_value_classified_as_string() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);
@@ -961,7 +959,7 @@ mod tests {
         );
     }
 
-    // T1.7 — explicit !!bool on an otherwise-string value → "boolean"
+    // explicit !!bool on an otherwise-string value → "boolean"
     #[test]
     fn tag_driven_explicit_bool_tag_overrides_value_content() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);
@@ -975,7 +973,7 @@ mod tests {
         );
     }
 
-    // T1.8 — explicit !!str on a value that looks like a number → "string"
+    // explicit !!str on a value that looks like a number → "string"
     #[test]
     fn tag_driven_explicit_str_tag_on_integer_looking_value() {
         let schema = object_schema_with_props(vec![("value", integer_schema())]);

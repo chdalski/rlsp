@@ -43,7 +43,6 @@ pub fn document_symbol_request(id: i64, uri: &str) -> Request {
         .finish()
 }
 
-// Test 25 (SPIKE)
 #[tokio::test]
 async fn should_return_definition_for_alias() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -73,7 +72,6 @@ async fn should_return_definition_for_alias() {
     );
 }
 
-// Test 26
 #[tokio::test]
 async fn should_return_null_definition_for_unknown_document() {
     let (mut service, socket) = LspService::new(Backend::new);
@@ -93,7 +91,6 @@ async fn should_return_null_definition_for_unknown_document() {
     );
 }
 
-// Test 27
 #[tokio::test]
 async fn should_return_references_for_anchor() {
     let (mut service, socket) = LspService::new(Backend::new);

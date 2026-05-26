@@ -153,7 +153,7 @@ mod tests {
     // Group 7: check_yaml_ordering — tag-based null key filtering
     // ══════════════════════════════════════════════════════════════════════════
 
-    // T7.1 — null key is excluded from ordering check with tag-based null detection
+    // null key is excluded from ordering check with tag-based null detection
     #[test]
     fn tag_driven_null_key_excluded_from_ordering_check() {
         // ~ is null; zebra and alpha are out of order — only 1 ordering diagnostic expected
@@ -170,7 +170,7 @@ mod tests {
         );
     }
 
-    // T7.2 — non-null plain scalar key is included in ordering check (baseline)
+    // non-null plain scalar key is included in ordering check (baseline)
     #[test]
     fn tag_driven_non_null_key_included_in_ordering_check() {
         let text = "banana: 2\napple: 1\n";

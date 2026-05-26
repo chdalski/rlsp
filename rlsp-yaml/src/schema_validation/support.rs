@@ -325,7 +325,6 @@ pub(super) mod test_fixtures {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    // Test 65
     #[test]
     fn should_continue_without_schema_validation_when_cache_lock_poisoned() {
         let lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
