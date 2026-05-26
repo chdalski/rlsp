@@ -13,6 +13,10 @@ use super::cursor_location::{node_span, scalar_key};
 use super::navigation::{
     collect_sequence_sibling_keys, collect_sibling_keys_ast, find_node_at_path, present_keys,
 };
+use super::schema_completions::{
+    collect_schema_properties_keys, resolve_schema_path, schema_has_properties,
+    schema_key_completions, schema_value_completions,
+};
 
 pub(super) fn complete_on_key<'a>(
     docs: &'a [Document<Span>],
@@ -37,10 +41,10 @@ pub(super) fn complete_on_key<'a>(
     };
     let structural = keys_to_items(structural_keys.into_iter().filter(|k| k != &key).collect());
     if let Some(s) = schema {
-        if let Some(resolved_schema) = super::resolve_schema_path(s, enclosing_path)
-            && super::schema_has_properties(resolved_schema)
+        if let Some(resolved_schema) = resolve_schema_path(s, enclosing_path)
+            && schema_has_properties(resolved_schema)
         {
-            let schema_properties = super::collect_schema_properties_keys(resolved_schema);
+            let schema_properties = collect_schema_properties_keys(resolved_schema);
             let schema_exclude: HashSet<String> = if schema_properties.contains(&key) {
                 let mut ex = present;
                 ex.insert(key);
@@ -48,7 +52,7 @@ pub(super) fn complete_on_key<'a>(
             } else {
                 HashSet::from([key])
             };
-            let schema_items = super::schema_key_completions(resolved_schema, &schema_exclude);
+            let schema_items = schema_key_completions(resolved_schema, &schema_exclude);
             let filtered_structural: Vec<CompletionItem> = structural
                 .into_iter()
                 .filter(|i| !schema_exclude.contains(i.label.as_str()))
@@ -69,8 +73,8 @@ pub(super) fn complete_on_value(
     if let Some(s) = schema {
         let mut value_path = enclosing_path;
         value_path.push(key.to_string());
-        if let Some(prop_schema) = super::resolve_schema_path(s, &value_path) {
-            let schema_items = super::schema_value_completions(prop_schema);
+        if let Some(prop_schema) = resolve_schema_path(s, &value_path) {
+            let schema_items = schema_value_completions(prop_schema);
             if !schema_items.is_empty() {
                 return schema_items;
             }
@@ -114,10 +118,10 @@ pub(super) fn complete_in_sequence_item<'a>(
     if let Some(s) = schema {
         let mut items_path = enclosing_path;
         items_path.push("[]".to_string());
-        if let Some(items_schema) = super::resolve_schema_path(s, &items_path)
-            && super::schema_has_properties(items_schema)
+        if let Some(items_schema) = resolve_schema_path(s, &items_path)
+            && schema_has_properties(items_schema)
         {
-            let schema_items = super::schema_key_completions(items_schema, &current_keys);
+            let schema_items = schema_key_completions(items_schema, &current_keys);
             let filtered_structural: Vec<CompletionItem> = structural
                 .into_iter()
                 .filter(|i| !current_keys.contains(i.label.as_str()))

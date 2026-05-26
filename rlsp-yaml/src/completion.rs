@@ -4,26 +4,24 @@ use std::collections::HashSet;
 
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Document;
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, InsertTextFormat,
-    MarkupContent, MarkupKind, Position,
-};
+use tower_lsp::lsp_types::{CompletionItem, Position};
 
-use crate::schema::{JsonSchema, SchemaType};
+use crate::schema::JsonSchema;
 
 mod completion_drivers;
 mod completion_items;
 mod cursor_location;
 mod formatting;
 mod navigation;
+mod schema_completions;
 mod support;
 
 use completion_drivers::{complete_in_sequence_item, complete_on_key, complete_on_value};
 use completion_items::keys_to_items;
 use cursor_location::{CursorLocation, locate_cursor};
-use formatting::{json_value_to_yaml_label, truncate_description, truncate_enum_label, type_label};
 use navigation::{collect_sequence_sibling_keys, collect_sibling_keys_ast, present_keys};
-use support::{MAX_BRANCH_COUNT, MAX_COMPLETION_ITEMS};
+use schema_completions::{resolve_schema_path, schema_has_properties, schema_key_completions};
+use support::MAX_COMPLETION_ITEMS;
 
 /// Compute completion items for the given cursor position within the AST.
 ///
@@ -102,253 +100,18 @@ pub fn complete_at(
     items
 }
 
-/// Walk the schema tree following `path`, returning the sub-schema at that
-/// path if it exists. Returns `None` when the path exceeds the schema depth.
-pub(super) fn resolve_schema_path<'a>(
-    schema: &'a JsonSchema,
-    path: &[String],
-) -> Option<&'a JsonSchema> {
-    let [key, rest @ ..] = path else {
-        return Some(schema);
-    };
-
-    // Array item descent.
-    if key == "[]" {
-        if let Some(items) = &schema.items {
-            return resolve_schema_path(items, rest);
-        }
-        return None;
-    }
-
-    // Direct property lookup.
-    if let Some(Some(prop_schema)) = schema.properties.as_ref().map(|p| p.get(key.as_str())) {
-        return resolve_schema_path(prop_schema, rest);
-    }
-
-    // Walk composition branches (capped).
-    [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-        .flat_map(|v| v.iter())
-        .take(MAX_BRANCH_COUNT)
-        .find_map(|branch| resolve_schema_path(branch, path))
-}
-
-/// Return true if the schema has any properties to suggest (direct or via composition).
-pub(super) fn schema_has_properties(schema: &JsonSchema) -> bool {
-    if schema.properties.as_ref().is_some_and(|p| !p.is_empty()) {
-        return true;
-    }
-    [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-        .any(|branch_list| branch_list.iter().any(schema_has_properties))
-}
-
-/// Produce key completion items from a resolved schema, excluding already-present keys.
-pub(super) fn schema_key_completions(
-    schema: &JsonSchema,
-    present: &HashSet<String>,
-) -> Vec<CompletionItem> {
-    let mut items: Vec<CompletionItem> = Vec::new();
-    collect_schema_properties(schema, present, &mut items, 0);
-
-    // If 2+ required properties are missing, offer a snippet that inserts them all at once.
-    if let Some(required) = &schema.required {
-        let missing: Vec<&String> = required
-            .iter()
-            .filter(|r| !present.contains(r.as_str()))
-            .collect();
-        if missing.len() >= 2 {
-            let snippet_body: String = missing
-                .iter()
-                .enumerate()
-                .map(|(idx, key)| {
-                    let n = idx + 1;
-                    let default = schema
-                        .properties
-                        .as_ref()
-                        .and_then(|props| props.get(*key))
-                        .map_or("", snippet_default);
-                    if default.is_empty() {
-                        format!("{key}: ${{{n}:}}")
-                    } else {
-                        format!("{key}: ${{{n}:{default}}}")
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            items.push(CompletionItem {
-                label: "(all required)".to_string(),
-                kind: Some(CompletionItemKind::SNIPPET),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                insert_text: Some(snippet_body),
-                sort_text: Some("!".to_string()),
-                detail: Some(format!("{} required properties", missing.len())),
-                ..CompletionItem::default()
-            });
-        }
-    }
-
-    items
-}
-
-/// Return the snippet placeholder default for a schema based on its type.
-fn snippet_default(schema: &JsonSchema) -> &'static str {
-    match schema.schema_type.as_ref() {
-        Some(SchemaType::Single(t)) => match t.as_str() {
-            "string" => "\"\"",
-            "integer" | "number" => "0",
-            "boolean" => "false",
-            "object" => "{}",
-            "array" => "[]",
-            _ => "",
-        },
-        _ => "",
-    }
-}
-
-/// Recursively collect property names from a schema and its composition branches.
-fn collect_schema_properties(
-    schema: &JsonSchema,
-    present: &HashSet<String>,
-    items: &mut Vec<CompletionItem>,
-    depth: usize,
-) {
-    if depth >= MAX_BRANCH_COUNT {
-        return;
-    }
-
-    if let Some(props) = &schema.properties {
-        for (key, prop_schema) in props {
-            if present.contains(key.as_str()) {
-                continue;
-            }
-            if items.len() >= MAX_COMPLETION_ITEMS {
-                return;
-            }
-            let detail = type_label(prop_schema);
-            let documentation = prop_schema.description.as_deref().map(|d| {
-                Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: truncate_description(d),
-                })
-            });
-            let (tags, sort_text) = if prop_schema.deprecated == Some(true) {
-                (
-                    Some(vec![CompletionItemTag::DEPRECATED]),
-                    Some(format!("~{key}")),
-                )
-            } else {
-                (None, None)
-            };
-            items.push(CompletionItem {
-                label: key.clone(),
-                kind: Some(CompletionItemKind::FIELD),
-                detail,
-                documentation,
-                tags,
-                sort_text,
-                ..CompletionItem::default()
-            });
-        }
-    }
-
-    // Walk composition branches, capped.
-    let branch_lists = [&schema.all_of, &schema.any_of, &schema.one_of];
-    let mut branch_count = 0;
-    for branch_list in branch_lists.into_iter().flatten() {
-        for branch in branch_list {
-            if branch_count >= MAX_BRANCH_COUNT {
-                return;
-            }
-            collect_schema_properties(branch, present, items, depth + 1);
-            branch_count += 1;
-        }
-    }
-}
-
-/// Return the set of all property names defined in a schema (direct + composition branches).
-pub(super) fn collect_schema_properties_keys(schema: &JsonSchema) -> HashSet<String> {
-    let mut keys = HashSet::new();
-    collect_schema_properties_keys_inner(schema, &mut keys, 0);
-    keys
-}
-
-fn collect_schema_properties_keys_inner(
-    schema: &JsonSchema,
-    keys: &mut HashSet<String>,
-    depth: usize,
-) {
-    if depth >= MAX_BRANCH_COUNT {
-        return;
-    }
-    if let Some(props) = &schema.properties {
-        for key in props.keys() {
-            keys.insert(key.clone());
-        }
-    }
-    for branch_list in [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-    {
-        for branch in branch_list {
-            collect_schema_properties_keys_inner(branch, keys, depth + 1);
-        }
-    }
-}
-
-/// Produce value completion items from a schema (enum values or boolean type).
-pub(super) fn schema_value_completions(schema: &JsonSchema) -> Vec<CompletionItem> {
-    // Enum values take priority.
-    if let Some(enum_vals) = &schema.enum_values {
-        let detail = type_label(schema);
-        return enum_vals
-            .iter()
-            .filter_map(|v| {
-                let label = json_value_to_yaml_label(v)?;
-                let label = truncate_enum_label(&label);
-                Some(CompletionItem {
-                    label,
-                    kind: Some(CompletionItemKind::VALUE),
-                    detail: detail.clone(),
-                    ..CompletionItem::default()
-                })
-            })
-            .collect();
-    }
-
-    // Boolean type → suggest "true" and "false".
-    if matches!(&schema.schema_type, Some(SchemaType::Single(t)) if t == "boolean") {
-        return vec![
-            CompletionItem {
-                label: "true".to_string(),
-                kind: Some(CompletionItemKind::VALUE),
-                ..CompletionItem::default()
-            },
-            CompletionItem {
-                label: "false".to_string(),
-                kind: Some(CompletionItemKind::VALUE),
-                ..CompletionItem::default()
-            },
-        ];
-    }
-
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+    use serde_json::json;
+    use tower_lsp::lsp_types::CompletionItemKind;
 
     use super::support::test_fixtures::{
-        boolean_schema, integer_schema, labels, object_schema, pos, string_schema,
+        integer_schema, labels, object_schema, pos, string_schema,
     };
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
-    use serde_json::json;
-    use tower_lsp::lsp_types::Documentation;
 
     // ══════════════════════════════════════════════════════════════════════════
     // Backward-Compatibility Tests (Tests 1–15): None schema
@@ -382,7 +145,7 @@ mod tests {
     )]
     fn sibling_key_suggests_and_excludes(
         #[case] text: &str,
-        #[case] cursor: Position,
+        #[case] cursor: tower_lsp::lsp_types::Position,
         #[case] expected: &[&str],
         #[case] absent: &[&str],
     ) {
@@ -409,9 +172,9 @@ mod tests {
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"name"),
+            !ls.contains(&"name"),
             "should not suggest 'name' which is at the cursor line"
         );
     }
@@ -422,9 +185,9 @@ mod tests {
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 4), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"name"),
+            !ls.contains(&"name"),
             "should not suggest 'name' already present in current sequence item"
         );
     }
@@ -435,14 +198,14 @@ mod tests {
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 10), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"production"),
-            "should suggest value 'production', got: {labels:?}"
+            ls.contains(&"production"),
+            "should suggest value 'production', got: {ls:?}"
         );
         assert!(
-            labels.contains(&"staging"),
-            "should suggest value 'staging', got: {labels:?}"
+            ls.contains(&"staging"),
+            "should suggest value 'staging', got: {ls:?}"
         );
         assert!(
             result
@@ -458,11 +221,11 @@ mod tests {
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(3, 10), None);
 
-        let labels = labels(&result);
-        let production_count = labels.iter().filter(|&&l| l == "production").count();
+        let ls = labels(&result);
+        let production_count = ls.iter().filter(|&&l| l == "production").count();
         assert_eq!(
             production_count, 1,
-            "should deduplicate: 'production' should appear only once, got: {labels:?}"
+            "should deduplicate: 'production' should appear only once, got: {ls:?}"
         );
     }
 
@@ -483,7 +246,10 @@ mod tests {
     #[case::document_separator("key1: v1\n---\nkey2: v2\n", pos(1, 0))]
     #[case::position_beyond_lines("key: value\n", pos(10, 0))]
     #[case::position_beyond_line_length("key: value\n", pos(0, 100))]
-    fn returns_empty_for_structural_no_schema(#[case] text: &str, #[case] cursor: Position) {
+    fn returns_empty_for_structural_no_schema(
+        #[case] text: &str,
+        #[case] cursor: tower_lsp::lsp_types::Position,
+    ) {
         let docs = parse_docs(text);
         let result = complete_at(&docs, cursor, None);
         assert!(result.is_empty(), "should return empty, got: {result:?}");
@@ -491,6 +257,8 @@ mod tests {
 
     #[test]
     fn should_return_empty_for_no_documents() {
+        use rlsp_yaml_parser::Span;
+        use rlsp_yaml_parser::node::Document;
         let empty: Vec<Document<Span>> = Vec::new();
         let result = complete_at(&empty, pos(0, 0), None);
 
@@ -501,380 +269,7 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Group B — Schema Key Completion at Key Positions
-    // ══════════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn should_suggest_schema_properties_at_top_level_key_position() {
-        let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
-        let text = "name: Alice\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"age"),
-            "should suggest schema property 'age', got: {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"name"),
-            "should not suggest 'name' which is already present"
-        );
-        assert!(
-            result
-                .iter()
-                .any(|i| i.kind == Some(CompletionItemKind::FIELD)),
-            "schema key completions should have FIELD kind"
-        );
-    }
-
-    #[test]
-    fn should_include_schema_detail_and_documentation_in_key_suggestion() {
-        let schema = object_schema(vec![(
-            "name",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                description: Some("The user's name".to_string()),
-                ..JsonSchema::default()
-            },
-        )]);
-        // Use a real document with a different key so schema suggests "name".
-        let text = "age: 30\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result.iter().find(|i| i.label == "name");
-        assert!(
-            item.is_some(),
-            "should suggest 'name', got: {:?}",
-            labels(&result)
-        );
-        let item = item.unwrap();
-        assert_eq!(
-            item.detail.as_deref(),
-            Some("string"),
-            "detail should be the type 'string'"
-        );
-        let has_description = match &item.documentation {
-            Some(Documentation::String(s)) => s.contains("The user's name"),
-            Some(Documentation::MarkupContent(m)) => m.value.contains("The user's name"),
-            None => false,
-        };
-        assert!(
-            has_description,
-            "documentation should contain 'The user's name'"
-        );
-    }
-
-    #[test]
-    fn should_suggest_all_schema_properties_when_mapping_is_empty() {
-        let schema = object_schema(vec![
-            ("host", JsonSchema::default()),
-            ("port", JsonSchema::default()),
-            ("timeout", JsonSchema::default()),
-        ]);
-        let text = "host: localhost\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(labels.contains(&"port"), "should suggest 'port'");
-        assert!(labels.contains(&"timeout"), "should suggest 'timeout'");
-        assert!(
-            !labels.contains(&"host"),
-            "should not suggest 'host' (already present)"
-        );
-    }
-
-    #[test]
-    fn should_not_suggest_schema_properties_already_in_document() {
-        let schema = object_schema(vec![
-            ("a", JsonSchema::default()),
-            ("b", JsonSchema::default()),
-            ("c", JsonSchema::default()),
-        ]);
-        let text = "a: 1\nb: 2\nc: \n";
-        let docs = parse_docs(text);
-        // cursor on line 2 ("c:"), key position
-        let result = complete_at(&docs, pos(2, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            !labels.contains(&"a"),
-            "should not suggest 'a' (already present)"
-        );
-        assert!(
-            !labels.contains(&"b"),
-            "should not suggest 'b' (already present)"
-        );
-        assert!(
-            !labels.contains(&"c"),
-            "should not suggest 'c' (current line)"
-        );
-    }
-
-    #[test]
-    fn should_suggest_schema_properties_for_nested_key_position() {
-        let schema = object_schema(vec![(
-            "server",
-            object_schema(vec![("host", string_schema()), ("port", integer_schema())]),
-        )]);
-        let text = "server:\n  host: localhost\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 2), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(labels.contains(&"port"), "should suggest nested 'port'");
-        assert!(
-            !labels.contains(&"host"),
-            "should not suggest 'host' (already present)"
-        );
-        assert!(
-            !labels.contains(&"server"),
-            "should not suggest parent 'server'"
-        );
-    }
-
-    #[test]
-    fn should_merge_schema_and_structural_suggestions() {
-        let schema = object_schema(vec![("kind", string_schema())]);
-        let text = "name: Alice\nkind: \n";
-        let docs = parse_docs(text);
-        // cursor at key position on line 0 ("name:")
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"kind"),
-            "schema property 'kind' should appear"
-        );
-        assert!(
-            !labels.contains(&"name"),
-            "current key 'name' should not appear"
-        );
-    }
-
-    #[test]
-    fn should_deduplicate_when_schema_and_structure_both_suggest_same_key() {
-        let schema = object_schema(vec![("env", string_schema())]);
-        let text = "env: production\nregion: us-east\n";
-        let docs = parse_docs(text);
-        // cursor at key position on line 1 ("region:")
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
-
-        let labels = labels(&result);
-        let env_count = labels.iter().filter(|&&l| l == "env").count();
-        assert!(
-            env_count <= 1,
-            "'env' should appear at most once, got: {labels:?}"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group C — Schema Enum Completion at Value Positions
-    // ══════════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn should_suggest_enum_values_at_value_position() {
-        let schema = object_schema(vec![(
-            "env",
-            JsonSchema {
-                enum_values: Some(vec![
-                    json!("production"),
-                    json!("staging"),
-                    json!("development"),
-                ]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "env: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"production"),
-            "should suggest 'production'"
-        );
-        assert!(labels.contains(&"staging"), "should suggest 'staging'");
-        assert!(
-            labels.contains(&"development"),
-            "should suggest 'development'"
-        );
-        assert!(
-            result
-                .iter()
-                .any(|i| i.kind == Some(CompletionItemKind::VALUE)),
-            "enum completions should have VALUE kind"
-        );
-    }
-
-    #[test]
-    fn should_include_schema_detail_in_enum_suggestion() {
-        let schema = object_schema(vec![(
-            "env",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("string".to_string())),
-                enum_values: Some(vec![json!("prod"), json!("dev")]),
-                description: Some("Deployment target".to_string()),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "env: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
-
-        assert!(!result.is_empty(), "should have enum suggestions");
-        assert!(
-            result
-                .iter()
-                .any(|i| i.detail.as_deref().is_some_and(|d| d.contains("string"))),
-            "at least one suggestion should have detail containing 'string'"
-        );
-    }
-
-    #[test]
-    fn should_not_duplicate_enum_value_already_used_in_same_key() {
-        let schema = object_schema(vec![(
-            "env",
-            JsonSchema {
-                enum_values: Some(vec![json!("production"), json!("staging")]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "env: production\nenv: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 5), Some(&schema));
-
-        let labels = labels(&result);
-        let prod_count = labels.iter().filter(|&&l| l == "production").count();
-        assert!(prod_count <= 1, "'production' should appear at most once");
-    }
-
-    #[test]
-    fn should_fall_back_to_structural_value_suggestions_when_no_schema_enum() {
-        let schema = object_schema(vec![("env", string_schema())]);
-        let text = "env: production\nenv: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 5), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"production"),
-            "structural value 'production' should still appear as fallback"
-        );
-    }
-
-    #[test]
-    fn should_suggest_boolean_values_for_boolean_schema_type() {
-        let schema = object_schema(vec![("enabled", boolean_schema())]);
-        let text = "enabled: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 9), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(labels.contains(&"true"), "should suggest 'true'");
-        assert!(labels.contains(&"false"), "should suggest 'false'");
-        assert!(
-            result
-                .iter()
-                .any(|i| i.kind == Some(CompletionItemKind::VALUE)),
-            "boolean completions should have VALUE kind"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group D — Path Resolution
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // Tests 29, 30, 31 — schema path resolution suggests nested property
-    #[rstest]
-    #[case::nested_path(
-        object_schema(vec![("database", object_schema(vec![("host", string_schema()), ("port", integer_schema())]))]),
-        "database:\n  host: localhost\n",
-        pos(1, 2),
-        "port",
-        "database"
-    )]
-    #[case::array_items_schema(
-        object_schema(vec![("servers", JsonSchema {
-            schema_type: Some(SchemaType::Single("array".to_string())),
-            items: Some(Box::new(object_schema(vec![("host", string_schema()), ("port", integer_schema())]))),
-            ..JsonSchema::default()
-        })]),
-        "servers:\n  - host: localhost\n",
-        pos(1, 4),
-        "port",
-        "servers"
-    )]
-    #[case::third_level_nesting(
-        object_schema(vec![("a", object_schema(vec![("b", object_schema(vec![("c", string_schema()), ("d", integer_schema())]))]))]),
-        "a:\n  b:\n    c: v\n",
-        pos(2, 4),
-        "d",
-        "a"
-    )]
-    fn schema_path_resolution_suggests_nested_property(
-        #[case] schema: JsonSchema,
-        #[case] text: &str,
-        #[case] cursor: Position,
-        #[case] expected: &str,
-        #[case] absent: &str,
-    ) {
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
-        let ls = labels(&result);
-        assert!(
-            ls.contains(&expected),
-            "should suggest {expected:?}, got: {ls:?}"
-        );
-        assert!(
-            !ls.contains(&absent),
-            "should not suggest {absent:?}, got: {ls:?}"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group E — Composition Schemas
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // Tests 32, 33, 34 — composition schema suggests properties from branches
-    #[rstest]
-    #[case::allof_branches(
-        JsonSchema { all_of: Some(vec![object_schema(vec![("name", string_schema())]), object_schema(vec![("age", integer_schema())])]), ..JsonSchema::default() },
-        "name: Alice\n",
-        pos(0, 0),
-        "age"
-    )]
-    #[case::anyof_branches(
-        JsonSchema { any_of: Some(vec![object_schema(vec![("host", string_schema())]), object_schema(vec![("socket", string_schema())])]), ..JsonSchema::default() },
-        "host: localhost\n",
-        pos(0, 0),
-        "socket"
-    )]
-    #[case::oneof_branches(
-        JsonSchema { one_of: Some(vec![object_schema(vec![("url", string_schema())]), object_schema(vec![("path", string_schema())])]), ..JsonSchema::default() },
-        "url: http://example.com\n",
-        pos(0, 0),
-        "path"
-    )]
-    fn composition_schema_suggests_from_branches(
-        #[case] schema: JsonSchema,
-        #[case] text: &str,
-        #[case] cursor: Position,
-        #[case] expected: &str,
-    ) {
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
-        let ls = labels(&result);
-        assert!(
-            ls.contains(&expected),
-            "should suggest {expected:?} from composition branches, got: {ls:?}"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group F — Fallback Behavior
+    // Group F — Fallback (structural-only subset)
     // ══════════════════════════════════════════════════════════════════════════
 
     #[test]
@@ -883,301 +278,11 @@ mod tests {
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"age"),
+            ls.contains(&"age"),
             "structural sibling 'age' should appear when schema is None"
         );
-    }
-
-    #[test]
-    fn should_fall_back_to_structural_when_schema_has_no_properties() {
-        let schema = JsonSchema::default();
-        let text = "name: Alice\nage: 30\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"age"),
-            "structural sibling 'age' should appear when schema has no properties"
-        );
-    }
-
-    #[test]
-    fn should_offer_schema_property_when_structural_has_no_siblings() {
-        // Schema has "unrelated"; document only has "name" (no siblings for structural).
-        let schema = object_schema(vec![("unrelated", JsonSchema::default())]);
-        let text = "name: Alice\n";
-        let docs = parse_docs(text);
-        // cursor at key position on the only key "name"; no structural siblings, but schema
-        // offers "unrelated"
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"unrelated"),
-            "schema property 'unrelated' should appear even when no structural siblings"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group G — Edge Cases
-    // ══════════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn should_return_empty_for_schema_completion_on_empty_document() {
-        let schema = object_schema(vec![("name", string_schema())]);
-        let result = complete_at(&[], pos(0, 0), Some(&schema));
-
-        assert!(result.is_empty(), "should return empty for empty document");
-    }
-
-    #[test]
-    fn should_return_empty_for_schema_completion_on_comment_line() {
-        let schema = object_schema(vec![("name", string_schema())]);
-        let text = "# comment\nkey: value\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        assert!(result.is_empty(), "should return empty for comment line");
-    }
-
-    #[test]
-    fn should_return_empty_for_schema_completion_on_document_separator() {
-        let schema = object_schema(vec![("name", string_schema())]);
-        let text = "key1: v1\n---\nkey2: v2\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
-
-        assert!(
-            result.is_empty(),
-            "should return empty for document separator"
-        );
-    }
-
-    #[test]
-    fn should_handle_schema_property_with_no_type_gracefully() {
-        let schema = object_schema(vec![("data", JsonSchema::default())]);
-        let text = "name: Alice\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result.iter().find(|i| i.label == "data");
-        assert!(item.is_some(), "should suggest 'data' without panicking");
-        // detail may be None or empty — no type to show
-        let item = item.unwrap();
-        if let Some(detail) = &item.detail {
-            assert!(
-                detail.is_empty(),
-                "detail should be empty when schema has no type, got: {detail:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn should_handle_enum_completion_with_partial_value_at_cursor() {
-        let schema = object_schema(vec![(
-            "env",
-            JsonSchema {
-                enum_values: Some(vec![json!("production"), json!("staging")]),
-                ..JsonSchema::default()
-            },
-        )]);
-        // Cursor within "pro" — value position with partial input
-        let text = "env: pro\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 7), Some(&schema));
-
-        let labels = labels(&result);
-        // LSP filtering is client-side; server should return all enum options
-        assert!(
-            labels.contains(&"production") || labels.contains(&"staging"),
-            "should return enum suggestions even with partial value at cursor"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Security Tests (Tests 43–50)
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // description truncated at 200 Unicode chars
-    #[test]
-    fn should_truncate_description_at_200_chars_in_completion_documentation() {
-        let long_desc = "x".repeat(500);
-        let schema = object_schema(vec![(
-            "name",
-            JsonSchema {
-                description: Some(long_desc),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "age: 30\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result.iter().find(|i| i.label == "name");
-        assert!(item.is_some(), "should suggest 'name'");
-        if let Some(item) = item {
-            let doc_char_count = match &item.documentation {
-                Some(Documentation::String(s)) => s.chars().count(),
-                Some(Documentation::MarkupContent(m)) => m.value.chars().count(),
-                None => 0,
-            };
-            assert!(
-                doc_char_count <= 200,
-                "documentation should be truncated to 200 chars, got {doc_char_count}"
-            );
-        }
-    }
-
-    // item count cap at 100
-    #[test]
-    fn should_cap_completion_items_at_100_when_schema_has_many_properties() {
-        let properties: std::collections::HashMap<String, JsonSchema> = (0..150)
-            .map(|i| (format!("prop_{i:03}"), JsonSchema::default()))
-            .collect();
-        let schema = JsonSchema {
-            schema_type: Some(SchemaType::Single("object".to_string())),
-            properties: Some(properties),
-            ..JsonSchema::default()
-        };
-        let text = "prop_000: x\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        assert!(
-            result.len() <= 100,
-            "completion items should be capped at 100, got {}",
-            result.len()
-        );
-    }
-
-    // allOf branch walking capped at MAX_BRANCH_COUNT (20)
-    #[test]
-    fn should_cap_allof_branch_walking_at_max_branch_count() {
-        // 30 branches — only MAX_BRANCH_COUNT (20) should be walked
-        let branches: Vec<JsonSchema> = (0..30)
-            .map(|i| JsonSchema {
-                properties: Some(
-                    std::iter::once((format!("field_{i}"), JsonSchema::default())).collect(),
-                ),
-                ..JsonSchema::default()
-            })
-            .collect();
-        let schema = JsonSchema {
-            all_of: Some(branches),
-            ..JsonSchema::default()
-        };
-        let text = "irrelevant: x\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        // At most 20 branches walked → at most 20 distinct schema-sourced properties
-        let schema_prop_count = result
-            .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
-            .count();
-        assert!(
-            schema_prop_count <= 20,
-            "at most 20 allOf branches should be walked, got {schema_prop_count} schema props"
-        );
-    }
-
-    // enum labels truncated at 50 chars
-    #[test]
-    fn should_truncate_long_enum_labels_at_50_chars() {
-        let long_val = "a".repeat(60);
-        let schema = object_schema(vec![(
-            "key",
-            JsonSchema {
-                enum_values: Some(vec![json!(long_val)]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "key: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
-
-        assert!(!result.is_empty(), "should have enum suggestion");
-        for item in &result {
-            assert!(
-                item.label.chars().count() <= 50,
-                "enum label should be truncated to 50 chars, got {} chars: {}",
-                item.label.chars().count(),
-                item.label
-            );
-        }
-    }
-
-    // JSON boolean enum values produce YAML scalar labels "true"/"false"
-    #[test]
-    fn should_convert_json_boolean_enum_to_yaml_scalar_true_false() {
-        let schema = object_schema(vec![(
-            "enabled",
-            JsonSchema {
-                enum_values: Some(vec![json!(true), json!(false)]),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "enabled: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 9), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            labels.contains(&"true"),
-            "JSON boolean true should produce label 'true', got: {labels:?}"
-        );
-        assert!(
-            labels.contains(&"false"),
-            "JSON boolean false should produce label 'false', got: {labels:?}"
-        );
-        assert!(
-            !labels.contains(&"\"true\""),
-            "should not produce JSON-quoted string '\"true\"'"
-        );
-        assert!(
-            !labels.contains(&"\"false\""),
-            "should not produce JSON-quoted string '\"false\"'"
-        );
-    }
-
-    // path depth exceeds schema depth: graceful bail, no panic
-    #[test]
-    fn should_return_no_schema_context_when_yaml_path_exceeds_schema_depth() {
-        // Schema is only 2 levels deep; YAML cursor is 5 levels deep.
-        // The path walker runs out of properties before reaching the cursor — must bail cleanly.
-        let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
-        let text = "a:\n  b:\n    c:\n      d:\n        e: v\n";
-        let docs = parse_docs(text);
-        // Must not panic or hang regardless of result
-        let _result = complete_at(&docs, pos(4, 8), Some(&schema));
-    }
-
-    // already-present keys excluded from schema suggestions
-    #[test]
-    fn should_exclude_already_present_keys_from_schema_suggestions() {
-        let schema = object_schema(vec![
-            ("a", JsonSchema::default()),
-            ("b", JsonSchema::default()),
-            ("c", JsonSchema::default()),
-        ]);
-        let text = "a: 1\nb: 2\n";
-        let docs = parse_docs(text);
-        // cursor on a new blank line at indent 0, key position after "b"
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
-
-        let labels = labels(&result);
-        assert!(
-            !labels.contains(&"a"),
-            "'a' is already present, should not appear"
-        );
-        assert!(
-            !labels.contains(&"b"),
-            "'b' is on cursor line, should not appear"
-        );
-        assert!(labels.contains(&"c"), "'c' is not present, should appear");
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1196,7 +301,7 @@ mod tests {
     )]
     fn cross_document_label_not_contaminated(
         #[case] text: &str,
-        #[case] cursor: Position,
+        #[case] cursor: tower_lsp::lsp_types::Position,
         #[case] schema: Option<&JsonSchema>,
         #[case] absent_label: &str,
     ) {
@@ -1209,392 +314,90 @@ mod tests {
         );
     }
 
-    // collect_present_keys_at_indent must not see keys from other document
     #[test]
     fn should_not_suppress_schema_key_present_only_in_other_document() {
-        // doc1 has "name: Alice"; doc2 has only "age: 30".
-        // Schema has "name" and "age". Cursor in doc2 — "name" should be suggested because
-        // it is not present in doc2.
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
         let text = "name: Alice\n---\nage: 30\n";
         let docs = parse_docs(text);
-        // cursor on "age:" in doc2
         let result = complete_at(&docs, pos(2, 0), Some(&schema));
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"name"),
-            "should suggest 'name' because it is absent from document 2, got: {labels:?}"
+            ls.contains(&"name"),
+            "should suggest 'name' because it is absent from document 2, got: {ls:?}"
         );
     }
 
-    // is_in_sequence_item must not cross --- boundary
     #[test]
     fn should_not_detect_sequence_context_from_other_document() {
-        // doc1 has a sequence item "- name: Alice"; doc2 has a plain mapping "host: local".
-        // Completion in doc2 should use mapping-sibling logic, not sequence-item logic.
         let text = "items:\n  - name: Alice\n---\nhost: local\nport: 8080\n";
         let docs = parse_docs(text);
-        // cursor on "host:" in doc2
         let result = complete_at(&docs, pos(3, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"port"),
-            "should suggest sibling key 'port' in document 2, got: {labels:?}"
+            ls.contains(&"port"),
+            "should suggest sibling key 'port' in document 2, got: {ls:?}"
         );
         assert!(
-            !labels.contains(&"name"),
-            "should not suggest 'name' from the sequence in document 1, got: {labels:?}"
+            !ls.contains(&"name"),
+            "should not suggest 'name' from the sequence in document 1, got: {ls:?}"
         );
     }
 
-    // cursor on first line (no separator before it)
     #[test]
     fn should_handle_cursor_on_first_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\n";
         let docs = parse_docs(text);
-        // cursor on "alpha:" — first line, no separator before it
         let result = complete_at(&docs, pos(0, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"beta"),
-            "should not suggest 'beta' from document 2 when cursor is on line 0, got: {labels:?}"
+            !ls.contains(&"beta"),
+            "should not suggest 'beta' from document 2 when cursor is on line 0, got: {ls:?}"
         );
     }
 
-    // cursor on last line of file (no separator after it)
     #[test]
     fn should_handle_cursor_on_last_line_of_multi_doc_file() {
         let text = "alpha: 1\n---\nbeta: 2\ngamma: 3\n";
         let docs = parse_docs(text);
-        // cursor on last line "gamma:"
         let result = complete_at(&docs, pos(3, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            labels.contains(&"beta"),
-            "should suggest sibling 'beta' from the same document, got: {labels:?}"
+            ls.contains(&"beta"),
+            "should suggest sibling 'beta' from the same document, got: {ls:?}"
         );
         assert!(
-            !labels.contains(&"alpha"),
-            "should not suggest 'alpha' from document 1, got: {labels:?}"
+            !ls.contains(&"alpha"),
+            "should not suggest 'alpha' from document 1, got: {ls:?}"
         );
     }
 
-    // consecutive separators (empty document between them)
     #[test]
     fn should_handle_consecutive_document_separators() {
         let text = "alpha: 1\n---\n---\nbeta: 2\n";
         let docs = parse_docs(text);
-        // cursor on "beta:" — the document between the two --- lines is empty
         let result = complete_at(&docs, pos(3, 0), None);
 
-        let labels = labels(&result);
+        let ls = labels(&result);
         assert!(
-            !labels.contains(&"alpha"),
-            "should not suggest 'alpha' from document 1 through empty middle document, got: {labels:?}"
-        );
-    }
-
-    // deprecated property gets DEPRECATED tag and tilde sort_text
-    #[test]
-    fn should_tag_deprecated_property_with_deprecated_tag_and_tilde_sort_text() {
-        let schema = object_schema(vec![(
-            "old_field",
-            JsonSchema {
-                deprecated: Some(true),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result
-            .iter()
-            .find(|i| i.label == "old_field")
-            .expect("should suggest old_field");
-        assert_eq!(
-            item.tags,
-            Some(vec![CompletionItemTag::DEPRECATED]),
-            "deprecated property should have DEPRECATED tag"
-        );
-        assert!(
-            item.sort_text
-                .as_deref()
-                .is_some_and(|s| s.starts_with('~')),
-            "deprecated property sort_text should start with '~', got: {:?}",
-            item.sort_text
-        );
-    }
-
-    // non-deprecated property has no tags and no sort_text
-    #[test]
-    fn should_not_tag_non_deprecated_property() {
-        let schema = object_schema(vec![(
-            "current_field",
-            JsonSchema {
-                deprecated: None,
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result
-            .iter()
-            .find(|i| i.label == "current_field")
-            .expect("should suggest current_field");
-        assert_eq!(
-            item.tags, None,
-            "non-deprecated property should have no tags"
-        );
-        assert_eq!(
-            item.sort_text, None,
-            "non-deprecated property should have no sort_text"
-        );
-    }
-
-    // only deprecated property is tagged when mixed schema
-    #[test]
-    fn should_only_tag_deprecated_property_in_mixed_schema() {
-        let schema = object_schema(vec![
-            (
-                "new_field",
-                JsonSchema {
-                    deprecated: None,
-                    ..JsonSchema::default()
-                },
-            ),
-            (
-                "old_field",
-                JsonSchema {
-                    deprecated: Some(true),
-                    ..JsonSchema::default()
-                },
-            ),
-        ]);
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let new_item = result
-            .iter()
-            .find(|i| i.label == "new_field")
-            .expect("should suggest new_field");
-        let old_item = result
-            .iter()
-            .find(|i| i.label == "old_field")
-            .expect("should suggest old_field");
-
-        assert_eq!(
-            new_item.tags, None,
-            "non-deprecated 'new_field' should have no tags"
-        );
-        assert_eq!(
-            old_item.tags,
-            Some(vec![CompletionItemTag::DEPRECATED]),
-            "deprecated 'old_field' should have DEPRECATED tag"
+            !ls.contains(&"alpha"),
+            "should not suggest 'alpha' from document 1 through empty middle document, got: {ls:?}"
         );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Group I — Multi-Required Snippet Completion
+    // Group J — structural/blank-line subset
     // ══════════════════════════════════════════════════════════════════════════
 
-    fn schema_with_required(props: Vec<(&str, JsonSchema)>, required: Vec<&str>) -> JsonSchema {
-        JsonSchema {
-            schema_type: Some(SchemaType::Single("object".to_string())),
-            properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
-            required: Some(required.into_iter().map(str::to_string).collect()),
-            ..JsonSchema::default()
-        }
-    }
-
-    // 3 required props all missing → snippet item with all 3 tab-stops
-    #[test]
-    fn should_offer_all_required_snippet_when_three_required_props_missing() {
-        let schema = schema_with_required(
-            vec![
-                ("name", string_schema()),
-                ("age", integer_schema()),
-                ("enabled", boolean_schema()),
-            ],
-            vec!["name", "age", "enabled"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let snippet = result
-            .iter()
-            .find(|i| i.label == "(all required)")
-            .expect("should offer '(all required)' snippet item");
-
-        let insert_text = snippet
-            .insert_text
-            .as_deref()
-            .expect("snippet item must have insert_text");
-
-        assert!(
-            insert_text.contains("${1:"),
-            "snippet must contain tab-stop ${{1:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("${2:"),
-            "snippet must contain tab-stop ${{2:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("${3:"),
-            "snippet must contain tab-stop ${{3:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("name:"),
-            "snippet must mention 'name', got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("age:"),
-            "snippet must mention 'age', got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("enabled:"),
-            "snippet must mention 'enabled', got: {insert_text}"
-        );
-    }
-
-    // Tests 63, 64 — no snippet offered when insufficient required props missing
-    #[rstest]
-    #[case::only_one_missing(
-        schema_with_required(
-            vec![("name", string_schema()), ("age", integer_schema()), ("enabled", boolean_schema())],
-            vec!["name", "age", "enabled"],
-        ),
-        "name: Alice\nage: 30\n",
-        pos(0, 0)
-    )]
-    #[case::no_required_props(
-        object_schema(vec![("name", string_schema()), ("age", integer_schema())]),
-        "\n",
-        pos(0, 0)
-    )]
-    fn should_not_offer_snippet(
-        #[case] schema: JsonSchema,
-        #[case] text: &str,
-        #[case] cursor: Position,
-    ) {
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
-        let has_snippet = result.iter().any(|i| i.label == "(all required)");
-        assert!(!has_snippet, "should not offer '(all required)' snippet");
-    }
-
-    // type-aware defaults: string → "", integer → 0, boolean → false
-    #[test]
-    #[expect(
-        clippy::literal_string_with_formatting_args,
-        reason = "snippet placeholders look like format args"
-    )]
-    fn should_use_type_aware_defaults_in_snippet() {
-        let schema = schema_with_required(
-            vec![
-                ("title", string_schema()),
-                ("count", integer_schema()),
-                ("active", boolean_schema()),
-            ],
-            vec!["title", "count", "active"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let snippet = result
-            .iter()
-            .find(|i| i.label == "(all required)")
-            .expect("should offer snippet");
-
-        let insert_text = snippet
-            .insert_text
-            .as_deref()
-            .expect("must have insert_text");
-
-        assert!(
-            insert_text.contains("\"\""),
-            "string type should default to \"\", got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains(":0")
-                || insert_text.contains(": 0")
-                || insert_text.contains("{1:0}")
-                || insert_text.contains("{2:0}")
-                || insert_text.contains("{3:0}"),
-            "integer type should default to 0, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("false"),
-            "boolean type should default to false, got: {insert_text}"
-        );
-    }
-
-    // snippet item has InsertTextFormat::SNIPPET
-    #[test]
-    fn should_set_insert_text_format_to_snippet() {
-        let schema = schema_with_required(
-            vec![("name", string_schema()), ("age", integer_schema())],
-            vec!["name", "age"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let snippet = result
-            .iter()
-            .find(|i| i.label == "(all required)")
-            .expect("should offer snippet");
-
-        assert_eq!(
-            snippet.insert_text_format,
-            Some(InsertTextFormat::SNIPPET),
-            "snippet item must have InsertTextFormat::SNIPPET"
-        );
-    }
-
-    // snippet item sort_text is "!" (sorts to top)
-    #[test]
-    fn should_set_snippet_sort_text_to_exclamation() {
-        let schema = schema_with_required(
-            vec![("name", string_schema()), ("age", integer_schema())],
-            vec!["name", "age"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let snippet = result
-            .iter()
-            .find(|i| i.label == "(all required)")
-            .expect("should offer snippet");
-
-        assert_eq!(
-            snippet.sort_text.as_deref(),
-            Some("!"),
-            "snippet sort_text should be '!' to sort to top"
-        );
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Group J — Previously Uncovered Paths
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // Lines 64-74: blank line → empty for both None-schema and empty-schema paths
     #[rstest]
     #[case::no_schema("key: value\n\n", pos(1, 0), None)]
     #[case::schema_no_properties("\n", pos(0, 0), Some(JsonSchema::default()))]
     fn blank_line_returns_empty(
         #[case] text: &str,
-        #[case] cursor: Position,
+        #[case] cursor: tower_lsp::lsp_types::Position,
         #[case] schema: Option<JsonSchema>,
     ) {
         let docs = parse_docs(text);
@@ -1602,239 +405,6 @@ mod tests {
         assert!(
             result.is_empty(),
             "blank line should return empty, got: {result:?}"
-        );
-    }
-
-    // Sequence item with no inline key uses "[]" sentinel for schema path descent.
-    #[test]
-    fn should_build_path_with_sequence_sentinel_for_bare_sequence_parent() {
-        // "servers" is a sequence; items have "host" and "port".
-        // Schema resolves via "servers" → [] → items schema.
-        let schema = object_schema(vec![(
-            "servers",
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("array".to_string())),
-                items: Some(Box::new(object_schema(vec![
-                    ("host", string_schema()),
-                    ("port", integer_schema()),
-                ]))),
-                ..JsonSchema::default()
-            },
-        )]);
-        // Bare sequence item "- " with no inline key, then indented key below it
-        let text = "servers:\n  -\n    host: localhost\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(2, 4), Some(&schema));
-
-        let ls = labels(&result);
-        assert!(
-            ls.contains(&"port"),
-            "should suggest 'port' via sequence [] path, got: {ls:?}"
-        );
-    }
-
-    // Lines 361-365: snippet_default for object/array/unknown types
-    #[test]
-    fn should_use_object_default_in_snippet_for_object_type_required_field() {
-        // Need 2+ required missing for snippet; pair with a string field
-        let schema = schema_with_required(
-            vec![
-                (
-                    "config",
-                    JsonSchema {
-                        schema_type: Some(SchemaType::Single("object".to_string())),
-                        ..JsonSchema::default()
-                    },
-                ),
-                ("name", string_schema()),
-            ],
-            vec!["config", "name"],
-        );
-        let schema2 = schema_with_required(
-            vec![
-                (
-                    "tags",
-                    JsonSchema {
-                        schema_type: Some(SchemaType::Single("array".to_string())),
-                        ..JsonSchema::default()
-                    },
-                ),
-                ("name", string_schema()),
-            ],
-            vec!["tags", "name"],
-        );
-
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-
-        let result1 = complete_at(&docs, pos(0, 0), Some(&schema));
-        let snippet1 = result1.iter().find(|i| i.label == "(all required)");
-        assert!(
-            snippet1.is_some(),
-            "should offer snippet for object-typed field"
-        );
-        let insert1 = snippet1.unwrap().insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert1.contains("{}"),
-            "object type default should be '{{}}', got: {insert1}"
-        );
-
-        let result2 = complete_at(&docs, pos(0, 0), Some(&schema2));
-        let snippet2 = result2.iter().find(|i| i.label == "(all required)");
-        assert!(
-            snippet2.is_some(),
-            "should offer snippet for array-typed field"
-        );
-        let insert2 = snippet2.unwrap().insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert2.contains("[]"),
-            "array type default should be '[]', got: {insert2}"
-        );
-    }
-
-    // Line 332: required field with no-default type (None type) → bare tab-stop format
-    #[test]
-    fn should_use_bare_tab_stop_in_snippet_for_field_with_no_type() {
-        // Need 2+ required missing to trigger snippet; pair no-type "data" with typed "name"
-        let schema = schema_with_required(
-            vec![("data", JsonSchema::default()), ("name", string_schema())],
-            vec!["data", "name"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let snippet = result.iter().find(|i| i.label == "(all required)");
-        assert!(snippet.is_some(), "should offer snippet");
-        let insert = snippet.unwrap().insert_text.as_deref().unwrap_or("");
-        // "data" has no type so default is "" → produces "data: ${N:}" (bare tab-stop)
-        assert!(
-            insert.contains("data: ${"),
-            "no-type field should have a tab-stop, got: {insert}"
-        );
-    }
-
-    // Line 377: collect_schema_properties depth cap
-    #[test]
-    fn should_not_panic_when_allof_depth_exceeds_max_branch_count() {
-        // Build a deeply recursive schema via allOf to hit the depth guard
-        fn deep_schema(depth: usize) -> JsonSchema {
-            if depth == 0 {
-                return object_schema(vec![("leaf", JsonSchema::default())]);
-            }
-            JsonSchema {
-                all_of: Some(vec![deep_schema(depth - 1)]),
-                ..JsonSchema::default()
-            }
-        }
-        // 25 levels deep — exceeds MAX_BRANCH_COUNT (20)
-        let schema = deep_schema(25);
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        // Must not panic or hang
-        let _result = complete_at(&docs, pos(0, 0), Some(&schema));
-    }
-
-    // Lines 475-477: json_value_to_yaml_label for Number, Null, Array, Object
-    #[test]
-    #[expect(
-        clippy::approx_constant,
-        reason = "3.14 is a test value, not an approximation of PI"
-    )]
-    fn should_render_number_and_null_enum_values_as_yaml_labels() {
-        let schema = object_schema(vec![(
-            "value",
-            JsonSchema {
-                enum_values: Some(vec![
-                    serde_json::Value::Number(serde_json::Number::from(42)),
-                    serde_json::Value::Null,
-                    serde_json::Value::Number(serde_json::Number::from_f64(3.14).unwrap()),
-                ]),
-                ..JsonSchema::default()
-            },
-        )]);
-        // "value: " is 7 chars; colon at index 5; col=6 puts cursor in value position
-        let text = "value: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 6), Some(&schema));
-
-        let ls = labels(&result);
-        assert!(ls.contains(&"42"), "should render integer 42, got: {ls:?}");
-        assert!(ls.contains(&"null"), "should render null, got: {ls:?}");
-        assert!(
-            ls.iter().any(|l| l.starts_with("3.14") || *l == "3.14"),
-            "should render float 3.14, got: {ls:?}"
-        );
-    }
-
-    #[test]
-    fn should_skip_array_and_object_enum_values() {
-        let schema = object_schema(vec![(
-            "value",
-            JsonSchema {
-                enum_values: Some(vec![
-                    serde_json::json!("valid"),
-                    serde_json::json!(["a", "b"]), // array — skipped
-                    serde_json::json!({"k": "v"}), // object — skipped
-                ]),
-                ..JsonSchema::default()
-            },
-        )]);
-        // col=6: cursor in value position (after "value: ")
-        let text = "value: \n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 6), Some(&schema));
-
-        let ls = labels(&result);
-        assert!(
-            ls.contains(&"valid"),
-            "string enum value should appear, got: {ls:?}"
-        );
-        assert_eq!(
-            ls.len(),
-            1,
-            "array and object enum values should be skipped, got: {ls:?}"
-        );
-    }
-
-    // Line 486: SchemaType::Multiple in type_label
-    #[test]
-    fn should_render_multiple_type_label_as_pipe_separated_string() {
-        let schema = object_schema(vec![(
-            "value",
-            JsonSchema {
-                schema_type: Some(SchemaType::Multiple(vec![
-                    "string".to_string(),
-                    "null".to_string(),
-                ])),
-                ..JsonSchema::default()
-            },
-        )]);
-        let text = "name: x\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
-
-        let item = result.iter().find(|i| i.label == "value");
-        assert!(item.is_some(), "should suggest 'value'");
-        assert_eq!(
-            item.unwrap().detail.as_deref(),
-            Some("string | null"),
-            "multiple types should be joined with ' | '"
-        );
-    }
-
-    // complete_at with blank line + schema → schema_key_completions path
-    #[test]
-    fn should_suggest_schema_keys_on_blank_line_when_schema_is_present() {
-        let schema = object_schema(vec![("host", string_schema()), ("port", integer_schema())]);
-        let text = "host: localhost\n\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
-
-        let ls = labels(&result);
-        assert!(
-            ls.contains(&"port"),
-            "should suggest 'port' on blank line with schema, got: {ls:?}"
         );
     }
 
@@ -1965,8 +535,6 @@ mod tests {
     }
 
     // C-8: InBlankMapping without schema — suggests nothing when all keys present.
-    // On a blank line in a mapping with no schema, structural suggestions exclude
-    // keys already in the document. When all keys are present, the result is empty.
     #[test]
     fn complete_at_in_blank_mapping_no_schema_structural_keys() {
         let docs = parse_docs("name: Alice\nage: 30\n\n");
@@ -2002,16 +570,12 @@ mod tests {
 
     // C-10: InSequenceItem — cursor on blank within a sequence item returns keys
     // from sibling items that are absent from the current item.
-    // (The parser includes trailing blank lines in the item's span, so a blank
-    // line between items routes to InSequenceItem for the preceding item.)
     #[test]
     fn complete_at_in_blank_sequence_no_schema_union_of_sibling_keys() {
         let docs =
             parse_docs("items:\n  - name: Alice\n    age: 30\n  \n  - name: Bob\n    city: NY\n");
         let result = complete_at(&docs, pos(3, 2), None);
         let ls = labels(&result);
-        // Cursor is inside item 1 (name+age); item 2 has name+city.
-        // InSequenceItem returns sibling keys minus item 1's keys → city.
         assert!(
             ls.contains(&"city"),
             "should suggest 'city' from sibling item, got: {ls:?}"

@@ -155,7 +155,7 @@ point as the orchestrator that wires the stages together.
 - [x] Extract `cursor_location`
 - [x] Extract `navigation`
 - [x] Extract `completion_items` and `completion_drivers`
-- [ ] Extract `schema_completions`
+- [x] Extract `schema_completions`
 - [ ] Verify `completion.rs` is orchestration only and
       every external caller continues to compile
       unchanged
@@ -362,35 +362,49 @@ Commit: `145d77d` (amended; see `git log --follow rlsp-yaml/src/completion/compl
 
 ### Task 5: Extract `schema_completions`
 
-- [ ] `src/completion/schema_completions.rs` exists and
+- [x] `src/completion/schema_completions.rs` exists and
       contains:
   - `pub(super) fn resolve_schema_path`
   - `pub(super) fn schema_has_properties`
   - `pub(super) fn schema_key_completions`
-  - `pub(super) fn snippet_default`
+  - `fn snippet_default` (private to this submodule)
   - `pub(super) fn collect_schema_properties`
   - `pub(super) fn collect_schema_properties_keys`
   - `fn collect_schema_properties_keys_inner` (private
     to this submodule)
   - `pub(super) fn schema_value_completions`
-  - a `#[cfg(test)] mod tests` block holding the
-    schema-property-at-key-position tests
-    (lines 1275–1360, ~5), enum-completion-at-value-position
-    tests (lines 1452–1532, ~5), type-aware tests
-    (lines 1547–1595, ~2), composition tests
-    (lines 1595–1660, ~3), deprecated-property-tagging
-    tests (lines 2089–2194, ~3), snippet-completion
-    tests (lines 2205–2381, ~5), and performance-bounds
-    tests (lines 1844–1875, ~2) — all from the original
-    `mod tests` block
-- [ ] `src/completion.rs` declares `mod
+  - a `#[cfg(test)] mod tests` block holding the seven
+    test groups (key-position, enum-value, type-aware,
+    composition, deprecated, snippet, performance-bounds)
+    plus 19 new direct unit tests for `resolve_schema_path`
+    (8), `schema_has_properties` (4),
+    `collect_schema_properties_keys` (3), and
+    `schema_value_completions` (4).
+- [x] `src/completion.rs` declares `mod
       schema_completions;` and routes its existing calls
       through the submodule
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Notes (test-engineer / reviewer observations):
+- Workspace test count rises from **6275** to **6294**
+  (+19 net new direct unit tests; ~50 schema-focused
+  end-to-end tests moved with helpers).
+- `completion_drivers.rs` updated to import five schema
+  helpers at the top of file (no `super::` qualifications
+  remain).
+- `snippet_default` ended up private to the submodule
+  (no callers outside it after the move). The plan
+  originally listed it as `pub(super)`; downgraded
+  during implementation.
+- `completion.rs` shrinks from ~2100 lines to **590
+  lines** — very close to orchestration-only. Task 6
+  finalizes.
+
+Commit: `038a109` (amended; see `git log --follow rlsp-yaml/src/completion/schema_completions.rs`)
 
 ### Task 6: Verify orchestration-only `completion.rs`
 
