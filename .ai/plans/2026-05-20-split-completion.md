@@ -153,7 +153,7 @@ point as the orchestrator that wires the stages together.
 - [x] Extract `formatting` and `support` (constants +
       test fixtures)
 - [x] Extract `cursor_location`
-- [ ] Extract `navigation`
+- [x] Extract `navigation`
 - [ ] Extract `completion_items` and `completion_drivers`
 - [ ] Extract `schema_completions`
 - [ ] Verify `completion.rs` is orchestration only and
@@ -274,21 +274,33 @@ through the structural-completion and document-separation
 tests that exercise `complete_at`. The new file therefore
 contains no `#[cfg(test)] mod tests` block.
 
-- [ ] `src/completion/navigation.rs` exists and contains
+- [x] `src/completion/navigation.rs` exists and contains
       exactly:
   - `pub(super) fn find_node_at_path`
   - `pub(super) fn present_keys`
   - `pub(super) fn collect_sibling_keys_ast`
   - `pub(super) fn collect_sequence_sibling_keys`
-  - no `#[cfg(test)] mod tests` block (no test in the
-    original block targets these helpers directly)
-- [ ] `src/completion.rs` declares `mod navigation;` and
+  - **Plan-text override (Task 2 finding):**
+    `navigation.rs` DOES have a `#[cfg(test)] mod tests`
+    block — Task 2's routing discovered 6 navigation
+    tests in the original `mod tests` that exercise
+    these helpers directly. They move with the helpers.
+- [x] `src/completion.rs` declares `mod navigation;` and
       routes its existing calls through the submodule
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Notes (test-engineer / reviewer observations):
+- 6 baseline navigation tests moved + 7 new direct unit
+  cases for `find_node_at_path` (4 None-returning + 3
+  Some-returning, using a NodeKind enum per the
+  enums-over-booleans guideline). Workspace test count
+  rises from **6245** to **6252**.
+
+Commit: `d82a552` (amended; see `git log --follow rlsp-yaml/src/completion/navigation.rs`)
 
 ### Task 4: Extract `completion_items` and `completion_drivers`
 
