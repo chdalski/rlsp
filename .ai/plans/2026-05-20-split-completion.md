@@ -154,7 +154,7 @@ point as the orchestrator that wires the stages together.
       test fixtures)
 - [x] Extract `cursor_location`
 - [x] Extract `navigation`
-- [ ] Extract `completion_items` and `completion_drivers`
+- [x] Extract `completion_items` and `completion_drivers`
 - [ ] Extract `schema_completions`
 - [ ] Verify `completion.rs` is orchestration only and
       every external caller continues to compile
@@ -319,30 +319,46 @@ multiline/indentation tests at lines 2396–2424 of the
 original `mod tests` block do exercise the per-context
 drivers directly and move into `completion_drivers.rs`.
 
-- [ ] `src/completion/completion_items.rs` exists and
+- [x] `src/completion/completion_items.rs` exists and
       contains exactly:
   - `pub(super) fn keys_to_items`
   - `pub(super) fn collect_values_for_key_ast`
   - `pub(super) fn collect_values_in_node`
   - `pub(super) fn merge_completions`
-  - no `#[cfg(test)] mod tests` block (no test in the
-    original block targets these helpers directly)
-- [ ] `src/completion/completion_drivers.rs` exists and
+  - **Plan-text override (test-engineer recommendation):**
+    `completion_items.rs` ships with 13 new direct unit
+    tests covering `keys_to_items`, `merge_completions`,
+    and `collect_values_for_key_ast`. The original plan
+    said "no `mod tests`" because no baseline tests
+    target these directly; the test-engineer recommended
+    adding direct coverage anyway (same lens as Task 1).
+- [x] `src/completion/completion_drivers.rs` exists and
       contains:
   - `pub(super) fn complete_on_key`
   - `pub(super) fn complete_on_value`
   - `pub(super) fn complete_in_sequence_item`
-  - a `#[cfg(test)] mod tests` block holding the
-    multiline/indentation tests (lines 2396–2424 of the
-    original `mod tests` block, ~2 tests)
-- [ ] `src/completion.rs` declares `mod completion_items;`
+  - a `#[cfg(test)] mod tests` block holding 6 moved
+    sequence-context tests + 10 new direct unit tests
+    covering each driver with schema/no-schema paths.
+- [x] `src/completion.rs` declares `mod completion_items;`
       and `mod completion_drivers;` and routes its
       existing calls through these submodules
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Notes (test-engineer / reviewer observations):
+- Workspace test count rises from **6252** to **6275**
+  (+23: 13 in `completion_items`, 10 in `completion_drivers`).
+- 5 schema helpers in `completion.rs` widened to
+  `pub(super)` so `completion_drivers` can reach them
+  ahead of Task 5 (Task 5 will move them out entirely).
+- Unused `LineIndex` and `Node` imports cleaned up in
+  `completion.rs`.
+
+Commit: `145d77d` (amended; see `git log --follow rlsp-yaml/src/completion/completion_drivers.rs`)
 
 ### Task 5: Extract `schema_completions`
 
