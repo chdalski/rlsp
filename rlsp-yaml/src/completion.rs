@@ -13,14 +13,11 @@ use tower_lsp::lsp_types::{
 
 use crate::schema::{JsonSchema, SchemaType};
 
-// Maximum number of completion items returned.
-const MAX_COMPLETION_ITEMS: usize = 100;
-// Maximum number of allOf/anyOf/oneOf branches walked for property collection.
-const MAX_BRANCH_COUNT: usize = 20;
-// Maximum number of Unicode characters in a description shown in documentation.
-const MAX_DESCRIPTION_LEN: usize = 200;
-// Maximum number of Unicode characters in an enum label.
-const MAX_ENUM_LABEL_LEN: usize = 50;
+mod formatting;
+mod support;
+
+use formatting::{json_value_to_yaml_label, truncate_description, truncate_enum_label, type_label};
+use support::{MAX_BRANCH_COUNT, MAX_COMPLETION_ITEMS};
 
 /// Compute completion items for the given cursor position within the AST.
 ///
@@ -539,56 +536,6 @@ fn schema_value_completions(schema: &JsonSchema) -> Vec<CompletionItem> {
     Vec::new()
 }
 
-/// Convert a `serde_json::Value` to a YAML scalar label string.
-/// Returns `None` for values that have no natural YAML scalar representation
-/// (arrays, objects).
-fn json_value_to_yaml_label(v: &serde_json::Value) -> Option<String> {
-    match v {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Bool(b) => Some(b.to_string()),
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        serde_json::Value::Null => Some("null".to_string()),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
-    }
-}
-
-/// Return the type label string for a schema (e.g. `"string"`, `"integer"`),
-/// or `None` if no type is defined.
-fn type_label(schema: &JsonSchema) -> Option<String> {
-    match &schema.schema_type {
-        Some(SchemaType::Single(t)) => Some(t.clone()),
-        Some(SchemaType::Multiple(ts)) => Some(ts.join(" | ")),
-        None => None,
-    }
-}
-
-/// Truncate a description so the result (including ellipsis) is at most
-/// `MAX_DESCRIPTION_LEN` Unicode characters.
-fn truncate_description(desc: &str) -> String {
-    if desc.chars().count() <= MAX_DESCRIPTION_LEN {
-        return desc.to_string();
-    }
-    // Keep MAX_DESCRIPTION_LEN-1 chars, then append "…" (1 char) = MAX_DESCRIPTION_LEN total.
-    let keep = MAX_DESCRIPTION_LEN - 1;
-    let boundary = desc.char_indices().nth(keep).map_or(desc.len(), |(i, _)| i);
-    format!("{}…", &desc[..boundary])
-}
-
-/// Truncate an enum label so the result (including ellipsis) is at most
-/// `MAX_ENUM_LABEL_LEN` Unicode characters.
-fn truncate_enum_label(label: &str) -> String {
-    if label.chars().count() <= MAX_ENUM_LABEL_LEN {
-        return label.to_string();
-    }
-    // Keep MAX_ENUM_LABEL_LEN-1 chars, then append "…" (1 char) = MAX_ENUM_LABEL_LEN total.
-    let keep = MAX_ENUM_LABEL_LEN - 1;
-    let boundary = label
-        .char_indices()
-        .nth(keep)
-        .map_or(label.len(), |(i, _)| i);
-    format!("{}…", &label[..boundary])
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // AST-first cursor-context substrate (Task 1)
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1067,48 +1014,14 @@ fn collect_sequence_sibling_keys(sequence: &Node<Span>) -> HashSet<String> {
 mod tests {
     use rstest::rstest;
 
+    use super::support::test_fixtures::{
+        boolean_schema, integer_schema, labels, object_schema, pos, string_schema,
+    };
     use super::*;
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
     use serde_json::json;
     use tower_lsp::lsp_types::Documentation;
-
-    fn pos(line: u32, character: u32) -> Position {
-        Position::new(line, character)
-    }
-
-    fn labels(items: &[CompletionItem]) -> Vec<&str> {
-        items.iter().map(|i| i.label.as_str()).collect()
-    }
-
-    fn string_schema() -> JsonSchema {
-        JsonSchema {
-            schema_type: Some(SchemaType::Single("string".to_string())),
-            ..JsonSchema::default()
-        }
-    }
-
-    fn integer_schema() -> JsonSchema {
-        JsonSchema {
-            schema_type: Some(SchemaType::Single("integer".to_string())),
-            ..JsonSchema::default()
-        }
-    }
-
-    fn boolean_schema() -> JsonSchema {
-        JsonSchema {
-            schema_type: Some(SchemaType::Single("boolean".to_string())),
-            ..JsonSchema::default()
-        }
-    }
-
-    fn object_schema(props: Vec<(&str, JsonSchema)>) -> JsonSchema {
-        JsonSchema {
-            schema_type: Some(SchemaType::Single("object".to_string())),
-            properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
-            ..JsonSchema::default()
-        }
-    }
 
     // ══════════════════════════════════════════════════════════════════════════
     // Backward-Compatibility Tests (Tests 1–15): None schema

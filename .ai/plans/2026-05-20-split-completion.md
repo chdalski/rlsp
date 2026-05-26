@@ -150,7 +150,7 @@ point as the orchestrator that wires the stages together.
 
 ## Steps
 
-- [ ] Extract `formatting` and `support` (constants +
+- [x] Extract `formatting` and `support` (constants +
       test fixtures)
 - [ ] Extract `cursor_location`
 - [ ] Extract `navigation`
@@ -171,7 +171,7 @@ internal dependencies beyond `serde_json` and
 constants and the test fixtures that every later test
 module needs.
 
-- [ ] `src/completion/formatting.rs` exists and contains:
+- [x] `src/completion/formatting.rs` exists and contains:
   - `pub(super) fn json_value_to_yaml_label`
   - `pub(super) fn type_label`
   - `pub(super) fn truncate_description`
@@ -179,7 +179,7 @@ module needs.
   - a `#[cfg(test)] mod tests` block holding the
     truncation tests (lines 1792–1875 of the original
     `mod tests` block, ~3 tests)
-- [ ] `src/completion/support.rs` exists and contains:
+- [x] `src/completion/support.rs` exists and contains:
   - `pub(super) const MAX_COMPLETION_ITEMS`,
     `MAX_BRANCH_COUNT`, `MAX_DESCRIPTION_LEN`,
     `MAX_ENUM_LABEL_LEN`
@@ -187,16 +187,32 @@ module needs.
     `pos`, `labels`, `string_schema`, `integer_schema`,
     `boolean_schema`, `object_schema`,
     `sibling_key_suggests_and_excludes`
-- [ ] `src/completion.rs` declares `mod formatting;` and
+- [x] `src/completion.rs` declares `mod formatting;` and
       `mod support;`
-- [ ] `src/completion.rs` no longer defines the moved
+- [x] `src/completion.rs` no longer defines the moved
       constants, functions, or unit tests
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` reports the same total test count as
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` reports the same total test count as
       the pre-task baseline; record both numbers in the
       commit message
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Notes (from the developer/test-engineer collaboration):
+- `sibling_key_suggests_and_excludes` is an rstest-
+  parametrized **test function** (not a fixture builder).
+  Per the plan's test-routing rule it routes to the
+  orchestrator-level tests and stays in `completion.rs`.
+- The truncation-tests group at lines 1792–1875 calls
+  `complete_at` end-to-end and asserts on its output,
+  not on the helpers directly — those tests stay with
+  `complete_at` for now (Task 5 will route the
+  performance-bounds subset to `schema_completions`).
+  The developer added 19 new direct unit tests for the
+  four formatting helpers in `formatting.rs`, raising
+  the workspace test count from **6219** to **6238**.
+
+Commit: `6211a2c` (amended; see `git log --follow rlsp-yaml/src/completion/support.rs`)
 
 ### Task 2: Extract `cursor_location`
 
