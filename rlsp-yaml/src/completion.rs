@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use rlsp_yaml_parser::LineIndex;
-use rlsp_yaml_parser::Pos;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{
@@ -13,9 +12,11 @@ use tower_lsp::lsp_types::{
 
 use crate::schema::{JsonSchema, SchemaType};
 
+mod cursor_location;
 mod formatting;
 mod support;
 
+use cursor_location::{CursorLocation, locate_cursor, node_span, scalar_key};
 use formatting::{json_value_to_yaml_label, truncate_description, truncate_enum_label, type_label};
 use support::{MAX_BRANCH_COUNT, MAX_COMPLETION_ITEMS};
 
@@ -536,401 +537,6 @@ fn schema_value_completions(schema: &JsonSchema) -> Vec<CompletionItem> {
     Vec::new()
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AST-first cursor-context substrate (Task 1)
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// Where the cursor sits in the YAML AST.
-///
-/// Used by `locate_cursor` and consumed by the Task-2 rewire of `complete_at`.
-/// Every variant carries the `enclosing_path` — ancestor mapping keys from the
-/// document root down to the immediately enclosing structure, with `"[]"`
-/// sentinels for sequence descents.
-#[derive(Debug)]
-enum CursorLocation<'a> {
-    /// Cursor is inside a mapping key token.
-    ///
-    /// `key` is the key being typed; `enclosing_path` is the path to the
-    /// containing mapping; `mapping` is the containing `Node::Mapping`.
-    OnKey {
-        key: String,
-        enclosing_path: Vec<String>,
-        mapping: &'a Node<Span>,
-    },
-    /// Cursor is in the value position of a `key: <value>` pair.
-    ///
-    /// `key` names the key whose value is under the cursor; `enclosing_path`
-    /// is the path to the containing mapping (does **not** include `key`).
-    OnValue {
-        key: String,
-        enclosing_path: Vec<String>,
-    },
-    /// Cursor is on a blank/whitespace-only line inside a mapping.
-    ///
-    /// No AST node's span contains the cursor, but a Mapping's span covers
-    /// `cursor.line` and its entries sit at a column ≤ the cursor column.
-    /// `mapping` is the deepest such `Node::Mapping`.
-    InBlankMapping {
-        enclosing_path: Vec<String>,
-        mapping: &'a Node<Span>,
-    },
-    /// Cursor is inside a specific sequence item.
-    ///
-    /// `sequence` is the containing `Node::Sequence`; `current_item` is the
-    /// item node the cursor sits in.
-    InSequenceItem {
-        enclosing_path: Vec<String>,
-        sequence: &'a Node<Span>,
-        current_item: &'a Node<Span>,
-    },
-    /// Cursor is on a blank/whitespace-only line directly inside a sequence.
-    ///
-    /// No item's span contains the cursor, but the sequence's own span covers
-    /// the cursor line.
-    InBlankSequence {
-        enclosing_path: Vec<String>,
-        sequence: &'a Node<Span>,
-    },
-    /// Cursor cannot be located in any AST structure.
-    ///
-    /// Covers: empty document, position past EOF, cursor on `---`/`...`,
-    /// cursor on a comment line.
-    OutsideAny,
-}
-
-/// Returns `true` when `cursor` is within `span` using half-open `[start, end)`.
-///
-/// Comparison is lexicographic on `(line, column)`, matching the semantics of
-/// `hover.rs::span_contains` and `navigation/references.rs::span_contains`.
-fn span_contains_cursor(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
-    let start = (
-        idx.line_column(span.start).0 as usize,
-        idx.line_column(span.start).1 as usize,
-    );
-    let end = (
-        idx.line_column(span.end).0 as usize,
-        idx.line_column(span.end).1 as usize,
-    );
-    let pos = (cursor.line, cursor.column);
-    start <= pos && pos < end
-}
-
-/// Extract the `loc` span from any AST node.
-const fn node_span(node: &Node<Span>) -> Span {
-    match node {
-        Node::Scalar { loc, .. }
-        | Node::Mapping { loc, .. }
-        | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => *loc,
-    }
-}
-
-/// Extract the scalar key string from a key node, returning `None` for
-/// non-scalar keys (complex mappings, sequences, aliases).
-const fn scalar_key(node: &Node<Span>) -> Option<&str> {
-    match node {
-        Node::Scalar { value, .. } => Some(value.as_str()),
-        Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
-    }
-}
-
-/// Convert an LSP `Position` (0-based line, 0-based character) to a parser
-/// `Pos` (1-based line, 0-based column).
-const fn lsp_position_to_pos(position: Position) -> Pos {
-    Pos {
-        byte_offset: 0,
-        line: position.line as usize + 1,
-        column: position.character as usize,
-    }
-}
-
-/// Walk `node` (which must be a `Node::Mapping`) looking for the deepest
-/// nested mapping whose entries have `key.(idx.line_column(loc.start).1 as usize) <= cursor.column`
-/// and whose span covers `cursor.line`.
-///
-/// `path` accumulates ancestor mapping keys in root-to-leaf order as the
-/// function descends. Returns `None` if `node` is not a mapping, its span
-/// doesn't cover `cursor.line`, or none of its entries' key columns ≤
-/// `cursor.column`.
-fn deepest_mapping_at_column<'a>(
-    node: &'a Node<Span>,
-    cursor: Pos,
-    path: &mut Vec<String>,
-    idx: &LineIndex,
-) -> Option<&'a Node<Span>> {
-    let Node::Mapping { entries, loc, .. } = node else {
-        return None;
-    };
-
-    // The mapping span must cover the cursor line.
-    if !(idx.line_column(loc.start).0 as usize <= cursor.line
-        && cursor.line <= idx.line_column(loc.end).0 as usize)
-    {
-        return None;
-    }
-
-    // Find an entry whose key column satisfies key.col <= cursor.col and
-    // whose value is a nested mapping that covers the cursor line. Descend
-    // into the deepest such mapping. Stop as soon as we find one that
-    // admits descent.
-    for (key_node, value_node) in entries {
-        let Some(key_str) = scalar_key(key_node) else {
-            continue;
-        };
-        let key_span = node_span(key_node);
-        if idx.line_column(key_span.start).1 as usize > cursor.column {
-            continue;
-        }
-
-        // This key's column satisfies the condition. Try to descend into its
-        // value if it is also a Mapping whose keys satisfy the condition.
-        if let Node::Mapping { .. } = value_node {
-            let saved_len = path.len();
-            path.push(key_str.to_string());
-            if let Some(deeper) = deepest_mapping_at_column(value_node, cursor, path, idx) {
-                return Some(deeper);
-            }
-            // Descent failed (value's entries too deep or span mismatch) — undo.
-            path.truncate(saved_len);
-        }
-    }
-
-    // No deeper mapping admitted descent. Check whether at least one entry's
-    // key column satisfies the condition — if so, this mapping is the result.
-    let has_eligible_entry = entries.iter().any(|(k, _)| {
-        let key_span = node_span(k);
-        idx.line_column(key_span.start).1 as usize <= cursor.column
-    });
-    if has_eligible_entry { Some(node) } else { None }
-}
-
-/// Return `true` if any mapping entry in `docs` has its key or value starting
-/// on `cursor_parser_line` (1-based parser line number).
-///
-/// Used to prevent the blank-line extension from firing on non-blank lines
-/// where the cursor is positioned past the end of content.
-fn cursor_line_has_mapping_content(docs: &[Document<Span>], cursor_parser_line: usize) -> bool {
-    fn node_has_content_on_line(node: &Node<Span>, line: usize, idx: &LineIndex) -> bool {
-        match node {
-            Node::Mapping { entries, .. } => {
-                for (key_node, value_node) in entries {
-                    let key_span = node_span(key_node);
-                    let value_span = node_span(value_node);
-                    if idx.line_column(key_span.start).0 as usize == line
-                        || (idx.line_column(value_span.start).0 as usize == line
-                            && value_span.start != value_span.end)
-                    {
-                        return true;
-                    }
-                    if node_has_content_on_line(value_node, line, idx) {
-                        return true;
-                    }
-                }
-                false
-            }
-            Node::Sequence { items, .. } => items.iter().any(|item| {
-                let span = node_span(item);
-                idx.line_column(span.start).0 as usize == line
-                    || node_has_content_on_line(item, line, idx)
-            }),
-            Node::Scalar { loc, .. } => {
-                idx.line_column(loc.start).0 as usize == line && loc.start != loc.end
-            }
-            Node::Alias { .. } => false,
-        }
-    }
-    docs.iter()
-        .any(|doc| node_has_content_on_line(&doc.root, cursor_parser_line, doc.line_index()))
-}
-
-/// Determine the `CursorLocation` for a cursor position within `docs`.
-///
-/// Returns `OutsideAny` when the cursor cannot be placed inside any node
-/// (empty document, past EOF, on a `---`/`...` separator, on a comment).
-/// Otherwise returns the most-specific variant describing the cursor context.
-fn locate_cursor(docs: &[Document<Span>], position: Position) -> CursorLocation<'_> {
-    if docs.is_empty() {
-        return CursorLocation::OutsideAny;
-    }
-
-    let cursor = lsp_position_to_pos(position);
-
-    // If cursor sits on a `---` or `...` separator line, return OutsideAny.
-    // When a document has an explicit start marker, the marker is on the line
-    // immediately before the root node's start line.
-    for doc in docs {
-        let idx = doc.line_index();
-        let root_start = idx.line_column(node_span(&doc.root).start).0 as usize;
-        if doc.explicit_start && root_start > 0 && cursor.line == root_start - 1 {
-            return CursorLocation::OutsideAny;
-        }
-        if doc.explicit_end {
-            let root_end = idx.line_column(node_span(&doc.root).end).0 as usize;
-            if cursor.line == root_end {
-                return CursorLocation::OutsideAny;
-            }
-        }
-    }
-
-    for doc in docs {
-        let idx = doc.line_index();
-        let result = locate_in_node(&doc.root, cursor, &mut Vec::new(), idx);
-        if !matches!(result, CursorLocation::OutsideAny) {
-            return result;
-        }
-    }
-
-    // No node contained the cursor. Try the blank-line extension: walk
-    // mappings whose span covers the cursor line and descend by column.
-    // Skip this extension if the cursor line has actual mapping content —
-    // positions past the end of a content-bearing line should return OutsideAny.
-    if !cursor_line_has_mapping_content(docs, cursor.line) {
-        for doc in docs {
-            let idx = doc.line_index();
-            let path: Vec<String> = Vec::new();
-            if let Node::Mapping { loc, .. } = &doc.root {
-                if idx.line_column(loc.start).0 as usize <= cursor.line
-                    && cursor.line <= idx.line_column(loc.end).0 as usize
-                {
-                    let mut descent_path: Vec<String> = Vec::new();
-                    if let Some(mapping) =
-                        deepest_mapping_at_column(&doc.root, cursor, &mut descent_path, idx)
-                    {
-                        return CursorLocation::InBlankMapping {
-                            enclosing_path: descent_path,
-                            mapping,
-                        };
-                    }
-                }
-            } else if let Node::Sequence { loc, .. } = &doc.root {
-                if idx.line_column(loc.start).0 as usize <= cursor.line
-                    && cursor.line <= idx.line_column(loc.end).0 as usize
-                {
-                    return CursorLocation::InBlankSequence {
-                        enclosing_path: path,
-                        sequence: &doc.root,
-                    };
-                }
-            }
-        }
-    }
-
-    CursorLocation::OutsideAny
-}
-
-/// Recursively walk `node`, building `enclosing_path` as keys are descended.
-/// Returns the most-specific `CursorLocation` for `cursor`, or `OutsideAny`
-/// if the cursor is not inside `node`.
-fn locate_in_node<'a>(
-    node: &'a Node<Span>,
-    cursor: Pos,
-    enclosing_path: &mut Vec<String>,
-    idx: &LineIndex,
-) -> CursorLocation<'a> {
-    match node {
-        Node::Mapping { entries, .. } => {
-            for (key_node, value_node) in entries {
-                let key_span = node_span(key_node);
-                let value_span = node_span(value_node);
-
-                if span_contains_cursor(key_span, cursor, idx) {
-                    let key = scalar_key(key_node).unwrap_or("").to_string();
-                    return CursorLocation::OnKey {
-                        key,
-                        enclosing_path: enclosing_path.clone(),
-                        mapping: node,
-                    };
-                }
-
-                if span_contains_cursor(value_span, cursor, idx) {
-                    let key = scalar_key(key_node).unwrap_or("").to_string();
-                    enclosing_path.push(key.clone());
-
-                    // Recurse into the value.
-                    let inner = locate_in_node(value_node, cursor, enclosing_path, idx);
-                    if !matches!(inner, CursorLocation::OutsideAny) {
-                        return inner;
-                    }
-
-                    // Value span contains cursor but no child matched.
-                    // If the value is a Mapping, the cursor is on a blank/whitespace
-                    // line inside that mapping — not on the scalar value.
-                    if matches!(value_node, Node::Mapping { .. }) {
-                        return CursorLocation::InBlankMapping {
-                            enclosing_path: enclosing_path.clone(),
-                            mapping: value_node,
-                        };
-                    }
-                    // Similarly for Sequence.
-                    if matches!(value_node, Node::Sequence { .. }) {
-                        return CursorLocation::InBlankSequence {
-                            enclosing_path: enclosing_path.clone(),
-                            sequence: value_node,
-                        };
-                    }
-
-                    enclosing_path.pop();
-
-                    // Cursor is on the scalar value directly.
-                    return CursorLocation::OnValue {
-                        key,
-                        enclosing_path: enclosing_path.clone(),
-                    };
-                }
-
-                // Fallback A: cursor is on the same line as the key, past the key
-                // span, and the value node's span starts on a DIFFERENT line.
-                // This happens for null/empty values where the parser places the
-                // value span at the start of the following line. Treat as OnValue.
-                if cursor.line == idx.line_column(key_span.start).0 as usize
-                    && cursor.column >= idx.line_column(key_span.end).1 as usize
-                    && idx.line_column(value_span.start).0 as usize != cursor.line
-                {
-                    if let Some(key) = scalar_key(key_node) {
-                        return CursorLocation::OnValue {
-                            key: key.to_string(),
-                            enclosing_path: enclosing_path.clone(),
-                        };
-                    }
-                }
-            }
-            CursorLocation::OutsideAny
-        }
-        Node::Sequence { items, .. } => {
-            for item in items {
-                let item_span = node_span(item);
-                if span_contains_cursor(item_span, cursor, idx) {
-                    // Push "[]" so that inner mapping keys carry the sequence
-                    // sentinel in their enclosing_path.
-                    enclosing_path.push("[]".to_string());
-                    let inner = locate_in_node(item, cursor, enclosing_path, idx);
-                    if matches!(inner, CursorLocation::OutsideAny) {
-                        enclosing_path.pop();
-                        return CursorLocation::InSequenceItem {
-                            enclosing_path: enclosing_path.clone(),
-                            sequence: node,
-                            current_item: item,
-                        };
-                    }
-                    // inner already has the "[]" in path via enclosing_path
-                    return inner;
-                }
-            }
-
-            // Cursor in sequence span but not in any item — blank sequence line.
-            if span_contains_cursor(node_span(node), cursor, idx) {
-                return CursorLocation::InBlankSequence {
-                    enclosing_path: enclosing_path.clone(),
-                    sequence: node,
-                };
-            }
-
-            CursorLocation::OutsideAny
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => CursorLocation::OutsideAny,
-    }
-}
-
 /// Walk `docs` following `path` (a sequence of mapping key strings) and return
 /// the node at that path, or `None` if any step fails.
 fn find_node_at_path<'a>(docs: &'a [Document<Span>], path: &[String]) -> Option<&'a Node<Span>> {
@@ -1010,7 +616,6 @@ fn collect_sequence_sibling_keys(sequence: &Node<Span>) -> HashSet<String> {
 }
 
 #[cfg(test)]
-#[expect(clippy::wildcard_enum_match_arm, reason = "test code")]
 mod tests {
     use rstest::rstest;
 
@@ -2605,402 +2210,6 @@ mod tests {
         );
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // AST substrate tests (Task 1)
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // ── locate_cursor: OnKey ─────────────────────────────────────────────────
-
-    #[rstest]
-    #[case::on_key_top_level("name: Alice\nage: 30\n", pos(0, 0), "name", vec![])]
-    #[case::on_key_nested("server:\n  host: localhost\n", pos(1, 2), "host", vec!["server".to_string()])]
-    #[case::on_key_in_sequence_item(
-        "items:\n  - name: foo\n    age: 1\n",
-        pos(1, 4),
-        "name",
-        vec!["items".to_string(), "[]".to_string()]
-    )]
-    #[case::on_key_utf8("café: latte\n", pos(0, 0), "café", vec![])]
-    #[case::on_key_three_levels(
-        "a:\n  b:\n    c: v\n",
-        pos(2, 4),
-        "c",
-        vec!["a".to_string(), "b".to_string()]
-    )]
-    fn locate_cursor_on_key(
-        #[case] yaml: &str,
-        #[case] position: Position,
-        #[case] expected_key: &str,
-        #[case] expected_path: Vec<String>,
-    ) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        match loc {
-            CursorLocation::OnKey {
-                key,
-                enclosing_path,
-                mapping,
-            } => {
-                assert_eq!(key, expected_key, "key mismatch");
-                assert_eq!(enclosing_path, expected_path, "path mismatch");
-                assert!(
-                    matches!(mapping, Node::Mapping { .. }),
-                    "mapping should be a Mapping node"
-                );
-            }
-            other => panic!("expected OnKey, got different variant for yaml={yaml:?}: {other:?}"),
-        }
-    }
-
-    // ── locate_cursor: OnValue ───────────────────────────────────────────────
-
-    #[rstest]
-    #[case::on_value_scalar("name: Alice\n", pos(0, 6), "name", vec![])]
-    #[case::on_value_nested("server:\n  host: localhost\n", pos(1, 8), "host", vec!["server".to_string()])]
-    fn locate_cursor_on_value(
-        #[case] yaml: &str,
-        #[case] position: Position,
-        #[case] expected_key: &str,
-        #[case] expected_path: Vec<String>,
-    ) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        match loc {
-            CursorLocation::OnValue {
-                key,
-                enclosing_path,
-            } => {
-                assert_eq!(key, expected_key, "key mismatch");
-                assert_eq!(enclosing_path, expected_path, "path mismatch");
-            }
-            other => panic!("expected OnValue, got different variant for yaml={yaml:?}: {other:?}"),
-        }
-    }
-
-    // ── locate_cursor: InBlankMapping ────────────────────────────────────────
-
-    #[rstest]
-    #[case::blank_mapping_root("name: Alice\n\nage: 30\n", pos(1, 0), vec![])]
-    #[case::blank_mapping_nested("server:\n  host: localhost\n  \nport: 80\n", pos(2, 2), vec!["server".to_string()])]
-    #[case::blank_mapping_eof("server:\n  host: localhost\n", pos(2, 2), vec!["server".to_string()])]
-    #[case::blank_mapping_column_boundary(
-        "outer:\n  inner:\n    key: val\n",
-        pos(3, 2),
-        vec!["outer".to_string()]
-    )]
-    #[case::blank_mapping_column_descent_deeper(
-        "outer:\n  inner:\n    key: val\n",
-        pos(3, 4),
-        vec!["outer".to_string(), "inner".to_string()]
-    )]
-    fn locate_cursor_in_blank_mapping(
-        #[case] yaml: &str,
-        #[case] position: Position,
-        #[case] expected_path: Vec<String>,
-    ) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        match loc {
-            CursorLocation::InBlankMapping {
-                enclosing_path,
-                mapping,
-            } => {
-                assert_eq!(
-                    enclosing_path, expected_path,
-                    "path mismatch for yaml={yaml:?}"
-                );
-                assert!(
-                    matches!(mapping, Node::Mapping { .. }),
-                    "mapping should be a Mapping node"
-                );
-            }
-            other => panic!(
-                "expected InBlankMapping, got different variant for yaml={yaml:?}: {other:?}"
-            ),
-        }
-    }
-
-    // ── locate_cursor: InBlankSequence ───────────────────────────────────────
-
-    #[rstest]
-    #[case::blank_sequence_after_scalar("items:\n  - foo\n  \n", pos(2, 2), vec!["items".to_string()])]
-    fn locate_cursor_in_blank_sequence(
-        #[case] yaml: &str,
-        #[case] position: Position,
-        #[case] expected_path: Vec<String>,
-    ) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        match loc {
-            CursorLocation::InBlankSequence {
-                enclosing_path,
-                sequence,
-            } => {
-                assert_eq!(
-                    enclosing_path, expected_path,
-                    "path mismatch for yaml={yaml:?}"
-                );
-                assert!(
-                    matches!(sequence, Node::Sequence { .. }),
-                    "sequence should be a Sequence node"
-                );
-            }
-            other => panic!(
-                "expected InBlankSequence, got different variant for yaml={yaml:?}: {other:?}"
-            ),
-        }
-    }
-
-    // ── locate_cursor: InSequenceItem ────────────────────────────────────────
-
-    #[rstest]
-    #[case::in_sequence_item_mapping_second_key(
-        "items:\n  - name: foo\n    age: 1\n",
-        pos(2, 4),
-        vec!["items".to_string(), "[]".to_string()]
-    )]
-    fn locate_cursor_in_sequence_item(
-        #[case] yaml: &str,
-        #[case] position: Position,
-        #[case] expected_path: Vec<String>,
-    ) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        match loc {
-            CursorLocation::InSequenceItem {
-                enclosing_path,
-                sequence,
-                ..
-            } => {
-                assert_eq!(
-                    enclosing_path, expected_path,
-                    "path mismatch for yaml={yaml:?}"
-                );
-                assert!(
-                    matches!(sequence, Node::Sequence { .. }),
-                    "sequence should be a Sequence node"
-                );
-            }
-            CursorLocation::OnKey {
-                enclosing_path,
-                mapping,
-                ..
-            } => {
-                assert_eq!(
-                    enclosing_path, expected_path,
-                    "path mismatch for yaml={yaml:?}"
-                );
-                assert!(
-                    matches!(mapping, Node::Mapping { .. }),
-                    "mapping should be a Mapping node"
-                );
-            }
-            other => panic!(
-                "expected InSequenceItem or OnKey, got different variant for yaml={yaml:?}: {other:?}"
-            ),
-        }
-    }
-
-    #[test]
-    fn locate_cursor_in_sequence_item_scalar() {
-        let yaml = "tags:\n  - rust\n  - yaml\n";
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, pos(1, 4));
-        match loc {
-            CursorLocation::InSequenceItem {
-                enclosing_path,
-                sequence,
-                current_item,
-            } => {
-                assert_eq!(enclosing_path, vec!["tags".to_string()]);
-                assert!(
-                    matches!(sequence, Node::Sequence { .. }),
-                    "sequence should be a Sequence node"
-                );
-                assert!(
-                    matches!(current_item, Node::Scalar { .. }),
-                    "current_item should be scalar"
-                );
-            }
-            other => panic!("expected InSequenceItem, got: {other:?}"),
-        }
-    }
-
-    // ── locate_cursor: OutsideAny ────────────────────────────────────────────
-
-    #[rstest]
-    #[case::empty_doc("", pos(0, 0))]
-    #[case::past_eof("name: Alice\n", pos(5, 0))]
-    #[case::on_separator("key1: v1\n---\nkey2: v2\n", pos(1, 0))]
-    #[case::on_comment("# comment\nkey: val\n", pos(0, 2))]
-    fn locate_cursor_outside_any(#[case] yaml: &str, #[case] position: Position) {
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, position);
-        assert!(
-            matches!(loc, CursorLocation::OutsideAny),
-            "expected OutsideAny for yaml={yaml:?} position={position:?}"
-        );
-    }
-
-    // ── locate_cursor: span_contains boundary cases ──────────────────────────
-
-    #[test]
-    fn locate_cursor_span_boundary_at_end_is_outside() {
-        // The scalar "Alice" ends at some position; cursor exactly at span.end
-        // should NOT be contained. We use a position clearly past any node.
-        let yaml = "name: Alice\n";
-        let docs = parse_docs(yaml);
-        // Parser line 1, column 11 is one past "Alice" (col 6 start + 5 chars).
-        // Use LSP pos(0, 11) to hit the boundary.
-        let loc = locate_cursor(&docs, pos(0, 11));
-        // Should be OutsideAny or InBlankMapping (not OnValue)
-        assert!(
-            !matches!(loc, CursorLocation::OnValue { .. }),
-            "cursor at span.end should not be OnValue"
-        );
-    }
-
-    #[test]
-    fn locate_cursor_span_boundary_at_start_is_contained() {
-        // Cursor at span.start should be contained.
-        let yaml = "name: Alice\n";
-        let docs = parse_docs(yaml);
-        // "name" key starts at parser line=1, col=0 → LSP pos(0, 0)
-        let loc = locate_cursor(&docs, pos(0, 0));
-        assert!(
-            matches!(loc, CursorLocation::OnKey { .. }),
-            "cursor at span.start should be OnKey"
-        );
-    }
-
-    // ── present_keys ─────────────────────────────────────────────────────────
-
-    #[rstest]
-    #[case::excludes_cursor_line(
-        "name: Alice\nage: 30\ncity: NY\n",
-        1,
-        &["name", "city"],
-        &["age"]
-    )]
-    #[case::only_entry_excluded("name: Alice\n", 0, &[], &["name"])]
-    #[case::utf8("café: latte\nname: Alice\n", 0, &["name"], &["café"])]
-    fn present_keys_test(
-        #[case] yaml: &str,
-        #[case] cursor_line: usize,
-        #[case] expected_present: &[&str],
-        #[case] expected_absent: &[&str],
-    ) {
-        let docs = parse_docs(yaml);
-        let Node::Mapping { .. } = &docs[0].root else {
-            panic!("expected mapping root");
-        };
-        let keys = present_keys(&docs[0].root, cursor_line, docs[0].line_index());
-        for k in expected_present {
-            assert!(
-                keys.contains(*k),
-                "expected '{k}' in present_keys, got: {keys:?}"
-            );
-        }
-        for k in expected_absent {
-            assert!(
-                !keys.contains(*k),
-                "expected '{k}' absent from present_keys, got: {keys:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn present_keys_sequence_item() {
-        let yaml = "items:\n  - name: foo\n    age: 1\n";
-        let docs = parse_docs(yaml);
-        // Navigate to the sequence item mapping
-        let Node::Mapping { entries, .. } = &docs[0].root else {
-            panic!("expected mapping root");
-        };
-        let (_, seq_value) = &entries[0];
-        let Node::Sequence { items, .. } = seq_value else {
-            panic!("expected sequence");
-        };
-        let item_mapping = &items[0];
-        // cursor_line=1 corresponds to "- name: foo" (0-based LSP line 1)
-        let keys = present_keys(item_mapping, 1, docs[0].line_index());
-        assert!(keys.contains("age"), "age should be present");
-        assert!(
-            !keys.contains("name"),
-            "name should be excluded (on cursor_line 1)"
-        );
-    }
-
-    // ── collect_sibling_keys_ast ──────────────────────────────────────────────
-
-    #[rstest]
-    #[case::declaration_order("a: 1\nb: 2\nc: 3\n", vec!["a", "b", "c"])]
-    #[case::single_key("only: val\n", vec!["only"])]
-    #[case::utf8("café: 1\ntea: 2\n", vec!["café", "tea"])]
-    fn collect_sibling_keys_ast_test(#[case] yaml: &str, #[case] expected: Vec<&str>) {
-        let docs = parse_docs(yaml);
-        let keys = collect_sibling_keys_ast(&docs[0].root);
-        assert_eq!(
-            keys, expected,
-            "declaration order mismatch for yaml={yaml:?}"
-        );
-    }
-
-    #[test]
-    fn collect_sibling_keys_ast_skips_non_scalar_keys() {
-        // Construct a mapping node manually to test non-scalar key skipping.
-        // The simplest approach: parse a YAML that won't have complex keys, and
-        // verify that the function only returns string keys.
-        let yaml = "x: 1\ny: 2\n";
-        let docs = parse_docs(yaml);
-        let keys = collect_sibling_keys_ast(&docs[0].root);
-        assert_eq!(keys, vec!["x", "y"]);
-    }
-
-    // ── collect_sequence_sibling_keys ────────────────────────────────────────
-
-    #[rstest]
-    #[case::union("- name: foo\n  age: 1\n- name: bar\n  city: NY\n", &["name", "age", "city"])]
-    #[case::scalar_items_no_keys("- foo\n- bar\n", &[])]
-    #[case::utf8("- café: latte\n- tea: matcha\n", &["café", "tea"])]
-    #[case::dedup("- name: foo\n- name: bar\n", &["name"])]
-    #[case::single_item("- x: 1\n  y: 2\n", &["x", "y"])]
-    fn collect_sequence_sibling_keys_test(#[case] yaml: &str, #[case] expected: &[&str]) {
-        let docs = parse_docs(yaml);
-        // The root is a sequence in these test cases.
-        let keys = collect_sequence_sibling_keys(&docs[0].root);
-        let expected_set: HashSet<&str> = expected.iter().copied().collect();
-        let actual_set: HashSet<&str> = keys.iter().map(String::as_str).collect();
-        assert_eq!(
-            actual_set, expected_set,
-            "key set mismatch for yaml={yaml:?}"
-        );
-    }
-
-    #[test]
-    fn collect_sequence_sibling_keys_empty_sequence() {
-        // Parse a sequence with no items — the root is a scalar for "[]" YAML
-        // but an empty block sequence has no items.
-        // Use an inline flow empty sequence to get an actual Sequence node.
-        let docs2 = parse_docs("[]\n");
-        let keys = collect_sequence_sibling_keys(&docs2[0].root);
-        assert!(keys.is_empty(), "empty sequence should return empty set");
-    }
-
-    // ── locate_cursor: additional cases from TE test list ────────────────────
-
-    #[test]
-    fn locate_cursor_on_key_at_end_of_key_token() {
-        // LC-2: cursor at last char of "name" key token
-        let yaml = "name: Alice\n";
-        let docs = parse_docs(yaml);
-        let loc = locate_cursor(&docs, pos(0, 3));
-        assert!(
-            matches!(loc, CursorLocation::OnKey { ref key, .. } if key == "name"),
-            "cursor at end of key token should still be OnKey"
-        );
-    }
-
     // ── C tests: complete_at branch coverage ─────────────────────────────────
 
     // C-1: OutsideAny returns empty
@@ -3185,5 +2394,115 @@ mod tests {
                 .all(|i| i.kind == Some(CompletionItemKind::FIELD)),
             "structural key suggestions should have FIELD kind"
         );
+    }
+
+    // ── present_keys ─────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::excludes_cursor_line(
+        "name: Alice\nage: 30\ncity: NY\n",
+        1,
+        &["name", "city"],
+        &["age"]
+    )]
+    #[case::only_entry_excluded("name: Alice\n", 0, &[], &["name"])]
+    #[case::utf8("café: latte\nname: Alice\n", 0, &["name"], &["café"])]
+    fn present_keys_test(
+        #[case] yaml: &str,
+        #[case] cursor_line: usize,
+        #[case] expected_present: &[&str],
+        #[case] expected_absent: &[&str],
+    ) {
+        let docs = parse_docs(yaml);
+        let Node::Mapping { .. } = &docs[0].root else {
+            panic!("expected mapping root");
+        };
+        let keys = present_keys(&docs[0].root, cursor_line, docs[0].line_index());
+        for k in expected_present {
+            assert!(
+                keys.contains(*k),
+                "expected '{k}' in present_keys, got: {keys:?}"
+            );
+        }
+        for k in expected_absent {
+            assert!(
+                !keys.contains(*k),
+                "expected '{k}' absent from present_keys, got: {keys:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn present_keys_sequence_item() {
+        let yaml = "items:\n  - name: foo\n    age: 1\n";
+        let docs = parse_docs(yaml);
+        // Navigate to the sequence item mapping
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected mapping root");
+        };
+        let (_, seq_value) = &entries[0];
+        let Node::Sequence { items, .. } = seq_value else {
+            panic!("expected sequence");
+        };
+        let item_mapping = &items[0];
+        // cursor_line=1 corresponds to "- name: foo" (0-based LSP line 1)
+        let keys = present_keys(item_mapping, 1, docs[0].line_index());
+        assert!(keys.contains("age"), "age should be present");
+        assert!(
+            !keys.contains("name"),
+            "name should be excluded (on cursor_line 1)"
+        );
+    }
+
+    // ── collect_sibling_keys_ast ──────────────────────────────────────────────
+
+    #[rstest]
+    #[case::declaration_order("a: 1\nb: 2\nc: 3\n", vec!["a", "b", "c"])]
+    #[case::single_key("only: val\n", vec!["only"])]
+    #[case::utf8("café: 1\ntea: 2\n", vec!["café", "tea"])]
+    fn collect_sibling_keys_ast_test(#[case] yaml: &str, #[case] expected: Vec<&str>) {
+        let docs = parse_docs(yaml);
+        let keys = collect_sibling_keys_ast(&docs[0].root);
+        assert_eq!(
+            keys, expected,
+            "declaration order mismatch for yaml={yaml:?}"
+        );
+    }
+
+    #[test]
+    fn collect_sibling_keys_ast_skips_non_scalar_keys() {
+        // Verify collect_sibling_keys_ast only returns string keys.
+        let yaml = "x: 1\ny: 2\n";
+        let docs = parse_docs(yaml);
+        let keys = collect_sibling_keys_ast(&docs[0].root);
+        assert_eq!(keys, vec!["x", "y"]);
+    }
+
+    // ── collect_sequence_sibling_keys ────────────────────────────────────────
+
+    #[rstest]
+    #[case::union("- name: foo\n  age: 1\n- name: bar\n  city: NY\n", &["name", "age", "city"])]
+    #[case::scalar_items_no_keys("- foo\n- bar\n", &[])]
+    #[case::utf8("- café: latte\n- tea: matcha\n", &["café", "tea"])]
+    #[case::dedup("- name: foo\n- name: bar\n", &["name"])]
+    #[case::single_item("- x: 1\n  y: 2\n", &["x", "y"])]
+    fn collect_sequence_sibling_keys_test(#[case] yaml: &str, #[case] expected: &[&str]) {
+        let docs = parse_docs(yaml);
+        // The root is a sequence in these test cases.
+        let keys = collect_sequence_sibling_keys(&docs[0].root);
+        let expected_set: HashSet<&str> = expected.iter().copied().collect();
+        let actual_set: HashSet<&str> = keys.iter().map(String::as_str).collect();
+        assert_eq!(
+            actual_set, expected_set,
+            "key set mismatch for yaml={yaml:?}"
+        );
+    }
+
+    #[test]
+    fn collect_sequence_sibling_keys_empty_sequence() {
+        // Use an inline flow empty sequence to get an actual Sequence node.
+        let docs2 = parse_docs("[]\n");
+        let keys = collect_sequence_sibling_keys(&docs2[0].root);
+        assert!(keys.is_empty(), "empty sequence should return empty set");
     }
 }

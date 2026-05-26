@@ -152,7 +152,7 @@ point as the orchestrator that wires the stages together.
 
 - [x] Extract `formatting` and `support` (constants +
       test fixtures)
-- [ ] Extract `cursor_location`
+- [x] Extract `cursor_location`
 - [ ] Extract `navigation`
 - [ ] Extract `completion_items` and `completion_drivers`
 - [ ] Extract `schema_completions`
@@ -221,7 +221,7 @@ concern (~450 lines) and detects where the cursor sits
 in the AST. It is invoked once at the top of
 `complete_at`.
 
-- [ ] `src/completion/cursor_location.rs` exists and
+- [x] `src/completion/cursor_location.rs` exists and
       contains:
   - `pub(super) enum CursorLocation<'a>`
   - `pub(super) fn span_contains_cursor`
@@ -237,14 +237,32 @@ in the AST. It is invoked once at the top of
     path-and-blank-line tests (lines 1711–1794, ~3 tests)
     and the unusual-cursor-line tests (lines 2040–2089,
     ~4 tests) from the original `mod tests` block
-- [ ] `src/completion.rs` declares `mod cursor_location;`
+- [x] `src/completion.rs` declares `mod cursor_location;`
       and calls `cursor_location::locate_cursor` from
       `complete_at`
-- [ ] `cargo build` succeeds without new warnings
-- [ ] `cargo test` total test count matches the previous
+- [x] `cargo build` succeeds without new warnings
+- [x] `cargo test` total test count matches the previous
       task's baseline
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] `cargo fmt --check` passes
+- [x] `cargo clippy --all-targets -- -D warnings` passes
+- [x] `cargo fmt --check` passes
+
+Notes (test-engineer / reviewer observations):
+- 10 baseline `locate_cursor*` tests + 7 new direct unit
+  tests for `node_span`, `scalar_key`, `span_contains_cursor`,
+  `cursor_line_has_mapping_content`, and `locate_in_node`
+  routed to `cursor_location.rs`. Workspace test count
+  rises from **6238** to **6245**.
+- Navigation tests (`present_keys_*`,
+  `collect_sibling_keys_ast_*`,
+  `collect_sequence_sibling_keys_*` — 6 tests) discovered
+  in the original `mod tests` block during routing. They
+  stay in `completion.rs` for now, colocated with their
+  helpers, and will follow the helpers to `navigation.rs`
+  in Task 3. This invalidates Task 3's plan-text claim
+  that navigation has no `mod tests` block — see Task 3
+  notes.
+
+Commit: `f129efc` (amended; see `git log --follow rlsp-yaml/src/completion/cursor_location.rs`)
 
 ### Task 3: Extract `navigation`
 
