@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-29
 
 ## Goal
@@ -118,21 +118,23 @@ dependabot remediation in this directory.
 
 ## Steps
 
-- [ ] Add `qs: ^6.15.2` to the existing `pnpm.overrides`
+- [x] Add `qs: ^6.15.2` to the existing `pnpm.overrides`
   block in `rlsp-yaml/integrations/vscode/package.json`
-- [ ] Run `pnpm update @vscode/vsce @azure/msal-node` (or
+- [x] Run `pnpm update @vscode/vsce @azure/msal-node` (or
   equivalent re-resolve invocation) and follow with
   `pnpm install` to rewrite `pnpm-lock.yaml`
-- [ ] Verify resolved versions in the lockfile satisfy
+- [x] Verify resolved versions in the lockfile satisfy
   every advisory's `first_patched_version`
-- [ ] Run lint, format check, build, unit tests, and
+- [x] Run lint, format check, build, unit tests, and
   integration tests
-- [ ] Confirm all three Dependabot alerts will close
+- [x] Confirm all three Dependabot alerts will close
   once the change lands on `main`
 
 ## Tasks
 
 ### Task 1: Patch `tmp`, `qs`, `uuid` resolutions in the vscode pnpm-lock.yaml
+
+**Commit:** `5bd686a4bf8f065aa1253f7dfc1ce055fbad043f`
 
 Apply the smallest change that moves all three packages
 to non-vulnerable versions: re-resolve the lockfile to
@@ -157,41 +159,38 @@ Files involved:
 
 Sub-tasks (all must be true to pass):
 
-- [ ] `pnpm.overrides` in `package.json` contains
+- [x] `pnpm.overrides` in `package.json` contains
   `"qs": "^6.15.2"` alongside the existing `lodash`,
   `fast-uri`, and `serialize-javascript` entries
-- [ ] `pnpm install` completes without error and updates
+- [x] `pnpm install` completes without error and updates
   `pnpm-lock.yaml`
-- [ ] The top-level `overrides:` block in
+- [x] The top-level `overrides:` block in
   `pnpm-lock.yaml` contains the new `qs` entry
-- [ ] `grep "^  tmp@" pnpm-lock.yaml` returns only
-  versions `>= 0.2.6` (no `0.2.5` resolution remains)
-- [ ] `grep "^  qs@" pnpm-lock.yaml` returns only
-  versions `>= 6.15.2` (no `6.15.1` resolution remains)
-- [ ] `grep "^  uuid@" pnpm-lock.yaml` returns no `8.3.2`
+- [x] `grep "^  tmp@" pnpm-lock.yaml` returns only
+  versions `>= 0.2.6` (resolved to `0.2.7`)
+- [x] `grep "^  qs@" pnpm-lock.yaml` returns only
+  versions `>= 6.15.2` (resolved to `6.15.2`)
+- [x] `grep "^  uuid@" pnpm-lock.yaml` returns no `8.3.2`
   resolution and no resolution in the vulnerable range
-  `< 11.1.1`. If any `uuid` resolution `< 11.1.1`
-  remains after re-resolving `@azure/msal-node`, add a
-  `uuid: ^11.1.1` entry to `pnpm.overrides` and
-  re-run `pnpm install` until this criterion holds
-- [ ] `grep "^  @azure/msal-node@" pnpm-lock.yaml`
-  returns version `5.2.2` (the re-resolved version that
-  drops `uuid` from the chain)
-- [ ] `pnpm run lint` exits zero
-- [ ] `pnpm run format` exits zero
-- [ ] `pnpm run build` exits zero
-- [ ] `pnpm run test` exits zero — vitest passing with
-  the same suite count recorded at the baseline
-- [ ] `pnpm run test:integration` exits zero — VS Code
-  integration suite passing with the same suite count
-  recorded at the baseline (uses `xvfb-run -a` on Linux
-  per root CLAUDE.md)
-- [ ] Security-engineer sign-off: the resolved lockfile
-  versions for `tmp`, `qs`, and `uuid` (or absence of a
-  vulnerable `uuid` resolution) meet or exceed the
-  `first_patched_version` of advisories #18, #19, #20,
-  with each advisory checked individually against the
-  lockfile
+  `< 11.1.1` — `uuid` is entirely absent from the
+  resolved lockfile (msal-node `5.2.2` dropped it)
+- [x] `grep "^  @azure/msal-node@" pnpm-lock.yaml`
+  returns version `5.2.2`
+- [x] `pnpm run lint` exits zero
+- [x] `pnpm run format` exits zero
+- [x] `pnpm run build` exits zero
+- [x] `pnpm run test` exits zero — 38/38 vitest passing
+- [ ] `pnpm run test:integration` exits zero — **not
+  met; pre-existing failure verified at baseline SHA
+  `97758574` (7 TS2345 errors in `src/config.test.ts`,
+  unrelated to this change). User approved landing this
+  task with the pre-existing failure unaddressed; a
+  follow-up plan repairs `src/config.test.ts`.**
+- [x] Security-engineer sign-off: input gate (risk
+  assessment of override-vs-re-resolve approach) and
+  output gate (per-advisory lockfile verification —
+  tmp@0.2.7 ≥ 0.2.6, qs@6.15.2 ≥ 6.15.2, uuid absent
+  from chain) both received
 
 ## Decisions
 
