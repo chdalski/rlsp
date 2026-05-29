@@ -31,12 +31,7 @@ beforeEach(() => {
 describe('getConfig — formatPrintWidth field presence', () => {
   it('omitted when all inspect scopes are undefined', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        defaultValue: 80,
-        globalValue: undefined,
-        workspaceValue: undefined,
-        workspaceFolderValue: undefined,
-      }) as never,
+      makeConfigStub({ defaultValue: 80 }) as never,
     );
     const result = getConfig();
     expect('formatPrintWidth' in result).toBe(false);
@@ -50,11 +45,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
   it('included when globalValue is 80', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        globalValue: 80,
-        workspaceValue: undefined,
-        workspaceFolderValue: undefined,
-      }) as never,
+      makeConfigStub({ globalValue: 80 }) as never,
     );
     const result = getConfig();
     expect('formatPrintWidth' in result).toBe(true);
@@ -63,11 +54,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
   it('included when globalValue is 100', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        globalValue: 100,
-        workspaceValue: undefined,
-        workspaceFolderValue: undefined,
-      }) as never,
+      makeConfigStub({ globalValue: 100 }) as never,
     );
     const result = getConfig();
     expect(result.formatPrintWidth).toBe(100);
@@ -75,11 +62,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
   it('included when workspaceValue is set', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        globalValue: undefined,
-        workspaceValue: 120,
-        workspaceFolderValue: undefined,
-      }) as never,
+      makeConfigStub({ workspaceValue: 120 }) as never,
     );
     const result = getConfig();
     expect(result.formatPrintWidth).toBe(120);
@@ -87,11 +70,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
   it('included when workspaceFolderValue is set', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        globalValue: undefined,
-        workspaceValue: undefined,
-        workspaceFolderValue: 60,
-      }) as never,
+      makeConfigStub({ workspaceFolderValue: 60 }) as never,
     );
     const result = getConfig();
     expect(result.formatPrintWidth).toBe(60);
@@ -111,11 +90,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
   it('included when workspaceValue is explicitly 0 (falsy boundary)', () => {
     vi.mocked(workspace.getConfiguration).mockReturnValue(
-      makeConfigStub({
-        globalValue: undefined,
-        workspaceValue: 0,
-        workspaceFolderValue: undefined,
-      }) as never,
+      makeConfigStub({ workspaceValue: 0 }) as never,
     );
     const result = getConfig();
     expect('formatPrintWidth' in result).toBe(true);
@@ -125,12 +100,7 @@ describe('getConfig — formatPrintWidth field presence', () => {
 
 describe('getConfig — other fields unaffected', () => {
   it('non-inspect fields retain values when formatPrintWidth is omitted', () => {
-    const stub = makeConfigStub({
-      defaultValue: 80,
-      globalValue: undefined,
-      workspaceValue: undefined,
-      workspaceFolderValue: undefined,
-    });
+    const stub = makeConfigStub({ defaultValue: 80 });
     stub.get.mockImplementation((key: string) => {
       if (key === 'keyOrdering') return true;
       return undefined;

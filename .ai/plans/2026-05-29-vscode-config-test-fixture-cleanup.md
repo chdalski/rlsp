@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-05-29
 
 ## Goal
@@ -107,20 +107,22 @@ manifest changes.
 
 ## Steps
 
-- [ ] Edit each `makeConfigStub({...})` call in
+- [x] Edit each `makeConfigStub({...})` call in
   `src/config.test.ts` to delete property assignments
   whose value is the literal `undefined`
-- [ ] Verify `tsc` passes (the first half of `pnpm run
+- [x] Verify `tsc` passes (the first half of `pnpm run
   test:integration`)
-- [ ] Verify `pnpm run test:integration` exits zero
-- [ ] Verify `pnpm run test` still passes with the same
+- [x] Verify `pnpm run test:integration` exits zero
+- [x] Verify `pnpm run test` still passes with the same
   baseline suite count
-- [ ] Verify `pnpm run lint`, `format`, and `build` exit
+- [x] Verify `pnpm run lint`, `format`, and `build` exit
   zero
 
 ## Tasks
 
 ### Task 1: Remove explicit `undefined` from `config.test.ts` fixtures
+
+**Commit:** `8106ca951549569a94257a92457929cc0b192811`
 
 Edit `src/config.test.ts` so that every call to
 `makeConfigStub({...})` contains only the properties the
@@ -150,19 +152,15 @@ Files involved:
 
 Sub-tasks (all must be true to pass):
 
-- [ ] `grep -nE "(default|global|workspace|workspaceFolder)Value:\s*undefined" src/config.test.ts` returns zero matches
-- [ ] `pnpm run lint` exits zero
-- [ ] `pnpm run format` exits zero
-- [ ] `pnpm run build` exits zero
-- [ ] `pnpm run test` exits zero — vitest reports 38/38
-  passing (same baseline suite count as before the edit)
-- [ ] `pnpm run test:integration` exits zero — `tsc`
-  compiles `src/` with no `TS2345` errors and
-  `vscode-test` runs to completion with all suites
-  passing
-- [ ] `git diff` shows changes confined to
+- [x] `grep -nE "(default|global|workspace|workspaceFolder)Value:\s*undefined" src/config.test.ts` returns zero matches
+- [x] `pnpm run lint` exits zero
+- [x] `pnpm run format` exits zero
+- [x] `pnpm run build` exits zero
+- [x] `pnpm run test` exits zero — vitest 38/38 passing
+- [x] `pnpm run test:integration` exits zero — `tsc`
+  clean and vscode-test 19/19 passing
+- [x] `git diff` shows changes confined to
   `rlsp-yaml/integrations/vscode/src/config.test.ts`
-  (no other files touched)
 
 ## Decisions
 
