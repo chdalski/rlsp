@@ -1,6 +1,61 @@
 # Changelog
 
 
+## [0.13.0] - 2026-06-08
+
+### Bug Fixes
+
+- Omit unset formatPrintWidth from LSP settings (a558adf)
+- Patch tmp/qs/uuid Dependabot alerts in lockfile (b388a06)
+
+### Documentation
+
+- Document formatEnable setting and external formatter interop (abb664f)
+
+### Features
+
+- Add formatEnable setting to gate LSP formatting handlers (b61430c)
+- Add .editorconfig parser module and cache (666b902)
+- Integrate .editorconfig into format handlers and watcher (1478a35)
+- Add formatRespectEditorconfig opt-out and docs (032e5b3)
+
+### Refactoring
+
+- Rename lsp_lifecycle.rs to lsp_lifecycle/main.rs (570fb7f)
+- Extract shared LSP test helpers into helpers.rs (c4eadb9)
+- Extract per-capability LSP test modules (3465ae3)
+- Extract configuration and schema-routing test modules (07511a9)
+- Extract validators_integration test module (d9f8a56)
+- Extract formatting_integration test module (3ab2cdd)
+- Rename corpus_invariants.rs to corpus_invariants/main.rs (d002edd)
+- Extract corpus_invariants shared utilities (9ff51d1)
+- Extract I1-I4 invariant test modules (13934e5)
+- Extract I5, I6, I8, I9 invariant test modules (c605197)
+- Extract I10 and I11 invariant test modules (3e943e8)
+- Move residual unit tests from corpus_invariants main.rs to shared (1025fa4)
+- Extract custom_tag and anchors validator submodules (37ac44b)
+- Extract flow_style and key_ordering submodules (b7ad482)
+- Extract duplicate_keys and yaml11_compat validator submodules (2fc45f2)
+- Extract custom_tags_validation submodule (9b28abd)
+- Extract options and scalar_render formatter submodules (db2b7c8)
+- Extract dedup formatter submodule (ace5ac8)
+- Extract sequence_render and mapping_render formatter submodules (683d9f3)
+- Extract comment_preservation and content_tracking formatter submodules (a9c684c)
+- Extract node_to_doc formatter submodule (4e08660)
+- Extract context and support schema_validation submodules (c37dda0)
+- Extract type_validation schema_validation submodule (8e942c3)
+- Extract composition schema_validation submodule (ae453bd)
+- Extract array_constraints schema_validation submodule (9afc2b2)
+- Extract scalar_constraints schema_validation submodule (f6bb764)
+- Extract mapping_constraints submodule from schema_validation (da28b7c)
+- Finish dispatcher-only schema_validation parent (d777108)
+- Strip stale numeric test markers (c194494)
+- Extract formatting and support submodules from completion.rs (d2077de)
+- Extract cursor_location submodule from completion.rs (6777776)
+- Extract navigation submodule from completion.rs (803905d)
+- Extract completion_items and completion_drivers submodules (39e8a06)
+- Extract schema_completions submodule from completion.rs (d64ee4a)
+
 ## [0.12.1] - 2026-05-13
 
 ### Bug Fixes
