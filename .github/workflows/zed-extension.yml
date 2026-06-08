@@ -75,6 +75,7 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -104,6 +105,7 @@ jobs:
             rlsp-yaml/integrations/zed/extension.toml
 
       - name: Commit, tag, and push
+        id: commit
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
@@ -118,6 +120,7 @@ jobs:
           git commit -m "chore(zed): bump extension to v${VERSION}"
           git tag -a "$TAG" -m "Zed extension v${VERSION}"
           git push origin HEAD "$TAG"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   open-registry-pr:
     name: Open Zed registry PR
@@ -139,7 +142,30 @@ jobs:
             --fork-name=zed-editor-extensions \
             --clone=false
           FORK_OWNER=$(gh api user --jq '.login')
+          gh repo sync "${FORK_OWNER}/zed-editor-extensions" \
+            --source zed-industries/extensions --branch main
           gh repo clone "${FORK_OWNER}/zed-editor-extensions" /tmp/extensions -- --depth=1
+
+      - name: Advance submodule to new release
+        env:
+          SHA: ${{ needs.commit-and-tag.outputs.sha }}
+          VERSION: ${{ needs.commit-and-tag.outputs.version }}
+        run: |
+          cd /tmp/extensions
+          git submodule update --init --depth=1 extensions/rlsp-yaml
+          cd extensions/rlsp-yaml
+          git fetch origin "${SHA}"
+          git checkout "${SHA}"
+
+          # Cross-check: extension.toml at this commit must declare the expected version
+          ACTUAL=$(grep '^version' \
+            rlsp-yaml/integrations/zed/extension.toml \
+            | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "::error::extension.toml at ${SHA} says ${ACTUAL}, expected ${VERSION}"
+            exit 1
+          fi
+          cd ../..
 
       - name: Bump version in fork's extensions.toml
         env:
@@ -179,7 +205,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add extensions.toml
+          git add extensions/rlsp-yaml extensions.toml
           git commit -m "rlsp-yaml: bump to v${VERSION}"
           git push origin "$BRANCH"
           gh pr create \

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-06-08)
 **Created:** 2026-06-08
 
 ## Goal
@@ -59,17 +59,17 @@ major versions per project convention.
 
 ## Steps
 
-- [ ] Add SHA output to `commit-and-tag` job
-- [ ] Add fork-sync step to `open-registry-pr` job
-- [ ] Add submodule advance and version cross-check
-- [ ] Update `git add` and commit to include submodule
-- [ ] Verify action versions are current
-- [ ] Test: workflow YAML is valid (actionlint or
+- [x] Add SHA output to `commit-and-tag` job
+- [x] Add fork-sync step to `open-registry-pr` job
+- [x] Add submodule advance and version cross-check
+- [x] Update `git add` and commit to include submodule
+- [x] Verify action versions are current
+- [x] Test: workflow YAML is valid (actionlint or
       equivalent)
 
 ## Tasks
 
-### Task 1: Fix the `open-registry-pr` job to advance the submodule
+### Task 1: Fix the `open-registry-pr` job to advance the submodule ✅ `b3cc7511`
 
 All changes are in `.github/workflows/zed-extension.yml`.
 
@@ -146,18 +146,18 @@ and `Swatinem/rust-cache` are at their latest stable
 major versions. Update any that aren't.
 
 Acceptance criteria:
-- [ ] `commit-and-tag` outputs both `version` and `sha`
-- [ ] Fork is synced to upstream before cloning
-- [ ] Submodule `extensions/rlsp-yaml` is initialized,
+- [x] `commit-and-tag` outputs both `version` and `sha`
+- [x] Fork is synced to upstream before cloning
+- [x] Submodule `extensions/rlsp-yaml` is initialized,
       fetched at the new SHA, and checked out
-- [ ] Version cross-check asserts `extension.toml` at the
+- [x] Version cross-check asserts `extension.toml` at the
       checked-out commit matches the version being written
       to `extensions.toml`; step fails with a clear error
       annotation if mismatched
-- [ ] `git add` stages both `extensions/rlsp-yaml` and
+- [x] `git add` stages both `extensions/rlsp-yaml` and
       `extensions.toml`
-- [ ] All actions at latest stable major versions
-- [ ] `actionlint .github/workflows/zed-extension.yml`
+- [x] All actions at latest stable major versions
+- [x] `actionlint .github/workflows/zed-extension.yml`
       exits 0 with no errors
 
 ## Non-Goals
