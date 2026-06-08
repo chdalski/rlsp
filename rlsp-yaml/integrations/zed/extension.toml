@@ -1,7 +1,7 @@
 schema_version = 1
 id = "rlsp-yaml"
 name = "rlsp-yaml"
-version = "0.1.1"
+version = "0.1.2"
 description = "YAML language server powered by rlsp-yaml"
 authors = ["Christoph Dalski", "Kirill Semenov"]
 repository = "https://github.com/chdalski/rlsp"
