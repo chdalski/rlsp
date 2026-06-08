@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-06-08)
 **Created:** 2026-06-08
 
 ## Goal
@@ -59,13 +59,13 @@ runs, committed alongside the code fix in this plan file.
 
 ## Steps
 
-- [ ] Add `gh auth setup-git` to the "Push branch and
+- [x] Add `gh auth setup-git` to the "Push branch and
       open PR" step
-- [ ] Run actionlint to verify no syntax errors
+- [x] Run actionlint to verify no syntax errors
 
 ## Tasks
 
-### Task 1: Add git credential setup before push
+### Task 1: Add git credential setup before push ✅ `04d49adb`
 
 In `.github/workflows/zed-extension.yml`, in the
 "Push branch and open PR" step (line 197), add
@@ -75,14 +75,14 @@ git's credential helper to use the `GH_TOKEN` env var
 (already declared on this step) for HTTPS push
 authentication.
 
-- [ ] `gh auth setup-git` is added before any `git` command
+- [x] `gh auth setup-git` is added before any `git` command
       that requires write access
-- [ ] `actionlint .github/workflows/zed-extension.yml`
+- [x] `actionlint .github/workflows/zed-extension.yml`
       exits 0 with no errors
-- [ ] The step's `GH_TOKEN` env var (already present) is
+- [x] The step's `GH_TOKEN` env var (already present) is
       the only auth mechanism — no new secrets or env vars
       introduced
-- [ ] The plan file (with root-cause explanation in Context)
+- [x] The plan file (with root-cause explanation in Context)
       is staged and committed alongside the workflow change
 
 ## Non-Goals

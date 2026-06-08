@@ -202,6 +202,7 @@ jobs:
           BRANCH="update-rlsp-yaml-${VERSION}"
           FORK_OWNER=$(gh api user --jq '.login')
           cd /tmp/extensions
+          gh auth setup-git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
