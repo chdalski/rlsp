@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-06-09
 
 ## Goal
@@ -34,7 +34,7 @@ bump, or re-run only the registry PR for an existing tag.
 
 ## Steps
 
-- [ ] Create `zed-registry-pr.yml` with registry PR logic extracted from
+- [x] Create `zed-registry-pr.yml` with registry PR logic extracted from
       `zed-extension.yml`
 - [ ] Rename `zed-extension.yml` → `zed-release.yml`, replace
       `open-registry-pr` with `trigger-registry-pr`, update
@@ -42,7 +42,7 @@ bump, or re-run only the registry PR for an existing tag.
 
 ## Tasks
 
-### Task 1: Create the registry PR workflow
+### Task 1: Create the registry PR workflow ✓ `169f418d`
 
 Create `.github/workflows/zed-registry-pr.yml` that encapsulates all registry
 PR logic currently in the `open-registry-pr` job of `zed-extension.yml`.
@@ -78,17 +78,17 @@ description: e.g. "Tag to create registry PR for (e.g. zed-v0.1.3)").
 - Workflow-level `name: Zed Registry PR`
 
 **Acceptance criteria:**
-- [ ] New workflow file exists at `.github/workflows/zed-registry-pr.yml`
-- [ ] `workflow_dispatch` trigger with required `tag` input of type string
-- [ ] Version extracted from tag name (strip `zed-v` prefix), validated as
+- [x] New workflow file exists at `.github/workflows/zed-registry-pr.yml`
+- [x] `workflow_dispatch` trigger with required `tag` input of type string
+- [x] Version extracted from tag name (strip `zed-v` prefix), validated as
       semver `X.Y.Z`
-- [ ] SHA resolved from `git rev-parse HEAD` after checkout at tag
-- [ ] All four registry PR steps (fork/sync/clone, submodule advance,
+- [x] SHA resolved from `git rev-parse HEAD` after checkout at tag
+- [x] All four registry PR steps (fork/sync/clone, submodule advance,
       version bump, push/PR) present and functionally identical to current
-- [ ] `gh auth setup-git` present before `git push`
-- [ ] PR title uses sentence case: `"Bump extension rlsp-yaml to ${VERSION}"`
-- [ ] Explicit `permissions` block on the job
-- [ ] Concurrency group set
+- [x] `gh auth setup-git` present before `git push`
+- [x] PR title uses sentence case: `"Bump extension rlsp-yaml to ${VERSION}"`
+- [x] Explicit `permissions` block on the job
+- [x] Concurrency group set
 
 ### Task 2: Rename and restructure the release workflow
 

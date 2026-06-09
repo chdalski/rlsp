@@ -1,0 +1,121 @@
+name: Zed Registry PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create registry PR for (e.g. zed-v0.1.3)"
+        required: true
+        type: string
+
+jobs:
+  open-registry-pr:
+    name: Open Zed registry PR
+    runs-on: ubuntu-latest
+    concurrency:
+      group: zed-registry-pr
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 1
+
+      - name: Resolve version and SHA
+        id: resolve
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#zed-v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '${TAG}' does not encode a valid semver version (expected zed-vX.Y.Z)"
+            exit 1
+          fi
+          SHA=$(git rev-parse HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag ${TAG} -> version=${VERSION} sha=${SHA}"
+
+      - name: Fork and clone zed-industries/extensions
+        env:
+          GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
+        run: |
+          gh repo fork zed-industries/extensions \
+            --fork-name=zed-editor-extensions \
+            --clone=false
+          FORK_OWNER=$(gh api user --jq '.login')
+          gh repo sync "${FORK_OWNER}/zed-editor-extensions" \
+            --source zed-industries/extensions --branch main
+          gh repo clone "${FORK_OWNER}/zed-editor-extensions" /tmp/extensions -- --depth=1
+
+      - name: Advance submodule to new release
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          cd /tmp/extensions
+          git submodule update --init --depth=1 extensions/rlsp-yaml
+          cd extensions/rlsp-yaml
+          git fetch origin "${SHA}"
+          git checkout "${SHA}"
+
+          ACTUAL=$(grep '^version' \
+            rlsp-yaml/integrations/zed/extension.toml \
+            | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "::error::extension.toml at ${SHA} says ${ACTUAL}, expected ${VERSION}"
+            exit 1
+          fi
+          cd ../..
+
+      - name: Bump version in fork's extensions.toml
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, re, pathlib
+
+          version = os.environ["VERSION"]
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit(f"Invalid version: {version!r}")
+
+          path = pathlib.Path("/tmp/extensions/extensions.toml")
+          text = path.read_text()
+
+          pattern = re.compile(
+              r'(\[rlsp-yaml\].*?version\s*=\s*")[^"]*(")',
+              re.DOTALL,
+          )
+          updated, count = pattern.subn(rf'\g<1>{version}\2', text)
+          if count != 1:
+              raise SystemExit(f"Expected exactly 1 replacement, got {count}")
+
+          path.write_text(updated)
+          print(f"Updated rlsp-yaml version to {version} in extensions.toml")
+          PYEOF
+
+      - name: Push branch and open PR
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
+        run: |
+          BRANCH="update-rlsp-yaml-${VERSION}"
+          FORK_OWNER=$(gh api user --jq '.login')
+          cd /tmp/extensions
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add extensions/rlsp-yaml extensions.toml
+          git commit -m "rlsp-yaml: Bump to v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo zed-industries/extensions \
+            --head "${FORK_OWNER}:${BRANCH}" \
+            --title "Bump extension rlsp-yaml to ${VERSION}" \
+            --body "Bumps rlsp-yaml Zed extension to v${VERSION}.
+
+          Upstream tag: https://github.com/chdalski/rlsp/releases/tag/zed-v${VERSION}"
