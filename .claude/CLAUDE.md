@@ -456,14 +456,7 @@ When the **reviewer messages you directly** with approval
    This produces a single commit covering both code
    changes and plan progress.
 
-6. **Record the commit SHA in the plan.** Run
-   `git rev-parse HEAD` to get the commit SHA. Edit the
-   plan file to record it in the completed task section,
-   then amend: `git commit --amend --no-edit`. This keeps
-   full traceability — each task in the plan links to its
-   commit — without adding a separate plan-update commit.
-
-7. **Cycle the team** if more tasks remain. Delete the
+6. **Cycle the team** if more tasks remain. Delete the
    current team via `TeamDelete`, then recreate it via
    `TeamCreate` with all four agents. This gives every
    agent — especially the developer — a clean context
@@ -482,10 +475,10 @@ When the **reviewer messages you directly** with approval
    to the `reviewer` via `SendMessage` — same handoff as
    Starting Execution step 2. The reviewer reads the plan
    file
-   (which carries checkboxes and SHAs from prior tasks)
+   (which carries checkboxes from prior tasks)
    to resume scope tracking.
 
-8. **Send the next task** to the developer, or proceed to
+7. **Send the next task** to the developer, or proceed to
    plan completion if all tasks are done. Include relevant
    cross-task context (patterns established, decisions
    made, constraints discovered) — you are the only agent
@@ -500,8 +493,7 @@ When the **reviewer messages you directly** with approval
 - Sending tasks to the developer
 - Committing approved work with plan updates (single commit
   per task) — squash WIP, update plan, stage, commit
-- Plan progress tracking (marking checkboxes, recording
-  commit SHAs)
+- Plan progress tracking (marking checkboxes)
 - Plan status changes (Completed, Canceled)
 
 **You delegate:**
@@ -564,8 +556,8 @@ When you find existing plans in the plans directory:
    incomplete, which are completed, which are canceled
 3. Ask which plans to resume, modify, or abandon
 4. If resuming, check which tasks are already committed
-   (look for recorded SHAs in the plan) and continue from
-   the next incomplete task — re-implementing committed
+   (look for completed checkboxes in the plan) and continue
+   from the next incomplete task — re-implementing committed
    work wastes effort and creates duplicate commits
 5. Re-create the team before resuming execution — teams do
    not persist across sessions
@@ -596,7 +588,7 @@ When all tasks in a plan are committed:
 
 2. **Update the plan status** to "Completed" and commit:
    `docs(<scope>): mark plan complete`. Task-level progress
-   (checkboxes, SHAs) was recorded in each task's commit
+   (checkboxes) was recorded in each task's commit
    during execution — this final status update is the
    plan-level closure.
 3. Report to the user:
@@ -666,7 +658,7 @@ a team-down window.
 - Before the first `TeamCreate` (initial planning, skill
   runs, user clarifications).
 - Between `TeamDelete` and the next `TeamCreate` in the
-  inter-task cycle (step 7 of After Reviewer Approval).
+  inter-task cycle (step 6 of After Reviewer Approval).
 - After the final `TeamDelete` at plan completion or
   abandonment.
 

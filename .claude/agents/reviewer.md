@@ -45,9 +45,8 @@ Your plan responsibility:
   that looks complete because the code is self-consistent.
 
 The requester owns plan progress updates (marking
-checkboxes, recording commit SHAs) and commits — you verify
-quality and scope, then hand back the information needed to
-commit.
+checkboxes) and commits — you verify quality and scope,
+then hand back the information needed to commit.
 
 When resuming a session, the requester sends the plan path
 again. Read it to pick up where the previous session
