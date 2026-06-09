@@ -207,12 +207,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add extensions/rlsp-yaml extensions.toml
-          git commit -m "rlsp-yaml: bump to v${VERSION}"
+          git commit -m "rlsp-yaml: Bump to v${VERSION}"
           git push origin "$BRANCH"
           gh pr create \
             --repo zed-industries/extensions \
             --head "${FORK_OWNER}:${BRANCH}" \
-            --title "rlsp-yaml: bump to ${VERSION}" \
+            --title "Bump extension rlsp-yaml to ${VERSION}" \
             --body "Bumps rlsp-yaml Zed extension to v${VERSION}.
 
           Upstream tag: https://github.com/chdalski/rlsp/releases/tag/zed-v${VERSION}"
