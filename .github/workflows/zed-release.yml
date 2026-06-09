@@ -1,4 +1,4 @@
-name: Zed Extension
+name: Zed Release
 
 on:
   push:
@@ -59,10 +59,8 @@ jobs:
 
   # Runs only on workflow_dispatch (triggered by trigger-zed in release-plz.yml).
   # Reads current version from extension.toml, increments the patch component,
-  # commits and tags in this repo, then open-registry-pr creates the registry PR.
-  #
-  # ZED_REGISTRY_PAT must be a classic PAT with `public_repo` scope — required
-  # for cross-repo PR creation against zed-industries/extensions.
+  # commits and tags in this repo, then trigger-registry-pr dispatches the
+  # registry PR workflow.
   commit-and-tag:
     name: Bump version and tag
     needs: preflight
@@ -75,7 +73,6 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
-      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -105,7 +102,6 @@ jobs:
             rlsp-yaml/integrations/zed/extension.toml
 
       - name: Commit, tag, and push
-        id: commit
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
@@ -120,99 +116,17 @@ jobs:
           git commit -m "chore(zed): bump extension to v${VERSION}"
           git tag -a "$TAG" -m "Zed extension v${VERSION}"
           git push origin HEAD "$TAG"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  open-registry-pr:
-    name: Open Zed registry PR
+  trigger-registry-pr:
+    name: Trigger registry PR
     needs: commit-and-tag
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    concurrency:
-      group: zed-release
-      cancel-in-progress: false
-    permissions: {}
+    permissions:
+      actions: write
     steps:
-      - name: Fork and clone zed-industries/extensions
-        env:
-          GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
-        run: |
-          # --fork-name renames the fork so it doesn't sit as a generic
-          # "extensions" repo in the owner's namespace. If a fork with the
-          # target name already exists, gh repo fork is a no-op.
-          gh repo fork zed-industries/extensions \
-            --fork-name=zed-editor-extensions \
-            --clone=false
-          FORK_OWNER=$(gh api user --jq '.login')
-          gh repo sync "${FORK_OWNER}/zed-editor-extensions" \
-            --source zed-industries/extensions --branch main
-          gh repo clone "${FORK_OWNER}/zed-editor-extensions" /tmp/extensions -- --depth=1
-
-      - name: Advance submodule to new release
-        env:
-          SHA: ${{ needs.commit-and-tag.outputs.sha }}
-          VERSION: ${{ needs.commit-and-tag.outputs.version }}
-        run: |
-          cd /tmp/extensions
-          git submodule update --init --depth=1 extensions/rlsp-yaml
-          cd extensions/rlsp-yaml
-          git fetch origin "${SHA}"
-          git checkout "${SHA}"
-
-          # Cross-check: extension.toml at this commit must declare the expected version
-          ACTUAL=$(grep '^version' \
-            rlsp-yaml/integrations/zed/extension.toml \
-            | head -1 | sed 's/.*"\(.*\)"/\1/')
-          if [ "$ACTUAL" != "$VERSION" ]; then
-            echo "::error::extension.toml at ${SHA} says ${ACTUAL}, expected ${VERSION}"
-            exit 1
-          fi
-          cd ../..
-
-      - name: Bump version in fork's extensions.toml
+      - name: Dispatch registry PR workflow
         env:
           VERSION: ${{ needs.commit-and-tag.outputs.version }}
-        run: |
-          python3 - <<'PYEOF'
-          import os, re, pathlib
-
-          version = os.environ["VERSION"]
-          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-              raise SystemExit(f"Invalid version: {version!r}")
-
-          path = pathlib.Path("/tmp/extensions/extensions.toml")
-          text = path.read_text()
-
-          # Replace only the version line inside the [rlsp-yaml] section.
-          pattern = re.compile(
-              r'(\[rlsp-yaml\].*?version\s*=\s*")[^"]*(")',
-              re.DOTALL,
-          )
-          updated, count = pattern.subn(rf'\g<1>{version}\2', text)
-          if count != 1:
-              raise SystemExit(f"Expected exactly 1 replacement, got {count}")
-
-          path.write_text(updated)
-          print(f"Updated rlsp-yaml version to {version} in extensions.toml")
-          PYEOF
-
-      - name: Push branch and open PR
-        env:
-          VERSION: ${{ needs.commit-and-tag.outputs.version }}
-          GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
-        run: |
-          BRANCH="update-rlsp-yaml-${VERSION}"
-          FORK_OWNER=$(gh api user --jq '.login')
-          cd /tmp/extensions
-          gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add extensions/rlsp-yaml extensions.toml
-          git commit -m "rlsp-yaml: Bump to v${VERSION}"
-          git push origin "$BRANCH"
-          gh pr create \
-            --repo zed-industries/extensions \
-            --head "${FORK_OWNER}:${BRANCH}" \
-            --title "Bump extension rlsp-yaml to ${VERSION}" \
-            --body "Bumps rlsp-yaml Zed extension to v${VERSION}.
-
-          Upstream tag: https://github.com/chdalski/rlsp/releases/tag/zed-v${VERSION}"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run zed-registry-pr.yml --repo "${GITHUB_REPOSITORY}" --field "tag=zed-v${VERSION}"

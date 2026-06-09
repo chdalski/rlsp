@@ -36,7 +36,7 @@ bump, or re-run only the registry PR for an existing tag.
 
 - [x] Create `zed-registry-pr.yml` with registry PR logic extracted from
       `zed-extension.yml`
-- [ ] Rename `zed-extension.yml` → `zed-release.yml`, replace
+- [x] Rename `zed-extension.yml` → `zed-release.yml`, replace
       `open-registry-pr` with `trigger-registry-pr`, update
       `release-plz.yml` reference
 
@@ -90,7 +90,7 @@ description: e.g. "Tag to create registry PR for (e.g. zed-v0.1.3)").
 - [x] Explicit `permissions` block on the job
 - [x] Concurrency group set
 
-### Task 2: Rename and restructure the release workflow
+### Task 2: Rename and restructure the release workflow ✓ `d8abcfe1`
 
 Rename `zed-extension.yml` → `zed-release.yml` and restructure it to dispatch
 the new registry PR workflow instead of running the registry PR logic inline.
@@ -117,16 +117,16 @@ the new registry PR workflow instead of running the registry PR logic inline.
    to `gh workflow run zed-release.yml` in the `trigger-zed` job (line 93).
 
 **Acceptance criteria:**
-- [ ] File renamed from `zed-extension.yml` to `zed-release.yml`
-- [ ] Workflow `name:` updated to `Zed Release`
-- [ ] `open-registry-pr` job removed
-- [ ] `sha` output and related lines removed from `commit-and-tag`
-- [ ] `trigger-registry-pr` job added with correct `needs`, `permissions`,
+- [x] File renamed from `zed-extension.yml` to `zed-release.yml`
+- [x] Workflow `name:` updated to `Zed Release`
+- [x] `open-registry-pr` job removed
+- [x] `sha` output and related lines removed from `commit-and-tag`
+- [x] `trigger-registry-pr` job added with correct `needs`, `permissions`,
       and dispatch command
-- [ ] `version` output still present in `commit-and-tag`
-- [ ] `check`, `preflight`, and `commit-and-tag` jobs unchanged (aside from
+- [x] `version` output still present in `commit-and-tag`
+- [x] `check`, `preflight`, and `commit-and-tag` jobs unchanged (aside from
       the output cleanup)
-- [ ] `release-plz.yml` updated to reference `zed-release.yml`
+- [x] `release-plz.yml` updated to reference `zed-release.yml`
 
 ## Decisions
 

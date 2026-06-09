@@ -90,7 +90,7 @@ jobs:
 
       - name: Trigger Zed extension workflow
         if: steps.check.outputs.found == 'true'
-        run: gh workflow run zed-extension.yml
+        run: gh workflow run zed-release.yml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
