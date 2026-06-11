@@ -28,7 +28,7 @@ jobs:
       - name: Generate coverage report
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -54,7 +54,7 @@ jobs:
         run: pnpm run test:coverage
         working-directory: rlsp-yaml/integrations/vscode
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: rlsp-yaml/integrations/vscode/coverage/lcov.info
           flags: vscode
