@@ -13,7 +13,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -33,7 +33,7 @@ jobs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       releases: ${{ steps.release.outputs.releases }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Check if rlsp-yaml was released
         id: check
@@ -78,7 +78,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Check if rlsp-yaml was released
         id: check
@@ -135,7 +135,7 @@ jobs:
           - { target: x86_64-pc-windows-msvc, os: windows-latest }
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ matrix.crate.tag }}
 
