@@ -206,7 +206,10 @@
       "lodash": ">=4.18.0",
       "fast-uri": "^3.1.2",
       "serialize-javascript": "^7.0.5",
-      "qs": "^6.15.2"
+      "qs": "^6.15.2",
+      "undici": "^7.28.0",
+      "form-data": "^4.0.6",
+      "markdown-it": "^14.2.0"
     }
   },
   "devDependencies": {
@@ -217,7 +220,7 @@
     "@vitest/coverage-v8": "^4.1.5",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.9.1",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.2.1",
     "prettier": "^3.8.3",

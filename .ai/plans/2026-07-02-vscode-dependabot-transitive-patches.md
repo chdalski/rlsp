@@ -127,7 +127,7 @@ established this override-based remediation pattern. This plan follows it.
 
 ## Steps
 
-- [ ] Pin patched transitives (undici, form-data, markdown-it) + bump
+- [x] Pin patched transitives (undici, form-data, markdown-it) + bump
       `@vscode/vsce`, regenerate the lockfile, and verify audit + quality
       gates (Task 1).
 
@@ -139,25 +139,29 @@ Single vertical slice — the change is one coherent unit (manifest edit +
 lockfile regeneration + verification); splitting it would produce a
 non-buildable intermediate state.
 
-- [ ] In `rlsp-yaml/integrations/vscode/package.json`, add three entries
+- [x] In `rlsp-yaml/integrations/vscode/package.json`, add three entries
       to the existing `pnpm.overrides` block:
       - `"undici": "^7.28.0"`
       - `"form-data": "^4.0.6"`
       - `"markdown-it": "^14.2.0"`
-- [ ] In the same file, bump the `@vscode/vsce` devDependency from
+- [x] In the same file, bump the `@vscode/vsce` devDependency from
       `^3.9.1` to `^3.9.2`.
-- [ ] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
+- [x] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
       `pnpm-lock.yaml` with the pinned versions.
-- [ ] Verify locked versions: confirm `pnpm-lock.yaml` resolves
+- [x] Verify locked versions: confirm `pnpm-lock.yaml` resolves
       `undici` ≥ 7.28.0, `form-data` ≥ 4.0.6, `markdown-it` ≥ 14.2.0
-      (e.g. `pnpm why undici` / grep the lockfile).
-- [ ] Run `pnpm audit --audit-level low` and confirm no advisories remain
-      for the three packages (report the output in the handoff).
-- [ ] Run the extension quality gates and confirm all pass:
+      (resolved: undici 7.28.0, form-data 4.0.6, markdown-it 14.3.0).
+- [x] Run `pnpm audit --audit-level low` and confirm no advisories remain
+      for the three packages (clean for undici/form-data/markdown-it; 3
+      residual moderate/low items are `@vscode/test-cli` test-infra only,
+      not among the 8 in-scope alerts).
+- [x] Run the extension quality gates and confirm all pass:
       `pnpm run build`, `pnpm run lint`, `pnpm run format`,
-      `pnpm run test`.
-- [ ] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
-      three overrides + vsce bump.
+      `pnpm run test` (build PASS, eslint 0 warnings, prettier PASS,
+      vitest 38/38).
+- [x] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
+      three overrides + vsce bump (36 insertions / 72 deletions, no
+      unrelated churn).
 
 **Acceptance:** all plan-level acceptance criteria (1–5) met and reported
 in the handoff, including the actual `pnpm audit` output and the resolved
