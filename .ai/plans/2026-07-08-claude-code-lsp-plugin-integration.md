@@ -178,7 +178,7 @@ verification accordingly:
 - [x] Clarify scope (Tier 1 LSP plugin) and provisioning (PATH + auto-download)
 - [x] Confirm Claude Code `.lsp.json`, hooks, plugin, and variable-expansion facts
 - [x] Confirm release asset naming, targets, and download URL scheme
-- [ ] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
+- [x] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
 - [ ] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [ ] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
@@ -210,13 +210,13 @@ Files:
   integration dirs.
 
 Acceptance criteria:
-- [ ] `plugin.json` and `.lsp.json` parse as valid JSON, contain every field
+- [x] `plugin.json` and `.lsp.json` parse as valid JSON, contain every field
       required by the Claude Code plugin/LSP schema (`command` and
       `extensionToLanguage` present; language id `"yaml"`), and the plugin
       passes `claude plugin validate --strict` (the same check the
       community-submission pipeline runs; `--strict` fails on missing metadata
       and unrecognized fields).
-- [ ] A smoke test drives the `PATH` `rlsp-yaml` binary directly (outside
+- [x] A smoke test drives the `PATH` `rlsp-yaml` binary directly (outside
       Claude Code) with an LSP `initialize` followed by `didOpen` of a document
       containing a YAML syntax error, and observes a `publishDiagnostics`
       notification reporting that error. This proves the exact binary the

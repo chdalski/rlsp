@@ -1,0 +1,10 @@
+{
+  "yaml": {
+    "command": "rlsp-yaml",
+    "extensionToLanguage": {
+      ".yaml": "yaml",
+      ".yml": "yaml"
+    },
+    "diagnostics": true
+  }
+}

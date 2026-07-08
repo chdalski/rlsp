@@ -1,0 +1,14 @@
+{
+  "name": "rlsp-yaml",
+  "displayName": "rlsp-yaml",
+  "description": "YAML language support powered by rlsp-yaml — fast, schema-aware, built in Rust.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Christoph Dalski",
+    "url": "https://github.com/chdalski"
+  },
+  "homepage": "https://github.com/chdalski/rlsp/tree/main/rlsp-yaml",
+  "repository": "https://github.com/chdalski/rlsp",
+  "license": "MIT",
+  "keywords": ["yaml", "lsp", "language-server"]
+}
