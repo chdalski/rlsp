@@ -153,7 +153,7 @@ follows it.
 
 ## Steps
 
-- [ ] Pin patched `js-yaml` via `pnpm.overrides`, regenerate the lockfile,
+- [x] Pin patched `js-yaml` via `pnpm.overrides`, regenerate the lockfile,
       and verify audit + quality gates (Task 1).
 
 ## Tasks
@@ -164,25 +164,34 @@ Single vertical slice — the change is one coherent unit (manifest edit +
 lockfile regeneration + verification); splitting it would produce a
 non-buildable intermediate state.
 
-- [ ] In `rlsp-yaml/integrations/vscode/package.json`, add one entry to the
+- [x] In `rlsp-yaml/integrations/vscode/package.json`, add one entry to the
       existing `pnpm.overrides` block: `"js-yaml": "^4.2.0"`.
-- [ ] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
+- [x] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
       `pnpm-lock.yaml` with the pinned version.
-- [ ] Verify locked versions: confirm `pnpm-lock.yaml` resolves `js-yaml`
+- [x] Verify locked versions: confirm `pnpm-lock.yaml` resolves `js-yaml`
       to ≥ 4.2.0 at every occurrence (no remaining `js-yaml@4.1.1`).
-- [ ] Run `pnpm audit --audit-level low` and confirm no advisory remains
+- [x] Run `pnpm audit --audit-level low` and confirm no advisory remains
       for `js-yaml`. Note any residual advisories for other packages and
       confirm they are pre-existing / out of scope (not introduced by this
       change).
-- [ ] Run the extension quality gates and confirm all pass:
+- [x] Run the extension quality gates and confirm all pass:
       `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       `pnpm run test`.
-- [ ] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
+- [x] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
       `js-yaml` override.
 
 **Acceptance:** all plan-level acceptance criteria (1–5) met and reported
 in the handoff, including the actual `pnpm audit` result for `js-yaml` and
 the resolved version(s) of `js-yaml` in the lockfile.
+
+**Result (2026-07-08):** js-yaml resolves to `4.3.0` at all 5 lockfile
+occurrences (zero remaining `4.1.1`); `pnpm audit` reports no js-yaml
+finding (advisory cleared); override present at `package.json`
+`pnpm.overrides`; all four quality gates pass (build clean, lint 0
+warnings, prettier clean, vitest 38/38); no unrelated lockfile churn (the
+two residual audit findings — `brace-expansion@5.0.5`, `diff@7.0.0` — are
+verified pre-existing, identical at baseline and HEAD, and are separate
+out-of-scope alerts).
 
 **Files:**
 - `rlsp-yaml/integrations/vscode/package.json`
