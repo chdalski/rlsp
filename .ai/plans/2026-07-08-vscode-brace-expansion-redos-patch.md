@@ -132,7 +132,7 @@ following that convention — with the version-scoping refinement above.
 
 ## Steps
 
-- [ ] Add a version-scoped `brace-expansion` 5.x override, regenerate the
+- [x] Add a version-scoped `brace-expansion` 5.x override, regenerate the
       lockfile, and verify the 5.x line is patched while 2.x is untouched,
       plus audit + quality gates (Task 1).
 
@@ -144,31 +144,40 @@ Single vertical slice — one coherent unit (manifest edit + lockfile
 regeneration + verification); splitting would produce a non-buildable
 intermediate state.
 
-- [ ] In `rlsp-yaml/integrations/vscode/package.json`, add a version-scoped
+- [x] In `rlsp-yaml/integrations/vscode/package.json`, add a version-scoped
       entry to the existing `pnpm.overrides` block targeting the 5.x line
       only — recommended `"brace-expansion@5": "^5.0.6"`.
-- [ ] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
+- [x] Run `pnpm install` in `rlsp-yaml/integrations/vscode` to regenerate
       `pnpm-lock.yaml`.
-- [ ] Verify the 5.x line: confirm no remaining `brace-expansion@5.0.5`;
+- [x] Verify the 5.x line: confirm no remaining `brace-expansion@5.0.5`;
       the 5.x occurrence(s) resolve to ≥ 5.0.6.
-- [ ] Verify the 2.x line is untouched: confirm `brace-expansion@2.1.0`
+- [x] Verify the 2.x line is untouched: confirm `brace-expansion@2.1.0`
       still appears unchanged (runtime `vscode-languageclient` path). If
       the override disturbed 2.x, switch to a narrower selector and
       re-verify.
-- [ ] Run `pnpm audit --audit-level low`; confirm no advisory remains for
+- [x] Run `pnpm audit --audit-level low`; confirm no advisory remains for
       `brace-expansion`. Note residual advisories for other packages
       (expected: `diff@7.0.0`, out of scope by decision) and confirm they
       are pre-existing, not introduced here.
-- [ ] Run the extension quality gates and confirm all pass:
+- [x] Run the extension quality gates and confirm all pass:
       `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       `pnpm run test`.
-- [ ] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
+- [x] Spot-check the `pnpm-lock.yaml` diff for unexpected churn beyond the
       scoped `brace-expansion` bump.
 
 **Acceptance:** all plan-level acceptance criteria (1–6) met and reported
 in the handoff, including the actual `pnpm audit` result for
 `brace-expansion`, the resolved 5.x version, and confirmation the 2.x line
 is unchanged.
+
+**Result (2026-07-08):** scoped override `"brace-expansion@5": "^5.0.6"`
+added; 5.x line resolves to `5.0.7` at both lockfile sites (zero remaining
+`5.0.5`); both `brace-expansion@2.1.0` sites unchanged (integrity hash
+byte-identical to baseline, absent from the diff) — runtime
+`vscode-languageclient` path untouched; `pnpm audit` reports zero
+brace-expansion findings; all four quality gates pass (build clean, lint 0
+warnings, prettier clean, vitest 38/38); no unrelated churn. The residual
+`diff@7.0.0` low finding is unchanged and out of scope by user decision.
 
 **Files:**
 - `rlsp-yaml/integrations/vscode/package.json`
