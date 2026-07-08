@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-07-08)
 **Created:** 2026-07-08
 
 # VS Code Extension — Patch brace-expansion 5.x ReDoS (scoped override)
