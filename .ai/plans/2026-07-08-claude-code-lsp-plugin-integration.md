@@ -185,7 +185,7 @@ verification accordingly:
 - [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [x] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
-- [ ] Task 5 — Document the first-install session-restart in the integration README (found during user verification)
+- [x] Task 5 — Document the first-install session-restart in the integration README (found during user verification)
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
@@ -456,19 +456,25 @@ wrapper) remains out of scope (relies on undocumented behavior; see Non-Goals).
 Files:
 - `rlsp-yaml/integrations/claude-code/README.md` — in the provisioning/
   installation section (and the `/plugin` Errors-tab troubleshooting note), add
-  a concise note: after a fresh `/plugin install` on a machine with no
-  `rlsp-yaml` on `PATH`, start one new session so the `SessionStart` hook
-  downloads and installs the binary and the LSP activates; keeping `rlsp-yaml`
-  on `PATH` avoids the wait entirely (the PATH copy is instant).
+  a concise note: after **any** fresh `/plugin install`, start one new session
+  so the `SessionStart` hook provisions `${CLAUDE_PLUGIN_DATA}/rlsp-yaml` and the
+  LSP activates — the hook runs at session start, so it does not fire in the
+  session where `/plugin install` runs. Having `rlsp-yaml` on `PATH` makes that
+  provisioning **instant** (the hook *copies* the PATH binary instead of
+  downloading ~10 MB) but does **not** remove the one restart, because that copy
+  also runs in the `SessionStart` hook.
 
 Acceptance criteria:
-- [ ] The integration README documents the first-install session-restart
-      behavior for the no-PATH-binary case, in the provisioning/installation
-      and/or `/plugin` troubleshooting section.
-- [ ] The note states the on-PATH mitigation (instant, no wait).
-- [ ] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
+- [x] The integration README documents that a fresh `/plugin install` needs one
+      new session for provisioning to run (the `SessionStart` hook does not fire
+      in the install session), in the provisioning/installation and/or `/plugin`
+      troubleshooting section.
+- [x] The note states the on-`PATH` benefit **accurately**: provisioning is
+      instant (a copy, no ~10 MB download), but the one-time first-install
+      restart still applies — `PATH` does not avoid the restart.
+- [x] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
       passes (sanity check — no structural change).
-- [ ] Only `rlsp-yaml/integrations/claude-code/README.md` changes (no code, no
+- [x] Only `rlsp-yaml/integrations/claude-code/README.md` changes (no code, no
       other docs).
 
 ## Decisions

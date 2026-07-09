@@ -54,6 +54,17 @@ The hook re-runs at the start of every session. If it already has a
 working binary in place, this is a fast no-op; if a previous run failed or
 was interrupted, it retries automatically.
 
+**Every fresh install needs one session restart.** `/plugin install` happens
+mid-session, after that session's `SessionStart` hook has already run — so
+the hook that provisions `${CLAUDE_PLUGIN_DATA}/rlsp-yaml` doesn't fire, and
+the LSP doesn't activate, until you start a **new session**. This is
+inherent to Claude Code's session lifecycle: there is no install-time hook,
+and `/reload-plugins` does not re-run `SessionStart`. If `rlsp-yaml` is
+already on `PATH`, that provisioning is **instant** once the hook runs — it
+copies your `PATH` binary into the data dir instead of downloading it — but
+the one restart still applies, since the copy happens inside that same
+`SessionStart` hook. `PATH` avoids the download, not the restart.
+
 **Windows is not covered by this plugin.** The provisioning hook is a POSIX
 shell script and does not run under native Windows. Windows support is
 planned as a separate, Windows-verified follow-up.
@@ -103,6 +114,8 @@ Common issues:
   provisioning hook has not run yet or failed. Check the hook's guidance
   message in Claude's context at session start; it names the specific
   failure (unsupported platform, network error, integrity check failure).
+  Right after a fresh `/plugin install`, this is expected — start one new
+  session to trigger provisioning (see [Provisioning](#provisioning)).
 - **No diagnostics after editing a YAML file** — confirm the LSP server is
   listed with no Errors-tab entries first; a server that never started
   cannot produce diagnostics.
