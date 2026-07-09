@@ -2,6 +2,7 @@
 name = "rlsp-yaml-zed"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.97"
 description = "Zed extension for rlsp-yaml YAML language server"
 authors = ["Christoph Dalski", "Kirill Semenov"]
 repository = "https://github.com/chdalski/rlsp"

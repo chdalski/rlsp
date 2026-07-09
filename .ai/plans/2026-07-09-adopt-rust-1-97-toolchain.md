@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-07-09
 
 # Adopt Rust 1.97 and Fix Clippy Regressions
@@ -8,11 +8,11 @@
 
 CI's "Format + Clippy" job went red because CI floats on
 `dtolnay/rust-toolchain@stable` (currently Rust 1.97.0)
-while local dev lagged on 1.94.1 — so 13 new clippy lints
+while local dev lagged on 1.94.1 — so clippy lints
 introduced/tightened in 1.97 were invisible locally and
 only failed on push. Get CI green again under 1.97 and
-adopt 1.97 as the project's Rust version: fix the 13
-clippy findings, pin local dev to 1.97.0 via
+adopt 1.97 as the project's Rust version: fix **all** the
+1.97 clippy findings, pin local dev to 1.97.0 via
 `rust-toolchain.toml` so contributors and AI agents build
 against the same compiler CI uses (catching such lints
 before push), and bump the declared MSRV to 1.97 across
@@ -23,11 +23,13 @@ all crates.
 - **Trigger:** failed run
   https://github.com/chdalski/rlsp/actions/runs/29021942363/job/86131172450
   — `cargo clippy --workspace --all-targets -- -D warnings`
-  exited 101. `cargo fmt --check`, the full test suite,
-  `cargo build --all-targets`, and the Zed wasm clippy
-  gate are all clean under 1.97; the *only* breakage is
-  the 13 clippy findings below.
-- **The 13 clippy findings (all in test code):**
+  exited 101 (the CI log showed only the loader-test errors
+  because clippy aborts after the first crate fails to
+  compile). `cargo fmt --check`, the full test suite, and
+  `cargo build --all-targets` pass under 1.97 — the code
+  compiles and all tests pass; only the clippy gate is red.
+- **Task 1 findings (13, all test code — now fixed in
+  613e940b):**
   - `useless_borrows_in_formatting` — redundant `&` in
     `assert!`/`assert_eq!` format arguments:
     - `rlsp-yaml-parser/tests/loader.rs` lines 60, 86,
@@ -43,6 +45,29 @@ all crates.
     `&`; convert to `assert_eq!`). Both changes are
     semantics-preserving and compile on the old MSRV — no
     newer-compiler feature is required.
+- **Scope correction (clean build) — the initial "only 13
+  findings" enumeration was WRONG.** It was taken with a
+  *stale incremental clippy cache* after the mid-session
+  1.94→1.97 toolchain switch, so unchanged library code was
+  never re-linted. The reviewer caught this on Task 2 via a
+  clean build; the lead independently reproduced it. A full
+  `cargo clean` + `cargo clippy --workspace --all-targets`
+  under 1.97.0 surfaces the real remaining set:
+  - **91 `collapsible_if`** — the new-in-1.97 let-chain
+    collapse (`if a { if let P = e {…} }` →
+    `if a && let P = e {…}`), across both crates, mostly
+    production `src/` (rlsp-yaml lib 48, rlsp-yaml-parser
+    lib 28) plus ~15 in test files.
+  - **1 `missing_const_for_fn`** (nursery lint — one fn
+    that could be `const`).
+  All are newly flagged by 1.97 (the project was
+  clippy-clean on 1.94). Task 1's 13 fixes were real, but
+  Task 1 did NOT make `main` green — these 92 were latent.
+  Lesson: always `cargo clean` before verifying lints after
+  a toolchain change (see Task 3).
+- **User decision:** fix all of them (apply the collapses;
+  make the fn `const`) — keep the strict-clippy posture
+  rather than allowing/suppressing the lints.
 - **Why warnings fail even without `-D warnings`:** the
   workspace lint config sets `warnings = "deny"`, so any
   clippy warning is an error regardless of the CLI flag.
@@ -100,13 +125,22 @@ all crates.
 ## Steps
 
 - [x] Reproduce the CI failure locally on 1.97.0
-- [x] Enumerate all 1.97 breakage (clippy only; 13 findings)
-- [x] Confirm strategy with user (pin local, CI canary; MSRV 1.97; all 4 crates; devcontainer unchanged)
-- [x] Task 1: Fix the 13 clippy findings
-- [ ] Task 2: Add `rust-toolchain.toml` pin and bump MSRV to 1.97 in all 4 crates
-- [ ] Confirm the full gate set passes under 1.97
+- [x] Enumerate 1.97 breakage (initial pass under-reported due to stale clippy cache; corrected via clean build — see Context)
+- [x] Confirm strategy with user (pin local, CI canary; MSRV 1.97; all 4 crates; devcontainer unchanged; fix-all clippy)
+- [x] Task 1: Fix the 13 test-code clippy findings (committed 613e940b)
+- [x] Task 3: Fix the 91 `collapsible_if` + 1 `missing_const_for_fn` (clean build → clippy green)
+- [x] Task 2: Finalize `rust-toolchain.toml` pin + MSRV bump to 1.97 (config done as WIP; commits after Task 3)
+- [ ] Confirm the full gate set passes under 1.97 on a clean build
 
 ## Tasks
+
+> **Authoritative execution/commit order is 1 → 3 → 2, NOT
+> document order.** Task numbers are stable identifiers (the
+> active team already knows Task 2 as the pin/MSRV work).
+> Task 2's config was implemented first as WIP `284d9d1f`
+> but commits LAST, because its clean-build clippy
+> acceptance only holds after Task 3's fixes land. Read
+> Task 3 before finalizing Task 2.
 
 ### Task 1: Fix the 13 clippy findings
 
@@ -138,6 +172,11 @@ green immediately.
 Acceptance: all four commands above pass; the diff touches
 only the three named test files.
 
+**Note (post-hoc):** Task 1's clippy verification ran
+against a stale incremental cache; its 13 fixes are
+correct but did NOT make `main` green — 92 further 1.97
+findings were latent (see Context / Task 3).
+
 ### Task 2: Adopt Rust 1.97 (pin toolchain + bump MSRV)
 
 Add a root `rust-toolchain.toml` pinning local dev to
@@ -145,34 +184,85 @@ Add a root `rust-toolchain.toml` pinning local dev to
 crates. CI toolchain refs are intentionally left on
 `@stable` (Non-Goals).
 
-- [ ] Create `rust-toolchain.toml` at the repo root with
+**Sequencing:** the config work is already implemented as
+WIP commit `284d9d1f` but is held unapproved — its
+acceptance requires a clean-build clippy pass, which is
+only true after Task 3. Task 2 therefore commits *after*
+Task 3 (final history: Task 1 → Task 3 fix → Task 2
+pin/MSRV), so every landed commit's clippy state is
+coherent.
+
+- [x] Create `rust-toolchain.toml` at the repo root with
       `channel = "1.97.0"` and
       `components = ["clippy", "rustfmt"]`
-- [ ] Add a comment in `rust-toolchain.toml` stating that
+- [x] Add a comment in `rust-toolchain.toml` stating that
       it pins local dev while CI floats on `@stable` as a
       new-stable canary (reveals intent for future readers)
-- [ ] Change `rust-version = "1.87"` to
+- [x] Change `rust-version = "1.87"` to
       `rust-version = "1.97"` in `rlsp-fmt/Cargo.toml`,
       `rlsp-yaml/Cargo.toml`, `rlsp-yaml-parser/Cargo.toml`
-- [ ] Add `rust-version = "1.97"` to the `[package]` table
+- [x] Add `rust-version = "1.97"` to the `[package]` table
       of `rlsp-yaml/integrations/zed/Cargo.toml` (leave its
       `version` and `edition` untouched)
-- [ ] Do NOT modify any `version = "..."` field in any
+- [x] Do NOT modify any `version = "..."` field in any
       Cargo.toml
-- [ ] With the pin file present, `cargo clippy --workspace
+- [x] With the pin file present, `cargo clippy --workspace
       --all-targets -- -D warnings`, `cargo test --workspace`,
       and `cargo fmt --all -- --check` still pass
-- [ ] The Zed wasm gate still passes:
+- [x] The Zed wasm gate still passes:
       `cargo clippy --manifest-path
       rlsp-yaml/integrations/zed/Cargo.toml --all-targets
       --target wasm32-wasip2 -- -D warnings`
-- [ ] `cargo metadata` / `cargo build` accept the new
+- [x] `cargo metadata` / `cargo build` accept the new
       `rust-version` without an MSRV error
 
 Acceptance: `rust-toolchain.toml` exists and pins 1.97.0;
 all four crates declare `rust-version = "1.97"`; no
 `version =` field changed; the workspace and Zed gates
 listed above all pass under the pin.
+
+### Task 3: Fix the 91 `collapsible_if` + 1 `missing_const_for_fn`
+
+Apply clippy's fixes for the remaining 1.97 findings so a
+**clean-build** `cargo clippy --workspace --all-targets --
+-D warnings` passes. Executes before Task 2 is finalized so
+`main` reaches a genuinely green clippy. Touches production
+parser + LSP code, so the test-engineer is consulted (both
+gates).
+
+- [x] test-engineer INPUT gate: obtain a
+      test/verification list before implementing — the
+      parser is hot-path code over untrusted YAML; confirm
+      the existing unit/conformance/yaml-test-suite
+      coverage catches any semantic drift from the
+      collapses, and flag any site needing a targeted
+      assertion
+- [x] Apply the 91 `collapsible_if` collapses across both
+      crates' `src/` and test files (use `cargo clippy
+      --fix` for reliability, then review the diff — the
+      collapses are semantics-preserving per clippy)
+- [x] Fix the 1 `missing_const_for_fn` (make the fn
+      `const`)
+- [x] `cargo fmt --all`, then `cargo fmt --all -- --check`
+      exits 0
+- [x] CLEAN-BUILD gate (mandatory — run `cargo clean`
+      first): `cargo clippy --workspace --all-targets --
+      -D warnings` exits 0 (0 warnings)
+- [x] `cargo test --workspace` passes with 0 failures
+      (verifies the collapses preserved parser behavior)
+- [x] Zed wasm gate: `cargo clippy --manifest-path
+      rlsp-yaml/integrations/zed/Cargo.toml --all-targets
+      --target wasm32-wasip2 -- -D warnings` exits 0
+- [x] Diff touches only `.rs` source — no Cargo.toml,
+      `rust-toolchain.toml`, workflow, or `version =`
+      change
+- [x] test-engineer OUTPUT gate: sign-off that the applied
+      fixes are covered by the verified test set
+
+Acceptance: on a CLEAN build (`cargo clean` first),
+`cargo clippy --workspace --all-targets -- -D warnings`
+exits 0 and `cargo test --workspace` passes with 0
+failures; the diff touches only `.rs` source files.
 
 ## Decisions
 
@@ -190,16 +280,33 @@ listed above all pass under the pin.
   reproducibility; CI's floating stable may advance to
   1.97.x — patch drift rarely adds lints, so the canary
   still works at minor granularity.
-- **Two tasks, clippy first.** Task 1 restores green `main`
-  immediately (all 13 clippy errors must land in one commit
-  because `cargo clippy --workspace` fails wholesale on any
-  single warning). Task 2 is pure metadata/infra and keeps
-  `main` green.
-- **No advisors.** Task 1 is test-only, mechanical, and
-  semantics-preserving; Task 2 is config/metadata. Neither
-  touches a trust boundary, untrusted input, or test
-  coverage — both are low-risk, low-uncertainty per
-  `risk-assessment.md`.
+- **Fix all findings (not allow).** Per the user, apply the
+  91 `collapsible_if` collapses and make the fn `const`,
+  preserving the strict-clippy posture rather than relaxing
+  a core lint.
+- **Clean build is mandatory for lint verification.** The
+  whole scope-correction happened because incremental clippy
+  cache hid findings after the toolchain switch. Task 3's
+  clippy gate MUST run after `cargo clean`; the same applies
+  to any future toolchain-change verification.
+- **Execution/commit order: Task 1 → Task 3 → Task 2.**
+  Task 1 is committed (613e940b). Task 3 (the collapsible_if
+  fix) lands next so a clean-build clippy goes green. Task 2
+  (pin + MSRV, config already done as WIP `284d9d1f`) commits
+  last. Final landing: `git reset 613e940b`, then commit the
+  `.rs` fixes ("fix"/"style" type), then commit the pin +
+  MSRV + plan ("build"/"chore" type — reviewer picks, MSRV
+  is release-relevant).
+- **Advisors: test-engineer for Task 3 only.** Tasks 1 and 2
+  are test-only / config-only (no advisors). Task 3 modifies
+  production parser + LSP code across ~76 `src/` sites;
+  though mechanical, the parser is the untrusted-YAML
+  authority, so the test-engineer verifies coverage catches
+  any semantic drift (input + output gates). No
+  security-engineer: the collapses introduce no new
+  trust-boundary logic — they are semantics-preserving
+  refactors of existing conditionals, and correctness is
+  guarded by the conformance/test suite.
 
 ## Non-Goals
 
@@ -225,3 +332,7 @@ listed above all pass under the pin.
   toolchain/packaging change, not a user-facing YAML LSP
   feature; the conventional-commit history + this plan
   carry the record.
+- **Allowing/suppressing the 1.97 lints.** The user chose to
+  fix all findings (apply the collapses, make the fn
+  `const`), preserving strict clippy — not to add
+  `collapsible_if = "allow"` or an `#[expect]` blanket.

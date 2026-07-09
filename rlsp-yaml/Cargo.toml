@@ -2,7 +2,7 @@
 name = "rlsp-yaml"
 version = "0.13.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.97"
 description = "A fast, lightweight YAML language server"
 authors.workspace = true
 license.workspace = true

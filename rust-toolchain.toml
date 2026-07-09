@@ -1,0 +1,9 @@
+# Pins LOCAL dev to 1.97.0 so contributors/agents build against the same
+# compiler CI uses and catch new-stable lints before pushing. CI stays on
+# `dtolnay/rust-toolchain@stable`, which exports `RUSTUP_TOOLCHAIN` and
+# outranks this file in rustup's override order — CI keeps floating on
+# `@stable` as a canary; when it fails on a newer stable, bump `channel`
+# here to match.
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]

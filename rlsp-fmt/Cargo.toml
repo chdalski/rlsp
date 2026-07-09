@@ -2,7 +2,7 @@
 name = "rlsp-fmt"
 version = "0.1.8"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.97"
 description = "A reusable pretty-printing engine for rlsp language servers"
 authors.workspace = true
 license.workspace = true
