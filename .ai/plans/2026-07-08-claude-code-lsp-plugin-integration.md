@@ -184,6 +184,7 @@ verification accordingly:
 - [x] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
 - [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
+- [ ] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
@@ -401,6 +402,42 @@ Acceptance criteria:
       links the canonical submission docs page, and states that the repo
       `marketplace.json` covers direct install while community listing covers
       stranger discoverability.
+
+### Task 4: Correct the data-dir id in the manual-verification doc
+
+Found during user verification of Task 2: `MANUAL_VERIFICATION.md`'s Task 2
+section hardcodes `~/.claude/plugins/data/rlsp-yaml` in two example commands
+(the data-dir clear step and the binary-check step). The real id is
+`<plugin-name>@<marketplace>` with `@` replaced by `-` (documented rule; the
+docs' example `formatter@my-marketplace` → `formatter-my-marketplace`), so the
+dir is `rlsp-yaml-inline` for a `--plugin-dir` load and `rlsp-yaml-rlsp` for
+the `rlsp` marketplace install — never the bare `rlsp-yaml`. The plugin itself
+is unaffected: `provision.sh` and `.lsp.json` use the `${CLAUDE_PLUGIN_DATA}`
+variable, which Claude Code substitutes with the correct dir at runtime; only
+these human-facing example paths are wrong.
+
+Files:
+- `rlsp-yaml/integrations/claude-code/MANUAL_VERIFICATION.md` — replace the two
+  hardcoded `~/.claude/plugins/data/rlsp-yaml` example paths in the Task 2
+  section (the `rm -rf` clear step and the `ls -l` check step) with a
+  discovery-based approach: have the user run `ls ~/.claude/plugins/data/` and
+  find the `rlsp-yaml-*` directory. Enrich the existing `<id>` note so the
+  reader understands the id is `<name>@<marketplace>` with `@`→`-`
+  (`rlsp-yaml-inline` for a `--plugin-dir` load, `rlsp-yaml-rlsp` for the `rlsp`
+  marketplace).
+
+Acceptance criteria:
+- [ ] No command in `MANUAL_VERIFICATION.md` hardcodes
+      `~/.claude/plugins/data/rlsp-yaml` (or any single fixed id); the clear and
+      check steps use a discovery command (`ls ~/.claude/plugins/data/`) or
+      otherwise resolve the id at runtime.
+- [ ] The doc states the id convention — `<plugin-name>@<marketplace>` with
+      `@`→`-` — giving `rlsp-yaml-inline` (`--plugin-dir`) and `rlsp-yaml-rlsp`
+      (`rlsp` marketplace) as the concrete cases.
+- [ ] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
+      passes (sanity check — no structural change).
+- [ ] No other file is modified — the README's `${CLAUDE_PLUGIN_DATA}`
+      references are already correct and must not change.
 
 ## Decisions
 
