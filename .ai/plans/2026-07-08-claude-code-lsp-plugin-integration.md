@@ -185,6 +185,7 @@ verification accordingly:
 - [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [x] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
+- [ ] Task 5 — Document the first-install session-restart in the integration README (found during user verification)
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
@@ -438,6 +439,37 @@ Acceptance criteria:
       passes (sanity check — no structural change).
 - [x] No other file is modified — the README's `${CLAUDE_PLUGIN_DATA}`
       references are already correct and must not change.
+
+### Task 5: Document the first-install session-restart in the README
+
+Found during user verification of Task 3: on a **fresh install with no
+`rlsp-yaml` on `PATH`**, the binary is provisioned by the `SessionStart` hook,
+which runs at session start — so it is not available in the session where
+`/plugin install` runs; the LSP activates only after the user starts a new
+session. This is inherent to Claude Code's SessionStart-then-restart
+provisioning model (verified: no install-time hook exists, and `/reload-plugins`
+does not re-run `SessionStart`). Document it so the one-restart is expected, not
+confusing. This closes the user-facing side of the plan's deferred
+SessionStart-timing item; engineering around the gap (a provision-on-spawn
+wrapper) remains out of scope (relies on undocumented behavior; see Non-Goals).
+
+Files:
+- `rlsp-yaml/integrations/claude-code/README.md` — in the provisioning/
+  installation section (and the `/plugin` Errors-tab troubleshooting note), add
+  a concise note: after a fresh `/plugin install` on a machine with no
+  `rlsp-yaml` on `PATH`, start one new session so the `SessionStart` hook
+  downloads and installs the binary and the LSP activates; keeping `rlsp-yaml`
+  on `PATH` avoids the wait entirely (the PATH copy is instant).
+
+Acceptance criteria:
+- [ ] The integration README documents the first-install session-restart
+      behavior for the no-PATH-binary case, in the provisioning/installation
+      and/or `/plugin` troubleshooting section.
+- [ ] The note states the on-PATH mitigation (instant, no wait).
+- [ ] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
+      passes (sanity check — no structural change).
+- [ ] Only `rlsp-yaml/integrations/claude-code/README.md` changes (no code, no
+      other docs).
 
 ## Decisions
 
