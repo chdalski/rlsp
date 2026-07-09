@@ -1096,3 +1096,32 @@ fn scalar_on_continuation_line_has_correct_span() {
         unreachable!("expected exactly 2 scalar spans");
     }
 }
+
+// -----------------------------------------------------------------------
+// Group Q: Coverage gap tests — verbatim tag separation inside flow
+// collections (YAML 1.2 §6.9.1: s-separate(n,c) required before node
+// content)
+// -----------------------------------------------------------------------
+
+// Test 63: verbatim tag not separated from content by whitespace, inside a
+// flow collection.
+#[test]
+fn verbatim_tag_in_flow_collection_missing_separator_errors() {
+    // `[!<tag:example.com,2000:t>value]` — no space after the closing `>`
+    // of the verbatim tag; `value` is unseparated node content.
+    let input = "[!<tag:example.com,2000:t>value]\n";
+    let result: Vec<_> = parse_events(input).collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "verbatim tag not separated from content by whitespace must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message
+                .contains("tag must be separated from node content by whitespace"),
+            "error message should mention tag/content separation; got: {}",
+            err.message
+        );
+    }
+}

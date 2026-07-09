@@ -102,10 +102,10 @@ fn node_indent(
                 }
 
                 // Case 4: value starts at or before prev_ast_line → recurse into value.
-                if val_line <= prev_ast_line {
-                    if let Some(inner) = node_indent(value, prev_ast_line, tab_size, idx) {
-                        return Some(inner);
-                    }
+                if val_line <= prev_ast_line
+                    && let Some(inner) = node_indent(value, prev_ast_line, tab_size, idx)
+                {
+                    return Some(inner);
                 }
             }
             None

@@ -95,38 +95,38 @@ pub(super) fn validate_array_constraints(
 ) {
     let len = seq.len() as u64;
 
-    if let Some(min) = schema.min_items {
-        if len < min {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMinItems",
-                format!(
-                    "Array at {} has {} items, minimum is {}",
-                    format_path(path),
-                    len,
-                    min
-                ),
-            ));
-        }
+    if let Some(min) = schema.min_items
+        && len < min
+    {
+        let range = span_to_lsp(seq_loc, ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMinItems",
+            format!(
+                "Array at {} has {} items, minimum is {}",
+                format_path(path),
+                len,
+                min
+            ),
+        ));
     }
 
-    if let Some(max) = schema.max_items {
-        if len > max {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMaxItems",
-                format!(
-                    "Array at {} has {} items, maximum is {}",
-                    format_path(path),
-                    len,
-                    max
-                ),
-            ));
-        }
+    if let Some(max) = schema.max_items
+        && len > max
+    {
+        let range = span_to_lsp(seq_loc, ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMaxItems",
+            format!(
+                "Array at {} has {} items, maximum is {}",
+                format_path(path),
+                len,
+                max
+            ),
+        ));
     }
 
     if schema.unique_items == Some(true) {
@@ -191,21 +191,21 @@ pub(super) fn validate_contains(
         ));
     }
 
-    if let Some(max) = schema.max_contains {
-        if match_count > max {
-            let range = span_to_lsp(seq_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaContains",
-                format!(
-                    "Array at {} must contain at most {} item(s) matching the schema, found {}",
-                    format_path(path),
-                    max,
-                    match_count
-                ),
-            ));
-        }
+    if let Some(max) = schema.max_contains
+        && match_count > max
+    {
+        let range = span_to_lsp(seq_loc, ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaContains",
+            format!(
+                "Array at {} must contain at most {} item(s) matching the schema, found {}",
+                format_path(path),
+                max,
+                match_count
+            ),
+        ));
     }
 }
 

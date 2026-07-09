@@ -98,12 +98,11 @@ pub(super) fn collect_evaluated_properties(schema: &JsonSchema, key: &str) -> bo
     // Matched by patternProperties
     if let Some(pp) = &schema.pattern_properties {
         for (pattern, _) in pp {
-            if pattern.len() <= MAX_PATTERN_LEN {
-                if let Some(re) = get_regex(pattern) {
-                    if re.is_match(key) {
-                        return true;
-                    }
-                }
+            if pattern.len() <= MAX_PATTERN_LEN
+                && let Some(re) = get_regex(pattern)
+                && re.is_match(key)
+            {
+                return true;
             }
         }
     }
@@ -131,15 +130,15 @@ pub(super) fn collect_evaluated_properties(schema: &JsonSchema, key: &str) -> bo
         }
     }
     // Matched by if/then/else (one level deep)
-    if let Some(then_s) = &schema.then_schema {
-        if collect_evaluated_properties(then_s, key) {
-            return true;
-        }
+    if let Some(then_s) = &schema.then_schema
+        && collect_evaluated_properties(then_s, key)
+    {
+        return true;
     }
-    if let Some(else_s) = &schema.else_schema {
-        if collect_evaluated_properties(else_s, key) {
-            return true;
-        }
+    if let Some(else_s) = &schema.else_schema
+        && collect_evaluated_properties(else_s, key)
+    {
+        return true;
     }
     false
 }

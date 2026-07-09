@@ -183,14 +183,12 @@ fn find_yaml11_octal_in_node<'a>(
                     loc,
                     ..
                 } = v
+                    && idx.line_column(loc.start).0 as usize == parser_line
+                    && crate::scalar_helpers::is_yaml11_octal(value)
+                    && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
                 {
-                    if idx.line_column(loc.start).0 as usize == parser_line
-                        && crate::scalar_helpers::is_yaml11_octal(value)
-                        && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
-                    {
-                        let key_col = idx.line_column(node_loc(k).start).1 as usize;
-                        return Some((v, loc, key_col));
-                    }
+                    let key_col = idx.line_column(node_loc(k).start).1 as usize;
+                    return Some((v, loc, key_col));
                 }
                 if let Some(result) =
                     find_yaml11_octal_in_node(k, parser_line, diag, col_match, idx)
@@ -213,13 +211,11 @@ fn find_yaml11_octal_in_node<'a>(
                     loc,
                     ..
                 } = item
+                    && idx.line_column(loc.start).0 as usize == parser_line
+                    && crate::scalar_helpers::is_yaml11_octal(value)
+                    && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
                 {
-                    if idx.line_column(loc.start).0 as usize == parser_line
-                        && crate::scalar_helpers::is_yaml11_octal(value)
-                        && (!col_match || yaml11_octal_col_matches_diag(*loc, diag, idx))
-                    {
-                        return Some((item, loc, idx.line_column(loc.start).1 as usize));
-                    }
+                    return Some((item, loc, idx.line_column(loc.start).1 as usize));
                 }
                 if let Some(result) =
                     find_yaml11_octal_in_node(item, parser_line, diag, col_match, idx)

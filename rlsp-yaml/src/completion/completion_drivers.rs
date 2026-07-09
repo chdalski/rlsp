@@ -40,25 +40,24 @@ pub(super) fn complete_on_key<'a>(
         collect_sibling_keys_ast(mapping).into_iter().collect()
     };
     let structural = keys_to_items(structural_keys.into_iter().filter(|k| k != &key).collect());
-    if let Some(s) = schema {
-        if let Some(resolved_schema) = resolve_schema_path(s, enclosing_path)
-            && schema_has_properties(resolved_schema)
-        {
-            let schema_properties = collect_schema_properties_keys(resolved_schema);
-            let schema_exclude: HashSet<String> = if schema_properties.contains(&key) {
-                let mut ex = present;
-                ex.insert(key);
-                ex
-            } else {
-                HashSet::from([key])
-            };
-            let schema_items = schema_key_completions(resolved_schema, &schema_exclude);
-            let filtered_structural: Vec<CompletionItem> = structural
-                .into_iter()
-                .filter(|i| !schema_exclude.contains(i.label.as_str()))
-                .collect();
-            return merge_completions(filtered_structural, schema_items);
-        }
+    if let Some(s) = schema
+        && let Some(resolved_schema) = resolve_schema_path(s, enclosing_path)
+        && schema_has_properties(resolved_schema)
+    {
+        let schema_properties = collect_schema_properties_keys(resolved_schema);
+        let schema_exclude: HashSet<String> = if schema_properties.contains(&key) {
+            let mut ex = present;
+            ex.insert(key);
+            ex
+        } else {
+            HashSet::from([key])
+        };
+        let schema_items = schema_key_completions(resolved_schema, &schema_exclude);
+        let filtered_structural: Vec<CompletionItem> = structural
+            .into_iter()
+            .filter(|i| !schema_exclude.contains(i.label.as_str()))
+            .collect();
+        return merge_completions(filtered_structural, schema_items);
     }
     structural
 }

@@ -63,38 +63,38 @@ pub(super) fn validate_mapping_constraints(
 ) {
     let len = entries.len() as u64;
 
-    if let Some(min) = schema.min_properties {
-        if len < min {
-            let range = span_to_lsp(mapping_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMinProperties",
-                format!(
-                    "Object at {} has {} properties, minimum is {}",
-                    format_path(path),
-                    len,
-                    min
-                ),
-            ));
-        }
+    if let Some(min) = schema.min_properties
+        && len < min
+    {
+        let range = span_to_lsp(mapping_loc, ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMinProperties",
+            format!(
+                "Object at {} has {} properties, minimum is {}",
+                format_path(path),
+                len,
+                min
+            ),
+        ));
     }
 
-    if let Some(max) = schema.max_properties {
-        if len > max {
-            let range = span_to_lsp(mapping_loc, ctx.idx);
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMaxProperties",
-                format!(
-                    "Object at {} has {} properties, maximum is {}",
-                    format_path(path),
-                    len,
-                    max
-                ),
-            ));
-        }
+    if let Some(max) = schema.max_properties
+        && len > max
+    {
+        let range = span_to_lsp(mapping_loc, ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMaxProperties",
+            format!(
+                "Object at {} has {} properties, maximum is {}",
+                format_path(path),
+                len,
+                max
+            ),
+        ));
     }
 }
 

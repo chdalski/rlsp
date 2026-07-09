@@ -57,20 +57,19 @@ pub(super) fn validate_scalar_constraints(
     }
 
     // const — compare any scalar node via yaml_to_json
-    if let Some(const_val) = &schema.const_value {
-        if let Some(yaml_val) = yaml_to_json(node) {
-            if yaml_val != *const_val {
-                let range = span_to_lsp(node_loc(node), ctx.idx);
-                ctx.diagnostics.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::ERROR,
-                    "schemaConst",
-                    format!("Value at {} must equal {}", format_path(path), const_val),
-                ));
-            }
-        }
-        // If yaml_to_json returns None (object/array), skip the check
+    if let Some(const_val) = &schema.const_value
+        && let Some(yaml_val) = yaml_to_json(node)
+        && yaml_val != *const_val
+    {
+        let range = span_to_lsp(node_loc(node), ctx.idx);
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaConst",
+            format!("Value at {} must equal {}", format_path(path), const_val),
+        ));
     }
+    // If yaml_to_json returns None (object/array), skip the check
 }
 
 pub(super) fn validate_string_constraints(
@@ -120,36 +119,36 @@ pub(super) fn validate_string_constraints(
 
     let char_count = s.chars().count() as u64;
 
-    if let Some(min_len) = schema.min_length {
-        if char_count < min_len {
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMinLength",
-                format!(
-                    "Value at {} is too short: {} chars (minimum {})",
-                    format_path(path),
-                    char_count,
-                    min_len
-                ),
-            ));
-        }
+    if let Some(min_len) = schema.min_length
+        && char_count < min_len
+    {
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMinLength",
+            format!(
+                "Value at {} is too short: {} chars (minimum {})",
+                format_path(path),
+                char_count,
+                min_len
+            ),
+        ));
     }
 
-    if let Some(max_len) = schema.max_length {
-        if char_count > max_len {
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMaxLength",
-                format!(
-                    "Value at {} is too long: {} chars (maximum {})",
-                    format_path(path),
-                    char_count,
-                    max_len
-                ),
-            ));
-        }
+    if let Some(max_len) = schema.max_length
+        && char_count > max_len
+    {
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMaxLength",
+            format!(
+                "Value at {} is too long: {} chars (maximum {})",
+                format_path(path),
+                char_count,
+                max_len
+            ),
+        ));
     }
 
     if ctx.format_validation {
@@ -257,28 +256,28 @@ pub(super) fn validate_content(
     };
 
     // Step 2: check media type if set
-    if let Some(media_type) = &schema.content_media_type {
-        if media_type == "application/json" {
-            let text = decoded_bytes
-                .as_ref()
-                .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
-            let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
-            if !valid {
-                diagnostics.push(make_diagnostic(
-                    span_to_lsp(loc, idx),
-                    DiagnosticSeverity::WARNING,
-                    "schemaContentMediaType",
-                    format!(
-                        "String at {} does not contain valid {media_type} content",
-                        format_path(path)
-                    ),
-                ));
-                // Media type check failed — skip contentSchema validation
-                return;
-            }
+    if let Some(media_type) = &schema.content_media_type
+        && media_type == "application/json"
+    {
+        let text = decoded_bytes
+            .as_ref()
+            .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
+        let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
+        if !valid {
+            diagnostics.push(make_diagnostic(
+                span_to_lsp(loc, idx),
+                DiagnosticSeverity::WARNING,
+                "schemaContentMediaType",
+                format!(
+                    "String at {} does not contain valid {media_type} content",
+                    format_path(path)
+                ),
+            ));
+            // Media type check failed — skip contentSchema validation
+            return;
         }
-        // Unknown media type — fall through to contentSchema if present
     }
+    // Unknown media type — fall through to contentSchema if present
 
     // Step 3: validate decoded content against contentSchema if present
     validate_content_schema(
@@ -398,50 +397,50 @@ pub(super) fn validate_numeric_constraints(
     }
 
     // exclusiveMinimum (Draft-06+ number form)
-    if let Some(excl_min) = schema.exclusive_minimum {
-        if val <= excl_min {
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMinimum",
-                format!(
-                    "Value at {} is below exclusive minimum {excl_min}",
-                    format_path(path),
-                ),
-            ));
-        }
+    if let Some(excl_min) = schema.exclusive_minimum
+        && val <= excl_min
+    {
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMinimum",
+            format!(
+                "Value at {} is below exclusive minimum {excl_min}",
+                format_path(path),
+            ),
+        ));
     }
 
     // exclusiveMaximum (Draft-06+ number form)
-    if let Some(excl_max) = schema.exclusive_maximum {
-        if val >= excl_max {
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                "schemaMaximum",
-                format!(
-                    "Value at {} is above exclusive maximum {excl_max}",
-                    format_path(path),
-                ),
-            ));
-        }
+    if let Some(excl_max) = schema.exclusive_maximum
+        && val >= excl_max
+    {
+        ctx.diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            "schemaMaximum",
+            format!(
+                "Value at {} is above exclusive maximum {excl_max}",
+                format_path(path),
+            ),
+        ));
     }
 
     // multipleOf
-    if let Some(multiple_of) = schema.multiple_of {
-        if multiple_of > 0.0 {
-            let quotient = val / multiple_of;
-            if (quotient - quotient.round()).abs() >= f64::EPSILON {
-                ctx.diagnostics.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::ERROR,
-                    "schemaMultipleOf",
-                    format!(
-                        "Value at {} must be a multiple of {multiple_of}",
-                        format_path(path),
-                    ),
-                ));
-            }
+    if let Some(multiple_of) = schema.multiple_of
+        && multiple_of > 0.0
+    {
+        let quotient = val / multiple_of;
+        if (quotient - quotient.round()).abs() >= f64::EPSILON {
+            ctx.diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                "schemaMultipleOf",
+                format!(
+                    "Value at {} must be a multiple of {multiple_of}",
+                    format_path(path),
+                ),
+            ));
         }
     }
 }

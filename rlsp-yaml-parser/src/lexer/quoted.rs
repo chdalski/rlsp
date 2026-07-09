@@ -383,19 +383,19 @@ impl<'input> Lexer<'input> {
             // Blank lines bypass the check: l-empty (§6.5) allows any indentation.
             // Rationale: without this check a quoted scalar can "escape" its block
             // by dedenting, silently absorbing lines that belong to a sibling node.
-            if let Some(n) = block_context_indent {
-                if !is_blank {
-                    let found = next.indent;
-                    if found <= n {
-                        return Err(Error::syntax(
-                            next.pos,
-                            format!(
-                                "continuation line does not have enough indentation \
+            if let Some(n) = block_context_indent
+                && !is_blank
+            {
+                let found = next.indent;
+                if found <= n {
+                    return Err(Error::syntax(
+                        next.pos,
+                        format!(
+                            "continuation line does not have enough indentation \
                                  (expected at least {} spaces, found {found})",
-                                n + 1
-                            ),
-                        ));
-                    }
+                            n + 1
+                        ),
+                    ));
                 }
             }
 
@@ -770,17 +770,17 @@ pub(super) fn scan_double_quoted_line(
             let span = body.get(i..hit).unwrap_or_default();
             // Validate nb-json on the literal span (quoted scalars allow all
             // non-C0 characters per YAML §5.1 JSON-compatibility clause).
-            if !skip_char_validation {
-                if let Some((bad_i, bad_ch)) = find_non_nb_json(span.as_bytes()) {
-                    let bad_pos = crate::pos::advance_within_line(
-                        start_pos,
-                        body.get(..i + bad_i).unwrap_or_default(),
-                    );
-                    return Err(Error::invalid_character(
-                        bad_pos,
-                        non_printable_error_message(bad_ch, "double-quoted scalar"),
-                    ));
-                }
+            if !skip_char_validation
+                && let Some((bad_i, bad_ch)) = find_non_nb_json(span.as_bytes())
+            {
+                let bad_pos = crate::pos::advance_within_line(
+                    start_pos,
+                    body.get(..i + bad_i).unwrap_or_default(),
+                );
+                return Err(Error::invalid_character(
+                    bad_pos,
+                    non_printable_error_message(bad_ch, "double-quoted scalar"),
+                ));
             }
             if let Some(buf) = owned.as_mut() {
                 buf.push_str(span);
@@ -857,17 +857,13 @@ pub(super) fn scan_double_quoted_line(
     // No more `"` or `\` — consume the rest of the line as plain content.
     let rest = body.get(i..).unwrap_or_default();
     // Validate nb-json on the trailing literal span.
-    if !skip_char_validation {
-        if let Some((bad_i, bad_ch)) = find_non_nb_json(rest.as_bytes()) {
-            let bad_pos = crate::pos::advance_within_line(
-                start_pos,
-                body.get(..i + bad_i).unwrap_or_default(),
-            );
-            return Err(Error::invalid_character(
-                bad_pos,
-                non_printable_error_message(bad_ch, "double-quoted scalar"),
-            ));
-        }
+    if !skip_char_validation && let Some((bad_i, bad_ch)) = find_non_nb_json(rest.as_bytes()) {
+        let bad_pos =
+            crate::pos::advance_within_line(start_pos, body.get(..i + bad_i).unwrap_or_default());
+        return Err(Error::invalid_character(
+            bad_pos,
+            non_printable_error_message(bad_ch, "double-quoted scalar"),
+        ));
     }
     if let Some(buf) = owned.as_mut() {
         if !rest.is_empty() {

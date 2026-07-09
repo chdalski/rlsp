@@ -256,7 +256,7 @@ fn channel_to_u8(v: f32) -> u8 {
 }
 
 /// Convert an HSL component (hue 0–360, sat/lum 0–100) to a rounded integer.
-fn hsl_to_u32(v: f32) -> u32 {
+const fn hsl_to_u32(v: f32) -> u32 {
     // v is always non-negative (hue 0-360, sat/lum 0-100), round gives integer in range.
     #[expect(
         clippy::cast_possible_truncation,
@@ -330,17 +330,17 @@ fn scan_line_for_colors(
         let ch = chars.get(i).copied().unwrap_or('\0');
 
         // Try hex color: #RGB, #RRGGBB, #RRGGBBAA
-        if ch == '#' {
-            if let Some((color, len)) = try_hex(chars.get(i + 1..).unwrap_or(&[])) {
-                let start_col = col_offset + i;
-                let end_col = start_col + 1 + len;
-                results.push(ColorMatch {
-                    range: make_range(line_idx, start_col, line_idx, end_col),
-                    color,
-                });
-                i += 1 + len;
-                continue;
-            }
+        if ch == '#'
+            && let Some((color, len)) = try_hex(chars.get(i + 1..).unwrap_or(&[]))
+        {
+            let start_col = col_offset + i;
+            let end_col = start_col + 1 + len;
+            results.push(ColorMatch {
+                range: make_range(line_idx, start_col, line_idx, end_col),
+                color,
+            });
+            i += 1 + len;
+            continue;
         }
 
         // Try function-form: rgb/rgba/hsl/hsla
@@ -358,17 +358,18 @@ fn scan_line_for_colors(
         // Try named color (only at word boundary)
         let prev = i.checked_sub(1).and_then(|p| chars.get(p).copied());
         let at_word_start = prev.is_none_or(|c| !c.is_alphanumeric() && c != '_');
-        if at_word_start && ch.is_ascii_alphabetic() {
-            if let Some((color, len)) = try_named_color(chars.get(i..).unwrap_or(&[])) {
-                let start_col = col_offset + i;
-                let end_col = start_col + len;
-                results.push(ColorMatch {
-                    range: make_range(line_idx, start_col, line_idx, end_col),
-                    color,
-                });
-                i += len;
-                continue;
-            }
+        if at_word_start
+            && ch.is_ascii_alphabetic()
+            && let Some((color, len)) = try_named_color(chars.get(i..).unwrap_or(&[]))
+        {
+            let start_col = col_offset + i;
+            let end_col = start_col + len;
+            results.push(ColorMatch {
+                range: make_range(line_idx, start_col, line_idx, end_col),
+                color,
+            });
+            i += len;
+            continue;
         }
 
         i += 1;

@@ -364,17 +364,17 @@ impl<'input> EventIter<'input> {
                 // lines are exempt — they act as line separators.
                 // At document root (no enclosing block), there is no
                 // indentation constraint.
-                if let Some(min_indent) = flow_min_indent {
-                    if let Some(next_line) = self.lexer.peek_next_line() {
-                        let trimmed = next_line.content.trim();
-                        if !trimmed.is_empty() && next_line.indent <= min_indent {
-                            let err_pos = next_line.pos;
-                            self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error::syntax(
-                                err_pos,
-                                "flow collection continuation line is not indented enough".into(),
-                            )));
-                        }
+                if let Some(min_indent) = flow_min_indent
+                    && let Some(next_line) = self.lexer.peek_next_line()
+                {
+                    let trimmed = next_line.content.trim();
+                    if !trimmed.is_empty() && next_line.indent <= min_indent {
+                        let err_pos = next_line.pos;
+                        self.state = IterState::Done;
+                        return StepResult::Yield(Err(Error::syntax(
+                            err_pos,
+                            "flow collection continuation line is not indented enough".into(),
+                        )));
                     }
                 }
 
@@ -1311,15 +1311,15 @@ impl<'input> EventIter<'input> {
                         // the node content is unseparated — return an error.
                         if is_verbatim {
                             let after_tag = &cur_content[pos_in_line..];
-                            if let Some(first) = after_tag.chars().next() {
-                                if first != ' ' && first != '\t' {
-                                    self.state = IterState::Done;
-                                    return StepResult::Yield(Err(Error::syntax(
-                                        bang_pos,
-                                        "tag must be separated from node content by whitespace"
-                                            .into(),
-                                    )));
-                                }
+                            if let Some(first) = after_tag.chars().next()
+                                && first != ' '
+                                && first != '\t'
+                            {
+                                self.state = IterState::Done;
+                                return StepResult::Yield(Err(Error::syntax(
+                                    bang_pos,
+                                    "tag must be separated from node content by whitespace".into(),
+                                )));
                             }
                         }
                         // Skip any whitespace after the tag.

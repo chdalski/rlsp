@@ -132,22 +132,22 @@ impl<'input> Lexer<'input> {
                     bad_pos,
                     format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
                 ));
-            } else if !self.input_all_printable {
-                if let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes()) {
-                    // General c-printable backstop: any non-printable byte in the
-                    // suffix that follows the plain scalar value is an error.
-                    let bad_col_offset =
-                        crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
-                    let bad_pos = Pos {
-                        byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
-                        line: consumed_first.pos.line,
-                        column: consumed_first.pos.column + bad_col_offset,
-                    };
-                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
-                        bad_pos,
-                        non_printable_error_message(bad_ch, "plain scalar"),
-                    ));
-                }
+            } else if !self.input_all_printable
+                && let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes())
+            {
+                // General c-printable backstop: any non-printable byte in the
+                // suffix that follows the plain scalar value is an error.
+                let bad_col_offset =
+                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
+                let bad_pos = Pos {
+                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
+                    line: consumed_first.pos.line,
+                    column: consumed_first.pos.column + bad_col_offset,
+                };
+                self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                    bad_pos,
+                    non_printable_error_message(bad_ch, "plain scalar"),
+                ));
             }
         }
 
@@ -239,31 +239,31 @@ impl<'input> Lexer<'input> {
             // Check for non-c-printable bytes in the suffix that stopped the scan.
             // `after_cont` is a suffix of `trimmed`; compute its byte offset within
             // `next.content` by counting bytes from the end of `trimmed`.
-            if !self.input_all_printable {
-                if let Some((bad_byte_i, bad_ch)) = find_non_c_printable(after_cont.as_bytes()) {
-                    // Byte offset of `after_cont[0]` within `next.content`:
-                    //   leading_ws = next.content.len() - trimmed.len()
-                    //   ws_skipped  = trimmed.len() - after_cont.len() (after cont_value strip)
-                    // So after_cont starts at next.content.len() - after_cont.len().
-                    let after_cont_in_content = next.content.len() - after_cont.len();
-                    let bad_in_content = after_cont_in_content + bad_byte_i;
-                    let bad_col = crate::pos::column_at(next.content, bad_in_content);
-                    let bad_pos = Pos {
-                        byte_offset: next.offset + bad_in_content,
-                        line: next.pos.line,
-                        column: next.pos.column + bad_col,
-                    };
-                    // Consume the line so the parser advances past it.
-                    let Some(consumed) = self.buf.consume_next() else {
-                        unreachable!("consume cont line failed")
-                    };
-                    self.current_pos = pos_after_line(&consumed);
-                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
-                        bad_pos,
-                        non_printable_error_message(bad_ch, "plain scalar"),
-                    ));
-                    return result;
-                }
+            if !self.input_all_printable
+                && let Some((bad_byte_i, bad_ch)) = find_non_c_printable(after_cont.as_bytes())
+            {
+                // Byte offset of `after_cont[0]` within `next.content`:
+                //   leading_ws = next.content.len() - trimmed.len()
+                //   ws_skipped  = trimmed.len() - after_cont.len() (after cont_value strip)
+                // So after_cont starts at next.content.len() - after_cont.len().
+                let after_cont_in_content = next.content.len() - after_cont.len();
+                let bad_in_content = after_cont_in_content + bad_byte_i;
+                let bad_col = crate::pos::column_at(next.content, bad_in_content);
+                let bad_pos = Pos {
+                    byte_offset: next.offset + bad_in_content,
+                    line: next.pos.line,
+                    column: next.pos.column + bad_col,
+                };
+                // Consume the line so the parser advances past it.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume cont line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                    bad_pos,
+                    non_printable_error_message(bad_ch, "plain scalar"),
+                ));
+                return result;
             }
 
             // If the remainder after the scanned value is a comment (`# …`),

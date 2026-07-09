@@ -289,12 +289,11 @@ fn directive_scope_is_independent_per_document() {
     let tags: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if let Event::Scalar { value, .. } = e {
-                if let Some(t) = e.tag() {
-                    if value.as_ref() == "val1" || value.as_ref() == "val2" {
-                        return Some((value.as_ref().to_owned(), t.to_owned()));
-                    }
-                }
+            if let Event::Scalar { value, .. } = e
+                && let Some(t) = e.tag()
+                && (value.as_ref() == "val1" || value.as_ref() == "val2")
+            {
+                return Some((value.as_ref().to_owned(), t.to_owned()));
             }
             None
         })

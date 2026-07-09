@@ -131,16 +131,16 @@ pub fn parse_test_metadata(content: &str) -> Vec<TestEntry> {
                 inherited.skip = true;
             }
             let fail = current.fail.take().unwrap_or(false);
-            if !inherited.skip {
-                if let Some(ref yaml) = inherited.yaml {
-                    let name = inherited.name.clone().unwrap_or_default();
-                    results.push(TestEntry {
-                        name,
-                        yaml: yaml.clone(),
-                        tree: inherited.tree.clone(),
-                        fail,
-                    });
-                }
+            if !inherited.skip
+                && let Some(ref yaml) = inherited.yaml
+            {
+                let name = inherited.name.clone().unwrap_or_default();
+                results.push(TestEntry {
+                    name,
+                    yaml: yaml.clone(),
+                    tree: inherited.tree.clone(),
+                    fail,
+                });
             }
             // Reset tree per-entry (it is not inherited like yaml/name).
             inherited.tree = None;

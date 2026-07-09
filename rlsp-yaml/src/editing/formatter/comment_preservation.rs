@@ -170,10 +170,10 @@ pub(super) fn attach_comments(
             // had blank lines before it (indicating a blank section separator) and
             // emit that blank before the comment line.
             if matches!(next_entry, Some(e) if e.signature.is_empty()) {
-                if let Some(e) = next_entry {
-                    if e.blank_lines_before > 0 {
-                        result_lines.push(String::new());
-                    }
+                if let Some(e) = next_entry
+                    && e.blank_lines_before > 0
+                {
+                    result_lines.push(String::new());
                 }
                 next_entry = entry_iter.next();
             }
@@ -192,34 +192,34 @@ pub(super) fn attach_comments(
             next_entry = entry_iter.next();
         }
 
-        if let Some(entry) = next_entry {
-            if entry.signature == fmt_sig {
-                let indent_len = fmt_line.len() - fmt_line.trim_start().len();
-                let indent_str = " ".repeat(indent_len);
+        if let Some(entry) = next_entry
+            && entry.signature == fmt_sig
+        {
+            let indent_len = fmt_line.len() - fmt_line.trim_start().len();
+            let indent_str = " ".repeat(indent_len);
 
-                // Emit blank line before this entry if the original had one,
-                // or if a skipped empty-sig entry carried a blank count.
-                // Skip if the formatted output already ended with a blank line
-                // (e.g. emitted by repr_block_to_doc for folded scalar content)
-                // to prevent double blanks.
-                let last_is_blank = result_lines.last().is_some_and(String::is_empty);
-                if (entry.blank_lines_before > 0 || carried_blanks > 0) && !last_is_blank {
-                    result_lines.push(String::new());
-                }
-
-                for lc in &entry.leading {
-                    if lc.is_empty() {
-                        result_lines.push(String::new());
-                    } else {
-                        result_lines.push(format!("{indent_str}{lc}"));
-                    }
-                }
-
-                result_lines.push(fmt_line.to_string());
-
-                next_entry = entry_iter.next();
-                continue;
+            // Emit blank line before this entry if the original had one,
+            // or if a skipped empty-sig entry carried a blank count.
+            // Skip if the formatted output already ended with a blank line
+            // (e.g. emitted by repr_block_to_doc for folded scalar content)
+            // to prevent double blanks.
+            let last_is_blank = result_lines.last().is_some_and(String::is_empty);
+            if (entry.blank_lines_before > 0 || carried_blanks > 0) && !last_is_blank {
+                result_lines.push(String::new());
             }
+
+            for lc in &entry.leading {
+                if lc.is_empty() {
+                    result_lines.push(String::new());
+                } else {
+                    result_lines.push(format!("{indent_str}{lc}"));
+                }
+            }
+
+            result_lines.push(fmt_line.to_string());
+
+            next_entry = entry_iter.next();
+            continue;
         }
 
         result_lines.push(fmt_line.to_string());

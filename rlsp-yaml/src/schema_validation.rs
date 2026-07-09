@@ -124,17 +124,17 @@ fn validate_node(
     composition::validate_composition(node, schema, path, ctx, depth);
 
     // unevaluatedProperties (Draft 2019-09)
-    if schema.unevaluated_properties.is_some() {
-        if let Node::Mapping { entries, .. } = node {
-            mapping_constraints::validate_unevaluated_properties(entries, schema, path, ctx, depth);
-        }
+    if schema.unevaluated_properties.is_some()
+        && let Node::Mapping { entries, .. } = node
+    {
+        mapping_constraints::validate_unevaluated_properties(entries, schema, path, ctx, depth);
     }
 
     // unevaluatedItems (Draft 2019-09)
-    if schema.unevaluated_items.is_some() {
-        if let Node::Sequence { items, .. } = node {
-            array_constraints::validate_unevaluated_items(items, schema, path, ctx, depth);
-        }
+    if schema.unevaluated_items.is_some()
+        && let Node::Sequence { items, .. } = node
+    {
+        array_constraints::validate_unevaluated_items(items, schema, path, ctx, depth);
     }
 }
 

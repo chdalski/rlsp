@@ -32,12 +32,10 @@ pub(super) fn effective_yaml_type<'a>(
         && is_plain
         && yaml_type == "string"
         && single_type_or_contains(schema_type, "boolean")
+        && let Node::Scalar { value, .. } = node
+        && scalar_helpers::is_yaml11_bool(value)
     {
-        if let Node::Scalar { value, .. } = node {
-            if scalar_helpers::is_yaml11_bool(value) {
-                return "boolean";
-            }
-        }
+        return "boolean";
     }
     yaml_type
 }
@@ -113,21 +111,19 @@ pub(super) fn type_mismatch_diagnostic(
         && is_plain
         && effective_type == "string"
         && single_type_or_contains(schema_type, "boolean")
+        && let Node::Scalar { value, .. } = node
+        && scalar_helpers::is_yaml11_bool(value)
     {
-        if let Node::Scalar { value, .. } = node {
-            if scalar_helpers::is_yaml11_bool(value) {
-                let canonical = scalar_helpers::yaml11_bool_canonical(value);
-                return (
-                    "schemaYaml11BooleanType",
-                    format!(
-                        "Value at {} does not match type: expected boolean, got string. \
+        let canonical = scalar_helpers::yaml11_bool_canonical(value);
+        return (
+            "schemaYaml11BooleanType",
+            format!(
+                "Value at {} does not match type: expected boolean, got string. \
                          \"{value}\" is not a boolean in YAML 1.2 — use {canonical} instead. \
                          (In YAML 1.1, \"{value}\" was a boolean.)",
-                        format_path(path),
-                    ),
-                );
-            }
-        }
+                format_path(path),
+            ),
+        );
     }
     (
         "schemaType",

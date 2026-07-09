@@ -822,3 +822,33 @@ fn percent_prefixed_line_inside_explicit_doc_is_treated_as_content() {
         ]
     );
 }
+
+// -----------------------------------------------------------------------
+// Group N: Coverage gap test — root-node guard
+// -----------------------------------------------------------------------
+// A document contains exactly one root node; once it is fully emitted, any
+// further non-comment, non-blank content without an intervening document
+// marker (`---`/`...`) is invalid.
+
+#[test]
+fn content_after_root_node_without_marker_errors() {
+    // "[a]\nb\n" — a flow sequence closes as the (only) root node at the
+    // end of line 1; `b` on line 2 is unexpected content with no
+    // intervening `---`/`...` marker. (A bare plain scalar like "a\nb\n"
+    // is NOT an error — it folds into a single multi-line scalar "a b",
+    // so it does not exercise this guard.)
+    let result: Vec<_> = parse_events("[a]\nb\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "content after the document root node without a marker must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message
+                .contains("unexpected content after document root node"),
+            "error message should mention unexpected content after root node; got: {}",
+            err.message
+        );
+    }
+}

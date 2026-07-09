@@ -134,16 +134,18 @@ fn parse_test_metadata(content: &str) -> Vec<(String, bool)> {
                 in_block_scalar = false;
                 block_buf.clear();
                 block_key.clear();
-                if line.starts_with("  ") && !line.starts_with("    ") {
-                    if let Some((key, value)) = line.trim().split_once(": ") {
-                        apply_field(key, value, &mut current_yaml, &mut current_fail, &mut skip);
-                    }
+                if line.starts_with("  ")
+                    && !line.starts_with("    ")
+                    && let Some((key, value)) = line.trim().split_once(": ")
+                {
+                    apply_field(key, value, &mut current_yaml, &mut current_fail, &mut skip);
                 }
             }
-        } else if line.starts_with("  ") && !line.starts_with("    ") {
-            if let Some((key, value)) = line.trim().split_once(": ") {
-                apply_field(key, value, &mut current_yaml, &mut current_fail, &mut skip);
-            }
+        } else if line.starts_with("  ")
+            && !line.starts_with("    ")
+            && let Some((key, value)) = line.trim().split_once(": ")
+        {
+            apply_field(key, value, &mut current_yaml, &mut current_fail, &mut skip);
         }
     }
 

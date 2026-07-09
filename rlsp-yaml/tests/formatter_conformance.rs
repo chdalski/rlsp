@@ -99,11 +99,11 @@ fn parse_test_metadata(content: &str) -> Vec<(String, String, bool)> {
                 inherited.skip = true;
             }
             let fail = current.fail.take().unwrap_or(false);
-            if !inherited.skip {
-                if let Some(ref yaml) = inherited.yaml {
-                    let name = inherited.name.clone().unwrap_or_default();
-                    results.push((name, yaml.clone(), fail));
-                }
+            if !inherited.skip
+                && let Some(ref yaml) = inherited.yaml
+            {
+                let name = inherited.name.clone().unwrap_or_default();
+                results.push((name, yaml.clone(), fail));
             }
         };
 

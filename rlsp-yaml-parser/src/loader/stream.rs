@@ -101,10 +101,10 @@ pub(super) fn peek_trailing_comment(
 ) -> Result<Option<String>> {
     if let Some(Ok((Event::Comment { .. }, span))) = stream.peek() {
         let comment_line = line_index.line_column(span.start).0;
-        if comment_line == preceding_end_line {
-            if let Some((Event::Comment { text }, _)) = next_from(stream)? {
-                return Ok(Some(with_hash_prefix(text)));
-            }
+        if comment_line == preceding_end_line
+            && let Some((Event::Comment { text }, _)) = next_from(stream)?
+        {
+            return Ok(Some(with_hash_prefix(text)));
         }
     }
     Ok(None)

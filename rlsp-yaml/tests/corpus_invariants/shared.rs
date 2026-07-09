@@ -27,12 +27,11 @@ pub fn collect_corpus_files() -> Vec<PathBuf> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if ext == "yml" || ext == "yaml" {
-                    files.push(path);
-                }
-            }
+        if path.is_file()
+            && let Some(ext) = path.extension().and_then(|e| e.to_str())
+            && (ext == "yml" || ext == "yaml")
+        {
+            files.push(path);
         }
     }
     files.sort();
@@ -611,12 +610,11 @@ pub mod helpers {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext == "yml" || ext == "yaml" {
-                        files.push(path);
-                    }
-                }
+            if path.is_file()
+                && let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && (ext == "yml" || ext == "yaml")
+            {
+                files.push(path);
             }
         }
         files.sort();

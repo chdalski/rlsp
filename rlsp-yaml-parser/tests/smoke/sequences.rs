@@ -912,13 +912,13 @@ fn fast_path_plain_scalar_with_trailing_comment() {
     let events = event_variants("- value # comment\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(scalar) = scalar {
-        if let Event::Scalar { value, style, .. } = scalar {
-            assert_eq!(value.as_ref(), "value");
-            assert!(matches!(style, ScalarStyle::Plain));
-            assert!(scalar.anchor().is_none());
-            assert!(scalar.tag().is_none());
-        }
+    if let Some(scalar) = scalar
+        && let Event::Scalar { value, style, .. } = scalar
+    {
+        assert_eq!(value.as_ref(), "value");
+        assert!(matches!(style, ScalarStyle::Plain));
+        assert!(scalar.anchor().is_none());
+        assert!(scalar.tag().is_none());
     }
 }
 
@@ -991,11 +991,11 @@ fn fast_path_skipped_anchor_prefix() {
     let events = event_variants("- &anchor value\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(scalar) = scalar {
-        if let Event::Scalar { value, .. } = scalar {
-            assert_eq!(value.as_ref(), "value");
-            assert_eq!(scalar.anchor(), Some("anchor"));
-        }
+    if let Some(scalar) = scalar
+        && let Event::Scalar { value, .. } = scalar
+    {
+        assert_eq!(value.as_ref(), "value");
+        assert_eq!(scalar.anchor(), Some("anchor"));
     }
 }
 
@@ -1005,11 +1005,11 @@ fn fast_path_skipped_tag_prefix() {
     let events = event_variants("- !!str value\n");
     let scalar = events.iter().find(|e| matches!(e, Event::Scalar { .. }));
     assert!(scalar.is_some(), "scalar must be emitted");
-    if let Some(scalar) = scalar {
-        if let Event::Scalar { value, .. } = scalar {
-            assert_eq!(value.as_ref(), "value");
-            assert!(scalar.tag().is_some(), "tag must be present");
-        }
+    if let Some(scalar) = scalar
+        && let Event::Scalar { value, .. } = scalar
+    {
+        assert_eq!(value.as_ref(), "value");
+        assert!(scalar.tag().is_some(), "tag must be present");
     }
 }
 

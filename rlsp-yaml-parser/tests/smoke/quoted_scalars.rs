@@ -116,10 +116,10 @@ fn double_quoted_span_covers_including_delimiters() {
 fn quoted_key_parse_events_style_double() {
     let events = event_variants("\"key\": value\n");
     let key_event = events.iter().find_map(|ev| {
-        if let Event::Scalar { value, style, .. } = ev {
-            if value == "key" {
-                return Some(*style);
-            }
+        if let Event::Scalar { value, style, .. } = ev
+            && value == "key"
+        {
+            return Some(*style);
         }
         None
     });
@@ -135,10 +135,10 @@ fn quoted_key_parse_events_style_double() {
 fn quoted_key_parse_events_style_single() {
     let events = event_variants("'key': value\n");
     let key_event = events.iter().find_map(|ev| {
-        if let Event::Scalar { value, style, .. } = ev {
-            if value == "key" {
-                return Some(*style);
-            }
+        if let Event::Scalar { value, style, .. } = ev
+            && value == "key"
+        {
+            return Some(*style);
         }
         None
     });

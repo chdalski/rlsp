@@ -44,20 +44,20 @@ impl<'input> EventIter<'input> {
         // Exceptions: `\t[`, `\t{`, `\t]`, `\t}` are allowed because flow
         // collection delimiters can follow tabs (YAML test suite 6CA3, Q5MG).
         // Lines like `  \tx` have SPACES as indentation; the tab is content.
-        if let Some(line) = self.lexer.peek_next_line() {
-            if line.content.starts_with('\t') {
-                // First char is a tab — check what the first non-tab character
-                // is.  Flow collection delimiters are allowed after leading tabs.
-                let first_non_tab = line.content.trim_start_matches('\t').chars().next();
-                if !matches!(first_non_tab, Some('[' | '{' | ']' | '}')) {
-                    let err_pos = line.pos;
-                    self.state = IterState::Done;
-                    self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error::syntax(
-                        err_pos,
-                        "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
-                    )));
-                }
+        if let Some(line) = self.lexer.peek_next_line()
+            && line.content.starts_with('\t')
+        {
+            // First char is a tab — check what the first non-tab character
+            // is.  Flow collection delimiters are allowed after leading tabs.
+            let first_non_tab = line.content.trim_start_matches('\t').chars().next();
+            if !matches!(first_non_tab, Some('[' | '{' | ']' | '}')) {
+                let err_pos = line.pos;
+                self.state = IterState::Done;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
+                )));
             }
         }
 
@@ -69,16 +69,16 @@ impl<'input> EventIter<'input> {
         // This check runs before mapping/sequence/flow detection so that a
         // BOM-prefixed line (e.g. `\u{FEFF}key: val`) is not mistakenly parsed
         // as a valid mapping entry.
-        if let Some(line) = self.lexer.peek_next_line() {
-            if line.content.starts_with('\u{FEFF}') {
-                let err_pos = line.pos;
-                self.state = IterState::Done;
-                self.lexer.consume_line();
-                return StepResult::Yield(Err(Error::syntax(
-                    err_pos,
-                    "invalid character U+FEFF in document".into(),
-                )));
-            }
+        if let Some(line) = self.lexer.peek_next_line()
+            && line.content.starts_with('\u{FEFF}')
+        {
+            let err_pos = line.pos;
+            self.state = IterState::Done;
+            self.lexer.consume_line();
+            return StepResult::Yield(Err(Error::syntax(
+                err_pos,
+                "invalid character U+FEFF in document".into(),
+            )));
         }
 
         // ---- Document / stream boundaries ----
@@ -174,23 +174,23 @@ impl<'input> EventIter<'input> {
             // document's (empty) directive scope.  Tags defined in the previous
             // document do not carry over (YAML §9.2), so an undefined handle
             // must fail immediately.
-            if let Some((tag_val, tag_offset)) = self.lexer.peek_inline_scalar() {
-                if tag_val.starts_with('!') {
-                    // The inline scalar starts at `tag_offset` bytes from the
-                    // start of the input.  Reconstruct the full Pos by computing
-                    // the column as the byte distance from the `---` line start —
-                    // tags are ASCII-only, so byte distance == codepoint distance.
-                    let col_from_line_start = tag_offset as usize - marker_pos.byte_offset;
-                    let tag_pos = Pos {
-                        byte_offset: tag_offset as usize,
-                        line: marker_pos.line,
-                        column: col_from_line_start,
-                    };
-                    if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
-                        self.lexer.drain_inline_scalar();
-                        self.state = IterState::Done;
-                        return StepResult::Yield(Err(e));
-                    }
+            if let Some((tag_val, tag_offset)) = self.lexer.peek_inline_scalar()
+                && tag_val.starts_with('!')
+            {
+                // The inline scalar starts at `tag_offset` bytes from the
+                // start of the input.  Reconstruct the full Pos by computing
+                // the column as the byte distance from the `---` line start —
+                // tags are ASCII-only, so byte distance == codepoint distance.
+                let col_from_line_start = tag_offset as usize - marker_pos.byte_offset;
+                let tag_pos = Pos {
+                    byte_offset: tag_offset as usize,
+                    line: marker_pos.line,
+                    column: col_from_line_start,
+                };
+                if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
+                    self.lexer.drain_inline_scalar();
+                    self.state = IterState::Done;
+                    return StepResult::Yield(Err(e));
                 }
             }
             self.state = IterState::InDocument;
@@ -251,16 +251,18 @@ impl<'input> EventIter<'input> {
         // A YAML document contains exactly one root node.  Once the root has
         // been fully emitted (`root_node_emitted = true`) and the collection
         // stack is empty, any further non-comment, non-blank content is invalid.
-        if self.root_node_emitted && self.coll_stack.is_empty() && !self.lexer.has_inline_scalar() {
-            if let Some(line) = self.lexer.peek_next_line() {
-                let err_pos = line.pos;
-                self.state = IterState::Done;
-                self.lexer.consume_line();
-                return StepResult::Yield(Err(Error::syntax(
-                    err_pos,
-                    "unexpected content after document root node".into(),
-                )));
-            }
+        if self.root_node_emitted
+            && self.coll_stack.is_empty()
+            && !self.lexer.has_inline_scalar()
+            && let Some(line) = self.lexer.peek_next_line()
+        {
+            let err_pos = line.pos;
+            self.state = IterState::Done;
+            self.lexer.consume_line();
+            return StepResult::Yield(Err(Error::syntax(
+                err_pos,
+                "unexpected content after document root node".into(),
+            )));
         }
 
         // ---- Byte-prefix dispatch ----
@@ -1034,16 +1036,18 @@ impl<'input> EventIter<'input> {
         // parse error.
         if let Some(line) = self.lexer.peek_next_line() {
             let first_ch = line.content.chars().next();
-            if let Some(ch) = first_ch {
-                if ch != ' ' && ch != '\t' && !crate::lexer::is_ns_char(ch) {
-                    let err_pos = line.pos;
-                    self.state = IterState::Done;
-                    self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error::syntax(
-                        err_pos,
-                        format!("invalid character U+{:04X} in document", ch as u32),
-                    )));
-                }
+            if let Some(ch) = first_ch
+                && ch != ' '
+                && ch != '\t'
+                && !crate::lexer::is_ns_char(ch)
+            {
+                let err_pos = line.pos;
+                self.state = IterState::Done;
+                self.lexer.consume_line();
+                return StepResult::Yield(Err(Error::syntax(
+                    err_pos,
+                    format!("invalid character U+{:04X} in document", ch as u32),
+                )));
             }
         }
 

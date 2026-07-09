@@ -274,11 +274,11 @@ fn parse_optional_anchor_tag(s: &str) -> (Option<String>, Option<String>, &str) 
     }
 
     // Optional tag: `<content>`
-    if rest.starts_with('<') {
-        if let Some(close) = rest.find('>') {
-            tag = Some(rest[1..close].to_string());
-            rest = rest[close + 1..].trim_start();
-        }
+    if rest.starts_with('<')
+        && let Some(close) = rest.find('>')
+    {
+        tag = Some(rest[1..close].to_string());
+        rest = rest[close + 1..].trim_start();
     }
 
     (anchor, tag, rest)

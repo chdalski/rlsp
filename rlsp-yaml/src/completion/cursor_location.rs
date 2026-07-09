@@ -271,15 +271,14 @@ pub(super) fn locate_cursor(docs: &[Document<Span>], position: Position) -> Curs
                         };
                     }
                 }
-            } else if let Node::Sequence { loc, .. } = &doc.root {
-                if idx.line_column(loc.start).0 as usize <= cursor.line
-                    && cursor.line <= idx.line_column(loc.end).0 as usize
-                {
-                    return CursorLocation::InBlankSequence {
-                        enclosing_path: path,
-                        sequence: &doc.root,
-                    };
-                }
+            } else if let Node::Sequence { loc, .. } = &doc.root
+                && idx.line_column(loc.start).0 as usize <= cursor.line
+                && cursor.line <= idx.line_column(loc.end).0 as usize
+            {
+                return CursorLocation::InBlankSequence {
+                    enclosing_path: path,
+                    sequence: &doc.root,
+                };
             }
         }
     }
@@ -354,13 +353,12 @@ pub(super) fn locate_in_node<'a>(
                 if cursor.line == idx.line_column(key_span.start).0 as usize
                     && cursor.column >= idx.line_column(key_span.end).1 as usize
                     && idx.line_column(value_span.start).0 as usize != cursor.line
+                    && let Some(key) = scalar_key(key_node)
                 {
-                    if let Some(key) = scalar_key(key_node) {
-                        return CursorLocation::OnValue {
-                            key: key.to_string(),
-                            enclosing_path: enclosing_path.clone(),
-                        };
-                    }
+                    return CursorLocation::OnValue {
+                        key: key.to_string(),
+                        enclosing_path: enclosing_path.clone(),
+                    };
                 }
             }
             CursorLocation::OutsideAny

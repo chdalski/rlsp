@@ -178,10 +178,10 @@ fn is_valid_duration_designators(s: &str, designators: &[char]) -> bool {
         let Some(idx) = designators.iter().position(|&d| d == designator) else {
             return false;
         };
-        if let Some(prev) = last_idx {
-            if idx <= prev {
-                return false; // out of order or repeated
-            }
+        if let Some(prev) = last_idx
+            && idx <= prev
+        {
+            return false; // out of order or repeated
         }
         last_idx = Some(idx);
         remaining = &remaining[digit_end + designator.len_utf8()..];

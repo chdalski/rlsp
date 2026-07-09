@@ -63,15 +63,16 @@ fn collect_node_links(
             // !include tag: treat value as a file path.
             if tag.as_deref() == Some("!include") {
                 // Reject empty paths and control characters that are invalid in file paths.
-                if !value.is_empty() && !value.contains(['\n', '\r', '\x00']) {
-                    if let Some(target) = resolve_include_path(value, base_uri) {
-                        out.push(DocumentLink {
-                            range: span_to_range(*loc, idx),
-                            target: Some(target),
-                            tooltip: Some("Open included file".to_string()),
-                            data: None,
-                        });
-                    }
+                if !value.is_empty()
+                    && !value.contains(['\n', '\r', '\x00'])
+                    && let Some(target) = resolve_include_path(value, base_uri)
+                {
+                    out.push(DocumentLink {
+                        range: span_to_range(*loc, idx),
+                        target: Some(target),
+                        tooltip: Some("Open included file".to_string()),
+                        data: None,
+                    });
                 }
                 // Do not also scan the value for URLs when it's an !include tag.
                 return;

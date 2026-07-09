@@ -272,14 +272,14 @@ impl<'input> LineBuffer<'input> {
     /// fails `c-printable`) everywhere else.
     pub fn signal_document_boundary(&mut self) {
         // Strip at most one BOM from the already-primed next line.
-        if let Some(ref mut next) = self.next {
-            if next.content.starts_with('\u{FEFF}') {
-                let bom_len = '\u{FEFF}'.len_utf8(); // 3 bytes
-                next.content = &next.content[bom_len..];
-                next.offset += bom_len;
-                next.pos.byte_offset += bom_len;
-                // Column is unchanged: BOM is zero-width in column terms.
-            }
+        if let Some(ref mut next) = self.next
+            && next.content.starts_with('\u{FEFF}')
+        {
+            let bom_len = '\u{FEFF}'.len_utf8(); // 3 bytes
+            next.content = &next.content[bom_len..];
+            next.offset += bom_len;
+            next.pos.byte_offset += bom_len;
+            // Column is unchanged: BOM is zero-width in column terms.
         }
         // Invalidate lookahead that may have peeked the unstripped BOM line.
         self.lookahead.clear();

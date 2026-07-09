@@ -996,13 +996,12 @@ fn parse_schema_with_root(
     }
 
     // $dynamicRef — same resolution as $ref for single-document schemas
-    if let Some(Value::String(ref_str)) = obj.get("$dynamicRef") {
-        if let Some(resolved) = resolve_ref(ref_str, root, base_uri, ctx.as_deref_mut(), depth + 1)
-        {
-            return Some(resolved);
-        }
-        // Fall through if unresolved — parse remaining fields
+    if let Some(Value::String(ref_str)) = obj.get("$dynamicRef")
+        && let Some(resolved) = resolve_ref(ref_str, root, base_uri, ctx.as_deref_mut(), depth + 1)
+    {
+        return Some(resolved);
     }
+    // Fall through if unresolved — parse remaining fields
 
     // $id (Draft-06+) / id (Draft-04) — update base URI for sub-schemas
     let raw_id = obj

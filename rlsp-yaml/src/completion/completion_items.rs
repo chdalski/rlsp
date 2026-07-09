@@ -56,20 +56,20 @@ pub(super) fn collect_values_in_node(
     match node {
         Node::Mapping { entries, .. } => {
             for (key_node, value_node) in entries {
-                if let Some(k) = scalar_key(key_node) {
-                    if k == key_name {
-                        let key_span = node_span(key_node);
-                        if idx.line_column(key_span.start).0 as usize != parser_cursor_line {
-                            if let Node::Scalar { value, .. } = value_node {
-                                if !value.is_empty() && seen.insert(value.clone()) {
-                                    items.push(CompletionItem {
-                                        label: value.clone(),
-                                        kind: Some(CompletionItemKind::VALUE),
-                                        ..CompletionItem::default()
-                                    });
-                                }
-                            }
-                        }
+                if let Some(k) = scalar_key(key_node)
+                    && k == key_name
+                {
+                    let key_span = node_span(key_node);
+                    if idx.line_column(key_span.start).0 as usize != parser_cursor_line
+                        && let Node::Scalar { value, .. } = value_node
+                        && !value.is_empty()
+                        && seen.insert(value.clone())
+                    {
+                        items.push(CompletionItem {
+                            label: value.clone(),
+                            kind: Some(CompletionItemKind::VALUE),
+                            ..CompletionItem::default()
+                        });
                     }
                 }
                 collect_values_in_node(value_node, key_name, parser_cursor_line, seen, items, idx);

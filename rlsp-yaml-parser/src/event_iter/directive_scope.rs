@@ -21,22 +21,22 @@ fn percent_decode(s: &str) -> Cow<'_, str> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes.get(i) == Some(&b'%') {
-            if let (Some(&hi_byte), Some(&lo_byte)) = (bytes.get(i + 1), bytes.get(i + 2)) {
-                let hi = (hi_byte as char).to_digit(16);
-                let lo = (lo_byte as char).to_digit(16);
-                if let (Some(h), Some(l)) = (hi, lo) {
-                    // h and l are each 0..=15 from to_digit(16); the combined
-                    // value is 0..=255 and always fits in u8.
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "nibble-pair h<<4|l is 0..=255, always fits in u8"
-                    )]
-                    let decoded = ((h << 4) | l) as u8;
-                    out.push(char::from(decoded));
-                    i += 3;
-                    continue;
-                }
+        if bytes.get(i) == Some(&b'%')
+            && let (Some(&hi_byte), Some(&lo_byte)) = (bytes.get(i + 1), bytes.get(i + 2))
+        {
+            let hi = (hi_byte as char).to_digit(16);
+            let lo = (lo_byte as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                // h and l are each 0..=15 from to_digit(16); the combined
+                // value is 0..=255 and always fits in u8.
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "nibble-pair h<<4|l is 0..=255, always fits in u8"
+                )]
+                let decoded = ((h << 4) | l) as u8;
+                out.push(char::from(decoded));
+                i += 3;
+                continue;
             }
         }
         if let Some(&b) = bytes.get(i) {
@@ -193,26 +193,26 @@ impl DirectiveScope {
         // `!suffix` — check for a registered primary `!` handle (set via `%TAG ! prefix`).
         // If present, expand; otherwise return as local tag.  A bare `!` (after_first_bang
         // is empty) is a non-specific tag and is never expanded.
-        if !after_first_bang.is_empty() {
-            if let Some(prefix) = self.tag_handles.get("!") {
-                let decoded_suffix = percent_decode(after_first_bang);
-                let resolved = format!("{prefix}{decoded_suffix}");
-                if resolved.len() > MAX_RESOLVED_TAG_LEN {
-                    return Err(Error::syntax(
-                        indicator_pos,
-                        format!(
-                            "resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"
-                        ),
-                    ));
-                }
-                validate_resolved_tag(&resolved).map_err(|offset| Error::syntax(
+        if !after_first_bang.is_empty()
+            && let Some(prefix) = self.tag_handles.get("!")
+        {
+            let decoded_suffix = percent_decode(after_first_bang);
+            let resolved = format!("{prefix}{decoded_suffix}");
+            if resolved.len() > MAX_RESOLVED_TAG_LEN {
+                return Err(Error::syntax(
+                    indicator_pos,
+                    format!("resolved tag exceeds maximum length of {MAX_RESOLVED_TAG_LEN} bytes"),
+                ));
+            }
+            validate_resolved_tag(&resolved).map_err(|offset| {
+                Error::syntax(
                     indicator_pos,
                     format!(
                         "resolved tag contains character not allowed in URI at byte offset {offset}"
                     ),
-                ))?;
-                return Ok(Cow::Owned(resolved));
-            }
+                )
+            })?;
+            return Ok(Cow::Owned(resolved));
         }
 
         // `!suffix` with no registered `!` handle (local tag) or bare `!` — no expansion.

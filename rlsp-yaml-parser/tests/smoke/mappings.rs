@@ -705,3 +705,50 @@ fn empty_value_span_is_zero_width() {
         assert_eq!(span.start, span.end, "empty value span must be zero-width");
     }
 }
+
+// -----------------------------------------------------------------------
+// Group J: Coverage gap tests — tab-indented block structure after
+// explicit key/value markers (YAML 1.2 §6.1: tab is not valid block
+// indentation)
+// -----------------------------------------------------------------------
+
+#[test]
+fn explicit_key_tab_after_question_mark_is_rejected() {
+    // "?\t- a\n" — bare `?` explicit-key marker followed by a tab, then a
+    // block sequence entry. The tab makes the sequence's `-` tab-indented
+    // block structure, which YAML 1.2 §6.1 forbids.
+    let result: Vec<_> = parse_events("?\t- a\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "tab after '?' explicit-key marker must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message
+                .contains("tab character is not valid block indentation"),
+            "error message should mention tab block indentation; got: {}",
+            err.message
+        );
+    }
+}
+
+#[test]
+fn explicit_value_tab_after_colon_is_rejected() {
+    // "? k\n:\t- a\n" — explicit key `k`, then `:` explicit-value marker
+    // followed by a tab and a block sequence entry on the value line.
+    let result: Vec<_> = parse_events("? k\n:\t- a\n").collect();
+    let has_error = result.iter().any(Result::is_err);
+    assert!(
+        has_error,
+        "tab after ':' explicit-value marker must return an error"
+    );
+    if let Some(err) = result.iter().find_map(|r| r.as_ref().err()) {
+        assert!(
+            err.message
+                .contains("tab character is not valid block indentation"),
+            "error message should mention tab block indentation; got: {}",
+            err.message
+        );
+    }
+}

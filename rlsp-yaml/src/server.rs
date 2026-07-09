@@ -456,11 +456,11 @@ impl Backend {
             // Fourth fallback: SchemaStore catalog.
             // get_or_fetch_schemastore_catalog() acquires and releases
             // schemastore_catalog lock without holding any other lock.
-            if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await {
-                if let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog) {
-                    self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
-                        .await;
-                }
+            if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await
+                && let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog)
+            {
+                self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
+                    .await;
             }
         }
     }

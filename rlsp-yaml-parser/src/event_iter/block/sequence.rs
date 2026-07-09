@@ -164,14 +164,21 @@ impl<'input> EventIter<'input> {
             // (`has_had_item = true`) and the new dash is NOT at the parent
             // sequence's column (not a new sibling item), this is a wrong-indent
             // sequence entry.
-            if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last() {
-                if dash_indent != parent_col {
-                    self.state = IterState::Done;
-                    return StepResult::Yield(Err(Error::syntax(
-                        dash_pos,
-                        "block sequence entry at wrong indentation level".into(),
-                    )));
-                }
+            // Defensive: not observed to fire across the full test suite +
+            // yaml-test-suite corpus (checked via temporary instrumentation
+            // during the 1.97 collapsible_if cleanup). `opens_new` above
+            // already implies `dash_indent > col` for a `Sequence` top, so
+            // `dash_indent != parent_col` may be unreachable in practice;
+            // kept as a guard in case future `opens_new` changes weaken that
+            // invariant.
+            if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last()
+                && dash_indent != parent_col
+            {
+                self.state = IterState::Done;
+                return StepResult::Yield(Err(Error::syntax(
+                    dash_pos,
+                    "block sequence entry at wrong indentation level".into(),
+                )));
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
@@ -215,12 +222,11 @@ impl<'input> EventIter<'input> {
         }
         // When continuing an existing sequence (opens_new = false), reset
         // `current_item_started` so that the new item can receive content.
-        if !opens_new {
-            if let Some(CollectionEntry::Sequence(_, current_item_started)) =
+        if !opens_new
+            && let Some(CollectionEntry::Sequence(_, current_item_started)) =
                 self.coll_stack.last_mut()
-            {
-                *current_item_started = false;
-            }
+        {
+            *current_item_started = false;
         }
         // When continuing an existing sequence (opens_new = false) and there is
         // a pending tag/anchor from the previous item's content (e.g. `- !!str`

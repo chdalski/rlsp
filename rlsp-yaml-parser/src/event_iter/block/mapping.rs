@@ -49,15 +49,14 @@ impl<'input> EventIter<'input> {
         };
 
         // Explicit key indicator: `? ` or `?` at EOL.
-        if let Some(after_q) = trimmed.strip_prefix('?') {
-            if after_q.is_empty()
+        if let Some(after_q) = trimmed.strip_prefix('?')
+            && (after_q.is_empty()
                 || after_q.starts_with(' ')
                 || after_q.starts_with('\t')
                 || after_q.starts_with('\n')
-                || after_q.starts_with('\r')
-            {
-                return Some((key_indent, key_pos));
-            }
+                || after_q.starts_with('\r'))
+        {
+            return Some((key_indent, key_pos));
         }
 
         // Implicit key: line contains `: ` or ends with `:`.
@@ -392,33 +391,33 @@ impl<'input> EventIter<'input> {
         // (the next item down the stack) is a Mapping at the same indent —
         // either as a value (seq-spaces rule) or as an explicit key's content
         // (bare `?` with a block sequence key).
-        if let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last() {
-            if seq_col == effective_key_indent {
-                let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
+        if let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last()
+            && seq_col == effective_key_indent
+        {
+            let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
                     |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == effective_key_indent),
                 );
-                if parent_is_seq_spaces_mapping {
-                    self.coll_stack.pop();
-                    self.queue
-                        .push_back((Event::SequenceEnd, zero_span(cur_pos)));
-                    // If complex_key_inline is set for the parent mapping, the
-                    // sequence was the KEY (e.g. `?\n- a\n: value`).  Advance to
-                    // Value phase and clear the flag.
-                    // Otherwise the sequence was the VALUE (seq-spaces rule) —
-                    // advance from Value to Key phase.
-                    if let Some(CollectionEntry::Mapping(col, phase, has_had_value)) =
-                        self.coll_stack.last_mut()
-                    {
-                        if self.complex_key_inline == Some(*col) {
-                            *phase = MappingPhase::Value;
-                            *has_had_value = true;
-                            self.complex_key_inline = None;
-                        } else {
-                            *phase = MappingPhase::Key;
-                        }
+            if parent_is_seq_spaces_mapping {
+                self.coll_stack.pop();
+                self.queue
+                    .push_back((Event::SequenceEnd, zero_span(cur_pos)));
+                // If complex_key_inline is set for the parent mapping, the
+                // sequence was the KEY (e.g. `?\n- a\n: value`).  Advance to
+                // Value phase and clear the flag.
+                // Otherwise the sequence was the VALUE (seq-spaces rule) —
+                // advance from Value to Key phase.
+                if let Some(CollectionEntry::Mapping(col, phase, has_had_value)) =
+                    self.coll_stack.last_mut()
+                {
+                    if self.complex_key_inline == Some(*col) {
+                        *phase = MappingPhase::Value;
+                        *has_had_value = true;
+                        self.complex_key_inline = None;
+                    } else {
+                        *phase = MappingPhase::Key;
                     }
-                    return StepResult::Continue;
                 }
+                return StepResult::Continue;
             }
         }
 
@@ -474,15 +473,13 @@ impl<'input> EventIter<'input> {
             // of a new nested mapping.  Route directly to
             // `consume_explicit_value_line` so we don't open a spurious
             // inner mapping (E76Z: `*alias : value` where alias was the key).
-            if self.is_value_indicator_line() {
-                if let Some(&CollectionEntry::Mapping(val_col, MappingPhase::Value, _)) =
+            if self.is_value_indicator_line()
+                && let Some(&CollectionEntry::Mapping(val_col, MappingPhase::Value, _)) =
                     self.coll_stack.last()
-                {
-                    if val_col <= effective_key_indent {
-                        self.consume_explicit_value_line(val_col);
-                        return StepResult::Continue;
-                    }
-                }
+                && val_col <= effective_key_indent
+            {
+                self.consume_explicit_value_line(val_col);
+                return StepResult::Continue;
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
@@ -612,19 +609,19 @@ impl<'input> EventIter<'input> {
             // via a tab, which is forbidden (YAML 1.2 §6.1).
             if let Some(line) = self.lexer.peek_next_line() {
                 let after_spaces = line.content.trim_start_matches(' ');
-                if let Some(after_colon) = after_spaces.strip_prefix(':') {
-                    if !after_colon.is_empty() {
-                        let value = after_colon.trim_start_matches([' ', '\t']);
-                        let separator = &after_colon[..after_colon.len() - value.len()];
-                        if separator.contains('\t') && is_tab_indented_block_indicator(value) {
-                            let err_pos = line.pos;
-                            self.state = IterState::Done;
-                            self.lexer.consume_line();
-                            return StepResult::Yield(Err(Error::syntax(
-                                err_pos,
-                                "tab character is not valid block indentation".into(),
-                            )));
-                        }
+                if let Some(after_colon) = after_spaces.strip_prefix(':')
+                    && !after_colon.is_empty()
+                {
+                    let value = after_colon.trim_start_matches([' ', '\t']);
+                    let separator = &after_colon[..after_colon.len() - value.len()];
+                    if separator.contains('\t') && is_tab_indented_block_indicator(value) {
+                        let err_pos = line.pos;
+                        self.state = IterState::Done;
+                        self.lexer.consume_line();
+                        return StepResult::Yield(Err(Error::syntax(
+                            err_pos,
+                            "tab character is not valid block indentation".into(),
+                        )));
                     }
                 }
             }
@@ -695,19 +692,19 @@ impl<'input> EventIter<'input> {
         // via a tab, which is forbidden (YAML 1.2 §6.1).
         if let Some(line) = self.lexer.peek_next_line() {
             let after_spaces = line.content.trim_start_matches(' ');
-            if let Some(after_q) = after_spaces.strip_prefix('?') {
-                if !after_q.is_empty() {
-                    let inline = after_q.trim_start_matches([' ', '\t']);
-                    let separator = &after_q[..after_q.len() - inline.len()];
-                    if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
-                        let err_pos = line.pos;
-                        self.state = IterState::Done;
-                        self.lexer.consume_line();
-                        return StepResult::Yield(Err(Error::syntax(
-                            err_pos,
-                            "tab character is not valid block indentation".into(),
-                        )));
-                    }
+            if let Some(after_q) = after_spaces.strip_prefix('?')
+                && !after_q.is_empty()
+            {
+                let inline = after_q.trim_start_matches([' ', '\t']);
+                let separator = &after_q[..after_q.len() - inline.len()];
+                if separator.contains('\t') && is_tab_indented_block_indicator(inline) {
+                    let err_pos = line.pos;
+                    self.state = IterState::Done;
+                    self.lexer.consume_line();
+                    return StepResult::Yield(Err(Error::syntax(
+                        err_pos,
+                        "tab character is not valid block indentation".into(),
+                    )));
                 }
             }
         }
@@ -862,11 +859,10 @@ impl<'input> EventIter<'input> {
         // IS the key and the mapping will advance to Value phase here — clear it.
         // (For an outer mapping's flag surviving through inner mappings, only
         // `advance_mapping_to_value` with the correct indent clears it.)
-        if let Some(flag_col) = self.complex_key_inline {
-            if self.coll_stack.last().is_some_and(|e| matches!(e, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == flag_col)) {
+        if let Some(flag_col) = self.complex_key_inline
+            && self.coll_stack.last().is_some_and(|e| matches!(e, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == flag_col)) {
                 self.complex_key_inline = None;
             }
-        }
         // Find the innermost mapping entry on the stack.
         for entry in self.coll_stack.iter_mut().rev() {
             if let CollectionEntry::Mapping(_, phase, has_had_value) = entry {

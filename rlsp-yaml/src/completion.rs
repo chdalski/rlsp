@@ -81,12 +81,11 @@ pub fn complete_at(
             let present = docs.first().map_or_else(HashSet::new, |d| {
                 present_keys(mapping, cursor_line, d.line_index())
             });
-            if let Some(s) = schema {
-                if let Some(resolved_schema) = resolve_schema_path(s, &enclosing_path)
-                    && schema_has_properties(resolved_schema)
-                {
-                    return schema_key_completions(resolved_schema, &present);
-                }
+            if let Some(s) = schema
+                && let Some(resolved_schema) = resolve_schema_path(s, &enclosing_path)
+                && schema_has_properties(resolved_schema)
+            {
+                return schema_key_completions(resolved_schema, &present);
             }
             keys_to_items(
                 collect_sibling_keys_ast(mapping)
