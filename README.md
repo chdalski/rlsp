@@ -18,6 +18,8 @@ Small, fast language server implementations written in Rust with minimal memory 
 
 **Zed** — a Zed extension is available in the [Zed marketplace](https://zed.dev/extensions?query=rlsp-yaml). Search for `rlsp-yaml` and install — no manual server configuration required. The extension is at [`rlsp-yaml/integrations/zed/`](rlsp-yaml/integrations/zed/).
 
+**Claude Code** — a plugin registers `rlsp-yaml` as a native LSP server, so diagnostics and code navigation flow into Claude's context after every edit. Supports **Linux and macOS**, with automatic binary provisioning (PATH-first, else auto-download). Install with `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`. The plugin is at [`rlsp-yaml/integrations/claude-code/`](rlsp-yaml/integrations/claude-code/).
+
 ## Contributing
 
 This project accepts bug reports and feature requests via [GitHub Issues](https://github.com/chdalski/rlsp/issues). External code contributions are not currently accepted. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.

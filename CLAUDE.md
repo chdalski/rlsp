@@ -34,12 +34,22 @@ cargo check --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm3
 cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
 ```
 
+### Claude Code Plugin
+
+```sh
+claude plugin validate --strict rlsp-yaml/integrations/claude-code  # validate plugin.json / .lsp.json / hooks.json
+claude plugin validate --strict .                                  # validate the repo-root marketplace.json
+cargo test -p rlsp-yaml --test claude_code_stdio_smoke              # LSP initialize/didOpen smoke test
+sh rlsp-yaml/integrations/claude-code/scripts/provision.test.sh     # provisioning script test suite
+```
+
 ## Components
 
 | Path | Purpose |
 |------|---------|
 | `rlsp-fmt/` | Generic Wadler-Lindig pretty-printing engine |
 | `rlsp-yaml/` | YAML language server |
+| `rlsp-yaml/integrations/claude-code/` | Claude Code plugin for rlsp-yaml |
 | `rlsp-yaml/integrations/vscode/` | VS Code extension for rlsp-yaml |
 | `rlsp-yaml/integrations/zed/` | Zed extension for rlsp-yaml |
 | `rlsp-yaml-parser/` | Spec-faithful streaming YAML 1.2 parser |

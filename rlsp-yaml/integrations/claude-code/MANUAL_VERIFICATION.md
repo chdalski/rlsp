@@ -8,8 +8,9 @@ nothing in this repository claims one passed until a user has actually run
 it.
 
 These are scratch verification procedures, task-scoped as noted in each
-section below. They do not describe end-user installation — that is Task
-3's `README.md`, which covers the marketplace install path.
+section below. `README.md` documents the install paths themselves
+(`--plugin-dir` and marketplace); the Task 3 section here confirms the
+marketplace path actually installs and loads the plugin end-to-end.
 
 ## Task 1 — PATH binary
 
@@ -153,3 +154,63 @@ session if the first download is slow).
       the auto-provisioned binary
 - [ ] *(if applicable)* Step 5 passed — unsupported-platform guidance
       reached Claude's context, no binary was downloaded
+
+## Task 3 — Marketplace install
+
+Scoped to the repo-root `.claude-plugin/marketplace.json` and the
+`/plugin marketplace add` + `/plugin install` path documented in
+`rlsp-yaml/integrations/claude-code/README.md`. Confirms the plugin is
+installable by a user who has never cloned this repo — the actual
+end-user install path, as opposed to the `--plugin-dir`/local-checkout
+paths verified in Tasks 1–2.
+
+### Prerequisites
+
+- Claude Code CLI installed (`claude --version`).
+- No local `--plugin-dir` session already loading `rlsp-yaml` for this
+  repo (so the marketplace-installed copy is unambiguously what's active).
+
+### Steps
+
+1. Start Claude Code without `--plugin-dir`:
+
+   ```sh
+   claude
+   ```
+
+2. Add this repository as a marketplace and install the plugin:
+
+   ```
+   /plugin marketplace add chdalski/rlsp
+   /plugin install rlsp-yaml@rlsp
+   ```
+
+   **Expected:** both commands succeed with no errors; `/plugin` lists
+   `rlsp-yaml` as installed from the `rlsp` marketplace.
+
+3. Restart or resume the session so the newly installed plugin's hooks and
+   LSP registration take effect (if not applied automatically).
+
+4. Run `/plugin` and open the plugin's detail view (or check the Errors
+   tab). **Expected:** the `rlsp-yaml` LSP server is listed with no error
+   entries, and the `SessionStart` provisioning hook has run (per Task 2's
+   verification, same expected outcome — PATH-first or auto-download).
+
+5. Open or create a YAML file with a syntax error (same fixture as Tasks 1
+   and 2):
+
+   ```yaml
+   key: [bad
+   ```
+
+   **Expected:** an `rlsp-yaml` diagnostic for the syntax error surfaces
+   into Claude's context, confirming the marketplace-installed plugin
+   works end-to-end, not just the local `--plugin-dir` copy.
+
+### Result
+
+- [ ] Confirmed by: _(name / date)_
+- [ ] Step 2 passed — marketplace add and plugin install both succeeded
+- [ ] Step 4 passed — LSP active with no Errors-tab entries
+- [ ] Step 5 passed — syntax-error diagnostic reached Claude's context via
+      the marketplace-installed plugin

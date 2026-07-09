@@ -47,6 +47,10 @@ vim.lsp.start({
 
 A dedicated extension is available at [`integrations/vscode/`](integrations/vscode/). It bundles the compiled `rlsp-yaml` binary and configures itself automatically — no manual setup required. Platform-specific VSIX packages are built by CI and attached to each release.
 
+### Claude Code
+
+A dedicated plugin is available at [`integrations/claude-code/`](integrations/claude-code/). It registers `rlsp-yaml` as a native LSP server so diagnostics and code navigation flow into Claude's context automatically, and provisions the binary itself (PATH-first, else auto-download) on **Linux and macOS**. Install via `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `claude --plugin-dir integrations/claude-code`.
+
 ### Helix
 
 Add to `~/.config/helix/languages.toml`:

@@ -10,7 +10,7 @@ and patches from external contributors are not accepted.
 
 ### Bug Reports
 
-Open the bug report template for the affected component — `rlsp-yaml`, `rlsp-yaml-parser`, `rlsp-fmt`, the VS Code extension, or the Zed extension. Include:
+Open the bug report template for the affected component — `rlsp-yaml`, `rlsp-yaml-parser`, `rlsp-fmt`, the VS Code extension, the Zed extension, or the Claude Code plugin. Include:
 
 - A clear description of the problem
 - Steps to reproduce
@@ -42,3 +42,4 @@ Templates are in [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
 | `rlsp-fmt` | `#c5def5` | Affects the pretty-printing engine |
 | `vscode-extension` | `#0052cc` | Affects the VS Code extension |
 | `zed-extension` | `#5319e7` | Affects the Zed extension |
+| `claude-code-plugin` | `#1d76db` | Affects the Claude Code plugin |

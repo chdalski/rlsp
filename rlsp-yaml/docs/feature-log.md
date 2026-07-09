@@ -57,6 +57,14 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Claude Code Plugin [completed]
+
+**Description:** rlsp-yaml is now available as a Claude Code plugin, registering the server as a native LSP server. After Claude edits a `.yaml`/`.yml` file, the server's diagnostics and code-navigation flow into Claude's context automatically. On Linux and macOS, the plugin provisions the `rlsp-yaml` binary itself — preferring one already on `PATH`, otherwise downloading the matching release — so no manual install is required. Install with `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `--plugin-dir`. Windows is not yet supported.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### Custom Tag Type Annotations [completed]
 
 **Description:** The `customTags` setting (and the `$tags=` modeline) now accepts optional type annotations. Append ` scalar`, ` mapping`, or ` sequence` (case-insensitive) to any tag entry to declare the expected node structure. When a tagged node's actual structure doesn't match the declared type, the server emits a `tagTypeMismatch` warning diagnostic. Tags without a type annotation continue to suppress `unknownTag` warnings with no structure check. This format is compatible with the RedHat yaml-language-server `customTags` setting, so existing configurations migrate unchanged. When both workspace settings and a modeline declare the same tag name, the modeline wins.

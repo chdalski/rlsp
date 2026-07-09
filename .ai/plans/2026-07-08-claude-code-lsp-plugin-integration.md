@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-07-08
 
 # Claude Code LSP Plugin Integration for rlsp-yaml
@@ -183,7 +183,7 @@ verification accordingly:
 - [x] Confirm release asset naming, targets, and download URL scheme
 - [x] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
 - [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
-- [ ] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
+- [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
@@ -357,30 +357,30 @@ Files:
   `zed-extension`.
 
 Acceptance criteria:
-- [ ] The integration README documents installation, the PATH-first/download
+- [x] The integration README documents installation, the PATH-first/download
       provisioning behavior, the Linux/macOS-only scope with the
       unsupported-platform message, and the `initializationOptions` passthrough
       with a link to `docs/configuration.md`.
-- [ ] Every command, path, and URL shown in the README matches what Tasks 1–2
+- [x] Every command, path, and URL shown in the README matches what Tasks 1–2
       actually produce (plugin dir name, data-dir command path, release URL
       scheme).
-- [ ] `rlsp-yaml/README.md` Editor Setup lists Claude Code with a pointer to
+- [x] `rlsp-yaml/README.md` Editor Setup lists Claude Code with a pointer to
       the integration directory, consistent in style with the adjacent entries.
-- [ ] Root `README.md` "Editor Extensions" section lists Claude Code alongside
+- [x] Root `README.md` "Editor Extensions" section lists Claude Code alongside
       VS Code and Zed.
-- [ ] Root `CLAUDE.md` Components table has a `rlsp-yaml/integrations/claude-code/`
+- [x] Root `CLAUDE.md` Components table has a `rlsp-yaml/integrations/claude-code/`
       row.
-- [ ] Root `CLAUDE.md` `## Build and Test` has a `### Claude Code Plugin`
+- [x] Root `CLAUDE.md` `## Build and Test` has a `### Claude Code Plugin`
       subsection documenting the runnable commands for this integration's
       `claude plugin validate --strict` check, Task 1 smoke test, and Task 2
       provisioning tests, parallel to the existing VS Code / Zed subsections.
-- [ ] `rlsp-yaml/docs/feature-log.md` has a Claude Code plugin entry matching
+- [x] `rlsp-yaml/docs/feature-log.md` has a Claude Code plugin entry matching
       the format of the existing "Zed Editor Extension" entry.
-- [ ] `.github/ISSUE_TEMPLATE/bug_claude_code_plugin.yml` exists, mirroring the
+- [x] `.github/ISSUE_TEMPLATE/bug_claude_code_plugin.yml` exists, mirroring the
       `bug_zed_extension.yml` structure.
-- [ ] `CONTRIBUTING.md`'s "Bug Reports" enumeration lists the Claude Code plugin,
+- [x] `CONTRIBUTING.md`'s "Bug Reports" enumeration lists the Claude Code plugin,
       and its "Recommended GitHub Labels" table has a `claude-code-plugin` row.
-- [ ] `.claude-plugin/marketplace.json` exists at the repo root, passes
+- [x] `.claude-plugin/marketplace.json` exists at the repo root, passes
       `claude plugin validate --strict` (which validates marketplace manifests),
       and has `name`, `owner`, `description`, and a `plugins` entry whose
       `git-subdir` source resolves to `rlsp-yaml/integrations/claude-code`; the
@@ -391,11 +391,11 @@ Acceptance criteria:
       in a real Claude Code session, `/plugin marketplace add chdalski/rlsp`
       followed by `/plugin install rlsp-yaml@<marketplace-name>` installs and
       loads the plugin (LSP active, no `/plugin` Errors-tab entries).
-- [ ] The plugin passes `claude plugin validate --strict`, and `plugin.json`
+- [x] The plugin passes `claude plugin validate --strict`, and `plugin.json`
       carries the community-catalog metadata fields (`displayName`,
       `description`, `keywords`, `author`, `license`, `homepage`,
       `repository`).
-- [ ] The integration README's Publishing section documents the community
+- [x] The integration README's Publishing section documents the community
       submission steps (run `claude plugin validate`; the two in-app form URLs;
       commit-SHA pinning by the `anthropics/claude-plugins-community` catalog),
       links the canonical submission docs page, and states that the repo
