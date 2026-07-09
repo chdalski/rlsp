@@ -92,11 +92,17 @@ session if the first download is slow).
 
 - Locate and clear this plugin's persistent data dir so provisioning starts
   from empty. It resolves to `~/.claude/plugins/data/<id>/` (relocatable
-  via `CLAUDE_CONFIG_DIR`), where `<id>` is the plugin identifier used at
-  install/load time (e.g. `rlsp-yaml` for a local `--plugin-dir` load):
+  via `CLAUDE_CONFIG_DIR`), where `<id>` is `<plugin-name>@<marketplace>`
+  with `@` replaced by `-` — for this plugin that's `rlsp-yaml-inline` for
+  a local `--plugin-dir` load (synthetic `@inline` source) and
+  `rlsp-yaml-rlsp` for the `rlsp` marketplace install (`rlsp-yaml@rlsp`).
+  It's never bare `rlsp-yaml`. Discover the actual directory rather than
+  guessing, and use it for the remainder of this task:
 
   ```sh
-  rm -rf ~/.claude/plugins/data/rlsp-yaml   # adjust <id> if it differs
+  ls ~/.claude/plugins/data/          # find the rlsp-yaml-* entry, i.e. <id>
+  DATA_DIR=~/.claude/plugins/data/<id>   # fill in what ls found
+  rm -rf "$DATA_DIR"
   ```
 
 - A supported host: Linux (`x86_64`/`aarch64`/`riscv64`) or macOS
@@ -114,10 +120,13 @@ session if the first download is slow).
 
 2. **Expected:** the `SessionStart` hook runs `provision.sh`, which
    downloads and verifies the pinned release and installs it to the data
-   dir. Confirm from a second terminal (or after the session):
+   dir. Confirm from a second terminal (or after the session) — this is a
+   new shell, so rediscover the data dir (see Prerequisites) rather than
+   reusing `$DATA_DIR` from the first terminal:
 
    ```sh
-   ls -l ~/.claude/plugins/data/rlsp-yaml/rlsp-yaml   # adjust <id> if it differs
+   ls ~/.claude/plugins/data/                    # find the rlsp-yaml-* entry, i.e. <id>
+   ls -l ~/.claude/plugins/data/<id>/rlsp-yaml    # fill in what ls found
    ```
 
    **Expected:** the file exists and is executable.

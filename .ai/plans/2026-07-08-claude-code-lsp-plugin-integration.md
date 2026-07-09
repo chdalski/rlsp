@@ -184,7 +184,7 @@ verification accordingly:
 - [x] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
 - [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
-- [ ] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
+- [x] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
@@ -225,7 +225,7 @@ Acceptance criteria:
       containing a YAML syntax error, and observes a `publishDiagnostics`
       notification reporting that error. This proves the exact binary the
       `.lsp.json` points at produces diagnostics over stdio.
-- [ ] *(user-verified)* A written procedure exists and the user confirms:
+- [x] *(user-verified)* A written procedure exists and the user confirms:
       installing the plugin locally via `claude --plugin-dir <dir>` (with
       `rlsp-yaml` on `PATH`) loads it with no
       `/plugin` Errors-tab entries, and editing a file with an invalid YAML
@@ -294,7 +294,7 @@ Acceptance criteria:
 - [x] The security advisor's specified controls (integrity, extraction safety,
       URL trust) are implemented, and both the security-engineer and
       test-engineer have signed off on the finished implementation.
-- [ ] *(user-verified)* A written procedure exists and the user confirms: on a
+- [x] *(user-verified)* A written procedure exists and the user confirms: on a
       machine with no `rlsp-yaml` on `PATH` and an empty data dir, starting a
       Claude Code session results in the YAML LSP becoming active (documenting
       whether it activates in the same session or the next, per the timing gap
@@ -427,16 +427,16 @@ Files:
   marketplace).
 
 Acceptance criteria:
-- [ ] No command in `MANUAL_VERIFICATION.md` hardcodes
+- [x] No command in `MANUAL_VERIFICATION.md` hardcodes
       `~/.claude/plugins/data/rlsp-yaml` (or any single fixed id); the clear and
       check steps use a discovery command (`ls ~/.claude/plugins/data/`) or
       otherwise resolve the id at runtime.
-- [ ] The doc states the id convention — `<plugin-name>@<marketplace>` with
+- [x] The doc states the id convention — `<plugin-name>@<marketplace>` with
       `@`→`-` — giving `rlsp-yaml-inline` (`--plugin-dir`) and `rlsp-yaml-rlsp`
       (`rlsp` marketplace) as the concrete cases.
-- [ ] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
+- [x] `claude plugin validate --strict rlsp-yaml/integrations/claude-code` still
       passes (sanity check — no structural change).
-- [ ] No other file is modified — the README's `${CLAUDE_PLUGIN_DATA}`
+- [x] No other file is modified — the README's `${CLAUDE_PLUGIN_DATA}`
       references are already correct and must not change.
 
 ## Decisions
