@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-07-09)
 **Created:** 2026-07-09
 
 # Adopt Rust 1.97 and Fix Clippy Regressions
@@ -130,7 +130,7 @@ all crates.
 - [x] Task 1: Fix the 13 test-code clippy findings (committed 613e940b)
 - [x] Task 3: Fix the 91 `collapsible_if` + 1 `missing_const_for_fn` (clean build → clippy green)
 - [x] Task 2: Finalize `rust-toolchain.toml` pin + MSRV bump to 1.97 (config done as WIP; commits after Task 3)
-- [ ] Confirm the full gate set passes under 1.97 on a clean build
+- [x] Confirm the full gate set passes under 1.97 on a clean build (HEAD 7554d20a: clippy/fmt/test/Zed all exit 0; 6300 tests pass)
 
 ## Tasks
 
