@@ -61,10 +61,13 @@ edit-time enforcement hooks are explicitly out of scope (see Non-Goals).
   `description`, `keywords`, `author`, `license`, `homepage`, and `repository`
   for browse/search. `claude plugin validate` is the documented CLI check for a
   plugin's structure (the community-submission pipeline runs the same check).
-- A `SessionStart` hook runs a shell command when a session begins/resumes,
-  can run arbitrary shell (curl/tar/chmod), and its **stdout becomes Claude's
-  context** — so a provisioning hook can both perform work and surface
-  human/agent-readable status.
+- A `SessionStart` hook runs a shell command when a session begins/resumes and
+  can run arbitrary shell (curl/tar/chmod). **Exit-code semantics matter here:**
+  for `SessionStart`, the hook's **stdout is injected into Claude's context only
+  on exit 0**; on a non-zero exit, only **stderr** is shown (to the user, not
+  Claude) and stdout is discarded. The hook re-runs every session regardless of
+  exit code. So a provisioning hook that wants its status/guidance to reach
+  Claude must exit 0 and write to stdout.
 - **Known gaps (documented as silent):** when a plugin LSP `command` is not
   found, the error appears only in the human-facing `/plugin` Errors tab and
   is *not* injected into the model's context; there is no documented
@@ -179,7 +182,7 @@ verification accordingly:
 - [x] Confirm Claude Code `.lsp.json`, hooks, plugin, and variable-expansion facts
 - [x] Confirm release asset naming, targets, and download URL scheme
 - [x] Task 1 — Plugin skeleton + LSP wiring against a `PATH` binary
-- [ ] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
+- [x] Task 2 — Auto-provisioning `SessionStart` hook + switch to data-dir binary
 - [ ] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [ ] Final: user runs the live-verification procedures; mark plan Completed
 
@@ -257,33 +260,37 @@ Files:
   pinned release asset, verify its integrity before use, extract the binary
   into `${CLAUDE_PLUGIN_DATA}`, and mark it executable. On any host whose
   os/arch does not map to a published Linux/macOS asset, or on any failure,
-  print actionable install guidance to stdout (which reaches Claude) and exit
-  non-zero so the next session retries. Windows is out of scope — the hook is
+  print actionable install guidance to stdout and **exit 0** so the guidance
+  reaches Claude's context (per SessionStart semantics, stdout is surfaced to
+  Claude only on exit 0). Provisioning re-runs every session regardless of exit
+  code — the still-empty data dir triggers the retry on its own. Windows is out
+  of scope — the hook is
   a POSIX shell script and is not expected to run on native Windows (see
   Decisions / Non-Goals).
 - `rlsp-yaml/integrations/claude-code/.lsp.json` — change `command` to
   `"${CLAUDE_PLUGIN_DATA}/rlsp-yaml"`.
 
 Acceptance criteria:
-- [ ] With `rlsp-yaml` **not** on `PATH` and an empty data dir, running
+- [x] With `rlsp-yaml` **not** on `PATH` and an empty data dir, running
       `provision.sh` on the host downloads the asset matching the host's
       os/arch from the pinned `rlsp-yaml-v<version>` release, passes its
       integrity check, extracts a binary to `${CLAUDE_PLUGIN_DATA}`, and that
       binary answers an LSP `initialize` handshake over stdio.
-- [ ] A corrupted or tampered download is rejected: the integrity check fails,
-      no executable is left in the data dir, the script exits non-zero, and its
-      stdout names the failure. (The specific integrity mechanism is whatever
-      the security advisor specifies; this criterion verifies the *behavior*.)
-- [ ] With `rlsp-yaml` present on `PATH`, `provision.sh` reuses it (the data-dir
+- [x] A corrupted or tampered download is rejected: the integrity check fails,
+      no executable is left in the data dir, and the failure is named on stdout
+      with the hook exiting 0 (so Claude sees it, per SessionStart semantics).
+      (The specific integrity mechanism is whatever the security advisor
+      specifies; this criterion verifies the *behavior*.)
+- [x] With `rlsp-yaml` present on `PATH`, `provision.sh` reuses it (the data-dir
       entry resolves to the PATH binary) and performs no network download.
-- [ ] On a Linux/macOS host whose os/arch has no published asset (e.g. 32-bit
+- [x] On a Linux/macOS host whose os/arch has no published asset (e.g. 32-bit
       ARM Linux, `armv7`), the script does not attempt a download; it prints
-      install guidance and exits non-zero.
-- [ ] os/arch → release-target mapping is covered by explicit cases for every
+      install guidance to stdout and exits 0 (so Claude sees the guidance).
+- [x] os/arch → release-target mapping is covered by explicit cases for every
       published Linux/macOS target (`x86_64`/`aarch64`/`riscv64gc-unknown-linux-gnu`,
       `x86_64`/`aarch64-apple-darwin`) and at least one unsupported os/arch,
       mirroring the Zed extension's `platform_target` cases.
-- [ ] The security advisor's specified controls (integrity, extraction safety,
+- [x] The security advisor's specified controls (integrity, extraction safety,
       URL trust) are implemented, and both the security-engineer and
       test-engineer have signed off on the finished implementation.
 - [ ] *(user-verified)* A written procedure exists and the user confirms: on a

@@ -1,0 +1,16 @@
+{
+  "description": "Provisions the rlsp-yaml binary the YAML language server needs, so it is available at ${CLAUDE_PLUGIN_DATA}/rlsp-yaml even on a machine with no rlsp-yaml on PATH.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/provision.sh",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}

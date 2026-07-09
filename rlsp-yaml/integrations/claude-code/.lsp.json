@@ -1,6 +1,6 @@
 {
   "yaml": {
-    "command": "rlsp-yaml",
+    "command": "${CLAUDE_PLUGIN_DATA}/rlsp-yaml",
     "extensionToLanguage": {
       ".yaml": "yaml",
       ".yml": "yaml"
