@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-07-09)
 **Created:** 2026-07-08
 
 # Claude Code LSP Plugin Integration for rlsp-yaml
@@ -186,7 +186,7 @@ verification accordingly:
 - [x] Task 3 — Docs + distribution: READMEs, CLAUDE.md, feature-log, CONTRIBUTING + issue template, marketplace.json, plugin.json metadata + submission docs
 - [x] Task 4 — Correct the data-dir id in `MANUAL_VERIFICATION.md` (found during user verification)
 - [x] Task 5 — Document the first-install session-restart in the integration README (found during user verification)
-- [ ] Final: user runs the live-verification procedures; mark plan Completed
+- [x] Final: user runs the live-verification procedures; mark plan Completed
 
 ## Tasks
 
@@ -389,7 +389,7 @@ Acceptance criteria:
       integration README
       documents both the `--plugin-dir` local path and the
       `/plugin marketplace add` + `/plugin install` path.
-- [ ] *(user-verified)* A written procedure exists and the user confirms that
+- [x] *(user-verified)* A written procedure exists and the user confirms that
       in a real Claude Code session, `/plugin marketplace add chdalski/rlsp`
       followed by `/plugin install rlsp-yaml@<marketplace-name>` installs and
       loads the plugin (LSP active, no `/plugin` Errors-tab entries).
