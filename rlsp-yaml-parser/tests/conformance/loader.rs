@@ -763,12 +763,12 @@ fn multi_document_yaml_with_explicit_markers() {
     assert!(
         matches!(&docs[0].root, Node::Scalar { value, .. } if value == "foo"),
         "expected scalar 'foo', got: {:?}",
-        &docs[0].root
+        docs[0].root
     );
     assert!(
         matches!(&docs[1].root, Node::Scalar { value, .. } if value == "bar"),
         "expected scalar 'bar', got: {:?}",
-        &docs[1].root
+        docs[1].root
     );
 }
 

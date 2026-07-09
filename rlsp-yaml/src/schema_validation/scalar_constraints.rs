@@ -1102,7 +1102,10 @@ mod tests {
             Some("application/json"),
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].code == Some(NumberOrString::String("schemaContentEncoding".to_string())));
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("schemaContentEncoding".to_string()))
+        );
     }
 
     // contentEncoding + contentMediaType: valid encoding but invalid JSON
@@ -1112,8 +1115,9 @@ mod tests {
         // base64("not json") = "bm90IGpzb24="
         let diags = run_content("bm90IGpzb24=", Some("base64"), Some("application/json"));
         assert_eq!(diags.len(), 1);
-        assert!(
-            diags[0].code == Some(NumberOrString::String("schemaContentMediaType".to_string()))
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("schemaContentMediaType".to_string()))
         );
     }
 

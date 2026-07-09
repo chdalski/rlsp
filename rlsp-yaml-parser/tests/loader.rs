@@ -57,7 +57,7 @@ fn spike_plain_scalar_loads() {
     assert!(
         matches!(&docs[0].root, Node::Scalar { value, .. } if value == "hello"),
         "got: {:?}",
-        &docs[0].root
+        docs[0].root
     );
 }
 
@@ -83,7 +83,7 @@ fn it_3_empty_document_has_empty_scalar_root() {
     assert!(
         matches!(&docs[0].root, Node::Scalar { value, .. } if value.is_empty()),
         "got: {:?}",
-        &docs[0].root
+        docs[0].root
     );
 }
 
@@ -114,7 +114,7 @@ fn it_6_nested_mapping_inside_sequence() {
     assert!(
         matches!(&items[0], Node::Mapping { .. }),
         "got: {:?}",
-        &items[0]
+        items[0]
     );
 }
 
@@ -183,12 +183,12 @@ fn it_12_anchor_on_scalar_is_preserved_in_lossless_mode() {
         matches!(&items[0], Node::Scalar { value, .. } if value == "shared")
             && items[0].anchor() == Some("ref"),
         "got: {:?}",
-        &items[0]
+        items[0]
     );
     assert!(
         matches!(&items[1], Node::Alias { name, .. } if name == "ref"),
         "got: {:?}",
-        &items[1]
+        items[1]
     );
 }
 
@@ -202,12 +202,12 @@ fn it_13_alias_expands_to_anchored_scalar_in_resolved_mode() {
     assert!(
         matches!(&items[0], Node::Scalar { value, .. } if value == "shared"),
         "got: {:?}",
-        &items[0]
+        items[0]
     );
     assert!(
         matches!(&items[1], Node::Scalar { value, .. } if value == "shared"),
         "got: {:?}",
-        &items[1]
+        items[1]
     );
 }
 
@@ -240,7 +240,7 @@ fn it_15_alias_expands_to_anchored_mapping_in_resolved_mode() {
     assert!(
         matches!(&items[1], Node::Mapping { entries, .. } if entries.len() == 1),
         "got: {:?}",
-        &items[1]
+        items[1]
     );
 }
 
@@ -417,7 +417,7 @@ fn it_rt_9_anchored_node_preserves_anchor() {
     assert!(
         matches!(&items[0], Node::Scalar { .. }) && items[0].anchor() == Some("ref"),
         "got: {:?}",
-        &items[0]
+        items[0]
     );
 }
 

@@ -102,7 +102,7 @@ all crates.
 - [x] Reproduce the CI failure locally on 1.97.0
 - [x] Enumerate all 1.97 breakage (clippy only; 13 findings)
 - [x] Confirm strategy with user (pin local, CI canary; MSRV 1.97; all 4 crates; devcontainer unchanged)
-- [ ] Task 1: Fix the 13 clippy findings
+- [x] Task 1: Fix the 13 clippy findings
 - [ ] Task 2: Add `rust-toolchain.toml` pin and bump MSRV to 1.97 in all 4 crates
 - [ ] Confirm the full gate set passes under 1.97
 
@@ -115,25 +115,25 @@ code so `cargo clippy --workspace --all-targets -- -D warnings`
 passes under Rust 1.97. Lands first so `main` returns to
 green immediately.
 
-- [ ] `useless_borrows_in_formatting`: remove the redundant
+- [x] `useless_borrows_in_formatting`: remove the redundant
       `&` at the 9 sites in
       `rlsp-yaml-parser/tests/loader.rs` (60, 86, 117, 186,
       191, 205, 210, 243, 420)
-- [ ] `useless_borrows_in_formatting`: remove the redundant
+- [x] `useless_borrows_in_formatting`: remove the redundant
       `&` at the 2 sites in
       `rlsp-yaml-parser/tests/conformance/loader.rs`
       (766, 771)
-- [ ] `manual_assert_eq`: convert `assert!(a == b)` to
+- [x] `manual_assert_eq`: convert `assert!(a == b)` to
       `assert_eq!(a, b)` at the 2 sites in
       `rlsp-yaml/src/schema_validation/scalar_constraints.rs`
       (1105, 1115)
-- [ ] Confirm the running toolchain is 1.97.0
+- [x] Confirm the running toolchain is 1.97.0
       (`rustc --version`)
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
       exits 0 (0 warnings)
-- [ ] `cargo test --workspace` passes with 0 failures
-- [ ] `cargo fmt --all -- --check` exits 0
-- [ ] No `version = "..."` field changed in any Cargo.toml
+- [x] `cargo test --workspace` passes with 0 failures
+- [x] `cargo fmt --all -- --check` exits 0
+- [x] No `version = "..."` field changed in any Cargo.toml
 
 Acceptance: all four commands above pass; the diff touches
 only the three named test files.
