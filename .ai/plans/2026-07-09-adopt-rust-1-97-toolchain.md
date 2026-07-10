@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-07-10)
 **Created:** 2026-07-09
 
 # Adopt Rust 1.97 and Fix Clippy Regressions
@@ -142,8 +142,8 @@ all crates.
 - [x] Push to origin (04dc029c); main CI green, but Zed CI red — the pin unexpectedly overrode CI's toolchain (see Context "Post-push discovery")
 - [x] Confirm `dtolnay/rust-toolchain@1.97.0` branch exists (git ls-remote — dtolnay publishes per-version branches)
 - [x] Task 4: Full-pin CI — pin the 8 `dtolnay/rust-toolchain@stable` refs to `@1.97.0` (+ pin comment + CLAUDE.md drift fix) so CI == local; fixes Zed CI + the release/vscode cross-compile matrices
-- [ ] Push (with user approval) and confirm main CI + Zed green; scratch-verify a `macos-latest` cross-compile under `@1.97.0`; release/vscode matrices tracked for their next real run
-- [ ] Mark plan Completed
+- [x] Push (bfc92cc4) + verify: main CI, Coverage, Release-plz all green on `@1.97.0` (CI log confirms `dtolnay/rust-toolchain@1.97.0` resolved). The Zed/vscode/release workflows are path/release-gated so they did NOT auto-run; a throwaway scratch workflow verified the exact Zed-wasm scenario (`@1.97.0` + `wasm32-wasip2` on the Zed crate — the one that failed) AND a macOS `x86_64-apple-darwin` cross-build — both green; scratch branch deleted (not merged)
+- [x] Mark plan Completed
 
 ## Tasks
 
