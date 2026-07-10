@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-07-10)
 **Created:** 2026-07-10
 
 # Claude Code Plugin — Bring-Your-Own-Binary
@@ -200,3 +200,19 @@ Verification:
   change (untrusted binary resolution / provenance). The security-engineer
   specifies what install-doc guidance is warranted; the plan does not
   pre-prescribe it.
+
+## Accepted Risks & Open Items (recorded at completion, 2026-07-10)
+
+Inherent to the user-directed bring-your-own-binary architecture — not gaps
+in the implementation (per the security-engineer, confirmed independently at
+review):
+
+- **Bare-`PATH` resolution is trusted with no code-level verification.**
+  Mitigated only by doc-level `which`/`where` PATH-shadowing guidance in the
+  install docs, consistent with ecosystem-standard LSP integrations.
+- **No automated update mechanism.** Mitigated only by doc-level
+  version-check guidance in the install docs.
+
+Open item (non-blocking): Windows `.exe` PATHEXT resolution of the bare
+`rlsp-yaml` command is unverified in-sandbox — confirm out-of-band. If it
+fails, a per-OS command form is a follow-up.
