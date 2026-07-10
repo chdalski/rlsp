@@ -1,9 +1,9 @@
-# Pins LOCAL dev to 1.97.0 so contributors/agents build against the same
-# compiler CI uses and catch new-stable lints before pushing. CI stays on
-# `dtolnay/rust-toolchain@stable`, which exports `RUSTUP_TOOLCHAIN` and
-# outranks this file in rustup's override order — CI keeps floating on
-# `@stable` as a canary; when it fails on a newer stable, bump `channel`
-# here to match.
+# Single source of truth for BOTH local dev and CI — both build against
+# 1.97.0. CI workflows reference `dtolnay/rust-toolchain@1.97.0` to match
+# this pin, so `dtolnay` installs each job's targets/components onto the
+# same toolchain rustup selects here — no mismatch, no floating canary.
+# To bump: edit `channel` here AND all `@1.97.0` refs together in one
+# commit.
 [toolchain]
 channel = "1.97.0"
 components = ["clippy", "rustfmt"]

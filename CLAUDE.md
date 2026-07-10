@@ -15,12 +15,12 @@ cargo bench            # run benchmarks (Criterion)
 cargo clean            # clean stale build artifacts
 ```
 
-> After a Rust toolchain change (e.g. a `rustup` update or CI's floating
-> `@stable` moving ahead of local), run `cargo clean` before trusting a
-> clippy result — the incremental clippy cache does not re-lint unchanged
-> code, so it silently under-reports lints introduced/tightened by the new
-> toolchain. CI does clean builds, so an incremental local pass is not
-> equivalent.
+> After a Rust toolchain change (e.g. a `rustup` update or bumping the
+> pinned `channel` in `rust-toolchain.toml`), run `cargo clean` before
+> trusting a clippy result — the incremental clippy cache does not re-lint
+> unchanged code, so it silently under-reports lints introduced/tightened
+> by the new toolchain. CI does clean builds, so an incremental local pass
+> is not equivalent.
 
 ### VS Code Extension
 

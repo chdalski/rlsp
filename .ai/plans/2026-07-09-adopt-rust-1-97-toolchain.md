@@ -141,7 +141,7 @@ all crates.
 - [x] Confirm the full gate set passes under 1.97 on a clean build (HEAD 7554d20a: clippy/fmt/test/Zed all exit 0; 6300 tests pass)
 - [x] Push to origin (04dc029c); main CI green, but Zed CI red — the pin unexpectedly overrode CI's toolchain (see Context "Post-push discovery")
 - [x] Confirm `dtolnay/rust-toolchain@1.97.0` branch exists (git ls-remote — dtolnay publishes per-version branches)
-- [ ] Task 4: Full-pin CI — pin the 8 `dtolnay/rust-toolchain@stable` refs to `@1.97.0` (+ update the pin comment) so CI == local; fixes Zed CI + the release/vscode cross-compile matrices
+- [x] Task 4: Full-pin CI — pin the 8 `dtolnay/rust-toolchain@stable` refs to `@1.97.0` (+ pin comment + CLAUDE.md drift fix) so CI == local; fixes Zed CI + the release/vscode cross-compile matrices
 - [ ] Push (with user approval) and confirm main CI + Zed green; scratch-verify a `macos-latest` cross-compile under `@1.97.0`; release/vscode matrices tracked for their next real run
 - [ ] Mark plan Completed
 
@@ -286,30 +286,35 @@ mismatch, no `RUSTUP_TOOLCHAIN`, no `targets` in the pin.
 Result: CI == local exactly. (See Context "Post-push
 discovery".)
 
-- [ ] Change all 8 `dtolnay/rust-toolchain@stable` refs to
+- [x] Change all 8 `dtolnay/rust-toolchain@stable` refs to
       `dtolnay/rust-toolchain@1.97.0`: `ci.yml` (2),
       `coverage.yml` (1), `zed-release.yml` (1),
       `release-plz.yml` (3), `vscode-extension.yml` (1). Leave
       each step's `targets:` / `components:` inputs and each
       workflow's `permissions` block unchanged.
-- [ ] Update `rust-toolchain.toml`'s comment: the pin is the
+- [x] Update `rust-toolchain.toml`'s comment: the pin is the
       single source of truth for BOTH local and CI (both
       1.97.0); CI refs are pinned to `@1.97.0` to match; to
       bump, edit `channel` here AND all `@1.97.0` refs
       together; no floating canary. Keep `channel` +
       `components`; add no `targets`.
-- [ ] Do NOT set `RUSTUP_TOOLCHAIN`, add pin `targets`, or
+- [x] Do NOT set `RUSTUP_TOOLCHAIN`, add pin `targets`, or
       change any per-job `targets:`/`components:` input or
       `version =` field. Do not touch `zed-registry-pr.yml`
       (non-cargo).
-- [ ] Per `github-workflows.md`: other actions stay at their
+- [x] Per `github-workflows.md`: other actions stay at their
       latest major version and each workflow's `permissions`
       block is intact (all 5 already declare one — confirm,
       don't add/remove). `@1.97.0` is a version branch of the
       same action — the idiomatic fixed-toolchain pin.
-- [ ] Local sanity: `rustc --version` still 1.97.0 via the
+- [x] Fix CLAUDE.md drift (reviewer High finding): the
+      Build-and-Test clippy-cache note said "CI's floating
+      `@stable` moving ahead of local" — now false under
+      full-pin; swapped the example to "bumping the pinned
+      `channel`". 7th file in the commit.
+- [x] Local sanity: `rustc --version` still 1.97.0 via the
       pin; `cargo build --workspace` + clippy still pass.
-- [ ] Touched workflow YAML parses cleanly (`actionlint` if
+- [x] Touched workflow YAML parses cleanly (`actionlint` if
       available; else confirm each triggers + runs past its
       first step on the verification push).
 
