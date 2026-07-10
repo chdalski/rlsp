@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-07-10
 
 # Claude Code Plugin — Bring-Your-Own-Binary
@@ -87,19 +87,19 @@ the binary themselves — is offset by per-platform install documentation.
 
 ## Steps
 
-- [ ] Change `.lsp.json` `yaml.command` to bare `"rlsp-yaml"`
-- [ ] Delete `hooks/hooks.json` (and the now-empty `hooks/` dir)
-- [ ] Delete `scripts/provision.sh` and `scripts/provision.test.sh` (and the
+- [x] Change `.lsp.json` `yaml.command` to bare `"rlsp-yaml"`
+- [x] Delete `hooks/hooks.json` (and the now-empty `hooks/` dir)
+- [x] Delete `scripts/provision.sh` and `scripts/provision.test.sh` (and the
       now-empty `scripts/` dir)
-- [ ] Delete `MANUAL_VERIFICATION.md`
-- [ ] Rewrite the plugin `README.md`: replace `## Provisioning` with
+- [x] Delete `MANUAL_VERIFICATION.md`
+- [x] Rewrite the plugin `README.md`: replace `## Provisioning` with
       per-platform install instructions; fix intro platform line, config
       example command, and troubleshooting
-- [ ] Update root `README.md` and `rlsp-yaml/README.md` plugin blurbs
-- [ ] Update the `rlsp-yaml/docs/feature-log.md` "Claude Code Plugin" entry
-- [ ] Update root `CLAUDE.md` build/test section (drop `hooks.json` from the
+- [x] Update root `README.md` and `rlsp-yaml/README.md` plugin blurbs
+- [x] Update the `rlsp-yaml/docs/feature-log.md` "Claude Code Plugin" entry
+- [x] Update root `CLAUDE.md` build/test section (drop `hooks.json` from the
       validate comment; remove the `provision.test.sh` line)
-- [ ] Verify: both `claude plugin validate --strict` invocations and the
+- [x] Verify: both `claude plugin validate --strict` invocations and the
       stdio smoke test pass; grep sweep shows no stale references
 
 ## Tasks
@@ -115,16 +115,16 @@ any intermediate commit that changed the mechanism without the docs (or vice
 versa) would leave the repository describing behavior it no longer has.
 
 Mechanism:
-- [ ] `.lsp.json` `yaml.command` is `"rlsp-yaml"` (bare — no
+- [x] `.lsp.json` `yaml.command` is `"rlsp-yaml"` (bare — no
       `${CLAUDE_PLUGIN_DATA}` prefix); `extensionToLanguage` and
       `diagnostics` unchanged
-- [ ] `hooks/hooks.json` removed; `hooks/` directory gone
-- [ ] `scripts/provision.sh` and `scripts/provision.test.sh` removed;
+- [x] `hooks/hooks.json` removed; `hooks/` directory gone
+- [x] `scripts/provision.sh` and `scripts/provision.test.sh` removed;
       `scripts/` directory gone
-- [ ] `MANUAL_VERIFICATION.md` removed
+- [x] `MANUAL_VERIFICATION.md` removed
 
 Documentation:
-- [ ] Plugin `README.md`: no `Provisioning`/hook/`${CLAUDE_PLUGIN_DATA}`
+- [x] Plugin `README.md`: no `Provisioning`/hook/`${CLAUDE_PLUGIN_DATA}`
       references remain; a new "Installing the rlsp-yaml binary" section
       documents, for each published target, downloading the matching release
       asset, extracting it, and putting it on `PATH`, plus
@@ -132,11 +132,11 @@ Documentation:
       command is bare `rlsp-yaml`; troubleshooting maps a missing binary to
       "install it / ensure it is on PATH"; the intro platform line no longer
       says Linux/macOS-only
-- [ ] Root `README.md` and `rlsp-yaml/README.md` plugin descriptions no
+- [x] Root `README.md` and `rlsp-yaml/README.md` plugin descriptions no
       longer claim automatic provisioning or a Linux/macOS-only limitation;
       they state the binary must be installed and point at the plugin README
       for instructions
-- [ ] `rlsp-yaml/docs/feature-log.md` "Claude Code Plugin" entry: the
+- [x] `rlsp-yaml/docs/feature-log.md` "Claude Code Plugin" entry: the
       sentence "On Linux and macOS, the plugin provisions the `rlsp-yaml`
       binary itself — preferring one already on `PATH`, otherwise downloading
       the matching release — so no manual install is required" is replaced
@@ -144,28 +144,28 @@ Documentation:
       plugin README), and the trailing "Windows is not yet supported." claim
       is removed/corrected since Windows is now supported via
       bring-your-own-binary (see Decisions: update in place, not a new entry)
-- [ ] Root `CLAUDE.md`: the `claude plugin validate` comment no longer lists
+- [x] Root `CLAUDE.md`: the `claude plugin validate` comment no longer lists
       `hooks.json`; the `provision.test.sh` line is removed
-- [ ] Install docs use version-agnostic language (latest-release page +
+- [x] Install docs use version-agnostic language (latest-release page +
       asset-name pattern), no hardcoded version or sha256
 
 Security guidance (from the security advisor — see Decisions):
-- [ ] Any install-doc security guidance the security-engineer specifies
+- [x] Any install-doc security guidance the security-engineer specifies
       (e.g. checksum verification, trusted-source / PATH caveat) is included
 
 Verification:
-- [ ] `claude plugin validate --strict rlsp-yaml/integrations/claude-code`
+- [x] `claude plugin validate --strict rlsp-yaml/integrations/claude-code`
       passes
-- [ ] `claude plugin validate --strict .` passes
-- [ ] `cargo test -p rlsp-yaml --test claude_code_stdio_smoke` passes
-- [ ] Repo grep finds no remaining `provision` / `hooks.json` /
+- [x] `claude plugin validate --strict .` passes
+- [x] `cargo test -p rlsp-yaml --test claude_code_stdio_smoke` passes
+- [x] Repo grep finds no remaining `provision` / `hooks.json` /
       `CLAUDE_PLUGIN_DATA` / `MANUAL_VERIFICATION` / `SessionStart`
       references outside `.ai/` archived/plan/memory files
-- [ ] No stale platform-limitation or auto-provisioning language remains in
+- [x] No stale platform-limitation or auto-provisioning language remains in
       the plugin README, root `README.md`, `rlsp-yaml/README.md`, or
       `feature-log.md` (e.g. "Windows is not yet supported", "Linux and
       macOS", "auto-download", "provisions ... itself")
-- [ ] Advisor gates satisfied: test-engineer (input + output),
+- [x] Advisor gates satisfied: test-engineer (input + output),
       security-engineer (input + output)
 
 ## Decisions

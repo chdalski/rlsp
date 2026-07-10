@@ -44,10 +44,9 @@ cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets
 ### Claude Code Plugin
 
 ```sh
-claude plugin validate --strict rlsp-yaml/integrations/claude-code  # validate plugin.json / .lsp.json / hooks.json
+claude plugin validate --strict rlsp-yaml/integrations/claude-code  # validate plugin.json / .lsp.json
 claude plugin validate --strict .                                  # validate the repo-root marketplace.json
 cargo test -p rlsp-yaml --test claude_code_stdio_smoke              # LSP initialize/didOpen smoke test
-sh rlsp-yaml/integrations/claude-code/scripts/provision.test.sh     # provisioning script test suite
 ```
 
 ## Components

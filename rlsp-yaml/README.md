@@ -49,7 +49,7 @@ A dedicated extension is available at [`integrations/vscode/`](integrations/vsco
 
 ### Claude Code
 
-A dedicated plugin is available at [`integrations/claude-code/`](integrations/claude-code/). It registers `rlsp-yaml` as a native LSP server so diagnostics and code navigation flow into Claude's context automatically, and provisions the binary itself (PATH-first, else auto-download) on **Linux and macOS**. Install via `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `claude --plugin-dir integrations/claude-code`.
+A dedicated plugin is available at [`integrations/claude-code/`](integrations/claude-code/). It registers `rlsp-yaml` as a native LSP server so diagnostics and code navigation flow into Claude's context automatically. The plugin does not bundle a binary — install `rlsp-yaml` yourself (see the [plugin README](integrations/claude-code/README.md#installing-the-rlsp-yaml-binary) for per-platform instructions), then install the plugin via `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `claude --plugin-dir integrations/claude-code`.
 
 ### Helix
 

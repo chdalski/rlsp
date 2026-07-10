@@ -3,8 +3,10 @@
 Registers `rlsp-yaml` as a native LSP server for Claude Code. After Claude
 edits a `.yaml`/`.yml` file, the server's diagnostics and code-navigation
 flow back into Claude's context automatically — no manual linting step, no
-separate tool call. Supported on **Linux and macOS**; Windows is not
-supported (see [Provisioning](#provisioning)).
+separate tool call. Works on every platform this project publishes a
+release binary for (Linux, macOS, Windows) — you install the `rlsp-yaml`
+binary yourself; see
+[Installing the rlsp-yaml binary](#installing-the-rlsp-yaml-binary).
 
 ## Installation
 
@@ -29,45 +31,84 @@ Either path loads the same plugin — `--plugin-dir` is for testing a local
 checkout without a marketplace add; the marketplace install is the normal
 path for end users.
 
-## Provisioning
+## Installing the rlsp-yaml binary
 
-The plugin needs an `rlsp-yaml` binary to run. A `SessionStart` hook
-provisions one automatically, with no action required:
+This plugin does not bundle or provision a binary — `.lsp.json` spawns the
+bare command `rlsp-yaml`, resolved from your `PATH` the same way Claude
+Code resolves any other LSP server (`rust-analyzer`, `gopls`, etc.).
+Install it once before loading the plugin.
 
-1. **PATH-first.** If `rlsp-yaml` is already on `PATH` (e.g. installed via
-   `cargo install rlsp-yaml` or a system package), the hook copies it into
-   the plugin's persistent data directory and stops. No network access.
-2. **Auto-download.** Otherwise, the hook detects your OS/architecture,
-   downloads the matching binary from the project's
-   [GitHub Releases](https://github.com/chdalski/rlsp/releases), verifies
-   its integrity, and installs it into the persistent data directory.
-3. **Unsupported platform.** If your OS/architecture has no published
-   binary, the hook prints install guidance (a link to the release page)
-   into Claude's context instead of failing silently.
+### Option 1 — prebuilt binary (Linux, macOS, Windows)
 
-The provisioned binary lives at `${CLAUDE_PLUGIN_DATA}/rlsp-yaml` — the
-plugin's persistent data directory, which survives plugin updates (unlike
-`${CLAUDE_PLUGIN_ROOT}`, which changes on every update). This means the
-binary is downloaded once, not on every session.
+1. Go to the [latest release](https://github.com/chdalski/rlsp/releases/latest)
+   and download the asset matching your platform:
 
-The hook re-runs at the start of every session. If it already has a
-working binary in place, this is a fast no-op; if a previous run failed or
-was interrupted, it retries automatically.
+   | Platform | Asset |
+   |----------|-------|
+   | Linux x86_64 | `rlsp-yaml-x86_64-unknown-linux-gnu.tar.gz` |
+   | Linux aarch64 | `rlsp-yaml-aarch64-unknown-linux-gnu.tar.gz` |
+   | Linux riscv64 | `rlsp-yaml-riscv64gc-unknown-linux-gnu.tar.gz` |
+   | macOS x86_64 | `rlsp-yaml-x86_64-apple-darwin.tar.gz` |
+   | macOS aarch64 (Apple Silicon) | `rlsp-yaml-aarch64-apple-darwin.tar.gz` |
+   | Windows x86_64 | `rlsp-yaml-x86_64-pc-windows-msvc.zip` |
 
-**Every fresh install needs one session restart.** `/plugin install` happens
-mid-session, after that session's `SessionStart` hook has already run — so
-the hook that provisions `${CLAUDE_PLUGIN_DATA}/rlsp-yaml` doesn't fire, and
-the LSP doesn't activate, until you start a **new session**. This is
-inherent to Claude Code's session lifecycle: there is no install-time hook,
-and `/reload-plugins` does not re-run `SessionStart`. If `rlsp-yaml` is
-already on `PATH`, that provisioning is **instant** once the hook runs — it
-copies your `PATH` binary into the data dir instead of downloading it — but
-the one restart still applies, since the copy happens inside that same
-`SessionStart` hook. `PATH` avoids the download, not the restart.
+2. Verify the download against the checksum GitHub publishes for that
+   asset — this is the same check a previous version of this plugin ran
+   automatically:
 
-**Windows is not covered by this plugin.** The provisioning hook is a POSIX
-shell script and does not run under native Windows. Windows support is
-planned as a separate, Windows-verified follow-up.
+   ```sh
+   gh release view <tag> --repo chdalski/rlsp --json assets --jq '.assets[] | {name, digest}'
+   sha256sum rlsp-yaml-<target>.tar.gz     # Linux
+   shasum -a 256 rlsp-yaml-<target>.tar.gz # macOS
+   ```
+
+   Replace `<tag>` with the release tag you downloaded and `<target>` with
+   the platform triple from the table above. No `gh` CLI? The same
+   per-asset digest is shown on the release page itself, next to each
+   asset.
+
+3. Extract the archive (`tar xzf <file>` on Linux/macOS; unzip on Windows)
+   and put the `rlsp-yaml` binary on your `PATH`.
+
+4. Confirm it resolves to the binary you just installed — especially on a
+   machine where `PATH` isn't fully under your own control:
+
+   ```sh
+   which rlsp-yaml   # Linux/macOS
+   where rlsp-yaml   # Windows
+   ```
+
+### Option 2 — `cargo install` (if you have Rust)
+
+```sh
+cargo install rlsp-yaml
+```
+
+cargo verifies the download against the crates.io index checksum as part
+of the registry protocol — no extra verification steps needed. Pin
+`--version X.Y.Z` for a reproducible install across machines.
+
+### Staying up to date
+
+The plugin does not auto-update the binary. Check what you have installed
+against the latest release:
+
+```sh
+rlsp-yaml --version
+```
+
+and compare against the
+[Releases page](https://github.com/chdalski/rlsp/releases) or
+[CHANGELOG](../../CHANGELOG.md); reinstall (or
+`cargo install rlsp-yaml --force`) to pick up fixes.
+
+### `PATH` is resolved fresh, not cached
+
+Unlike a provisioned binary copied into a data directory once, `command:
+"rlsp-yaml"` is resolved from `PATH` each time Claude Code starts the
+language server. If you change `PATH` (e.g. switching a version manager's
+active version) while a session is running, restart the session for the
+new binary to take effect.
 
 ## Configuration
 
@@ -86,7 +127,7 @@ To pin specific settings, add an `initializationOptions` object to
 ```json
 {
   "yaml": {
-    "command": "${CLAUDE_PLUGIN_DATA}/rlsp-yaml",
+    "command": "rlsp-yaml",
     "extensionToLanguage": { ".yaml": "yaml", ".yml": "yaml" },
     "diagnostics": true,
     "initializationOptions": {
@@ -111,11 +152,9 @@ Run `/plugin` and open the plugin's detail view (or check the Errors tab).
 Common issues:
 
 - **`Executable not found in $PATH`** or a missing-binary error — the
-  provisioning hook has not run yet or failed. Check the hook's guidance
-  message in Claude's context at session start; it names the specific
-  failure (unsupported platform, network error, integrity check failure).
-  Right after a fresh `/plugin install`, this is expected — start one new
-  session to trigger provisioning (see [Provisioning](#provisioning)).
+  `rlsp-yaml` binary is not installed, or not on `PATH`. Install it (see
+  [Installing the rlsp-yaml binary](#installing-the-rlsp-yaml-binary));
+  restart or resume the session if the LSP server was already running.
 - **No diagnostics after editing a YAML file** — confirm the LSP server is
   listed with no Errors-tab entries first; a server that never started
   cannot produce diagnostics.

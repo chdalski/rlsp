@@ -59,7 +59,7 @@ corresponding plan file under `.ai/plans/`.
 
 ### Claude Code Plugin [completed]
 
-**Description:** rlsp-yaml is now available as a Claude Code plugin, registering the server as a native LSP server. After Claude edits a `.yaml`/`.yml` file, the server's diagnostics and code-navigation flow into Claude's context automatically. On Linux and macOS, the plugin provisions the `rlsp-yaml` binary itself — preferring one already on `PATH`, otherwise downloading the matching release — so no manual install is required. Install with `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `--plugin-dir`. Windows is not yet supported.
+**Description:** rlsp-yaml is now available as a Claude Code plugin, registering the server as a native LSP server. After Claude edits a `.yaml`/`.yml` file, the server's diagnostics and code-navigation flow into Claude's context automatically. The plugin does not bundle or provision a binary — install `rlsp-yaml` yourself (see the [plugin README](../integrations/claude-code/README.md#installing-the-rlsp-yaml-binary)) on any platform this project publishes a release binary for (Linux, macOS, Windows). Install the plugin with `/plugin marketplace add chdalski/rlsp` then `/plugin install rlsp-yaml@rlsp`, or load a local checkout with `--plugin-dir`.
 **Complexity:** Medium
 **Tier:** 1
 
