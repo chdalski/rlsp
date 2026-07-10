@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** Completed (2026-07-09)
+**Status:** InProgress
 **Created:** 2026-07-09
 
 # Adopt Rust 1.97 and Fix Clippy Regressions
@@ -71,23 +71,31 @@ all crates.
 - **Why warnings fail even without `-D warnings`:** the
   workspace lint config sets `warnings = "deny"`, so any
   clippy warning is an error regardless of the CLI flag.
-- **Toolchain strategy (user-chosen, "Option 1"):** pin
-  *local* dev to 1.97.0 via a root `rust-toolchain.toml`;
-  leave *CI* on floating `@stable` so it keeps acting as a
-  canary that fails when a new stable Rust ships new lints
-  — the user's intended "hint to update the toolchain."
-  CI workflow toolchain refs are deliberately NOT changed
-  (see Non-Goals).
-- **Why CI keeps floating with the pin present:**
-  `dtolnay/rust-toolchain` exports `RUSTUP_TOOLCHAIN` into
-  `$GITHUB_ENV`, and that env var has higher precedence
-  than a `rust-toolchain.toml` file in rustup's override
-  order — so CI resolves to `@stable`, ignoring the pin,
-  while local dev (no such env var) honors the file. Note:
-  today stable == 1.97.0 == pin, so CI behaves identically
-  whether or not it honors the file; the float-vs-pin
-  distinction only becomes observable when stable advances
-  past 1.97.0.
+- **Toolchain strategy — FULL-PIN (user-chosen, final).**
+  Pin BOTH local dev and CI to 1.97.0: `rust-toolchain.toml`
+  (channel 1.97.0) for local, and the CI action refs pinned
+  to the matching `dtolnay/rust-toolchain@1.97.0` (Task 4).
+  Local == CI exactly, zero drift, no canary. To adopt a
+  newer stable, bump the pin `channel` + all `@1.97.0` refs
+  together in a deliberate commit.
+- **Post-push discovery (why Task 4 exists).** After Tasks
+  1–3 landed and were pushed (04dc029c), main CI went green
+  but the **Zed CI job failed**. Root cause (from the CI
+  log): `rust-toolchain.toml` OUTRANKS `dtolnay@stable`'s
+  `rustup default stable`, so CI ran on the pinned `1.97.0`
+  (`"1.97.0 ... overridden by rust-toolchain.toml"`) — the
+  pin silently pinned CI too. And `stable` and `1.97.0` are
+  SEPARATE rustup installs even at the same version, so the
+  wasm/cross targets `dtolnay@stable` installs onto `stable`
+  were absent on the pinned `1.97.0` (→ `can't find crate
+  for core`). The release-plz / vscode cross-compile
+  matrices would break the same way at their next run. Fix:
+  pin the CI action refs to `@1.97.0` (Task 4) so `dtolnay`
+  installs each job's targets onto the SAME toolchain the
+  pin selects. (An earlier assumption that
+  `dtolnay/rust-toolchain` exports `RUSTUP_TOOLCHAIN` and so
+  lets CI float past the pin was WRONG — disproven by this
+  failure.)
 - **MSRV is deliberate policy, not a technical need.** The
   fixes compile on 1.87; setting `rust-version = "1.97"`
   aligns the declared MSRV with the pinned/CI toolchain
@@ -126,11 +134,16 @@ all crates.
 
 - [x] Reproduce the CI failure locally on 1.97.0
 - [x] Enumerate 1.97 breakage (initial pass under-reported due to stale clippy cache; corrected via clean build — see Context)
-- [x] Confirm strategy with user (pin local, CI canary; MSRV 1.97; all 4 crates; devcontainer unchanged; fix-all clippy)
+- [x] Confirm strategy with user (MSRV 1.97; all 4 crates; devcontainer unchanged; fix-all clippy; toolchain strategy later settled as full-pin — see Task 4 / Context "Post-push discovery")
 - [x] Task 1: Fix the 13 test-code clippy findings (committed 613e940b)
 - [x] Task 3: Fix the 91 `collapsible_if` + 1 `missing_const_for_fn` (clean build → clippy green)
 - [x] Task 2: Finalize `rust-toolchain.toml` pin + MSRV bump to 1.97 (config done as WIP; commits after Task 3)
 - [x] Confirm the full gate set passes under 1.97 on a clean build (HEAD 7554d20a: clippy/fmt/test/Zed all exit 0; 6300 tests pass)
+- [x] Push to origin (04dc029c); main CI green, but Zed CI red — the pin unexpectedly overrode CI's toolchain (see Context "Post-push discovery")
+- [x] Confirm `dtolnay/rust-toolchain@1.97.0` branch exists (git ls-remote — dtolnay publishes per-version branches)
+- [ ] Task 4: Full-pin CI — pin the 8 `dtolnay/rust-toolchain@stable` refs to `@1.97.0` (+ update the pin comment) so CI == local; fixes Zed CI + the release/vscode cross-compile matrices
+- [ ] Push (with user approval) and confirm main CI + Zed green; scratch-verify a `macos-latest` cross-compile under `@1.97.0`; release/vscode matrices tracked for their next real run
+- [ ] Mark plan Completed
 
 ## Tasks
 
@@ -264,22 +277,74 @@ Acceptance: on a CLEAN build (`cargo clean` first),
 exits 0 and `cargo test --workspace` passes with 0
 failures; the diff touches only `.rs` source files.
 
+### Task 4: Full-pin CI (`@1.97.0` refs)
+
+Change the CI action refs to `dtolnay/rust-toolchain@1.97.0`
+so `dtolnay` installs each job's targets/components onto the
+SAME `1.97.0` toolchain the pin selects — no separate-install
+mismatch, no `RUSTUP_TOOLCHAIN`, no `targets` in the pin.
+Result: CI == local exactly. (See Context "Post-push
+discovery".)
+
+- [ ] Change all 8 `dtolnay/rust-toolchain@stable` refs to
+      `dtolnay/rust-toolchain@1.97.0`: `ci.yml` (2),
+      `coverage.yml` (1), `zed-release.yml` (1),
+      `release-plz.yml` (3), `vscode-extension.yml` (1). Leave
+      each step's `targets:` / `components:` inputs and each
+      workflow's `permissions` block unchanged.
+- [ ] Update `rust-toolchain.toml`'s comment: the pin is the
+      single source of truth for BOTH local and CI (both
+      1.97.0); CI refs are pinned to `@1.97.0` to match; to
+      bump, edit `channel` here AND all `@1.97.0` refs
+      together; no floating canary. Keep `channel` +
+      `components`; add no `targets`.
+- [ ] Do NOT set `RUSTUP_TOOLCHAIN`, add pin `targets`, or
+      change any per-job `targets:`/`components:` input or
+      `version =` field. Do not touch `zed-registry-pr.yml`
+      (non-cargo).
+- [ ] Per `github-workflows.md`: other actions stay at their
+      latest major version and each workflow's `permissions`
+      block is intact (all 5 already declare one — confirm,
+      don't add/remove). `@1.97.0` is a version branch of the
+      same action — the idiomatic fixed-toolchain pin.
+- [ ] Local sanity: `rustc --version` still 1.97.0 via the
+      pin; `cargo build --workspace` + clippy still pass.
+- [ ] Touched workflow YAML parses cleanly (`actionlint` if
+      available; else confirm each triggers + runs past its
+      first step on the verification push).
+
+Acceptance: all 8 CI refs are `@1.97.0`; pin comment updated
+(single source of truth + bump-both note); no per-job target
+input, `permissions` block, or `version =` field changed;
+local still uses 1.97.0. **Post-push verification (lead):**
+(1) main CI + Zed workflows go green on push; (2) a throwaway
+`workflow_dispatch` scratch workflow with a `macos-latest`
+job (`dtolnay/rust-toolchain@1.97.0` + an `x86_64-apple-darwin`
+cross-build) confirms a non-Linux cross-compile resolves,
+then is deleted without merging. The release-plz / vscode
+matrices run only at release/dispatch (a vscode dispatch
+would publish) and are tracked for their next real run
+(residual risk in Decisions).
+
 ## Decisions
 
-- **Toolchain: pin local, CI floats (Option 1).** Fixes the
-  local/CI drift that hid the lints, while preserving CI's
-  canary behavior the user values. Minimal surface: one new
-  file, no workflow edits. A clean stepping stone if the
-  user later adopts Renovate/automation.
+- **Toolchain: FULL-PIN — CI == local (final).** Fixes the
+  local/CI drift that hid the lints with exact
+  reproducibility — both local and CI use 1.97.0, via the pin
+  + matching `@1.97.0` CI action refs (Task 4). No auto-canary
+  (CI won't surface new-stable lints until a deliberate bump
+  of the pin `channel` + all `@1.97.0` refs together). Chosen
+  over "CI floats as a canary" (the user preferred no-drift),
+  over adding all release targets to the pin (install bloat),
+  and over dropping the pin (no reproducibility guarantee).
 - **MSRV = "1.97" (major.minor).** Matches the existing
   field style (`"1.87"`) and aligns the declared MSRV with
   the pinned toolchain. Deliberate policy choice, not a
   compiler-feature requirement — the reviewer should not
   reject it as "unnecessary."
-- **Pin channel = "1.97.0" (exact patch).** Maximizes local
-  reproducibility; CI's floating stable may advance to
-  1.97.x — patch drift rarely adds lints, so the canary
-  still works at minor granularity.
+- **Pin channel = "1.97.0" (exact patch).** Maximizes
+  reproducibility; both local and CI resolve to this exact
+  build.
 - **Fix all findings (not allow).** Per the user, apply the
   91 `collapsible_if` collapses and make the fn `const`,
   preserving the strict-clippy posture rather than relaxing
@@ -306,19 +371,34 @@ failures; the diff touches only `.rs` source files.
   security-engineer: the collapses introduce no new
   trust-boundary logic — they are semantics-preserving
   refactors of existing conditionals, and correctness is
-  guarded by the conformance/test suite.
+  guarded by the conformance/test suite. **Task 4: no
+  advisors** — CI action-ref + comment change; no
+  permissions/secrets/access-control, no code or test surface.
+- **Release / VS Code cross-compile matrices verified by
+  mechanism, not by push.** Only Zed's `check` job
+  (`ubuntu-latest`, wasm) is push-triggered proof of the
+  `@1.97.0` full-pin. The release-plz `build-binaries` and
+  vscode `build-extension` matrices (incl. `macos-latest` /
+  `windows-latest`) run only at release/dispatch and can't be
+  safely dry-run (a vscode dispatch would publish). Narrowed
+  by a lead-side scratch `macos-latest` check (Task 4
+  acceptance); `windows-latest` accepted. **Follow-up:**
+  confirm both matrices go green the next time either runs — a
+  fast-follow fix if not, not a new plan.
 
 ## Non-Goals
 
-- **Aligning CI workflow toolchain refs to the pin.** CI
-  intentionally stays on floating `@stable` as the canary
-  (Option 1). The 8 `dtolnay/rust-toolchain@stable` refs
-  across `ci.yml` (2), `coverage.yml` (1),
+- **Changing per-job `targets:` / `components:` inputs or
+  `permissions` blocks.** Task 4 DOES change the 8
+  `dtolnay/rust-toolchain@stable` action refs to `@1.97.0`
+  (to match the pin) across `ci.yml` (2), `coverage.yml` (1),
   `zed-release.yml` (1), `release-plz.yml` (3), and
-  `vscode-extension.yml` (1) are left unchanged.
+  `vscode-extension.yml` (1) — but each step's `targets:` /
+  `components:` inputs and each workflow's `permissions` block
+  are unchanged.
 - **Renovate or a scheduled toolchain-bump workflow.**
   Deferred; Dependabot does not manage toolchains, and the
-  user chose the lighter Option 1 for now.
+  user chose a manual pin + deliberate-bump approach for now.
 - **Any `.devcontainer/` change.** rustup auto-installs the
   pinned toolchain from `rust-toolchain.toml`; the pin file
   stays the single source of truth (no version baked into
