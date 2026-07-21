@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release-pr
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: dtolnay/rust-toolchain@1.100.0
       - id: release
         uses: MarcoIeni/release-plz-action@v0.5
         with:
@@ -139,7 +139,7 @@ jobs:
         with:
           ref: ${{ matrix.crate.tag }}
 
-      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: ${{ matrix.target.target }}
 
