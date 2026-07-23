@@ -6,21 +6,21 @@ metadata:
 ---
 
 The repo pins Rust via a root `rust-toolchain.toml`
-(`channel = "1.97.0"`, `components = ["clippy","rustfmt"]`, no
+(`channel = "1.97.1"`, `components = ["clippy","rustfmt"]`, no
 `targets`). This pins BOTH local dev AND CI: rustup honors the file over
 `dtolnay/rust-toolchain`'s `rustup default`, so CI runs on the pinned
 toolchain (CI log: `"1.97.0 ... overridden by rust-toolchain.toml"`). It
 does NOT let CI float on stable.
 
-**Critical gotcha:** `stable` and `1.97.0` are SEPARATE rustup installs
+**Critical gotcha:** `stable` and `1.97.1` are SEPARATE rustup installs
 even at the same version. `dtolnay/rust-toolchain@stable` installs each
 job's cross-compile targets (wasm32-wasip2, x86_64-apple-darwin, …) onto
-the `stable` install — but the pin makes cargo use the `1.97.0` install,
+the `stable` install — but the pin makes cargo use the `1.97.1` install,
 which lacks those targets → cross-compile jobs fail with
 `error[E0463]: can't find crate for core`.
 
 **Fix in use (full-pin):** the CI workflows pin their action refs to
-`dtolnay/rust-toolchain@1.97.0` (a real per-version branch of the action)
+`dtolnay/rust-toolchain@1.97.1` (a real per-version branch of the action)
 so dtolnay installs targets onto the SAME toolchain the pin selects.
 CI == local exactly; no canary. `RUSTUP_TOOLCHAIN` is NOT used; the pin
 declares no `targets`.

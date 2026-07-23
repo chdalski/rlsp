@@ -1,9 +1,9 @@
 # Single source of truth for BOTH local dev and CI — both build against
-# 1.97.0. CI workflows reference `dtolnay/rust-toolchain@1.97.0` to match
+# 1.97.1. CI workflows reference `dtolnay/rust-toolchain@1.97.1` to match
 # this pin, so `dtolnay` installs each job's targets/components onto the
 # same toolchain rustup selects here — no mismatch, no floating canary.
-# To bump: edit `channel` here AND all `@1.97.0` refs together in one
+# To bump: edit `channel` here AND all `@1.97.1` refs together in one
 # commit.
 [toolchain]
-channel = "1.97.0"
+channel = "1.97.1"
 components = ["clippy", "rustfmt"]

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-07-23
 
 # Dependabot Follow-Up: Toolchain Pin, Action Bumps, and npm Advisory Patches
@@ -346,7 +346,7 @@ the numbers above must be independently reproduced.
 
 - [x] Add a Dependabot `ignore` rule for
       `dtolnay/rust-toolchain` (Task 1)
-- [ ] Bump the Rust toolchain pin from 1.97.0 to 1.97.1
+- [x] Bump the Rust toolchain pin from 1.97.0 to 1.97.1
       across `rust-toolchain.toml`, all 8 workflow action
       refs, and the toolchain memory note (Task 2)
 - [ ] Bump `actions/setup-node` from v6 to v7 in all 3 refs
@@ -420,15 +420,18 @@ cross-compile jobs install targets onto a toolchain that
 cargo does not select, which fails with
 `error[E0463]: can't find crate for core`.
 
-- [ ] Run `rustup toolchain install 1.97.1`.
-- [ ] In `rust-toolchain.toml`, set `channel = "1.97.1"` and
-      update both `1.97.0` mentions in the header comment
-      (lines 2 and 5) to `1.97.1`. Leave `components`
-      unchanged and do not add a `targets` key.
-- [ ] Run `rustup target add wasm32-wasip2` — the newly
+- [x] Run `rustup toolchain install 1.97.1`.
+- [x] In `rust-toolchain.toml`, set `channel = "1.97.1"` and
+      update all three `1.97.0` mentions in the header
+      comment to `1.97.1` — line 2 carries two (a prose
+      mention and an inline `@1.97.0` example) and line 5
+      carries one. Leave `components` unchanged and do not
+      add a `targets` key. The binding criterion is that no
+      stale `1.97.0` text remains in the file.
+- [x] Run `rustup target add wasm32-wasip2` — the newly
       installed toolchain is a separate rustup install and
       does not inherit the target list from 1.97.0.
-- [ ] Update all 8 `dtolnay/rust-toolchain@1.97.0` refs to
+- [x] Update all 8 `dtolnay/rust-toolchain@1.97.0` refs to
       `@1.97.1`: `.github/workflows/ci.yml` (lines 21, 36),
       `.github/workflows/coverage.yml` (line 21),
       `.github/workflows/release-plz.yml` (lines 19, 39,
@@ -436,7 +439,7 @@ cargo does not select, which fails with
       (line 79), `.github/workflows/zed-release.yml`
       (line 26). Confirm by grep that zero `@1.97.0` refs
       remain under `.github/`.
-- [ ] Update `.ai/memory/project_rust_toolchain_pin_ci_behavior.md`.
+- [x] Update `.ai/memory/project_rust_toolchain_pin_ci_behavior.md`.
       The file contains exactly 5 literal `1.97.0`
       occurrences, at lines 9, 12, 15, 18, and 23. Change
       **4** of them to 1.97.1: line 9 (the
@@ -448,7 +451,7 @@ cargo does not select, which fails with
       version-agnostic `@<ver>` placeholder. Do not change
       the note's structure or its description of the pinning
       strategy.
-- [ ] **Leave the 5th occurrence — line 12 — unchanged.** The
+- [x] **Leave the 5th occurrence — line 12 — unchanged.** The
       text
       `(CI log: "1.97.0 ... overridden by rust-toolchain.toml")`
       is a verbatim quotation from a real 1.97.0-era CI run,
@@ -457,22 +460,22 @@ cargo does not select, which fails with
       in the handoff that this occurrence was deliberately
       left at 1.97.0 and why. After editing, the file must
       contain exactly one remaining `1.97.0` occurrence.
-- [ ] Run `cargo clean`, then `cargo fmt --all -- --check`,
+- [x] Run `cargo clean`, then `cargo fmt --all -- --check`,
       then `cargo clippy --workspace --all-targets -- -D warnings`,
       then `cargo test --workspace`. The `cargo clean` is
       mandatory and must precede clippy — an incremental
       clippy cache does not re-lint unchanged code after a
       toolchain change and silently under-reports new lints.
-- [ ] Run
+- [x] Run
       `cargo check --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2`
       and
       `cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings`.
       These cover `zed-release.yml`, which is dispatch-gated
       and will not run in CI on this commit.
-- [ ] Confirm `rustc --version` reports 1.97.1 from within
+- [x] Confirm `rustc --version` reports 1.97.1 from within
       the repository (the pin is active) and quote it in the
       handoff.
-- [ ] Confirm no `Cargo.toml` was modified — `rust-version`
+- [x] Confirm no `Cargo.toml` was modified — `rust-version`
       stays `"1.97"` in all four crates.
 
 **Acceptance:** `rust-toolchain.toml` reads
