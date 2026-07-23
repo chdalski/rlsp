@@ -302,6 +302,24 @@ the numbers above must be independently reproduced.
   pointing `package_json_file` at the extension manifest
   leaves exactly one. Keeping `version` alongside
   `package_json_file` is not an option — the action throws.
+- **`publish-extension` is pinned, not manifest-driven
+  (user-confirmed during Task 4).** That job has no
+  `actions/checkout` and runs `permissions: {}` because it
+  holds `VSCE_PAT` and only publishes the pre-built VSIX.
+  `package_json_file` cannot resolve without the repo tree,
+  so removing its `version` would break the job. The two
+  alternatives were: (a) pin the step to an explicit version,
+  or (b) add a checkout + `contents: read` to the
+  secret-bearing job. The user chose (a) — the publish job
+  neither builds nor installs from the lockfile, so its pnpm
+  version does not affect the published artifact, and adding
+  a source checkout to the token-bearing job trades a real
+  (if small) security cost for cosmetic consistency. The step
+  is aligned to `version: 10` with a comment explaining the
+  exception. This narrows the original "all 3 steps"
+  acceptance to the 2 checkout-having steps; the plan's
+  reproducibility goal is unaffected because only build/test
+  jobs consume the lockfile.
 - **Five commits, one per concern** (user direction). Each is
   independently revertable.
 - **PR #50 is closed unmerged, not merged or rebased** (user
@@ -356,7 +374,7 @@ the numbers above must be independently reproduced.
       refs, and the toolchain memory note (Task 2)
 - [x] Bump `actions/setup-node` from v6 to v7 in all 3 refs
       (Task 3)
-- [ ] Make CI resolve pnpm from the extension's
+- [x] Make CI resolve pnpm from the extension's
       `packageManager` field instead of a hardcoded
       `version: 9` (Task 4)
 - [ ] Patch the `brace-expansion` and `fast-uri` advisories
@@ -577,36 +595,63 @@ bootstrap pnpm so `pnpm store path` reports the store version
 the real install actually writes to, which is what
 `coverage.yml`'s `cache: 'pnpm'` depends on for cold caches.
 
-- [ ] In `.github/workflows/coverage.yml` (the
-      `pnpm/action-setup` step at lines 42-44), remove the
-      `version: 9` input and add
-      `package_json_file: rlsp-yaml/integrations/vscode/package.json`.
-- [ ] In `.github/workflows/vscode-extension.yml`, make the
-      same change to both `pnpm/action-setup` steps (lines
-      116-119 and 169-172). Keep `run_install: false` on
-      both.
-- [ ] Confirm the `version` input is removed, not merely
-      changed — leaving it alongside `package_json_file`
-      makes the action throw
+**Scope correction (applied at execution).** The plan
+originally directed making all 3 `pnpm/action-setup` steps
+manifest-driven. During the security input gate, the
+developer and advisor found that the third step —
+`vscode-extension.yml`'s `publish-extension` job — has **no
+`actions/checkout`** and runs with `permissions: {}` (it holds
+`VSCE_PAT` and only publishes the pre-built VSIX). With no
+checkout, `package_json_file` resolves against a
+`GITHUB_WORKSPACE` that lacks the repo tree; the action
+swallows the `ENOENT` and, with `version` removed, throws
+`No pnpm version is specified` — breaking the publish job.
+The user chose to pin that step rather than add a checkout to
+the secret-bearing job (see Decisions). Only the two
+checkout-having jobs become manifest-driven.
+
+- [x] In `.github/workflows/coverage.yml` (the
+      `pnpm/action-setup` step, `coverage-vscode` job, which
+      checks out the repo), remove the `version: 9` input and
+      add `package_json_file: rlsp-yaml/integrations/vscode/package.json`.
+- [x] In `.github/workflows/vscode-extension.yml`
+      `build-extension` step (checks out at line 77), make the
+      same change. Keep `run_install: false`.
+- [x] In `.github/workflows/vscode-extension.yml`
+      `publish-extension` step (no checkout), do **not** remove
+      `version`: change `version: 9` → `version: 10` (align the
+      major to the declared `pnpm@10.33.2`), keep
+      `run_install: false`, and add a comment explaining the
+      step is pinned because the job has no checkout by design
+      and its pnpm version does not affect the published VSIX.
+      Do **not** add a checkout or change `permissions: {}`.
+- [x] Confirm the `version` input is removed (not merely
+      changed) on the two manifest-driven steps — leaving it
+      alongside `package_json_file` makes the action throw
       `Multiple versions of pnpm specified`.
-- [ ] Confirm by grep that zero `pnpm/action-setup` steps
-      under `.github/` still carry a `version:` input, and
-      that all 3 carry the `package_json_file` path.
-- [ ] Confirm the `package_json_file` value is written
+- [x] Confirm by grep: exactly 2 `pnpm/action-setup` steps
+      under `.github/` carry `package_json_file` with no
+      `version:`; exactly 1 retains `version: 10`; zero remain
+      at `version: 9`.
+- [x] Confirm the `package_json_file` value is written
       relative to the repository root, not to any job
       `working-directory` — the action resolves it against
       `GITHUB_WORKSPACE`.
-- [ ] Confirm `"packageManager": "pnpm@10.33.2"` is present
+- [x] Confirm `"packageManager": "pnpm@10.33.2"` is present
       and unmodified in
       `rlsp-yaml/integrations/vscode/package.json`.
-- [ ] Confirm the step ordering in `coverage.yml` is
+- [x] Confirm the step ordering in `coverage.yml` is
       unchanged, with `pnpm/action-setup` still before
       `actions/setup-node` — `setup-node`'s `cache: 'pnpm'`
       needs pnpm on `PATH` to compute the store path.
 
-**Acceptance:** all 3 `pnpm/action-setup` steps under
-`.github/` have no `version:` input and carry
+**Acceptance:** the 2 checkout-having `pnpm/action-setup`
+steps (`coverage.yml` coverage-vscode, `vscode-extension.yml`
+build-extension) have no `version:` input and carry
 `package_json_file: rlsp-yaml/integrations/vscode/package.json`;
+the `publish-extension` step retains `version: 10` with an
+explanatory comment and its `permissions: {}` is unchanged
+(no checkout added); zero steps remain at `version: 9`;
 `run_install: false` is retained on the two
 `vscode-extension.yml` steps; `coverage.yml` step order is
 unchanged; `package.json` is not modified by this task.

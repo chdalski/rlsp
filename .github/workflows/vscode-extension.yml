@@ -115,7 +115,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          package_json_file: rlsp-yaml/integrations/vscode/package.json
           run_install: false
 
       - name: Install dependencies
@@ -166,9 +166,14 @@ jobs:
         with:
           node-version: '22'
 
+      # This job has no actions/checkout (by design — it holds VSCE_PAT under
+      # permissions: {}), so package_json_file cannot resolve here. The pnpm
+      # version does not affect the published artifact: the VSIX is built by
+      # build-extension, and this job only runs `pnpx @vscode/vsce publish`
+      # against the downloaded artifact with run_install: false.
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 10
           run_install: false
 
       - name: Publish to Marketplace
