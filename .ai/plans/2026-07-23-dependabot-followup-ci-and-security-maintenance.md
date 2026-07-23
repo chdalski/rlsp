@@ -269,6 +269,21 @@ the numbers above must be independently reproduced.
   `exclude-patterns` entry would only split the dependency
   into its own PR; `ignore` suppresses it entirely, including
   from grouped PRs.
+- **Accepted risk, rated Low (security-engineer, Task 1).** A
+  bare `ignore` with only `dependency-name` suppresses
+  Dependabot's *security*-update auto-PRs for this dependency,
+  not just scheduled version-update PRs — GitHub's
+  "Controlling which dependencies are updated by Dependabot"
+  states `ignore` applies when Dependabot "opens pull requests
+  for version updates and security updates." Rated Low because
+  a GHSA-driven bump would resolve against the same
+  fictional-branch namespace that produced PR #50, so that
+  channel was never trustworthy for this action. Detection is
+  retained via Dependabot Alerts, which `dependabot.yml` does
+  not govern and which are verified enabled on this repository
+  (`gh api repos/chdalski/rlsp/dependabot/alerts` returns 30
+  alerts, 1 open). Remediation is the manual lockstep bump
+  already documented in the config comment.
 - **Bump to 1.97.1, not to the highest branch name.** 1.97.1
   is the newest Rust release that exists in the official
   distribution channel.
@@ -329,7 +344,7 @@ the numbers above must be independently reproduced.
 
 ## Steps
 
-- [ ] Add a Dependabot `ignore` rule for
+- [x] Add a Dependabot `ignore` rule for
       `dtolnay/rust-toolchain` (Task 1)
 - [ ] Bump the Rust toolchain pin from 1.97.0 to 1.97.1
       across `rust-toolchain.toml`, all 8 workflow action
@@ -355,21 +370,21 @@ a released Rust toolchain. The pin is manually managed in
 lockstep with `rust-toolchain.toml`, so automated bumps of
 this one action are never wanted.
 
-- [ ] In `.github/dependabot.yml`, add an `ignore` list to
+- [x] In `.github/dependabot.yml`, add an `ignore` list to
       the `github-actions` update entry containing a single
       `dependency-name: "dtolnay/rust-toolchain"` element.
       Leave the existing `groups`/`patterns` block unchanged.
-- [ ] Add a comment above the `ignore` list stating (a) that
+- [x] Add a comment above the `ignore` list stating (a) that
       the action publishes version branches ahead of the
       actual Rust releases, so the highest branch name is not
       necessarily a released toolchain, and (b) that the pin
       is bumped manually together with `rust-toolchain.toml`
       and all 8 workflow refs.
-- [ ] Confirm the file is valid YAML and the `ignore` key
+- [x] Confirm the file is valid YAML and the `ignore` key
       sits at the same nesting level as `schedule` and
       `groups` within the `github-actions` entry — quote the
       resulting entry verbatim in the handoff.
-- [ ] Confirm the `cargo` update entry is byte-for-byte
+- [x] Confirm the `cargo` update entry is byte-for-byte
       unchanged.
 
 **Acceptance:** `.github/dependabot.yml` parses as valid

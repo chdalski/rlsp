@@ -14,3 +14,11 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    # dtolnay/rust-toolchain publishes toolchain versions as git branches,
+    # pre-created ahead of the actual Rust release, not as tags. Dependabot
+    # reads branch names as version strings and proposes the highest-sorting
+    # one, with no knowledge of whether that Rust release has shipped yet.
+    # The pin is bumped manually together with rust-toolchain.toml and all
+    # 8 workflow refs in one deliberate commit, never via automated PR.
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"
