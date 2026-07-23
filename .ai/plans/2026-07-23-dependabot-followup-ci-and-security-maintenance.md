@@ -89,13 +89,18 @@ There are **8** action refs to keep in lockstep:
 Read directly from the `v7` branch of `actions/setup-node`
 (`README.md` and `action.yml`) on 2026-07-23:
 
-- The only v7 change is an internal migration to ESM.
-  Upstream states: "No changes to action inputs, outputs, or
-  behavior."
-- The **sole breaking change** is removal of the dummy
-  `NODE_AUTH_TOKEN` fallback, which affects only steps that
-  set `registry-url`. **No `setup-node` step in this
-  repository sets `registry-url`.**
+- The only v7 change upstream categorizes as breaking is an
+  internal migration to ESM, with no change to action inputs
+  or behavior. (Inputs are byte-identical v6→v7; two cache
+  **outputs** were added additively — `cache-primary-key`,
+  `cache-matched-key` — neither used here.)
+- The one consumer-visible behavior change is removal of the
+  dummy `NODE_AUTH_TOKEN` fallback (upstream files it under
+  Bug fixes, not Breaking changes). It affects only steps
+  that set `registry-url`. **No `setup-node` step in this
+  repository sets `registry-url`**, so it is a no-op at all
+  three call sites. Verified at source: `src/main.ts` guards
+  the entire auth path behind a non-empty `registry-url`.
 - The `node24` runtime (`runs: using: 'node24'`, requiring
   runner ≥ v2.327.1) was introduced in **v5**, not v7 — this
   bump imposes no new runner requirement.
@@ -349,7 +354,7 @@ the numbers above must be independently reproduced.
 - [x] Bump the Rust toolchain pin from 1.97.0 to 1.97.1
       across `rust-toolchain.toml`, all 8 workflow action
       refs, and the toolchain memory note (Task 2)
-- [ ] Bump `actions/setup-node` from v6 to v7 in all 3 refs
+- [x] Bump `actions/setup-node` from v6 to v7 in all 3 refs
       (Task 3)
 - [ ] Make CI resolve pnpm from the extension's
       `packageManager` field instead of a hardcoded
@@ -522,17 +527,17 @@ dummy `NODE_AUTH_TOKEN` fallback; the latter affects only
 steps that set `registry-url`, and no step in this
 repository does.
 
-- [ ] Update all 3 `actions/setup-node@v6` refs to `@v7`:
+- [x] Update all 3 `actions/setup-node@v6` refs to `@v7`:
       `.github/workflows/coverage.yml` (line 45),
       `.github/workflows/vscode-extension.yml` (lines 112,
       165).
-- [ ] Confirm by grep that zero `actions/setup-node@v6` refs
+- [x] Confirm by grep that zero `actions/setup-node@v6` refs
       remain under `.github/`.
-- [ ] Confirm no `setup-node` step in the repository sets a
+- [x] Confirm no `setup-node` step in the repository sets a
       `registry-url` input, and state this explicitly in the
       handoff — it is the condition under which v7's only
       breaking change applies.
-- [ ] Leave every `with:` block on those steps otherwise
+- [x] Leave every `with:` block on those steps otherwise
       unchanged, including `node-version: '22'`,
       `cache: 'pnpm'`, and `cache-dependency-path` in
       `coverage.yml`.

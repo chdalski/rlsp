@@ -109,7 +109,7 @@ jobs:
           Copy-Item target/${{ matrix.target }}/release/rlsp-yaml.exe rlsp-yaml/integrations/vscode/server/${{ matrix.target }}/rlsp-yaml.exe
         shell: pwsh
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -162,7 +162,7 @@ jobs:
           pattern: rlsp-yaml-*
           merge-multiple: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
