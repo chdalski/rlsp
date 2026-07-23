@@ -204,13 +204,14 @@
   "pnpm": {
     "overrides": {
       "lodash": ">=4.18.0",
-      "fast-uri": "^3.1.2",
+      "fast-uri": "^3.1.4",
       "serialize-javascript": "^7.0.5",
       "qs": "^6.15.2",
       "undici": "^7.28.0",
       "form-data": "^4.0.6",
       "markdown-it": "^14.2.0",
       "js-yaml": "^4.2.0",
+      "brace-expansion@2": "^2.1.2",
       "brace-expansion@5": "^5.0.6"
     }
   },
