@@ -1,6 +1,6 @@
 [package]
 name = "rlsp-fmt"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 rust-version = "1.97"
 description = "A reusable pretty-printing engine for rlsp language servers"
