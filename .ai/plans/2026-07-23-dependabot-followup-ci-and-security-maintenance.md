@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-07-24)
 **Created:** 2026-07-23
 
 # Dependabot Follow-Up: Toolchain Pin, Action Bumps, and npm Advisory Patches
@@ -380,8 +380,10 @@ the numbers above must be independently reproduced.
 - [x] Patch the `brace-expansion` and `fast-uri` advisories
       via `pnpm.overrides` and regenerate the lockfile
       (Task 5)
-- [ ] Lead: close PR #50 unmerged once Tasks 1–5 are on
-      `main`
+- [x] Lead: close PR #50 unmerged once Tasks 1–5 are on
+      `main` — Dependabot auto-closed it (2026-07-24) when
+      the `ignore` rule reached `main`; no manual close
+      needed.
 
 ## Tasks
 
