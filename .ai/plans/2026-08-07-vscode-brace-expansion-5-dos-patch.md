@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch brace-expansion@5 DoS Advisories
@@ -71,17 +71,17 @@ to ≥ 5.0.9 and `pnpm audit` no longer reports either advisory.
 
 - [x] Confirm the two advisories, their vulnerable ranges, the
       resolved `5.0.7`, and that `5.0.9` is published
-- [ ] Advance the `brace-expansion@5` override to `^5.0.9` in
+- [x] Advance the `brace-expansion@5` override to `^5.0.9` in
       `package.json`
-- [ ] Regenerate `pnpm-lock.yaml` via `pnpm install`
-- [ ] Update the `brace-expansion@5` literals in
+- [x] Regenerate `pnpm-lock.yaml` via `pnpm install`
+- [x] Update the `brace-expansion@5` literals in
       `overrides.test.ts` (presence `^5.0.6` → `^5.0.9`;
       resolution `5.0.7` → the new resolved version)
-- [ ] Verify build, lint, format, and tests pass
-- [ ] Verify the lockfile resolves `brace-expansion` 5.x ≥ 5.0.9
+- [x] Verify build, lint, format, and tests pass
+- [x] Verify the lockfile resolves `brace-expansion` 5.x ≥ 5.0.9
       with no 5.x version in `>= 4.0.0, < 5.0.9`; `pnpm audit`
       no longer reports either advisory
-- [ ] Confirm the extension `version` field is unchanged
+- [x] Confirm the extension `version` field is unchanged
 - [ ] At plan completion, remove the now-superseded
       `brace-expansion@5` backlog entry from
       `.ai/memory/project_followup_plans.md` (lead) — this plan
@@ -104,24 +104,24 @@ Files: `rlsp-yaml/integrations/vscode/package.json` (the
 (regenerated), and `rlsp-yaml/integrations/vscode/src/overrides.test.ts`
 (literal update).
 
-- [ ] The `brace-expansion@5` override targets `^5.0.9` (or a
+- [x] The `brace-expansion@5` override targets `^5.0.9` (or a
       later patched version); no other override entry changes
-- [ ] `pnpm-lock.yaml` is regenerated so `brace-expansion` on the
+- [x] `pnpm-lock.yaml` is regenerated so `brace-expansion` on the
       5.x line resolves ≥ 5.0.9 and no 5.x version remains in
       `>= 4.0.0, < 5.0.9`. This lockfile check is the
       deterministic, commit-time proof
-- [ ] `overrides.test.ts` `brace-expansion@5` literals are updated
+- [x] `overrides.test.ts` `brace-expansion@5` literals are updated
       to the new pinned floor and the new resolved version; no
       assertion is deleted or loosened in a way that would let a
       vulnerable 5.x version pass. The `brace-expansion@2` and
       `fast-uri` assertions are untouched
-- [ ] Local `pnpm audit` no longer reports GHSA-mh99-v99m-4gvg or
+- [x] Local `pnpm audit` no longer reports GHSA-mh99-v99m-4gvg or
       GHSA-rgw5-rvv9-x895 (supporting check)
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`, and
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run format`, and
       `pnpm run test` all pass
-- [ ] The extension's own `version` field is unchanged; no
+- [x] The extension's own `version` field is unchanged; no
       `Cargo.toml` is modified
-- [ ] Working-tree changes are limited to `package.json`,
+- [x] Working-tree changes are limited to `package.json`,
       `pnpm-lock.yaml`, and `src/overrides.test.ts`; no scratch
       files remain
 

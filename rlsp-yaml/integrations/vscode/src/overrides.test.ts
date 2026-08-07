@@ -32,7 +32,7 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     const overridesEnd = lockfile.indexOf('\n\n', overridesStart);
     const overridesBlock = lockfile.slice(overridesStart, overridesEnd);
     expect(overridesBlock).toContain('brace-expansion@2: ^2.1.4');
-    expect(overridesBlock).toContain('brace-expansion@5: ^5.0.6');
+    expect(overridesBlock).toContain('brace-expansion@5: ^5.0.9');
     expect(overridesBlock).toContain('fast-uri: ^3.1.5');
   });
 
@@ -45,7 +45,7 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
   });
 
   it('brace-expansion on the minimatch@10.2.5 path is unaffected by the @2 override', () => {
-    expect(resolvedDependencyVersion('minimatch@10.2.5:', 'brace-expansion')).toBe('5.0.7');
+    expect(resolvedDependencyVersion('minimatch@10.2.5:', 'brace-expansion')).toBe('5.0.9');
   });
 
   it('fast-uri resolves to the patched version with no vulnerable version remaining', () => {
