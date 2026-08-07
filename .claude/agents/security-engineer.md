@@ -1,7 +1,7 @@
 ---
 name: security-engineer
 description: Advisory role — assesses security implications when consulted
-model: sonnet
+model: sonnet[1m]
 effort: high
 color: red
 tools:

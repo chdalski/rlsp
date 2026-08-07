@@ -452,9 +452,13 @@ When the **reviewer messages you directly** with approval
 5. **Stage and commit.** Stage every file from the verified
    file list AND the plan file using `git add` with
    specific paths. Never use `git add .` or `git add -A`.
-   Commit with the reviewer's composed commit message.
-   This produces a single commit covering both code
-   changes and plan progress.
+   Commit with the reviewer's composed commit message,
+   appending a `Plan:` trailer as the final line — the
+   plan's filename without `.md` (e.g.
+   `Plan: YYYY-MM-DD-add-user-auth`). This produces a
+   single commit covering both code changes and plan
+   progress, tied to its plan so `git log --grep="Plan: "`
+   recovers the mapping without the plan recording SHAs.
 
 6. **Cycle the team** if more tasks remain. Delete the
    current team via `TeamDelete`, then recreate it via

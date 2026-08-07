@@ -1,7 +1,7 @@
 ---
 name: test-engineer
 description: Advisory role — designs test specifications when consulted
-model: sonnet
+model: sonnet[1m]
 effort: high
 color: blue
 tools:

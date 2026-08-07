@@ -78,6 +78,21 @@ contradict earlier ones.
   developer to guess what to look up or skip research
   entirely.
 
+Context orients the developer; it is not a change
+inventory. Name the key files, types, and systems the work
+centers on and why they matter — enough to start in the
+right place without repeating your investigation. Do not
+list every call site or line the change touches: for
+renames, moves, removals, and signature changes, the build,
+type-checker, tests, and reviewer find every affected site
+more reliably than a hand-built list — which goes stale the
+moment code moves and buries the plan's intent. The one
+exception is a change that compiles clean but alters what a
+reader observes — populating an empty field, changing a
+default, widening a value's meaning, reshaping output.
+Nothing downstream flags those automatically, so name the
+affected readers only for that kind of change.
+
 ### Steps
 
 A checklist of concrete steps. Use `- [ ]` for pending
@@ -99,21 +114,28 @@ checklist obscures status rather than revealing it.
 
 ### Tasks
 
-<!-- agent: Acceptance criteria must be hard numbers — no
-     parenthetical fallbacks like "(or user-approved
-     residual)." Flexibility is the user's decision at
-     review time, not a pre-authorized escape hatch. -->
+<!-- agent: A task's checkboxes are acceptance criteria —
+     observable outcomes that let anyone verify the task is
+     done — not a procedure for doing it. If a checkbox says
+     *how* (which file to edit, which function to change, in
+     what order), it is a step: rewrite it as the outcome
+     that step produces, or drop it. The developer owns the
+     how; the plan owns the what. Enumerated steps presume
+     the author knows the implementation better than the
+     developer will, and go stale the moment code shifts. -->
 
-<!-- agent: Each task needs specific verification criteria.
-     "Improves" is not verifiable; "tests X, Y, Z now
-     pass" is. Replace hedge words ("should," "many,"
-     "ideally") with concrete expectations. -->
-
-<!-- agent: If a task changes a data structure or removes
-     code, add sub-tasks to update docs and test fixtures
-     that reference the old state. If a task reaches a
-     "zero" state, add a sub-task to remove the tracking
-     mechanism — leaving it invites regression. -->
+<!-- agent: Criteria must be concrete and verifiable —
+     replace hedge words ("should," "many," "improves")
+     with outcomes that are plainly true or false, and with
+     no escape hatch: quantitative criteria are hard numbers
+     with no parenthetical fallback like "(or user-approved
+     residual)" — flexibility is the user's decision at
+     review time, not pre-authorized in the plan. When a
+     task changes or removes something other code or docs
+     depend on, make the dependent update its own criterion
+     ("docs and fixtures for the old shape are updated";
+     "the now-unused tracking mechanism is removed") rather
+     than a forgotten side effect. -->
 
 <!-- agent: Do NOT use fixed numeric thresholds (line
      counts, file sizes, ratios) as hard acceptance
@@ -132,19 +154,29 @@ checklist obscures status rather than revealing it.
      cannot articulate one, the split is not justified. -->
 
 Vertical task slices decomposed from the steps above. Each
-task is a committable unit of work with clear acceptance
-criteria.
+task is a committable unit of work. Give it a one- or
+two-sentence description of what it achieves and why, then
+a list of acceptance criteria — the conditions that must
+hold when it is done.
 
 ```markdown
-### Task 1: Add token model
+### Task 2: Name the repository ports after their data source
 
-Add a JWT token data model that validates and serializes
-tokens used by the auth service.
+Rename the two repository ports so their names state which
+database each reads, not their implementation history.
+Behavior is unchanged.
 
-- [ ] Token struct with required fields
-- [ ] Validates expiration and signature
-- [ ] Unit tests: happy path, expired token
+- [ ] Each port's name identifies its data source; no
+      reference to an old name remains
+- [ ] Mocks and adapters use the new names consistently
+- [ ] Build, tests, and lints pass
 ```
+
+Describe the outcome, not the edits: "no reference to the
+old name remains" is verifiable and lets the developer find
+every site, while "rename the trait in ports.rs, change the
+generic parameter in service.rs…" is the implementation —
+which the compiler verifies, not the plan.
 
 Order tasks by dependency — foundational work first. Use
 vertical slices (each task touches all layers needed for
@@ -213,3 +245,11 @@ is noise.
 - Plans are committed to git alongside the code they
   describe — this ties decisions to the code that
   implemented them, making future archaeology easier.
+- A plan never records the commit SHAs of its own tasks.
+  Each commit instead names its plan with a `Plan:`
+  trailer — the plan's filename without `.md` (e.g.
+  `Plan: YYYY-MM-DD-add-user-auth`). A commit's SHA is
+  unknown until the commit exists, so writing it back into
+  the plan forces an amend, and a later rebase or squash
+  silently orphans it; `git log --grep="Plan: "` is the
+  stable plan→commit lookup.
