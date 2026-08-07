@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [0.13.1] - 2026-08-07
+
+### Bug Fixes
+
+- Patch brace-expansion and fast-uri npm advisories (5cd73a0)
+- Patch 10 dependabot advisories via pnpm overrides (bb11c34)
+- Patch js-yaml !!omap DoS via pnpm override ([#50](https://github.com/chdalski/rlsp/pull/50)) (d0f059e)
+- Bump brace-expansion@5 override to patch DoS advisories (9577b30)
+
+### Documentation
+
+- Document plugin and add marketplace catalog (e7300b8)
+- Fix data-dir id in Task 2 verification steps (bc11ced)
+- Document post-install session restart in README (7d836a2)
+
+### Features
+
+- Add plugin skeleton and PATH-binary LSP wiring (ba828c3)
+- Auto-provision rlsp-yaml via SessionStart hook (653b91c)
+
+### Refactoring
+
+- Convert plugin to bring-your-own-binary (a7a937c)
+
 ## [0.13.0] - 2026-06-08
 
 ### Bug Fixes
