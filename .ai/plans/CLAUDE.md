@@ -12,3 +12,7 @@ Plans must follow the conventions documented in the
 project's CLAUDE.md files — the root CLAUDE.md and any
 sub-project CLAUDE.md files in directories the plan
 touches.
+
+**Completed and canceled plans are frozen** — once a plan's
+Status is `Completed` or `Canceled`, do not edit or append
+to it; it is a historical record. New work gets its own plan.

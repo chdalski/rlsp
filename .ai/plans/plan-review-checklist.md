@@ -65,16 +65,18 @@ concrete criteria.
 ## 4. Stale Artifacts After Task Completion
 
 Tasks that change structures, remove code, or reach "zero"
-states must include sub-tasks to update affected
-documentation and clean up tracking mechanisms.
+states leave stale documentation, fixtures, and tracking
+mechanisms behind. The build and tests do not catch these,
+so the plan must own them — as an acceptance criterion on
+the task, not an enumerated how-to step.
 
 - For each task that changes a data structure, API, or
   behavior: are there documentation files that describe
-  the old state? If so, does the task include update
-  sub-tasks?
+  the old state? If so, does the task carry a criterion
+  that they are updated?
 - For each task that removes code: are there test fixtures,
   comments, or docs that reference the removed code? If
-  so, does the task include cleanup sub-tasks?
+  so, does the task carry a cleanup criterion?
 - For each task that reaches a "zero" state (empty list,
   zero failures): does the plan delete the tracking
   mechanism, or leave it as an invitation to regress?
@@ -117,16 +119,21 @@ references in other documentation.
 
 ## 7. Task Description Completeness
 
-Each task must have verification criteria specific enough
-for the reviewer to distinguish "done" from "partially
-done."
+Each task must have acceptance criteria specific enough for
+the reviewer to distinguish "done" from "partially done" —
+stated as outcomes, not as a procedure.
 
-- Does each task specify what must be true after
+- Does each task specify what must be **true** after
   completion — which artifacts exist, which behaviors
   work, which conditions hold?
-- Is the exit criterion independently verifiable? The
-  reviewer should be able to check completion without
-  asking the implementor what was intended.
+- Are the criteria outcomes rather than steps? A checkbox
+  that dictates *how* (which file to edit, which function
+  to change, in what order) is a step, not a criterion —
+  flag it. The developer owns the how; the compiler and
+  tests confirm the sites were covered.
+- Is each criterion independently verifiable? The reviewer
+  should be able to check completion without asking the
+  implementor what was intended.
 - Can the reviewer distinguish "task done" from "task
   partially done" using only the task description?
 
@@ -244,35 +251,34 @@ sibling plans in the queue.
 
 ## 13. Default / Data-Shape Changes
 
-When a task changes the shape of data returned from a
-widely-used function — adding a field, populating a
-previously-empty field, changing an optional value to a
-required one, altering an enum/union layout, widening a
-type — every reader of the affected data may break, not
-only the callsites the plan intends to migrate.
+This section applies **only** to changes that compile and
+load clean yet change what a reader observes at runtime —
+populating a previously-empty field, changing a default,
+making an optional value required, altering an enum/union
+layout, widening a type, reshaping output. Nothing in the
+build, type-checker, or existing tests flags these, so a
+reader can silently misbehave.
 
-- Does any task change a function's return shape, a
-  field's default value, or the layout of a widely-used
-  type?
-- If yes, does the Context or Research section enumerate
-  **all readers** of the affected data — not just the
-  callsites being migrated? Readers include any code
-  that inspects the field or consumes the output:
-  formatters, serializers, validators, assertions,
-  invariant checks, logging, diagnostics, downstream
-  transforms.
-- A search scoped to one helper function's callers is
-  insufficient when the data is also read by code that
-  does not call that helper. The research must cover
-  direct reads of the affected field or value — by
-  whatever access mechanism the language uses (property
-  access, getter methods, destructuring, pattern
-  matching) — across the entire codebase.
+It does **not** apply to renames, moves, removals, or
+signature changes. For those the build, type-checker,
+tests, and this review find every affected site — a
+hand-built call-site inventory in the plan is redundant and
+goes stale. Do not flag a plan for omitting sites the
+toolchain catches.
+
+- Does any task make a silent data-shape or behavior
+  change of the kind above?
+- If yes, does the Context section name the affected
+  **readers** — the code that inspects the field or
+  consumes the output (formatters, serializers,
+  validators, invariant checks, diagnostics, downstream
+  transforms), not just the callsites being migrated? A
+  search scoped to one helper's callers is insufficient
+  when the value is also read directly elsewhere.
 - Why this matters: a production incident shipped two
   broken components (an output formatter and a
-  consistency invariant) because the plan's research
-  identified only the callers of one classification
-  helper, missing two other components that read the
-  same field directly through different code paths.
-  Both readers broke immediately; neither was in the
-  migrated callsite set.
+  consistency invariant) because the plan identified only
+  the callers of one classification helper, missing two
+  components that read the same field directly. Both
+  broke immediately with no compile error; neither was in
+  the migrated callsite set.
