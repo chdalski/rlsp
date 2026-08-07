@@ -31,17 +31,17 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     const overridesStart = lockfile.indexOf('overrides:');
     const overridesEnd = lockfile.indexOf('\n\n', overridesStart);
     const overridesBlock = lockfile.slice(overridesStart, overridesEnd);
-    expect(overridesBlock).toContain('brace-expansion@2: ^2.1.2');
+    expect(overridesBlock).toContain('brace-expansion@2: ^2.1.4');
     expect(overridesBlock).toContain('brace-expansion@5: ^5.0.6');
-    expect(overridesBlock).toContain('fast-uri: ^3.1.4');
+    expect(overridesBlock).toContain('fast-uri: ^3.1.5');
   });
 
   it('brace-expansion resolves to the patched version on the minimatch@5.1.9 runtime path', () => {
-    expect(resolvedDependencyVersion('minimatch@5.1.9:', 'brace-expansion')).toBe('2.1.2');
+    expect(resolvedDependencyVersion('minimatch@5.1.9:', 'brace-expansion')).toBe('2.1.4');
   });
 
   it('brace-expansion resolves to the patched version on the minimatch@9.0.9 dev path', () => {
-    expect(resolvedDependencyVersion('minimatch@9.0.9:', 'brace-expansion')).toBe('2.1.2');
+    expect(resolvedDependencyVersion('minimatch@9.0.9:', 'brace-expansion')).toBe('2.1.4');
   });
 
   it('brace-expansion on the minimatch@10.2.5 path is unaffected by the @2 override', () => {
@@ -49,7 +49,7 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
   });
 
   it('fast-uri resolves to the patched version with no vulnerable version remaining', () => {
-    expect(lockfile).toContain('fast-uri@3.1.4:');
-    expect(lockfile).not.toContain('fast-uri@3.1.2');
+    expect(lockfile).toContain('fast-uri@3.1.5:');
+    expect(lockfile).not.toContain('fast-uri@3.1.4');
   });
 });

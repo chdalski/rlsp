@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch 10 Open Dependabot Advisories
@@ -96,16 +96,16 @@ Key files:
       first-patched versions
 - [x] Confirm the `pnpm.overrides` block is the established
       pin mechanism and identify stale/missing pins
-- [ ] Update the four override entries in `package.json`
+- [x] Update the four override entries in `package.json`
       (advance three, add `postcss`)
-- [ ] Regenerate `pnpm-lock.yaml` via `pnpm install`
-- [ ] Verify build, lint, format, and unit tests pass
-- [ ] Verify the regenerated lockfile no longer resolves any
+- [x] Regenerate `pnpm-lock.yaml` via `pnpm install`
+- [x] Verify build, lint, format, and unit tests pass
+- [x] Verify the regenerated lockfile no longer resolves any
       version inside an alert's vulnerable range (`undici`
       ≥ 7.29.0, `fast-uri` ≥ 3.1.5, `postcss` ≥ 8.5.23,
       `brace-expansion` 2.x line ≥ 2.1.4); local `pnpm audit`
       reports clean as a supporting check
-- [ ] Confirm the extension `version` field is unchanged
+- [x] Confirm the extension `version` field is unchanged
 - [ ] After the change lands on the scanned branch, confirm
       via `gh api repos/chdalski/rlsp/dependabot/alerts` that
       all ten alerts (#39, #40, #41, #43, #44, #45, #46, #47,
@@ -130,11 +130,11 @@ the lockfile leaves CI in a broken (`ERR_PNPM_OUTDATED_LOCKFILE`)
 state, so the manifest edit and lockfile regeneration must
 land together.
 
-- [ ] `undici` override targets the 7.29.x line (first
+- [x] `undici` override targets the 7.29.x line (first
       patched 7.29.0); `fast-uri` targets 3.1.5 or later;
       `brace-expansion@2` targets the 2.1.4 line;
       `postcss` has a new override targeting 8.5.23 or later
-- [ ] `pnpm-lock.yaml` is regenerated so no resolved entry
+- [x] `pnpm-lock.yaml` is regenerated so no resolved entry
       remains within any alert's vulnerable range: `undici`
       resolves ≥ 7.29.0, `fast-uri` ≥ 3.1.5, `postcss`
       ≥ 8.5.23, `brace-expansion` (2.x line) ≥ 2.1.4. This
@@ -143,17 +143,22 @@ land together.
       alert re-query is the lead's post-merge confirmation
       (Steps), not a Task-1 criterion, because alert state
       only flips after GitHub re-scans the scanned branch
-- [ ] Local `pnpm audit` reports no advisories for the ten
+- [x] Local `pnpm audit` reports no advisories for the ten
       flagged packages at the patched severities (supporting
       check; the lockfile-range check above is authoritative
       at commit time)
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       and `pnpm run test` all pass
-- [ ] The extension's own `version` field in `package.json`
+- [x] The extension's own `version` field in `package.json`
       is unchanged; no `Cargo.toml` is modified
-- [ ] No scratch or throwaway files remain in the working
-      tree; the only changes are `package.json` and
-      `pnpm-lock.yaml`
+- [x] No scratch or throwaway files remain in the working
+      tree; the changes are `package.json`, `pnpm-lock.yaml`,
+      and `src/overrides.test.ts` — the last a pre-existing
+      regression guard (from commit 5cd73a01) whose pinned
+      version literals had to track the bumped overrides; the
+      lead authorized it in scope during execution and the
+      reviewer verified the edit is literal-only (no assertion
+      removed or weakened)
 
 ## Decisions
 
