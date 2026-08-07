@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch js-yaml !!omap DoS Advisory (#50)
@@ -73,15 +73,15 @@ lockfile.
       patched version
 - [x] Confirm the current `js-yaml` override and resolved
       version, and that no regression guard pins js-yaml
-- [ ] Advance the `js-yaml` override to `^4.3.1` in
+- [x] Advance the `js-yaml` override to `^4.3.1` in
       `package.json`
-- [ ] Regenerate `pnpm-lock.yaml` via `pnpm install`
-- [ ] Verify build, lint, format, and unit tests pass
-- [ ] Verify the regenerated lockfile resolves `js-yaml`
+- [x] Regenerate `pnpm-lock.yaml` via `pnpm install`
+- [x] Verify build, lint, format, and unit tests pass
+- [x] Verify the regenerated lockfile resolves `js-yaml`
       ≥ 4.3.1 with no version in `>= 4.0.0, < 4.3.1`; local
       `pnpm audit` reports the js-yaml advisory cleared as a
       supporting check
-- [ ] Confirm the extension `version` field is unchanged
+- [x] Confirm the extension `version` field is unchanged
 - [ ] After the change lands on the scanned branch, confirm
       via `gh api repos/chdalski/rlsp/dependabot/alerts/50`
       that alert #50 has left the `open` state, allowing for
@@ -102,21 +102,21 @@ Files: `rlsp-yaml/integrations/vscode/package.json` (the
 `js-yaml` override) and `rlsp-yaml/integrations/vscode/pnpm-lock.yaml`
 (regenerated).
 
-- [ ] The `js-yaml` override targets `^4.3.1` (or a later
+- [x] The `js-yaml` override targets `^4.3.1` (or a later
       patched version)
-- [ ] `pnpm-lock.yaml` is regenerated so `js-yaml` resolves
+- [x] `pnpm-lock.yaml` is regenerated so `js-yaml` resolves
       ≥ 4.3.1 and no resolved `js-yaml` version remains in
       the vulnerable range `>= 4.0.0, < 4.3.1`. This lockfile
       check is the deterministic, commit-time proof; the
       GitHub alert re-query is the lead's post-merge
       confirmation (Steps), not a Task-1 criterion
-- [ ] Local `pnpm audit` no longer reports the js-yaml
+- [x] Local `pnpm audit` no longer reports the js-yaml
       `!!omap` advisory (supporting check)
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       and `pnpm run test` all pass
-- [ ] The extension's own `version` field in `package.json`
+- [x] The extension's own `version` field in `package.json`
       is unchanged; no `Cargo.toml` is modified
-- [ ] Working-tree changes are limited to `package.json` and
+- [x] Working-tree changes are limited to `package.json` and
       `pnpm-lock.yaml`; no scratch or throwaway files remain
 
 ## Decisions
