@@ -88,9 +88,9 @@ override block and less standing maintenance surface.
       the relevant advisory range
 - [x] Record a per-pin verdict (keep / remove) with evidence
       (see Audit Verdicts section)
-- [ ] Remove the pins proven redundant; regenerate the
+- [x] Remove the pins proven redundant; regenerate the
       lockfile
-- [ ] Verify build, lint, format, and tests pass, and that
+- [x] Verify build, lint, format, and tests pass, and that
       the lockfile still resolves non-vulnerable versions for
       every previously-pinned package
 - [ ] After the change lands, confirm no prior-closed
@@ -128,13 +128,13 @@ the lockfile, and prove nothing regressed. Only pins with a
 recorded "remove" verdict are touched; "keep" pins are left
 untouched.
 
-- [ ] Only the pins marked "remove" in Task 1 are deleted
+- [x] Only the pins marked "remove" in Task 1 are deleted
       from the `pnpm.overrides` block; no "keep" pin changes
-- [ ] `pnpm-lock.yaml` is regenerated and still resolves a
+- [x] `pnpm-lock.yaml` is regenerated and still resolves a
       non-vulnerable version for every package that had a pin
       (removed or kept) — no version enters a known advisory
       range
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       and `pnpm run test` all pass. For the `overrides.test.ts`
       guard: if `brace-expansion@2` and/or `fast-uri` are
       marked "remove", the override-block-presence assertion(s)
@@ -146,7 +146,7 @@ untouched.
       pass. Every guarded pin that is KEPT has its assertions
       left exactly as-is. If both guarded pins are kept,
       `overrides.test.ts` is unchanged
-- [ ] The extension `version` field is unchanged; no
+- [x] The extension `version` field is unchanged; no
       `Cargo.toml` is modified
 - [ ] After the change lands on the scanned branch, no
       Dependabot alert closed by a prior security plan has
