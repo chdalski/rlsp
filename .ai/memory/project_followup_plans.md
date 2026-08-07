@@ -51,3 +51,21 @@ type: project
   re-resolution could permit `5.0.6`. If tightening to `^5.0.7`, verify the
   specific advisory coverage of `5.0.6` at scoping time rather than taking
   the claim on faith (flagged by the Task 5 security advisor).
+
+- **`pnpm.overrides` block consolidation audit.** The VS Code extension's
+  `pnpm.overrides` block (`rlsp-yaml/integrations/vscode/package.json`) has
+  accumulated across ~7 sequential security plans and now pins 11 packages
+  (`lodash`, `serialize-javascript`, `qs`, `form-data`, `markdown-it`,
+  `js-yaml`, `undici`, `fast-uri`, `postcss`, `brace-expansion@2`,
+  `brace-expansion@5`). No plan has audited whether each pin is still
+  load-bearing — a transitive chain may have moved past the vulnerable
+  version on its own, making an override redundant and safe to drop.
+  Deferred from the 2026-08-07 advisory-patch plan
+  (`.ai/plans/2026-08-07-vscode-dependabot-advisory-patches.md`) to keep
+  that fix tight and independently reviewable. When acting: for each
+  override, determine whether removing it still resolves a non-vulnerable
+  version (`pnpm why <pkg>` against the relevant advisory ranges); remove
+  only pins proven redundant, and verify each removal with `pnpm install`
+  + build/lint/test. Do not remove a pin without confirming the underlying
+  advisory is no longer reachable — a redundant-looking pin can become
+  load-bearing again after an unrelated dependency bump.
