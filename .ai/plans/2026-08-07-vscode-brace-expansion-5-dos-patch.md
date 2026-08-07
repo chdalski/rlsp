@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch brace-expansion@5 DoS Advisories
@@ -82,7 +82,7 @@ to ≥ 5.0.9 and `pnpm audit` no longer reports either advisory.
       with no 5.x version in `>= 4.0.0, < 5.0.9`; `pnpm audit`
       no longer reports either advisory
 - [x] Confirm the extension `version` field is unchanged
-- [ ] At plan completion, remove the now-superseded
+- [x] At plan completion, remove the now-superseded
       `brace-expansion@5` backlog entry from
       `.ai/memory/project_followup_plans.md` (lead) — this plan
       advances the pin past the `^5.0.7` that note contemplated,

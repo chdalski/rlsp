@@ -45,13 +45,6 @@ type: project
   action's current handling and that the hash matches the intended pnpm
   release.
 
-- **`brace-expansion@5` override floor `^5.0.6` sits below the resolved
-  `5.0.7`.** No active exposure — the lockfile resolves `@5` to `5.0.7`
-  today — but the override string does not pin that floor, so a future
-  re-resolution could permit `5.0.6`. If tightening to `^5.0.7`, verify the
-  specific advisory coverage of `5.0.6` at scoping time rather than taking
-  the claim on faith (flagged by the Task 5 security advisor).
-
 - **`pnpm.overrides` block consolidation audit.** The VS Code extension's
   `pnpm.overrides` block (`rlsp-yaml/integrations/vscode/package.json`) has
   accumulated across ~7 sequential security plans and now pins 11 packages
