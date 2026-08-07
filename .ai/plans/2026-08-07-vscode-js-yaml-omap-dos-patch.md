@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch js-yaml !!omap DoS Advisory (#50)
@@ -82,10 +82,12 @@ lockfile.
       `pnpm audit` reports the js-yaml advisory cleared as a
       supporting check
 - [x] Confirm the extension `version` field is unchanged
-- [ ] After the change lands on the scanned branch, confirm
+- [x] After the change lands on the scanned branch, confirm
       via `gh api repos/chdalski/rlsp/dependabot/alerts/50`
       that alert #50 has left the `open` state, allowing for
-      GitHub's re-scan latency (lead, at plan completion)
+      GitHub's re-scan latency (lead, at plan completion) —
+      pushed to `origin/main` at d0f059e0; alert #50 confirmed
+      `fixed`, total open Dependabot alerts now 0
 
 ## Tasks
 
