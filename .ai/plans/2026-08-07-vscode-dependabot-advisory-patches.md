@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: Patch 10 Open Dependabot Advisories
@@ -106,14 +106,17 @@ Key files:
       `brace-expansion` 2.x line ≥ 2.1.4); local `pnpm audit`
       reports clean as a supporting check
 - [x] Confirm the extension `version` field is unchanged
-- [ ] After the change lands on the scanned branch, confirm
+- [x] After the change lands on the scanned branch, confirm
       via `gh api repos/chdalski/rlsp/dependabot/alerts` that
       all ten alerts (#39, #40, #41, #43, #44, #45, #46, #47,
       #48, #49) have left the `open` state, allowing for
-      GitHub's re-scan latency (lead, at plan completion)
-- [ ] At plan completion, record the deferred override
+      GitHub's re-scan latency (lead, at plan completion) —
+      pushed to `origin/main` at 1adba696; all ten confirmed
+      `fixed`
+- [x] At plan completion, record the deferred override
       consolidation as an open item in
-      `.ai/memory/project_followup_plans.md` (lead)
+      `.ai/memory/project_followup_plans.md` (lead) — recorded
+      in commit 1adba696
 
 ## Tasks
 
