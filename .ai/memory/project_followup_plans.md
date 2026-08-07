@@ -69,3 +69,6 @@ type: project
   + build/lint/test. Do not remove a pin without confirming the underlying
   advisory is no longer reachable — a redundant-looking pin can become
   load-bearing again after an unrelated dependency bump.
+  **Now scheduled as a plan:** `.ai/plans/2026-08-07-vscode-overrides-consolidation-audit.md`
+  (NotStarted) owns this work — remove this backlog note when that plan is
+  marked Completed.
