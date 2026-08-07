@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-07
 
 # VS Code Extension: Audit and Prune the pnpm.overrides Block
@@ -80,13 +80,14 @@ override block and less standing maintenance surface.
 
 ## Steps
 
-- [ ] Enumerate the current `pnpm.overrides` entries and,
+- [x] Enumerate the current `pnpm.overrides` entries and,
       for each, the advisory/advisories it was added for
-- [ ] For each pin, determine whether it is still
+- [x] For each pin, determine whether it is still
       load-bearing — whether removing it still resolves a
       non-vulnerable version — with `pnpm why` evidence and
       the relevant advisory range
-- [ ] Record a per-pin verdict (keep / remove) with evidence
+- [x] Record a per-pin verdict (keep / remove) with evidence
+      (see Audit Verdicts section)
 - [ ] Remove the pins proven redundant; regenerate the
       lockfile
 - [ ] Verify build, lint, format, and tests pass, and that
@@ -109,14 +110,14 @@ the dependency graph moved past the vulnerable range so the
 pin can be removed safely? This is investigation — its output
 is the documented verdict that Task 2 acts on.
 
-- [ ] Every current override entry has a recorded verdict
+- [x] Every current override entry has a recorded verdict
       (keep or remove) with `pnpm why <pkg>` evidence and the
       advisory range it addresses
-- [ ] Each "remove" verdict states the non-vulnerable version
+- [x] Each "remove" verdict states the non-vulnerable version
       the dependency resolves to without the override
-- [ ] Each "keep" verdict states which consumer still pulls a
+- [x] Each "keep" verdict states which consumer still pulls a
       version inside the advisory range absent the pin
-- [ ] The verdict set is recorded in this plan (Decisions or
+- [x] The verdict set is recorded in this plan (Decisions or
       an appended audit note) so Task 2's scope is
       unambiguous
 
@@ -151,6 +152,31 @@ untouched.
       Dependabot alert closed by a prior security plan has
       returned to `open` (lead, at plan completion)
 
+## Audit Verdicts (Task 1 — recorded 2026-08-07)
+
+Empirical redundancy test (does the chain resolve a
+non-vulnerable version without the override?), reviewer-verified
+with the faithful Task-2 model (real lockfile, remove the
+override, full `pnpm install`, then `pnpm why` + `pnpm audit`).
+
+- **REMOVE (9)** — each resolves its patched version absent the
+  override, zero advisories: `lodash`, `fast-uri`, `qs`,
+  `undici`, `postcss`, `form-data`, `markdown-it`, `js-yaml`,
+  `brace-expansion@2`.
+- **KEEP (1)** — genuinely load-bearing: `serialize-javascript`
+  — `mocha@11.7.5` declares `^6.0.2` whose `< 7.0.0` ceiling
+  excludes the 7.0.5 patch, so it resolves the vulnerable 6.0.2
+  without the pin.
+- **DEFERRED (1)** — `brace-expansion@5`: the `^5.0.6` override
+  gives no protection (resolves the vulnerable 5.0.7 with or
+  without it; live GHSA-mh99-v99m-4gvg / GHSA-rgw5-rvv9-x895).
+  Handled by the `2026-08-07-vscode-brace-expansion-5-dos-patch.md`
+  fix (bump to `^5.0.9`); its keep/remove status is re-evaluated
+  empirically at Task 2 after that fix lands.
+
+Task 2 removes the 9 REMOVE pins, keeps `serialize-javascript`,
+and re-checks `brace-expansion@5`.
+
 ## Decisions
 
 - **Removal requires proof, not preference:** a pin is
@@ -165,6 +191,18 @@ untouched.
 - **Runs after the security patches:** scheduled after the
   2026-08-07 js-yaml #50 patch so it audits the final pinned
   state, not a moving target.
+- **Sequencing and the deferred compensating control (user
+  decision 2026-08-07):** the user directed doing the
+  `brace-expansion@5` fix first, then this removal (Task 2),
+  and deferring the compensating control (a CI `pnpm audit`
+  step + a pnpm/`npm` Dependabot entry) "for now." So Task 2
+  runs after the `brace-expansion@5` fix WITHOUT that control
+  in place. The 9 removals are safe today (empirically
+  verified); the trade-off is that a future regression on one
+  of these subtrees would be caught reactively by a Dependabot
+  alert (post-merge) rather than blocked pre-merge. The
+  deferred control is tracked in
+  `.ai/memory/project_followup_plans.md` so it is not lost.
 
 ## Non-Goals
 
