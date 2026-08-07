@@ -45,27 +45,6 @@ type: project
   action's current handling and that the hash matches the intended pnpm
   release.
 
-- **`pnpm.overrides` block consolidation audit.** The VS Code extension's
-  `pnpm.overrides` block (`rlsp-yaml/integrations/vscode/package.json`) has
-  accumulated across ~7 sequential security plans and now pins 11 packages
-  (`lodash`, `serialize-javascript`, `qs`, `form-data`, `markdown-it`,
-  `js-yaml`, `undici`, `fast-uri`, `postcss`, `brace-expansion@2`,
-  `brace-expansion@5`). No plan has audited whether each pin is still
-  load-bearing — a transitive chain may have moved past the vulnerable
-  version on its own, making an override redundant and safe to drop.
-  Deferred from the 2026-08-07 advisory-patch plan
-  (`.ai/plans/2026-08-07-vscode-dependabot-advisory-patches.md`) to keep
-  that fix tight and independently reviewable. When acting: for each
-  override, determine whether removing it still resolves a non-vulnerable
-  version (`pnpm why <pkg>` against the relevant advisory ranges); remove
-  only pins proven redundant, and verify each removal with `pnpm install`
-  + build/lint/test. Do not remove a pin without confirming the underlying
-  advisory is no longer reachable — a redundant-looking pin can become
-  load-bearing again after an unrelated dependency bump.
-  **Now scheduled as a plan:** `.ai/plans/2026-08-07-vscode-overrides-consolidation-audit.md`
-  (InProgress — audit done, removal pending) owns this work — remove this
-  backlog note when that plan is marked Completed.
-
 - **Compensating control for npm advisories (CI `pnpm audit` + Dependabot
   coverage).** The VS Code extension has no CI `pnpm audit` gate and no
   Dependabot npm-ecosystem entry (verified 2026-08-07: no `audit` in any

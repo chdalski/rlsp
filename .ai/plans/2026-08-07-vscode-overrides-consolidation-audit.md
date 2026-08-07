@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: Audit and Prune the pnpm.overrides Block
@@ -93,9 +93,10 @@ override block and less standing maintenance surface.
 - [x] Verify build, lint, format, and tests pass, and that
       the lockfile still resolves non-vulnerable versions for
       every previously-pinned package
-- [ ] After the change lands, confirm no prior-closed
-      Dependabot alert has returned to `open`
-- [ ] At plan completion, remove the override-consolidation
+- [x] After the change lands, confirm no prior-closed
+      Dependabot alert has returned to `open` — pushed at
+      ce9475d9; open alert count 0, `pnpm audit --prod` clean
+- [x] At plan completion, remove the override-consolidation
       backlog entry from `.ai/memory/project_followup_plans.md`
       (lead) — that note names this plan as its owner and
       instructs its own removal once this plan is Completed
@@ -148,7 +149,7 @@ untouched.
       `overrides.test.ts` is unchanged
 - [x] The extension `version` field is unchanged; no
       `Cargo.toml` is modified
-- [ ] After the change lands on the scanned branch, no
+- [x] After the change lands on the scanned branch, no
       Dependabot alert closed by a prior security plan has
       returned to `open` (lead, at plan completion)
 
