@@ -43,11 +43,21 @@ override block and less standing maintenance surface.
   explicit proof that the dependency still resolves to a
   non-vulnerable version without the override.
 - **Regression guard.** `rlsp-yaml/integrations/vscode/src/overrides.test.ts`
-  asserts the lockfile resolves patched versions for
-  `brace-expansion` and `fast-uri`. If either of those pins
-  is a removal candidate, that guard is the safety net —
-  do not weaken or delete its assertions to make a removal
-  pass.
+  guards `brace-expansion` and `fast-uri` with two kinds of
+  assertion: (1) that the `pnpm.overrides` block literally
+  contains their pin entries (e.g. `brace-expansion@2: ^2.1.4`,
+  `fast-uri: ^3.1.5`), and (2) that the lockfile resolves
+  them to non-vulnerable versions on their dependency paths.
+  Both kinds are coupled to the current pinned state, so
+  removing or changing either guarded pin will break them.
+  The safety property the guard protects is "`brace-expansion`
+  and `fast-uri` resolve to non-vulnerable versions" — that
+  property must never be weakened or deleted to force a pass.
+  But if the audit *proves* a guarded pin redundant (its
+  dependency chain resolves a non-vulnerable version without
+  the override), updating the guard's assertions to the new
+  proven state is legitimate stale-artifact cleanup, not
+  weakening. Task 2 states the exact rule.
 - **Authoritative safety signal.** After the change lands
   on the branch GitHub scans, the Dependabot alert list
   (`gh api repos/chdalski/rlsp/dependabot/alerts`) must show
@@ -84,6 +94,10 @@ override block and less standing maintenance surface.
       every previously-pinned package
 - [ ] After the change lands, confirm no prior-closed
       Dependabot alert has returned to `open`
+- [ ] At plan completion, remove the override-consolidation
+      backlog entry from `.ai/memory/project_followup_plans.md`
+      (lead) — that note names this plan as its owner and
+      instructs its own removal once this plan is Completed
 
 ## Tasks
 
@@ -120,9 +134,17 @@ untouched.
       (removed or kept) — no version enters a known advisory
       range
 - [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
-      and `pnpm run test` all pass, including the
-      `overrides.test.ts` regression guard with no assertion
-      weakened
+      and `pnpm run test` all pass. For the `overrides.test.ts`
+      guard: if `brace-expansion@2` and/or `fast-uri` are
+      marked "remove", the override-block-presence assertion(s)
+      for the removed pin are deleted, and any resolution
+      assertion for that package is updated to assert the new
+      resolved (still non-vulnerable) version it lands on
+      without the override — never deleted or loosened in a
+      way that would let a version inside the advisory range
+      pass. Every guarded pin that is KEPT has its assertions
+      left exactly as-is. If both guarded pins are kept,
+      `overrides.test.ts` is unchanged
 - [ ] The extension `version` field is unchanged; no
       `Cargo.toml` is modified
 - [ ] After the change lands on the scanned branch, no
