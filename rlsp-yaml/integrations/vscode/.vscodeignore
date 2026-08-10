@@ -6,5 +6,5 @@ eslint.config.mjs
 .gitignore
 CLAUDE.md
 pnpm-lock.yaml
-vitest.config.ts
+vitest.config.mts
 *.vsix

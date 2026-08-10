@@ -68,7 +68,7 @@ security guard's actual assertions or the extension's build.
 - [x] Confirm CRLF trim scope with user (Moderate: keep `normalizeLineEndings`
       + unit tests; drop the 2 CRLF-scenario blocks)
 - [x] Task 1 — Trim the redundant CRLF-scenario tests in `overrides.test.ts`
-- [ ] Task 2 — Rename `vitest.config.ts` → `vitest.config.mts`
+- [x] Task 2 — Rename `vitest.config.ts` → `vitest.config.mts`
 - [ ] (Lead) After Task 1 lands, remove the "`overrides.test.ts` accumulated
       test surface — consolidation candidate" entry from
       `.ai/memory/project_followup_plans.md` (Open: CI & integrations) — this
@@ -104,17 +104,17 @@ it or changing the whole package's module system. Update the matching
 `.vscodeignore` entry so the rename leaves no dead ignore rule and the config
 stays out of the packaged VSIX.
 
-- [ ] `vitest.config.ts` is renamed to `vitest.config.mts` with its contents
+- [x] `vitest.config.ts` is renamed to `vitest.config.mts` with its contents
       unchanged; no `"type": "module"` is added to `package.json`
-- [ ] `.vscodeignore`'s entry matches the new filename (`vitest.config.mts`),
+- [x] `.vscodeignore`'s entry matches the new filename (`vitest.config.mts`),
       leaving no dead rule; `pnpm run package` (vsce) succeeds and the
       resulting `.vsix` does not contain the vitest config (verify, then
       remove the generated `.vsix` so the tree stays clean)
-- [ ] `pnpm run test` and `pnpm run test:coverage` still discover and use the
+- [x] `pnpm run test` and `pnpm run test:coverage` still discover and use the
       config — tests run and coverage is generated
-- [ ] The "ESM syntax in a file loaded as CommonJS" deprecation warning no
+- [x] The "ESM syntax in a file loaded as CommonJS" deprecation warning no
       longer appears in the vitest/vite output (cite the before/after)
-- [ ] `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`, and
+- [x] `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`, and
       `pnpm run build` are unaffected
 
 ## Decisions
