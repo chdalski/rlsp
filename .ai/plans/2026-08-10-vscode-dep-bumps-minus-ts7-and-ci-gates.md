@@ -112,6 +112,8 @@ reach a "mostly green" PR. Keep the extension's npm security posture
 - [x] Task 1 — Add extension static-check CI gates + Dependabot TS-major ignore
 - [x] Task 2 — Apply the 11 non-TS bumps + vscode-languageclient@10 migration
       + refresh the regression-guard test
+- [x] Task 3 — Fix VSIX packaging: raise engines.vscode to ^1.125.0 (surfaced
+      by push CI; @types/vscode had outpaced engines.vscode)
 - [ ] (Lead) Verify push-triggered CI on `main` is green across the matrix
       (incl. Windows) after the work lands — `gh run list`
 - [ ] (Lead) Comment `@dependabot rebase` on PR #58 after both tasks land, so
@@ -182,6 +184,22 @@ must land together or the typecheck/tests break.
       the exact command and error — not a self-authorized skip; the
       Steps-level post-landing CI check is the backstop
 
+### Task 3: Raise engines.vscode to ^1.125.0 to unblock VSIX packaging
+
+Push-triggered CI (`vscode-extension.yml`, the only place `vsce package`
+runs) failed at Package VSIX on every matrix leg: `@vscode/vsce` rejects
+packaging when `@types/vscode` (raised to ^1.125.0 in Task 2) exceeds
+`engines.vscode` (left at ^1.116.0). Restore the lockstep — both were
+1.116.0 before Task 2 — by raising `engines.vscode` to ^1.125.0.
+User-approved fix.
+
+- [x] `engines.vscode` is `^1.125.0`; `@types/vscode` remains `^1.125.0`; no
+      other dependency, manifest field, source, or test is changed
+- [x] `vsce package` (`pnpm run package`) succeeds — the previously failing
+      CI packaging step reproduces green locally
+- [x] `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`,
+      `pnpm run build`, and `pnpm run test` still pass
+
 ## Decisions
 
 - **Exclude TypeScript 7, land the other 11.** typescript-eslint has no TS 7
@@ -222,6 +240,12 @@ must land together or the typecheck/tests break.
   logged in `.ai/memory/project_followup_plans.md` (the project's live
   backlog) so the aggregate concern stays discoverable after this plan
   freezes rather than being carried forward silently a fifth time.
+- **engines.vscode raised to ^1.125.0 (CI-surfaced, Task 3).** `vsce package`
+  enforces `@types/vscode <= engines.vscode` — a check that runs only in the
+  push-triggered `vscode-extension.yml`, not in local gates or PR CI — so the
+  Task 2 `@types/vscode` bump broke VSIX packaging until `engines.vscode` was
+  raised to match. The extension's minimum VS Code is now 1.125 (LC@10 already
+  required ≥1.91). User chose this over reverting the `@types/vscode` bump.
 
 ## Non-Goals
 
