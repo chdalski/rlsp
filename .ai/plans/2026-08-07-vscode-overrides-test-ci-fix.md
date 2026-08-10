@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: Fix Red CI in overrides.test.ts (type errors + Windows CRLF)
@@ -86,9 +86,12 @@ Key files:
       `CLAUDE.md` VS Code Extension command block
 - [x] Verify `build`, `lint`, `format`, `test`, `typecheck`
       all pass locally
-- [ ] After the change lands, confirm the "VS Code Extension"
+- [x] After the change lands, confirm the "VS Code Extension"
       workflow succeeds across the full matrix incl. Windows
-      (lead, via `gh run`, at plan completion)
+      (lead, via `gh run`, at plan completion) — pushed at
+      1d1f702c; all 5 matrix jobs green incl.
+      `Build VSIX (x86_64-pc-windows-msvc)`, plus CI /
+      Coverage / Release-plz all success
 
 ## Tasks
 
