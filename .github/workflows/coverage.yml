@@ -60,3 +60,29 @@ jobs:
           flags: vscode
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  vscode-static-checks:
+    name: VS Code Extension Static Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: rlsp-yaml/integrations/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: rlsp-yaml/integrations/vscode/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: rlsp-yaml/integrations/vscode
+      - name: Typecheck
+        run: pnpm run typecheck
+        working-directory: rlsp-yaml/integrations/vscode
+      - name: Lint
+        run: pnpm run lint
+        working-directory: rlsp-yaml/integrations/vscode
+      - name: Format
+        run: pnpm run format
+        working-directory: rlsp-yaml/integrations/vscode

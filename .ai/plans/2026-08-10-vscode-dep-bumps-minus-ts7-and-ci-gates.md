@@ -109,7 +109,7 @@ reach a "mostly green" PR. Keep the extension's npm security posture
       posture in the PR lockfile
 - [x] Confirm approach with user (fix & land most; add PR gates;
       trunk-based on `main`)
-- [ ] Task 1 — Add extension static-check CI gates + Dependabot TS-major ignore
+- [x] Task 1 — Add extension static-check CI gates + Dependabot TS-major ignore
 - [ ] Task 2 — Apply the 11 non-TS bumps + vscode-languageclient@10 migration
       + refresh the regression-guard test
 - [ ] (Lead) Verify push-triggered CI on `main` is green across the matrix
@@ -135,19 +135,19 @@ place before the dependency change. `main` is currently green on typecheck,
 lint, and format under the existing dependency set, so adding the gates does
 not turn `main` red.
 
-- [ ] `typecheck`, `lint`, and `format` for the extension run in CI on both
+- [x] `typecheck`, `lint`, and `format` for the extension run in CI on both
       pull requests to `main` and pushes to `main`, and a failure of any of
       them fails the check
-- [ ] The new gates surface as clearly identifiable checks (a failing
+- [x] The new gates surface as clearly identifiable checks (a failing
       typecheck is distinguishable from a failing lint/format in the CI UI)
-- [ ] `.github/dependabot.yml` excludes `typescript` semver-major updates
+- [x] `.github/dependabot.yml` excludes `typescript` semver-major updates
       from the npm group while still allowing its minor/patch updates, with a
       comment stating the reason (typescript-eslint lacks TS 7 support;
       issue #10940) and the condition for removal
-- [ ] Any workflow file touched has explicit least-privilege `permissions`
+- [x] Any workflow file touched has explicit least-privilege `permissions`
       and its actions pinned to current major versions (per
       `.claude/rules/github-workflows.md`)
-- [ ] `.github/workflows/*.yml` and `.github/dependabot.yml` remain valid
+- [x] `.github/workflows/*.yml` and `.github/dependabot.yml` remain valid
       YAML; the changed workflow parses (e.g. `actionlint` if available, or a
       YAML parse check)
 

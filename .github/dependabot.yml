@@ -29,3 +29,10 @@ updates:
     groups:
       vscode-extension-dependencies:
         patterns: ["*"]
+    # typescript-eslint does not yet support TypeScript 7.0 (tracked in
+    # typescript-eslint#10940: support starts at TS >=7.1), and lint is a
+    # required project gate. Block the major only; minor/patch keep flowing.
+    # Remove this ignore once typescript-eslint supports TS >=7.1.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
