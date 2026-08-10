@@ -20,19 +20,40 @@ import { describe, expect, it } from 'vitest';
 // override change is a visible, intentional edit to the overrides block
 // rather than silent transitive drift.
 const lockfilePath = path.join(__dirname, '..', 'pnpm-lock.yaml');
-const lockfile = readFileSync(lockfilePath, 'utf8');
+
+// Windows checkouts of this repository read text files with CRLF line
+// endings unless normalized at checkout (see ../.gitattributes, which
+// pins pnpm-lock.yaml to LF as the checkout-time fix). Normalizing here
+// too makes the parsing below robust for any checkout that predates that
+// pin, or has a stale local git config. This only changes how this test
+// process reads the file into memory -- it does not rewrite the file on
+// disk and does not change what pnpm itself uses to resolve or install
+// packages.
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n');
+}
+
+const lockfile = normalizeLineEndings(readFileSync(lockfilePath, 'utf8'));
+
+// Slice the `overrides:` block out of a lockfile string.
+function overridesBlockOf(text: string): string {
+  const overridesStart = text.indexOf('overrides:');
+  const overridesEnd = text.indexOf('\n\n', overridesStart);
+  return text.slice(overridesStart, overridesEnd === -1 ? undefined : overridesEnd);
+}
 
 // The lockfile lists each package twice: once under `packages:` (resolution
 // metadata only) and once under `snapshots:` (resolved `dependencies:`).
 // Use the last occurrence to read the resolved dependency version.
 function resolvedDependencyVersion(
+  text: string,
   blockHeader: string,
   dependencyName: string,
 ): string | undefined {
-  const blockStart = lockfile.lastIndexOf(`\n  ${blockHeader}\n`);
+  const blockStart = text.lastIndexOf(`\n  ${blockHeader}\n`);
   if (blockStart === -1) return undefined;
-  const blockEnd = lockfile.indexOf('\n\n', blockStart);
-  const block = lockfile.slice(blockStart, blockEnd === -1 ? undefined : blockEnd);
+  const blockEnd = text.indexOf('\n\n', blockStart);
+  const block = text.slice(blockStart, blockEnd === -1 ? undefined : blockEnd);
   const match = new RegExp(`${dependencyName}: (\\S+)`).exec(block);
   return match?.[1];
 }
@@ -40,11 +61,20 @@ function resolvedDependencyVersion(
 // Every `<packageName>@X.Y.Z:` header in the lockfile, deduplicated. Used to
 // check a package across every resolved version simultaneously present in
 // the graph, not just the one an override would have forced.
-function allResolvedVersions(packageName: string): string[] {
+function allResolvedVersions(text: string, packageName: string): string[] {
   const headerPattern = new RegExp(`\\n  ${packageName}@(\\d+\\.\\d+\\.\\d+):`, 'g');
   const versions = new Set<string>();
-  for (const match of lockfile.matchAll(headerPattern)) {
-    versions.add(match[1]);
+  for (const match of text.matchAll(headerPattern)) {
+    const version = match[1];
+    // The capture group is unconditional in the pattern, so it is always
+    // present whenever the overall match succeeds -- this branch is
+    // unreachable in practice. It throws rather than skipping the match
+    // because silently dropping a resolved version here would shrink the
+    // set this security guard checks, which is worse than a crash.
+    if (version === undefined) {
+      throw new Error(`unexpected header match with no captured version: ${match[0]}`);
+    }
+    versions.add(version);
   }
   return [...versions];
 }
@@ -62,52 +92,132 @@ function parseVersion(version: string): [number, number, number] {
 }
 
 function isAtLeast(actual: string, floor: string): boolean {
-  const a = parseVersion(actual);
-  const f = parseVersion(floor);
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== f[i]) return a[i] > f[i];
-  }
-  return true;
+  const [aMajor, aMinor, aPatch] = parseVersion(actual);
+  const [fMajor, fMinor, fPatch] = parseVersion(floor);
+  if (aMajor !== fMajor) return aMajor > fMajor;
+  if (aMinor !== fMinor) return aMinor > fMinor;
+  return aPatch >= fPatch;
 }
 
 describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
   it('overrides block declares the retained pins', () => {
-    const overridesStart = lockfile.indexOf('overrides:');
-    const overridesEnd = lockfile.indexOf('\n\n', overridesStart);
-    const overridesBlock = lockfile.slice(overridesStart, overridesEnd);
+    const overridesBlock = overridesBlockOf(lockfile);
     expect(overridesBlock).toContain('brace-expansion@5: ^5.0.9');
     expect(overridesBlock).toContain('serialize-javascript: ^7.0.5');
   });
 
   it('overrides block no longer declares the removed brace-expansion@2 / fast-uri pins', () => {
-    const overridesStart = lockfile.indexOf('overrides:');
-    const overridesEnd = lockfile.indexOf('\n\n', overridesStart);
-    const overridesBlock = lockfile.slice(overridesStart, overridesEnd);
+    const overridesBlock = overridesBlockOf(lockfile);
     expect(overridesBlock).not.toContain('brace-expansion@2:');
     expect(overridesBlock).not.toContain('fast-uri:');
   });
 
   it('brace-expansion on minimatch@5.1.9 resolves to a non-vulnerable version', () => {
-    const resolved = resolvedDependencyVersion('minimatch@5.1.9:', 'brace-expansion');
+    const resolved = resolvedDependencyVersion(lockfile, 'minimatch@5.1.9:', 'brace-expansion');
     expect(resolved).toBeDefined();
     expect(isAtLeast(resolved ?? '', '2.1.4')).toBe(true);
   });
 
   it('brace-expansion on minimatch@9.0.9 resolves to a non-vulnerable version', () => {
-    const resolved = resolvedDependencyVersion('minimatch@9.0.9:', 'brace-expansion');
+    const resolved = resolvedDependencyVersion(lockfile, 'minimatch@9.0.9:', 'brace-expansion');
     expect(resolved).toBeDefined();
     expect(isAtLeast(resolved ?? '', '2.1.4')).toBe(true);
   });
 
   it('brace-expansion on minimatch@10.2.5 remains pinned to the overridden major', () => {
-    expect(resolvedDependencyVersion('minimatch@10.2.5:', 'brace-expansion')).toBe('5.0.9');
+    expect(resolvedDependencyVersion(lockfile, 'minimatch@10.2.5:', 'brace-expansion')).toBe(
+      '5.0.9',
+    );
   });
 
   it('fast-uri resolves to a non-vulnerable version everywhere in the lockfile, with the override removed', () => {
-    const versions = allResolvedVersions('fast-uri');
+    const versions = allResolvedVersions(lockfile, 'fast-uri');
     expect(versions.length).toBeGreaterThan(0);
     for (const version of versions) {
       expect(isAtLeast(version, '3.1.5')).toBe(true);
     }
+  });
+});
+
+describe('normalizeLineEndings', () => {
+  it('converts CRLF to LF without corrupting content', () => {
+    const input = 'a:\r\n  b: 1\r\n\r\nc:\r\n  d: 2\r\n';
+    const expected = 'a:\n  b: 1\n\nc:\n  d: 2\n';
+    expect(normalizeLineEndings(input)).toBe(expected);
+  });
+
+  it('is a no-op on already-LF content', () => {
+    const input =
+      'packages:\n\n  minimatch@5.1.9:\n    dependencies:\n      brace-expansion: 2.1.4\n';
+    expect(normalizeLineEndings(input)).toBe(input);
+  });
+});
+
+describe('CRLF-agnostic lockfile parsing', () => {
+  it('resolvedDependencyVersion finds the last occurrence in a CRLF fixture', () => {
+    const fixture = normalizeLineEndings(
+      '\r\n' +
+        'packages:\r\n' +
+        '\r\n' +
+        '  minimatch@5.1.9:\r\n' +
+        '    dependencies:\r\n' +
+        '      brace-expansion: 2.0.1\r\n' +
+        '\r\n' +
+        'snapshots:\r\n' +
+        '\r\n' +
+        '  minimatch@5.1.9:\r\n' +
+        '    dependencies:\r\n' +
+        '      brace-expansion: 2.1.4\r\n' +
+        '\r\n',
+    );
+    // The last occurrence (under `snapshots:`) wins, per
+    // resolvedDependencyVersion's documented contract.
+    expect(resolvedDependencyVersion(fixture, 'minimatch@5.1.9:', 'brace-expansion')).toBe('2.1.4');
+  });
+
+  it('allResolvedVersions collects every header match in a CRLF fixture', () => {
+    const fixture = normalizeLineEndings(
+      '\r\n' +
+        'packages:\r\n' +
+        '\r\n' +
+        '  fast-uri@3.1.5:\r\n' +
+        '    resolution: {integrity: sha512-x}\r\n' +
+        '\r\n' +
+        '  fast-uri@3.1.6:\r\n' +
+        '    resolution: {integrity: sha512-y}\r\n' +
+        '\r\n' +
+        'snapshots:\r\n' +
+        '\r\n' +
+        '  fast-uri@3.1.5:\r\n' +
+        '    resolution: {integrity: sha512-x}\r\n' +
+        '\r\n',
+    );
+    // fast-uri@3.1.5 appears twice (packages + snapshots); the Set
+    // deduplicates it to a single entry.
+    expect(allResolvedVersions(fixture, 'fast-uri')).toEqual(['3.1.5', '3.1.6']);
+  });
+});
+
+describe('CRLF parity against the real lockfile', () => {
+  it('parsing a CRLF-transformed copy of the real lockfile matches the LF original', () => {
+    const crlfLockfile = normalizeLineEndings(lockfile.replace(/\n/g, '\r\n'));
+    const dependencyProbes: readonly (readonly [string, string])[] = [
+      ['minimatch@5.1.9:', 'brace-expansion'],
+      ['minimatch@9.0.9:', 'brace-expansion'],
+      ['minimatch@10.2.5:', 'brace-expansion'],
+    ];
+    for (const [blockHeader, dependencyName] of dependencyProbes) {
+      expect(resolvedDependencyVersion(crlfLockfile, blockHeader, dependencyName)).toBe(
+        resolvedDependencyVersion(lockfile, blockHeader, dependencyName),
+      );
+    }
+
+    for (const packageName of ['fast-uri', 'brace-expansion']) {
+      expect(allResolvedVersions(crlfLockfile, packageName)).toEqual(
+        allResolvedVersions(lockfile, packageName),
+      );
+    }
+
+    expect(overridesBlockOf(crlfLockfile)).toBe(overridesBlockOf(lockfile));
   });
 });

@@ -194,6 +194,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:integration": "tsc && vscode-test",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "format": "prettier --check 'src/**/*.ts'",
     "format:fix": "prettier --write 'src/**/*.ts'"

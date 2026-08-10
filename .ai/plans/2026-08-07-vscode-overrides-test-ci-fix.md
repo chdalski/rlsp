@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-07
 
 # VS Code Extension: Fix Red CI in overrides.test.ts (type errors + Windows CRLF)
@@ -76,15 +76,15 @@ Key files:
 
 - [x] Reproduce the type errors locally with `tsc --noEmit`
       and confirm the CRLF cause from the Windows CI logs
-- [ ] Fix the type errors with proper narrowing (no
+- [x] Fix the type errors with proper narrowing (no
       casts/escape hatches)
-- [ ] Make the lockfile parsing line-ending-agnostic
+- [x] Make the lockfile parsing line-ending-agnostic
       (normalize CRLF→LF on read) and add a targeted
       `.gitattributes` LF pin for `pnpm-lock.yaml`
-- [ ] Add a `typecheck` script (`tsc --noEmit`) and run it
+- [x] Add a `typecheck` script (`tsc --noEmit`) and run it
       as part of the gate; document it in the root
       `CLAUDE.md` VS Code Extension command block
-- [ ] Verify `build`, `lint`, `format`, `test`, `typecheck`
+- [x] Verify `build`, `lint`, `format`, `test`, `typecheck`
       all pass locally
 - [ ] After the change lands, confirm the "VS Code Extension"
       workflow succeeds across the full matrix incl. Windows
@@ -103,34 +103,34 @@ Files: `src/overrides.test.ts`, `package.json` (new
 `typecheck` script), a new `.gitattributes`, and root
 `CLAUDE.md` (document the `typecheck` command).
 
-- [ ] The three `tsc` errors are resolved with real type
+- [x] The three `tsc` errors are resolved with real type
       narrowing/guards — no `as`, `!`, `@ts-expect-error`, or
       `eslint-disable`. `pnpm exec tsc --noEmit` reports 0
       errors.
-- [ ] The lockfile-parsing helpers are line-ending-agnostic
+- [x] The lockfile-parsing helpers are line-ending-agnostic
       (the lockfile content is normalized CRLF→LF before
       parsing, or the patterns tolerate `\r\n`), so
       `resolvedDependencyVersion`, `allResolvedVersions`, and
       the `overrides:` block slice work whether the file has
       LF or CRLF.
-- [ ] A targeted `.gitattributes` forces `pnpm-lock.yaml` to
+- [x] A targeted `.gitattributes` forces `pnpm-lock.yaml` to
       LF (`pnpm-lock.yaml text eol=lf` or equivalent), so the
       file checks out LF on Windows. It does NOT introduce a
       repo-wide renormalization.
-- [ ] A `typecheck` script (`tsc --noEmit`) exists in
+- [x] A `typecheck` script (`tsc --noEmit`) exists in
       `package.json` and passes.
-- [ ] The root `/workspace/CLAUDE.md` "VS Code Extension"
+- [x] The root `/workspace/CLAUDE.md` "VS Code Extension"
       command block lists `pnpm run typecheck`, so the closed
       gate is documented where the project's build/test
       reference lives.
-- [ ] The guard's security-detection semantics are unchanged:
+- [x] The guard's security-detection semantics are unchanged:
       it still fails if brace-expansion (@2/@5 paths) or
       fast-uri resolves to a version inside its advisory
       range. Confirm the floor comparisons and the retained
       brace-expansion@5 exact-match assertion still hold.
-- [ ] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
+- [x] `pnpm run build`, `pnpm run lint`, `pnpm run format`,
       `pnpm run test`, and `pnpm run typecheck` all pass.
-- [ ] Extension `version` unchanged; no `Cargo.toml`
+- [x] Extension `version` unchanged; no `Cargo.toml`
       modified. Only `src/overrides.test.ts`, `package.json`,
       `.gitattributes`, and root `CLAUDE.md` change.
 

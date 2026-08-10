@@ -30,6 +30,7 @@ pnpm install       # install dependencies
 pnpm run build     # bundle extension (esbuild)
 pnpm run test      # run unit tests (vitest)
 pnpm run test:integration  # run VS Code integration tests (requires display; use xvfb-run -a on Linux)
+pnpm run typecheck # typecheck without emitting (fast local gate; test:integration also runs tsc)
 pnpm run lint      # lint TypeScript source
 pnpm run format    # check formatting (prettier)
 ```
