@@ -44,3 +44,16 @@ type: project
   rated adding one **low-severity / non-blocking**. If pursued, confirm the
   action's current handling and that the hash matches the intended pnpm
   release.
+
+- **`overrides.test.ts` accumulated test surface — consolidation candidate.**
+  The brace-expansion/fast-uri security-guard file has been touched by four
+  sequential plans (the three 2026-08-07 overrides/advisory plans plus
+  `2026-08-10-vscode-dep-bumps-minus-ts7-and-ci-gates.md` Task 2). It now
+  carries CRLF-normalization helper tests and lockfile-parity tests alongside
+  the security-guard assertions (~224 lines). Now that `.gitattributes` pins
+  `pnpm-lock.yaml` to LF at checkout, review whether the CRLF-fixture and
+  lockfile-parity `describe` blocks still earn their keep or should be
+  trimmed/merged. Surfaced by the plan-review of the 2026-08-10 dep-bumps plan
+  and deliberately kept out of that plan's scope to preserve the dep-bump
+  slice's atomicity. Bias: trim only if it clearly reduces surface without
+  losing a real robustness property.

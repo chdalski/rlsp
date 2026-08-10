@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-10)
 **Created:** 2026-08-10
 
 # VS Code extension: land Dependabot bumps (minus TypeScript 7) + close the CI blind spot
@@ -114,13 +114,15 @@ reach a "mostly green" PR. Keep the extension's npm security posture
       + refresh the regression-guard test
 - [x] Task 3 — Fix VSIX packaging: raise engines.vscode to ^1.125.0 (surfaced
       by push CI; @types/vscode had outpaced engines.vscode)
-- [ ] (Lead) Verify push-triggered CI on `main` is green across the matrix
-      (incl. Windows) after the work lands — `gh run list`
-- [ ] (Lead) Comment `@dependabot rebase` on PR #58 after both tasks land, so
-      Dependabot re-evaluates the group against the new `main` — with the 11
-      bumps already present and the TypeScript major ignored, Dependabot
-      closes the now-empty PR itself
-- [ ] (Lead) At plan completion, record the `overrides.test.ts`
+- [x] (Lead) Verify push-triggered CI on `main` is green across the matrix
+      (incl. Windows) after the work lands — all four push workflows green at
+      994a9c9a; VS Code Extension passed every leg incl. x86_64-pc-windows-msvc
+- [ ] (Lead) Comment `@dependabot rebase` on PR #58 — DELEGATED TO USER: this
+      session's GitHub token lacks PR-comment permission (`addComment` denied).
+      User to post `@dependabot rebase` on #58 (or Dependabot's weekly run
+      supersedes it). All bumps are on `main` and the TS major is ignored, so
+      the PR is already obsolete.
+- [x] (Lead) At plan completion, record the `overrides.test.ts`
       CRLF/lockfile-parity test-surface consolidation candidate in
       `.ai/memory/project_followup_plans.md` (under "Open: CI & integrations")
       so the deferred concern stays discoverable after this plan freezes
