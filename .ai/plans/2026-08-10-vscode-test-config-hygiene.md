@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-10
 
 # VS Code extension: trim redundant CRLF guard tests + fix vitest ESM config warning
@@ -33,9 +33,12 @@ security guard's actual assertions or the extension's build.
   it and its `describe('normalizeLineEndings')` unit tests (2 tests) stay.
   The security-guard assertions (brace-expansion ≥ 2.1.4 / overridden 5.x;
   fast-uri ≥ 3.1.5) and the `pnpm.overrides` block are out of scope.
-  `resolvedDependencyVersion` and `allResolvedVersions` remain exercised by
-  the guard's own assertions on the real (LF) lockfile after the CRLF direct
-  tests are removed — no helper becomes orphaned/untested.
+  After Task 2 (of the dep-bumps plan) rewrote the guard to key off
+  `allResolvedVersions`, `resolvedDependencyVersion` is called only by the
+  CRLF blocks — removing them orphans it, so it is deleted too (dead code;
+  `noUnusedLocals` under `@tsconfig/strictest` requires this).
+  `allResolvedVersions` / `overridesBlockOf` / `parseVersion` / `isAtLeast`
+  remain exercised by the guard's own assertions on the real (LF) lockfile.
 
 - **vitest config warning.** `vitest.config.ts` uses ESM
   (`import` / `export default`); `package.json` has no `"type"` field, so
@@ -64,7 +67,7 @@ security guard's actual assertions or the extension's build.
       tsconfig include, config references)
 - [x] Confirm CRLF trim scope with user (Moderate: keep `normalizeLineEndings`
       + unit tests; drop the 2 CRLF-scenario blocks)
-- [ ] Task 1 — Trim the redundant CRLF-scenario tests in `overrides.test.ts`
+- [x] Task 1 — Trim the redundant CRLF-scenario tests in `overrides.test.ts`
 - [ ] Task 2 — Rename `vitest.config.ts` → `vitest.config.mts`
 - [ ] (Lead) After Task 1 lands, remove the "`overrides.test.ts` accumulated
       test surface — consolidation candidate" entry from
@@ -79,15 +82,18 @@ Remove the CRLF tests that exercise the LF-pinned-lockfile scenario
 `.gitattributes` already prevents, keeping the cheap `normalizeLineEndings`
 robustness and leaving the security guard's assertions untouched.
 
-- [ ] The `describe('CRLF-agnostic lockfile parsing')` and
+- [x] The `describe('CRLF-agnostic lockfile parsing')` and
       `describe('CRLF parity against the real lockfile')` blocks are removed
-- [ ] `normalizeLineEndings` and its `describe('normalizeLineEndings')` unit
+- [x] `normalizeLineEndings` and its `describe('normalizeLineEndings')` unit
       tests remain; it is still used to read the lockfile in the guard
-- [ ] The security-guard assertions (brace-expansion / fast-uri) and the
+- [x] The security-guard assertions (brace-expansion / fast-uri) and the
       `pnpm.overrides` regression-guard `describe` are unchanged
-- [ ] No helper is left orphaned/untested: `resolvedDependencyVersion` and
-      `allResolvedVersions` remain exercised by the guard's assertions
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] No helper is left orphaned/untested: the post-Task-2 guard keys off
+      `allResolvedVersions`, so `resolvedDependencyVersion` (used only by the
+      removed CRLF blocks) is deleted as orphaned dead code — `noUnusedLocals`
+      requires it; `allResolvedVersions` / `overridesBlockOf` / `parseVersion`
+      / `isAtLeast` remain exercised by the guard's assertions
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` all pass
 
 ### Task 2: Rename vitest.config.ts to vitest.config.mts

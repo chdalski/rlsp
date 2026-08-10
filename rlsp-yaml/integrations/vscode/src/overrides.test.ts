@@ -46,22 +46,6 @@ function overridesBlockOf(text: string): string {
   return text.slice(overridesStart, overridesEnd === -1 ? undefined : overridesEnd);
 }
 
-// The lockfile lists each package twice: once under `packages:` (resolution
-// metadata only) and once under `snapshots:` (resolved `dependencies:`).
-// Use the last occurrence to read the resolved dependency version.
-function resolvedDependencyVersion(
-  text: string,
-  blockHeader: string,
-  dependencyName: string,
-): string | undefined {
-  const blockStart = text.lastIndexOf(`\n  ${blockHeader}\n`);
-  if (blockStart === -1) return undefined;
-  const blockEnd = text.indexOf('\n\n', blockStart);
-  const block = text.slice(blockStart, blockEnd === -1 ? undefined : blockEnd);
-  const match = new RegExp(`${dependencyName}: (\\S+)`).exec(block);
-  return match?.[1];
-}
-
 // Every `<packageName>@X.Y.Z:` header in the lockfile, deduplicated. Used to
 // check a package across every resolved version simultaneously present in
 // the graph, not just the one an override would have forced.
@@ -153,74 +137,5 @@ describe('normalizeLineEndings', () => {
     const input =
       'packages:\n\n  minimatch@5.1.9:\n    dependencies:\n      brace-expansion: 2.1.4\n';
     expect(normalizeLineEndings(input)).toBe(input);
-  });
-});
-
-describe('CRLF-agnostic lockfile parsing', () => {
-  it('resolvedDependencyVersion finds the last occurrence in a CRLF fixture', () => {
-    const fixture = normalizeLineEndings(
-      '\r\n' +
-        'packages:\r\n' +
-        '\r\n' +
-        '  minimatch@5.1.9:\r\n' +
-        '    dependencies:\r\n' +
-        '      brace-expansion: 2.0.1\r\n' +
-        '\r\n' +
-        'snapshots:\r\n' +
-        '\r\n' +
-        '  minimatch@5.1.9:\r\n' +
-        '    dependencies:\r\n' +
-        '      brace-expansion: 2.1.4\r\n' +
-        '\r\n',
-    );
-    // The last occurrence (under `snapshots:`) wins, per
-    // resolvedDependencyVersion's documented contract.
-    expect(resolvedDependencyVersion(fixture, 'minimatch@5.1.9:', 'brace-expansion')).toBe('2.1.4');
-  });
-
-  it('allResolvedVersions collects every header match in a CRLF fixture', () => {
-    const fixture = normalizeLineEndings(
-      '\r\n' +
-        'packages:\r\n' +
-        '\r\n' +
-        '  fast-uri@3.1.5:\r\n' +
-        '    resolution: {integrity: sha512-x}\r\n' +
-        '\r\n' +
-        '  fast-uri@3.1.6:\r\n' +
-        '    resolution: {integrity: sha512-y}\r\n' +
-        '\r\n' +
-        'snapshots:\r\n' +
-        '\r\n' +
-        '  fast-uri@3.1.5:\r\n' +
-        '    resolution: {integrity: sha512-x}\r\n' +
-        '\r\n',
-    );
-    // fast-uri@3.1.5 appears twice (packages + snapshots); the Set
-    // deduplicates it to a single entry.
-    expect(allResolvedVersions(fixture, 'fast-uri')).toEqual(['3.1.5', '3.1.6']);
-  });
-});
-
-describe('CRLF parity against the real lockfile', () => {
-  it('parsing a CRLF-transformed copy of the real lockfile matches the LF original', () => {
-    const crlfLockfile = normalizeLineEndings(lockfile.replace(/\n/g, '\r\n'));
-    const dependencyProbes: readonly (readonly [string, string])[] = [
-      ['minimatch@5.1.9:', 'brace-expansion'],
-      ['minimatch@9.0.9:', 'brace-expansion'],
-      ['minimatch@10.2.5:', 'brace-expansion'],
-    ];
-    for (const [blockHeader, dependencyName] of dependencyProbes) {
-      expect(resolvedDependencyVersion(crlfLockfile, blockHeader, dependencyName)).toBe(
-        resolvedDependencyVersion(lockfile, blockHeader, dependencyName),
-      );
-    }
-
-    for (const packageName of ['fast-uri', 'brace-expansion']) {
-      expect(allResolvedVersions(crlfLockfile, packageName)).toEqual(
-        allResolvedVersions(lockfile, packageName),
-      );
-    }
-
-    expect(overridesBlockOf(crlfLockfile)).toBe(overridesBlockOf(lockfile));
   });
 });
