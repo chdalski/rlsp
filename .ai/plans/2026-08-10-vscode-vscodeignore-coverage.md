@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-08-10)
 **Created:** 2026-08-10
 
 # VS Code extension: exclude coverage/ from the packaged VSIX
@@ -43,7 +43,7 @@ vitest-config rename (`2026-08-10-vscode-test-config-hygiene.md`).
 
 - [x] Confirm `.vscodeignore` lacks a `coverage/` entry and that the coverage
       report dir is `./coverage`
-- [ ] Task 1 — Add `coverage/` to `.vscodeignore` and verify the VSIX excludes it
+- [x] Task 1 — Add `coverage/` to `.vscodeignore` and verify the VSIX excludes it
 
 ## Tasks
 
@@ -52,13 +52,13 @@ vitest-config rename (`2026-08-10-vscode-test-config-hygiene.md`).
 Add a `coverage/` entry to `.vscodeignore` so `vsce package` never bundles the
 coverage report, and verify by packaging with a `coverage/` directory present.
 
-- [ ] `.vscodeignore` contains a `coverage/` entry; no other line is changed
-- [ ] With a `coverage/` directory present (e.g. after `pnpm run test:coverage`),
+- [x] `.vscodeignore` contains a `coverage/` entry; no other line is changed
+- [x] With a `coverage/` directory present (e.g. after `pnpm run test:coverage`),
       `pnpm run package` (vsce) succeeds and the resulting `.vsix` does not
       contain any `coverage/` path (verify — e.g. `unzip -l *.vsix | grep -i
       coverage` shows nothing — then remove the generated `.vsix` so the tree
       stays clean)
-- [ ] No source, test, or other config file is changed (this is a
+- [x] No source, test, or other config file is changed (this is a
       `.vscodeignore`-only change)
 
 ## Decisions

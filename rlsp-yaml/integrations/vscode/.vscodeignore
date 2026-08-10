@@ -8,3 +8,4 @@ CLAUDE.md
 pnpm-lock.yaml
 vitest.config.mts
 *.vsix
+coverage/
