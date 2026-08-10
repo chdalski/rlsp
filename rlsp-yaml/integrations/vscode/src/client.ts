@@ -1,4 +1,4 @@
-import { workspace, type OutputChannel } from 'vscode';
+import { workspace, type LogOutputChannel } from 'vscode';
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -9,7 +9,7 @@ import { getConfig } from './config.js';
 
 export function createLanguageClient(
   serverBinaryPath: string,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
 ): LanguageClient {
   const serverOptions: ServerOptions = {
     command: serverBinaryPath,

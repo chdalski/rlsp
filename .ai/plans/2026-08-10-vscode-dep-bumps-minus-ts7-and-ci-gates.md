@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-08-10
 
 # VS Code extension: land Dependabot bumps (minus TypeScript 7) + close the CI blind spot
@@ -110,7 +110,7 @@ reach a "mostly green" PR. Keep the extension's npm security posture
 - [x] Confirm approach with user (fix & land most; add PR gates;
       trunk-based on `main`)
 - [x] Task 1 — Add extension static-check CI gates + Dependabot TS-major ignore
-- [ ] Task 2 — Apply the 11 non-TS bumps + vscode-languageclient@10 migration
+- [x] Task 2 — Apply the 11 non-TS bumps + vscode-languageclient@10 migration
       + refresh the regression-guard test
 - [ ] (Lead) Verify push-triggered CI on `main` is green across the matrix
       (incl. Windows) after the work lands — `gh run list`
@@ -160,23 +160,23 @@ guard so it tracks the new dependency graph without silently going vacuous.
 These are one atomic slice: the lockfile, the source migration, and the test
 must land together or the typecheck/tests break.
 
-- [ ] `package.json` and `pnpm-lock.yaml` reflect the 11 target versions
+- [x] `package.json` and `pnpm-lock.yaml` reflect the 11 target versions
       from the table above; `typescript` remains `6.0.3`; the `pnpm.overrides`
       block (`brace-expansion@5`, `serialize-javascript`) is unchanged
-- [ ] The extension source compiles against `vscode-languageclient@10`: the
+- [x] The extension source compiles against `vscode-languageclient@10`: the
       output channel supplied to the client is a `LogOutputChannel` and the
       types flowing through `client.ts` / `commands.ts` match, with no API
       used that exceeds the declared `engines.vscode`
-- [ ] The brace-expansion / fast-uri regression guard asserts the *current*
+- [x] The brace-expansion / fast-uri regression guard asserts the *current*
       dependency graph resolves non-vulnerable versions (brace-expansion
       ≥ 2.1.4 except the intentionally-overridden 5.x line ≥ 5.0.9; fast-uri
       ≥ 3.1.5) and fails if a future bump regresses into an advisory range —
       it must not vacuously pass because a probed transitive version is
       absent
-- [ ] `pnpm run audit` passes (low+ severity) with the new lockfile
-- [ ] `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`,
+- [x] `pnpm run audit` passes (low+ severity) with the new lockfile
+- [x] `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`,
       `pnpm run build`, and `pnpm run test` all pass locally
-- [ ] `pnpm run test:integration` passes under `xvfb`
+- [x] `pnpm run test:integration` passes under `xvfb`
       (`xvfb-run -a pnpm run test:integration`). A genuine inability to run
       the VS Code test harness in the sandbox is escalated as a blocker with
       the exact command and error — not a self-authorized skip; the

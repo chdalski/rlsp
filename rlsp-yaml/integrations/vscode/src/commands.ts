@@ -1,4 +1,4 @@
-import { window, type OutputChannel } from 'vscode';
+import { window, type LogOutputChannel } from 'vscode';
 import { type LanguageClient } from 'vscode-languageclient/node';
 import { type StatusBar } from './status.js';
 
@@ -21,7 +21,7 @@ export function makeRestartServer(
   };
 }
 
-export function makeShowOutput(outputChannel: OutputChannel): () => void {
+export function makeShowOutput(outputChannel: LogOutputChannel): () => void {
   return () => {
     outputChannel.show();
   };

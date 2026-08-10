@@ -9,7 +9,7 @@ import { StatusBar } from './status.js';
 let client: LanguageClient | undefined;
 
 export async function activate(context: ExtensionContext): Promise<void> {
-  const outputChannel = window.createOutputChannel('rlsp-yaml');
+  const outputChannel = window.createOutputChannel('rlsp-yaml', { log: true });
   context.subscriptions.push(outputChannel);
 
   const statusBar = new StatusBar();

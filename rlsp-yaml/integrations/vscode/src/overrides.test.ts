@@ -5,9 +5,13 @@ import { describe, expect, it } from 'vitest';
 // Regression guard for the pnpm.overrides entries that patch two npm
 // security advisories (brace-expansion GHSA-3jxr-9vmj-r5cp, fast-uri
 // GHSA-v2hh-gcrm-f6hx / GHSA-4c8g-83qw-93j6). brace-expansion reaches the
-// extension's runtime dependency path via vscode-languageclient ->
-// minimatch@5.1.9, so this asserts the lockfile actually resolves a
-// non-vulnerable version -- not just that an override string is present.
+// extension's runtime dependency path transitively through
+// vscode-languageclient's dependency graph (currently via minimatch, though
+// the exact minimatch version is not load-bearing for this guard -- see the
+// brace-expansion assertions below, which key off brace-expansion's own
+// resolved versions rather than any specific minimatch version), so this
+// asserts the lockfile actually resolves a non-vulnerable version -- not
+// just that an override string is present.
 //
 // brace-expansion@2 and fast-uri no longer have overrides: the
 // 2026-08-07 overrides-consolidation audit proved their dependency chains
@@ -112,22 +116,21 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     expect(overridesBlock).not.toContain('fast-uri:');
   });
 
-  it('brace-expansion on minimatch@5.1.9 resolves to a non-vulnerable version', () => {
-    const resolved = resolvedDependencyVersion(lockfile, 'minimatch@5.1.9:', 'brace-expansion');
-    expect(resolved).toBeDefined();
-    expect(isAtLeast(resolved ?? '', '2.1.4')).toBe(true);
-  });
-
-  it('brace-expansion on minimatch@9.0.9 resolves to a non-vulnerable version', () => {
-    const resolved = resolvedDependencyVersion(lockfile, 'minimatch@9.0.9:', 'brace-expansion');
-    expect(resolved).toBeDefined();
-    expect(isAtLeast(resolved ?? '', '2.1.4')).toBe(true);
-  });
-
-  it('brace-expansion on minimatch@10.2.5 remains pinned to the overridden major', () => {
-    expect(resolvedDependencyVersion(lockfile, 'minimatch@10.2.5:', 'brace-expansion')).toBe(
-      '5.0.9',
+  it('brace-expansion resolves to a non-vulnerable version on every non-overridden branch of the graph', () => {
+    const nonOverriddenVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
+      (version) => parseVersion(version)[0] !== 5,
     );
+    expect(nonOverriddenVersions.length).toBeGreaterThan(0);
+    for (const version of nonOverriddenVersions) {
+      expect(isAtLeast(version, '2.1.4')).toBe(true);
+    }
+  });
+
+  it("brace-expansion's overridden major-5 branch stays pinned to the audited patched version", () => {
+    const overriddenVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
+      (version) => parseVersion(version)[0] === 5,
+    );
+    expect(overriddenVersions).toEqual(['5.0.9']);
   });
 
   it('fast-uri resolves to a non-vulnerable version everywhere in the lockfile, with the override removed', () => {
