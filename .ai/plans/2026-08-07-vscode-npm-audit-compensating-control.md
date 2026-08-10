@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-08-07)
 **Created:** 2026-08-07
 
 # VS Code Extension: npm-Advisory Compensating Control (CI audit + Dependabot)
@@ -92,17 +92,17 @@ Key files:
       demonstrate (command + output in the handoff) that it
       fails on a moderate/high advisory; validate the
       dependabot.yml change
-- [ ] After the change lands, confirm the extension workflow
+- [x] After the change lands, confirm the extension workflow
       still succeeds and the audit step ran (lead, via
-      `gh run`, at plan completion) — NOTE: the task is
-      committed locally but **NOT pushed**, per the user's
-      instruction (2026-08-10); this step and Status →
-      Completed are pending the user's push + CI-green
-      confirmation
-- [ ] At plan completion, remove the "Compensating control for
+      `gh run`, at plan completion) — pushed at 2f8a2596; the
+      "Audit dependencies" step ran and passed, VS Code
+      Extension green across the full matrix (CI / Release-plz
+      also success); the `npm_and_yarn` Dependabot update job
+      ran successfully, confirming the new entry
+- [x] At plan completion, remove the "Compensating control for
       npm advisories" entry from
       `.ai/memory/project_followup_plans.md` (lead) — this plan
-      resolves it (deferred to completion, i.e. after push)
+      resolves it
 
 ## Tasks
 

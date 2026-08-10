@@ -44,18 +44,3 @@ type: project
   rated adding one **low-severity / non-blocking**. If pursued, confirm the
   action's current handling and that the hash matches the intended pnpm
   release.
-
-- **Compensating control for npm advisories (CI `pnpm audit` + Dependabot
-  coverage).** The VS Code extension has no CI `pnpm audit` gate and no
-  Dependabot npm-ecosystem entry (verified 2026-08-07: no `audit` in any
-  `.github/workflows/*.yml`; `.github/dependabot.yml` declares only `cargo`
-  and `github-actions`). GitHub Dependabot *alerts* still fire post-merge,
-  but there is no pre-merge/local signal. This matters because the
-  2026-08-07 overrides consolidation removes 9 manifest-level pins that were
-  the only proactive guardrail against these subtrees regressing into a
-  vulnerable range on a future dependency bump. Deferred by the user
-  ("leave 2 out for now", 2026-08-07). When acting: add a `pnpm audit` step
-  to `vscode-extension.yml` and/or a `package-ecosystem: "npm"` entry (which
-  natively handles `pnpm-lock.yaml`, no npm involved) scoped to
-  `directory: /rlsp-yaml/integrations/vscode` in `.github/dependabot.yml`.
-  Security-engineer rated the gap Medium.
