@@ -22,3 +22,10 @@ updates:
     # 8 workflow refs in one deliberate commit, never via automated PR.
     ignore:
       - dependency-name: "dtolnay/rust-toolchain"
+  - package-ecosystem: "npm"
+    directory: "/rlsp-yaml/integrations/vscode"
+    schedule:
+      interval: "weekly"
+    groups:
+      vscode-extension-dependencies:
+        patterns: ["*"]

@@ -135,6 +135,20 @@ jobs:
         working-directory: rlsp-yaml/integrations/vscode
         run: xvfb-run -a pnpm run test:integration
 
+      # Runs once per workflow (not per matrix leg) since the dependency
+      # tree audited is identical across targets.
+      #
+      # CVE-2026-24001 / GHSA-73rr-hh4g-fpgx: DoS in jsdiff's parsePatch,
+      # pulled in transitively via @vscode/test-cli > mocha > diff (dev-only,
+      # test-output diffing, not reachable from any runtime/user input).
+      # Suppressed via pnpm.auditConfig.ignoreCves in package.json. Revisit
+      # when @vscode/test-cli or mocha bump their `diff` dependency past
+      # 8.0.3.
+      - name: Audit dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        working-directory: rlsp-yaml/integrations/vscode
+        run: pnpm run audit
+
       - name: Set extension version
         if: needs.resolve-version.outputs.version != ''
         working-directory: rlsp-yaml/integrations/vscode

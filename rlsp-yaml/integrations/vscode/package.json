@@ -195,6 +195,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "tsc && vscode-test",
     "typecheck": "tsc --noEmit",
+    "audit": "pnpm audit --audit-level=low --ignore-registry-errors",
     "lint": "eslint src/",
     "format": "prettier --check 'src/**/*.ts'",
     "format:fix": "prettier --write 'src/**/*.ts'"
@@ -206,6 +207,9 @@
     "overrides": {
       "serialize-javascript": "^7.0.5",
       "brace-expansion@5": "^5.0.9"
+    },
+    "auditConfig": {
+      "ignoreCves": ["CVE-2026-24001"]
     }
   },
   "devDependencies": {

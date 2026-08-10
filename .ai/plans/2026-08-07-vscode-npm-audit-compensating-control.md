@@ -79,26 +79,30 @@ Key files:
 
 ## Steps
 
-- [ ] Consult the security advisor on the audit gate's scope
+- [x] Consult the security advisor on the audit gate's scope
       and severity threshold (must catch dev-tree moderate/high
       advisories; must not break on the pre-existing `diff` low)
-- [ ] Add an `audit` script encoding the threshold and wire
+- [x] Add an `audit` script encoding the threshold and wire
       the gate into `vscode-extension.yml` (`pnpm run audit`),
       running once (Linux-gated or a dedicated job)
-- [ ] Add the npm ecosystem entry to `.github/dependabot.yml`
-- [ ] Document the audit gate (`pnpm run audit`) in the root
+- [x] Add the npm ecosystem entry to `.github/dependabot.yml`
+- [x] Document the audit gate (`pnpm run audit`) in the root
       `CLAUDE.md` "VS Code Extension" command block
-- [ ] Verify the gate passes on the current tree and
+- [x] Verify the gate passes on the current tree and
       demonstrate (command + output in the handoff) that it
       fails on a moderate/high advisory; validate the
       dependabot.yml change
 - [ ] After the change lands, confirm the extension workflow
       still succeeds and the audit step ran (lead, via
-      `gh run`, at plan completion)
+      `gh run`, at plan completion) — NOTE: the task is
+      committed locally but **NOT pushed**, per the user's
+      instruction (2026-08-10); this step and Status →
+      Completed are pending the user's push + CI-green
+      confirmation
 - [ ] At plan completion, remove the "Compensating control for
       npm advisories" entry from
       `.ai/memory/project_followup_plans.md` (lead) — this plan
-      resolves it
+      resolves it (deferred to completion, i.e. after push)
 
 ## Tasks
 
@@ -113,31 +117,31 @@ Files: `.github/workflows/vscode-extension.yml`,
 `rlsp-yaml/integrations/vscode/package.json` (new `audit`
 script), and root `CLAUDE.md`.
 
-- [ ] An `audit` script in `package.json` encodes the
+- [x] An `audit` script in `package.json` encodes the
       scope/threshold the security advisor specified, and
       `vscode-extension.yml` invokes it (`pnpm run audit`)
       exactly once per workflow run (not once per matrix
       target), so CI and local devs run the identical check.
-- [ ] The gate **passes on the current tree** (the pre-existing
+- [x] The gate **passes on the current tree** (the pre-existing
       dev-only `diff` low does not fail it). The developer's
       handoff includes the actual command and output showing
       the gate **failing** at a lowered threshold (or against a
       known-vulnerable version), so the reviewer can verify the
       would-fail behavior from the handoff alone — the
       committed workflow is left in a passing state.
-- [ ] The root `/workspace/CLAUDE.md` "VS Code Extension"
+- [x] The root `/workspace/CLAUDE.md` "VS Code Extension"
       command block lists `pnpm run audit`, so the enforced
       gate is documented where the build/test reference lives.
-- [ ] `.github/dependabot.yml` has an npm ecosystem entry
+- [x] `.github/dependabot.yml` has an npm ecosystem entry
       scoped to `/rlsp-yaml/integrations/vscode`, consistent
       with the existing entries' schedule/grouping style; the
       file remains valid Dependabot config.
-- [ ] No `Cargo.toml` or extension `version` change; only
+- [x] No `Cargo.toml` or extension `version` change; only
       `.github/workflows/vscode-extension.yml`,
       `.github/dependabot.yml`,
       `rlsp-yaml/integrations/vscode/package.json`, and root
       `CLAUDE.md` change; no scratch files.
-- [ ] The security advisor has signed off (output gate) that
+- [x] The security advisor has signed off (output gate) that
       the gate's scope/threshold meaningfully catches the
       dev-tree advisory class without spurious failures.
 
