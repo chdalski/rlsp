@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-08-10)
 **Created:** 2026-08-10
 
 # VS Code extension: trim redundant CRLF guard tests + fix vitest ESM config warning
@@ -69,7 +69,7 @@ security guard's actual assertions or the extension's build.
       + unit tests; drop the 2 CRLF-scenario blocks)
 - [x] Task 1 — Trim the redundant CRLF-scenario tests in `overrides.test.ts`
 - [x] Task 2 — Rename `vitest.config.ts` → `vitest.config.mts`
-- [ ] (Lead) After Task 1 lands, remove the "`overrides.test.ts` accumulated
+- [x] (Lead) After Task 1 lands, remove the "`overrides.test.ts` accumulated
       test surface — consolidation candidate" entry from
       `.ai/memory/project_followup_plans.md` (Open: CI & integrations) — this
       plan resolves it, so it must not linger as an open follow-up
