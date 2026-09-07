@@ -1,0 +1,306 @@
+**Repository:** root
+**Status:** NotStarted
+**Created:** 2026-09-07
+
+# Land the pending dependency refresh, migrate to Vitest 5, move CI to Node 24
+
+## Goal
+
+The user refreshed dependencies out-of-band (`cargo update` for the Rust
+workspace and the Zed extension, `pnpm update` for the VS Code extension) and
+wants the remaining gaps closed: the refreshed lockfiles landed, the packages
+`pnpm outdated` still reports addressed, the open GitHub issues reviewed, and
+the four open Dependabot security alerts resolved. The issues review is already
+done and produced no work — the queue is empty (see Context) — so this plan
+carries the other three. Landing the refreshed `pnpm-lock.yaml` is what actually closes
+those alerts, and the same task must tighten the lockfile regression guard that
+is supposed to catch a future regression into the advisory range — it currently
+would not. Vitest 5 is then the only remaining upgradeable package, and CI moves
+to Node 24 so the runtime is a supported LTS with headroom over Vitest 5's
+floor.
+
+## Context
+
+- **The pending working-tree changes are already verified green.** Four files
+  are modified but uncommitted: root `Cargo.lock`, `rlsp-yaml/integrations/zed/Cargo.lock`,
+  and the VS Code extension's `package.json` + `pnpm-lock.yaml`. Every build and
+  test command listed in the root `CLAUDE.md` and the extension `CLAUDE.md` was
+  run against this tree on 2026-09-07 and passed:
+
+  | Gate | Result |
+  |------|--------|
+  | `pnpm run typecheck` (`tsc --noEmit`) | clean |
+  | `pnpm run lint` (`eslint src/`) | clean |
+  | `pnpm run format` (`prettier --check`) | clean |
+  | `pnpm run test` (`vitest run`) | 49 passed, 5 files |
+  | `pnpm run test:integration` (under `xvfb-run -a`) | 19 passed, 1 pending |
+  | `pnpm run build` (esbuild) | `out/main.js`, 968.7 kb |
+  | `pnpm run audit` | 1 low, the allowlisted `CVE-2026-24001` |
+  | `cargo fmt --all --check` | clean |
+  | `cargo clippy --all-targets` | clean |
+  | `cargo build` | clean |
+  | `cargo test --workspace` | 6300 passed, 0 failed |
+  | Zed `cargo check` / `cargo clippy` (`--target wasm32-wasip2`) | clean |
+  | `cargo test -p rlsp-yaml --test claude_code_stdio_smoke` | 2 passed |
+  | `claude plugin validate --strict` (plugin + marketplace) | both passed |
+
+  The single pending integration test is the pre-existing conditional skip
+  "activate() resolves and starts the client when the server binary is present",
+  which is skipped because no built server binary is on the path — it is not a
+  regression and not something this plan changes. These are baseline figures for
+  the current toolchain and dependency set; Task 3 changes the JavaScript test
+  runner, so the 49-test figure is the number to compare against after that
+  upgrade. The Zed wasm gates matter here specifically because
+  `rlsp-yaml/integrations/zed/Cargo.lock` is one of the four refreshed files.
+  The `package.json` diff is three dependency
+  range bumps (`@types/node` `^26.4.0`→`^26.4.1`, `@types/vscode` `^1.134.0`→`^1.136.0`,
+  `eslint` `^10.9.1`→`^10.10.0`) plus a cosmetic reformat of the
+  `pnpm.auditConfig.ignoreCves` array from one line to multi-line.
+
+- **Those four files exist only in the working tree and are not recoverable if
+  discarded.** They are the product of the user's out-of-band `cargo update` and
+  `pnpm update` runs, with no commit or stash behind them. Any destructive git
+  operation on the working tree before Task 1 commits them loses that dependency
+  resolution work. They must be WIP-committed early and must appear in Task 1's
+  commit; re-running the update commands is not an equivalent recovery, because
+  registry state moves and would produce a different resolution than the one
+  verified green here. Task 3 modifies `package.json` and `pnpm-lock.yaml` again
+  on top of this baseline.
+
+- **The open GitHub issues queue was checked and is empty.** The user's request
+  covered three things: the packages `pnpm outdated` still reports, the open
+  GitHub issues, and the Dependabot security alerts. `gh issue list --state open`
+  returned zero issues on 2026-09-07, so that third of the request needs no task
+  — it was investigated and came back empty, not dropped. Open *pull requests*
+  are a separate matter and are addressed under Non-Goals.
+
+- **The four Dependabot alerts are all `fast-uri`, all high, all dev-scope.**
+  Alerts #52, #53, #56, #57 — `GHSA-5jgf-p345-68v8` / `CVE-2026-75931`,
+  `GHSA-fph4-wmhf-6fwf` / `CVE-2026-75899`, `GHSA-f65p-4m7j-42xc` / `CVE-2026-75975`,
+  `GHSA-jqff-g426-hqxp` / `CVE-2026-76172`. They cover host confusion and SSRF
+  via URI normalization. `fast-uri` is reached only through
+  `@vscode/vsce → secretlint → ajv` (and `table`), so it is build/publish
+  tooling, not extension runtime code. **Every one is first patched in 3.1.6.**
+  The committed lockfile resolves `3.1.5`; the pending lockfile resolves
+  `3.1.7`. Pushing the pending lockfile to `main` is what closes all four.
+
+- **The lockfile regression guard's `fast-uri` floor is stale and currently
+  unsound.** `src/overrides.test.ts` asserts every resolved `fast-uri` version
+  is `>= 3.1.5`. That floor predates these four advisories, whose vulnerable
+  ranges are `>= 3.0.0, < 3.1.6` and `>= 3.1.2, < 3.1.6`. A future dependency
+  bump that resolved `fast-uri` back to exactly `3.1.5` would satisfy the guard
+  while being vulnerable to all four — precisely the regression the guard exists
+  to catch. The file's header comment also names only the two older `fast-uri`
+  advisories (`GHSA-v2hh-gcrm-f6hx` / `GHSA-4c8g-83qw-93j6`). The guard reads the
+  lockfile as text and asserts on resolved versions rather than on the presence
+  of an override string; the `brace-expansion` assertions in the same file are
+  unaffected by this work.
+
+- **Vitest 5 is upgradeable; TypeScript 7 is not.** `vitest` and
+  `@vitest/coverage-v8` are at `4.1.11` with `5.0.0` available, and its peers are
+  already satisfied — `vite@8.2.2` (needs `^6.4.0 || ^7 || ^8`) and
+  `@types/node@26` (needs `^22 || >=24`). `typescript` is at `6.0.3` with `7.0.2`
+  available but stays put: `typescript-eslint@8.69.0` (current latest) declares
+  the peer range `typescript: >=4.8.4 <6.1.0`, and lint is a required gate.
+  `6.0.3` is the newest 6.x release. `.github/dependabot.yml` already carries an
+  ignore rule for the `typescript` major, so nothing leaks through — no change
+  is needed there.
+
+- **Vitest 5 breaking changes that touch this project.** Minimum Node is
+  `^22.12.0 || ^24 || >=26` and Vite `>=6.4`. Mocks are now cleared by default
+  before each test. Unawaited async assertions now fail the test. The v8
+  coverage provider switched to AST-based remapping as the only supported mode
+  (`coverage.ignoreEmptyLines` and `coverage.experimentalAstAwareRemapping` are
+  removed), so reported coverage numbers shift. Config lookup no longer searches
+  ancestor directories. JSON/JUnit reporter output moved to `.vitest/`. Several
+  subpath entry points were removed, and `@vitest/expect` / `@vitest/runner` are
+  now inlined into `vitest`.
+
+- **Existing test and coverage surface.** `vitest.config.mts` is 12 lines:
+  `environment: 'node'`, `include: ['src/**/*.test.ts']`,
+  `exclude: ['src/test/integration/**']`, and coverage with `provider: 'v8'`,
+  `reporter: ['lcov', 'text']`, `reportsDirectory: './coverage'`. It uses no
+  removed option and no negation globs. The five test files are
+  `commands.test.ts`, `config.test.ts`, `overrides.test.ts`, `server.test.ts`,
+  and `status.test.ts`; `commands.test.ts` and `config.test.ts` mock the `vscode`
+  module and already call `vi.resetAllMocks()` in `beforeEach`, configuring
+  implementations inside each test. The only `vitest` subpath import in the
+  project is `vitest/config` in the config file, which remains supported.
+
+- **Coverage is gated by Codecov, so the remapping change is observable.**
+  `codecov.yml` sets `project.default` to `target: auto` with `threshold: 1%`
+  and `patch.default` to `target: 80%`. The `coverage-vscode` job in
+  `.github/workflows/coverage.yml` runs `pnpm run test:coverage` and uploads
+  `rlsp-yaml/integrations/vscode/coverage/lcov.info` under the `vscode` flag with
+  `fail_ci_if_error: true`.
+
+- **The Node 22 pin has no rationale on record.** `node-version: '22'` appears
+  four times — twice in `.github/workflows/coverage.yml` (the `coverage-vscode`
+  and `vscode-static-checks` jobs) and twice in
+  `.github/workflows/vscode-extension.yml`. It originated in commit `df2b68f6`
+  (the first VSIX build workflow) and was copied into each workflow added since
+  (`027c51e4`, `b6f8a5d9`, `82ed3663`); no commit message or comment explains it.
+  There is no `.nvmrc` and no `engines.node` in `package.json` — only
+  `engines.vscode: ^1.125.0`. Per the Node release schedule, v22 entered
+  maintenance on 2025-10-21 (EOL 2027-04-30) and v24 is Active LTS until
+  2026-10-20. A VS Code extension executes on the Node runtime bundled with VS
+  Code, so the CI Node version governs build and test tooling only, not the
+  shipped extension.
+
+- **Project conventions that constrain this work.** Agents must not edit
+  `version = "..."` fields in any `Cargo.toml` — release-plz owns version
+  progression. Work lands directly on `main` (trunk-based); no feature branch or
+  PR. Formatter/settings sync rules do not apply here, as no formatter setting
+  changes.
+
+- **References.** Vitest 5 release notes and migration guide
+  (<https://vitest.dev/blog/vitest-5.html>, <https://vitest.dev/guide/migration>),
+  the Node.js release schedule
+  (<https://github.com/nodejs/Release/blob/main/schedule.json>), and the GitHub
+  advisories named above.
+
+## Steps
+
+- [ ] Clarify scope and the Node version decision with the user
+- [ ] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
+- [ ] Confirm the four Dependabot alerts close after the push
+- [ ] Move CI from Node 22 to Node 24 and record why
+- [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
+- [ ] Measure and record the coverage delta caused by AST-based remapping
+- [ ] Verify the full CI matrix is green after the final push
+
+## Tasks
+
+### Task 1: Land the refreshed lockfiles and make the `fast-uri` guard match the advisories
+
+Commit the four already-verified dependency-refresh files and correct the
+lockfile regression guard, whose `fast-uri` floor sits one patch below the
+version that actually fixes the four open advisories. These ship together
+because the refreshed lockfile is what resolves the alerts, and a guard that
+still accepts `3.1.5` would let the same vulnerability return unnoticed.
+
+- [ ] The refreshed root `Cargo.lock`, Zed `Cargo.lock`, extension
+      `package.json`, and `pnpm-lock.yaml` are committed with no unrelated
+      changes included
+- [ ] No `version = "..."` field in any `Cargo.toml` is modified
+- [ ] The guard rejects every `fast-uri` version below `3.1.6`, and a
+      deliberately lowered floor makes the test fail
+- [ ] The guard's explanatory comment names the four current advisories by
+      GHSA identifier and states `3.1.6` as the patched version
+- [ ] `brace-expansion` and `serialize-javascript` assertions in the same file
+      are unchanged and still pass
+- [ ] `pnpm run typecheck`, `lint`, `format`, `test`, and `audit` pass, and
+      `cargo build`, `cargo clippy --all-targets`, and `cargo test` pass
+- [ ] The Zed extension checks and lints clean against its refreshed lockfile on
+      the `wasm32-wasip2` target. The root workspace `members` list is
+      `["rlsp-fmt", "rlsp-yaml", "rlsp-yaml-parser"]`, so the Zed crate is
+      outside the workspace and the root `cargo` commands above never build it —
+      it needs its own `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml`
+      invocations, per the "Zed Extension" section of the root `CLAUDE.md`
+- [ ] After the change is pushed to `main`, all four `fast-uri` Dependabot
+      alerts (#52, #53, #56, #57) report as closed, and no new alert is open
+
+### Task 2: Move CI to Node 24 and record the reason
+
+Replace all four `node-version: '22'` pins with Node 24 — the Active LTS line —
+and leave a comment so the version stops being an undocumented copy-forward.
+Node 22 is in maintenance, and Node 24 gives comfortable headroom over the
+Vitest 5 floor that Task 3 introduces.
+
+- [ ] Every workflow job that sets up Node for the extension runs Node 24; no
+      `node-version: '22'` remains in `.github/workflows/`
+- [ ] A comment at the pin records why this version was chosen and what would
+      prompt changing it, so the next reader is not left guessing as with the
+      previous pin
+- [ ] `@types/node` is left at its current major — the runtime/types gap is a
+      known, accepted difference
+- [ ] All extension gates (`typecheck`, `lint`, `format`, `test`, `audit`) pass
+      when run on Node 24
+- [ ] After the push, the `coverage-vscode`, `vscode-static-checks`, and VS Code
+      extension workflow jobs are green on the full CI matrix, Windows included
+- [ ] The `publish-extension` pin is confirmed safe by direct evidence rather
+      than by CI. That job is gated `if: needs.resolve-version.outputs.version
+      != ''`, and `resolve-version` runs only on `workflow_dispatch`, so a push
+      to `main` never executes it and the push-triggered run above cannot
+      exercise this pin. It is the only Node-24 pin shipping without CI
+      feedback; the handoff states that explicitly rather than implying the
+      matrix covered it
+
+### Task 3: Upgrade to Vitest 5 and record the coverage impact
+
+Move `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the behavioural
+changes that reach this suite — default mock clearing, failure on unawaited
+async assertions, and the switch to AST-based v8 coverage remapping. The
+remapping changes reported coverage, and Codecov gates the project at a 1%
+threshold, so the delta must be measured rather than assumed.
+
+- [ ] `vitest` and `@vitest/coverage-v8` both resolve to 5.0.0 and remain
+      version-aligned with each other
+- [ ] All 49 existing tests pass, with no test disabled, skipped, or weakened to
+      accommodate the upgrade
+- [ ] The suite passes under the new default mock-clearing behaviour without
+      relying on it — mock implementations each test depends on are established
+      within that test or its `beforeEach`
+- [ ] No assertion is left unawaited; the run reports no unawaited-assertion
+      failures
+- [ ] `vitest.config.mts` contains no option removed in Vitest 5, and the
+      project imports no removed subpath entry point
+- [ ] `pnpm run test:coverage` writes `coverage/lcov.info` at the path the
+      `coverage-vscode` job uploads
+- [ ] Total line coverage is measured before and after the upgrade, both figures
+      are reported in the handoff, and the post-upgrade total is no more than 1
+      percentage point below the pre-upgrade total
+- [ ] `pnpm run typecheck`, `lint`, `format`, and `audit` pass
+- [ ] After the push, the full CI matrix is green and the Codecov `vscode` flag
+      reports without error
+
+## Decisions
+
+- **Node 24, not 22 or 26** — user's choice at clarification. v24 is Active LTS
+  until 2026-10-20; v22 has been in maintenance since 2025-10-21. v26 does not
+  reach LTS until 2026-10-28.
+- **`@types/node` stays on its current major** — user declined aligning it down
+  to `^24`. CI will typecheck against the Node 26 API surface while running Node
+  24. Accepted knowingly; revisit if a type/runtime mismatch causes a real
+  failure.
+- **TypeScript stays at 6.0.3** — `typescript-eslint@8.69.0` declares
+  `typescript: >=4.8.4 <6.1.0`, and lint is a required gate. Verified against the
+  registry on 2026-09-07 rather than carried over from the earlier plan. The
+  existing `dependabot.yml` ignore rule already covers this, so no change is
+  needed.
+- **The `fast-uri` guard floor moves to 3.1.6, not 3.1.7** — 3.1.6 is the first
+  patched version for all four advisories. Pinning the floor to the currently
+  resolved 3.1.7 would make the guard fail on an unrelated future downgrade that
+  is not actually vulnerable.
+- **Lockfiles and the guard fix ship as one commit** — the guard's correctness
+  is what makes the security posture of the refreshed lockfile durable; splitting
+  them would leave a window where the guard silently under-enforces.
+- **The `publish-extension` Node pin is accepted on evidence, not CI** — it
+  cannot be reached by a push-triggered run (see Task 2). The residual risk is
+  small and was checked directly on 2026-09-07: the job performs no build, lint,
+  or test under its Node setup, using it only to run
+  `pnpx @vscode/vsce publish` against an artifact built elsewhere;
+  `@vscode/vsce@3.9.2` declares `engines: { node: '>= 20' }`, and its CLI was
+  confirmed working under Node 24.14.1 locally. A failure would surface visibly
+  at the next `workflow_dispatch` release rather than silently.
+
+- **Coverage delta is measured, not predicted** — AST-based remapping generally
+  raises reported coverage by dropping non-executable lines from the
+  denominator, but the direction is not assumed. If the measured drop exceeds
+  the 1 percentage point bar, that is a blocker to raise, not a number to
+  restate.
+
+## Non-Goals
+
+- **Upgrading TypeScript to 7.0.2** — blocked by the `typescript-eslint` peer
+  range; unblocked only when typescript-eslint supports TS >= 7.1.
+- **Closing Dependabot PR #62, landing PR #63, or acting on release-plz PR #44**
+  — the user explicitly excluded all three from this plan.
+- **Changing `pnpm.overrides` or the `auditConfig.ignoreCves` allowlist** — the
+  current overrides posture was audited on 2026-08-07 and is out of scope; only
+  the guard's `fast-uri` floor changes.
+- **Adding an `.nvmrc` or an `engines.node` field** — the Node version is pinned
+  in the workflows only; introducing a second source of truth is not part of this
+  work.
+- **Changing which workflows run which gates** — the CI gate coverage added on
+  2026-08-10 stands as-is; only the Node version within those jobs changes.
