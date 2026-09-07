@@ -48,7 +48,7 @@ floor.
   "activate() resolves and starts the client when the server binary is present",
   which is skipped because no built server binary is on the path — it is not a
   regression and not something this plan changes. These are baseline figures for
-  the current toolchain and dependency set; Task 3 changes the JavaScript test
+  the current toolchain and dependency set; Task 4 changes the JavaScript test
   runner, so the 49-test figure is the number to compare against after that
   upgrade. The Zed wasm gates matter here specifically because
   `rlsp-yaml/integrations/zed/Cargo.lock` is one of the four refreshed files.
@@ -64,7 +64,7 @@ floor.
   resolution work. They must be WIP-committed early and must appear in Task 1's
   commit; re-running the update commands is not an equivalent recovery, because
   registry state moves and would produce a different resolution than the one
-  verified green here. Task 3 modifies `package.json` and `pnpm-lock.yaml` again
+  verified green here. Task 2 and Task 4 modify `package.json` and `pnpm-lock.yaml` again
   on top of this baseline.
 
 - **The open GitHub issues queue was checked and is empty.** The user's request
@@ -110,6 +110,30 @@ floor.
   lockfile as text and asserts on resolved versions rather than on the presence
   of an override string; the `brace-expansion` assertions in the same file are
   unaffected by this work.
+
+- **VSIX packaging is broken on `main`, and the two CI failures had different
+  causes.** Verified per-run rather than batch-categorized:
+
+  | Run | `@types/vscode` | `engines.vscode` | Failing step |
+  |-----|-----------------|------------------|--------------|
+  | `03482b21` (2026-08-10) | `^1.125.0` | `^1.125.0` | none — success |
+  | `762522a3` (2026-08-14) | `^1.125.0` | `^1.125.0` | **Audit dependencies** — the `fast-uri` advisory; fixed by Task 1 |
+  | `6e65f730` (2026-09-07) | `^1.134.0` | `^1.125.0` | **Package VSIX** — types exceed engine |
+  | `b0a93ef5` (Task 1) | `^1.136.0` | `^1.125.0` | **Package VSIX** — same cause |
+
+  The packaging break was introduced by Dependabot PR #65, not by Task 1; Task 1
+  raised the types further but did not cause the failure mode. The audit failure
+  is already resolved.
+
+  `engines.vscode` is mandatory — `@vscode/vsce/out/package.js` throws
+  `Manifest missing field: engines` without it — and is not redundant with the
+  types: it is the runtime compatibility promise the Marketplace uses to gate
+  installs, while `@types/vscode` is the compile-time API ceiling. `vsce`
+  enforces `types <= engines` so code cannot compile against an API the declared
+  minimum runtime lacks. The check lives in
+  `validateVSCodeTypesCompatibility` and runs *only* when `@types/vscode` is
+  present in `devDependencies`, *only* during `vsce package`, and compares
+  major.minor only — which is exactly why divergence reaches `main` unnoticed.
 
 - **Vitest 5 is upgradeable; TypeScript 7 is not.** `vitest` and
   `@vitest/coverage-v8` are at `4.1.11` with `5.0.0` available, and its peers are
@@ -179,6 +203,7 @@ floor.
 - [x] Clarify scope and the Node version decision with the user
 - [x] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
 - [x] Confirm the four Dependabot alerts close after the push
+- [ ] Realign `@types/vscode` with `engines.vscode` and guard the pair
 - [ ] Move CI from Node 22 to Node 24 and record why
 - [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
 - [ ] Measure and record the coverage delta caused by AST-based remapping
@@ -236,12 +261,43 @@ still accepts `3.1.5` would let the same vulnerability return unnoticed.
 - [x] After the change is pushed to `main`, all four `fast-uri` Dependabot
       alerts (#52, #53, #56, #57) report as closed, and no new alert is open
 
-### Task 2: Move CI to Node 24 and record the reason
+### Task 2: Restore VSIX packaging by realigning `@types/vscode` with `engines.vscode`
+
+`vsce package` refuses to build when `@types/vscode` exceeds `engines.vscode`,
+and nothing in the fast gates notices — the check runs only inside packaging,
+which executes late and only on `main`. Dependabot raised the types twice
+without touching the engine, so all five platform builds now fail. Bring the
+types back to the declared engine and add a guard so the pair cannot silently
+diverge again.
+
+- [ ] `@types/vscode` and `engines.vscode` agree on major and minor, with
+      `engines.vscode` unchanged at `^1.125.0` — the extension keeps working on
+      VS Code 1.125 and newer
+- [ ] `vsce package` succeeds locally for at least one platform target,
+      demonstrated rather than assumed
+- [ ] A guard test fails when the two fields disagree. It reads both values
+      from `package.json` rather than hardcoding either, so it keeps working
+      after a future deliberate bump
+- [ ] The guard is proven able to fail: temporarily diverging the two fields
+      makes it fail, and restoring them makes it pass. That observed
+      fail-then-pass result is reported; the diverged state is not committed
+- [ ] The guard states in a comment why the two fields are coupled and that
+      `vsce` compares major.minor only, so a future reader does not treat the
+      pairing as arbitrary
+- [ ] No Dependabot ignore rule is added for `@types/vscode` — a future bump
+      should turn its PR red so the minimum-version decision is made
+      deliberately, not suppressed
+- [ ] The existing 66 tests still pass and the new total is stated explicitly
+- [ ] `pnpm run typecheck`, `lint`, `format`, `test`, `audit`, and `build` pass
+- [ ] After the push, all five `Build VSIX` platform jobs in the VS Code
+      Extension workflow are green, and the workflow itself succeeds
+
+### Task 3: Move CI to Node 24 and record the reason
 
 Replace all four `node-version: '22'` pins with Node 24 — the Active LTS line —
 and leave a comment so the version stops being an undocumented copy-forward.
 Node 22 is in maintenance, and Node 24 gives comfortable headroom over the
-Vitest 5 floor that Task 3 introduces.
+Vitest 5 floor that Task 4 introduces.
 
 - [ ] Every workflow job that sets up Node for the extension runs Node 24; no
       `node-version: '22'` remains in `.github/workflows/`
@@ -262,7 +318,7 @@ Vitest 5 floor that Task 3 introduces.
       feedback; the handoff states that explicitly rather than implying the
       matrix covered it
 
-### Task 3: Upgrade to Vitest 5 and record the coverage impact
+### Task 4: Upgrade to Vitest 5 and record the coverage impact
 
 Move `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the behavioural
 changes that reach this suite — default mock clearing, failure on unawaited
@@ -352,13 +408,27 @@ threshold, so the delta must be measured rather than assumed.
   is what makes the security posture of the refreshed lockfile durable; splitting
   them would leave a window where the guard silently under-enforces.
 - **The `publish-extension` Node pin is accepted on evidence, not CI** — it
-  cannot be reached by a push-triggered run (see Task 2). The residual risk is
+  cannot be reached by a push-triggered run (see Task 3). The residual risk is
   small and was checked directly on 2026-09-07: the job performs no build, lint,
   or test under its Node setup, using it only to run
   `pnpx @vscode/vsce publish` against an artifact built elsewhere;
   `@vscode/vsce@3.9.2` declares `engines: { node: '>= 20' }`, and its CLI was
   confirmed working under Node 24.14.1 locally. A failure would surface visibly
   at the next `workflow_dispatch` release rather than silently.
+
+- **`engines.vscode` stays at `^1.125.0`; `@types/vscode` comes down to match**
+  — user's choice. The source uses no API introduced after 1.125, so the newer
+  types buy nothing today, and holding the engine keeps the extension
+  installable for VS Code 1.125+ users. Raising the engine is a user-facing
+  compatibility narrowing and should be a deliberate decision made when an API
+  actually requires it.
+
+- **No Dependabot ignore for `@types/vscode`; a guard test instead** — user's
+  choice. An ignore rule hides the bump; a guard test turns a future Dependabot
+  PR red in seconds and forces an explicit call on the minimum supported VS Code
+  version. Dependabot cannot group the two in any case: `engines.vscode` is a
+  manifest field, not a dependency, so no `dependabot.yml` grouping can keep
+  them in lockstep.
 
 - **Coverage delta is measured, not predicted** — AST-based remapping generally
   raises reported coverage by dropping non-executable lines from the
