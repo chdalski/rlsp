@@ -309,7 +309,18 @@ Vitest 5 floor that Task 4 introduces.
 - [x] All extension gates (`typecheck`, `lint`, `format`, `test`, `audit`) pass
       when run on Node 24
 - [ ] After the push, the `coverage-vscode`, `vscode-static-checks`, and VS Code
-      extension workflow jobs are green on the full CI matrix, Windows included
+      extension workflow jobs are green on the full CI matrix, Windows included.
+      **Partially verified as of `b1f4f7e3`.** Both `coverage.yml` pins are
+      confirmed green on Node 24 (`VS Code Extension Coverage` and `VS Code
+      Extension Static Checks`). The `vscode-extension.yml` build pin is *not*
+      yet exercised: that workflow is path-filtered to
+      `rlsp-yaml/integrations/vscode/**`, and `b1f4f7e3` touched only
+      `.github/workflows/` and this plan, so it did not run — its last run was
+      Task 2's, on the old Node 22 pins. Task 4 modifies extension files and
+      will trigger it, so this criterion is verified then. It is deliberately
+      **not** force-triggered via `workflow_dispatch`: that path runs
+      `resolve-version` and would publish to the Marketplace. The
+      `publish-extension` pin remains accepted on evidence per Decisions.
 - [x] The `publish-extension` pin is confirmed safe by direct evidence rather
       than by CI. That job is gated `if: needs.resolve-version.outputs.version
       != ''`, and `resolve-version` runs only on `workflow_dispatch`, so a push
