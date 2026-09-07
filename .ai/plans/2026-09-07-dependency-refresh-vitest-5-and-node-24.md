@@ -289,7 +289,7 @@ diverge again.
       deliberately, not suppressed
 - [x] The existing 66 tests still pass and the new total is stated explicitly
 - [x] `pnpm run typecheck`, `lint`, `format`, `test`, `audit`, and `build` pass
-- [ ] After the push, all five `Build VSIX` platform jobs in the VS Code
+- [x] After the push, all five `Build VSIX` platform jobs in the VS Code
       Extension workflow are green, and the workflow itself succeeds
 
 ### Task 3: Move CI to Node 24 and record the reason
