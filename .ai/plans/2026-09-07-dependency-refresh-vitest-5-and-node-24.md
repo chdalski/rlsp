@@ -178,7 +178,7 @@ floor.
 
 - [x] Clarify scope and the Node version decision with the user
 - [x] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
-- [ ] Confirm the four Dependabot alerts close after the push
+- [x] Confirm the four Dependabot alerts close after the push
 - [ ] Move CI from Node 22 to Node 24 and record why
 - [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
 - [ ] Measure and record the coverage delta caused by AST-based remapping
@@ -233,7 +233,7 @@ still accepts `3.1.5` would let the same vulnerability return unnoticed.
       outside the workspace and the root `cargo` commands above never build it —
       it needs its own `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml`
       invocations, per the "Zed Extension" section of the root `CLAUDE.md`
-- [ ] After the change is pushed to `main`, all four `fast-uri` Dependabot
+- [x] After the change is pushed to `main`, all four `fast-uri` Dependabot
       alerts (#52, #53, #56, #57) report as closed, and no new alert is open
 
 ### Task 2: Move CI to Node 24 and record the reason
