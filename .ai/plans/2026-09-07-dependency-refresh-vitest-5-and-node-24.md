@@ -204,7 +204,7 @@ floor.
 - [x] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
 - [x] Confirm the four Dependabot alerts close after the push
 - [x] Realign `@types/vscode` with `engines.vscode` and guard the pair
-- [ ] Move CI from Node 22 to Node 24 and record why
+- [x] Move CI from Node 22 to Node 24 and record why
 - [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
 - [ ] Measure and record the coverage delta caused by AST-based remapping
 - [ ] Verify the full CI matrix is green after the final push
@@ -299,18 +299,18 @@ and leave a comment so the version stops being an undocumented copy-forward.
 Node 22 is in maintenance, and Node 24 gives comfortable headroom over the
 Vitest 5 floor that Task 4 introduces.
 
-- [ ] Every workflow job that sets up Node for the extension runs Node 24; no
+- [x] Every workflow job that sets up Node for the extension runs Node 24; no
       `node-version: '22'` remains in `.github/workflows/`
-- [ ] A comment at the pin records why this version was chosen and what would
+- [x] A comment at the pin records why this version was chosen and what would
       prompt changing it, so the next reader is not left guessing as with the
       previous pin
-- [ ] `@types/node` is left at its current major — the runtime/types gap is a
+- [x] `@types/node` is left at its current major — the runtime/types gap is a
       known, accepted difference
-- [ ] All extension gates (`typecheck`, `lint`, `format`, `test`, `audit`) pass
+- [x] All extension gates (`typecheck`, `lint`, `format`, `test`, `audit`) pass
       when run on Node 24
 - [ ] After the push, the `coverage-vscode`, `vscode-static-checks`, and VS Code
       extension workflow jobs are green on the full CI matrix, Windows included
-- [ ] The `publish-extension` pin is confirmed safe by direct evidence rather
+- [x] The `publish-extension` pin is confirmed safe by direct evidence rather
       than by CI. That job is gated `if: needs.resolve-version.outputs.version
       != ''`, and `resolve-version` runs only on `workflow_dispatch`, so a push
       to `main` never executes it and the push-triggered run above cannot

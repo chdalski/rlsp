@@ -44,7 +44,12 @@ jobs:
           package_json_file: rlsp-yaml/integrations/vscode/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          # Node 24 is Active LTS (until 2026-10-20); Node 22 entered
+          # maintenance 2025-10-21 (EOL 2027-04-30). This pin governs
+          # build/test tooling only -- the shipped extension runs on the
+          # Node bundled with VS Code, not this version. Revisit when
+          # Node 26 becomes LTS (2026-10-28) or Node 24 nears EOL.
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: rlsp-yaml/integrations/vscode/pnpm-lock.yaml
       - name: Install dependencies
@@ -71,7 +76,12 @@ jobs:
           package_json_file: rlsp-yaml/integrations/vscode/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          # Node 24 is Active LTS (until 2026-10-20); Node 22 entered
+          # maintenance 2025-10-21 (EOL 2027-04-30). This pin governs
+          # build/test tooling only -- the shipped extension runs on the
+          # Node bundled with VS Code, not this version. Revisit when
+          # Node 26 becomes LTS (2026-10-28) or Node 24 nears EOL.
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: rlsp-yaml/integrations/vscode/pnpm-lock.yaml
       - name: Install dependencies
