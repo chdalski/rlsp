@@ -80,8 +80,23 @@ floor.
   `GHSA-jqff-g426-hqxp` / `CVE-2026-76172`. They cover host confusion and SSRF
   via URI normalization. `fast-uri` is reached only through
   `@vscode/vsce → secretlint → ajv` (and `table`), so it is build/publish
-  tooling, not extension runtime code. **Every one is first patched in 3.1.6.**
-  The committed lockfile resolves `3.1.5`; the pending lockfile resolves
+  tooling, not extension runtime code.
+
+  **Each advisory spans three vulnerable ranges, not one.** An earlier revision
+  of this plan said only "every one is first patched in 3.1.6", which is
+  incomplete and was the basis for a control that would have missed the 4.x
+  line. Verified against `gh api repos/:owner/:repo/dependabot/alerts` on
+  2026-09-07:
+
+  | Advisory | 2.x vulnerable | 3.x vulnerable | 4.x vulnerable |
+  |----------|----------------|----------------|----------------|
+  | `GHSA-5jgf-p345-68v8` | `>= 2.4.2, < 2.4.5` | `>= 3.1.3, < 3.1.6` | `>= 4.0.1, < 4.1.3` |
+  | `GHSA-f65p-4m7j-42xc` | `>= 2.3.1, < 2.4.5` | `>= 3.0.0, < 3.1.6` | `>= 4.0.0, < 4.1.3` |
+  | `GHSA-fph4-wmhf-6fwf` | `>= 2.4.1, < 2.4.5` | `>= 3.1.2, < 3.1.6` | `>= 4.0.0, < 4.1.3` |
+  | `GHSA-jqff-g426-hqxp` | `>= 2.3.1, < 2.4.5` | `>= 3.0.0, < 3.1.6` | `>= 4.0.0, < 4.1.3` |
+
+  The patched floors are therefore `2.4.5`, `3.1.6`, and `4.1.3` — one per major
+  line. The committed lockfile resolves `3.1.5`; the pending lockfile resolves
   `3.1.7`. Pushing the pending lockfile to `main` is what closes all four.
 
 - **The lockfile regression guard's `fast-uri` floor is stale and currently
@@ -183,13 +198,11 @@ still accepts `3.1.5` would let the same vulnerability return unnoticed.
       `package.json`, and `pnpm-lock.yaml` are committed with no unrelated
       changes included
 - [ ] No `version = "..."` field in any `Cargo.toml` is modified
-- [ ] The lockfile guard rejects every resolved `fast-uri` version below
-      `3.1.6`
-- [ ] The lockfile guard also rejects a resolved `fast-uri` major other than
-      `3`. Each of the four advisories carries three vulnerable ranges, not one
-      — `< 2.4.5`, `< 3.1.6`, and `< 4.1.3` — so a bare `>= 3.1.6` floor returns
-      true for `4.0.0`–`4.1.2`, which is vulnerable to all four. A major bump
-      must force a deliberate update to this guard rather than passing silently
+- [ ] The lockfile guard accepts a resolved `fast-uri` version only if it is
+      patched on its own major line — `>= 3.1.6` on 3.x, `>= 4.1.3` on 4.x —
+      and rejects every other major, failing closed. This is a single decision
+      point, not a floor check plus a separate major check: the accepted floor
+      cannot be changed without editing the floor itself
 - [ ] `isAtLeast` is directly unit-tested against literal version pairs
       spanning the new floor, including `('3.1.5','3.1.6') === false` (the exact
       regression this task closes), `('3.1.6','3.1.6') === true` (inclusive
@@ -295,15 +308,39 @@ threshold, so the delta must be measured rather than assumed.
   patched version for all four advisories. Pinning the floor to the currently
   resolved 3.1.7 would make the guard fail on an unrelated future downgrade that
   is not actually vulnerable.
-- **The guard pins the `fast-uri` major in addition to the floor** — raised by
-  the security advisor at Task 1's input gate and verified directly against the
-  GitHub advisory data on 2026-09-07. Every one of the four advisories lists
+- **The `fast-uri` guard uses a per-major floor, not a floor plus a major pin**
+  — settled between the two advisors during Task 1. The underlying gap was
+  raised by the security advisor at the input gate and verified directly
+  against the GitHub advisory data on 2026-09-07. Every one of the four
+  advisories lists
   three vulnerable ranges (`>= 2.3.1/2.4.1/2.4.2, < 2.4.5`;
   `>= 3.0.0/3.1.2/3.1.3, < 3.1.6`; `>= 4.0.0/4.0.1, < 4.1.3`), so a single floor
   is structurally the wrong control for this package: `isAtLeast('4.0.0',
-  '3.1.6')` is true while `4.0.0` is vulnerable to all four. Pinning the major
-  is preferred over a per-major floor table — the intent is to force a human to
-  revisit the guard when the major moves, not to predict future advisories.
+  '3.1.6')` is true while `4.0.0` is vulnerable to all four.
+
+  The first fix attempted was that floor plus a separate `major === 3`
+  assertion. Both advisors then rejected it, for two reasons that compound:
+
+  1. `fast-uri` carries no override, so its version drifts through ordinary
+     transitive `pnpm update` churn. A pin on major 3 fires on a legitimately
+     patched `4.1.3+` — a false alarm with no security meaning.
+  2. Worse, the two assertions fail independently. Whoever hits that false
+     alarm changes `.toBe(3)` to `.toBe(4)` and stops, because
+     `isAtLeast(version, '3.1.6')` keeps passing for *any* 4.x — it was never
+     major-aware. That silently reinstates the vulnerable-4.x hole the pin was
+     added to close.
+
+  The guard therefore uses a single `isPatchedFastUri` function with a
+  per-major floor (`3.x → 3.1.6`, `4.x → 4.1.3`), collapsing this to one
+  decision point: accepting a 4.x version requires `>= 4.1.3`, so no unrelated
+  literal can silence a failure. Encoding `4.1.3` is not speculation — it is
+  published advisory data, verified on 2026-09-07.
+
+- **The guard fails closed on every major line except 3 and 4** — including
+  2.x, whose `2.4.5` is genuinely patched. A transitive downgrade across a
+  major line is unusual enough to deserve a human look regardless, and
+  enumerating 2.x as vetted would reintroduce the per-patch bookkeeping this
+  design exists to avoid.
 
 - **The `overridesBlockOf` unguarded `indexOf` is a known latent gap, left
   as-is** — if pnpm ever stops emitting an `overrides:` block, `indexOf` returns
