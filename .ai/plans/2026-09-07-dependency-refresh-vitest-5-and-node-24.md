@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-09-07)
 **Created:** 2026-09-07
 
 # Land the pending dependency refresh, migrate to Vitest 5, move CI to Node 24
@@ -207,7 +207,7 @@ floor.
 - [x] Move CI from Node 22 to Node 24 and record why
 - [x] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
 - [x] Measure and record the coverage delta caused by AST-based remapping
-- [ ] Verify the full CI matrix is green after the final push
+- [x] Verify the full CI matrix is green after the final push
 
 ## Tasks
 
@@ -308,9 +308,9 @@ Vitest 5 floor that Task 4 introduces.
       known, accepted difference
 - [x] All extension gates (`typecheck`, `lint`, `format`, `test`, `audit`) pass
       when run on Node 24
-- [ ] After the push, the `coverage-vscode`, `vscode-static-checks`, and VS Code
+- [x] After the push, the `coverage-vscode`, `vscode-static-checks`, and VS Code
       extension workflow jobs are green on the full CI matrix, Windows included.
-      **Partially verified as of `b1f4f7e3`.** Both `coverage.yml` pins are
+      **Verified.** Initially partial as of `b1f4f7e3` (that commit touched only `.github/workflows/`, and the extension workflow is path-filtered to `rlsp-yaml/integrations/vscode/**`, so it did not run). Task 4's push (`1bcb22a3`) touched extension files and triggered it: all five `Build VSIX` jobs green on Node 24, Windows included. Original note retained below for the record. Both `coverage.yml` pins are
       confirmed green on Node 24 (`VS Code Extension Coverage` and `VS Code
       Extension Static Checks`). The `vscode-extension.yml` build pin is *not*
       yet exercised: that workflow is path-filtered to
@@ -354,7 +354,7 @@ threshold, so the delta must be measured rather than assumed.
       are reported in the handoff, and the post-upgrade total is no more than 1
       percentage point below the pre-upgrade total
 - [x] `pnpm run typecheck`, `lint`, `format`, and `audit` pass
-- [ ] After the push, the full CI matrix is green and the Codecov `vscode` flag
+- [x] After the push, the full CI matrix is green and the Codecov `vscode` flag
       reports without error
 
 ## Decisions
@@ -461,3 +461,29 @@ threshold, so the delta must be measured rather than assumed.
   work.
 - **Changing which workflows run which gates** — the CI gate coverage added on
   2026-08-10 stands as-is; only the Node version within those jobs changes.
+
+## Outcome
+
+Verified on 2026-09-07 after the final push (`1bcb22a3`):
+
+- **Dependabot alerts: 0 open.** All four `fast-uri` advisories (#52, #53, #56,
+  #57) closed by Task 1.
+- **GitHub issues: 0 open**, as at planning time.
+- **`pnpm outdated`** now reports three entries, all accounted for:
+  `typescript` 6.0.3 → 7.0.2 remains blocked by `typescript-eslint`'s
+  `>=4.8.4 <6.1.0` peer range and is covered by an existing `dependabot.yml`
+  ignore; `@types/vscode` 1.125.0 → 1.136.0 is reported outdated **by design**,
+  being the deliberate Task 2 pin to `engines.vscode`; `@types/node`
+  26.4.1 → 26.5.0 is a release published during this work and was never in
+  scope. The two packages this plan set out to upgrade — `vitest` and
+  `@vitest/coverage-v8` — are both at 5.0.0.
+- **Dependabot PR #62** (`futures` 0.3.34) auto-closed: Task 1's push already
+  carried that resolution.
+- **Not in scope, still open:** PR #63 (`taiki-e/install-action`) and PR #44
+  (release-plz), both excluded by the user at clarification.
+
+Two defects were found and fixed that were not visible at planning time: the
+`fast-uri` guard's floor was below the patched version *and* structurally unable
+to reject a vulnerable 4.x (Task 1), and VSIX packaging was already broken on
+`main` by a `@types/vscode` / `engines.vscode` divergence (Task 2, added
+mid-plan at the user's direction).
