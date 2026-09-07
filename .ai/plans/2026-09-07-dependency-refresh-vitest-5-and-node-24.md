@@ -205,8 +205,8 @@ floor.
 - [x] Confirm the four Dependabot alerts close after the push
 - [x] Realign `@types/vscode` with `engines.vscode` and guard the pair
 - [x] Move CI from Node 22 to Node 24 and record why
-- [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
-- [ ] Measure and record the coverage delta caused by AST-based remapping
+- [x] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
+- [x] Measure and record the coverage delta caused by AST-based remapping
 - [ ] Verify the full CI matrix is green after the final push
 
 ## Tasks
@@ -337,23 +337,23 @@ async assertions, and the switch to AST-based v8 coverage remapping. The
 remapping changes reported coverage, and Codecov gates the project at a 1%
 threshold, so the delta must be measured rather than assumed.
 
-- [ ] `vitest` and `@vitest/coverage-v8` both resolve to 5.0.0 and remain
+- [x] `vitest` and `@vitest/coverage-v8` both resolve to 5.0.0 and remain
       version-aligned with each other
-- [ ] All 49 existing tests pass, with no test disabled, skipped, or weakened to
+- [x] All 49 existing tests pass, with no test disabled, skipped, or weakened to
       accommodate the upgrade
-- [ ] The suite passes under the new default mock-clearing behaviour without
+- [x] The suite passes under the new default mock-clearing behaviour without
       relying on it — mock implementations each test depends on are established
       within that test or its `beforeEach`
-- [ ] No assertion is left unawaited; the run reports no unawaited-assertion
+- [x] No assertion is left unawaited; the run reports no unawaited-assertion
       failures
-- [ ] `vitest.config.mts` contains no option removed in Vitest 5, and the
+- [x] `vitest.config.mts` contains no option removed in Vitest 5, and the
       project imports no removed subpath entry point
-- [ ] `pnpm run test:coverage` writes `coverage/lcov.info` at the path the
+- [x] `pnpm run test:coverage` writes `coverage/lcov.info` at the path the
       `coverage-vscode` job uploads
-- [ ] Total line coverage is measured before and after the upgrade, both figures
+- [x] Total line coverage is measured before and after the upgrade, both figures
       are reported in the handoff, and the post-upgrade total is no more than 1
       percentage point below the pre-upgrade total
-- [ ] `pnpm run typecheck`, `lint`, `format`, and `audit` pass
+- [x] `pnpm run typecheck`, `lint`, `format`, and `audit` pass
 - [ ] After the push, the full CI matrix is green and the Codecov `vscode` flag
       reports without error
 
