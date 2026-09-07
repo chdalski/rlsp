@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-07
 
 # Land the pending dependency refresh, migrate to Vitest 5, move CI to Node 24
@@ -176,8 +176,8 @@ floor.
 
 ## Steps
 
-- [ ] Clarify scope and the Node version decision with the user
-- [ ] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
+- [x] Clarify scope and the Node version decision with the user
+- [x] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
 - [ ] Confirm the four Dependabot alerts close after the push
 - [ ] Move CI from Node 22 to Node 24 and record why
 - [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
@@ -194,16 +194,16 @@ version that actually fixes the four open advisories. These ship together
 because the refreshed lockfile is what resolves the alerts, and a guard that
 still accepts `3.1.5` would let the same vulnerability return unnoticed.
 
-- [ ] The refreshed root `Cargo.lock`, Zed `Cargo.lock`, extension
+- [x] The refreshed root `Cargo.lock`, Zed `Cargo.lock`, extension
       `package.json`, and `pnpm-lock.yaml` are committed with no unrelated
       changes included
-- [ ] No `version = "..."` field in any `Cargo.toml` is modified
-- [ ] The lockfile guard accepts a resolved `fast-uri` version only if it is
+- [x] No `version = "..."` field in any `Cargo.toml` is modified
+- [x] The lockfile guard accepts a resolved `fast-uri` version only if it is
       patched on its own major line — `>= 3.1.6` on 3.x, `>= 4.1.3` on 4.x —
       and rejects every other major, failing closed. This is a single decision
       point, not a floor check plus a separate major check: the accepted floor
       cannot be changed without editing the floor itself
-- [ ] `isAtLeast` is directly unit-tested against literal version pairs
+- [x] `isAtLeast` is directly unit-tested against literal version pairs
       spanning the new floor, including `('3.1.5','3.1.6') === false` (the exact
       regression this task closes), `('3.1.6','3.1.6') === true` (inclusive
       floor), and `('3.1.10','3.1.6') === true` (numeric, not lexicographic,
@@ -211,23 +211,23 @@ still accepts `3.1.5` would let the same vulnerability return unnoticed.
       rejects vulnerable versions — the lockfile-reading test cannot carry that
       claim, because once this task lands the real lockfile never contains a
       vulnerable version, so no floor value makes it fail
-- [ ] `parseVersion` is tested to throw on a non-release version string, the
+- [x] `parseVersion` is tested to throw on a non-release version string, the
       hard-failure behaviour its own comment documents
-- [ ] The assertion loop is proven non-vacuous: during implementation, raising
+- [x] The assertion loop is proven non-vacuous: during implementation, raising
       the floor *above* the currently resolved version makes the lockfile test
       fail, and the handoff reports that observed fail-then-pass result. Raising
       is the correct direction — lowering a floor only makes it more permissive
       and can never produce a new failure. This check is not committed
-- [ ] The guard's explanatory comment names the four current advisories by
+- [x] The guard's explanatory comment names the four current advisories by
       GHSA identifier, states `3.1.6` as the patched version for the 3.x line,
       and records why the major is pinned
-- [ ] The handoff states the new total test count explicitly rather than
+- [x] The handoff states the new total test count explicitly rather than
       implying the 49-test baseline still holds
-- [ ] `brace-expansion` and `serialize-javascript` assertions in the same file
+- [x] `brace-expansion` and `serialize-javascript` assertions in the same file
       are unchanged and still pass
-- [ ] `pnpm run typecheck`, `lint`, `format`, `test`, and `audit` pass, and
+- [x] `pnpm run typecheck`, `lint`, `format`, `test`, and `audit` pass, and
       `cargo build`, `cargo clippy --all-targets`, and `cargo test` pass
-- [ ] The Zed extension checks and lints clean against its refreshed lockfile on
+- [x] The Zed extension checks and lints clean against its refreshed lockfile on
       the `wasm32-wasip2` target. The root workspace `members` list is
       `["rlsp-fmt", "rlsp-yaml", "rlsp-yaml-parser"]`, so the Zed crate is
       outside the workspace and the root `cargo` commands above never build it —

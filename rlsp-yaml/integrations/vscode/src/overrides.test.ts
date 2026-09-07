@@ -2,9 +2,18 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
-// Regression guard for the pnpm.overrides entries that patch two npm
+// Regression guard for the pnpm.overrides entries that patch npm
 // security advisories (brace-expansion GHSA-3jxr-9vmj-r5cp, fast-uri
-// GHSA-v2hh-gcrm-f6hx / GHSA-4c8g-83qw-93j6). brace-expansion reaches the
+// GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
+// GHSA-jqff-g426-hqxp -- each of these four advisories spans three
+// vulnerable ranges on the 2.x, 3.x, and 4.x lines, with patched floors
+// 2.4.5, 3.1.6, and 4.1.3 respectively). fast-uri carries no override --
+// its version drifts with ordinary transitive dependency updates -- so
+// isPatchedFastUri() below encodes both verified patched floors (3.1.6
+// and 4.1.3) directly, and fails closed for every other major line,
+// including 2.x, even though 2.4.5 is also patched: a transitive
+// downgrade across a major line is unexpected enough that it should stop
+// and be looked at rather than pass on an assumption. brace-expansion reaches the
 // extension's runtime dependency path transitively through
 // vscode-languageclient's dependency graph (currently via minimatch, though
 // the exact minimatch version is not load-bearing for this guard -- see the
@@ -87,6 +96,19 @@ function isAtLeast(actual: string, floor: string): boolean {
   return aPatch >= fPatch;
 }
 
+// fast-uri-specific patched-version check. isAtLeast alone cannot express
+// this: it is major-agnostic, so isAtLeast(version, '3.1.6') accepts any
+// 4.x version, including the vulnerable 4.0.0-4.1.2 range. This function
+// is the single decision point for "is this fast-uri version patched" --
+// keeping the floor check and the major check in one place means there is
+// no way to satisfy the guard by editing only one of them.
+function isPatchedFastUri(version: string): boolean {
+  const [major] = parseVersion(version);
+  if (major === 3) return isAtLeast(version, '3.1.6');
+  if (major === 4) return isAtLeast(version, '4.1.3');
+  return false; // any other major line is unvetted -- fail closed
+}
+
 describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
   it('overrides block declares the retained pins', () => {
     const overridesBlock = overridesBlockOf(lockfile);
@@ -121,8 +143,62 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     const versions = allResolvedVersions(lockfile, 'fast-uri');
     expect(versions.length).toBeGreaterThan(0);
     for (const version of versions) {
-      expect(isAtLeast(version, '3.1.5')).toBe(true);
+      expect(isPatchedFastUri(version)).toBe(true);
     }
+  });
+});
+
+// Direct unit coverage for isAtLeast/parseVersion. The lockfile-driven
+// tests above only ever exercise these against whatever fast-uri/
+// brace-expansion versions happen to be resolved right now -- once the
+// lockfile holds a non-vulnerable version, no floor value in those tests
+// can exercise the false branch again. These cases are the standing proof
+// that the comparison itself rejects vulnerable versions, independent of
+// what the lockfile currently resolves.
+describe('isAtLeast', () => {
+  it.each([
+    // The exact regression this task closes: the pre-fix floor accepted
+    // this vulnerable patch version.
+    ['3.1.5', '3.1.6', false],
+    // Inclusive floor.
+    ['3.1.6', '3.1.6', true],
+    // Currently resolved by the lockfile.
+    ['3.1.7', '3.1.6', true],
+    // Numeric comparison, not lexicographic -- '3.1.10' < '3.1.6' as
+    // strings, but 10 > 6 as numbers.
+    ['3.1.10', '3.1.6', true],
+    ['3.2.0', '3.1.6', true],
+    ['4.0.0', '3.1.6', true],
+    ['3.0.9', '3.1.6', false],
+    ['2.9.9', '3.1.6', false],
+  ])('isAtLeast(%s, %s) === %s', (actual, floor, expected) => {
+    expect(isAtLeast(actual, floor)).toBe(expected);
+  });
+});
+
+// Boundary coverage for isPatchedFastUri, independent of what the
+// lockfile currently resolves. Covers both patched floors, the two 4.x
+// false-positive traps (4.0.0 is major-4 but pre-floor; 4.1.2 is one
+// patch below the floor) that isAtLeast alone would miss, and the
+// fail-closed default for majors this guard has not vetted.
+describe('isPatchedFastUri', () => {
+  it.each([
+    ['3.1.5', false],
+    ['3.1.6', true],
+    ['4.0.0', false],
+    ['4.1.2', false],
+    ['4.1.3', true],
+    ['4.2.0', true],
+    ['2.9.9', false],
+    ['5.0.0', false],
+  ])('isPatchedFastUri(%s) === %s', (version, expected) => {
+    expect(isPatchedFastUri(version)).toBe(expected);
+  });
+});
+
+describe('parseVersion', () => {
+  it('throws on a non-release version string', () => {
+    expect(() => parseVersion('3.1.6-beta.1')).toThrow('unexpected version format');
   });
 });
 
