@@ -203,7 +203,7 @@ floor.
 - [x] Clarify scope and the Node version decision with the user
 - [x] Land the refreshed Rust and npm lockfiles and raise the `fast-uri` guard floor
 - [x] Confirm the four Dependabot alerts close after the push
-- [ ] Realign `@types/vscode` with `engines.vscode` and guard the pair
+- [x] Realign `@types/vscode` with `engines.vscode` and guard the pair
 - [ ] Move CI from Node 22 to Node 24 and record why
 - [ ] Upgrade `vitest` and `@vitest/coverage-v8` to 5.0.0 and resolve the migration
 - [ ] Measure and record the coverage delta caused by AST-based remapping
@@ -270,25 +270,25 @@ without touching the engine, so all five platform builds now fail. Bring the
 types back to the declared engine and add a guard so the pair cannot silently
 diverge again.
 
-- [ ] `@types/vscode` and `engines.vscode` agree on major and minor, with
+- [x] `@types/vscode` and `engines.vscode` agree on major and minor, with
       `engines.vscode` unchanged at `^1.125.0` — the extension keeps working on
       VS Code 1.125 and newer
-- [ ] `vsce package` succeeds locally for at least one platform target,
+- [x] `vsce package` succeeds locally for at least one platform target,
       demonstrated rather than assumed
-- [ ] A guard test fails when the two fields disagree. It reads both values
+- [x] A guard test fails when the two fields disagree. It reads both values
       from `package.json` rather than hardcoding either, so it keeps working
       after a future deliberate bump
-- [ ] The guard is proven able to fail: temporarily diverging the two fields
+- [x] The guard is proven able to fail: temporarily diverging the two fields
       makes it fail, and restoring them makes it pass. That observed
       fail-then-pass result is reported; the diverged state is not committed
-- [ ] The guard states in a comment why the two fields are coupled and that
+- [x] The guard states in a comment why the two fields are coupled and that
       `vsce` compares major.minor only, so a future reader does not treat the
       pairing as arbitrary
-- [ ] No Dependabot ignore rule is added for `@types/vscode` — a future bump
+- [x] No Dependabot ignore rule is added for `@types/vscode` — a future bump
       should turn its PR red so the minimum-version decision is made
       deliberately, not suppressed
-- [ ] The existing 66 tests still pass and the new total is stated explicitly
-- [ ] `pnpm run typecheck`, `lint`, `format`, `test`, `audit`, and `build` pass
+- [x] The existing 66 tests still pass and the new total is stated explicitly
+- [x] `pnpm run typecheck`, `lint`, `format`, `test`, `audit`, and `build` pass
 - [ ] After the push, all five `Build VSIX` platform jobs in the VS Code
       Extension workflow are green, and the workflow itself succeeds
 
