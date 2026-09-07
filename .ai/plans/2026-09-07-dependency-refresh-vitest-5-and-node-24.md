@@ -183,10 +183,33 @@ still accepts `3.1.5` would let the same vulnerability return unnoticed.
       `package.json`, and `pnpm-lock.yaml` are committed with no unrelated
       changes included
 - [ ] No `version = "..."` field in any `Cargo.toml` is modified
-- [ ] The guard rejects every `fast-uri` version below `3.1.6`, and a
-      deliberately lowered floor makes the test fail
+- [ ] The lockfile guard rejects every resolved `fast-uri` version below
+      `3.1.6`
+- [ ] The lockfile guard also rejects a resolved `fast-uri` major other than
+      `3`. Each of the four advisories carries three vulnerable ranges, not one
+      — `< 2.4.5`, `< 3.1.6`, and `< 4.1.3` — so a bare `>= 3.1.6` floor returns
+      true for `4.0.0`–`4.1.2`, which is vulnerable to all four. A major bump
+      must force a deliberate update to this guard rather than passing silently
+- [ ] `isAtLeast` is directly unit-tested against literal version pairs
+      spanning the new floor, including `('3.1.5','3.1.6') === false` (the exact
+      regression this task closes), `('3.1.6','3.1.6') === true` (inclusive
+      floor), and `('3.1.10','3.1.6') === true` (numeric, not lexicographic,
+      comparison). These assertions are the standing proof that the floor
+      rejects vulnerable versions — the lockfile-reading test cannot carry that
+      claim, because once this task lands the real lockfile never contains a
+      vulnerable version, so no floor value makes it fail
+- [ ] `parseVersion` is tested to throw on a non-release version string, the
+      hard-failure behaviour its own comment documents
+- [ ] The assertion loop is proven non-vacuous: during implementation, raising
+      the floor *above* the currently resolved version makes the lockfile test
+      fail, and the handoff reports that observed fail-then-pass result. Raising
+      is the correct direction — lowering a floor only makes it more permissive
+      and can never produce a new failure. This check is not committed
 - [ ] The guard's explanatory comment names the four current advisories by
-      GHSA identifier and states `3.1.6` as the patched version
+      GHSA identifier, states `3.1.6` as the patched version for the 3.x line,
+      and records why the major is pinned
+- [ ] The handoff states the new total test count explicitly rather than
+      implying the 49-test baseline still holds
 - [ ] `brace-expansion` and `serialize-javascript` assertions in the same file
       are unchanged and still pass
 - [ ] `pnpm run typecheck`, `lint`, `format`, `test`, and `audit` pass, and
@@ -272,6 +295,22 @@ threshold, so the delta must be measured rather than assumed.
   patched version for all four advisories. Pinning the floor to the currently
   resolved 3.1.7 would make the guard fail on an unrelated future downgrade that
   is not actually vulnerable.
+- **The guard pins the `fast-uri` major in addition to the floor** — raised by
+  the security advisor at Task 1's input gate and verified directly against the
+  GitHub advisory data on 2026-09-07. Every one of the four advisories lists
+  three vulnerable ranges (`>= 2.3.1/2.4.1/2.4.2, < 2.4.5`;
+  `>= 3.0.0/3.1.2/3.1.3, < 3.1.6`; `>= 4.0.0/4.0.1, < 4.1.3`), so a single floor
+  is structurally the wrong control for this package: `isAtLeast('4.0.0',
+  '3.1.6')` is true while `4.0.0` is vulnerable to all four. Pinning the major
+  is preferred over a per-major floor table — the intent is to force a human to
+  revisit the guard when the major moves, not to predict future advisories.
+
+- **The `overridesBlockOf` unguarded `indexOf` is a known latent gap, left
+  as-is** — if pnpm ever stops emitting an `overrides:` block, `indexOf` returns
+  `-1` and the slice yields near-empty text rather than failing loudly. It is
+  pre-existing, outside this plan's Non-Goals boundary on overrides handling,
+  and recorded here so it is carried forward knowingly rather than silently.
+
 - **Lockfiles and the guard fix ship as one commit** — the guard's correctness
   is what makes the security posture of the refreshed lockfile durable; splitting
   them would leave a window where the guard silently under-enforces.
