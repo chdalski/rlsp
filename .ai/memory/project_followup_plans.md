@@ -37,6 +37,18 @@ type: project
   bumped manually in lockstep, so drift is bounded. Verify the current
   pinning posture before acting — this note reflects 2026-07-23 state.
 
+- **`npm_and_yarn` Dependabot job for the VS Code extension fails repeatedly.**
+  Surfaced 2026-09-08 while verifying the push that added the Zed cargo entry.
+  The `npm_and_yarn in /rlsp-yaml/integrations/vscode` Dependabot Updates run
+  fails with `record_update_job_unknown_error`; the run log also shows
+  `Failed to parse GITHUB_REGISTRIES_PROXY environment variable`. Verified
+  pre-existing and unrelated to the Zed entry: failures on 2026-09-07 (×2,
+  `for fast-uri`) and 2026-09-03 (×3, `for fast-uri` / `for @humanfs/node`),
+  with successes interleaved on 2026-09-03, so it is intermittent rather than
+  a hard break. Root cause not investigated. Check `gh run list --workflow
+  "Dependabot Updates"` for current state before acting — this note reflects
+  2026-09-08 state.
+
 - **`packageManager` field may warrant a `+<integrity>` hash.** Task 4 made CI
   resolve pnpm from `rlsp-yaml/integrations/vscode/package.json`'s
   `"packageManager": "pnpm@10.33.2"`. `pnpm/action-setup` supports (and
