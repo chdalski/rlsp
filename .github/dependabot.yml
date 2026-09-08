@@ -36,3 +36,14 @@ updates:
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+  # The Zed extension crate declares its own `[workspace]` table (Cargo.toml)
+  # and therefore sits outside the root Cargo workspace covered by the cargo
+  # entry above. Dependabot's cargo updater resolves per manifest directory,
+  # so a second entry is required to reach this crate's Cargo.toml/Cargo.lock.
+  - package-ecosystem: "cargo"
+    directory: "/rlsp-yaml/integrations/zed"
+    schedule:
+      interval: "weekly"
+    groups:
+      zed-extension-dependencies:
+        patterns: ["*"]

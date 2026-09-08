@@ -61,8 +61,8 @@ the rest of the repository already has.
 - [x] Clarify scope and `zed_extension_api` handling with the user
 - [x] Confirm the crate is outside the workspace and its lockfile is tracked
 - [x] Confirm CI gates pull requests touching the Zed extension directory
-- [ ] Add the `cargo` entry for the Zed extension directory
-- [ ] Verify the config parses and every key in the new entry is valid
+- [x] Add the `cargo` entry for the Zed extension directory
+- [x] Verify the config parses and every key in the new entry is valid
 
 ## Tasks
 
@@ -73,19 +73,19 @@ Zed extension's manifest directory, so its dependencies receive the same
 weekly grouped updates as the root workspace, GitHub Actions, and the VS Code
 extension.
 
-- [ ] `.github/dependabot.yml` contains a `cargo` entry whose directory is the
+- [x] `.github/dependabot.yml` contains a `cargo` entry whose directory is the
       Zed extension's manifest directory, on the same schedule interval as the
       three existing entries
-- [ ] The entry's updates arrive as a single group whose name follows the
+- [x] The entry's updates arrive as a single group whose name follows the
       naming convention of the existing groups
-- [ ] The entry carries no `ignore` rules
-- [ ] A comment on the entry states why the Zed crate needs an entry of its
+- [x] The entry carries no `ignore` rules
+- [x] A comment on the entry states why the Zed crate needs an entry of its
       own rather than being covered by the `cargo` entry at `/`
-- [ ] The file parses as valid YAML, and every key used in the new entry is
+- [x] The file parses as valid YAML, and every key used in the new entry is
       one the Dependabot options reference defines for an `updates` entry
-- [ ] The three existing entries — including their groups and their commented
+- [x] The three existing entries — including their groups and their commented
       `ignore` rules — are byte-for-byte unchanged
-- [ ] The directory named in the new entry is the one containing the Zed
+- [x] The directory named in the new entry is the one containing the Zed
       extension's `Cargo.toml` and its committed `Cargo.lock`
 
 ## Decisions
