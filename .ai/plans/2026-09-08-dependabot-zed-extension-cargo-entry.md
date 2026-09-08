@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-09-08)
 **Created:** 2026-09-08
 
 # Bring the Zed extension crate under Dependabot
