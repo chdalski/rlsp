@@ -217,8 +217,8 @@
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.8",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.4.1",
-    "@types/vscode": "1.125.0",
+    "@types/node": "^26.5.0",
+    "@types/vscode": "1.136.0",
     "@vitest/coverage-v8": "5.0.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
@@ -227,7 +227,7 @@
     "eslint": "^10.10.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.69.0",
+    "typescript-eslint": "^8.70.0",
     "vite": "^8.2.2",
     "vitest": "5.0.0"
   }
