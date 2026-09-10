@@ -16,7 +16,7 @@ memchr = "2"
 thiserror = "2"
 
 [dev-dependencies]
-rstest = "0.26"
+rstest = "0.27"
 criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1"
 
