@@ -638,7 +638,8 @@ This covers:
 - `/project-init` outputs — `CLAUDE.md`, `Cargo.toml` lint
   config, TypeScript strictness config
 - `/ensure-ai-dirs` outputs — plan format guide, review
-  checklist, plan archive moves
+  checklist, `completed/CLAUDE.md`, finished-plan moves
+  into `completed/`
 - Plan status changes — marking plans Completed or Canceled
   after execution ends (task-level updates are committed by
   the reviewer during execution)
