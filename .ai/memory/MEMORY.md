@@ -8,3 +8,18 @@
 - [project_followup_plans.md](project_followup_plans.md) — Open items: feature work (#1-3), cleanup queue (C1-C4: stale refs, match refactors, iterator patterns)
 - [potential-performance-optimizations.md](potential-performance-optimizations.md) — Deferred perf candidates: Option D (step_in_document restructure), L4 full (Option<Box<NodeMeta>>), arena Event queue, lazy Span construction + verification methodology. Applied work lives in plans + git log.
 - [2026-04-18-rlsp-yaml-architectural-program.md](2026-04-18-rlsp-yaml-architectural-program.md) — Session brief: GHA-expression false-positive bug → 3-move architectural program (AST-first rule, LSP-feature fixtures, real-world corpus). Move 1 plan drafted at `.ai/plans/2026-04-18-one-parser-one-ast.md`, awaiting user approval.
+- [Present full plan before approval](feedback_plan_presentation.md) — show complete plan content, not a summary, before asking for approval
+- [One plan at a time](feedback_one_plan_at_a_time.md) — present and execute plans sequentially; don't batch-present multi-plan programs
+- [Wait for reviewer's direct approval](feedback_wait_for_reviewer_direct_approval.md) — never commit based on a developer-relayed approval; wait for the reviewer's own message to the lead
+- [Don't auto-proceed on question timeouts](feedback_no_auto_proceed_on_question_timeout.md) — on AskUserQuestion "no response after 60s" notices, hold and wait; don't guess user-owned decisions
+- [No non-decision questions](feedback_no_non_decision_questions.md) — don't ask the user to pick between options that all lead to an acceptable outcome; resolve low-stakes non-blocking items as lead
+- [No completed items in memory](feedback_no_completed_in_memory.md) — remove done items from follow-up queues; completed work lives in plans and git
+- [No edits to completed plans](feedback_no_edit_completed_plans.md) — completed plans are immutable history; don't update stale refs in them
+- [Project memory location](feedback_project_memory_location.md) — use `.ai/memory/` in the workspace for project-specific memory, not home-dir
+- [feature-log.md is user-facing only](feedback_feature_log_user_facing_only.md) — do not add entries for internal refactors/retrofits in rlsp-yaml
+- [No mechanical code splits](feedback_no_mechanical_splits.md) — line counts are diagnostic signals, not prescriptive rules; splits need structural justification
+- [Scratch tools are not deliverables](feedback_scratch_tools_not_deliverables.md) — when a task requires empirical measurement, call out in the dispatch that scratch files must be deleted before committing
+- [No agent-verifiable perf thresholds](feedback_no_agent_perf_thresholds.md) — agents run in Docker, perf targets are baremetal; perf measurement is the user's job out-of-band
+- [Always consider performance](feedback_always_consider_performance.md) — proactively assess perf implications for every parser fix; don't wait to be asked
+- [Verify CI pipeline after push](feedback_verify_ci_pipeline_after_push.md) — check `gh run list` (full matrix, incl. Windows) after pushing; local gates + alert checks aren't "CI green"; run `tsc --noEmit` as part of the TS gate
+- [Trunk-based: land on main](feedback_trunk_based_land_on_main.md) — land work directly on main, no feature-branch/PR ceremony; let Dependabot self-close superseded PRs via `@dependabot rebase`
