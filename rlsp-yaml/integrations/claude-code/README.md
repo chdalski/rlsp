@@ -31,6 +31,47 @@ Either path loads the same plugin — `--plugin-dir` is for testing a local
 checkout without a marketplace add; the marketplace install is the normal
 path for end users.
 
+## Updating the plugin
+
+This is about the plugin itself — commands, hooks, `.lsp.json` — not the
+`rlsp-yaml` binary it spawns; see
+[Staying up to date](#staying-up-to-date) for the binary.
+
+Claude Code only fetches a new copy of the plugin when its `version` in
+`plugin.json` changes — an unchanged version means `claude plugin update`
+reports "already at the latest version" even if the plugin's files changed
+upstream. Every change to this plugin's folder ships with a version bump in
+the same commit, so an update is available whenever the plugin has changed.
+
+Update by hand — in a session:
+
+```
+/plugin marketplace update rlsp
+/plugin update rlsp-yaml@rlsp
+```
+
+or from a shell:
+
+```sh
+claude plugin marketplace update rlsp
+claude plugin update rlsp-yaml@rlsp
+```
+
+Either form refreshes the `rlsp` marketplace catalog first, then updates
+`rlsp-yaml` if a newer version is available:
+
+- `✔ rlsp-yaml is already at the latest version (…).` — nothing to do.
+- `✔ Plugin "rlsp-yaml" updated from … to … for scope user. Restart to
+  apply changes.` — run `/reload-plugins` in a session to pick up the new
+  version without restarting, or restart Claude Code.
+
+`rlsp` is a third-party marketplace, so Claude Code does not check it for
+updates in the background by default. To turn that on: run `/plugin`, open
+the **Marketplaces** tab, select `rlsp`, and choose **Enable auto-update**.
+Once enabled, Claude Code checks for marketplace and plugin updates a few
+minutes after each session starts and prompts you to `/reload-plugins` when
+a new version lands.
+
 ## Installing the rlsp-yaml binary
 
 This plugin does not bundle or provision a binary — `.lsp.json` spawns the

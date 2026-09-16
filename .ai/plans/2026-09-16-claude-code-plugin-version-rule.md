@@ -102,7 +102,7 @@ These match release-plz's defaults for 0.x crates. Milestone bumps (e.g. to
 - [x] Clarify requirements with user
 - [x] Measure `claude plugin update` behaviour and `validate --strict`
       constraints
-- [ ] Task 1: Document how plugin updates reach users
+- [x] Task 1: Document how plugin updates reach users
 - [ ] Task 2: Version-bump rule and one-time bump to 0.2.0
 - [ ] With the user's go-ahead, push `main`; verify the CI run for that push
       succeeds on every job
@@ -117,21 +117,21 @@ Users need to know that a plugin change reaches them only as a new version,
 that auto-update for this marketplace is off unless they turn it on, and how
 to update by hand.
 
-- [ ] The plugin README has a section on updating the plugin itself, separate
+- [x] The plugin README has a section on updating the plugin itself, separate
       from the binary "Staying up to date" subsection. It states that an
       update arrives only when the plugin's version changes and that every
       change to the plugin ships with a new version, gives the commands to
       update by hand (in a session and from a shell), and explains how to turn
       on auto-update for the `rlsp` marketplace
-- [ ] The review handoff shows each documented shell command run against
+- [x] The review handoff shows each documented shell command run against
       Claude Code 2.1.273 in an isolated `CLAUDE_CONFIG_DIR`, with its output.
       It names the steps that can only be done interactively and the docs
       page they rely on, confirms that the real `~/.claude` plugin files are
       unchanged, and confirms that no scratch files remain in the repo
-- [ ] The feature-log "Claude Code Plugin" entry states that plugin changes
+- [x] The feature-log "Claude Code Plugin" entry states that plugin changes
       are released as new versions and delivered through Claude Code's plugin
       update mechanism
-- [ ] The commit changes only the plugin README and the feature log;
+- [x] The commit changes only the plugin README and the feature log;
       `plugin.json` is unchanged
 
 ### Task 2: Version-bump rule and one-time bump to 0.2.0
