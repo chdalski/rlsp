@@ -23,3 +23,4 @@
 - [Always consider performance](feedback_always_consider_performance.md) — proactively assess perf implications for every parser fix; don't wait to be asked
 - [Verify CI pipeline after push](feedback_verify_ci_pipeline_after_push.md) — check `gh run list` (full matrix, incl. Windows) after pushing; local gates + alert checks aren't "CI green"; run `tsc --noEmit` as part of the TS gate
 - [Trunk-based: land on main](feedback_trunk_based_land_on_main.md) — land work directly on main, no feature-branch/PR ceremony; let Dependabot self-close superseded PRs via `@dependabot rebase`
+- [Plugin update needs version bump](project_claude_plugin_update_needs_version_bump.md) — `claude plugin update` compares only the version string; unchanged version = no-op; a plugin-root CLAUDE.md fails `validate --strict`
