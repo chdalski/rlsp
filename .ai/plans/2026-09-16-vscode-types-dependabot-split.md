@@ -68,9 +68,17 @@ can pass CI and merge again.
 - [x] Investigate why PR #70 fails
 - [x] Clarify the fix direction with the user (separate `@types/vscode` from the group)
 - [x] Exclude `@types/vscode` from the extension's catch-all Dependabot group
-- [ ] Push to `main` and let Dependabot's immediate run pick up the new configuration
-- [ ] Comment `@dependabot rebase` on PR #70 if it still carries `@types/vscode` after that run
-- [ ] Verify the outcomes stated in the Goal on GitHub
+- [x] Push to `main` and let Dependabot's immediate run pick up the new configuration
+- [x] Comment `@dependabot rebase` on PR #70 if it still carries `@types/vscode` after that run
+      — not needed: the push-triggered run closed #70 itself ("no longer needed")
+      and replaced it with #72 (`@types/node`, `typescript-eslint`, `vite`; no
+      `@types/vscode`), which passes every check
+- [ ] Verify the outcomes stated in the Goal on GitHub — open: the separate
+      `@types/vscode` PR has not been raised yet. In the push-triggered version job
+      (Actions run 35096393013), Dependabot marked all of #70's dependencies as
+      handled, `@types/vscode` included, while leaving #70 to a separate refresh
+      job, so this run skipped `@types/vscode`. The next scheduled weekly run
+      (Thursdays, ~23:03 UTC) is expected to raise it
 
 ## Tasks
 
