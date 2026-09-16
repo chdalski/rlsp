@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-16
 
 ## Goal
@@ -103,7 +103,7 @@ These match release-plz's defaults for 0.x crates. Milestone bumps (e.g. to
 - [x] Measure `claude plugin update` behaviour and `validate --strict`
       constraints
 - [x] Task 1: Document how plugin updates reach users
-- [ ] Task 2: Version-bump rule and one-time bump to 0.2.0
+- [x] Task 2: Version-bump rule and one-time bump to 0.2.0
 - [ ] With the user's go-ahead, push `main`; verify the CI run for that push
       succeeds on every job
 - [ ] On this machine, `claude plugin update rlsp-yaml@rlsp` moves the
@@ -140,22 +140,22 @@ Add the project convention that keeps the plugin version current, and bump
 the version to 0.2.0. That version covers the switch to "bring your own
 binary" (`a7a937c9`) and the Task 1 docs, so both reach existing installs.
 
-- [ ] `plugin.json` `version` is `0.2.0`, and no other field changes
-- [ ] The root `CLAUDE.md` Conventions contain a rule requiring every commit
+- [x] `plugin.json` `version` is `0.2.0`, and no other field changes
+- [x] The root `CLAUDE.md` Conventions contain a rule requiring every commit
       that changes a file under `rlsp-yaml/integrations/claude-code/` to also
       change `plugin.json`'s `version` in that commit, following the Bump
       rules table. The rule states why (`claude plugin update` compares
       versions, not content), that milestone bumps are user-directed, and
       that the existing "must not edit `version` in any `Cargo.toml`" rule
       does not cover `plugin.json`
-- [ ] Live check: in a scratch clone outside `/workspace` containing this
+- [x] Live check: in a scratch clone outside `/workspace` containing this
       task's changes, a headless Claude Code session running as the
       `developer` agent is asked to make a small non-breaking change to a
       file in the plugin folder, with no mention of versions. The resulting
       diff changes `plugin.json` from `0.2.0` to `0.2.1`. The handoff shows the
       exact command, the prompt, and the resulting diff. The scratch clone is
       deleted afterwards
-- [ ] `claude plugin validate --strict` passes for the plugin directory and
+- [x] `claude plugin validate --strict` passes for the plugin directory and
       the repo root
 
 ## Decisions

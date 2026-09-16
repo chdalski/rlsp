@@ -80,6 +80,19 @@ cargo test -p rlsp-yaml --test claude_code_stdio_smoke              # LSP initia
 - Workspace path dependencies must include a `version` field — `cargo publish` rejects path-only deps
 - Use `#[expect(lint, reason = "...")]` instead of `#[allow(lint)]` — enforced by `allow_attributes = "deny"` and `allow_attributes_without_reason = "deny"` in workspace lints
 - `clippy.toml` at the workspace root configures test-specific lint allowances (`allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`, `allow-indexing-slicing-in-tests = true`) — `unwrap_used`, `expect_used`, `panic`, and `indexing_slicing` do not need `#[expect]` suppression in test code
+- Every commit that changes a file under `rlsp-yaml/integrations/claude-code/` must also bump `plugin.json`'s `version` in the same commit — see Claude Code Plugin Versioning below
+
+### Claude Code Plugin Versioning
+
+Claude Code resolves whether a plugin update is available from `plugin.json`'s `version`, not from content — `claude plugin update` compares the installed version against the source version, and if they are equal it reports "already at the latest version" and fetches nothing, even when files changed. Every commit that changes a file under `rlsp-yaml/integrations/claude-code/` must therefore also bump `plugin.json`'s `version` in that same commit, by exactly one step:
+
+| The commit's plugin change | Current major is 0 | Current major ≥ 1 |
+|---|---|---|
+| breaks existing installs (e.g. removes or renames something users rely on) | minor | major |
+| adds a feature | patch | minor |
+| anything else (fixes, docs, README, metadata) | patch | patch |
+
+Milestone bumps (e.g. 0.x → 1.0) are user-directed, same as the `Cargo.toml` version rule above. This is a separate rule from "Agents must not edit `version = "..."` fields in any `Cargo.toml`" above — that rule is scoped to `Cargo.toml` files owned by release-plz and does not cover `plugin.json`, which release-plz does not manage.
 
 ## Crate Boundaries
 
