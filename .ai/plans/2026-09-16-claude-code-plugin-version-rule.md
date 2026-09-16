@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-09-16)
 **Created:** 2026-09-16
 
 ## Goal
@@ -104,9 +104,9 @@ These match release-plz's defaults for 0.x crates. Milestone bumps (e.g. to
       constraints
 - [x] Task 1: Document how plugin updates reach users
 - [x] Task 2: Version-bump rule and one-time bump to 0.2.0
-- [ ] With the user's go-ahead, push `main`; verify the CI run for that push
+- [x] With the user's go-ahead, push `main`; verify the CI run for that push
       succeeds on every job
-- [ ] On this machine, `claude plugin update rlsp-yaml@rlsp` moves the
+- [x] On this machine, `claude plugin update rlsp-yaml@rlsp` moves the
       installed plugin from `0.1.0` to `0.2.0`
 
 ## Tasks
