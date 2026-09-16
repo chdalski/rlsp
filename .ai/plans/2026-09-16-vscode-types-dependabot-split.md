@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-16
 
 ## Goal
@@ -67,7 +67,7 @@ can pass CI and merge again.
 
 - [x] Investigate why PR #70 fails
 - [x] Clarify the fix direction with the user (separate `@types/vscode` from the group)
-- [ ] Exclude `@types/vscode` from the extension's catch-all Dependabot group
+- [x] Exclude `@types/vscode` from the extension's catch-all Dependabot group
 - [ ] Push to `main` and let Dependabot's immediate run pick up the new configuration
 - [ ] Comment `@dependabot rebase` on PR #70 if it still carries `@types/vscode` after that run
 - [ ] Verify the outcomes stated in the Goal on GitHub
@@ -80,20 +80,20 @@ Change the extension's npm Dependabot entry so `@types/vscode` is no longer
 bundled with the other dependencies. Leave a comment explaining why, so no one
 later folds it back in as a tidy-up.
 
-- [ ] In the npm entry for `/rlsp-yaml/integrations/vscode`, the
+- [x] In the npm entry for `/rlsp-yaml/integrations/vscode`, the
       `vscode-extension-dependencies` group no longer matches `@types/vscode`;
       every other dependency still matches it
-- [ ] No Dependabot `ignore` rule for `@types/vscode` exists; its updates are
+- [x] No Dependabot `ignore` rule for `@types/vscode` exists; its updates are
       still proposed
-- [ ] A comment beside the change says: `@types/vscode` must move in lockstep
+- [x] A comment beside the change says: `@types/vscode` must move in lockstep
       with `engines.vscode`; its bump PR is expected to stay red until the
       minimum VS Code version is raised on purpose; keeping it in the group would
       block every other extension dependency update
-- [ ] The existing `typescript` major-version ignore rule and its comment are
+- [x] The existing `typescript` major-version ignore rule and its comment are
       unchanged, and no other ecosystem entry in `.github/dependabot.yml` changes
-- [ ] `.github/dependabot.yml` passes validation against the SchemaStore
+- [x] `.github/dependabot.yml` passes validation against the SchemaStore
       `dependabot-2.0` JSON schema; the handoff names the command and its output
-- [ ] `.github/dependabot.yml` is the only file changed
+- [x] `.github/dependabot.yml` is the only file changed
 
 ## Decisions
 

@@ -29,6 +29,11 @@ updates:
     groups:
       vscode-extension-dependencies:
         patterns: ["*"]
+        # @types/vscode must move in lockstep with engines.vscode; its bump
+        # PR is expected to stay red until the minimum VS Code version is
+        # raised on purpose; keeping it in the group would block every
+        # other extension dependency update.
+        exclude-patterns: ["@types/vscode"]
     # typescript-eslint does not yet support TypeScript 7.0 (tracked in
     # typescript-eslint#10940: support starts at TS >=7.1), and lint is a
     # required project gate. Block the major only; minor/patch keep flowing.
