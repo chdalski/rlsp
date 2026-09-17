@@ -50,6 +50,19 @@ languages.
 | `[dev-dependencies]` with test crates in Cargo.toml | Rust test crates |
 | `#[cfg(test)]` in `.rs` files | Rust built-in tests |
 
+### Code Intelligence Plugins
+
+Official language-server plugins for detected languages.
+A plugin only activates when its server binary is on
+`PATH`.
+
+| Language | Plugin | Server binary |
+|---|---|---|
+| TypeScript | `typescript-lsp@claude-plugins-official` | `typescript-language-server` |
+| Rust | `rust-analyzer-lsp@claude-plugins-official` | `rust-analyzer` |
+| Python | `pyright-lsp@claude-plugins-official` | `pyright-langserver` |
+| Go | `gopls-lsp@claude-plugins-official` | `gopls` |
+
 ### Mono-Repo Detection
 
 A project is a mono-repo if any of these are true:
@@ -131,27 +144,39 @@ homepages, npm/crates.io package pages).
    `eslint.config.mjs`, and `package.json` in each
    TypeScript project root.
 
-7. **Detect mono-repo** — check for workspace fields,
+7. **Enable code intelligence plugins** — for each
+   detected language listed in the Code Intelligence
+   Plugins table, add its plugin to `enabledPlugins` in
+   `.claude/settings.json` with the value `true`. Merge
+   into the existing file: keep every other key and entry,
+   and leave an entry already set to `false` unchanged —
+   it records a deliberate opt-out. Then check each
+   plugin's server binary with `command -v <binary>`. Do
+   not install missing binaries — that changes the
+   machine, not the project — but report them, because
+   the plugin stays inactive without its binary.
+
+8. **Detect mono-repo** — check for workspace fields,
    multiple manifest directories, or git submodules. If
    detected, catalog components with their paths and
    purposes (from component README.md or manifest
    descriptions).
 
-8. **Synthesize overview** — read README.md (first few
+9. **Synthesize overview** — read README.md (first few
    paragraphs) and manifest `description` fields. Write
    2-4 sentences: what the project is, who it serves,
    why it exists. If no README exists, infer from code
    structure and manifest metadata.
 
-9. **Detect conventions** — scan for convention signals
+10. **Detect conventions** — scan for convention signals
    using the Convention Detection table. Note each finding
    as a one-line entry.
 
-10. **Detect references** — scan for authoritative URLs
+11. **Detect references** — scan for authoritative URLs
     using the Reference Detection guidance. Note each
     finding.
 
-11. **Confirm with user** — present detected conventions
+12. **Confirm with user** — present detected conventions
     and references to the user via `AskUserQuestion`:
     - "I detected these conventions — are they correct?
       Anything to add or remove?" (list detected
@@ -164,15 +189,15 @@ homepages, npm/crates.io package pages).
     Merge user feedback with preserved entries. If the
     user adds new entries, include them.
 
-12. **Write CLAUDE.md** — assemble the output following the
+13. **Write CLAUDE.md** — assemble the output following the
     format in `.claude/skills/project-init/project-context.md`.
     Write to the project root. Then check for subdirectories
     with their own `.git/` — for each one, scan it
-    independently (repeat steps 3-11 scoped to that
+    independently (repeat steps 3-12 scoped to that
     subdirectory) and write its own `CLAUDE.md`. Check for
     existing `CLAUDE.md` in each location before writing.
 
-13. **Present summary** — report to the caller:
+14. **Present summary** — report to the caller:
     - Overview synthesized (brief description of what was
       written)
     - Build and test commands detected
@@ -182,4 +207,8 @@ homepages, npm/crates.io package pages).
       (Rust projects only)
     - Which TypeScript config files were updated
       (TypeScript projects only)
+    - Which code intelligence plugins were enabled and
+      which server binaries are missing. Plugins enabled
+      here load only after the user runs `/reload-plugins`
+      or starts a new session.
     - Whether any files beyond `CLAUDE.md` were modified

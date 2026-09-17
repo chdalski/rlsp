@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Independent quality gate — reviews work against plan scope and verifies code quality
-model: claude-opus-4-8[1m]
+model: opus[1m]
 effort: high
 color: purple
 tools:
