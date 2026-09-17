@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-09-17)
 **Created:** 2026-09-16
 
 ## Goal
@@ -73,12 +73,13 @@ can pass CI and merge again.
       — not needed: the push-triggered run closed #70 itself ("no longer needed")
       and replaced it with #72 (`@types/node`, `typescript-eslint`, `vite`; no
       `@types/vscode`), which passes every check
-- [ ] Verify the outcomes stated in the Goal on GitHub — open: the separate
-      `@types/vscode` PR has not been raised yet. In the push-triggered version job
-      (Actions run 35096393013), Dependabot marked all of #70's dependencies as
-      handled, `@types/vscode` included, while leaving #70 to a separate refresh
-      job, so this run skipped `@types/vscode`. The next scheduled weekly run
-      (Thursdays, ~23:03 UTC) is expected to raise it
+- [x] Verify the outcomes stated in the Goal on GitHub — verified 2026-09-17
+      after a manual "Check for updates" (the push-triggered run on 2026-09-16
+      had skipped `@types/vscode`; see Actions run 35096393013). Both npm update
+      jobs succeeded. #73 bumps only `@types/vscode` (1.125.0→1.137.0), and its
+      only failure is the `engine-compat.test.ts` lockstep guard (1 failed, 86
+      passed). The grouped PR #72 (`@types/node`, `typescript-eslint`, `vite`)
+      passes every check
 
 ## Tasks
 
