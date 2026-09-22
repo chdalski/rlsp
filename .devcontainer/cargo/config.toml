@@ -1,0 +1,5 @@
+# Link Rust builds with mold; post-create.sh copies this file into $CARGO_HOME.
+# gcc's -fuse-ld selects mold, so no clang is needed, and the cfg table
+# covers x86_64 and arm64 containers alike.
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

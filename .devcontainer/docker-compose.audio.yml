@@ -1,0 +1,19 @@
+# PulseAudio passthrough (Linux only), loaded as the second entry of
+# "dockerComposeFile" in devcontainer.json. On macOS or Windows remove that
+# entry — the host socket below does not exist there, so the start fails.
+# README.md covers the (untested) macOS and WSL2 setups.
+services:
+  sandbox:
+    environment:
+      PULSE_SERVER: unix:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
+    volumes:
+      - type: bind
+        source: ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse
+        target: ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
+        target: ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
+        bind:
+          create_host_path: false

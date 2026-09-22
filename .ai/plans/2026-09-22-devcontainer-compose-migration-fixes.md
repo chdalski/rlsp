@@ -106,10 +106,10 @@ repo's defaults.
 
 - [x] Compare the Compose migration with `HEAD` and check the running container
 - [x] Agree the fix direction with the user
-- [ ] Enable the official code intelligence plugins in the project settings
-- [ ] Make `post-start.sh` install rust-analyzer for the pinned toolchain
-- [ ] Change the stated defaults and the fallbacks to this repo's values
-- [ ] Commit the migration and the fixes together
+- [x] Enable the official code intelligence plugins in the project settings
+- [x] Make `post-start.sh` install rust-analyzer for the pinned toolchain
+- [x] Change the stated defaults and the fallbacks to this repo's values
+- [x] Commit the migration and the fixes together
 
 ## Tasks
 
@@ -121,38 +121,38 @@ rust-analyzer for the pinned toolchain. Change the defaults the docs and
 fallbacks state to `oauth` and `chrisski.dev`. The result lands as one commit
 together with the uncommitted Compose migration.
 
-- [ ] `.claude/settings.json` enables `rust-analyzer-lsp@claude-plugins-official`
+- [x] `.claude/settings.json` enables `rust-analyzer-lsp@claude-plugins-official`
       and `typescript-lsp@claude-plugins-official`. Its existing `env` and
       `plansDirectory` values are unchanged, and `rlsp-yaml@rlsp` is not added
-- [ ] Running the plugin step of `post-start.sh` in this container installs
+- [x] Running the plugin step of `post-start.sh` in this container installs
       both plugins. Afterwards `claude plugin list` shows both as installed. A
       second run reports both as already installed and installs nothing. The
       handoff includes the output of both runs
-- [ ] On every container start, `post-start.sh` makes sure the toolchain that
+- [x] On every container start, `post-start.sh` makes sure the toolchain that
       is active in `/workspace` (the `rust-toolchain.toml` pin) is installed and
       has the rust-analyzer component. If this fails, for example offline, the
       script prints a warning and the start continues, the same way the plugin
       step handles failures. Afterwards `rust-analyzer --version` succeeds in
       `/workspace`, and the handoff includes that output
-- [ ] `rust-toolchain.toml` and the CI workflows are unchanged
-- [ ] Every statement of the `CLAUDE_AUTH` and `GIT_EMAIL_DOMAIN` defaults in
+- [x] `rust-toolchain.toml` and the CI workflows are unchanged
+- [x] Every statement of the `CLAUDE_AUTH` and `GIT_EMAIL_DOMAIN` defaults in
       `.devcontainer/README.md` and `.devcontainer/post-start.sh` says `oauth`
       and `chrisski.dev`, and the fallbacks in `post-start.sh` use those values.
       `codecentric.de` appears nowhere under `.devcontainer/`, and the README
       examples for switching auth modes switch to `proxy`
-- [ ] In the README, the example `.env` below the settings table sets
+- [x] In the README, the example `.env` below the settings table sets
       `CLAUDE_AUTH=proxy`, so it shows a real override of the default. Its
       `DEVCONTAINER_CPUS` and `DEVCONTAINER_MEMORY` lines are unchanged
-- [ ] `post-create.sh`'s comments and the README's plugin and file
+- [x] `post-create.sh`'s comments and the README's plugin and file
       descriptions say correctly where rust-analyzer comes from, and mention
       the new `post-start.sh` step. Neither says that rust-analyzer or gopls
       comes from a devcontainer feature
-- [ ] The README's migration section no longer mentions a `.devcontainer_audio/`
+- [x] The README's migration section no longer mentions a `.devcontainer_audio/`
       template
-- [ ] `bash -n` passes for `post-start.sh` and `post-create.sh`, and
+- [x] `bash -n` passes for `post-start.sh` and `post-create.sh`, and
       `uvx --from shellcheck-py shellcheck` reports no findings on lines this
       task added or changed. The handoff includes both commands and their output
-- [ ] The commit contains exactly the 14 migration paths (including the
+- [x] The commit contains exactly the 14 migration paths (including the
       deletions of `init-env` and `init-env.cmd`), `.claude/settings.json` and
       this plan. `.devcontainer/.env.credentials` and
       `.claude/settings.local.json` are not in it

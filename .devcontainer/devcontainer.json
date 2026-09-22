@@ -1,8 +1,16 @@
 {
   "name": "${localWorkspaceFolderBasename} - Sandbox",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  // Build, resource limits, env files and read-only host binds live in
+  // docker-compose.yml. docker-compose.audio.yml adds PulseAudio passthrough
+  // and works on Linux only — remove it on macOS and Windows.
+  "dockerComposeFile": [
+    "docker-compose.yml",
+    "docker-compose.audio.yml"
+  ],
+  "service": "sandbox",
+  // Keep the container running — on the Compose path the image's own
+  // command runs otherwise, and it exits immediately.
+  "overrideCommand": true,
   // Use features to enable language support (https://containers.dev/features):
   "features": {
     "ghcr.io/devcontainers/features/rust:1": {},
@@ -13,32 +21,21 @@
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "remoteUser": "vscode",
-  // Cross-platform init: runs on the HOST before the container starts.
-  // The extensionless "init-env" is resolved by the OS — Unix runs init-env
-  // directly (shebang), Windows appends .cmd via PATHEXT and runs init-env.cmd.
-  // Creates .devcontainer/.env.local (gitignored) with CLAUDE_AUTH=proxy if
-  // it doesn't exist yet. The file must exist before Docker reads it via
-  // --env-file in runArgs below.
-  "initializeCommand": [
-    ".devcontainer/init-env"
-  ],
-  "runArgs": [
-    "--env-file",
-    ".devcontainer/.env.local"
-  ],
+  // Named volumes only — read-only binds belong in docker-compose.yml (see
+  // there). Compose prefixes every volume with the project name
+  // (<folder>_devcontainer_), so the folder name is not repeated here;
+  // ${devcontainerId} keeps checkouts with the same folder name apart.
+  // fish keeps its history in ~/.local/share/fish, hence that mount target.
   "mounts": [
-    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=claude-code-config-${localWorkspaceFolderBasename},target=/home/vscode/.claude,type=volume",
-    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/vscode/.claude-host,type=bind,readonly",
-    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude.json,target=/home/vscode/.claude-host.json,type=bind,readonly",
-    "source=pnpm-store-${devcontainerId},target=/home/vscode/.local/share/pnpm/store,type=volume",
-    "source=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse,target=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse,type=bind",
-    "source=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native,target=${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native,type=bind"
+    "source=claude-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=shell-history-${devcontainerId},target=/home/vscode/.local/share/fish,type=volume",
+    "source=pnpm-store-${devcontainerId},target=/home/vscode/.local/share/pnpm/store,type=volume"
   ],
   "containerEnv": {
-    "PULSE_SERVER": "unix:${localEnv:XDG_RUNTIME_DIR:/run/user/1000}/pulse/native"
+    // uv's cache and the workspace .venv are on different filesystems, so
+    // hardlinking always fails — copy without warning on every sync.
+    "UV_LINK_MODE": "copy"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
   "postCreateCommand": "bash /workspace/.devcontainer/post-create.sh",
   "postStartCommand": "bash /workspace/.devcontainer/post-start.sh",

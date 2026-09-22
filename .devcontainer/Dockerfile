@@ -1,4 +1,6 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu
+# Pinned to an Ubuntu release so a new LTS never arrives unannounced;
+# docker-compose.yml pulls on every build for the release's security updates.
+FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
 # Install development tools
 # hadolint ignore=DL3009
@@ -16,9 +18,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     fish \
     sox \
+    # Audio passthrough for docker-compose.audio.yml; inert without it
     pulseaudio-utils \
     alsa-utils \
     libasound2-plugins \
+    # Fast linker for Rust builds (cargo/config.toml, copied in post-create.sh)
+    mold \
     # VS Code / Electron dependencies for headless integration tests
     xvfb \
     libgtk-3-0 \
@@ -57,16 +62,12 @@ USER vscode
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Set the default shell to fish
+# Configure and set the default shell to fish
+COPY --chown=vscode:vscode fish/config.fish /home/vscode/.config/fish/config.fish
 ENV SHELL=/usr/bin/fish
 
 # Set the default editor and visual
 ENV EDITOR=nano
 ENV VISUAL=nano
 
-RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes && \
-    mkdir -p /home/vscode/.config/fish && \
-    echo 'fish_add_path /home/vscode/.local/bin' >> /home/vscode/.config/fish/config.fish && \
-    echo 'alias l="ls -lisa"' >> /home/vscode/.config/fish/config.fish && \
-    echo 'alias claude="claude --dangerously-skip-permissions"' >> /home/vscode/.config/fish/config.fish && \
-    echo 'starship init fish | source' >> /home/vscode/.config/fish/config.fish
+RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes

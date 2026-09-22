@@ -1,0 +1,47 @@
+# Compose service for devcontainer.json. Holds what devcontainer.json cannot
+# express on the Compose path: resource limits, env files and the read-only
+# host binds.
+#
+# No `name:` and no `container_name:` on purpose: without them the
+# devcontainer CLI names the project <folder>_devcontainer, so each checkout
+# gets its own container. A fixed name makes every checkout share one.
+services:
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Pull the (pinned) base image on every build to pick up its security
+      # updates.
+      pull: true
+    # Personal limits, set in .devcontainer/.env, e.g. DEVCONTAINER_CPUS=4 and
+    # DEVCONTAINER_MEMORY=8g; 0 means no limit. Compose substitutes ${...}
+    # from .devcontainer/.env only — the env_file entries below do not feed
+    # substitution, so a team default belongs in the fallback here.
+    cpus: ${DEVCONTAINER_CPUS:-0}
+    mem_limit: ${DEVCONTAINER_MEMORY:-0}
+    # Container environment: committed defaults, then personal overrides.
+    # Never add .env.credentials here — the devcontainer CLI prints the
+    # resolved Compose config, env_file values included, in its start log.
+    env_file:
+      - path: .env.defaults
+      - path: .env
+        required: false
+    volumes:
+      - ..:/workspace:delegated
+      # Read-only host binds belong here, not in devcontainer.json `mounts`:
+      # on the Compose path the devcontainer CLI drops `readonly` from
+      # `mounts` entries, which would make the host's ~/.claude writable from
+      # inside the sandbox. create_host_path: false fails the start when a
+      # source is missing instead of creating an empty directory on the host.
+      - type: bind
+        source: ${HOME:-}${USERPROFILE:-}/.claude
+        target: /home/vscode/.claude-host
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOME:-}${USERPROFILE:-}/.claude.json
+        target: /home/vscode/.claude-host.json
+        read_only: true
+        bind:
+          create_host_path: false
