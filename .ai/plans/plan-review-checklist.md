@@ -8,13 +8,45 @@
 
 Review the plan against each section below. For every issue
 found, report the section number, the specific text that
-fails the check, and what needs to change. If no issues are
-found in a section, skip it in the report.
+fails the check, what needs to change, and its severity. If
+no issues are found in a section, skip it in the report.
+
+## Severity
+
+Classify every finding as **Blocking** or **Advisory**. Only
+Blocking findings send the plan back for revision and
+another full review pass — over-classifying costs a whole
+cycle, not a few seconds of reading.
+
+- **Blocking** — executing the plan as written would deliver
+  something other than what the user asked for, or would let
+  an agent report a task done when it is not: narrowed
+  scope, tasks that do not add up to the goal, an escape
+  hatch, a criterion that cannot be judged true or false, a
+  stale artifact or reader that a search found and no
+  criterion covers. Block even when the fix is small.
+- **Advisory** — everything else: wording that is verifiable
+  but could be tighter, format slips that do not change what
+  gets built, and improvement suggestions. Sections 11 and
+  12 are always Advisory — splitting a plan or adding
+  consolidation work changes the scope the user approves, so
+  the user decides, not the review cycle.
+
+Report only what you can ground in plan text or a search
+result. A finding that docs *might* describe the old state
+or counts *might* go stale names the file and reference the
+search found — otherwise drop it. If the Decisions section
+records a reasoned choice on the point, the finding is
+resolved; do not re-flag it. Escape hatches (section 2) are
+the exception: only the user can authorize a weaker target,
+so no Decisions entry resolves one.
 
 Return a structured findings report:
-- If issues exist: list each with section number, quoted
-  text, and required change
-- If the plan passes all checks: state "No issues found"
+- If Blocking issues exist: list the Blocking findings,
+  then any Advisory findings
+- If no Blocking issues exist: state
+  "No blocking issues found", then list any Advisory
+  findings
 
 ## 1. Self-Containment
 
@@ -126,11 +158,13 @@ stated as outcomes, not as a procedure.
 - Does each task specify what must be **true** after
   completion — which artifacts exist, which behaviors
   work, which conditions hold?
-- Are the criteria outcomes rather than steps? A checkbox
-  that dictates *how* (which file to edit, which function
-  to change, in what order) is a step, not a criterion —
-  flag it. The developer owns the how; the compiler and
-  tests confirm the sites were covered.
+- Are the criteria outcomes rather than steps? A task
+  checkbox that dictates *how* (which file to edit, which
+  function to change, in what order) is a step, not a
+  criterion — flag it. The developer owns the how; the
+  compiler and tests confirm the sites were covered. This
+  applies to Task checkboxes only — the Steps section is a
+  procedure by design.
 - Is each criterion independently verifiable? The reviewer
   should be able to check completion without asking the
   implementor what was intended.
