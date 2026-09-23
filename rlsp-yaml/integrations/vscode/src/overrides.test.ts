@@ -2,51 +2,81 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
-// Regression guard for the pnpm.overrides entries that patch npm
-// security advisories (brace-expansion GHSA-3jxr-9vmj-r5cp, fast-uri
-// GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
-// GHSA-jqff-g426-hqxp -- each of these four advisories spans three
-// vulnerable ranges on the 2.x, 3.x, and 4.x lines, with patched floors
-// 2.4.5, 3.1.6, and 4.1.3 respectively). fast-uri carries no override --
-// its version drifts with ordinary transitive dependency updates, and as
-// of the @vscode/vsce 4.0.0 upgrade it has left the dependency graph
-// entirely (vsce 4.0.0 dropped the dependency chain that pulled it in) --
-// so isPatchedFastUri() below encodes both verified patched floors (3.1.6
-// and 4.1.3) directly, and fails closed for every other major line,
-// including 2.x, even though 2.4.5 is also patched: a transitive
-// downgrade across a major line is unexpected enough that it should stop
-// and be looked at rather than pass on an assumption. brace-expansion reaches the
-// extension's runtime dependency path transitively through
-// vscode-languageclient's dependency graph (currently via minimatch, though
-// the exact minimatch version is not load-bearing for this guard -- see the
-// brace-expansion assertions below, which key off brace-expansion's own
-// resolved versions rather than any specific minimatch version), so this
-// asserts the lockfile actually resolves a non-vulnerable version -- not
-// just that an override string is present.
+// Regression guard for the pnpm.overrides entries that patch npm security
+// advisories. brace-expansion is covered by GHSA-rgw5-rvv9-x895 (HIGH,
+// CVE-2026-69152: DoS via unbounded intermediate arrays, bypassing the
+// earlier GHSA-mh99-v99m-4gvg / CVE-2026-14257 mitigation -- which is why
+// the major-5 floor below is 5.0.9, not that earlier advisory's 5.0.8).
+// Verified directly against the GitHub Advisory API. For the record, the
+// full set of vulnerable bands and patched floors the advisory publishes:
+// `< 1.1.18` (patched 1.1.18), `>= 2.0.0, < 2.1.4` (patched 2.1.4),
+// `>= 3.0.0, < 3.0.6` (patched 3.0.6), and `>= 4.0.0, < 5.0.9` (patched
+// 5.0.9). Major 4 has no patched release at all -- every 4.x version is
+// vulnerable, and the fix is moving to major 5. This is reference data
+// only, not executable acceptance -- see isPatchedBraceExpansion below for
+// which of these floors this guard actually checks against.
 //
-// brace-expansion@2 and fast-uri no longer have overrides: the
-// 2026-08-07 overrides-consolidation audit proved their dependency chains
-// resolve non-vulnerable versions on their own. Their guard tests below
-// assert the resolved version directly (a semver floor, not the old
-// override-was-applied exact match) so the guard still fails if a future
-// dependency bump regresses into the advisory range. fast-uri's guard
-// additionally tolerates the package being entirely absent from the
-// lockfile -- absence is not a regression here, since fast-uri has no
-// override to defend and nothing in this project requires it to be
-// present -- but still fails closed if a resolved fast-uri version is
-// present and unpatched. brace-expansion@5 remains overridden (deferred
-// DoS fix, GHSA-mh99-v99m-4gvg / GHSA-rgw5-rvv9-x895) and still requires
-// presence: its override is active, so the major-5 branch disappearing
-// from the graph would mean the override went dead, which is itself a
-// regression worth failing loudly on. Its version assertion is a floor
-// (>= 5.0.9), not an exact match, though: the override itself is the
-// caret range ^5.0.9, so an ordinary transitive bump elsewhere in the
-// dependency tree can legitimately advance the resolved patch version
-// without anyone touching the overrides block. An exact-match assertion
-// would false-fail on that ordinary drift -- exactly the kind of
-// pressure that leads to loosening a security guard under time
-// pressure -- so the assertion is a floor tied to the patched version
-// instead, which the caret range already permits drifting above.
+// Both brace-expansion majors reachable in this graph carry active
+// overrides, and both are load-bearing. The test for whether an override is
+// redundant: every direct dependent's own declared range for the package
+// must be bounded at or above that major line's patched floor. A scratch
+// dependency resolution landing above the floor does NOT establish this --
+// pnpm picks the newest version satisfying a range when nothing else
+// constrains it, so an observed resolved version reflects resolver
+// preference (registry mirror state, store contents, incremental lockfile
+// history), not a guarantee. Applying the declared-range test here:
+//   - minimatch@10.2.6 declares "brace-expansion": "^5.0.8", which admits
+//     the vulnerable 5.0.8 -- reaches the extension's runtime dependency
+//     path via vscode-languageclient.
+//   - minimatch@9.0.9 declares "brace-expansion": "^2.0.2", which admits
+//     the vulnerable 2.0.2-2.1.3 range -- reaches the graph via mocha, a
+//     dev-only path.
+// Neither declared range is bounded at its floor, so neither override is
+// redundant. The brace-expansion@2 override was previously retired on the
+// resolution-snapshot test above (an earlier audit saw a resolved version
+// above the floor and concluded the dependent's range must be safe), which
+// is why it is restored here rather than left absent: the retirement was
+// based on the wrong test, not on a change in the actual dependency graph.
+//
+// isPatchedBraceExpansion() below is the single decision point for "is this
+// brace-expansion version patched". It dispatches on major line rather than
+// comparing against one global floor, because a major-agnostic comparison
+// against, say, the 5.0.9 floor would accept any higher major
+// (isAtLeast('6.0.0', '5.0.9') is true) without that major ever being
+// vetted against the advisory. It encodes a floor only for the two major
+// lines actually reachable in this graph today -- 2 (2.1.4) and 5 (5.0.9)
+// -- and fails closed on every other major, including 1 and 3, even though
+// the advisory gives those their own patched floors (1.1.18 and 3.0.6
+// respectively, see above). This mirrors isPatchedFastUri immediately
+// below, which fails closed on fast-uri's 2.x line even though 2.4.5 is
+// also patched: a transitive jump onto a major line nobody has vetted for
+// this graph is unexpected enough that it should stop the build and be
+// looked at, rather than pass on the assumption that the advisory's own
+// floor is automatically safe to trust unattended. Major 1 and major 3
+// being absent from this graph is not an oversight -- it is why their
+// floors are not wired in as passing thresholds. Major 4 fails closed for
+// a different reason: the advisory covers it as fully vulnerable, with no
+// patched release to check against at all.
+//
+// The lockfile-driven "resolved major lines are exactly {2, 5}" test below
+// is an independent structural canary, not a restatement of the predicate:
+// even if a future edit broadened the predicate's accepted majors, that
+// test still fails loudly the moment an unexpected major line appears in
+// the graph, which is the actual property this guard exists to protect.
+//
+// fast-uri carries no override -- its version drifts with ordinary
+// transitive dependency updates, and as of the @vscode/vsce 4.0.0 upgrade
+// it has left the dependency graph entirely (vsce 4.0.0 dropped the
+// dependency chain that pulled it in). isPatchedFastUri() encodes its own
+// verified patched floors (3.1.6 and 4.1.3, from GHSA-5jgf-p345-68v8 /
+// GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc / GHSA-jqff-g426-hqxp) and
+// fails closed for every other major line, including 2.x, even though
+// 2.4.5 is also patched: a transitive downgrade across a major line is
+// unexpected enough that it should stop and be looked at rather than pass
+// on an assumption.
+//
+// All of this asserts what the lockfile actually resolves -- not just that
+// an override string is present in package.json.
 const lockfilePath = path.join(__dirname, '..', 'pnpm-lock.yaml');
 
 // Windows checkouts of this repository read text files with CRLF line
@@ -124,24 +154,42 @@ function isPatchedFastUri(version: string): boolean {
   return false; // any other major line is unvetted -- fail closed
 }
 
-// Aggregation predicate for the brace-expansion@5 override branch: every
-// resolved version must be at or above the patched floor, AND the branch
-// must be non-empty. The presence check is not redundant -- `[].every(…)`
-// is vacuously true, so without it, the override silently going dead
-// (major-5 branch vanishing from the graph entirely) would pass. That is
-// the opposite of what this guard should do, since the override is still
-// active in pnpm.overrides (see header comment). Deliberately asymmetric
-// with allPatchedOrAbsent below, which must accept an empty array --
-// brace-expansion@5 has an active override and is expected to always
-// resolve; fast-uri has none and is not.
-function allAtLeastAndPresent(versions: string[], floor: string): boolean {
-  return versions.length > 0 && versions.every((version) => isAtLeast(version, floor));
+// brace-expansion-specific patched-version check for GHSA-rgw5-rvv9-x895.
+// Only majors 2 and 5 -- the two lines actually reachable in this graph --
+// get a floor comparison. Every other major fails closed, including 1 and
+// 3, which the advisory covers with patched floors of their own (1.1.18
+// and 3.0.6, see header comment): those floors are deliberately not wired
+// in here, because a transitive jump onto a major line nobody has vetted
+// for this graph should stop the build, not pass because the advisory
+// happens to have a floor for it. Major 4 falls into the same `false`
+// default for a different reason -- it has no patched release at all, so
+// there is no floor to check even if this guard wanted to vet it.
+function isPatchedBraceExpansion(version: string): boolean {
+  const [major] = parseVersion(version);
+  if (major === 2) return isAtLeast(version, '2.1.4');
+  if (major === 5) return isAtLeast(version, '5.0.9');
+  return false; // majors 1, 3, 4, and anything else are unvetted -- fail closed
+}
+
+// Aggregation predicate for an overridden brace-expansion major line: every
+// resolved version on that line must be patched, AND the line must be
+// non-empty. The presence check is not redundant -- `[].every(...)` is
+// vacuously true, so without it, an override silently going dead (its major
+// line vanishing from the graph entirely) would pass. That is the opposite
+// of what this guard should do while the override is still active in
+// pnpm.overrides (see header comment) -- true today for both the major-2
+// and major-5 branches. Deliberately asymmetric with allPatchedOrAbsent
+// below, which must accept an empty array: brace-expansion's overridden
+// lines are expected to always resolve; fast-uri has no override and is
+// not.
+function allPatchedAndPresent(versions: string[]): boolean {
+  return versions.length > 0 && versions.every((version) => isPatchedBraceExpansion(version));
 }
 
 // Aggregation predicate for fast-uri: absence from the graph is
 // tolerated (see header comment), but any version that is present must
 // be patched. `[].every(…)` being vacuously true is exactly the wanted
-// behavior here, unlike allAtLeastAndPresent above -- no separate
+// behavior here, unlike allPatchedAndPresent above -- no separate
 // presence check.
 function allPatchedOrAbsent(versions: string[]): boolean {
   return versions.every((version) => isPatchedFastUri(version));
@@ -150,31 +198,39 @@ function allPatchedOrAbsent(versions: string[]): boolean {
 describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
   it('overrides block declares the retained pins', () => {
     const overridesBlock = overridesBlockOf(lockfile);
+    expect(overridesBlock).toContain('brace-expansion@2: ^2.1.4');
     expect(overridesBlock).toContain('brace-expansion@5: ^5.0.9');
     expect(overridesBlock).toContain('serialize-javascript: ^7.0.5');
   });
 
-  it('overrides block no longer declares the removed brace-expansion@2 / fast-uri pins', () => {
+  it('overrides block no longer declares the removed fast-uri pin', () => {
     const overridesBlock = overridesBlockOf(lockfile);
-    expect(overridesBlock).not.toContain('brace-expansion@2:');
     expect(overridesBlock).not.toContain('fast-uri:');
   });
 
-  it('brace-expansion resolves to a non-vulnerable version on every non-overridden branch of the graph', () => {
-    const nonOverriddenVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
-      (version) => parseVersion(version)[0] !== 5,
+  // Structural canary, independent of isPatchedBraceExpansion: even if a
+  // future edit broadened the predicate's accepted majors, this still
+  // fails the moment an unexpected major line -- one this guard has never
+  // vetted for this graph -- shows up in the lockfile at all.
+  it('brace-expansion resolves only the vetted major lines (2 and 5)', () => {
+    const majors = new Set(
+      allResolvedVersions(lockfile, 'brace-expansion').map((version) => parseVersion(version)[0]),
     );
-    expect(nonOverriddenVersions.length).toBeGreaterThan(0);
-    for (const version of nonOverriddenVersions) {
-      expect(isAtLeast(version, '2.1.4')).toBe(true);
-    }
+    expect(majors).toEqual(new Set([2, 5]));
+  });
+
+  it("brace-expansion's overridden major-2 branch resolves to at least the audited patched floor", () => {
+    const majorTwoVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
+      (version) => parseVersion(version)[0] === 2,
+    );
+    expect(allPatchedAndPresent(majorTwoVersions)).toBe(true);
   });
 
   it("brace-expansion's overridden major-5 branch resolves to at least the audited patched floor", () => {
-    const overriddenVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
+    const majorFiveVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
       (version) => parseVersion(version)[0] === 5,
     );
-    expect(allAtLeastAndPresent(overriddenVersions, '5.0.9')).toBe(true);
+    expect(allPatchedAndPresent(majorFiveVersions)).toBe(true);
   });
 
   it('fast-uri is absent from the lockfile, or resolves to a patched version wherever present', () => {
@@ -208,7 +264,7 @@ describe('isAtLeast', () => {
     ['2.9.9', '3.1.6', false],
     // The brace-expansion@5 patched floor (GHSA-rgw5-rvv9-x895): the
     // override's caret range (^5.0.9) permits ordinary patch drift above
-    // this floor, but allAtLeastAndPresent below must still catch drift
+    // this floor, but allPatchedAndPresent below must still catch drift
     // below it.
     ['5.0.8', '5.0.9', false],
     ['5.0.9', '5.0.9', true],
@@ -237,30 +293,81 @@ describe('isPatchedFastUri', () => {
   });
 });
 
-// Boundary coverage for allAtLeastAndPresent's aggregation semantics,
-// independent of what the lockfile currently resolves -- once
-// brace-expansion@5 resolves at or above the floor, the lockfile-driven
-// test above can never exercise the false branch again. isAtLeast's own
-// floor/version comparisons are already covered above; these cases are
-// scoped to the aggregation behavior only (empty-array, mixed-array).
-describe('allAtLeastAndPresent', () => {
+// Boundary coverage for isPatchedBraceExpansion, independent of what the
+// lockfile currently resolves. Covers both vetted floors (2 and 5), the
+// major-4 line (which has no patched release at all, so every version on
+// it is false regardless of how high the minor/patch climbs), and the
+// fail-closed default for every other major -- including the two trap
+// cases below, which are the load-bearing proof that this predicate
+// rejects unvetted majors even when the advisory gives them their own
+// patched floor. Without those two cases, a predicate that (incorrectly)
+// fell back to the advisory's full floor table for majors 1 and 3 would
+// still pass every other case in this table.
+describe('isPatchedBraceExpansion', () => {
   it.each([
+    // Trap: this is major 1's real advisory-patched floor, but major 1 has
+    // no dependent in this graph, so it must stay unvetted -- same
+    // reasoning as isPatchedFastUri's major-2 case above.
+    ['1.1.18', false],
+    // The exact regression this task restores the override for: the top
+    // of minimatch@9.0.9's admitted range (^2.0.2) sits inside this
+    // vulnerable band.
+    ['2.1.3', false],
+    ['2.1.4', true],
+    ['2.5.0', true],
+    // Trap: major 3's real advisory-patched floor -- must still reject,
+    // for the same reason as 1.1.18 above.
+    ['3.0.6', false],
+    // Major 4's lowest version -- no patched release exists on this line.
+    ['4.0.0', false],
+    // High into major 4, still vulnerable -- proves this isn't
+    // accidentally implemented as a floor check (e.g. isAtLeast(v,
+    // '4.0.0'), which would wrongly return true here).
+    ['4.9.9', false],
+    ['5.0.8', false],
+    ['5.0.9', true],
+    ['5.1.0', true],
+    // Fail-closed default: major 0 also falls inside the advisory's real
+    // `< 1.1.18` band, so this is doubly correct, not just unvetted.
+    ['0.9.9', false],
+    // Fail-closed default for a future major the advisory doesn't cover
+    // at all.
+    ['6.0.0', false],
+  ])('isPatchedBraceExpansion(%s) === %s', (version, expected) => {
+    expect(isPatchedBraceExpansion(version)).toBe(expected);
+  });
+});
+
+// Boundary coverage for allPatchedAndPresent's aggregation semantics,
+// independent of what the lockfile currently resolves. isPatchedBraceExpansion's
+// own floor/major comparisons are already covered above; these cases are
+// scoped to the aggregation behavior only (empty-array, mixed-major array).
+describe('allPatchedAndPresent', () => {
+  it.each([
+    [['2.1.4'], true],
+    [['2.1.5'], true],
+    // The exact regression this restores the override for.
+    [['2.1.3'], false],
     // Inclusive floor, single element -- the shape of today's real
-    // lockfile.
-    [['5.0.9'], '5.0.9', true],
-    [['5.0.10'], '5.0.9', true],
-    // The exact regression the old exact-pin assertion caught, now
-    // caught via the floor instead.
-    [['5.0.8'], '5.0.9', false],
-    // Mixed good+bad -- proves every element is checked, not just the
-    // first.
-    [['5.0.9', '5.0.8'], '5.0.9', false],
-    // Empty must fail: the override is active (see header comment on
+    // lockfile major-5 branch.
+    [['5.0.9'], true],
+    [['5.0.8'], false],
+    // Mixed majors, both patched -- proves the aggregator honors each
+    // element's own major-dispatched floor rather than one global floor,
+    // which could not express two simultaneously-valid floors at once.
+    [['2.1.4', '5.0.9'], true],
+    // Mixed majors, one bad -- proves every element is checked, not just
+    // the first.
+    [['2.1.4', '5.0.8'], false],
+    // A major-4 version on its own -- proves the aggregator doesn't
+    // bypass isPatchedBraceExpansion's always-false major-4 handling.
+    [['4.0.0'], false],
+    // Empty must fail: both overrides are active (see header comment on
     // overrides.test.ts), so a vanished branch is itself a regression,
     // not a pass.
-    [[], '5.0.9', false],
-  ])('allAtLeastAndPresent(%j, %s) === %s', (versions, floor, expected) => {
-    expect(allAtLeastAndPresent(versions, floor)).toBe(expected);
+    [[], false],
+  ])('allPatchedAndPresent(%j) === %s', (versions, expected) => {
+    expect(allPatchedAndPresent(versions)).toBe(expected);
   });
 });
 

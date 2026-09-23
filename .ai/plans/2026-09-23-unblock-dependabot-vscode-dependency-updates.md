@@ -123,7 +123,7 @@ correct the comments that describe the retired overrides as redundant.
 - [x] Confirm with the user which upgrades to land and how the guards change
 - [x] Land the `@vscode/vsce` upgrade and repair the two stale guards
 - [x] Establish which overrides are genuinely redundant, by declared range
-- [ ] Bound every `brace-expansion` major line by an override and a
+- [x] Bound every `brace-expansion` major line by an override and a
       major-aware guard
 - [ ] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
 - [ ] Confirm Dependabot closed both pull requests
@@ -166,41 +166,45 @@ admit versions inside GHSA-rgw5-rvv9-x895's vulnerable bands, so the
 overrides are what keep the advisory out of the graph by construction rather
 than by resolver preference. Correct the comments that state the opposite.
 
-- [ ] `pnpm.overrides` in `package.json` bounds both `brace-expansion` major
+- [x] `pnpm.overrides` in `package.json` bounds both `brace-expansion` major
       lines present in the graph — the major-2 line at or above 2.1.4 and
       the major-5 line at or above 5.0.9 — and retains `serialize-javascript`
-- [ ] `pnpm-lock.yaml` resolves every `brace-expansion` version at or above
+- [x] `pnpm-lock.yaml` resolves every `brace-expansion` version at or above
       its own major line's patched floor, and its `overrides:` block
       declares the same pins as `package.json`
-- [ ] A single predicate decides whether a `brace-expansion` version is
-      patched, dispatching on major line against that line's floor from
-      GHSA-rgw5-rvv9-x895 (1.1.18, 2.1.4, 3.0.6, 5.0.9), and returns false
-      for any major line the advisory data does not cover
-- [ ] The predicate rejects every version on the major-4 line, which the
+- [x] A single predicate decides whether a `brace-expansion` version is
+      patched, dispatching on major line. It encodes a floor only for the
+      major lines actually present in this graph — 2.1.4 for major 2 and
+      5.0.9 for major 5 — and returns false for every other major line,
+      including ones the advisory covers with a patched floor of their own.
+      This matches how `isPatchedFastUri` already fails closed on major
+      lines nobody has vetted, so a transitive jump across major lines stops
+      the build rather than passing on an assumption
+- [x] The predicate rejects every version on the major-4 line, which the
       advisory covers as vulnerable with no patched release of its own, and
       rejects `6.0.0` and every other version on a major line the advisory
       does not cover at all. Both cases are proven by literals that do not
       depend on what the lockfile currently resolves
-- [ ] No lockfile-driven assertion accepts a `brace-expansion` version by a
+- [x] No lockfile-driven assertion accepts a `brace-expansion` version by a
       major-agnostic comparison
-- [ ] A `brace-expansion` major line that carries an override fails the
+- [x] A `brace-expansion` major line that carries an override fails the
       guard if it disappears from the lockfile entirely. This holds for both
       the major-2 and the major-5 line, so an override going dead is caught
       rather than passing vacuously on an empty set
-- [ ] The file states the test for whether an override is redundant — every
+- [x] The file states the test for whether an override is redundant — every
       direct dependent's own declared range bounded at or above that major
       line's patched floor — so a future removal candidate is evaluated
       against declared ranges rather than against a resolution snapshot
-- [ ] The guard over the overrides block expects every retained pin,
+- [x] The guard over the overrides block expects every retained pin,
       including both `brace-expansion` pins, and the guard over removed pins
       covers only `fast-uri`
-- [ ] Every comment in `overrides.test.ts` describes the real reason each
+- [x] Every comment in `overrides.test.ts` describes the real reason each
       override is retained or was removed. No comment claims a
       `brace-expansion` override is redundant, and no comment justifies a
       retirement by a scratch resolution landing above a floor
-- [ ] `pnpm.auditConfig.ignoreCves` is unchanged
-- [ ] `pnpm run audit` reports no finding beyond the allowlisted low
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm.auditConfig.ignoreCves` is unchanged
+- [x] `pnpm run audit` reports no finding beyond the allowlisted low
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
 
 ### Task 3: `@types/vscode` and `engines.vscode` move to 1.138.0 together

@@ -74,6 +74,7 @@ cargo test -p rlsp-yaml --test claude_code_stdio_smoke              # LSP initia
 - Conventional commits required — changelogs auto-generated via git-cliff
 - OIDC trusted publishing to crates.io — no `CARGO_REGISTRY_TOKEN` secret needed
 - pnpm as Node.js package manager
+- A pnpm override is redundant only when every direct dependent's *declared* range is bounded at or above the advisory's patched floor — an observed resolved version above the floor proves nothing, since it reflects resolver preference (mirror state, store contents, incremental lockfile history)
 - AI-written project — external contributions via GitHub issues only
 - Each `rlsp-<language>` crate must have `README.md`, `docs/configuration.md`, `docs/feature-log.md`
 - Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference; `docs/feature-log.md` is user-facing feature decisions only — internal refactors and implementation rewrites do NOT go there (commit history + plan files carry that record)

@@ -206,6 +206,7 @@
   "pnpm": {
     "overrides": {
       "serialize-javascript": "^7.0.5",
+      "brace-expansion@2": "^2.1.4",
       "brace-expansion@5": "^5.0.9"
     },
     "auditConfig": {
