@@ -26,7 +26,7 @@ type: project
      All three were verified out-of-scope for that overrides/CI-config plan. -->
 
 - **`dtolnay/rust-toolchain` refs pin mutable branches, not tags or SHAs.**
-  All 8 workflow refs use `@1.97.1`, which resolves a *branch* the action
+  All 8 workflow refs use `@1.98.1`, which resolves a *branch* the action
   pre-creates ahead of the actual Rust release (this is the same
   branches-as-versions behavior that produced the fictional-`1.100.0` PR #50
   and prompted the dependabot `ignore` rule in that plan). A mutable branch
