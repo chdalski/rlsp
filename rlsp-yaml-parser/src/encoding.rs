@@ -55,7 +55,7 @@ impl core::fmt::Display for EncodingError {
 /// null-byte patterns because `[a, 0x00, 0x00, 0x00, ..]` (UTF-32-LE) is a
 /// strict superset of `[a, 0x00, ..]` (UTF-16-LE).
 #[must_use]
-pub fn detect_encoding(bytes: &[u8]) -> Encoding {
+pub const fn detect_encoding(bytes: &[u8]) -> Encoding {
     match bytes {
         // UTF-32 BOMs (must come before UTF-16 checks)
         [0x00, 0x00, 0xFE, 0xFF, ..] => Encoding::Utf32Be,
@@ -117,13 +117,14 @@ fn decode_utf16(bytes: &[u8], endian: Endian) -> Result<String, EncodingError> {
     if !bytes.len().is_multiple_of(2) {
         return Err(EncodingError::TruncatedUtf16);
     }
-    // Collect u16 code units.
-    let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|chunk| match (chunk, endian) {
-            ([lo, hi], Endian::Little) => u16::from_le_bytes([*lo, *hi]),
-            ([hi, lo], Endian::Big) => u16::from_be_bytes([*hi, *lo]),
-            _ => 0, // chunks_exact(2) guarantees length 2; unreachable
+    // Collect u16 code units. The length check above guarantees an empty
+    // remainder, so only the chunks half of `as_chunks` is used.
+    let (chunks, _remainder) = bytes.as_chunks::<2>();
+    let units: Vec<u16> = chunks
+        .iter()
+        .map(|chunk| match endian {
+            Endian::Little => u16::from_le_bytes(*chunk),
+            Endian::Big => u16::from_be_bytes(*chunk),
         })
         .collect();
 
@@ -154,11 +155,13 @@ fn decode_utf32(bytes: &[u8], endian: Endian) -> Result<String, EncodingError> {
     }
     let mut out = String::with_capacity(bytes.len() / 4);
     let mut skip_bom = true;
-    for chunk in bytes.chunks_exact(4) {
-        let cp = match (chunk, endian) {
-            ([a, b, c, d], Endian::Little) => u32::from_le_bytes([*a, *b, *c, *d]),
-            ([a, b, c, d], Endian::Big) => u32::from_be_bytes([*a, *b, *c, *d]),
-            _ => 0, // chunks_exact(4) guarantees length 4; unreachable
+    // The length check above guarantees an empty remainder, so only the
+    // chunks half of `as_chunks` is used.
+    let (chunks, _remainder) = bytes.as_chunks::<4>();
+    for chunk in chunks {
+        let cp = match endian {
+            Endian::Little => u32::from_le_bytes(*chunk),
+            Endian::Big => u32::from_be_bytes(*chunk),
         };
         // Strip leading BOM.
         if skip_bom && cp == 0xFEFF {
@@ -344,6 +347,59 @@ mod tests {
     fn decode_invalid_utf8_returns_error() {
         // Lone continuation byte — not valid UTF-8, no BOM so treated as UTF-8
         assert!(decode(&[0x80]).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_utf16 / decode_utf32 — as_chunks boundary (0/1/2-chunk cases)
+    //
+    // Pins the private chunking functions' behavior in isolation from
+    // detect_encoding/BOM dispatch, covering the as_chunks 0/1/2-chunk
+    // boundaries directly (see chunks_exact_to_as_chunks rewrite).
+    // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::little(Endian::Little)]
+    #[case::big(Endian::Big)]
+    fn decode_utf16_zero_chunks_returns_empty_string(#[case] endian: Endian) {
+        assert_eq!(decode_utf16(&[], endian).unwrap(), "");
+    }
+
+    #[rstest]
+    #[case::little(Endian::Little, &[0x41u8, 0x00] as &[u8])]
+    #[case::big(Endian::Big, &[0x00, 0x41])]
+    fn decode_utf16_one_chunk_decodes_single_unit(#[case] endian: Endian, #[case] bytes: &[u8]) {
+        assert_eq!(decode_utf16(bytes, endian).unwrap(), "A");
+    }
+
+    #[rstest]
+    #[case::little(Endian::Little, &[0x41u8, 0x00, 0x42, 0x00] as &[u8])]
+    #[case::big(Endian::Big, &[0x00, 0x41, 0x00, 0x42])]
+    fn decode_utf16_two_chunks_preserves_order(#[case] endian: Endian, #[case] bytes: &[u8]) {
+        assert_eq!(decode_utf16(bytes, endian).unwrap(), "AB");
+    }
+
+    #[rstest]
+    #[case::little(Endian::Little)]
+    #[case::big(Endian::Big)]
+    fn decode_utf32_zero_chunks_returns_empty_string(#[case] endian: Endian) {
+        assert_eq!(decode_utf32(&[], endian).unwrap(), "");
+    }
+
+    #[rstest]
+    #[case::little(Endian::Little, &[0x41u8, 0x00, 0x00, 0x00] as &[u8])]
+    #[case::big(Endian::Big, &[0x00, 0x00, 0x00, 0x41])]
+    fn decode_utf32_one_chunk_decodes_single_codepoint(
+        #[case] endian: Endian,
+        #[case] bytes: &[u8],
+    ) {
+        assert_eq!(decode_utf32(bytes, endian).unwrap(), "A");
+    }
+
+    #[rstest]
+    #[case::little(Endian::Little, &[0x41u8, 0x00, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00] as &[u8])]
+    #[case::big(Endian::Big, &[0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x42])]
+    fn decode_utf32_two_chunks_preserves_order(#[case] endian: Endian, #[case] bytes: &[u8]) {
+        assert_eq!(decode_utf32(bytes, endian).unwrap(), "AB");
     }
 
     // -----------------------------------------------------------------------

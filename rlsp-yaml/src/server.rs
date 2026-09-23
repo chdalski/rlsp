@@ -163,7 +163,7 @@ impl Backend {
     }
 
     pub(crate) fn get_key_ordering(&self) -> bool {
-        self.settings.lock().ok().is_some_and(|s| s.key_ordering)
+        self.settings.lock().is_ok_and(|s| s.key_ordering)
     }
 
     pub(crate) fn get_schema_associations(&self) -> Vec<crate::schema::SchemaAssociation> {

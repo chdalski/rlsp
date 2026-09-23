@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-23
 
 # Adopt Rust 1.98.1, Edition 2024 for Zed, and Refresh Cargo.lock
@@ -101,7 +101,7 @@ dependencies.
 - [x] Confirm editions available in 1.98.1 (2024 is latest)
 - [x] Confirm scope with user (Zed edition 2024; MSRV 1.98;
       include lockfile refresh)
-- [ ] Task 1: Fix the five 1.98.1 findings
+- [x] Task 1: Fix the five 1.98.1 findings
 - [ ] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
 - [ ] Task 3: Move the Zed extension crate to edition 2024
 - [ ] Task 4: Refresh both lockfiles
@@ -121,22 +121,22 @@ raises, so the codebase is lint-clean on both 1.97.1 (the
 current pin) and 1.98.1. Fixes apply the lint's
 recommendation; no lint is allowed, expected, or suppressed.
 
-- [ ] A clean-target `cargo +1.98.1 clippy --workspace
+- [x] A clean-target `cargo +1.98.1 clippy --workspace
       --all-targets -- -D warnings` exits 0
-- [ ] A clean-target `cargo +1.98.1 test --workspace`
+- [x] A clean-target `cargo +1.98.1 test --workspace`
       compiles and passes with 0 failures
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
       and `cargo test --workspace` on the pinned 1.97.1 also
       exit 0 with 0 failures
-- [ ] `cargo fmt --all -- --check` exits 0
-- [ ] No `#[allow]`, `#[expect]`, or lint-config entry was
+- [x] `cargo fmt --all -- --check` exits 0
+- [x] No `#[allow]`, `#[expect]`, or lint-config entry was
       added for any of the five findings
-- [ ] UTF-16 and UTF-32 decoding behavior in
+- [x] UTF-16 and UTF-32 decoding behavior in
       `rlsp-yaml-parser/src/encoding.rs` is unchanged,
       including input whose length is not a multiple of the
       code-unit size, as shown by tests that exercise those
       inputs
-- [ ] The diff touches only `.rs` files
+- [x] The diff touches only `.rs` files
 
 ### Task 2: Pin Rust 1.98.1 locally and in CI; declare MSRV 1.98
 

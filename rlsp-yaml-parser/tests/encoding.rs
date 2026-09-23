@@ -503,6 +503,34 @@ fn decode_utf8_bom_only_three_bytes_detected_as_utf8() {
 }
 
 // ===========================================================================
+// decode() — BOM-less inputs at exactly one code-unit's length
+// ===========================================================================
+//
+// Complements detect_encoding_null_byte_heuristic / _exactly_four_bytes_*
+// (which only assert detection) by also asserting the decoded value through
+// the public decode() entry point.
+
+#[rstest]
+#[case::le(&[0x41u8, 0x00] as &[u8], "A")]
+#[case::be(&[0x00u8, 0x41] as &[u8], "A")]
+fn decode_bomless_utf16_exactly_two_bytes_single_unit(
+    #[case] input: &[u8],
+    #[case] expected: &str,
+) {
+    assert_eq!(decode(input).unwrap(), expected);
+}
+
+#[rstest]
+#[case::le(&[0x41u8, 0x00, 0x00, 0x00] as &[u8], "A")]
+#[case::be(&[0x00u8, 0x00, 0x00, 0x41] as &[u8], "A")]
+fn decode_bomless_utf32_exactly_four_bytes_single_codepoint(
+    #[case] input: &[u8],
+    #[case] expected: &str,
+) {
+    assert_eq!(decode(input).unwrap(), expected);
+}
+
+// ===========================================================================
 // GAP-E3: BOM-less UTF-16 LE odd-length input → TruncatedUtf16
 // ===========================================================================
 

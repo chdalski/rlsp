@@ -1389,8 +1389,6 @@ fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
 #[cfg(test)]
 #[expect(clippy::cast_possible_truncation, reason = "test code")]
 mod tests {
-    use std::io::Read as _;
-
     use rstest::rstest;
 
     use super::*;
