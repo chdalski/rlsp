@@ -10,12 +10,13 @@ Two Dependabot pull requests against the VS Code extension are stuck: the
 regression guard in the extension's own test suite that Dependabot cannot
 satisfy on its own, because the guard needs a companion change in the same
 commit. Land both upgrades with their companion changes so the guards pass on
-their real intent. Separately, measure every entry in the extension's pnpm
+their real intent. Separately, audit every entry in the extension's pnpm
 override and audit-allowlist configuration against the upgraded dependency
-graph, and drop the one the upgrades make redundant — `brace-expansion@5` —
-while keeping `serialize-javascript` and the audit allowlist, which still
-hold back advisories no package update clears. The overrides block then
-carries only pins that still do work.
+graph. That audit found the opposite of what it set out to find: no override
+is redundant, one that was retired earlier needs restoring, and the guard
+accepts any `brace-expansion` major line it has never vetted. Bound every
+`brace-expansion` major line by an override and by a major-aware guard, and
+correct the comments that describe the retired overrides as redundant.
 
 ## Context
 
@@ -51,13 +52,36 @@ carries only pins that still do work.
     so the package is absent from the graph entirely and the presence
     assertion fails on absence, not on a vulnerable version.
 
+- **How to tell whether an override is redundant.** An override on
+  `pkg@major` is redundant only when every direct dependent's own declared
+  range for `pkg` is bounded at or above that major line's patched floor. A
+  scratch resolution landing above the floor does not establish this: pnpm
+  picks the newest version satisfying a range when nothing else constrains
+  it, so the observed version reflects resolver preference, which a
+  version-limited registry mirror, an unindexed store, or an incremental
+  lockfile update can change. This plan's first draft used the resolution
+  test and reached the wrong conclusion; the declared-range test is the
+  correct one.
+
+- **`GHSA-rgw5-rvv9-x895` (HIGH) vulnerable bands**, from the GitHub
+  Advisory API: `< 1.1.18`, `>= 2.0.0, < 2.1.4`, `>= 3.0.0, < 3.0.6`, and
+  `>= 4.0.0, < 5.0.9`. The advisory covers no major line above 5.
+
+- **Both `brace-expansion` overrides are load-bearing.** Applying the
+  declared-range test to the two direct dependents in this graph:
+  - `minimatch@10.2.6` declares `"brace-expansion": "^5.0.8"`. `5.0.8`
+    exists and sits inside the `>= 4.0.0, < 5.0.9` band, so without the
+    `brace-expansion@5` override a vulnerable version is a semver-legal
+    resolution. This reaches the extension's runtime path through
+    `vscode-languageclient`.
+  - `minimatch@9.0.9` declares `"brace-expansion": "^2.0.2"`. Versions
+    `2.0.2` through `2.1.3` all sit inside the `>= 2.0.0, < 2.1.4` band, so
+    the `brace-expansion@2` override — retired earlier on the resolution
+    test — needs restoring. This reaches the graph through `mocha`, a
+    dev-only path.
+
 - **Measured override evidence (lead, 2026-09-23).** Resolving the manifest
-  from scratch in a scratch directory, with the agreed upgrades applied,
-  gave these results:
-  - Dropping `brace-expansion@5: ^5.0.9` changes no resolution:
-    `brace-expansion` resolves to `2.1.7` and `5.0.12` with the override and
-    without it. `pnpm audit --audit-level=low` reports only the one
-    allowlisted low finding either way.
+  from scratch in a scratch directory, with the agreed upgrades applied:
   - Dropping `serialize-javascript: ^7.0.5` regresses
     `serialize-javascript` from `7.1.1` to `6.0.2` and adds one high
     (GHSA-5c6j-r48x-rmvq) and one moderate (GHSA-qj8w-gfj5-8c6v) finding,
@@ -98,7 +122,9 @@ carries only pins that still do work.
 - [x] Measure each override's effect on resolution and on the audit gate
 - [x] Confirm with the user which upgrades to land and how the guards change
 - [x] Land the `@vscode/vsce` upgrade and repair the two stale guards
-- [ ] Remove the redundant `brace-expansion@5` override
+- [x] Establish which overrides are genuinely redundant, by declared range
+- [ ] Bound every `brace-expansion` major line by an override and a
+      major-aware guard
 - [ ] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
 - [ ] Confirm Dependabot closed both pull requests
 
@@ -130,28 +156,49 @@ dependency reintroduces it. This is the slice that unblocks PR #75.
 - [x] `pnpm run audit` reports no finding beyond the allowlisted low
 - [x] `pnpm run build` and `pnpm run test:integration` pass
 
-### Task 2: The redundant `brace-expansion@5` override is removed and the overrides guard reflects the retained pins
+### Task 2: Every `brace-expansion` major line is bounded by an override and by a major-aware guard
 
-Remove `brace-expansion@5: ^5.0.9` from `pnpm.overrides`. Measurement shows
-the dependency graph resolves a patched `brace-expansion` on its own, so the
-pin no longer changes any resolution — the same reasoning that retired the
-`brace-expansion@2` and `fast-uri` overrides. The guard keeps asserting the
-resolved version, so a future regression into the advisory range still fails.
+Restore the `brace-expansion@2` override, keep the `brace-expansion@5`
+override, and replace the major-agnostic floor check with a predicate that
+dispatches on major version the way `isPatchedFastUri` already does. Both
+overrides are load-bearing: their direct dependents' own declared ranges
+admit versions inside GHSA-rgw5-rvv9-x895's vulnerable bands, so the
+overrides are what keep the advisory out of the graph by construction rather
+than by resolver preference. Correct the comments that state the opposite.
 
-- [ ] `pnpm.overrides` in `package.json` declares `serialize-javascript`
-      and nothing else
-- [ ] `pnpm-lock.yaml`, resolved with no override for `brace-expansion`,
-      carries a major-5 `brace-expansion` at or above 5.0.9
-- [ ] The guard over the overrides block expects only the retained pins, and
-      the guard over removed pins covers `brace-expansion@5` alongside the
-      pins already removed
-- [ ] The header comment groups `brace-expansion@5` with the packages that
-      carry no override, alongside `brace-expansion@2` and `fast-uri`. No
-      comment states that the major-5 branch is overridden, and no comment
-      justifies an assertion by an override being a visible, intentional
-      edit
-- [ ] The `serialize-javascript` override and
-      `pnpm.auditConfig.ignoreCves` are unchanged
+- [ ] `pnpm.overrides` in `package.json` bounds both `brace-expansion` major
+      lines present in the graph — the major-2 line at or above 2.1.4 and
+      the major-5 line at or above 5.0.9 — and retains `serialize-javascript`
+- [ ] `pnpm-lock.yaml` resolves every `brace-expansion` version at or above
+      its own major line's patched floor, and its `overrides:` block
+      declares the same pins as `package.json`
+- [ ] A single predicate decides whether a `brace-expansion` version is
+      patched, dispatching on major line against that line's floor from
+      GHSA-rgw5-rvv9-x895 (1.1.18, 2.1.4, 3.0.6, 5.0.9), and returns false
+      for any major line the advisory data does not cover
+- [ ] The predicate rejects every version on the major-4 line, which the
+      advisory covers as vulnerable with no patched release of its own, and
+      rejects `6.0.0` and every other version on a major line the advisory
+      does not cover at all. Both cases are proven by literals that do not
+      depend on what the lockfile currently resolves
+- [ ] No lockfile-driven assertion accepts a `brace-expansion` version by a
+      major-agnostic comparison
+- [ ] A `brace-expansion` major line that carries an override fails the
+      guard if it disappears from the lockfile entirely. This holds for both
+      the major-2 and the major-5 line, so an override going dead is caught
+      rather than passing vacuously on an empty set
+- [ ] The file states the test for whether an override is redundant — every
+      direct dependent's own declared range bounded at or above that major
+      line's patched floor — so a future removal candidate is evaluated
+      against declared ranges rather than against a resolution snapshot
+- [ ] The guard over the overrides block expects every retained pin,
+      including both `brace-expansion` pins, and the guard over removed pins
+      covers only `fast-uri`
+- [ ] Every comment in `overrides.test.ts` describes the real reason each
+      override is retained or was removed. No comment claims a
+      `brace-expansion` override is redundant, and no comment justifies a
+      retirement by a scratch resolution landing above a floor
+- [ ] `pnpm.auditConfig.ignoreCves` is unchanged
 - [ ] `pnpm run audit` reports no finding beyond the allowlisted low
 - [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
@@ -171,6 +218,7 @@ install the extension. This is the slice that unblocks PR #73.
       `package.json` and `pnpm-lock.yaml`
 - [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
+- [ ] `pnpm run audit` reports no finding beyond the allowlisted low
 - [ ] `pnpm run build` and `pnpm run test:integration` pass
 - [ ] `pnpm run package` produces a `.vsix` without a
       `@types/vscode` compatibility error from vsce
@@ -195,6 +243,21 @@ install the extension. This is the slice that unblocks PR #73.
   The alternative — pinning the override to exactly `5.0.9` to make the
   existing exact match true again — would freeze out future 5.0.x patches.
 
+- **No `brace-expansion` override is removed; the `brace-expansion@2`
+  override is restored** (user choice, after a security review found the
+  original premise wrong). Both direct dependents' declared ranges admit
+  versions inside the advisory's vulnerable bands, so both overrides keep
+  the advisory out of the graph by construction. The guard detects a
+  vulnerable resolution; the override prevents one. Keeping both is defense
+  in depth, and nothing shipped was ever exposed.
+
+- **The guard dispatches on major line rather than comparing against a
+  single floor** (user choice). A major-agnostic comparison accepts any
+  version on a higher major line — `isAtLeast('6.0.0', '5.0.9')` is true —
+  so a future `brace-expansion@6` would pass unvetted. `isPatchedFastUri`
+  already dispatches on major for this reason; the `brace-expansion` branch
+  now does the same and fails closed on lines the advisory does not cover.
+
 - **The `fast-uri` guard tolerates absence rather than being deleted** (user
   choice). `fast-uri` left the graph through a transitive change, so a
   transitive change can bring it back. Keeping the guard and its helper costs
@@ -210,9 +273,9 @@ install the extension. This is the slice that unblocks PR #73.
   constraint.
 
 - **Three slices rather than one commit.** The `@vscode/vsce` upgrade, the
-  override removal, and the `@types/vscode` upgrade have independent
-  rationales and independent failure modes; separate commits keep each
-  reviewable and revertable on its own.
+  `brace-expansion` override hardening, and the `@types/vscode` upgrade have
+  independent rationales and independent failure modes; separate commits
+  keep each reviewable and revertable on its own.
 
 ## Non-Goals
 
@@ -222,6 +285,17 @@ install the extension. This is the slice that unblocks PR #73.
 - Removing `serialize-javascript` from `pnpm.overrides`, or removing
   `pnpm.auditConfig.ignoreCves`. Measurement shows both still hold back
   audit findings.
+- Re-auditing the rest of the dependency graph against the declared-range
+  test. This plan applies it to `brace-expansion`, the package whose
+  override the audit set out to remove. A sweep of every transitive
+  dependency for the same class of exposure is separate work.
+- Restoring a `fast-uri` override. `fast-uri` is absent from the graph
+  entirely, so no dependent declares a range for it and an override would
+  bind nothing.
+- Consolidating `overrides.test.ts`. The file has grown across many plans
+  and a pass over its aggregate structure is worth doing, but it is a
+  refactor with no security content and does not belong in a commit that
+  restores an override. It gets its own plan after this one.
 - Adding an override for the allowlisted jsdiff advisory. The allowlist is
   the existing deliberate treatment for that dev-only low finding.
 - Upgrading any other dependency in `package.json`, or any Rust dependency.
