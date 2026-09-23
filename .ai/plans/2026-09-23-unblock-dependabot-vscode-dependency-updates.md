@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-09-23)
 **Created:** 2026-09-23
 
 ## Goal
@@ -126,7 +126,7 @@ correct the comments that describe the retired overrides as redundant.
 - [x] Bound every `brace-expansion` major line by an override and a
       major-aware guard
 - [x] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
-- [ ] Confirm Dependabot closed both pull requests
+- [x] Confirm Dependabot closed both pull requests
 
 ## Tasks
 
