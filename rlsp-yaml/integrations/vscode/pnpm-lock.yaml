@@ -27,8 +27,8 @@ importers:
         specifier: ^26.5.1
         version: 26.5.1
       '@types/vscode':
-        specifier: 1.125.0
-        version: 1.125.0
+        specifier: 1.138.0
+        version: 1.138.0
       '@vitest/coverage-v8':
         specifier: 5.0.0
         version: 5.0.0(vitest@5.0.0)
@@ -614,8 +614,8 @@ packages:
   '@types/node@26.5.1':
     resolution: {integrity: sha512-CzNm2FezW4VR/LjG6yUdiEgLE/rAQ9Slj5gCu/C2VrdcW7I0ahNZ8DRbHT7zOZ6r3ONgd/bsQIeSaoDGrd1C6g==}
 
-  '@types/vscode@1.125.0':
-    resolution: {integrity: sha512-0icm/ZQAaism87P0ekHqi4/Ju9du+Tm0RUW+y7vqRsxY2cY0FNRX1nAnaW7nT6npPt2tfHiheZ55Zm9UhqonFA==}
+  '@types/vscode@1.138.0':
+    resolution: {integrity: sha512-DhlvrucJa8n6EHst7qQcXOcjLKs/VRTQy55plLO+RN74jonYsr/t9dd66zBnAyz1tpDig0okQAxuoPHpVNje2g==}
 
   '@typescript-eslint/eslint-plugin@8.70.0':
     resolution: {integrity: sha512-/v8HZt6RlyIZxB3ntehELOcUcfxKPVGWXnQdJuHRmzrqgF8nQypcC/oxGW+Ot4VGKDq81XugPKxx0n5PBtf9PA==}
@@ -2447,7 +2447,7 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
 
-  '@types/vscode@1.125.0': {}
+  '@types/vscode@1.138.0': {}
 
   '@typescript-eslint/eslint-plugin@8.70.0(@typescript-eslint/parser@8.70.0(eslint@10.10.0)(typescript@6.0.3))(eslint@10.10.0)(typescript@6.0.3)':
     dependencies:

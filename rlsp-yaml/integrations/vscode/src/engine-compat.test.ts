@@ -176,7 +176,12 @@ describe('majorMinorEqual', () => {
     // Patch differences are not load-bearing.
     ['^1.125.0', '^1.125.7', true],
     ['1.125.0', '1.125.0', true],
-    // Today's exact broken state, preserved as a standing literal.
+    // A types-ahead-of-engines mismatch, held as a standing literal
+    // independent of whatever package.json currently declares -- see
+    // the block comment above this describe: once the two real fields
+    // agree, the manifest-driven test can never exercise this false
+    // branch again, so this case is the standing proof the comparison
+    // itself can fail.
     ['^1.136.0', '^1.125.0', false],
     ['^2.0.0', '^1.125.0', false],
     // Types *below* engine: vsce's own check would accept this (it only

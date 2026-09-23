@@ -125,7 +125,7 @@ correct the comments that describe the retired overrides as redundant.
 - [x] Establish which overrides are genuinely redundant, by declared range
 - [x] Bound every `brace-expansion` major line by an override and a
       major-aware guard
-- [ ] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
+- [x] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
 - [ ] Confirm Dependabot closed both pull requests
 
 ## Tasks
@@ -214,17 +214,17 @@ PR #73 proposes — and raise `engines.vscode` in the same commit so the
 lockstep guard holds. This raises the minimum VS Code version required to
 install the extension. This is the slice that unblocks PR #73.
 
-- [ ] `engines.vscode` requires 1.138, and
+- [x] `engines.vscode` requires 1.138, and
       `devDependencies["@types/vscode"]` is the exact pin `1.138.0` with no
       range prefix
-- [ ] `pnpm-lock.yaml` resolves `@types/vscode@1.138.0`
-- [ ] Every assertion in `engine-compat.test.ts` passes against the real
+- [x] `pnpm-lock.yaml` resolves `@types/vscode@1.138.0`
+- [x] Every assertion in `engine-compat.test.ts` passes against the real
       `package.json` and `pnpm-lock.yaml`
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
-- [ ] `pnpm run audit` reports no finding beyond the allowlisted low
-- [ ] `pnpm run build` and `pnpm run test:integration` pass
-- [ ] `pnpm run package` produces a `.vsix` without a
+- [x] `pnpm run audit` reports no finding beyond the allowlisted low
+- [x] `pnpm run build` and `pnpm run test:integration` pass
+- [x] `pnpm run package` produces a `.vsix` without a
       `@types/vscode` compatibility error from vsce
 
 ## Decisions
