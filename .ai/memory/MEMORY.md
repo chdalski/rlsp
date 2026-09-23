@@ -25,3 +25,4 @@
 - [Trunk-based: land on main](feedback_trunk_based_land_on_main.md) — land work directly on main, no feature-branch/PR ceremony; let Dependabot self-close superseded PRs via `@dependabot rebase`
 - [Plugin update needs version bump](project_claude_plugin_update_needs_version_bump.md) — `claude plugin update` compares only the version string; unchanged version = no-op; a plugin-root CLAUDE.md fails `validate --strict`
 - [Dependabot group change skips excluded dep once](project_dependabot_group_change_skips_excluded_dep.md) — push-triggered run rebuilds the open group PR but gives the newly excluded dep no PR; next weekly run or a manual "Check for updates" (web UI only) opens it
+- [No pausing between tasks](feedback_no_pausing_between_tasks.md) — after plan approval, run all tasks + push + CI + closure continuously; report once at the end or on a real blocker

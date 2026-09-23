@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-09-23)
 **Created:** 2026-09-23
 
 # Adopt Rust 1.98.1, Edition 2024 for Zed, and Refresh Cargo.lock
@@ -105,12 +105,14 @@ dependencies.
 - [x] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
 - [x] Task 3: Move the Zed extension crate to edition 2024
 - [x] Task 4: Refresh both lockfiles
-- [ ] Push to `main` and confirm `ci.yml` and `coverage.yml`
+- [x] Push to `main` and confirm `ci.yml` and `coverage.yml`
       runs are green (`gh run list`)
-- [ ] Verify the Zed wasm build on CI with the new pin via a
-      throwaway push-triggered scratch workflow on a scratch
-      branch; delete the branch afterward
-- [ ] Mark plan Completed
+- [x] Verify the Zed wasm build on CI with the new pin — the
+      push touched `rlsp-yaml/integrations/zed/**`, so the real
+      `Zed Release` Check + Clippy job ran on `main` with
+      `dtolnay/rust-toolchain@1.98.1` + `wasm32-wasip2` and
+      passed; no scratch branch was needed
+- [x] Mark plan Completed
 
 ## Tasks
 
