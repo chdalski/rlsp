@@ -104,7 +104,7 @@ dependencies.
 - [x] Task 1: Fix the five 1.98.1 findings
 - [x] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
 - [x] Task 3: Move the Zed extension crate to edition 2024
-- [ ] Task 4: Refresh both lockfiles
+- [x] Task 4: Refresh both lockfiles
 - [ ] Push to `main` and confirm `ci.yml` and `coverage.yml`
       runs are green (`gh run list`)
 - [ ] Verify the Zed wasm build on CI with the new pin via a
@@ -192,20 +192,20 @@ Update the workspace `Cargo.lock` and the Zed crate's
 `Cargo.lock` so every dependency resolves to its newest
 semver-compatible release, with the full gate set green.
 
-- [ ] `cargo update --dry-run` reports no pending updates
+- [x] `cargo update --dry-run` reports no pending updates
       for the workspace or for the Zed crate
-- [ ] No `Cargo.toml` changed in this task
-- [ ] After `cargo clean`: `cargo clippy --workspace
+- [x] No `Cargo.toml` changed in this task
+- [x] After `cargo clean`: `cargo clippy --workspace
       --all-targets -- -D warnings` exits 0,
       `cargo test --workspace` passes with 0 failures,
       `cargo build --workspace` exits 0
-- [ ] Zed gates pass: `cargo check` and
+- [x] Zed gates pass: `cargo check` and
       `cargo clippy --all-targets -- -D warnings` with
       `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml
       --target wasm32-wasip2`
-- [ ] `cargo test -p rlsp-yaml --test
+- [x] `cargo test -p rlsp-yaml --test
       claude_code_stdio_smoke` passes
-- [ ] The diff touches only the two `Cargo.lock` files
+- [x] The diff touches only the two `Cargo.lock` files
 
 ## Decisions
 
