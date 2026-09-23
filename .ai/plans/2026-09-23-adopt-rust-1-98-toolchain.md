@@ -102,7 +102,7 @@ dependencies.
 - [x] Confirm scope with user (Zed edition 2024; MSRV 1.98;
       include lockfile refresh)
 - [x] Task 1: Fix the five 1.98.1 findings
-- [ ] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
+- [x] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
 - [ ] Task 3: Move the Zed extension crate to edition 2024
 - [ ] Task 4: Refresh both lockfiles
 - [ ] Push to `main` and confirm `ci.yml` and `coverage.yml`
@@ -144,26 +144,26 @@ Move the full-pin from 1.97.1 to 1.98.1 so local dev and
 every CI job build on the same toolchain, and raise the
 declared MSRV to match.
 
-- [ ] `rust-toolchain.toml` pins `channel = "1.98.1"` with
+- [x] `rust-toolchain.toml` pins `channel = "1.98.1"` with
       the same components, and its comment names 1.98.1
       everywhere it previously named 1.97.1
-- [ ] All 8 CI `dtolnay/rust-toolchain` refs are `@1.98.1`;
+- [x] All 8 CI `dtolnay/rust-toolchain` refs are `@1.98.1`;
       no `@1.97.1` reference remains anywhere under
       `.github/`
-- [ ] No per-job `targets:` / `components:` input and no
+- [x] No per-job `targets:` / `components:` input and no
       workflow `permissions` block changed
-- [ ] All four crates declare `rust-version = "1.98"`
-- [ ] No `version = "..."` field changed in any Cargo.toml
-- [ ] `rustc --version` in the repo reports 1.98.1
-- [ ] After `cargo clean`: `cargo clippy --workspace
+- [x] All four crates declare `rust-version = "1.98"`
+- [x] No `version = "..."` field changed in any Cargo.toml
+- [x] `rustc --version` in the repo reports 1.98.1
+- [x] After `cargo clean`: `cargo clippy --workspace
       --all-targets -- -D warnings` exits 0,
       `cargo test --workspace` passes with 0 failures,
       `cargo fmt --all -- --check` exits 0
-- [ ] Zed gates pass on 1.98.1: `cargo check` and
+- [x] Zed gates pass on 1.98.1: `cargo check` and
       `cargo clippy --all-targets -- -D warnings` with
       `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml
       --target wasm32-wasip2`
-- [ ] Every `.github/workflows/*.yml` file touched parses as
+- [x] Every `.github/workflows/*.yml` file touched parses as
       valid YAML
 
 ### Task 3: Move the Zed extension crate to edition 2024
