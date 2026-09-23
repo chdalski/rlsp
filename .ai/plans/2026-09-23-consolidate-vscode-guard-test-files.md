@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-23
 
 ## Goal
@@ -75,7 +75,7 @@ before it.
 
 - [x] Survey both guard files and identify what is genuinely duplicated
 - [x] Confirm scope and approach with the user
-- [ ] Collapse the duplicated predicates and aggregators
+- [x] Collapse the duplicated predicates and aggregators
 - [ ] Cut the header comment to its load-bearing reasoning
 - [ ] Order both files so each helper sits with the suite that proves it
 
@@ -92,29 +92,29 @@ after. The header comment's prose is rewritten wholesale by the task that
 follows this one, so leaving its references to the merged function names in
 place here is expected rather than an oversight.
 
-- [ ] One predicate decides whether a version of a named package is
+- [x] One predicate decides whether a version of a named package is
       patched, reading that package's per-major floors from a single
       declared table, and returning false for any major line the table does
       not cover
-- [ ] The floors the table declares are exactly those in force today:
+- [x] The floors the table declares are exactly those in force today:
       `brace-expansion` majors 2 and 5 at 2.1.4 and 5.0.9, `fast-uri`
       majors 3 and 4 at 3.1.6 and 4.1.3. No major line gains or loses a
       floor
-- [ ] One aggregator decides whether a set of resolved versions passes,
+- [x] One aggregator decides whether a set of resolved versions passes,
       with the empty-set outcome supplied by its caller. The
       `brace-expansion` call sites reject an empty set and the `fast-uri`
       call site accepts one, as they do today
-- [ ] Every boundary case asserted against the old predicates and
+- [x] Every boundary case asserted against the old predicates and
       aggregators is asserted against the new ones, with the same expected
       value. This includes the advisory-floor traps 1.1.18 and 3.0.6, the
       major-4 cases, the uncovered-major case, and the empty-array cases
       for both aggregation policies
-- [ ] No test is deleted without an equivalent assertion existing
+- [x] No test is deleted without an equivalent assertion existing
       afterwards, and the suite's passing count is at least its count at
       baseline
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
-- [ ] `pnpm run audit` reports no finding beyond the allowlisted low
+- [x] `pnpm run audit` reports no finding beyond the allowlisted low
 
 ### Task 2: The header comment states each piece of reasoning once
 

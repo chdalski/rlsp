@@ -141,58 +141,67 @@ function isAtLeast(actual: string, floor: string): boolean {
   return aPatch >= fPatch;
 }
 
-// fast-uri-specific patched-version check. isAtLeast alone cannot express
-// this: it is major-agnostic, so isAtLeast(version, '3.1.6') accepts any
-// 4.x version, including the vulnerable 4.0.0-4.1.2 range. This function
-// is the single decision point for "is this fast-uri version patched" --
-// keeping the floor check and the major check in one place means there is
-// no way to satisfy the guard by editing only one of them.
-function isPatchedFastUri(version: string): boolean {
+// Package-specific patched-version check, keyed first by package name and
+// then by major line. isAtLeast alone cannot express this: it is
+// major-agnostic, so isAtLeast(version, floor) for one major's floor would
+// accept any higher major, including majors nobody has vetted for this
+// graph. Keying the floor table by package name first -- rather than one
+// shared major -> floor map -- prevents one package's vetted floor for a
+// major line from leaking into another package's fail-closed default for
+// that same major: fast-uri's major-3/4 floors and brace-expansion's
+// major-2/5 floors never collide, because each package only ever looks up
+// its own row. The GuardedPackage union restricts the package parameter to
+// the two packages this guard vets, so a typo in the package name is a
+// compile error rather than a silent miss.
+type GuardedPackage = 'brace-expansion' | 'fast-uri';
+
+// The single declared table of patched floors. brace-expansion majors 2
+// and 5 are the two lines reachable in this graph (GHSA-rgw5-rvv9-x895;
+// see header comment for the advisory's full floor list, most of which is
+// deliberately not wired in here). fast-uri majors 3 and 4 are its two
+// verified patched floors (GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf /
+// GHSA-f65p-4m7j-42xc / GHSA-jqff-g426-hqxp). Any major line absent from a
+// package's row -- including majors the advisories cover with floors of
+// their own, like brace-expansion 1 and 3, or fast-uri 2 -- has no entry,
+// and isPatchedVersion below fails closed on a missing entry rather than
+// falling back to any other row or major.
+const patchedFloors: Record<GuardedPackage, Record<number, string>> = {
+  'brace-expansion': { 2: '2.1.4', 5: '5.0.9' },
+  'fast-uri': { 3: '3.1.6', 4: '4.1.3' },
+};
+
+// Single decision point for "is this version of this package patched".
+// Looks up the package's row, then that row's floor for the version's
+// major line; a missing entry (an unvetted major for that package) returns
+// false rather than falling through to another major's or another
+// package's floor. Keeping the floor lookup and the major dispatch in one
+// place means there is no way to satisfy the guard by editing only one of
+// them.
+function isPatchedVersion(packageName: GuardedPackage, version: string): boolean {
   const [major] = parseVersion(version);
-  if (major === 3) return isAtLeast(version, '3.1.6');
-  if (major === 4) return isAtLeast(version, '4.1.3');
-  return false; // any other major line is unvetted -- fail closed
+  const floor = patchedFloors[packageName][major];
+  return floor !== undefined && isAtLeast(version, floor);
 }
 
-// brace-expansion-specific patched-version check for GHSA-rgw5-rvv9-x895.
-// Only majors 2 and 5 -- the two lines actually reachable in this graph --
-// get a floor comparison. Every other major fails closed, including 1 and
-// 3, which the advisory covers with patched floors of their own (1.1.18
-// and 3.0.6, see header comment): those floors are deliberately not wired
-// in here, because a transitive jump onto a major line nobody has vetted
-// for this graph should stop the build, not pass because the advisory
-// happens to have a floor for it. Major 4 falls into the same `false`
-// default for a different reason -- it has no patched release at all, so
-// there is no floor to check even if this guard wanted to vet it.
-function isPatchedBraceExpansion(version: string): boolean {
-  const [major] = parseVersion(version);
-  if (major === 2) return isAtLeast(version, '2.1.4');
-  if (major === 5) return isAtLeast(version, '5.0.9');
-  return false; // majors 1, 3, 4, and anything else are unvetted -- fail closed
-}
-
-// Aggregation predicate for an overridden brace-expansion major line: every
-// resolved version on that line must be patched, AND the line must be
-// non-empty. The presence check is not redundant -- `[].every(...)` is
-// vacuously true, so without it, an override silently going dead (its major
-// line vanishing from the graph entirely) would pass. That is the opposite
-// of what this guard should do while the override is still active in
-// pnpm.overrides (see header comment) -- true today for both the major-2
-// and major-5 branches. Deliberately asymmetric with allPatchedOrAbsent
-// below, which must accept an empty array: brace-expansion's overridden
-// lines are expected to always resolve; fast-uri has no override and is
-// not.
-function allPatchedAndPresent(versions: string[]): boolean {
-  return versions.length > 0 && versions.every((version) => isPatchedBraceExpansion(version));
-}
-
-// Aggregation predicate for fast-uri: absence from the graph is
-// tolerated (see header comment), but any version that is present must
-// be patched. `[].every(…)` being vacuously true is exactly the wanted
-// behavior here, unlike allPatchedAndPresent above -- no separate
-// presence check.
-function allPatchedOrAbsent(versions: string[]): boolean {
-  return versions.every((version) => isPatchedFastUri(version));
+// Single aggregation decision point: every resolved version of the named
+// package must be patched, and the empty-set outcome is supplied by the
+// caller via the named onEmpty field rather than hardcoded per package --
+// a named field keeps the polarity legible at each call site, where a bare
+// positional boolean would not be. brace-expansion's call sites pass
+// onEmpty: false, because its overridden major lines are expected always
+// to resolve -- an empty set means an override silently went dead, which
+// must fail loudly rather than pass vacuously on `[].every(...)`. The
+// fast-uri call site passes onEmpty: true, because fast-uri carries no
+// override and its absence from the graph (true as of the @vscode/vsce
+// 4.0.0 upgrade) is tolerated. See header comment for the full reasoning
+// behind each policy.
+function allPatched(
+  versions: string[],
+  packageName: GuardedPackage,
+  { onEmpty }: { onEmpty: boolean },
+): boolean {
+  if (versions.length === 0) return onEmpty;
+  return versions.every((version) => isPatchedVersion(packageName, version));
 }
 
 describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
@@ -208,7 +217,7 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     expect(overridesBlock).not.toContain('fast-uri:');
   });
 
-  // Structural canary, independent of isPatchedBraceExpansion: even if a
+  // Structural canary, independent of isPatchedVersion: even if a
   // future edit broadened the predicate's accepted majors, this still
   // fails the moment an unexpected major line -- one this guard has never
   // vetted for this graph -- shows up in the lockfile at all.
@@ -223,19 +232,19 @@ describe('pnpm.overrides regression guard (brace-expansion / fast-uri)', () => {
     const majorTwoVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
       (version) => parseVersion(version)[0] === 2,
     );
-    expect(allPatchedAndPresent(majorTwoVersions)).toBe(true);
+    expect(allPatched(majorTwoVersions, 'brace-expansion', { onEmpty: false })).toBe(true);
   });
 
   it("brace-expansion's overridden major-5 branch resolves to at least the audited patched floor", () => {
     const majorFiveVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
       (version) => parseVersion(version)[0] === 5,
     );
-    expect(allPatchedAndPresent(majorFiveVersions)).toBe(true);
+    expect(allPatched(majorFiveVersions, 'brace-expansion', { onEmpty: false })).toBe(true);
   });
 
   it('fast-uri is absent from the lockfile, or resolves to a patched version wherever present', () => {
     const versions = allResolvedVersions(lockfile, 'fast-uri');
-    expect(allPatchedOrAbsent(versions)).toBe(true);
+    expect(allPatched(versions, 'fast-uri', { onEmpty: true })).toBe(true);
   });
 });
 
@@ -264,7 +273,7 @@ describe('isAtLeast', () => {
     ['2.9.9', '3.1.6', false],
     // The brace-expansion@5 patched floor (GHSA-rgw5-rvv9-x895): the
     // override's caret range (^5.0.9) permits ordinary patch drift above
-    // this floor, but allPatchedAndPresent below must still catch drift
+    // this floor, but allPatched below must still catch drift
     // below it.
     ['5.0.8', '5.0.9', false],
     ['5.0.9', '5.0.9', true],
@@ -273,124 +282,137 @@ describe('isAtLeast', () => {
   });
 });
 
-// Boundary coverage for isPatchedFastUri, independent of what the
-// lockfile currently resolves. Covers both patched floors, the two 4.x
-// false-positive traps (4.0.0 is major-4 but pre-floor; 4.1.2 is one
-// patch below the floor) that isAtLeast alone would miss, and the
-// fail-closed default for majors this guard has not vetted.
-describe('isPatchedFastUri', () => {
-  it.each([
-    ['3.1.5', false],
-    ['3.1.6', true],
-    ['4.0.0', false],
-    ['4.1.2', false],
-    ['4.1.3', true],
-    ['4.2.0', true],
-    ['2.9.9', false],
-    ['5.0.0', false],
-  ])('isPatchedFastUri(%s) === %s', (version, expected) => {
-    expect(isPatchedFastUri(version)).toBe(expected);
-  });
-});
-
-// Boundary coverage for isPatchedBraceExpansion, independent of what the
-// lockfile currently resolves. Covers both vetted floors (2 and 5), the
-// major-4 line (which has no patched release at all, so every version on
-// it is false regardless of how high the minor/patch climbs), and the
-// fail-closed default for every other major -- including the two trap
-// cases below, which are the load-bearing proof that this predicate
-// rejects unvetted majors even when the advisory gives them their own
-// patched floor. Without those two cases, a predicate that (incorrectly)
-// fell back to the advisory's full floor table for majors 1 and 3 would
-// still pass every other case in this table.
-describe('isPatchedBraceExpansion', () => {
-  it.each([
+// Boundary coverage for isPatchedVersion, independent of what the lockfile
+// currently resolves. Union of both packages' patched floors and 4.x
+// false-positive traps, the fail-closed default for majors this guard has
+// not vetted for each package, and -- new for the merge -- the
+// cross-contamination traps at the end: brace-expansion 3.1.6/4.1.3 are
+// fast-uri's real floors, and fast-uri 2.1.4/5.0.9 are brace-expansion's
+// real floors, so a table keyed by major only (dropping packageName) would
+// wrongly flip every one of those four cases from false to true. There is
+// no runtime "unknown package name" case here: GuardedPackage's literal
+// union type makes that a compile error, not a reachable branch.
+describe('isPatchedVersion', () => {
+  it.each<[GuardedPackage, string, boolean]>([
+    // fast-uri, carried forward unchanged from the former
+    // isPatchedFastUri table. Covers both patched floors and the two 4.x
+    // false-positive traps (4.0.0 is major-4 but pre-floor; 4.1.2 is one
+    // patch below the floor) that isAtLeast alone would miss.
+    ['fast-uri', '3.1.5', false],
+    ['fast-uri', '3.1.6', true],
+    ['fast-uri', '4.0.0', false],
+    ['fast-uri', '4.1.2', false],
+    ['fast-uri', '4.1.3', true],
+    ['fast-uri', '4.2.0', true],
+    ['fast-uri', '2.9.9', false],
+    ['fast-uri', '5.0.0', false],
+    // brace-expansion, carried forward unchanged from the former
+    // isPatchedBraceExpansion table.
     // Trap: this is major 1's real advisory-patched floor, but major 1 has
     // no dependent in this graph, so it must stay unvetted -- same
-    // reasoning as isPatchedFastUri's major-2 case above.
-    ['1.1.18', false],
+    // reasoning as fast-uri's major-2 case above.
+    ['brace-expansion', '1.1.18', false],
     // The exact regression this task restores the override for: the top
     // of minimatch@9.0.9's admitted range (^2.0.2) sits inside this
     // vulnerable band.
-    ['2.1.3', false],
-    ['2.1.4', true],
-    ['2.5.0', true],
+    ['brace-expansion', '2.1.3', false],
+    ['brace-expansion', '2.1.4', true],
+    ['brace-expansion', '2.5.0', true],
     // Trap: major 3's real advisory-patched floor -- must still reject,
     // for the same reason as 1.1.18 above.
-    ['3.0.6', false],
+    ['brace-expansion', '3.0.6', false],
     // Major 4's lowest version -- no patched release exists on this line.
-    ['4.0.0', false],
+    ['brace-expansion', '4.0.0', false],
     // High into major 4, still vulnerable -- proves this isn't
     // accidentally implemented as a floor check (e.g. isAtLeast(v,
     // '4.0.0'), which would wrongly return true here).
-    ['4.9.9', false],
-    ['5.0.8', false],
-    ['5.0.9', true],
-    ['5.1.0', true],
+    ['brace-expansion', '4.9.9', false],
+    ['brace-expansion', '5.0.8', false],
+    ['brace-expansion', '5.0.9', true],
+    ['brace-expansion', '5.1.0', true],
     // Fail-closed default: major 0 also falls inside the advisory's real
     // `< 1.1.18` band, so this is doubly correct, not just unvetted.
-    ['0.9.9', false],
+    ['brace-expansion', '0.9.9', false],
     // Fail-closed default for a future major the advisory doesn't cover
     // at all.
-    ['6.0.0', false],
-  ])('isPatchedBraceExpansion(%s) === %s', (version, expected) => {
-    expect(isPatchedBraceExpansion(version)).toBe(expected);
+    ['brace-expansion', '6.0.0', false],
+    // Cross-contamination traps, new for the merge: fast-uri's real
+    // patched floors, applied to brace-expansion, which has no major-3
+    // floor at all and a different (fully-vulnerable) major-4 status.
+    ['brace-expansion', '3.1.6', false],
+    ['brace-expansion', '4.1.3', false],
+    // Cross-contamination traps, the other direction: brace-expansion's
+    // real patched floors, applied to fast-uri, which vets neither major
+    // 2 nor major 5.
+    ['fast-uri', '2.1.4', false],
+    ['fast-uri', '5.0.9', false],
+  ])('isPatchedVersion(%s, %s) === %s', (packageName, version, expected) => {
+    expect(isPatchedVersion(packageName, version)).toBe(expected);
   });
 });
 
-// Boundary coverage for allPatchedAndPresent's aggregation semantics,
-// independent of what the lockfile currently resolves. isPatchedBraceExpansion's
-// own floor/major comparisons are already covered above; these cases are
-// scoped to the aggregation behavior only (empty-array, mixed-major array).
-describe('allPatchedAndPresent', () => {
-  it.each([
-    [['2.1.4'], true],
-    [['2.1.5'], true],
+// Boundary coverage for allPatched's aggregation semantics, independent of
+// what the lockfile currently resolves. isPatchedVersion's own floor/major
+// comparisons are already covered above; these cases are scoped to the
+// aggregation behavior only (empty-array, mixed-major array, and the
+// onEmpty flag itself). Union of both former aggregators' tables, plus two
+// new traps at the end that pass the *other* package's historical onEmpty
+// policy alongside an empty array -- proving onEmpty itself controls the
+// outcome rather than a hardcoded per-package branch that happens to match
+// today's two call sites.
+describe('allPatched', () => {
+  it.each<[string[], GuardedPackage, boolean, boolean]>([
+    // brace-expansion, carried forward unchanged from the former
+    // allPatchedAndPresent table (onEmpty: false throughout).
+    [['2.1.4'], 'brace-expansion', false, true],
+    [['2.1.5'], 'brace-expansion', false, true],
     // The exact regression this restores the override for.
-    [['2.1.3'], false],
+    [['2.1.3'], 'brace-expansion', false, false],
     // Inclusive floor, single element -- the shape of today's real
     // lockfile major-5 branch.
-    [['5.0.9'], true],
-    [['5.0.8'], false],
+    [['5.0.9'], 'brace-expansion', false, true],
+    [['5.0.8'], 'brace-expansion', false, false],
     // Mixed majors, both patched -- proves the aggregator honors each
     // element's own major-dispatched floor rather than one global floor,
     // which could not express two simultaneously-valid floors at once.
-    [['2.1.4', '5.0.9'], true],
+    [['2.1.4', '5.0.9'], 'brace-expansion', false, true],
     // Mixed majors, one bad -- proves every element is checked, not just
     // the first.
-    [['2.1.4', '5.0.8'], false],
+    [['2.1.4', '5.0.8'], 'brace-expansion', false, false],
     // A major-4 version on its own -- proves the aggregator doesn't
-    // bypass isPatchedBraceExpansion's always-false major-4 handling.
-    [['4.0.0'], false],
+    // bypass isPatchedVersion's always-false brace-expansion major-4
+    // handling.
+    [['4.0.0'], 'brace-expansion', false, false],
     // Empty must fail: both overrides are active (see header comment on
     // overrides.test.ts), so a vanished branch is itself a regression,
     // not a pass.
-    [[], false],
-  ])('allPatchedAndPresent(%j) === %s', (versions, expected) => {
-    expect(allPatchedAndPresent(versions)).toBe(expected);
-  });
-});
-
-// Boundary coverage for allPatchedOrAbsent's aggregation semantics,
-// independent of what the lockfile currently resolves. isPatchedFastUri's
-// own floor/major comparisons are already covered above; these cases are
-// scoped to the aggregation behavior only (empty-array, mixed-array).
-describe('allPatchedOrAbsent', () => {
-  it.each([
-    // Empty must pass -- the tolerated-absence behavior this task adds.
-    [[], true],
-    [['3.1.6'], true],
-    [['4.1.3'], true],
+    [[], 'brace-expansion', false, false],
+    // fast-uri, carried forward unchanged from the former
+    // allPatchedOrAbsent table (onEmpty: true throughout).
+    // Empty must pass -- the tolerated-absence behavior fast-uri's call
+    // site relies on.
+    [[], 'fast-uri', true, true],
+    [['3.1.6'], 'fast-uri', true, true],
+    [['4.1.3'], 'fast-uri', true, true],
     // Present and unpatched must still fail.
-    [['3.1.5'], false],
+    [['3.1.5'], 'fast-uri', true, false],
     // Mixed patched+unpatched -- proves no short-circuit on the first
     // good value.
-    [['4.1.3', '3.1.5'], false],
+    [['4.1.3', '3.1.5'], 'fast-uri', true, false],
     // Present but on an unvetted major line -- confirms this wrapper
-    // doesn't bypass isPatchedFastUri's fail-closed default.
-    [['5.0.0'], false],
-  ])('allPatchedOrAbsent(%j) === %s', (versions, expected) => {
-    expect(allPatchedOrAbsent(versions)).toBe(expected);
+    // doesn't bypass isPatchedVersion's fail-closed default.
+    [['5.0.0'], 'fast-uri', true, false],
+    // onEmpty-flag traps, new for the merge: an empty array with the
+    // *other* package's historical policy. If allPatched ignored onEmpty
+    // and instead hardcoded a per-package branch internally, these two
+    // would keep passing with today's call sites but silently diverge the
+    // moment either call site's onEmpty argument changed -- these prove
+    // the flag itself is load-bearing right now, not incidentally
+    // correct.
+    [[], 'brace-expansion', true, true],
+    [[], 'fast-uri', false, false],
+  ])('allPatched(%j, %s, onEmpty=%s) === %s', (versions, packageName, onEmpty, expected) => {
+    expect(allPatched(versions, packageName, { onEmpty })).toBe(expected);
   });
 });
 
