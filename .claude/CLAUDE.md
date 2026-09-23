@@ -113,9 +113,18 @@ After clarification is complete:
    on earlier ones. This enables incremental review — the
    reviewer can evaluate each slice in isolation.
 
-5. **Review the plan via subagent.** Launch the
-   `plan-reviewer` agent to review the plan before
-   presenting it to the user. Pass it:
+5. **Review the plan via subagent.** First proofread your
+   draft against `plan-review-checklist.md` in the plans
+   directory and fix the mechanical items directly: escape
+   hatches (§2), hedge words (§3), references to other plan
+   files (§1), task checkboxes written as steps instead of
+   outcomes (§7), and format (§10). Escape hatches and hedge
+   words are Blocking findings, so each one left for the
+   reviewer costs a full review pass. This is proofreading,
+   not review — the plan-reviewer still runs afterward.
+
+   Then launch the `plan-reviewer` agent to review the plan
+   before presenting it to the user. Pass it:
    - The plan file path
    - The plans directory path (so it can find
      `plan-format.md` and `plan-review-checklist.md`)
@@ -126,9 +135,16 @@ After clarification is complete:
 
    This is a cycle — not a one-shot check:
    a. Launch the `plan-reviewer` with all three inputs.
-   b. If the subagent reports issues: revise the plan to
-      address each finding, then re-launch the subagent.
-   c. Repeat until the subagent returns "No issues found."
+   b. Fix each Blocking finding, or decline one you judge
+      wrong by recording the reason in the plan's
+      Decisions section — the user sees every decline
+      (step 6). Apply the Advisory findings you agree
+      with; they never require another pass.
+   c. If you fixed any Blocking finding, re-launch the
+      subagent — a fix can break what an earlier pass
+      approved. Repeat until it returns
+      "No blocking issues found" or every remaining
+      Blocking finding is declined.
 
    Each launch is stateless — every review pass gets fresh
    eyes on the current plan state. Launch it without a
@@ -143,10 +159,13 @@ After clarification is complete:
    independent code review applies to plans.
 
 6. **Present the plan to the user** for approval. Use
-   `AskUserQuestion` to confirm. If the user requests
-   changes, revise the plan and restart the review cycle
-   (step 5) — revisions based on user feedback can
-   reintroduce issues the subagent would catch.
+   `AskUserQuestion` to confirm. Name each Blocking finding
+   you declined and each split or consolidation suggestion
+   the review raised — those are the user's decisions, not
+   yours. If the user requests changes, revise the plan and
+   restart the review cycle (step 5) — revisions based on
+   user feedback can reintroduce issues the subagent would
+   catch.
 
 7. **Commit the plan.** After user approval, commit the
    plan file using conventional commit format:
