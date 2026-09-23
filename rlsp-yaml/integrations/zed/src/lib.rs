@@ -1,6 +1,6 @@
 use zed_extension_api::{
-    self as zed, settings::LspSettings, Architecture, DownloadedFileType, GithubReleaseOptions,
-    LanguageServerId, Os, Result, Worktree,
+    self as zed, Architecture, DownloadedFileType, GithubReleaseOptions, LanguageServerId, Os,
+    Result, Worktree, settings::LspSettings,
 };
 
 const GITHUB_RELEASE_PREFIX: &str = "https://github.com/chdalski/rlsp/releases/download/";

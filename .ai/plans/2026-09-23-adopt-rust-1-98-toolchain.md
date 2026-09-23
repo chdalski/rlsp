@@ -103,7 +103,7 @@ dependencies.
       include lockfile refresh)
 - [x] Task 1: Fix the five 1.98.1 findings
 - [x] Task 2: Pin Rust 1.98.1 locally and in CI; MSRV 1.98
-- [ ] Task 3: Move the Zed extension crate to edition 2024
+- [x] Task 3: Move the Zed extension crate to edition 2024
 - [ ] Task 4: Refresh both lockfiles
 - [ ] Push to `main` and confirm `ci.yml` and `coverage.yml`
       runs are green (`gh run list`)
@@ -171,19 +171,19 @@ declared MSRV to match.
 Bring the Zed extension crate onto the latest stable
 edition so all four crates share edition 2024.
 
-- [ ] `rlsp-yaml/integrations/zed/Cargo.toml` declares
+- [x] `rlsp-yaml/integrations/zed/Cargo.toml` declares
       `edition = "2024"`; its `version` field is unchanged
-- [ ] Zed gates pass on 1.98.1: `cargo check` and
+- [x] Zed gates pass on 1.98.1: `cargo check` and
       `cargo clippy --all-targets -- -D warnings` with
       `--manifest-path rlsp-yaml/integrations/zed/Cargo.toml
       --target wasm32-wasip2`
-- [ ] `cargo fmt --manifest-path
+- [x] `cargo fmt --manifest-path
       rlsp-yaml/integrations/zed/Cargo.toml -- --check`
       exits 0
-- [ ] Any edition-migration semantic change (e.g. from
+- [x] Any edition-migration semantic change (e.g. from
       `cargo fix --edition`) is named in the review handoff
       with the reason it is behavior-preserving
-- [ ] No lint was allowed, expected, or suppressed to make
+- [x] No lint was allowed, expected, or suppressed to make
       the edition change pass
 
 ### Task 4: Refresh both lockfiles to the latest compatible versions

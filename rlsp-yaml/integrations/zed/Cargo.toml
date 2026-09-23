@@ -1,7 +1,7 @@
 [package]
 name = "rlsp-yaml-zed"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.98"
 description = "Zed extension for rlsp-yaml YAML language server"
 authors = ["Christoph Dalski", "Kirill Semenov"]
