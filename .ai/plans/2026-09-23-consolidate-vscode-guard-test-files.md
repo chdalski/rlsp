@@ -76,7 +76,7 @@ before it.
 - [x] Survey both guard files and identify what is genuinely duplicated
 - [x] Confirm scope and approach with the user
 - [x] Collapse the duplicated predicates and aggregators
-- [ ] Cut the header comment to its load-bearing reasoning
+- [x] Cut the header comment to its load-bearing reasoning
 - [ ] Order both files so each helper sits with the suite that proves it
 
 ## Tasks
@@ -122,16 +122,16 @@ Cut `overrides.test.ts`'s header to the reasoning a future maintainer needs,
 stating the fail-closed rationale once instead of three times. The material
 that explains why earlier work went wrong stays.
 
-- [ ] The header states the declared-range test for override redundancy,
+- [x] The header states the declared-range test for override redundancy,
       the record that the `brace-expansion@2` override was retired on the
       wrong test and restored, the fail-closed rationale for unvetted major
       lines, and the advisory's vulnerable bands with their patched floors
-- [ ] The fail-closed rationale appears once and covers every package and
+- [x] The fail-closed rationale appears once and covers every package and
       major line it applies to, rather than being restated per predicate
-- [ ] No statement in the header contradicts what the file asserts, and no
+- [x] No statement in the header contradicts what the file asserts, and no
       statement describes a package's override status or resolved version as
       a fact about the current moment
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
 
 ### Task 3: Each helper sits with the suite that proves it

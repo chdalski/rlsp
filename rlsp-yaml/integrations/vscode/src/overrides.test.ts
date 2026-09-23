@@ -7,76 +7,48 @@ import { describe, expect, it } from 'vitest';
 // CVE-2026-69152: DoS via unbounded intermediate arrays, bypassing the
 // earlier GHSA-mh99-v99m-4gvg / CVE-2026-14257 mitigation -- which is why
 // the major-5 floor below is 5.0.9, not that earlier advisory's 5.0.8).
-// Verified directly against the GitHub Advisory API. For the record, the
-// full set of vulnerable bands and patched floors the advisory publishes:
+// Verified directly against the GitHub Advisory API. The full set of
+// vulnerable bands and patched floors GHSA-rgw5-rvv9-x895 publishes:
 // `< 1.1.18` (patched 1.1.18), `>= 2.0.0, < 2.1.4` (patched 2.1.4),
 // `>= 3.0.0, < 3.0.6` (patched 3.0.6), and `>= 4.0.0, < 5.0.9` (patched
 // 5.0.9). Major 4 has no patched release at all -- every 4.x version is
-// vulnerable, and the fix is moving to major 5. This is reference data
-// only, not executable acceptance -- see isPatchedBraceExpansion below for
-// which of these floors this guard actually checks against.
+// vulnerable and the fix is moving to major 5, so a missing major-4 floor
+// below means migrating off major 4 entirely, not that no floor has been
+// found yet. fast-uri is covered by GHSA-5jgf-p345-68v8 /
+// GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc / GHSA-jqff-g426-hqxp, with
+// verified patched floors of 3.1.6 and 4.1.3. All of the above is
+// reference data only, not executable acceptance -- see the patchedFloors
+// table and isPatchedVersion below for which of these floors this guard
+// actually checks against.
 //
-// Both brace-expansion majors reachable in this graph carry active
-// overrides, and both are load-bearing. The test for whether an override is
-// redundant: every direct dependent's own declared range for the package
-// must be bounded at or above that major line's patched floor. A scratch
-// dependency resolution landing above the floor does NOT establish this --
-// pnpm picks the newest version satisfying a range when nothing else
-// constrains it, so an observed resolved version reflects resolver
-// preference (registry mirror state, store contents, incremental lockfile
-// history), not a guarantee. Applying the declared-range test here:
-//   - minimatch@10.2.6 declares "brace-expansion": "^5.0.8", which admits
-//     the vulnerable 5.0.8 -- reaches the extension's runtime dependency
-//     path via vscode-languageclient.
-//   - minimatch@9.0.9 declares "brace-expansion": "^2.0.2", which admits
-//     the vulnerable 2.0.2-2.1.3 range -- reaches the graph via mocha, a
-//     dev-only path.
-// Neither declared range is bounded at its floor, so neither override is
-// redundant. The brace-expansion@2 override was previously retired on the
-// resolution-snapshot test above (an earlier audit saw a resolved version
-// above the floor and concluded the dependent's range must be safe), which
-// is why it is restored here rather than left absent: the retirement was
-// based on the wrong test, not on a change in the actual dependency graph.
+// Before retiring either override: re-derive the current direct
+// dependents from the lockfile and check each one's own declared range
+// against the floor below -- a resolved version is not evidence. An
+// override is redundant only when every direct dependent's declared
+// range is bounded at or above that major line's patched floor; a
+// resolved version above the floor proves nothing, because pnpm picks
+// the newest version satisfying a range when nothing else constrains it,
+// so an observed resolved version reflects resolver preference (registry
+// mirror state, store contents, incremental lockfile history), not a
+// range guarantee. The brace-expansion@2 override was once retired on
+// exactly that wrong evidence -- a resolved version above the floor was
+// read as proof the dependent's range was safe -- and was restored once
+// the retirement was found to rest on a resolved version rather than a
+// bounded declared range. Re-derive from the lockfile; don't trust a
+// snapshot.
 //
-// isPatchedBraceExpansion() below is the single decision point for "is this
-// brace-expansion version patched". It dispatches on major line rather than
-// comparing against one global floor, because a major-agnostic comparison
-// against, say, the 5.0.9 floor would accept any higher major
-// (isAtLeast('6.0.0', '5.0.9') is true) without that major ever being
-// vetted against the advisory. It encodes a floor only for the two major
-// lines actually reachable in this graph today -- 2 (2.1.4) and 5 (5.0.9)
-// -- and fails closed on every other major, including 1 and 3, even though
-// the advisory gives those their own patched floors (1.1.18 and 3.0.6
-// respectively, see above). This mirrors isPatchedFastUri immediately
-// below, which fails closed on fast-uri's 2.x line even though 2.4.5 is
-// also patched: a transitive jump onto a major line nobody has vetted for
-// this graph is unexpected enough that it should stop the build and be
-// looked at, rather than pass on the assumption that the advisory's own
-// floor is automatically safe to trust unattended. Major 1 and major 3
-// being absent from this graph is not an oversight -- it is why their
-// floors are not wired in as passing thresholds. Major 4 fails closed for
-// a different reason: the advisory covers it as fully vulnerable, with no
-// patched release to check against at all.
-//
-// The lockfile-driven "resolved major lines are exactly {2, 5}" test below
-// is an independent structural canary, not a restatement of the predicate:
-// even if a future edit broadened the predicate's accepted majors, that
-// test still fails loudly the moment an unexpected major line appears in
-// the graph, which is the actual property this guard exists to protect.
-//
-// fast-uri carries no override -- its version drifts with ordinary
-// transitive dependency updates, and as of the @vscode/vsce 4.0.0 upgrade
-// it has left the dependency graph entirely (vsce 4.0.0 dropped the
-// dependency chain that pulled it in). isPatchedFastUri() encodes its own
-// verified patched floors (3.1.6 and 4.1.3, from GHSA-5jgf-p345-68v8 /
-// GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc / GHSA-jqff-g426-hqxp) and
-// fails closed for every other major line, including 2.x, even though
-// 2.4.5 is also patched: a transitive downgrade across a major line is
-// unexpected enough that it should stop and be looked at rather than pass
-// on an assumption.
-//
-// All of this asserts what the lockfile actually resolves -- not just that
-// an override string is present in package.json.
+// The patchedFloors table (checked by isPatchedVersion below) only
+// contains the major lines vetted as reachable in this graph for each
+// package, not every major either advisory has patched -- for example
+// brace-expansion majors 1 and 3, and fast-uri major 2, each covered by
+// their own advisory floor but with no entry in that table. A major
+// absent from a package's row is unvetted, not safe, and the lookup
+// fails closed on it rather than falling back to another major or
+// another package; see patchedFloors/isPatchedVersion below for the
+// exact mechanics. The resolved-major-lines canary test below
+// independently fails the moment an unvetted brace-expansion major
+// appears in the lockfile at all; fast-uri has no equivalent canary, so
+// the fail-closed lookup is its only backstop.
 const lockfilePath = path.join(__dirname, '..', 'pnpm-lock.yaml');
 
 // Windows checkouts of this repository read text files with CRLF line
