@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-09-23
 
 ## Goal
@@ -97,7 +97,7 @@ carries only pins that still do work.
 - [x] Reproduce each guard failure's cause against the guard source
 - [x] Measure each override's effect on resolution and on the audit gate
 - [x] Confirm with the user which upgrades to land and how the guards change
-- [ ] Land the `@vscode/vsce` upgrade and repair the two stale guards
+- [x] Land the `@vscode/vsce` upgrade and repair the two stale guards
 - [ ] Remove the redundant `brace-expansion@5` override
 - [ ] Land the `@types/vscode` upgrade in lockstep with `engines.vscode`
 - [ ] Confirm Dependabot closed both pull requests
@@ -113,22 +113,22 @@ override permits, and the `fast-uri` assertion tolerates the package being
 absent from the graph while still rejecting a vulnerable version if a future
 dependency reintroduces it. This is the slice that unblocks PR #75.
 
-- [ ] `devDependencies["@vscode/vsce"]` accepts 4.0.0, and `pnpm-lock.yaml`
+- [x] `devDependencies["@vscode/vsce"]` accepts 4.0.0, and `pnpm-lock.yaml`
       resolves `@vscode/vsce@4.0.0`
-- [ ] The `brace-expansion` major-5 guard passes against the resolved version
+- [x] The `brace-expansion` major-5 guard passes against the resolved version
       by requiring it to be at or above the patched floor 5.0.9, and fails
       for a 5.x version below that floor
-- [ ] The `fast-uri` guard passes while `fast-uri` is absent from the
+- [x] The `fast-uri` guard passes while `fast-uri` is absent from the
       lockfile, and fails for a resolved `fast-uri` version outside the
       patched ranges. `isPatchedFastUri` and its unit suite still exist and
       still reject every version they reject today
-- [ ] Every comment in `overrides.test.ts` describes what the file now
+- [x] Every comment in `overrides.test.ts` describes what the file now
       asserts; no comment claims the major-5 branch is held to an exact
       version or that `fast-uri` is expected in the graph
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
-- [ ] `pnpm run audit` reports no finding beyond the allowlisted low
-- [ ] `pnpm run build` and `pnpm run test:integration` pass
+- [x] `pnpm run audit` reports no finding beyond the allowlisted low
+- [x] `pnpm run build` and `pnpm run test:integration` pass
 
 ### Task 2: The redundant `brace-expansion@5` override is removed and the overrides guard reflects the retained pins
 
