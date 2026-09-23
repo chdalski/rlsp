@@ -15,8 +15,6 @@ import { describe, expect, it } from 'vitest';
 // is exactly the kind of silent divergence this guard exists to catch.
 // There is no production engine-compat.ts -- same as overrides.test.ts,
 // which has no overrides.ts -- this test file *is* the guard.
-const packageJsonPath = path.join(__dirname, '..', 'package.json');
-const lockfilePath = path.join(__dirname, '..', 'pnpm-lock.yaml');
 
 // JSON.parse returns `any`. Casting that away with `as` would silently
 // paper over a missing or malformed field instead of failing loudly with
@@ -57,6 +55,26 @@ function readTypesVscode(manifest: unknown): string {
   return readStringField(devDependencies, '@types/vscode', `devDependencies['@types/vscode']`);
 }
 
+describe('manifest shape guards', () => {
+  it('throws when engines.vscode is missing, naming the field', () => {
+    expect(() => readEnginesVscode({})).toThrow('engines.vscode');
+  });
+
+  it('throws when engines.vscode is not a string', () => {
+    expect(() => readEnginesVscode({ engines: { vscode: 1 } })).toThrow('engines.vscode');
+  });
+
+  it('throws when @types/vscode is absent from devDependencies, naming the field', () => {
+    expect(() => readTypesVscode({ devDependencies: {} })).toThrow('@types/vscode');
+  });
+
+  it('throws when @types/vscode is not a string', () => {
+    expect(() => readTypesVscode({ devDependencies: { '@types/vscode': 1 } })).toThrow(
+      '@types/vscode',
+    );
+  });
+});
+
 // Strips a leading `^` or `~` and requires exactly major.minor.patch.
 // Deliberately does not support `x` wildcards (e.g. `^1.x.0`) -- this
 // project has never used wildcard ranges for these fields, and tolerating
@@ -70,6 +88,28 @@ function parseVersion(version: string): [number, number] {
   return [Number(major), Number(minor)];
 }
 
+describe('parseVersion', () => {
+  it('parses a caret-prefixed version', () => {
+    expect(parseVersion('^1.125.0')).toEqual([1, 125]);
+  });
+
+  it('parses a tilde-prefixed version', () => {
+    expect(parseVersion('~1.125.3')).toEqual([1, 125]);
+  });
+
+  it('parses an unprefixed version without rejecting it', () => {
+    expect(parseVersion('1.125.0')).toEqual([1, 125]);
+  });
+
+  it('throws on an x wildcard component', () => {
+    expect(() => parseVersion('^1.x.0')).toThrow('unexpected version format');
+  });
+
+  it('throws on a non-version string', () => {
+    expect(() => parseVersion('not-a-version')).toThrow('unexpected version format');
+  });
+});
+
 // Exact major.minor equality. vsce's own check (see the top-of-file
 // comment) only rejects @types/vscode when it is *ahead* of
 // engines.vscode and compares major.minor only, ignoring patch --
@@ -80,6 +120,35 @@ function majorMinorEqual(a: string, b: string): boolean {
   const [bMajor, bMinor] = parseVersion(b);
   return aMajor === bMajor && aMinor === bMinor;
 }
+
+// Direct unit coverage for majorMinorEqual/parseVersion. The
+// manifest-driven tests below only ever exercise these against whatever
+// package.json currently declares -- once the two fields are fixed, the
+// "agree on major.minor" test below can never exercise the false branch
+// again. These cases are the standing proof the comparison itself can
+// fail, independent of what package.json currently declares. Same
+// relationship as isAtLeast's literal suite to the lockfile-driven
+// fast-uri test in overrides.test.ts.
+describe('majorMinorEqual', () => {
+  it.each([
+    // Patch differences are not load-bearing.
+    ['^1.125.0', '^1.125.7', true],
+    ['1.125.0', '1.125.0', true],
+    // A types-ahead-of-engines mismatch, held as a standing literal
+    // independent of whatever package.json currently declares -- see
+    // the block comment above this describe: once the two real fields
+    // agree, the manifest-driven test can never exercise this false
+    // branch again, so this case is the standing proof the comparison
+    // itself can fail.
+    ['^1.136.0', '^1.125.0', false],
+    ['^2.0.0', '^1.125.0', false],
+    // Types *below* engine: vsce's own check would accept this (it only
+    // rejects types being ahead); this guard must not.
+    ['^1.120.0', '^1.125.0', false],
+  ])('majorMinorEqual(%s, %s) === %s', (a, b, expected) => {
+    expect(majorMinorEqual(a, b)).toBe(expected);
+  });
+});
 
 // Windows checkouts of this repository read text files with CRLF line
 // endings unless normalized at checkout (see ../.gitattributes, which
@@ -114,6 +183,38 @@ function resolvedTypesVscodeVersion(lockfileText: string): string {
   }
   return version;
 }
+
+// Direct unit coverage for resolvedTypesVscodeVersion, against literal
+// lockfile snippets rather than the real pnpm-lock.yaml -- once the
+// lockfile is regenerated to match the pinned specifier, the real-file
+// test below can never exercise the "header absent" branch again. These
+// two stay provably able to fail independent of what pnpm-lock.yaml
+// currently resolves.
+describe('resolvedTypesVscodeVersion', () => {
+  it('reads the version out of a package header line', () => {
+    const snippet = [
+      "  '@types/sarif@2.1.7':",
+      '    resolution: {integrity: sha512-fake==}',
+      '',
+      "  '@types/vscode@1.125.0':",
+      '    resolution: {integrity: sha512-fake==}',
+      '',
+    ].join('\n');
+    expect(resolvedTypesVscodeVersion(snippet)).toBe('1.125.0');
+  });
+
+  it('throws when the header is absent', () => {
+    const snippet = [
+      "  '@types/sarif@2.1.7':",
+      '    resolution: {integrity: sha512-fake==}',
+      '',
+    ].join('\n');
+    expect(() => resolvedTypesVscodeVersion(snippet)).toThrow("no '@types/vscode' package header");
+  });
+});
+
+const packageJsonPath = path.join(__dirname, '..', 'package.json');
+const lockfilePath = path.join(__dirname, '..', 'pnpm-lock.yaml');
 
 describe('engines.vscode / @types/vscode lockstep guard', () => {
   const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
@@ -160,105 +261,5 @@ describe('engines.vscode / @types/vscode lockstep guard', () => {
     // pipeline that would catch it.
     const typesVscode = readTypesVscode(packageJson);
     expect(resolvedTypesVscodeVersion(lockfile)).toBe(typesVscode);
-  });
-});
-
-// Direct unit coverage for majorMinorEqual/parseVersion. The
-// manifest-driven tests above only ever exercise these against whatever
-// package.json currently declares -- once the two fields are fixed, the
-// "agree on major.minor" test above can never exercise the false branch
-// again. These cases are the standing proof the comparison itself can
-// fail, independent of what package.json currently declares. Same
-// relationship as isAtLeast's literal suite to the lockfile-driven
-// fast-uri test in overrides.test.ts.
-describe('majorMinorEqual', () => {
-  it.each([
-    // Patch differences are not load-bearing.
-    ['^1.125.0', '^1.125.7', true],
-    ['1.125.0', '1.125.0', true],
-    // A types-ahead-of-engines mismatch, held as a standing literal
-    // independent of whatever package.json currently declares -- see
-    // the block comment above this describe: once the two real fields
-    // agree, the manifest-driven test can never exercise this false
-    // branch again, so this case is the standing proof the comparison
-    // itself can fail.
-    ['^1.136.0', '^1.125.0', false],
-    ['^2.0.0', '^1.125.0', false],
-    // Types *below* engine: vsce's own check would accept this (it only
-    // rejects types being ahead); this guard must not.
-    ['^1.120.0', '^1.125.0', false],
-  ])('majorMinorEqual(%s, %s) === %s', (a, b, expected) => {
-    expect(majorMinorEqual(a, b)).toBe(expected);
-  });
-});
-
-// Direct unit coverage for resolvedTypesVscodeVersion, against literal
-// lockfile snippets rather than the real pnpm-lock.yaml -- once the
-// lockfile is regenerated to match the pinned specifier, the real-file
-// test above can never exercise the "header absent" branch again. These
-// two stay provably able to fail independent of what pnpm-lock.yaml
-// currently resolves.
-describe('resolvedTypesVscodeVersion', () => {
-  it('reads the version out of a package header line', () => {
-    const snippet = [
-      "  '@types/sarif@2.1.7':",
-      '    resolution: {integrity: sha512-fake==}',
-      '',
-      "  '@types/vscode@1.125.0':",
-      '    resolution: {integrity: sha512-fake==}',
-      '',
-    ].join('\n');
-    expect(resolvedTypesVscodeVersion(snippet)).toBe('1.125.0');
-  });
-
-  it('throws when the header is absent', () => {
-    const snippet = [
-      "  '@types/sarif@2.1.7':",
-      '    resolution: {integrity: sha512-fake==}',
-      '',
-    ].join('\n');
-    expect(() => resolvedTypesVscodeVersion(snippet)).toThrow("no '@types/vscode' package header");
-  });
-});
-
-describe('parseVersion', () => {
-  it('parses a caret-prefixed version', () => {
-    expect(parseVersion('^1.125.0')).toEqual([1, 125]);
-  });
-
-  it('parses a tilde-prefixed version', () => {
-    expect(parseVersion('~1.125.3')).toEqual([1, 125]);
-  });
-
-  it('parses an unprefixed version without rejecting it', () => {
-    expect(parseVersion('1.125.0')).toEqual([1, 125]);
-  });
-
-  it('throws on an x wildcard component', () => {
-    expect(() => parseVersion('^1.x.0')).toThrow('unexpected version format');
-  });
-
-  it('throws on a non-version string', () => {
-    expect(() => parseVersion('not-a-version')).toThrow('unexpected version format');
-  });
-});
-
-describe('manifest shape guards', () => {
-  it('throws when engines.vscode is missing, naming the field', () => {
-    expect(() => readEnginesVscode({})).toThrow('engines.vscode');
-  });
-
-  it('throws when engines.vscode is not a string', () => {
-    expect(() => readEnginesVscode({ engines: { vscode: 1 } })).toThrow('engines.vscode');
-  });
-
-  it('throws when @types/vscode is absent from devDependencies, naming the field', () => {
-    expect(() => readTypesVscode({ devDependencies: {} })).toThrow('@types/vscode');
-  });
-
-  it('throws when @types/vscode is not a string', () => {
-    expect(() => readTypesVscode({ devDependencies: { '@types/vscode': 1 } })).toThrow(
-      '@types/vscode',
-    );
   });
 });

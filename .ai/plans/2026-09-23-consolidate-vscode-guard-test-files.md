@@ -77,7 +77,7 @@ before it.
 - [x] Confirm scope and approach with the user
 - [x] Collapse the duplicated predicates and aggregators
 - [x] Cut the header comment to its load-bearing reasoning
-- [ ] Order both files so each helper sits with the suite that proves it
+- [x] Order both files so each helper sits with the suite that proves it
 
 ## Tasks
 
@@ -140,16 +140,16 @@ Order both guard files so a reader meets a helper and its boundary suite
 together, rather than reading every helper and then every suite. No helper,
 assertion, or test case changes.
 
-- [ ] In both files, each helper and the suite asserting its behavior are
+- [x] In both files, each helper and the suite asserting its behavior are
       adjacent, with the lockfile-driven and manifest-driven suites that
       exercise the real files grouped together
-- [ ] Every helper, assertion, test name and expected value is unchanged
+- [x] Every helper, assertion, test name and expected value is unchanged
       from before this task — the diff moves lines and changes comments,
       and changes nothing else
-- [ ] The suite's passing count equals its count before this task
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] The suite's passing count equals its count before this task
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
-- [ ] `pnpm run build` and `pnpm run test:integration` pass
+- [x] `pnpm run build` and `pnpm run test:integration` pass
 
 ## Decisions
 
