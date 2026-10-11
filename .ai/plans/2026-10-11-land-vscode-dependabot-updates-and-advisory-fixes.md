@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-11
 
 # Land the Open VS Code Dependabot Updates and Close the Open Security Advisories
@@ -165,7 +165,7 @@ the full matrix.
       advisories' vulnerable bands
 - [x] Check each advisory package's direct-dependent declared ranges
 - [x] Confirm with the user that `engines.vscode` moves to 1.140
-- [ ] Land PR #79's group update on `main`
+- [x] Land PR #79's group update on `main`
 - [ ] Raise or add the advisory override floors and extend the guard to
       cover them
 - [ ] Move `@types/vscode` and `engines.vscode` to 1.140.0 together
@@ -183,17 +183,17 @@ Land the eight dependency updates PR #79 proposes as our own commit on
 `main`, with the exact package manifest and lockfile Dependabot produced and
 CI verified. This slice supersedes PR #79.
 
-- [ ] `package.json` and `pnpm-lock.yaml` under
+- [x] `package.json` and `pnpm-lock.yaml` under
       `rlsp-yaml/integrations/vscode/` are byte-identical to their content
       at commit `6611f8c9`
-- [ ] `pnpm install --frozen-lockfile` succeeds
-- [ ] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`,
+- [x] `pnpm install --frozen-lockfile` succeeds
+- [x] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`,
       `pnpm run lint`, and `pnpm run format` pass
-- [ ] `xvfb-run -a pnpm run test:integration` passes with a server binary
+- [x] `xvfb-run -a pnpm run test:integration` passes with a server binary
       present at
       `rlsp-yaml/integrations/vscode/server/x86_64-unknown-linux-gnu/rlsp-yaml`,
       so the activation-success test runs rather than being skipped
-- [ ] The commit contains no file outside `package.json` and
+- [x] The commit contains no file outside `package.json` and
       `pnpm-lock.yaml`; the test server binary and other scratch output
       are not committed
 
