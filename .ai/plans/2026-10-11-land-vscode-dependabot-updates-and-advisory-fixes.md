@@ -166,7 +166,7 @@ the full matrix.
 - [x] Check each advisory package's direct-dependent declared ranges
 - [x] Confirm with the user that `engines.vscode` moves to 1.140
 - [x] Land PR #79's group update on `main`
-- [ ] Raise or add the advisory override floors and extend the guard to
+- [x] Raise or add the advisory override floors and extend the guard to
       cover them
 - [ ] Move `@types/vscode` and `engines.vscode` to 1.140.0 together
 - [ ] Push to `main` and confirm every workflow the push triggers succeeds,
@@ -206,31 +206,31 @@ whatever the resolver picked. Extend `overrides.test.ts` so that a resolved
 version of any of these packages below its patched floor fails the test
 suite. This clears the last audit finding and closes all six alerts.
 
-- [ ] `pnpm.overrides` bounds `brace-expansion@2` at or above 2.1.7,
+- [x] `pnpm.overrides` bounds `brace-expansion@2` at or above 2.1.7,
       `brace-expansion@5` at or above 5.0.12, `serialize-javascript` at or
       above 7.1.2, and `source-map-js` at or above 1.2.2. The lockfile's
       `overrides:` block declares the same pins as `package.json`
-- [ ] Compared with the lockfile at the end of Task 1, the only change in
+- [x] Compared with the lockfile at the end of Task 1, the only change in
       resolved package versions is `serialize-javascript` 7.1.1 → 7.1.2
-- [ ] `pnpm run audit` exits 0, and its report shows no finding other than
+- [x] `pnpm run audit` exits 0, and its report shows no finding other than
       the allowlisted CVE-2026-24001
-- [ ] `pnpm.auditConfig.ignoreCves` is unchanged
-- [ ] The lockfile guard in `overrides.test.ts` fails when any resolved
+- [x] `pnpm.auditConfig.ignoreCves` is unchanged
+- [x] The lockfile guard in `overrides.test.ts` fails when any resolved
       version of `brace-expansion` (major 2 or 5), `serialize-javascript`,
       or `source-map-js` is below the floor named in the first criterion
       of this task. It also fails when an overridden package disappears
       from the lockfile entirely, so that an override that stops matching
       anything fails loudly instead of passing on an empty set
-- [ ] For `serialize-javascript` and `source-map-js`, the guard is closed
+- [x] For `serialize-javascript` and `source-map-js`, the guard is closed
       to major lines it has not checked, the same way it already is for
       `brace-expansion` and `fast-uri`: a resolved version on any other
       major line fails. Literal cases that do not depend on the current
       lockfile show this for each package: a version one patch below the
       floor is rejected, the floor itself is accepted, and a version on a
       major line with no floor is rejected
-- [ ] The `brace-expansion` literal cases cover the new floors: 2.1.6 and
+- [x] The `brace-expansion` literal cases cover the new floors: 2.1.6 and
       5.0.11 are rejected, and 2.1.7 and 5.0.12 are accepted
-- [ ] In `overrides.test.ts`, no comment or test title names a superseded
+- [x] In `overrides.test.ts`, no comment or test title names a superseded
       floor as current. In particular, 2.1.4 and 5.0.9 never appear as the
       current `brace-expansion` floors, and GHSA-rgw5-rvv9-x895 is never
       named as the advisory that sets them. Each floor in the floor table
@@ -238,7 +238,7 @@ suite. This clears the last audit finding and closes all six alerts.
       `describe` title that lists guarded packages lists all of them
       (`brace-expansion`, `fast-uri`, `serialize-javascript`,
       `source-map-js`)
-- [ ] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
 
 ### Task 3: `@types/vscode` and `engines.vscode` move to 1.140.0 together
