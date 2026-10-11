@@ -8,6 +8,9 @@ paths:
 ## Framework and Tools
 
 - `cargo test` for unit and integration tests
+- `cargo nextest` runs no doc tests — a project that runs
+  its tests with nextest also runs `cargo test --doc`, or
+  its doc tests never run
 - `proptest` for property-based testing
 - `mockall` for mocking trait implementations
 

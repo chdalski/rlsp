@@ -69,7 +69,8 @@ Every other `.rs` file is a **sub-module**. Imports come
 first, then any nested child modules, then items.
 
 ```rust
-// 1. use — std, external, crate (rustfmt groups these)
+// 1. use — std, external, crate (one group each, separated
+//    by a blank line)
 use std::borrow::Cow;
 
 use serde_json::Value;
@@ -85,9 +86,11 @@ pub fn validate(value: &Value) -> Result<(), Error> {
 }
 ```
 
-Rustfmt handles alphabetical ordering inside each `use`
-group (`reorder_imports`, on by default). This rule only
-governs the relative order of the groups themselves.
+The three groups are separated by hand with blank lines:
+on the stable toolchain rustfmt keeps the blank-line groups
+as written and only sorts alphabetically within each group
+(`reorder_imports`, on by default). This rule governs which
+groups exist and their relative order.
 
 ## Block-Scope Placement
 

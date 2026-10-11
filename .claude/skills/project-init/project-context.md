@@ -32,6 +32,35 @@ Synthesize purpose from each component's README.md first
 paragraph or manifest `description` field. Omit this
 section entirely for single-project repos.
 
+**Language** — always present. A level-2 section with the
+project language and its exceptions, both confirmed by the
+user:
+
+```markdown
+## Language
+
+Project language: <language>. Everything written to the
+repository — code, comments, docs, tests, commit messages,
+plans — is in <language>, regardless of the language the
+user chats in. Chat replies may use the user's language.
+
+Format tokens stay verbatim in every language: Conventional
+Commit types (`feat`, `fix`, ...), plan header fields,
+status values, and section headings, and programming-language
+keywords.
+
+Exceptions:
+- <one line per user-confirmed exception>
+```
+
+Omit the Exceptions list when there are none. Write the
+section even when the language is English — agents
+otherwise mirror the chat language into files, so an
+explicit declaration is what keeps a German conversation
+from producing German commit messages. Format tokens stay
+verbatim because tools parse them (plan archiving matches
+`Completed`/`Canceled` literally).
+
 **Conventions** — always present. A level-2 section
 containing non-obvious project conventions detected during
 scanning and confirmed by the user. Each entry is one
@@ -64,8 +93,9 @@ When `/project-init` runs on an existing `CLAUDE.md`:
 - **Regenerate**: Overview, Build and Test, Components —
   these reflect current project state and should be
   refreshed from manifests and README
-- **Preserve**: Conventions and References entries — these
-  contain user-confirmed and agent-discovered content that
-  cannot be re-detected automatically
+- **Preserve**: Language section, Conventions and
+  References entries — these contain user-confirmed and
+  agent-discovered content that cannot be re-detected
+  automatically
 - **Add**: newly detected conventions or references not
   already present in the preserved entries

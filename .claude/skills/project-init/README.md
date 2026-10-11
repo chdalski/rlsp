@@ -21,11 +21,13 @@ major structural changes.
    automation, pre-commit hooks, etc.) and authoritative
    references (spec URLs, API docs)
 6. Presents detected conventions and references to the user
-   for confirmation before writing
+   for confirmation, and asks for the project language (the
+   language all repository files are written in) and its
+   exceptions
 7. Writes `CLAUDE.md` at the project root — and at the root
    of each sub-project that has its own `.git/`
 8. Re-running preserves user-confirmed and agent-discovered
-   Conventions and References entries while refreshing
+   Language, Conventions, and References entries while refreshing
    auto-detected sections
 
 ## Extending for a new language

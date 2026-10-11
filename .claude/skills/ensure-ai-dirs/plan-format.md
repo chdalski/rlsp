@@ -81,7 +81,7 @@ contradict earlier ones.
 Context orients the developer; it is not a change
 inventory. Name the key files, types, and systems the work
 centers on and why they matter — enough to start in the
-right place without repeating your investigation. Do not
+right place. Do not
 list every call site or line the change touches: for
 renames, moves, removals, and signature changes, the build,
 type-checker, tests, and reviewer find every affected site
@@ -92,6 +92,15 @@ reader observes — populating an empty field, changing a
 default, widening a value's meaning, reshaping output.
 Nothing downstream flags those automatically, so name the
 affected readers only for that kind of change.
+
+Context holds only what applies to the whole plan. A fact
+that one task needs goes in that task's description — the
+developer and the reviewer work one task at a time, and
+every plan-wide sentence is read again for every task.
+State facts as they are now ("labels of the form
+`1. Observe` render as an error in the book; `Step 1:
+Observe` renders"), not as the investigation that
+established them.
 
 ### Steps
 
@@ -155,7 +164,8 @@ checklist obscures status rather than revealing it.
 
 Vertical task slices decomposed from the steps above. Each
 task is a committable unit of work. Give it a one- or
-two-sentence description of what it achieves and why, then
+two-sentence description of what it achieves and why —
+plus any fact only this task needs (see Context) — then
 a list of acceptance criteria — the conditions that must
 hold when it is done.
 
@@ -178,6 +188,17 @@ every site, while "rename the trait in ports.rs, change the
 generic parameter in service.rs…" is the implementation —
 which the compiler verifies, not the plan.
 
+A behavior-preserving refactor task names the tests that
+pin the behavior it preserves and carries the criterion
+that they pass with their assertions unchanged — only
+mechanical edits such as import paths. A refactor that
+also edits what its tests assert can hide a behavior
+change behind a green build. When no test covers that
+behavior, a preceding task first adds tests that pin it at
+its public entry points — the general behavior, not every
+line. Only a separate, earlier commit shows that those
+tests pass against the code as it was before the refactor.
+
 Order tasks by dependency — foundational work first. Use
 vertical slices (each task touches all layers needed for
 that feature) rather than horizontal slices (all routes,
@@ -186,14 +207,18 @@ increments and reduce integration risk.
 
 ### Decisions
 
-Key choices made during planning or execution, with brief
-reasoning. Recording the "why" prevents future agents
-from revisiting settled decisions or unknowingly
-contradicting them.
+Key choices that constrain the work, each with its reason.
+Recording the "why" prevents future agents from
+revisiting settled decisions or unknowingly
+contradicting them. Record the decision and its reason —
+not who made it or when: a decision binds because it is
+in the approved plan. A choice made while implementing
+belongs here only if a later task or a resuming session
+must honor it; otherwise the commit message records it.
 
 ```markdown
-- **Auth method:** JWT tokens (user preference, aligns
-  with existing API)
+- **Auth method:** JWT tokens — the existing API already
+  issues and validates them
 - **Form library:** None — plain HTML form is sufficient
   for two fields
 ```
@@ -226,6 +251,43 @@ otherwise assume are included. Do not list unrelated
 work — a Non-Goals section full of obvious exclusions
 is noise.
 
+## What Does Not Belong in a Plan
+
+A plan's readers are the implementor and the reviewer of
+each task, the plan-reviewer, the user at approval, and a
+lead resuming in a later session. Each of them pays for
+every sentence on every read, and review passes tend to
+add text, never remove it. Test each sentence: would one
+of these readers act differently without it? If not, cut
+it. In particular, leave out:
+
+- **Conversation records** — quotes of the user, who said
+  or chose what, and when.
+- **Investigation narratives** — how a defect was
+  diagnosed, why a tool behaves as it does, scripts or
+  harnesses built along the way. If a task needs a way to
+  verify its outcome, make it an acceptance criterion that
+  names the command or check.
+- **Evidence of absence** — search results showing that
+  nothing else needs changing ("no other file refers to
+  X"). The plan-reviewer and the reviewer run their own
+  searches; pre-answering them only adds text that goes
+  stale.
+- **Process narration** — "named to the user at
+  approval," "raised in review," "accepted after
+  discussion." A declined review finding is recorded as a
+  decision with its reason, not as the story of the
+  review.
+- **Execution logs** — what happened while a task ran.
+  The plan tracks checkbox state; commit messages carry
+  the rest.
+- **Restated project rules** — language, conventions, or
+  constraints already in a `CLAUDE.md` file, which every
+  agent has loaded.
+- **The same fact twice** — state each fact once: in
+  Context if the whole plan needs it, otherwise in its
+  task.
+
 ## Conventions
 
 - Use plain markdown. No frontmatter — plans are runtime
@@ -236,6 +298,14 @@ is noise.
   prefix (YYYY-MM-DD) establishes chronological order
   across sessions; the slug makes the plan's subject
   visible without opening the file.
+- Write plan prose in the project language declared in
+  the root `CLAUDE.md` Language section (English if there
+  is none). Format tokens stay verbatim in English: header
+  field names, status values, section and `Task N:`
+  heading prefixes, and the `Plan:` trailer.
+  `/ensure-ai-dirs` archives plans by matching
+  `Completed`/`Canceled` literally — a translated status
+  leaves a finished plan in the active directory forever.
 - One plan per task or feature. Don't combine unrelated
   work into a single plan — mixed plans make progress
   tracking ambiguous and complicate resumption.

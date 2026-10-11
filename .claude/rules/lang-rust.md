@@ -1,6 +1,7 @@
 ---
 paths:
   - "**/*.rs"
+  - "**/Cargo.toml"
 ---
 
 # Rust
@@ -141,10 +142,20 @@ fn find_and_validate(
 
 ### Required Tools
 
-- `cargo fmt` before every commit (consistent formatting)
-- `cargo clippy` with zero warnings — clippy catches
-  correctness and performance issues the compiler misses
-- `cargo test` must pass
+- `cargo fmt --all` before every commit (consistent
+  formatting)
+- `cargo clippy --workspace --all-targets` with zero
+  warnings — clippy catches correctness and performance
+  issues the compiler misses; plain `cargo clippy` skips
+  tests, benches and examples
+- `cargo test --workspace` must pass — in a workspace
+  whose root is also a package, cargo commands without
+  `--workspace` cover only the root package
+- Suppress a lint at the one site that needs it, with
+  `#[expect(lint, reason = "...")]`, never `#[allow]`: an
+  `#[expect]` that stops firing warns, so stale
+  suppressions surface, and the lints `/project-init` sets
+  reject `#[allow]` and suppressions without a reason
 - `cargo clean` before quality checks if stale incremental
   state is suspected — stale artifacts can hide errors
 

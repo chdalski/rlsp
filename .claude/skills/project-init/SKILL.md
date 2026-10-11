@@ -117,11 +117,11 @@ homepages, npm/crates.io package pages).
 
 2. **Check for existing CLAUDE.md** — if `CLAUDE.md`
    exists at the project root, read it. If it has
-   Conventions or References sections, extract their
-   entries for preservation. Ask the user whether to
+   Language, Conventions, or References sections, extract
+   their entries for preservation. Ask the user whether to
    regenerate (refreshes Overview, Build and Test,
-   Components while preserving Conventions and References)
-   or skip.
+   Components while preserving Language, Conventions, and
+   References) or skip.
 
 3. **Scan for manifests** — search the project root and
    one level of subdirectories for manifest files
@@ -176,8 +176,9 @@ homepages, npm/crates.io package pages).
     using the Reference Detection guidance. Note each
     finding.
 
-12. **Confirm with user** — present detected conventions
-    and references to the user via `AskUserQuestion`:
+12. **Confirm with user** — present detected conventions,
+    references, and project language to the user via
+    `AskUserQuestion`:
     - "I detected these conventions — are they correct?
       Anything to add or remove?" (list detected
       conventions plus any preserved from existing
@@ -185,6 +186,20 @@ homepages, npm/crates.io package pages).
     - "These look like authoritative references — should
       I include them? Any to add?" (list detected
       references plus any preserved)
+    - "What is the project language — the language all
+      repository files are written in, whatever language
+      we chat in?" Offer as the first option the preserved
+      language, or else the language most of README.md,
+      docs, and code comments are written in. Do not infer
+      it from the chat language — a user may chat in German
+      about an English codebase.
+    - "Which exceptions apply?" — ask after the language
+      is known, as a multi-select with any preserved
+      exceptions plus the common ones that fit, e.g. for a
+      non-English project language: identifiers in
+      English; code comments in English; domain terms in
+      the project language; UI translation files in their
+      target language. The user may add their own.
 
     Merge user feedback with preserved entries. If the
     user adds new entries, include them.
@@ -196,12 +211,17 @@ homepages, npm/crates.io package pages).
     independently (repeat steps 3-12 scoped to that
     subdirectory) and write its own `CLAUDE.md`. Check for
     existing `CLAUDE.md` in each location before writing.
+    Reuse the root's language answer for sub-projects
+    instead of asking again, and write the Language section
+    to each sub-project `CLAUDE.md` — a sub-project may be
+    opened as a session of its own.
 
 14. **Present summary** — report to the caller:
     - Overview synthesized (brief description of what was
       written)
     - Build and test commands detected
     - Whether mono-repo structure was found
+    - Project language and its exceptions
     - Conventions and references included
     - Which `Cargo.toml` files were updated with lints
       (Rust projects only)

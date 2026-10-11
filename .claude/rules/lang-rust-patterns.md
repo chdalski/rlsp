@@ -198,8 +198,13 @@ impl Order {
 
 ### Repository Traits
 
+Write `async fn` directly in the trait — stable Rust
+supports it natively — and take the implementation as a
+generic parameter. `#[async_trait]` boxes every returned
+future; reach for it only when the trait must be used as
+`dyn Trait`, which a trait with `async fn` cannot be.
+
 ```rust
-#[async_trait]
 trait OrderRepository {
     async fn find(
         &self,
@@ -212,6 +217,12 @@ trait OrderRepository {
     ) -> Result<(), RepositoryError>;
 }
 ```
+
+A plain `async fn` in a trait promises no `Send` future,
+so a generic caller cannot `tokio::spawn` it. When callers
+spawn it, declare the method as returning
+`impl Future<Output = ...> + Send` instead of reaching for
+`#[async_trait]`.
 
 ## Async Patterns
 

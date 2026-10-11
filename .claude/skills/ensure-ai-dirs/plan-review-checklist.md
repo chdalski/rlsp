@@ -14,9 +14,10 @@ no issues are found in a section, skip it in the report.
 ## Severity
 
 Classify every finding as **Blocking** or **Advisory**. Only
-Blocking findings send the plan back for revision and
-another full review pass — over-classifying costs a whole
-cycle, not a few seconds of reading.
+Blocking findings hold the plan back from the user — each
+costs a revision and another full review pass, so
+over-classifying costs a whole cycle, not a few seconds of
+reading.
 
 - **Blocking** — executing the plan as written would deliver
   something other than what the user asked for, or would let
@@ -30,7 +31,9 @@ cycle, not a few seconds of reading.
   gets built, and improvement suggestions. Sections 11 and
   12 are always Advisory — splitting a plan or adding
   consolidation work changes the scope the user approves, so
-  the user decides, not the review cycle.
+  the user decides, not the review cycle. Section 14 is
+  always Advisory — cutting text never changes what gets
+  built.
 
 Report only what you can ground in plan text or a search
 result. A finding that docs *might* describe the old state
@@ -148,6 +151,9 @@ references in other documentation.
   changed? If so, does a task update them?
 - Do test fixture descriptions reference behavior being
   fixed? If so, does a task update them?
+- Run the searches yourself. Do not flag a plan for
+  omitting search results that show nothing else is
+  affected — plan-format.md excludes them from plans.
 
 ## 7. Task Description Completeness
 
@@ -170,6 +176,12 @@ stated as outcomes, not as a procedure.
   implementor what was intended.
 - Can the reviewer distinguish "task done" from "task
   partially done" using only the task description?
+- Does each behavior-preserving refactor task name the
+  tests that pin the behavior it preserves and require
+  them to pass with their assertions unchanged? When no
+  test covered that behavior, does a preceding task add
+  them? Without both, a refactor can change behavior and
+  still pass review.
 
 ## 8. Goal Covers User Request
 
@@ -316,3 +328,23 @@ toolchain catches.
   components that read the same field directly. Both
   broke immediately with no compile error; neither was in
   the migrated callsite set.
+
+## 14. Plan Noise
+
+Every reader of the plan pays for each sentence on every
+read, and review passes tend to add text, never remove it.
+Flag text that no reader would act differently without, as
+defined in plan-format.md's "What Does Not Belong in a
+Plan":
+
+- Quotes of the user, or who decided what and when
+- Diagnosis stories, tool internals, or harness recipes
+  where a stated fact or an acceptance criterion would do
+- Search results that prove nothing else needs changing
+- Narration of the planning or review process
+- Execution logs beyond checkbox state
+- Project rules restated from a `CLAUDE.md` file
+- A fact stated in Context and again in a task, or a fact
+  in Context that only one task needs
+
+Quote the text and give the shorter form, or say to cut it.
