@@ -34,7 +34,12 @@
   "containerEnv": {
     // uv's cache and the workspace .venv are on different filesystems, so
     // hardlinking always fails — copy without warning on every sync.
-    "UV_LINK_MODE": "copy"
+    "UV_LINK_MODE": "copy",
+    // Keeps Claude Code's global config (.claude.json) on the ~/.claude
+    // volume instead of in $HOME, so it survives a rebuild; post-start.sh
+    // fills it once. containerEnv, not remoteEnv: a `claude` in a
+    // `docker exec` shell must read the same file.
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
   "workspaceFolder": "/workspace",
   "postCreateCommand": "bash /workspace/.devcontainer/post-create.sh",

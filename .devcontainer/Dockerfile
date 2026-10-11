@@ -60,7 +60,11 @@ WORKDIR /workspace
 # Switch to non-root user
 USER vscode
 
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# The installer leaves a stub ~/.claude.json (no onboarding, no account); in
+# the image it would win post-start.sh's one-time fill of the config on the
+# volume over the host copy.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && rm -f /home/vscode/.claude.json
 
 # Configure and set the default shell to fish
 COPY --chown=vscode:vscode fish/config.fish /home/vscode/.config/fish/config.fish

@@ -80,13 +80,29 @@ The `CLAUDE_AUTH` environment variable controls how Claude Code authenticates.
 
 | Mode | `CLAUDE_AUTH` | What gets copied | Use case |
 |------|---------------|------------------|----------|
-| OAuth (default) | `oauth` | `.credentials.json` + `settings.json` (env block and apiKeyHelper stripped) | Private Anthropic account |
+| OAuth (default) | `oauth` | `settings.json` (env block and apiKeyHelper stripped); no credentials | Private Anthropic account |
 | Proxy | `proxy` | `settings.json` (with env vars) | Work account via API proxy (e.g. Portkey) |
+
+The host copy happens only on the first start of a fresh Claude config volume
+(no `settings.json` in it yet). Later starts keep the container's own
+settings, so changes inside the container survive restarts. To pick up
+changes from the host, delete `~/.claude/settings.json` inside the container
+(or the whole volume, see [Troubleshooting](#troubleshooting)) and restart.
+
+Claude Code's global config (`.claude.json`: onboarding state, account,
+project settings) lives on the same volume — `CLAUDE_CONFIG_DIR` points
+Claude Code at `~/.claude` — so "Rebuild Container" does not start the
+onboarding again. `post-start.sh` fills it once, while the volume does not
+hold one yet: from the container's own `~/.claude.json` if one exists,
+otherwise from the host's `~/.claude.json`. Afterwards it is never
+overwritten.
 
 ### OAuth mode (default)
 
-Requires `~/.claude/.credentials.json` from a prior `claude login` on the
-host. The script copies it into the container and strips the entire `env`
+The host's `~/.claude/.credentials.json` is never copied: OAuth refresh
+tokens rotate, so a copy shared between host and container breaks as soon as
+one side refreshes it. Run `claude login` once inside the container; the
+session is kept in the Claude config volume. The script strips the entire `env`
 block and `apiKeyHelper` from `settings.json` so OAuth credentials are used
 and no proxy config leaks in. Env vars needed in oauth mode (e.g.
 `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`) go in `.devcontainer/.env`, or in
@@ -170,7 +186,7 @@ across rebuilds.
 
 | Volume | Target | Purpose |
 |--------|--------|---------|
-| `<folder>_devcontainer_claude-config-<id>` | `/home/vscode/.claude` | Claude config, sessions, memory, installed plugins |
+| `<folder>_devcontainer_claude-config-<id>` | `/home/vscode/.claude` | Claude settings, global config (`.claude.json`), sessions, memory, installed plugins |
 | `<folder>_devcontainer_shell-history-<id>` | `/home/vscode/.local/share/fish` | fish history |
 | `<folder>_devcontainer_pnpm-store-<id>` | `/home/vscode/.local/share/pnpm/store` | pnpm store |
 
@@ -192,7 +208,7 @@ cannot run at the same time.
 |--------|--------|---------|
 | Project folder | `/workspace` | Workspace |
 | `~/.claude/` (read-only) | `/home/vscode/.claude-host/` | Host config template directory |
-| `~/.claude.json` (read-only) | `/home/vscode/.claude-host.json` | Host Claude config file (copied into container on startup) |
+| `~/.claude.json` (read-only) | `/home/vscode/.claude-host.json` | Host Claude config file (copied onto the Claude config volume once) |
 | `$XDG_RUNTIME_DIR/pulse/` | same path | PulseAudio socket (audio overlay) |
 
 The read-only binds are declared in `docker-compose.yml`, not in
@@ -222,8 +238,9 @@ which pins a specific version, needs it installed separately.
   warn while it still exists. Do not just rename it: tokens in `.env` appear
   in the start log.
 - All volumes are renamed, so the first start uses a fresh Claude config
-  (host credentials are copied in again). To keep your sessions, copy the old
-  volume into the new one while the devcontainer is stopped:
+  (host settings are copied in again; in oauth mode, run `claude login`
+  again). To keep your sessions, copy the old volume into the new one while
+  the devcontainer is stopped:
 
   ```bash
   docker volume ls   # old: claude-code-config-<folder>, new: <folder>_devcontainer_claude-config-<id>

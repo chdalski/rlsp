@@ -45,5 +45,4 @@ end
 
 fish_add_path /home/vscode/.local/bin
 alias l="ls -lisa"
-alias claude="claude --dangerously-skip-permissions"
 starship init fish | source
