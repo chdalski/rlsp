@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-11)
 **Created:** 2026-10-11
 
 # Land the Open VS Code Dependabot Updates and Close the Open Security Advisories
@@ -169,10 +169,10 @@ the full matrix.
 - [x] Raise or add the advisory override floors and extend the guard to
       cover them
 - [x] Move `@types/vscode` and `engines.vscode` to 1.140.0 together
-- [ ] Push to `main` and confirm every workflow the push triggers succeeds,
+- [x] Push to `main` and confirm every workflow the push triggers succeeds,
       across every matrix leg
-- [ ] Confirm all six Dependabot alerts are closed as fixed
-- [ ] Comment `@dependabot rebase` on PR #79 and PR #82, and confirm
+- [x] Confirm all six Dependabot alerts are closed as fixed
+- [x] Comment `@dependabot rebase` on PR #79 and PR #82, and confirm
       Dependabot closes both
 
 ## Tasks
