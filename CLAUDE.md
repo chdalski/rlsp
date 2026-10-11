@@ -62,6 +62,18 @@ cargo test -p rlsp-yaml --test claude_code_stdio_smoke              # LSP initia
 | `rlsp-yaml/integrations/zed/` | Zed extension for rlsp-yaml |
 | `rlsp-yaml-parser/` | Spec-faithful streaming YAML 1.2 parser |
 
+## Language
+
+Project language: English. Everything written to the
+repository — code, comments, docs, tests, commit messages,
+plans — is in English, regardless of the language the
+user chats in. Chat replies may use the user's language.
+
+Format tokens stay verbatim in every language: Conventional
+Commit types (`feat`, `fix`, ...), plan header fields,
+status values, and section headings, and programming-language
+keywords.
+
 ## Conventions
 
 <!-- Agents: add non-obvious project conventions discovered during work — things a future agent would need to know to avoid mistakes. One line each. Remove when no longer true. -->
