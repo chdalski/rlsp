@@ -168,7 +168,7 @@ the full matrix.
 - [x] Land PR #79's group update on `main`
 - [x] Raise or add the advisory override floors and extend the guard to
       cover them
-- [ ] Move `@types/vscode` and `engines.vscode` to 1.140.0 together
+- [x] Move `@types/vscode` and `engines.vscode` to 1.140.0 together
 - [ ] Push to `main` and confirm every workflow the push triggers succeeds,
       across every matrix leg
 - [ ] Confirm all six Dependabot alerts are closed as fixed
@@ -248,18 +248,18 @@ Raise `@types/vscode` to 1.140.0, the newest release, and raise
 the minimum VS Code version needed to install the extension from 1.138 to
 1.140. This slice supersedes PR #82.
 
-- [ ] `engines.vscode` is `^1.140.0`, and
+- [x] `engines.vscode` is `^1.140.0`, and
       `devDependencies["@types/vscode"]` is the exact pin `1.140.0` with no
       range prefix
-- [ ] Compared with the lockfile at the end of Task 2, the only change in
+- [x] Compared with the lockfile at the end of Task 2, the only change in
       resolved package versions is `@types/vscode` 1.138.0 → 1.140.0
-- [ ] Every assertion in `engine-compat.test.ts` passes against the real
+- [x] Every assertion in `engine-compat.test.ts` passes against the real
       `package.json` and `pnpm-lock.yaml`
-- [ ] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`,
+- [x] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`,
       `pnpm run lint`, `pnpm run format`, and `pnpm run audit` pass
-- [ ] `xvfb-run -a pnpm run test:integration` passes with a server binary
+- [x] `xvfb-run -a pnpm run test:integration` passes with a server binary
       present, as in Task 1
-- [ ] `pnpm run package` produces a `.vsix` with no `@types/vscode`
+- [x] `pnpm run package` produces a `.vsix` with no `@types/vscode`
       compatibility error from vsce, and the `.vsix` is not committed
 
 ## Decisions

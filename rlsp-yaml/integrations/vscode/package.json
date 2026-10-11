@@ -8,7 +8,7 @@
   "icon": "rlsp-yaml-logo-small.png",
   "packageManager": "pnpm@10.33.2",
   "engines": {
-    "vscode": "^1.138.0"
+    "vscode": "^1.140.0"
   },
   "categories": [
     "Programming Languages",
@@ -220,7 +220,7 @@
     "@tsconfig/strictest": "^2.0.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.6.4",
-    "@types/vscode": "1.138.0",
+    "@types/vscode": "1.140.0",
     "@vitest/coverage-v8": "5.0.3",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
