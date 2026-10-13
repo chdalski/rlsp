@@ -553,7 +553,11 @@ When the **reviewer messages you directly** with approval
    each of the four teammates the structured `SendMessage`
    message `{"type": "shutdown_request", "reason": "..."}`,
    wait until all four have exited, then spawn all four
-   again as in Starting Execution step 1. A plain-text
+   again as in Starting Execution step 1. Confirm the exits
+   with `ListAgents`, which no longer lists an exited
+   teammate, rather than waiting for the
+   `shutdown_response` messages: they can reach you late.
+   A plain-text
    message, even one that names `shutdown_request`, leaves
    the teammate alive: it needs the request ID the
    structured message carries to answer with its
@@ -633,17 +637,29 @@ The developer-reviewer rejection loop is opaque to you.
 The reviewer messages you directly on approval — you do
 not need to monitor this exchange.
 
-**Never idle on a quick teammate reply alone.** Once your
-turn ends, only an inbound event wakes you, and delivery
-can lag: a prior session ended its turn twice waiting for a
-shutdown confirmation that arrived only after the user's
-next prompt. Before ending a turn whose next step waits on
-a reply due within minutes — the shutdown confirmations
-when cycling teammates, the answer to a status check —
-start a timer: `Bash` with `run_in_background` running
-`sleep 120`. When it fires, ignore it if the reply has
-arrived; otherwise send the teammate a status check, and
-if it stays silent, inform the user and ask how to proceed.
+**Act on idle notifications, not timers.** When a
+teammate's turn ends, you receive its idle notification at
+once, with its final text. An idle teammate resumes only
+when something wakes it: a message from another agent, or
+the completion of a command it started in the background.
+Check each notification against what you are waiting for
+from that teammate:
+
+- Its result has reached you in its own message —
+  proceed.
+- It names a message or a running command it waits for —
+  let it wait; that event wakes it.
+- Anything else is a stall, even when the text reads like
+  progress — no deliverable, or a result it says it sent
+  that never reached you. Message it at once with what you
+  need.
+
+`ListAgents` shows whether a teammate is `running` or
+`idle` when you need its state between notifications. Do
+not start `sleep` timers to wait for a teammate: a timer
+only delays noticing a stall that the idle notification
+already shows — prior sessions lost over ten minutes per
+stall that way.
 
 **If the developer appears unresponsive:**
 1. Send a status check via `SendMessage`
