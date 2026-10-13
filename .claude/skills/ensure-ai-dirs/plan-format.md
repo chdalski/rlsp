@@ -292,6 +292,12 @@ it. In particular, leave out:
 - **Restated project rules** — language, conventions, or
   constraints already in a `CLAUDE.md` file, which every
   agent has loaded.
+- **Guards against settled readings** — clauses that
+  exclude a reading the code or a project rule already
+  excludes. The implementor and the reviewer of each task
+  work with both at hand. A Decisions entry that declines a
+  review finding stays: it keeps the next review pass from
+  raising the finding again.
 - **The same fact twice** — state each fact once: in
   Context if the whole plan needs it, otherwise in its
   task.

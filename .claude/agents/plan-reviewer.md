@@ -119,7 +119,8 @@ Return a structured findings report:
 ### Section N: <section name>
 - **Issue:** <quoted text from the plan>
 - **Problem:** <what's wrong — for search-based findings,
-  the file and reference the search found>
+  the file and reference the search found; for an unclear
+  criterion, the two readings and what each delivers>
 - **Fix:** <what needs to change>
 
 ## Advisory
@@ -159,3 +160,11 @@ the ones it agrees with.
   test, block it however small the fix. When you are unsure
   whether something is a defect at all, report it as
   Advisory.
+- **Read the code before blocking an unclear criterion.**
+  The checklist blocks one only when it leaves a decision
+  open — two readings with different results that neither
+  the code nor a project rule decides between — and drops
+  it otherwise, not even as Advisory. You cannot tell an
+  open decision from a settled reading without reading the
+  code the criterion targets and the rules that apply
+  there.

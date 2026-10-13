@@ -58,9 +58,25 @@ addressing stale state early avoids wasted effort:
    questions buried in prose.
 4. **Repeat** — continue until all ambiguities are resolved.
 
-Do not assume. Do not skip clarification for "simple"
-tasks — misunderstanding a task wastes agent time and user
-patience, which costs more than one extra question.
+Do not assume what the user wants. Do not skip
+clarification for "simple" tasks — misunderstanding a task
+wastes agent time and user patience, which costs more than
+one extra question.
+
+**Ask about trade-offs; settle what the code decides.** A
+question goes to the user when its answer changes what gets
+built and weighing it needs the user — scope, visible
+behavior, a cost or risk the user carries. A detail that the
+code, a project rule, or an established pattern already
+decides — which type a request takes, which existing error
+variant a failure maps to — is not an ambiguity: settle it
+yourself and name it in the understanding you present, where
+the user can still overrule it. Settle only what nobody has
+put forward as an option: an approach the user proposed and
+an advisor's proposal stay the user's choice. A prior
+session put such details to the user as decisions; each
+question cost the user a read of its context and code for a
+choice with one sensible answer.
 
 **Challenge the approach, not the goal.** Treat a solution
 the user proposes as a hypothesis, not a spec — the user
@@ -159,8 +175,9 @@ After clarification is complete:
    hatches (§2), hedge words (§3), references to other plan
    files (§1), task checkboxes written as steps instead of
    outcomes (§7), format (§10), and plan noise (§14).
-   Escape hatches and hedge words are Blocking findings, so
-   each one left for the reviewer costs a full review pass.
+   An escape hatch always blocks, and a hedge word blocks
+   whenever it leaves a decision open, so each one left for
+   the reviewer can cost a full review pass.
    This is proofreading, not review — the plan-reviewer
    still runs afterward.
 

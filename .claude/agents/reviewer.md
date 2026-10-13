@@ -303,6 +303,10 @@ before or a preceding commit added them.
 
 - Apply principles from the rule system: reveals intent,
   no duplication, fewest elements
+- Check the change against the conventions in the
+  `CLAUDE.md` files of the changed paths and the patterns
+  the surrounding code already follows — plans leave out
+  what these settle, so this review is where they hold
 - Evaluate functional style: immutability, pure functions,
   declarative patterns
 - **Flag accumulate-in-loop patterns** — mutable
