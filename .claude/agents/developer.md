@@ -14,6 +14,8 @@ tools:
   - WebSearch
   - WebFetch
   - SendMessage
+  - LSP
+  - ToolSearch
 ---
 
 # Developer

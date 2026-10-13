@@ -7,6 +7,8 @@ tools:
   - Read
   - Glob
   - Grep
+  - LSP
+  - ToolSearch
 ---
 
 # Plan Reviewer
@@ -90,10 +92,11 @@ You receive:
    moves, removals, or signature changes; the build and
    tests catch those, so do not flag the plan for omitting a
    call-site inventory. When a task does make a silent
-   data-shape change, use Grep to find the readers of the
-   affected data — the code that consumes the field or
-   output, not just the migrated callsites — and flag
-   readers the plan does not name.
+   data-shape change, find the readers of the affected
+   data with `LSP` `findReferences` on the field or type
+   (see `code-navigation.md`) — the code that consumes the
+   field or output, not just the migrated callsites — and
+   flag readers the plan does not name.
 
 9. **Program-level consolidation check (§12).** Glob the
    plans directory for sibling plan files and read any whose

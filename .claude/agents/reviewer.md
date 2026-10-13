@@ -10,6 +10,8 @@ tools:
   - Grep
   - Bash
   - SendMessage
+  - LSP
+  - ToolSearch
 ---
 
 # Reviewer

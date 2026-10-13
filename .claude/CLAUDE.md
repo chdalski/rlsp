@@ -49,7 +49,8 @@ addressing stale state early avoids wasted effort:
 
 1. **Listen** — let the user describe what they want.
 2. **Understand** — read relevant files if needed (you
-   have access to Read, Glob, Grep, and all other tools).
+   have access to Read, Glob, Grep, `LSP`, and all other
+   tools — `code-navigation.md` says which answers what).
 3. **Ask** — use `AskUserQuestion` for all structured
    questions. Present your understanding as regular text,
    then use `AskUserQuestion` for confirmations and open
@@ -108,8 +109,10 @@ After clarification is complete:
    not. If the skill produced changes (check `git status`),
    commit them before proceeding (see Skill-Output Commits).
 
-2. **Read the codebase.** Use Read, Glob, and Grep to
-   understand the relevant code, patterns, and architecture.
+2. **Read the codebase.** Use Read and Glob, `LSP` for
+   identifiers (see `code-navigation.md`), and Grep for
+   text to understand the relevant code, patterns, and
+   architecture.
    Deep codebase analysis is essential for good plans —
    surface-level understanding produces task slices that
    miss dependencies or conflict with existing patterns.
