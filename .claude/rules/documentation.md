@@ -30,6 +30,25 @@ Tailor depth, vocabulary, and structure to the audience.
 When a document serves both, separate the concerns into
 distinct sections.
 
+## Reader's Need
+
+Every reader pays for each sentence on every read, and
+review passes tend to add text, never remove it. Write at
+the level of what the reader is trying to do:
+
+- Test each sentence: would the reader understand or do
+  anything differently without it? If not, cut it.
+- A simplification that holds for what the reader does is
+  accurate, not wrong documentation. Add an exception,
+  limitation, or edge case only when a reader following
+  the document will run into it.
+- For a step the reader must take, state the step. Give
+  the reasoning, threat model, or design behind it only
+  when the reader needs it to apply the step correctly.
+- Restate what every reader of the page needs (see ARID);
+  link to the file that holds detail only some readers
+  need — a config file, a rule, the code.
+
 ## Skimmability
 
 Readers skim before they read. Structure content so they
@@ -95,6 +114,9 @@ have the full picture:
 - A focused document that covers its scope thoroughly is
   better than a broad document that covers everything
   superficially
+- Completeness is about topics, not detail: a topic is
+  covered fully when the section delivers what it promises
+  its reader, not when every exception is listed
 
 ## Cumulative Structure
 

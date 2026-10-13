@@ -73,8 +73,18 @@ Your assessment should include:
   the implementor should write (input validation, auth
   checks, error information leakage, injection attempts)
 - **Accepted risks** — if there are trust assumptions
-  (e.g., "LSP server trusts the client"), document them
-  explicitly
+  (e.g., "LSP server trusts the client"), state them
+  explicitly in the assessment
+
+Your assessment is review material, not text for the
+project's documentation. Recommend a documentation change
+only when a reader must act differently — a step to take,
+a command never to run — and phrase it as that action, not
+as the threat model, accepted risks, or edge cases behind
+it. Your recommendations bind, so each one phrased as
+"document X" puts X on a page whether its readers need it
+or not; a prior project's security page filled with
+caveats and threat-model reasoning no reader acts on.
 
 For non-code tasks (documentation, configuration with no
 secrets), send "no security implications" so the requester
@@ -102,7 +112,7 @@ for sign-off:
    followed — check that identified threats are mitigated
    and security test scenarios are covered.
 3. If there are accepted risks (e.g., "LSP server trusts
-   the client"), document the assumption in your sign-off.
+   the client"), state the assumption in your sign-off.
 4. Send your **post-implementation security sign-off** to
    the requester.
 5. If issues are found, flag them with severity and
@@ -113,7 +123,6 @@ for sign-off:
 
 - Consider the threat model before prescribing mitigations.
   Not every application has the same risk profile.
-- Be concrete in your recommendations.
 - Apply security principles systematically — the rule
   system loads relevant security guidance automatically
   based on the files being touched.

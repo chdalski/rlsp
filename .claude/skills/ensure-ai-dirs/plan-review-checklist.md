@@ -171,6 +171,10 @@ stated as outcomes, not as a procedure.
   compiler and tests confirm the sites were covered. This
   applies to Task checkboxes only — the Steps section is a
   procedure by design.
+- Does each documentation criterion state what the reader
+  can do or find afterwards, rather than list the facts the
+  page must hold? The reviewer enforces a listed fact
+  whether the page's readers need it or not.
 - Is each criterion independently verifiable? The reviewer
   should be able to check completion without asking the
   implementor what was intended.

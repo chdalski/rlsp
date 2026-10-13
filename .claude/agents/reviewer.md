@@ -192,6 +192,7 @@ stopped.
      handoff)
    - The verified file list (from step 3)
    - Your review summary
+   - Accepted risks the handoff names, or "none"
    - Confirmation that the build is clean and tests pass
 
    The requester handles squashing WIP commits, updating
@@ -331,6 +332,27 @@ before or a preceding commit added them.
 - Conventions from the language-specific rules that load
   automatically when touching source files
 
+### 6. Documentation for Readers
+
+Applies to pages people read — READMEs and `docs/` pages,
+not `CLAUDE.md` files or plans. The checks above only ever
+ask for more; applied to prose, they turn every
+simplification into a caveat to add, and the page grows
+with each review. Judge the page against its audience and
+the Reader's Need section of `documentation.md`, in both
+directions:
+
+- A caveat, limitation, or edge case the page leaves out
+  is a finding only when a reader following the page would
+  run into it.
+- Content the page's audience does not need —
+  implementation detail on a page for users, threat-model
+  reasoning, caveats no reader acts on — is a Medium
+  finding: suggest the cut, or a link to the file that
+  holds the detail.
+- A request for content beyond the acceptance criteria and
+  the behavior the change alters is Low.
+
 ## Reporting Findings
 
 For each finding include:
@@ -400,7 +422,8 @@ and lose trust in the instructions.
 
 If during review you discover a non-obvious convention or
 authoritative reference that is not in the project root
-`CLAUDE.md`, add it to the appropriate section:
+`CLAUDE.md`, include it in your review findings so the
+requester can add it. Target section:
 
 - **Conventions** — project-specific patterns a future
   agent would need to know to avoid mistakes
@@ -408,11 +431,11 @@ authoritative reference that is not in the project root
   implementation decisions
 
 The bar is high: "would a future agent make a mistake
-without knowing this?" If yes, add a one-line entry. If
+without knowing this?" If yes, flag it. If
 the answer is "it would be slightly less efficient," skip
 it — CLAUDE.md is not a changelog.
 
-Only add to sections that have the
+Only flag entries for sections that have the
 `<!-- Agents: ... -->` HTML comment — this indicates the
 section was set up for progressive enrichment by
 `/project-init`. If the comment is absent, the CLAUDE.md

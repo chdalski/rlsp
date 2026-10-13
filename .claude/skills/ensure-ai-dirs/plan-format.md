@@ -188,6 +188,14 @@ every site, while "rename the trait in ports.rs, change the
 generic parameter in service.rs…" is the implementation —
 which the compiler verifies, not the plan.
 
+A documentation criterion states what the reader can do or
+find afterwards ("the README tells a user how to give the
+container a GitHub token"), not the facts the page must
+hold. The reviewer checks each criterion literally, so a
+criterion that lists facts — the token's format, which
+processes see it, which commands print it — puts every one
+of them on the page whether its readers need it or not.
+
 A behavior-preserving refactor task names the tests that
 pin the behavior it preserves and carries the criterion
 that they pass with their assertions unchanged — only

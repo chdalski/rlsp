@@ -449,6 +449,7 @@ The reviewer messages you on approval with:
 - The baseline commit SHA (from the developer's handoff)
 - The verified file list
 - A review summary confirming build and tests pass
+- Accepted risks from the security sign-off, or "none"
 
 **Rejection-cycle status updates.** The developer is
 instructed to break opacity after 3 rejections on the same
@@ -773,8 +774,8 @@ This covers:
   checklist, `completed/CLAUDE.md`, finished-plan moves
   into `completed/`
 - Plan status changes — marking plans Completed or Canceled
-  after execution ends (task-level updates are committed by
-  the reviewer during execution)
+  after execution ends (task-level updates ride in each
+  task's commit during execution)
 
 See Commit Timing below for when these commits run — skill
 outputs always land in a team-down window since skills run
@@ -825,7 +826,7 @@ at all until the team is down."
 ## Conventional Commits
 
 This blueprint uses conventional commit prefixes. The
-reviewer composes and makes all code commits — commit type
+reviewer composes code commit messages — commit type
 definitions live in the reviewer's agent file. For
 skill-output commits (see above), use `chore` for
 infrastructure artifacts and `docs` for plan files.

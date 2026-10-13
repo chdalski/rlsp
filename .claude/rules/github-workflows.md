@@ -7,8 +7,7 @@ paths:
 
 These rules activate when creating or modifying GitHub
 Actions workflow files. They address two recurring failure
-modes seen in this repository: stale action versions and
-missing permissions.
+modes: stale action versions and missing permissions.
 
 ## Action Version Currency
 
@@ -53,5 +52,5 @@ Explicit permissions document exactly what each workflow
 needs and protect against future default changes that
 would silently grant or revoke access. Code scanning
 flags workflows without explicit permissions as a security
-alert (alerts #1–4 in this repository were all
+alert (a prior project's first four alerts were all
 missing-permissions findings).

@@ -34,9 +34,10 @@ Place benchmark files in `benches/` at the project root.
 ### Writing Benchmarks
 
 ```rust
+use std::hint::black_box;
+
 use criterion::{
-    black_box, criterion_group, criterion_main,
-    BenchmarkId, Criterion,
+    criterion_group, criterion_main, BenchmarkId, Criterion,
 };
 use mycrate::function_to_benchmark;
 

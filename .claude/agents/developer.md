@@ -294,7 +294,8 @@ entire pipeline.
      tree after a "clean" commit.
    - What tests were added or modified
    - Advisor sign-off status (which advisors signed off,
-     or "no advisors consulted" if skipped)
+     or "no advisors consulted" if skipped), and every
+     accepted risk a security sign-off states
 
 5. **Handle review outcome:**
    - **Approved:** Your changes are committed. Wait for
