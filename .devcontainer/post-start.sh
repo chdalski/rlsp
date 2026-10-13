@@ -7,10 +7,11 @@
 #    from the container's ~/.claude.json, otherwise from the host copy.
 #    CLAUDE_CONFIG_DIR (containerEnv in devcontainer.json) makes Claude Code
 #    read it there, so onboarding and account state survive a rebuild
-# 3. Sets a random git identity for Claude commits (mail domain from
+# 3. Updates Claude Code, so the first session starts on the latest release
+# 4. Sets a random git identity for Claude commits (mail domain from
 #    GIT_EMAIL_DOMAIN, default chrisski.dev)
-# 4. Installs the official Claude plugins the project enables
-# 5. Installs rust-analyzer for the toolchain pinned in rust-toolchain.toml
+# 5. Installs the official Claude plugins the project enables
+# 6. Installs rust-analyzer for the toolchain pinned in rust-toolchain.toml
 #
 # Auth mode is controlled by the CLAUDE_AUTH environment variable:
 #   - "oauth" (default): never copies the host's .credentials.json — each
@@ -168,6 +169,24 @@ init_claude_config() {
   echo "$SEP"
 }
 
+update_claude() {
+  # Without this step the first session after a start finds the update
+  # itself, installs it in the background and must be restarted to run it.
+  # A rebuild needs the step as much as a restart: the image's install layer
+  # comes from the build cache and keeps the release of the first build.
+  #
+  # The timeout bounds the start (VS Code waits for postStartCommand). A
+  # failure only warns: the installed release keeps working, and the
+  # session's own auto-update tries again.
+  section "Updating Claude Code"
+  if ! command -v claude >/dev/null; then
+    echo "WARNING: claude is not on PATH, skipping update"
+  elif ! timeout 120 claude update </dev/null; then
+    echo "WARNING: claude update failed or timed out, keeping the installed release"
+  fi
+  echo "$SEP"
+}
+
 init_git_identity() {
   section "Initializing Git Identity"
 
@@ -306,8 +325,9 @@ setup_rust_analyzer() {
 
 main() {
   init_claude_settings
-  # Before setup_plugins, the first phase that calls `claude`.
+  # Before update_claude, the first phase that calls `claude`.
   init_claude_config
+  update_claude
   init_git_identity
   setup_plugins
   setup_rust_analyzer

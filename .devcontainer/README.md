@@ -27,7 +27,7 @@ Requires Docker Compose 2.24 or newer (optional `env_file` entries).
 | `fish/config.fish` | Shell config; reads `.env.credentials` |
 | `cargo/config.toml` | Links Rust builds with mold |
 | `post-create.sh` | Once per container: volume ownership, cargo config, language servers |
-| `post-start.sh` | Every start: Claude config, git identity, plugins, rust-analyzer |
+| `post-start.sh` | Every start: Claude config, Claude Code update, git identity, plugins, rust-analyzer |
 | `.env.defaults` | Committed environment defaults |
 | `.env.credentials.example` | Documents the credentials file format |
 
@@ -230,6 +230,15 @@ TypeScript and Python plugins. `post-start.sh` installs `rust-analyzer` for
 the toolchain pinned in `rust-toolchain.toml` on every start — the Rust
 feature only ships `rust-analyzer` for the `stable` channel, so `/workspace`,
 which pins a specific version, needs it installed separately.
+
+## Claude Code Updates
+
+On every start, `post-start.sh` runs `claude update`, so the first session
+already runs the latest release. Without it, that session installs the
+update in the background and has to be restarted to use it. "Rebuild
+Container" needs the step as well: the image's install layer comes from the
+build cache and holds the release of the first build. A failed update, or one
+that takes longer than two minutes, warns and the start continues.
 
 ## Migrating from the `.env.local` Layout
 
