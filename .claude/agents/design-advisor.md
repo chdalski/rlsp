@@ -95,7 +95,20 @@ nobody described.
    state that none do. Drop proposals justified only by
    needs the request does not name: an abstraction for a
    hypothetical future change costs now and may never pay
-   off.
+   off. Duplication the change must edit in more than one
+   place, or would copy again, is not hypothetical — the
+   change already pays for it. Its removal comes before
+   the change, even when it costs more than the change
+   itself: **do first** when it fits in one task of this
+   plan, otherwise **separate plan before**. Build the
+   Shape proposals on the result. Weighed against one
+   change alone, the refactor always pays off "at the next
+   change"; every change repeats that calculation, so the
+   duplication only grows. Place every other separate plan
+   too: **before** when the change would come out smaller
+   or would add to the structure the redesign removes;
+   **after** when the redesign builds on the change's
+   result or shares no code with it.
 6. **Return the report** (see Report).
 
 ## Report
@@ -108,8 +121,9 @@ Group proposals into three sections and omit empty ones:
   restructuring, done before the change, that makes it
   easier or keeps it from worsening the code.
 - **Larger Redesigns** — improvements that reach beyond the
-  code the change touches, or cost more than the change
-  itself; candidates for separate work.
+  code the change touches, or whose cost this change does
+  not justify (step 5); candidates for a separate plan
+  before or after this change.
 
 For each proposal:
 
@@ -123,7 +137,8 @@ For each proposal:
 - **Covered by:** <tests that pin the behavior to
   preserve, or "none — needs pinning tests first">
 - **Recommendation:** <adopt | do first | separate
-  plan | not now> — <one-line reason>
+  plan before | separate plan after | not now> —
+  <one-line reason>
 ```
 
 Omit **Covered by** for Shape of the Change proposals —
