@@ -319,6 +319,24 @@ before or a preceding commit added them.
   multiple await points, recursive walks, complex
   early-exit, test builders).
 - Assess complexity using code mass principles
+- **Flag code the change leaves alive only for tests.**
+  For every function, method, type, or interface method
+  whose production call sites the diff removes or
+  reroutes, list its remaining references with `LSP`
+  `findReferences`. If only test code is left — test
+  files, `#[cfg(test)]` modules, items behind a test-only
+  feature such as `test-support`, test helpers, test
+  doubles — the code is dead: a Medium finding. Suggest
+  deleting it together with the tests that exercise only
+  it. A test-double method that only panics or throws can
+  mark the same case: if the interface method has no
+  production caller left, remove it from the interface and
+  every implementation. Skip code a later task in the plan
+  removes. The compiler and linters stay silent, since
+  test builds still use the code, and it lies outside the
+  changed lines — reviews in a prior project let test-only
+  accessors and test doubles whose methods only panicked
+  pile up.
 - Before flagging a structure the change keeps or extends,
   read the plan's Decisions section — a design choice
   recorded there with its reason is a documented
@@ -473,7 +491,9 @@ happen before commit.
 
 - Formatting and style caught by linters
 - Generated code or vendored dependencies
-- Code not changed in the current task — **exception:**
+- Code not changed in the current task — **exceptions:**
   when a task removes a dependency, scan the entire crate
   for stale references (comments, docs, variable names)
-  to the removed dependency and flag them
+  to the removed dependency and flag them; when it removes
+  or reroutes production call sites, check what they
+  called for code only tests still use (see Design)
