@@ -138,6 +138,7 @@ jobs:
           GIT_NAME: ${{ steps.identity.outputs.name }}
           GIT_EMAIL: ${{ steps.identity.outputs.email }}
         run: |
+          set -euo pipefail
           BRANCH="update-rlsp-yaml-${VERSION}"
           cd /tmp/extensions
           gh auth setup-git
@@ -145,8 +146,46 @@ jobs:
           git config user.email "$GIT_EMAIL"
           git checkout -b "$BRANCH"
           git add extensions/rlsp-yaml extensions.toml
+
+          # git diff --quiet exits 1 when there are changes; any other
+          # non-zero status is a git failure, not an answer.
+          DIFF_STATUS=0
+          git diff --cached --quiet || DIFF_STATUS=$?
+          if [ "$DIFF_STATUS" -eq 0 ]; then
+            echo "::error::rlsp-yaml is already at ${VERSION} in the registry; nothing to commit"
+            exit 1
+          elif [ "$DIFF_STATUS" -ne 1 ]; then
+            echo "::error::git diff failed with status ${DIFF_STATUS}"
+            exit 1
+          fi
+
+          # The branch is force-pushed below, which would discard commits a Zed
+          # maintainer pushed to an open PR. The server-side head filter matches
+          # the fork owner exactly, so same-named branches in other forks do not
+          # count. The check passes only on a numeric zero; a malformed answer
+          # aborts.
+          OPEN_PRS=$(gh api \
+            "repos/zed-industries/extensions/pulls?state=open&head=${FORK_OWNER}:${BRANCH}" \
+            --jq '"\(length) \(map(.number | tostring) | join(","))"')
+          OPEN_COUNT="${OPEN_PRS%% *}"
+          OPEN_NUMBERS="${OPEN_PRS#* }"
+          if ! [[ "$OPEN_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "::error::Unexpected answer while looking up open registry PRs"
+            exit 1
+          fi
+          if [ "$OPEN_COUNT" -gt 0 ]; then
+            if ! [[ "$OPEN_NUMBERS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+              echo "::error::Unexpected PR numbers while looking up open registry PRs"
+              exit 1
+            fi
+            echo "::error::Open registry PR https://github.com/zed-industries/extensions/pull/${OPEN_NUMBERS%%,*} already exists for ${FORK_OWNER}:${BRANCH}; close it or update it by hand, then re-run"
+            exit 1
+          fi
+
           git commit -m "rlsp-yaml: Bump to v${VERSION}"
-          git push origin "$BRANCH"
+          # The branch is rebuilt from the freshly synced fork main, so a
+          # branch left by an earlier run has diverged; replace exactly this ref.
+          git push --force origin "refs/heads/${BRANCH}:refs/heads/${BRANCH}"
           gh pr create \
             --repo zed-industries/extensions \
             --head "${FORK_OWNER}:${BRANCH}" \

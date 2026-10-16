@@ -36,7 +36,7 @@ when both changes are on `main` and every CI run the push triggers succeeds.
 - [x] Clarify requirements with user
 - [x] Design review of the approach
 - [x] Task 1: Author the registry commit as the PAT owner
-- [ ] Task 2: Re-run the workflow for a version with a leftover branch
+- [x] Task 2: Re-run the workflow for a version with a leftover branch
 - [ ] Push to `main` and confirm the triggered CI runs succeed
 
 ## Tasks
@@ -64,18 +64,18 @@ the rejected bot-authored commit, and its PR (#7955) is closed. A re-run
 builds the branch from the freshly synced fork `main`, so a plain push is
 rejected as non-fast-forward.
 
-- [ ] A run whose release branch already exists in the fork, with no open
+- [x] A run whose release branch already exists in the fork, with no open
       registry PR from it, replaces that branch and opens a new registry PR
-- [ ] A run for which an open registry PR from the fork's release branch
+- [x] A run for which an open registry PR from the fork's release branch
       already exists fails before pushing, with an error naming that PR; an
       open PR from a same-named branch in another fork does not trigger
       this error
-- [ ] A run whose commit would contain no changes fails before pushing,
+- [x] A run whose commit would contain no changes fails before pushing,
       with an error stating that rlsp-yaml is already at that version in the
       registry
-- [ ] A run with no existing branch in the fork pushes the branch and opens
+- [x] A run with no existing branch in the fork pushes the branch and opens
       the registry PR, as before
-- [ ] `actionlint` reports no findings for
+- [x] `actionlint` reports no findings for
       `.github/workflows/zed-registry-pr.yml`
 
 ## Decisions
