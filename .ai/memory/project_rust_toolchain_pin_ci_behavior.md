@@ -22,20 +22,30 @@ which lacks those targets → cross-compile jobs fail with
 **Fix in use (full-pin):** the CI workflows pin their action refs to
 `dtolnay/rust-toolchain@1.98.1` (a real per-version branch of the action)
 so dtolnay installs targets onto the SAME toolchain the pin selects.
-CI == local exactly; no canary. `RUSTUP_TOOLCHAIN` is NOT used; the pin
-declares no `targets`.
+CI == local exactly; no canary. The pin declares no `targets`.
+`RUSTUP_TOOLCHAIN` is used in exactly one place: the Zed `check` job in
+`zed-release.yml` (see the exception below).
 
 **To bump the toolchain:** edit BOTH `rust-toolchain.toml`'s `channel`
-AND all 8 `dtolnay/rust-toolchain@<ver>` refs — ci.yml (2), coverage (1),
-zed-release (1), release-plz (3), vscode-extension (1) — to the new
-version, in one deliberate commit.
+AND every `dtolnay/rust-toolchain@<ver>` ref — ci.yml (2), coverage (1),
+release-plz (3), vscode-extension (1) — to the new version, in one
+deliberate commit.
 
-**Verification gotcha:** the Zed / vscode / release-binary cross-compile
+**Exception — the Zed extension crate:** Zed's registry CI builds
+extensions with its own pinned Rust (1.90 as of 2026-10-16), and a
+`rust-version` above it makes Zed reject the release (zed-industries/
+extensions#8014 failed with `requires rustc 1.98`). So the Zed crate
+declares `rust-version = "1.90"` and its `check` job selects 1.90 via a
+job-level `RUSTUP_TOOLCHAIN` + plain `rustup toolchain install` (no
+`dtolnay` ref). A toolchain bump must NOT touch either; raise them only
+after checking Zed's registry CI toolchain.
+
+**Verification gotcha:** the vscode / release-binary cross-compile
 jobs are path/release-gated, so they do NOT run on ordinary pushes.
 Verify toolchain changes affecting them with a throwaway push-triggered
 scratch workflow on a branch (a `workflow_dispatch`-only workflow can't
 be dispatched from a branch — GitHub requires it on the default branch;
 `on: push:` to the scratch branch works, and delete the branch after).
 
-See plans `.ai/plans/completed/2026-07-09-adopt-rust-1-97-toolchain.md` and `.ai/plans/2026-09-23-adopt-rust-1-98-toolchain.md`. Related:
+See plans `.ai/plans/completed/2026-07-09-adopt-rust-1-97-toolchain.md`, `.ai/plans/2026-09-23-adopt-rust-1-98-toolchain.md`, and `.ai/plans/2026-10-16-zed-crate-on-zed-registry-toolchain.md`. Related:
 [[clean-build-before-lint-verification]].

@@ -1,7 +1,7 @@
 # Memory Index
 
 - [Clean-build before lint verification](feedback_clean_build_before_lint_verification.md) — after a toolchain change, `cargo clean` before trusting clippy; incremental cache hid 92 findings during the 1.97 adoption
-- [rust-toolchain.toml pins CI too](project_rust_toolchain_pin_ci_behavior.md) — the root pin overrides dtolnay's rustup default; full-pin uses `@<version>` action refs; bump pin channel + all 8 refs together; cross-compile targets must land on the pinned toolchain
+- [rust-toolchain.toml pins CI too](project_rust_toolchain_pin_ci_behavior.md) — the root pin overrides dtolnay's rustup default; full-pin uses `@<version>` action refs; bump pin channel + every dtolnay ref together; cross-compile targets must land on the pinned toolchain; Zed check job + Zed crate `rust-version` stay on Zed's registry toolchain (1.90), never bumped with the pin
 - [yaml-test-suite is mandatory coverage](feedback_yaml_test_suite_mandatory.md) — any invariant/property testable against the suite MUST be tested against it; synthetic fixtures are never a substitute
 - [crates.io OIDC token is publish-only](project_crates_io_oidc_scope.md) — in-session `CARGO_REGISTRY_TOKEN` is OIDC-scoped to publish; `cargo yank` returns 403 and requires a personal token
 - [Dependabot npm runs fail on its own 3-day cooldown](project_dependabot_npm_cooldown.md) — `ERR_PNPM_NO_MATURE_MATCHING_VERSION` comes from Dependabot's injected `minimumReleaseAge=4320`, not repo config; self-heals after 72 h
