@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-16)
 **Created:** 2026-10-16
 
 # Author Zed Registry Commits as the PAT Owner and Make Re-Runs Work
@@ -37,7 +37,7 @@ when both changes are on `main` and every CI run the push triggers succeeds.
 - [x] Design review of the approach
 - [x] Task 1: Author the registry commit as the PAT owner
 - [x] Task 2: Re-run the workflow for a version with a leftover branch
-- [ ] Push to `main` and confirm the triggered CI runs succeed
+- [x] Push to `main` and confirm the triggered CI runs succeed
 
 ## Tasks
 
