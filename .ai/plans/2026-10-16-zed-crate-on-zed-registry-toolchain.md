@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-16)
 **Created:** 2026-10-16
 
 # Build the Zed Extension on Zed's Registry Toolchain
@@ -41,9 +41,9 @@ successor.
 - [x] Clarify requirements with user
 - [x] Design review of the approach
 - [x] Task 1: Build the Zed crate on Zed's registry toolchain
-- [ ] Push to `main`; every triggered CI run succeeds, and the Zed `check`
+- [x] Push to `main`; every triggered CI run succeeds, and the Zed `check`
       run's log shows rustc 1.90
-- [ ] Release 0.1.4 through `zed-release.yml`; its registry PR passes
+- [x] Release 0.1.4 through `zed-release.yml`; its registry PR passes
       Zed's `package` and `verification/cla-signed` checks; #8014 is closed
       with a pointer to that PR
 
@@ -101,6 +101,8 @@ in our CI first and a root toolchain bump leaves both alone.
   release, and Zed's own PR check remains the backstop.
 - **Release 0.1.4 instead of reusing 0.1.3:** the `zed-v0.1.3` tag points at
   the commit that declares 1.98.
+- **#8014 closing comment without a link:** #8014 was closed with a comment
+  announcing a fixed version; no separate comment linking #8016 is posted.
 
 ## Non-Goals
 
