@@ -39,14 +39,47 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "Resolved tag ${TAG} -> version=${VERSION} sha=${SHA}"
 
+      - name: Resolve PAT owner identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
+        run: |
+          set -euo pipefail
+          USER_JSON=$(gh api user)
+          LOGIN=$(jq -r '.login // ""' <<< "$USER_JSON")
+          ID=$(jq -r '.id // ""' <<< "$USER_JSON")
+          # The profile name is free text: drop control characters so it stays
+          # one line (a newline would inject extra entries into GITHUB_OUTPUT).
+          NAME=$(jq -r '(.name // "") | gsub("\\p{Cc}"; "") | gsub("^\\s+|\\s+$"; "") | .[:100]' <<< "$USER_JSON")
+
+          if ! [[ "$LOGIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]]; then
+            echo "::error::PAT owner login is missing or malformed"
+            exit 1
+          fi
+          if ! [[ "$ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::PAT owner id is missing or not numeric"
+            exit 1
+          fi
+          if [ -z "$NAME" ]; then
+            NAME="$LOGIN"
+          fi
+
+          {
+            echo "login=${LOGIN}"
+            echo "name=${NAME}"
+            echo "email=${ID}+${LOGIN}@users.noreply.github.com"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Registry commit identity: %s <%s+%s@users.noreply.github.com>\n' \
+            "$NAME" "$ID" "$LOGIN"
+
       - name: Fork and clone zed-industries/extensions
         env:
           GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
+          FORK_OWNER: ${{ steps.identity.outputs.login }}
         run: |
           gh repo fork zed-industries/extensions \
             --fork-name=zed-editor-extensions \
             --clone=false
-          FORK_OWNER=$(gh api user --jq '.login')
           gh repo sync "${FORK_OWNER}/zed-editor-extensions" \
             --source zed-industries/extensions --branch main
           gh repo clone "${FORK_OWNER}/zed-editor-extensions" /tmp/extensions -- --depth=1
@@ -101,13 +134,15 @@ jobs:
         env:
           VERSION: ${{ steps.resolve.outputs.version }}
           GH_TOKEN: ${{ secrets.ZED_REGISTRY_PAT }}
+          FORK_OWNER: ${{ steps.identity.outputs.login }}
+          GIT_NAME: ${{ steps.identity.outputs.name }}
+          GIT_EMAIL: ${{ steps.identity.outputs.email }}
         run: |
           BRANCH="update-rlsp-yaml-${VERSION}"
-          FORK_OWNER=$(gh api user --jq '.login')
           cd /tmp/extensions
           gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "$GIT_NAME"
+          git config user.email "$GIT_EMAIL"
           git checkout -b "$BRANCH"
           git add extensions/rlsp-yaml extensions.toml
           git commit -m "rlsp-yaml: Bump to v${VERSION}"

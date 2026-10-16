@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-16
 
 # Author Zed Registry Commits as the PAT Owner and Make Re-Runs Work
@@ -35,7 +35,7 @@ when both changes are on `main` and every CI run the push triggers succeeds.
 
 - [x] Clarify requirements with user
 - [x] Design review of the approach
-- [ ] Task 1: Author the registry commit as the PAT owner
+- [x] Task 1: Author the registry commit as the PAT owner
 - [ ] Task 2: Re-run the workflow for a version with a leftover branch
 - [ ] Push to `main` and confirm the triggered CI runs succeed
 
@@ -45,15 +45,15 @@ when both changes are on `main` and every CI run the push triggers succeeds.
 
 The registry commit must come from the account that signed Zed's CLA.
 
-- [ ] The registry commit's author and committer are both the PAT owner:
+- [x] The registry commit's author and committer are both the PAT owner:
       the name is the account's profile name, or its login when the profile
       name is unset or empty; the email is
       `<id>+<login>@users.noreply.github.com`
-- [ ] The workflow fetches the PAT owner's account details once, in a
+- [x] The workflow fetches the PAT owner's account details once, in a
       dedicated step, and every later use of the fork owner or the commit
       identity reads that step's outputs
-- [ ] No `github-actions[bot]` identity remains in `zed-registry-pr.yml`
-- [ ] `actionlint` reports no findings for
+- [x] No `github-actions[bot]` identity remains in `zed-registry-pr.yml`
+- [x] `actionlint` reports no findings for
       `.github/workflows/zed-registry-pr.yml`
 
 ### Task 2: Re-run the workflow for a version with a leftover branch
