@@ -14,23 +14,45 @@ no issues are found in a section, skip it in the report.
 ## Severity
 
 Classify every finding as **Blocking** or **Advisory**. Only
-Blocking findings send the plan back for revision and
-another full review pass — over-classifying costs a whole
-cycle, not a few seconds of reading.
+Blocking findings hold the plan back from the user — each
+costs a revision and another full review pass, so
+over-classifying costs a whole cycle, not a few seconds of
+reading.
 
 - **Blocking** — executing the plan as written would deliver
   something other than what the user asked for, or would let
   an agent report a task done when it is not: narrowed
   scope, tasks that do not add up to the goal, an escape
-  hatch, a criterion that cannot be judged true or false, a
-  stale artifact or reader that a search found and no
-  criterion covers. Block even when the fix is small.
+  hatch, a criterion that leaves a decision open (see
+  below), a stale artifact or reader that a search found
+  and no criterion covers. Block even when the fix is small.
 - **Advisory** — everything else: wording that is verifiable
-  but could be tighter, format slips that do not change what
-  gets built, and improvement suggestions. Sections 11 and
-  12 are always Advisory — splitting a plan or adding
-  consolidation work changes the scope the user approves, so
-  the user decides, not the review cycle.
+  but could be tighter (except precision for a settled
+  reading, which is dropped — see below), format slips that
+  do not change what gets built, and improvement
+  suggestions. Sections 11 and 12 are always Advisory —
+  splitting a plan or adding consolidation work changes the
+  scope the user approves, so the user decides, not the
+  review cycle. Section 14 is always Advisory — cutting
+  text never changes what gets built.
+
+**An unclear criterion blocks only when it leaves a
+decision open.** Name two readings a careful implementor
+could take and what each would deliver differently —
+behavior, scope, interface, or what gets tested — and put
+both in the finding. If you cannot name both, or the code
+the task targets (including the patterns it already
+follows) or a project rule — a `CLAUDE.md` file or a rule
+file the agents load — already decides between them, drop
+the finding, and do not report it as Advisory either: the
+lead applies Advisory findings, so the same text would
+still enter the plan. The implementor works from that code
+and those rules, and the reviewer checks the diff against
+both. Precision added for a reading the code already
+settles is new text that the next fresh pass searches for
+misreadings; a prior plan took 21 passes — from about the
+tenth on, each one only added such precision — until the
+user stopped the cycle.
 
 Report only what you can ground in plan text or a search
 result. A finding that docs *might* describe the old state
@@ -51,7 +73,7 @@ Return a structured findings report:
 ## 1. Self-Containment
 
 The plan must be understandable without reading any other
-file.
+plan file.
 
 - Can the Goal section be understood without reading any
   other plan file?
@@ -148,6 +170,9 @@ references in other documentation.
   changed? If so, does a task update them?
 - Do test fixture descriptions reference behavior being
   fixed? If so, does a task update them?
+- Run the searches yourself. Do not flag a plan for
+  omitting search results that show nothing else is
+  affected — plan-format.md excludes them from plans.
 
 ## 7. Task Description Completeness
 
@@ -165,11 +190,23 @@ stated as outcomes, not as a procedure.
   compiler and tests confirm the sites were covered. This
   applies to Task checkboxes only — the Steps section is a
   procedure by design.
-- Is each criterion independently verifiable? The reviewer
-  should be able to check completion without asking the
-  implementor what was intended.
-- Can the reviewer distinguish "task done" from "task
-  partially done" using only the task description?
+- Does each documentation criterion state what the reader
+  can do or find afterwards, rather than list the facts the
+  page must hold? The reviewer enforces a listed fact
+  whether the page's readers need it or not.
+- Is each criterion independently verifiable? With the code
+  and the project rules at hand, the reviewer should be
+  able to check completion without asking the implementor
+  what was intended.
+- Can the reviewer, reading the task description against
+  the code, distinguish "task done" from "task partially
+  done"?
+- Does each behavior-preserving refactor task name the
+  tests that pin the behavior it preserves and require
+  them to pass with their assertions unchanged? When no
+  test covered that behavior, does a preceding task add
+  them? Without both, a refactor can change behavior and
+  still pass review.
 
 ## 8. Goal Covers User Request
 
@@ -316,3 +353,26 @@ toolchain catches.
   components that read the same field directly. Both
   broke immediately with no compile error; neither was in
   the migrated callsite set.
+
+## 14. Plan Noise
+
+Every reader of the plan pays for each sentence on every
+read, and review passes tend to add text, never remove it.
+Flag text that no reader would act differently without, as
+defined in plan-format.md's "What Does Not Belong in a
+Plan":
+
+- Quotes of the user, or who decided what and when
+- Diagnosis stories, tool internals, or harness recipes
+  where a stated fact or an acceptance criterion would do
+- Search results that prove nothing else needs changing
+- Narration of the planning or review process
+- Execution logs beyond checkbox state
+- Project rules restated from a `CLAUDE.md` file
+- Clauses that exclude a reading the code or a project rule
+  already excludes — except the remove-only clause §5 asks
+  for and a Decisions entry that declines a review finding
+- A fact stated in Context and again in a task, or a fact
+  in Context that only one task needs
+
+Quote the text and give the shorter form, or say to cut it.
