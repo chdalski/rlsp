@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [0.13.2] - 2026-10-16
+
+### Bug Fixes
+
+- Build the Zed crate on Zed's registry toolchain 1.90 (e4ba67e)
+
 ## [0.13.1] - 2026-10-11
 
 ### Bug Fixes
