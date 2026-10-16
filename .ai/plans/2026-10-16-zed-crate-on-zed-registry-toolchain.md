@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-16
 
 # Build the Zed Extension on Zed's Registry Toolchain
@@ -40,7 +40,7 @@ successor.
 
 - [x] Clarify requirements with user
 - [x] Design review of the approach
-- [ ] Task 1: Build the Zed crate on Zed's registry toolchain
+- [x] Task 1: Build the Zed crate on Zed's registry toolchain
 - [ ] Push to `main`; every triggered CI run succeeds, and the Zed `check`
       run's log shows rustc 1.90
 - [ ] Release 0.1.4 through `zed-release.yml`; its registry PR passes
@@ -55,29 +55,29 @@ The Zed crate's declared floor and our CI's Zed check use Zed's registry
 toolchain, 1.90, instead of the root pin, so a crate Zed cannot build fails
 in our CI first and a root toolchain bump leaves both alone.
 
-- [ ] The Zed crate declares `rust-version = "1.90"`, with a comment beside
+- [x] The Zed crate declares `rust-version = "1.90"`, with a comment beside
       it stating that it must not exceed the toolchain Zed's registry CI
       builds with
-- [ ] The `check` job selects Rust 1.90 through a job-level
+- [x] The `check` job selects Rust 1.90 through a job-level
       `RUSTUP_TOOLCHAIN` value, installs that toolchain with the
       `wasm32-wasip2` target and clippy without `dtolnay/rust-toolchain`,
       and a comment on the job links Zed's registry CI as the source of the
       version and states that root toolchain bumps do not touch it
-- [ ] The `check` job runs a release build of the crate for
+- [x] The `check` job runs a release build of the crate for
       `wasm32-wasip2` and clippy with `-D warnings`, both on Rust 1.90
-- [ ] A change to `.github/workflows/zed-release.yml` triggers the `check`
+- [x] A change to `.github/workflows/zed-release.yml` triggers the `check`
       job on push and on pull request
-- [ ] A reader of `rust-toolchain.toml` learns that the Zed `check` job is
+- [x] A reader of `rust-toolchain.toml` learns that the Zed `check` job is
       excluded from a toolchain bump; `.github/dependabot.yml` refers to the
       toolchain refs without a fixed count
-- [ ] Root `CLAUDE.md` lets an agent install Rust 1.90 and run the same Zed
+- [x] Root `CLAUDE.md` lets an agent install Rust 1.90 and run the same Zed
       build and clippy commands the `check` job runs, and its Conventions
       record that the Zed crate follows Zed's registry toolchain, not the
       root pin
-- [ ] A local run on Rust 1.90 shows that the crate declaring
+- [x] A local run on Rust 1.90 shows that the crate declaring
       `rust-version = "1.91"` fails the build with cargo's "requires rustc"
       error; the probe leaves no change in the repository
-- [ ] `actionlint` reports no findings for
+- [x] `actionlint` reports no findings for
       `.github/workflows/zed-release.yml`
 
 ## Decisions

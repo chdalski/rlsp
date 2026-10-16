@@ -3,7 +3,8 @@
 # this pin, so `dtolnay` installs each job's targets/components onto the
 # same toolchain rustup selects here — no mismatch, no floating canary.
 # To bump: edit `channel` here AND all `@1.98.1` refs together in one
-# commit.
+# commit. The Zed extension's `check` job in zed-release.yml is excluded: it
+# builds with Zed's registry toolchain (1.90) and has no `dtolnay` ref.
 [toolchain]
 channel = "1.98.1"
 components = ["clippy", "rustfmt"]

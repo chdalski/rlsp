@@ -5,33 +5,41 @@ on:
     branches: [main]
     paths:
       - 'rlsp-yaml/integrations/zed/**'
+      - '.github/workflows/zed-release.yml'
   pull_request:
     branches: [main]
     paths:
       - 'rlsp-yaml/integrations/zed/**'
+      - '.github/workflows/zed-release.yml'
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Builds the crate the way Zed's registry CI does: Rust 1.90, a release
+  # build for wasm32-wasip2 (https://github.com/zed-industries/extensions/blob/main/.github/workflows/ci.yml).
+  # The version is fixed here on purpose and is not tied to rust-toolchain.toml
+  # or to the crate's rust-version, so root toolchain bumps do not touch this
+  # job. Raise it only after checking the toolchain in Zed's registry CI.
+  # RUSTUP_TOOLCHAIN takes precedence over the root rust-toolchain.toml pin.
   check:
     name: Check + Clippy
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      RUSTUP_TOOLCHAIN: "1.90"
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.98.1
-        with:
-          targets: wasm32-wasip2
-          components: clippy
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target wasm32-wasip2 --component clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rlsp-yaml/integrations/zed
-      - name: cargo check
-        run: cargo check --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2
+      - name: cargo build
+        run: cargo build --release --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2
       - name: cargo clippy
         run: cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
 

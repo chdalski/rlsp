@@ -38,9 +38,12 @@ pnpm run format    # check formatting (prettier)
 
 ### Zed Extension
 
+Built on Zed's registry toolchain (Rust 1.90), not the root pin. `RUSTUP_TOOLCHAIN` takes precedence over `rust-toolchain.toml`:
+
 ```sh
-cargo check --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2
-cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
+rustup toolchain install 1.90 --profile minimal --target wasm32-wasip2 --component clippy  # once
+RUSTUP_TOOLCHAIN=1.90 cargo build --release --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --target wasm32-wasip2
+RUSTUP_TOOLCHAIN=1.90 cargo clippy --manifest-path rlsp-yaml/integrations/zed/Cargo.toml --all-targets --target wasm32-wasip2 -- -D warnings
 ```
 
 ### Claude Code Plugin
@@ -84,6 +87,7 @@ keywords.
 - Automated releases via release-plz; tag format: `<package>-v<version>`. VS Code extension uses CalVer tags: `vscode-v<YYYY.MM.NN>`; Zed extension uses semver tags: `zed-v<semver>`
 - Agents must not edit `version = "..."` fields in any `Cargo.toml` — release-plz owns version progression from conventional commits; milestone bumps (e.g., 0.x → 1.0) are user-directed and applied as a single deliberate commit
 - Conventional commits required — changelogs auto-generated via git-cliff
+- The Zed crate (`rlsp-yaml/integrations/zed/`) follows Zed's registry toolchain (Rust 1.90), not the root pin: its `rust-version` must not exceed it, and the `check` job in `zed-release.yml` fixes it via `RUSTUP_TOOLCHAIN`; raise both only after checking Zed's registry CI
 - OIDC trusted publishing to crates.io — no `CARGO_REGISTRY_TOKEN` secret needed
 - pnpm as Node.js package manager
 - A pnpm override is redundant only when every direct dependent's *declared* range is bounded at or above the advisory's patched floor — an observed resolved version above the floor proves nothing, since it reflects resolver preference (mirror state, store contents, incremental lockfile history)
