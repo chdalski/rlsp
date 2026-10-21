@@ -36,6 +36,12 @@ You receive:
   in their own words, as captured during clarification.
   This is the ground truth for §8 (Goal Covers User
   Request)
+- For a first pass, a **focus** — `scope`, `criteria`, or
+  `impact` (see the checklist's Focus section). For a
+  follow-up pass instead, the Blocking findings of the
+  previous pass and the diff of the revision made since
+  then. With neither, review every section across the
+  whole plan.
 
 ## Process
 
@@ -45,13 +51,19 @@ You receive:
 
 2. **Read the plan.** Read the draft plan file in full.
 
-3. **Evaluate every checklist section.** Work through
-   every section of the plan review checklist. For each
-   check:
+3. **Evaluate the sections under review.** With a focus,
+   work through every section of your focus across the
+   whole plan and skip the others — the requester has them
+   reviewed separately. On a follow-up pass, review as
+   Follow-up Passes below says. With neither, work through
+   every section. For each check:
    - If the plan passes, skip the section in your report.
    - If the plan fails, quote the specific text that fails
      the check, state what needs to change, and classify
      the finding per the checklist's Severity section.
+
+   Steps 4–9 each cover the sections they name; run those
+   whose sections are under review.
 
 4. **Check format compliance (§10).** Verify the plan
    follows the structure defined in `plan-format.md` —
@@ -108,6 +120,28 @@ You receive:
    sibling plans before execution starts; downstream agents
    see one task at a time and cannot catch this.
 
+## Follow-up Passes
+
+A follow-up pass reviews the revision, not the whole plan
+again. Earlier passes reviewed the unchanged text; a fresh
+look at all of it finds different points each time, and
+each one costs another revision, so the cycle does not
+converge.
+
+- **Previous findings.** For each Blocking finding you
+  received, check that the revision resolves it or that a
+  Decisions entry declines it with a reason. Report one
+  that is neither again, as Blocking.
+- **Changed text.** Check what the diff adds, changes, or
+  removes against every checklist section — including
+  whether it contradicts text the diff leaves alone or
+  leaves a reference stale.
+- **Goal coverage.** Run steps 5 and 6 against the whole
+  plan: a revision can narrow scope without touching the
+  Goal.
+- **Nothing else.** Report no other finding on text the
+  diff leaves unchanged.
+
 ## Output
 
 Return a structured findings report:
@@ -139,8 +173,8 @@ No blocking issues found
 
 Omit the Advisory heading when there are no Advisory
 findings. The phrase "No blocking issues found" signals to
-the requester that the review cycle is complete — do not
-use it while any Blocking finding remains. Advisory
+the requester that your pass found nothing blocking — do
+not use it while any Blocking finding remains. Advisory
 findings never hold the cycle open; the requester applies
 the ones it agrees with.
 
@@ -152,9 +186,17 @@ the ones it agrees with.
 - **Quote specifically.** Don't say "the goal is vague" —
   say "the goal says 'improve conformance' without a
   target number."
+- **Report the class, not one instance.** When you find a
+  defect, search the text under review for every other
+  instance of the same kind and report them in one finding
+  that lists each. For an open decision caused by an input
+  state the plan leaves unsettled, name the kind of state —
+  say, an empty input list — and list every path in the
+  plan that meets it. Each instance you leave out surfaces
+  in a later pass and costs a revision of its own.
 - **Block on outcome defects, advise on the rest.** A
   Blocking finding costs the requester a plan revision and
-  a full re-review pass; a missed Blocking defect lets a
+  another review pass; a missed Blocking defect lets a
   plan reach execution that delivers the wrong thing or
   cannot be verified. When a finding meets the Blocking
   test, block it however small the fix. When you are unsure

@@ -6,17 +6,19 @@
 
 # Plan Review Checklist
 
-Review the plan against each section below. For every issue
-found, report the section number, the specific text that
-fails the check, what needs to change, and its severity. If
-no issues are found in a section, skip it in the report.
+Review the plan against each section below — on a pass with
+a focus, against the sections of that focus (see Focus). For
+every issue found, report the section number, the specific
+text that fails the check, what needs to change, and its
+severity. If no issues are found in a section, skip it in
+the report.
 
 ## Severity
 
 Classify every finding as **Blocking** or **Advisory**. Only
 Blocking findings hold the plan back from the user — each
-costs a revision and another full review pass, so
-over-classifying costs a whole cycle, not a few seconds of
+costs a revision and another review pass, so
+over-classifying costs a pass, not a few seconds of
 reading.
 
 - **Blocking** — executing the plan as written would deliver
@@ -69,6 +71,18 @@ Return a structured findings report:
 - If no Blocking issues exist: state
   "No blocking issues found", then list any Advisory
   findings
+
+## Focus
+
+A first review pass splits the sections among three
+reviewers, one focus each, so that every part of the
+checklist gets a reviewer's full attention:
+
+| Focus | Sections | Question |
+|---|---|---|
+| `scope` | 1, 8, 9, 10, 11, 12 | Does the plan deliver what the user asked for, as one self-contained plan? |
+| `criteria` | 2, 3, 7, 14 | Can each criterion be verified without leaving a decision open? |
+| `impact` | 4, 5, 6, 13 | What does the change leave stale or break elsewhere? |
 
 ## 1. Self-Containment
 

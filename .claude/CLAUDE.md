@@ -170,6 +170,16 @@ After clarification is complete:
    so the reviewer does not flag the structure the user
    chose to keep.
 
+   **When the plan promises unchanged behavior**, find
+   before writing every input state in which the planned
+   design computes something different from the current
+   code — per changed path, including states only test
+   data reaches. Each is a behavior change the plan must
+   settle: ask the user where _Ask about trade-offs_ says
+   so, and record each outcome in Decisions. A prior plan
+   promised identical results and left such states open;
+   the plan-reviewer found them one per pass.
+
 5. **Decompose into vertical task slices.** Each slice
    should be independently committable and touch all layers
    needed for the feature. Order slices so later ones build
@@ -178,7 +188,7 @@ After clarification is complete:
    adopted preparatory refactor is its own task ahead of
    the feature work.
 
-6. **Review the plan via subagent.** First proofread your
+6. **Review the plan via subagents.** First proofread your
    draft against `plan-review-checklist.md` in the plans
    directory and fix the mechanical items directly: escape
    hatches (§2), hedge words (§3), references to other plan
@@ -186,47 +196,60 @@ After clarification is complete:
    outcomes (§7), format (§10), and plan noise (§14).
    An escape hatch always blocks, and a hedge word blocks
    whenever it leaves a decision open, so each one left for
-   the reviewer can cost a full review pass.
+   the reviewer can cost a review pass.
    This is proofreading, not review — the plan-reviewer
    still runs afterward.
 
-   Then launch the `plan-reviewer` agent to review the plan
-   before presenting it to the user. Pass it:
+   Then review the plan in passes before presenting it to
+   the user. Every `plan-reviewer` launch gets:
    - The plan file path
    - The plans directory path (so it can find
      `plan-format.md` and `plan-review-checklist.md`)
    - The user's original request — what the user asked
-     for in their own words during clarification. The
-     plan-reviewer uses this as ground truth to verify
+     for in their own words during clarification, plus
+     any change the user asked for at approval (step 7).
+     The plan-reviewer uses this as ground truth to verify
      the goal captures the full scope of the request.
 
-   This is a cycle — not a one-shot check:
-   a. Launch the `plan-reviewer` with all three inputs.
-   b. Fix each Blocking finding, or decline one you judge
-      wrong by recording the reason in the plan's
-      Decisions section — the user sees every decline
-      (step 7).
-   c. If you changed the plan, re-launch the subagent — a
-      fix can break what an earlier pass approved. Repeat
-      until it returns "No blocking issues found" or every
-      remaining Blocking finding is declined.
-   d. Take Advisory findings in one batch: at the first
-      pass that reports no Blocking findings, decide once
-      which of its Advisory findings to take, apply them
-      all in one revision, and re-launch once more. If you
-      take none, the cycle is done. Every pass after the
-      batch is a closing pass: fix and re-pass its
-      Blocking findings as in b–c, but do not apply its
-      Advisory findings — name them to the user in step 7.
-      A prior session applied Advisory findings one round
-      at a time and took a one-task plan through six
-      passes.
+   a. **First pass: three reviewers in parallel.** Launch
+      three `plan-reviewer` subagents in one message, one
+      per focus: `scope`, `criteria`, and `impact`. A single
+      reviewer covering the whole checklist finds a
+      different subset on every pass, and the rest surfaces
+      one revision at a time.
+   b. **Revise.** Before each revision, copy the plan as
+      the last pass reviewed it to a temporary file outside
+      the plans directory — the plan-reviewer reads every
+      file there as a sibling plan. Fix each Blocking
+      finding, or decline one you judge wrong by recording
+      the reason in the plan's Decisions section — the user
+      sees every decline (step 7). When a finding names one
+      instance, fix every instance of its kind in the plan;
+      the reviewer may have reported only those it saw.
+      Apply the Advisory findings you agree with in the
+      same revision.
+   c. **Follow-up pass: the revision only.** Launch one
+      `plan-reviewer` with the Blocking findings of the
+      previous pass and the output of
+      `diff -u <copy> <plan>` — it has no Bash to produce
+      the diff itself. It checks that the revision resolves
+      those findings and holds up against the rest of the
+      plan; it does not review unchanged text again. Repeat
+      b–c until a pass reports no Blocking findings or
+      every remaining one is declined.
+   d. **No pass for Advisory findings alone.** A pass
+      without Blocking findings ends the cycle, and its
+      Advisory findings are dropped — except after the
+      first pass, where you may apply them (b) and run one
+      follow-up pass (c). A prior session applied Advisory
+      findings one round at a time and took a one-task plan
+      through six passes.
 
-   Each launch is stateless — every review pass gets fresh
-   eyes on the current plan state. Launch it without a
-   `name`: with agent teams enabled, a named launch spawns
-   a persistent teammate, and follow-up passes sent to it
-   carry the previous pass's context.
+   Launch every `plan-reviewer` without a `name`: with
+   agent teams enabled, a named launch spawns a persistent
+   teammate, and later passes sent to it carry the earlier
+   passes' context. A follow-up pass knows the earlier
+   passes only through the findings and the diff you pass.
 
    Do not skip this step for "simple" plans — the lead
    wrote the plan and is poorly positioned to spot its
@@ -236,21 +259,20 @@ After clarification is complete:
 
 7. **Present the plan to the user** for approval. Use
    `AskUserQuestion` to confirm. Name each Blocking finding
-   you declined, each split or consolidation suggestion
-   the review raised, and each Advisory finding from a
-   closing pass — those are the user's decisions, not
+   you declined and each split or consolidation suggestion
+   the review raised — those are the user's decisions, not
    yours. Present only plan text the plan-reviewer has
    reviewed in its current form: any edit after a review
    pass — a fix for a Blocking or an Advisory finding, a
    change the user asked for, your own correction, however
-   small — goes through step 6 again first. A prior
-   session worked seven Advisory findings into a plan and
-   asked for approval without a review pass. If the user
-   requests changes, revise the plan and restart the
-   review cycle (step 6), treating its first pass as a
-   closing pass — revisions based on user feedback can
-   reintroduce issues the subagent would catch. A change
-   of approach goes back to step 3 first.
+   small — goes through a follow-up pass (step 6b–c)
+   first. A prior session worked seven Advisory findings
+   into a plan and asked for approval without a review
+   pass. If the user requests changes, revise the plan and
+   run follow-up passes on the revision (step 6b–d) —
+   revisions based on user feedback can reintroduce issues
+   the subagent would catch. A change of approach goes
+   back to step 3 first.
 
 8. **Commit the plan.** After user approval, commit the
    plan file using conventional commit format:
