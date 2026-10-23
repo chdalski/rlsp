@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.14.0] - 2026-10-23
+
+### Bug Fixes
+
+- Build the Zed crate on Zed's registry toolchain 1.90 (e4ba67e)
+- Load remote schemas regardless of Content-Type (2eef668)
+
+### Features
+
+- Log why a declared schema could not be applied (ec36d70)
+
 ## [0.13.1] - 2026-10-11
 
 ### Bug Fixes
