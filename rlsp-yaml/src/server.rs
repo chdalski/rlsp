@@ -110,6 +110,75 @@ pub struct Settings {
 /// Default Kubernetes version used when `kubernetesVersion` is not configured.
 const DEFAULT_KUBERNETES_VERSION: &str = "master";
 
+/// Longest schema URL echoed into a client log message, in characters.
+const MAX_LOGGED_URL_CHARS: usize = 200;
+
+/// Longest client log message about a schema failure, in characters.
+const MAX_SCHEMA_LOG_CHARS: usize = 512;
+
+/// Where a schema URL came from, which decides whether a failure is logged.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemaSource {
+    /// Named by the user or a catalog: a modeline, the `schemas` setting, or a
+    /// `SchemaStore` match.
+    Declared,
+    /// Guessed from a root `apiVersion` and `kind`.
+    AutoDetectedKubernetes,
+}
+
+/// Build the log message for a schema that could not be applied.
+///
+/// The URL and the error text can carry attacker-chosen content (a modeline,
+/// a catalog entry, a server's error), so the message drops URL credentials,
+/// query and fragment, replaces control and bidirectional-formatting
+/// characters, and is length-capped.
+fn schema_failure_message(schema_url: &str, error: &schema::SchemaError) -> String {
+    let message = format!(
+        "Schema {} could not be applied: {error}",
+        loggable_url(schema_url)
+    );
+    let printable: String = message
+        .chars()
+        .map(|c| if is_unsafe_log_char(c) { '?' } else { c })
+        .collect();
+    truncate_chars(&printable, MAX_SCHEMA_LOG_CHARS)
+}
+
+/// The part of `raw` that identifies a schema without exposing credentials:
+/// scheme, host, port, and path, capped at [`MAX_LOGGED_URL_CHARS`].
+///
+/// A URL that does not parse is replaced by a placeholder, since stripping
+/// credentials from unstructured text is not reliable.
+fn loggable_url(raw: &str) -> String {
+    let Ok(mut url) = Url::parse(raw) else {
+        return format!("<unparsable URL, {} bytes>", raw.len());
+    };
+    // Both setters fail only for URLs that cannot carry userinfo; there is
+    // nothing to strip then.
+    url.set_username("").ok();
+    url.set_password(None).ok();
+    url.set_query(None);
+    url.set_fragment(None);
+    truncate_chars(url.as_str(), MAX_LOGGED_URL_CHARS)
+}
+
+const fn is_unsafe_log_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}' | '\u{2029}'
+                | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+}
+
+/// Keep at most `max` characters of `s`, marking a cut with `…`.
+fn truncate_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((cut, _)) => format!("{}…", &s[..cut]),
+        None => s.to_string(),
+    }
+}
+
 // Lock acquisition order — always acquire in this sequence to prevent deadlock.
 // Every handler that needs multiple locks must follow this order and must fully
 // release each guard (let it drop) before acquiring the next:
@@ -313,8 +382,31 @@ impl Backend {
         }
     }
 
+    /// Tell the user in the client log why `schema_url` could not be applied.
+    ///
+    /// Auto-detected Kubernetes schemas stay silent: their URL is a guess, and
+    /// for custom resources no schema exists.
+    async fn log_schema_failure(
+        &self,
+        source: SchemaSource,
+        schema_url: &str,
+        error: &crate::schema::SchemaError,
+    ) {
+        if source == SchemaSource::AutoDetectedKubernetes {
+            return;
+        }
+        self.client
+            .log_message(
+                tower_lsp::lsp_types::MessageType::WARNING,
+                schema_failure_message(schema_url, error),
+            )
+            .await;
+    }
+
     /// Normalize `schema_url`, record the association, fetch/cache the schema,
     /// and append schema-validation diagnostics to `diagnostics`.
+    ///
+    /// Failures are logged to the client according to `source`.
     ///
     /// No Mutex guard is held across any `.await` point.
     async fn process_schema(
@@ -324,8 +416,15 @@ impl Backend {
         diagnostics: &mut Vec<Diagnostic>,
         documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
         yaml_version: YamlVersion,
+        source: SchemaSource,
     ) {
-        let normalised = crate::schema::validate_and_normalize_url(schema_url).ok();
+        let normalised = match crate::schema::validate_and_normalize_url(schema_url) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                self.log_schema_failure(source, schema_url, &e).await;
+                None
+            }
+        };
 
         if let Some(url) = normalised {
             // Record the association (lock → insert → drop).
@@ -381,8 +480,13 @@ impl Backend {
                     }
                 }
 
-                let fetched: Option<(serde_json::Value, crate::schema::JsonSchema)> =
-                    fetch_result.ok();
+                let fetched = match fetch_result {
+                    Ok(fetched) => Some(fetched),
+                    Err(e) => {
+                        self.log_schema_failure(source, &url, &e).await;
+                        None
+                    }
+                };
 
                 if let Some((ref v, ref s)) = fetched
                     && let Ok(mut cache) = self.schema_cache.lock()
@@ -428,8 +532,15 @@ impl Backend {
                 }
                 // Fall through: non-schema validators already ran above.
             } else {
-                self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
-                    .await;
+                self.process_schema(
+                    uri,
+                    &schema_url,
+                    diagnostics,
+                    documents,
+                    yaml_version,
+                    SchemaSource::Declared,
+                )
+                .await;
             }
             return;
         }
@@ -442,16 +553,30 @@ impl Backend {
         let schema_store_enabled = self.get_schema_store_enabled();
         let filename = uri.path();
         if let Some(schema_url) = crate::schema::match_schema_by_filename(filename, &associations) {
-            self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
-                .await;
+            self.process_schema(
+                uri,
+                &schema_url,
+                diagnostics,
+                documents,
+                yaml_version,
+                SchemaSource::Declared,
+            )
+            .await;
         } else if let Some((api_version, kind)) =
             crate::schema::detect_kubernetes_resource(documents)
         {
             // Third fallback: Kubernetes auto-detection.
             let schema_url =
                 crate::schema::kubernetes_schema_url(&api_version, &kind, &k8s_version);
-            self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
-                .await;
+            self.process_schema(
+                uri,
+                &schema_url,
+                diagnostics,
+                documents,
+                yaml_version,
+                SchemaSource::AutoDetectedKubernetes,
+            )
+            .await;
         } else if schema_store_enabled {
             // Fourth fallback: SchemaStore catalog.
             // get_or_fetch_schemastore_catalog() acquires and releases
@@ -459,8 +584,15 @@ impl Backend {
             if let Some(catalog) = self.get_or_fetch_schemastore_catalog().await
                 && let Some(schema_url) = crate::schema::match_schemastore(filename, &catalog)
             {
-                self.process_schema(uri, &schema_url, diagnostics, documents, yaml_version)
-                    .await;
+                self.process_schema(
+                    uri,
+                    &schema_url,
+                    diagnostics,
+                    documents,
+                    yaml_version,
+                    SchemaSource::Declared,
+                )
+                .await;
             }
         }
     }
@@ -2590,5 +2722,91 @@ mod tests {
         let json = serde_json::json!({});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.format_enable, None);
+    }
+
+    // ---- schema_failure_message ----
+
+    fn fetch_failed(reason: &str) -> schema::SchemaError {
+        schema::SchemaError::FetchFailed(reason.to_string())
+    }
+
+    #[test]
+    fn schema_failure_message_names_url_and_error() {
+        let message = schema_failure_message(
+            "http://schema.invalid/schema.json",
+            &fetch_failed("http status: 404"),
+        );
+
+        assert!(message.contains("http://schema.invalid/schema.json"));
+        assert!(message.contains("Fetch failed: http status: 404"));
+    }
+
+    #[test]
+    fn schema_failure_message_names_rejection_reason() {
+        let error = schema::validate_and_normalize_url("http://localhost/schema.json")
+            .expect_err("localhost must be rejected");
+
+        let message = schema_failure_message("http://localhost/schema.json", &error);
+
+        assert!(message.contains("http://localhost/schema.json"));
+        assert!(message.contains("not permitted"));
+    }
+
+    #[test]
+    fn schema_failure_message_omits_userinfo_query_and_fragment() {
+        let message = schema_failure_message(
+            "https://user:secret@example.com/s.json?token=abc#frag",
+            &fetch_failed("http status: 404"),
+        );
+
+        assert!(message.contains("https://example.com/s.json"));
+        for leaked in ["user", "secret", "token", "abc", "frag"] {
+            assert!(!message.contains(leaked), "{leaked} leaked: {message}");
+        }
+    }
+
+    #[test]
+    fn schema_failure_message_replaces_unparsable_url_with_placeholder() {
+        let message = schema_failure_message("http://us er:pw@[bad", &fetch_failed("invalid URL"));
+
+        assert!(message.contains("<unparsable URL, 20 bytes>"));
+        assert!(!message.contains("pw@"));
+    }
+
+    #[test]
+    fn schema_failure_message_replaces_control_and_bidi_characters() {
+        let message = schema_failure_message(
+            "http://schema.invalid/s.json",
+            &fetch_failed("a\nb\r\x1b[2Jc\u{85}d\u{2028}e\u{202e}f"),
+        );
+
+        assert_eq!(
+            message,
+            "Schema http://schema.invalid/s.json could not be applied: \
+             Fetch failed: a?b??[2Jc?d?e?f"
+        );
+    }
+
+    #[test]
+    fn schema_failure_message_caps_url_length_on_a_character_boundary() {
+        let url = format!("https://example.com/{}", "ä".repeat(300));
+
+        let message = schema_failure_message(&url, &fetch_failed("x"));
+
+        // Each `ä` is percent-encoded by the URL parser; the cap applies to
+        // the normalised form.
+        assert!(message.contains('…'), "{message}");
+        assert!(message.chars().count() < 300, "{message}");
+    }
+
+    #[test]
+    fn schema_failure_message_caps_total_length() {
+        let message = schema_failure_message(
+            "http://schema.invalid/s.json",
+            &fetch_failed(&"ö".repeat(2000)),
+        );
+
+        assert_eq!(message.chars().count(), MAX_SCHEMA_LOG_CHARS + 1);
+        assert!(message.ends_with('…'));
     }
 }

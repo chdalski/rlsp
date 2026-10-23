@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-//! End-to-end schema loading over HTTP, served by a fake `CONNECT` proxy.
+//! End-to-end schema loading and failure logging over HTTP, served by a fake
+//! `CONNECT` proxy.
 //!
 //! The schema URL names a host on the reserved `.invalid` TLD (RFC 6761), which
 //! passes the SSRF guard (not an IP literal, not `localhost`). ureq tunnels the
@@ -12,13 +13,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::StreamExt;
 use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::json;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tower_lsp::LspService;
-use tower_lsp::jsonrpc::Request;
-use tower_lsp::lsp_types::NumberOrString;
+use tower_lsp::lsp_types::{LogMessageParams, MessageType, NumberOrString};
 
 use super::helpers::*;
 
@@ -26,7 +26,33 @@ const SCHEMA_HOST: &str = "schema.invalid";
 const SCHEMA_URL: &str = "http://schema.invalid/schema.json";
 const OBJECT_SCHEMA: &str = r#"{"type":"object","properties":{"count":{"type":"integer"}}}"#;
 
-/// A `CONNECT` proxy that serves one canned schema for `schema.invalid:80`
+/// The canned response served for the tunneled `GET`.
+struct Reply {
+    /// Status code and reason phrase, e.g. `404 Not Found`.
+    status: &'static str,
+    content_type: Option<&'static str>,
+    body: String,
+}
+
+impl Reply {
+    const fn ok(content_type: Option<&'static str>, body: String) -> Self {
+        Self {
+            status: "200 OK",
+            content_type,
+            body,
+        }
+    }
+
+    fn not_found() -> Self {
+        Self {
+            status: "404 Not Found",
+            content_type: Some("text/plain"),
+            body: "not found".to_string(),
+        }
+    }
+}
+
+/// A `CONNECT` proxy that serves one canned [`Reply`] for `schema.invalid:80`
 /// and answers every other tunnel target with 502.
 struct FakeProxy {
     addr: SocketAddr,
@@ -37,7 +63,7 @@ struct FakeProxy {
 }
 
 impl FakeProxy {
-    fn start(content_type: Option<&'static str>, body: String) -> Self {
+    fn start(reply: Reply) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake proxy");
         listener.set_nonblocking(true).expect("nonblocking");
         let addr = listener.local_addr().expect("local addr");
@@ -49,7 +75,7 @@ impl FakeProxy {
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let _ = serve_connection(stream, content_type, &body, &thread_seen);
+                        let _ = serve_connection(stream, &reply, &thread_seen);
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(10)),
                 }
@@ -87,8 +113,7 @@ fn read_head(stream: &mut TcpStream) -> std::io::Result<String> {
 
 fn serve_connection(
     mut stream: TcpStream,
-    content_type: Option<&str>,
-    body: &str,
+    reply: &Reply,
     seen: &Mutex<Vec<String>>,
 ) -> std::io::Result<()> {
     stream.set_nonblocking(false)?;
@@ -112,39 +137,49 @@ fn serve_connection(
         .to_string();
     seen.lock().expect("seen lock").extend([request_line, host]);
 
+    let Reply {
+        status,
+        content_type,
+        body,
+    } = reply;
     let content_type = content_type.map_or(String::new(), |ct| format!("Content-Type: {ct}\r\n"));
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
 
-fn initialize_request_with_proxy(id: i64, proxy_url: &str) -> Request {
-    Request::build("initialize")
-        .id(id)
-        .params(json!({
-            "capabilities": {},
-            "processId": null,
-            "rootUri": null,
-            "initializationOptions": { "httpProxy": proxy_url }
-        }))
-        .finish()
+/// Start a server whose client-bound log messages are collected.
+async fn start_server(
+    options: serde_json::Value,
+) -> (LspService<Backend>, UnboundedReceiver<LogMessageParams>) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    let log = collect_log_messages(socket);
+
+    send(&mut service, initialize_request_with_options(1, &options)).await;
+    send(&mut service, initialized_notification()).await;
+    (service, log)
+}
+
+fn proxy_options(proxy_url: &str) -> serde_json::Value {
+    json!({ "httpProxy": proxy_url })
+}
+
+/// Open a document whose `$schema` modeline names `schema_url`.
+async fn open_with_modeline(service: &mut LspService<Backend>, uri: &str, schema_url: &str) {
+    let text = format!("# yaml-language-server: $schema={schema_url}\ncount: not-a-number\n");
+    send(service, did_open_notification(uri, &text)).await;
 }
 
 /// Open a document whose `$schema` modeline names [`SCHEMA_URL`], with the
 /// server configured to use `proxy_url`; return the schema-validation
 /// diagnostic codes published for it.
 async fn schema_diagnostic_codes(proxy_url: &str) -> Vec<NumberOrString> {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request_with_proxy(1, proxy_url)).await;
-    send(&mut service, initialized_notification()).await;
+    let (mut service, _log) = start_server(proxy_options(proxy_url)).await;
 
     let uri = "file:///test/schema-fetch.yaml";
-    let text = format!("# yaml-language-server: $schema={SCHEMA_URL}\ncount: not-a-number\n");
-    send(&mut service, did_open_notification(uri, &text)).await;
+    open_with_modeline(&mut service, uri, SCHEMA_URL).await;
 
     service
         .inner()
@@ -153,6 +188,37 @@ async fn schema_diagnostic_codes(proxy_url: &str) -> Vec<NumberOrString> {
         .into_iter()
         .filter_map(|d| d.code)
         .collect()
+}
+
+/// Return every Warning log message sent before the sentinel's own.
+///
+/// The sentinel is a document whose modeline names a loopback URL: the SSRF
+/// guard rejects it without any network access, which logs exactly one
+/// Warning. Client-bound messages arrive in order, so once the sentinel's
+/// Warning is seen, every Warning the earlier requests caused has been
+/// delivered. Without this anchor an absence assertion could pass because the
+/// messages were read too early.
+async fn warnings_before_sentinel(
+    service: &mut LspService<Backend>,
+    log: &mut UnboundedReceiver<LogMessageParams>,
+) -> Vec<String> {
+    const SENTINEL_URL: &str = "http://127.0.0.1/sentinel.json";
+    open_with_modeline(service, "file:///test/sentinel.yaml", SENTINEL_URL).await;
+
+    let mut warnings = Vec::new();
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(5), log.recv())
+            .await
+            .expect("sentinel Warning never arrived")
+            .expect("log channel closed before the sentinel Warning");
+        if message.typ != MessageType::WARNING {
+            continue;
+        }
+        if message.message.contains(SENTINEL_URL) {
+            return warnings;
+        }
+        warnings.push(message.message);
+    }
 }
 
 fn schema_type() -> NumberOrString {
@@ -167,7 +233,7 @@ fn schema_type() -> NumberOrString {
 async fn should_publish_schema_diagnostic_when_schema_served_with_non_json_content_type(
     #[case] content_type: Option<&'static str>,
 ) {
-    let proxy = FakeProxy::start(content_type, OBJECT_SCHEMA.to_string());
+    let proxy = FakeProxy::start(Reply::ok(content_type, OBJECT_SCHEMA.to_string()));
 
     let codes = schema_diagnostic_codes(&proxy.url()).await;
 
@@ -180,7 +246,10 @@ async fn should_publish_schema_diagnostic_when_schema_served_with_non_json_conte
 
 #[tokio::test]
 async fn should_publish_no_schema_diagnostics_when_proxy_serves_non_json_body() {
-    let proxy = FakeProxy::start(Some("text/html"), "<html>not a schema</html>".to_string());
+    let proxy = FakeProxy::start(Reply::ok(
+        Some("text/html"),
+        "<html>not a schema</html>".to_string(),
+    ));
 
     let codes = schema_diagnostic_codes(&proxy.url()).await;
 
@@ -200,7 +269,7 @@ async fn should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit() 
     let schema = format!(
         r#"{{"type":"object","properties":{{"count":{{"type":"integer"}}}},"x-deep":{deep}}}"#
     );
-    let proxy = FakeProxy::start(Some("text/plain; charset=utf-8"), schema);
+    let proxy = FakeProxy::start(Reply::ok(Some("text/plain; charset=utf-8"), schema));
 
     let codes = schema_diagnostic_codes(&proxy.url()).await;
 
@@ -210,4 +279,112 @@ async fn should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit() 
         3,
         "the schema fetch must have been tried"
     );
+}
+
+// ---- failure logging ----
+
+#[rstest]
+#[case::loopback_host("http://localhost/schema.json")]
+#[case::disallowed_scheme("ftp://schema.invalid/schema.json")]
+#[tokio::test]
+async fn should_warn_once_when_modeline_url_is_rejected(#[case] schema_url: &str) {
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(&mut service, "file:///test/rejected.yaml", schema_url).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(warnings[0].contains(schema_url), "got: {warnings:?}");
+    assert!(warnings[0].contains("not permitted"), "got: {warnings:?}");
+    assert!(
+        proxy.seen().is_empty(),
+        "a rejected URL must not be fetched"
+    );
+}
+
+#[tokio::test]
+async fn should_warn_on_every_failed_modeline_fetch() {
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(&mut service, "file:///test/first.yaml", SCHEMA_URL).await;
+    open_with_modeline(&mut service, "file:///test/second.yaml", SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+    for warning in &warnings {
+        assert!(warning.contains(SCHEMA_URL), "got: {warning}");
+        assert!(warning.contains("Fetch failed"), "got: {warning}");
+    }
+    let connects = proxy
+        .seen()
+        .iter()
+        .filter(|line| line.starts_with("CONNECT "))
+        .count();
+    assert_eq!(connects, 2, "a failed fetch must be retried, not cached");
+}
+
+#[tokio::test]
+async fn should_warn_when_schemas_setting_url_is_rejected() {
+    let schema_url = "http://localhost/schema.json";
+    let (mut service, mut log) =
+        start_server(json!({ "schemas": { schema_url: "**/*.yaml" } })).await;
+
+    send(
+        &mut service,
+        did_open_notification("file:///test/settings.yaml", "key: value\n"),
+    )
+    .await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(warnings[0].contains(schema_url), "got: {warnings:?}");
+    assert!(warnings[0].contains("not permitted"), "got: {warnings:?}");
+}
+
+#[tokio::test]
+async fn should_not_warn_when_kubernetes_schema_fetch_fails() {
+    // The proxy answers every tunnel target but `schema.invalid:80` with 502,
+    // so the fetch of the Kubernetes schema URL fails without network access.
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    let custom_resource = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: w\n";
+    send(
+        &mut service,
+        did_open_notification("file:///test/widget.yaml", custom_resource),
+    )
+    .await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(
+        proxy
+            .seen()
+            .contains(&"CONNECT raw.githubusercontent.com:443 HTTP/1.1".to_string()),
+        "the Kubernetes schema fetch must have been tried, saw: {:?}",
+        proxy.seen()
+    );
+    assert!(warnings.is_empty(), "got: {warnings:?}");
+}
+
+#[tokio::test]
+async fn should_not_warn_when_schema_fetch_succeeds_or_is_cached() {
+    let proxy = FakeProxy::start(Reply::ok(
+        Some("application/json"),
+        OBJECT_SCHEMA.to_string(),
+    ));
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(&mut service, "file:///test/first.yaml", SCHEMA_URL).await;
+    assert_eq!(proxy.seen().len(), 3, "the first document must fetch");
+    open_with_modeline(&mut service, "file:///test/second.yaml", SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(
+        proxy.seen().len(),
+        3,
+        "the second document must hit the cache"
+    );
+    assert!(warnings.is_empty(), "got: {warnings:?}");
 }

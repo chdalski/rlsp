@@ -46,7 +46,7 @@ setting, or SchemaStore could not be applied.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: load schemas regardless of Content-Type
-- [ ] Task 2: log why a schema could not be applied
+- [x] Task 2: log why a schema could not be applied
 - [ ] Push to `main` and confirm the full CI matrix is green
 - [ ] Comment on issue #89 with what was fixed (including
       Kubernetes auto-detection) and that redirecting
@@ -111,27 +111,27 @@ every document with a root `apiVersion` and `kind`,
 including custom resources, for which no such schema
 exists and the fetch fails with HTTP 404.
 
-- [ ] When a schema URL from a modeline, the `schemas`
+- [x] When a schema URL from a modeline, the `schemas`
       setting, or a SchemaStore match is rejected by URL
       validation (e.g. `http://localhost/...`,
       `file://...`), the client receives a
       `window/logMessage` of type Warning whose message
       contains the URL and the rejection reason
-- [ ] When a schema fetch for a URL from one of these
+- [x] When a schema fetch for a URL from one of these
       sources fails, the client receives a
       `window/logMessage` of type Warning whose message
       contains the URL and the error
-- [ ] A failed fetch of a Kubernetes auto-detected schema
+- [x] A failed fetch of a Kubernetes auto-detected schema
       URL, a successful fetch, and a cache hit send no
       Warning
-- [ ] Integration tests in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] Integration tests in `rlsp-yaml/tests/lsp_lifecycle/`
       collect client-bound messages and assert: the
       Warning for a rejected modeline URL, the Warning for
       a failed modeline fetch served through the
       configured `httpProxy` (e.g. an HTTP 404), and no
       Warning for a custom-resource manifest whose
       Kubernetes schema fetch fails
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
