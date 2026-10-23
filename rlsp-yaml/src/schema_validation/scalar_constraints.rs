@@ -159,7 +159,7 @@ pub(super) fn validate_string_constraints(
             || schema.content_media_type.is_some()
             || schema.content_schema.is_some()
         {
-            validate_content(s, schema, loc, path, ctx.diagnostics, ctx.idx);
+            validate_content(s, schema, loc, path, ctx);
         }
     }
 }
@@ -222,8 +222,7 @@ pub(super) fn validate_content(
     schema: &JsonSchema,
     loc: Span,
     path: &[String],
-    diagnostics: &mut Vec<Diagnostic>,
-    idx: &LineIndex,
+    ctx: &mut Ctx<'_>,
 ) {
     // Step 1: decode if contentEncoding is set
     let decoded_bytes: Option<Vec<u8>> = if let Some(enc) = &schema.content_encoding {
@@ -238,8 +237,8 @@ pub(super) fn validate_content(
         if let Ok(bytes) = result {
             Some(bytes)
         } else {
-            diagnostics.push(make_diagnostic(
-                span_to_lsp(loc, idx),
+            ctx.diagnostics.push(make_diagnostic(
+                span_to_lsp(loc, ctx.idx),
                 DiagnosticSeverity::WARNING,
                 "schemaContentEncoding",
                 format!(
@@ -264,8 +263,8 @@ pub(super) fn validate_content(
             .map_or(Some(s), |bytes| std::str::from_utf8(bytes).ok());
         let valid = text.is_some_and(|t| serde_json::from_str::<serde_json::Value>(t).is_ok());
         if !valid {
-            diagnostics.push(make_diagnostic(
-                span_to_lsp(loc, idx),
+            ctx.diagnostics.push(make_diagnostic(
+                span_to_lsp(loc, ctx.idx),
                 DiagnosticSeverity::WARNING,
                 "schemaContentMediaType",
                 format!(
@@ -280,15 +279,7 @@ pub(super) fn validate_content(
     // Unknown media type — fall through to contentSchema if present
 
     // Step 3: validate decoded content against contentSchema if present
-    validate_content_schema(
-        s,
-        decoded_bytes.as_deref(),
-        schema,
-        loc,
-        path,
-        diagnostics,
-        idx,
-    );
+    validate_content_schema(s, decoded_bytes.as_deref(), schema, loc, path, ctx);
 }
 
 /// If `contentSchema` is present, parse the (possibly decoded) content as YAML
@@ -299,8 +290,7 @@ pub(super) fn validate_content_schema(
     schema: &JsonSchema,
     loc: Span,
     path: &[String],
-    diagnostics: &mut Vec<Diagnostic>,
-    idx: &LineIndex,
+    ctx: &mut Ctx<'_>,
 ) {
     let Some(content_schema) = &schema.content_schema else {
         return;
@@ -313,8 +303,8 @@ pub(super) fn validate_content_schema(
 
     // Parse the content as YAML.
     let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
-        diagnostics.push(make_diagnostic(
-            span_to_lsp(loc, idx),
+        ctx.diagnostics.push(make_diagnostic(
+            span_to_lsp(loc, ctx.idx),
             DiagnosticSeverity::WARNING,
             "schemaContentSchema",
             format!(
@@ -331,8 +321,15 @@ pub(super) fn validate_content_schema(
     for doc in &docs {
         let mut content_path = path.to_vec();
         content_path.push("(content)".to_string());
-        let mut ctx = Ctx::new(diagnostics, true, YamlVersion::V1_2, doc.line_index());
-        validate_node(&doc.root, content_schema, &content_path, &mut ctx, 0);
+        let mut content_ctx = Ctx::new(ctx.diagnostics, true, YamlVersion::V1_2, doc.line_index())
+            .with_mode(ctx.mode);
+        validate_node(
+            &doc.root,
+            content_schema,
+            &content_path,
+            &mut content_ctx,
+            0,
+        );
     }
 }
 

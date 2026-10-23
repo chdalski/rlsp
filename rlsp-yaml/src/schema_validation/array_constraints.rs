@@ -11,7 +11,7 @@ use super::context::Ctx;
 use super::support::{
     collect_evaluated_item_count, format_path, make_diagnostic, node_loc, yaml_to_json,
 };
-use super::validate_node;
+use super::{probe_passes, validate_node};
 
 pub(super) fn validate_unevaluated_items(
     seq: &[Node<Span>],
@@ -147,6 +147,11 @@ pub(super) fn validate_array_constraints(
         }
     }
 
+    // `contains` probes every item; skip it once a probe is already decided.
+    if ctx.probe_decided() {
+        return;
+    }
+
     if let Some(contains_schema) = &schema.contains {
         validate_contains(seq, seq_loc, contains_schema, schema, path, ctx, depth);
     }
@@ -161,16 +166,9 @@ pub(super) fn validate_contains(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    let format_validation = ctx.format_validation;
-    let yaml_version = ctx.yaml_version;
     let match_count = seq
         .iter()
-        .filter(|item| {
-            let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-            validate_node(item, contains_schema, path, &mut probe, depth + 1);
-            scratch.is_empty()
-        })
+        .filter(|item| probe_passes(item, contains_schema, path, ctx, depth + 1))
         .count() as u64;
 
     // Default min is 1 when `contains` is present without `minContains`
@@ -728,5 +726,19 @@ mod tests {
             diag.range.start, expected_start,
             "range must match sequence loc"
         );
+    }
+
+    #[test]
+    fn contains_probe_does_not_suppress_other_diagnostics() {
+        let raw = json!({
+            "type": "array",
+            "items": {"type": "integer"},
+            "contains": {"type": "integer"}
+        });
+        let schema = parse_schema(&raw).expect("valid schema");
+        let docs = parse_docs("[a, b]");
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        // Two items errors plus the schemaContains diagnostic.
+        assert_eq!(result.len(), 3, "diagnostics: {result:?}");
     }
 }

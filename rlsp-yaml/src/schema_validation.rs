@@ -17,7 +17,7 @@ mod scalar_constraints;
 mod support;
 mod type_validation;
 
-use context::Ctx;
+use context::{Ctx, Mode};
 use support::{
     MAX_ENUM_DISPLAY, MAX_VALIDATION_DEPTH, format_path, make_diagnostic, node_loc, yaml_to_json,
 };
@@ -69,7 +69,7 @@ fn validate_node(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    if depth > MAX_VALIDATION_DEPTH {
+    if depth > MAX_VALIDATION_DEPTH || ctx.probe_decided() {
         return;
     }
 
@@ -107,8 +107,18 @@ fn validate_node(
         ));
     }
 
+    // A probe that has recorded a diagnostic is decided; each guard below
+    // keeps the remaining phases — and the nested probes they start — from
+    // running.
+    if ctx.probe_decided() {
+        return;
+    }
+
     // Scalar constraints
     scalar_constraints::validate_scalar_constraints(node, schema, path, ctx);
+    if ctx.probe_decided() {
+        return;
+    }
 
     // Mapping-specific checks
     if let Node::Mapping { entries, loc, .. } = node {
@@ -119,9 +129,15 @@ fn validate_node(
     if let Node::Sequence { items, loc, .. } = node {
         array_constraints::validate_sequence(items, *loc, schema, path, ctx, depth);
     }
+    if ctx.probe_decided() {
+        return;
+    }
 
     // Composition
     composition::validate_composition(node, schema, path, ctx, depth);
+    if ctx.probe_decided() {
+        return;
+    }
 
     // unevaluatedProperties (Draft 2019-09)
     if schema.unevaluated_properties.is_some()
@@ -136,6 +152,29 @@ fn validate_node(
     {
         array_constraints::validate_unevaluated_items(items, schema, path, ctx, depth);
     }
+}
+
+/// Whether `node` validates against `schema` without a single diagnostic.
+///
+/// Validates into a scratch context that inherits `ctx`'s options and stops at
+/// the first diagnostic, so nothing reaches `ctx.diagnostics`.
+fn probe_passes(
+    node: &Node<Span>,
+    schema: &JsonSchema,
+    path: &[String],
+    ctx: &Ctx<'_>,
+    depth: usize,
+) -> bool {
+    let mut scratch = Vec::new();
+    let mut probe = Ctx::new(
+        &mut scratch,
+        ctx.format_validation,
+        ctx.yaml_version,
+        ctx.idx,
+    )
+    .with_mode(Mode::Probe);
+    validate_node(node, schema, path, &mut probe, depth);
+    scratch.is_empty()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -637,5 +676,100 @@ mod tests {
         // "testing" value: line 0, col 5..12
         assert_eq!(diag.range.start.line, 0, "start line");
         assert_eq!(diag.range.start.character, 5, "start column");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Probe mode — stops at the first diagnostic
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Validate `text` against `raw_schema` directly in `mode` and count the
+    /// diagnostics the walk recorded.
+    fn recorded_diagnostics(raw_schema: &serde_json::Value, text: &str, mode: Mode) -> usize {
+        let schema = crate::schema::parse_schema(raw_schema).expect("valid schema");
+        let docs = parse_docs(text);
+        let mut diagnostics = Vec::new();
+        let mut ctx = Ctx::new(
+            &mut diagnostics,
+            true,
+            YamlVersion::V1_2,
+            docs[0].line_index(),
+        )
+        .with_mode(mode);
+        validate_node(&docs[0].root, &schema, &[], &mut ctx, 0);
+        diagnostics.len()
+    }
+
+    // Every case records `report_count` diagnostics in report mode and exactly
+    // one in probe mode. The cases where the failing node fails a second time
+    // after its first diagnostic pin the guards between validation phases.
+    #[rstest]
+    #[case::mapping_children(
+        json!({"properties": {
+            "a": {"type": "integer"}, "b": {"type": "integer"}, "c": {"type": "integer"}
+        }}),
+        "a: p\nb: q\nc: r",
+        3
+    )]
+    #[case::sequence_items(json!({"items": {"type": "integer"}}), "[p, q, r]", 3)]
+    // base64("a: 1\nb: 2\n"): both content values violate the string schema.
+    #[case::content_schema(
+        json!({
+            "type": "string",
+            "contentEncoding": "base64",
+            "contentSchema": {"properties": {"a": {"type": "string"}, "b": {"type": "string"}}}
+        }),
+        "\"YTogMQpiOiAyCg==\"",
+        2
+    )]
+    #[case::scalar_constraint_after_enum(json!({"enum": ["x"], "minLength": 5}), "ab", 2)]
+    #[case::contains_after_item_error(
+        json!({"items": {"type": "integer"}, "contains": {"type": "integer"}}),
+        "[a]",
+        2
+    )]
+    #[case::required_before_children(
+        json!({"required": ["z"], "properties": {"a": {"type": "integer"}}}),
+        "a: p",
+        2
+    )]
+    #[case::any_of_after_child_error(
+        json!({"properties": {"a": {"type": "integer"}}, "anyOf": [{"required": ["z"]}]}),
+        "a: p",
+        2
+    )]
+    #[case::not_after_child_error(
+        json!({"properties": {"a": {"type": "integer"}}, "not": {"type": "object"}}),
+        "a: p",
+        2
+    )]
+    #[case::one_of_after_any_of(
+        json!({"anyOf": [{"required": ["z"]}], "oneOf": [{"required": ["z"]}]}),
+        "a: p",
+        2
+    )]
+    #[case::if_after_any_of(
+        json!({
+            "anyOf": [{"required": ["z"]}],
+            "if": {"required": ["z"]},
+            "else": {"required": ["w"]}
+        }),
+        "a: p",
+        2
+    )]
+    fn walk_records_every_diagnostic_in_report_mode_and_the_first_in_probe_mode(
+        #[case] raw_schema: serde_json::Value,
+        #[case] text: &str,
+        #[case] report_count: usize,
+    ) {
+        assert_eq!(
+            recorded_diagnostics(&raw_schema, text, Mode::Report),
+            report_count,
+            "report mode"
+        );
+        assert_eq!(
+            recorded_diagnostics(&raw_schema, text, Mode::Probe),
+            1,
+            "probe mode"
+        );
     }
 }

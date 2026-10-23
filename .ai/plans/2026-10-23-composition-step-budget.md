@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-23
 
 # Evaluate Every Composition Branch Within a Step Budget
@@ -54,7 +54,7 @@ user in the LSP log when validation stopped at that budget.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: one probe helper that stops at the first
+- [x] Task 1: one probe helper that stops at the first
       diagnostic
 - [ ] Task 2: validate every branch within a step budget
 - [ ] Task 3: log when validation stopped at the budget
@@ -74,18 +74,18 @@ first diagnostic — that cuts the work of failing branches,
 which grows once every branch is evaluated. Behavior is
 unchanged.
 
-- [ ] The five probe sites use one shared probe helper; none
+- [x] The five probe sites use one shared probe helper; none
       builds its own scratch context
-- [ ] A probe stops validating once it has recorded a
+- [x] A probe stops validating once it has recorded a
       diagnostic; validation outside probes still records
       every diagnostic
-- [ ] These tests pass with their assertions unchanged: the
+- [x] These tests pass with their assertions unchanged: the
       `anyOf`, `oneOf`, `not`, and `if`/`then`/`else` tests
       in `composition.rs`, the `contains` tests in
       `array_constraints.rs`, and
       `content_schema_nested_sub_schema_uses_full_validation`
       in `scalar_constraints.rs`
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Validate every branch within a step budget
 

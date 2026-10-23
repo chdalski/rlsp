@@ -8,6 +8,7 @@ use crate::lsp_util::span_to_lsp;
 use crate::schema::JsonSchema;
 
 use super::context::Ctx;
+use super::probe_passes;
 use super::support::{MAX_BRANCH_COUNT, format_path, make_diagnostic, node_loc};
 
 pub(super) fn validate_composition(
@@ -17,8 +18,6 @@ pub(super) fn validate_composition(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    let format_validation = ctx.format_validation;
-    let yaml_version = ctx.yaml_version;
     let node_range = span_to_lsp(node_loc(node), ctx.idx);
 
     // allOf: all branches must pass
@@ -28,15 +27,17 @@ pub(super) fn validate_composition(
         }
     }
 
+    if ctx.probe_decided() {
+        return;
+    }
+
     // anyOf: at least one branch must pass; if none do, emit a diagnostic
     if let Some(any_of) = &schema.any_of {
         let branch_count = any_of.iter().take(MAX_BRANCH_COUNT).count();
-        let any_passes = any_of.iter().take(MAX_BRANCH_COUNT).any(|branch| {
-            let mut scratch = Vec::new();
-            let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-            super::validate_node(node, branch, path, &mut probe, depth + 1);
-            scratch.is_empty()
-        });
+        let any_passes = any_of
+            .iter()
+            .take(MAX_BRANCH_COUNT)
+            .any(|branch| probe_passes(node, branch, path, ctx, depth + 1));
         if !any_passes {
             ctx.diagnostics.push(make_diagnostic(
                 node_range,
@@ -50,18 +51,17 @@ pub(super) fn validate_composition(
         }
     }
 
+    if ctx.probe_decided() {
+        return;
+    }
+
     // oneOf: exactly one branch must pass
     if let Some(one_of) = &schema.one_of {
         let total = one_of.iter().take(MAX_BRANCH_COUNT).count();
         let passing = one_of
             .iter()
             .take(MAX_BRANCH_COUNT)
-            .filter(|branch| {
-                let mut scratch = Vec::new();
-                let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-                super::validate_node(node, branch, path, &mut probe, depth + 1);
-                scratch.is_empty()
-            })
+            .filter(|branch| probe_passes(node, branch, path, ctx, depth + 1))
             .count();
 
         if passing == 0 {
@@ -87,30 +87,32 @@ pub(super) fn validate_composition(
         }
     }
 
+    if ctx.probe_decided() {
+        return;
+    }
+
     // not: the value must NOT match the sub-schema
-    if let Some(not_schema) = &schema.not {
-        let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-        super::validate_node(node, not_schema, path, &mut probe, depth + 1);
-        if scratch.is_empty() {
-            ctx.diagnostics.push(make_diagnostic(
-                node_range,
-                DiagnosticSeverity::ERROR,
-                "schemaNot",
-                format!(
-                    "Value at {} must not match the schema defined in 'not'",
-                    format_path(path)
-                ),
-            ));
-        }
+    if let Some(not_schema) = &schema.not
+        && probe_passes(node, not_schema, path, ctx, depth + 1)
+    {
+        ctx.diagnostics.push(make_diagnostic(
+            node_range,
+            DiagnosticSeverity::ERROR,
+            "schemaNot",
+            format!(
+                "Value at {} must not match the schema defined in 'not'",
+                format_path(path)
+            ),
+        ));
+    }
+
+    if ctx.probe_decided() {
+        return;
     }
 
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
-        let mut scratch = Vec::new();
-        let mut probe = Ctx::new(&mut scratch, format_validation, yaml_version, ctx.idx);
-        super::validate_node(node, if_schema, path, &mut probe, depth + 1);
-        if scratch.is_empty() {
+        if probe_passes(node, if_schema, path, ctx, depth + 1) {
             if let Some(then_schema) = &schema.then_schema {
                 super::validate_node(node, then_schema, path, ctx, depth + 1);
             }
@@ -122,10 +124,11 @@ pub(super) fn validate_composition(
 
 #[cfg(test)]
 mod tests {
-    use tower_lsp::lsp_types::DiagnosticSeverity;
+    use rstest::rstest;
+    use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
     use super::super::support::test_fixtures::{code_of, object_schema_with_props, string_schema};
-    use crate::schema::{JsonSchema, SchemaType};
+    use crate::schema::{JsonSchema, SchemaType, parse_schema};
     use crate::server::YamlVersion;
     use crate::test_utils::parse_docs;
     use serde_json::json;
@@ -776,5 +779,181 @@ mod tests {
             .find(|d| code_of(d) == "schemaType")
             .expect("expected a schemaType diagnostic");
         assert_eq!(diag.range.start.line, 0, "start line");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Probe outcomes — branches are evaluated in isolation
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn diagnostics_for(schema: &serde_json::Value, text: &str) -> Vec<Diagnostic> {
+        let schema = parse_schema(schema).expect("valid schema");
+        validate_schema(&parse_docs(text), &schema, true, YamlVersion::V1_2)
+    }
+
+    fn three_integers() -> serde_json::Value {
+        json!({"type": "object", "properties": {
+            "a": {"type": "integer"}, "b": {"type": "integer"}, "c": {"type": "integer"}
+        }})
+    }
+
+    fn three_strings() -> serde_json::Value {
+        json!({"type": "object", "properties": {
+            "a": {"type": "string"}, "b": {"type": "string"}, "c": {"type": "string"}
+        }})
+    }
+
+    #[rstest]
+    #[case::any_of_later_branch_passes("anyOf", [three_integers(), three_strings()], None)]
+    #[case::any_of_all_fail("anyOf", [three_integers(), three_integers()], Some("does not match any of the 2"))]
+    #[case::one_of_later_branch_passes("oneOf", [three_integers(), three_strings()], None)]
+    #[case::one_of_both_pass("oneOf", [three_strings(), three_strings()], Some("matches 2 of the 2"))]
+    fn probe_branch_with_many_errors_does_not_affect_sibling_branches(
+        #[case] keyword: &str,
+        #[case] branches: [serde_json::Value; 2],
+        #[case] expected_message: Option<&str>,
+    ) {
+        let schema = json!({ keyword: branches });
+        let result = diagnostics_for(&schema, "a: p\nb: q\nc: r");
+        match expected_message {
+            None => assert!(result.is_empty(), "unexpected diagnostics: {result:?}"),
+            Some(fragment) => {
+                assert_eq!(result.len(), 1, "expected one diagnostic: {result:?}");
+                assert!(
+                    result[0].message.contains(fragment),
+                    "message {:?} lacks {fragment:?}",
+                    result[0].message
+                );
+            }
+        }
+    }
+
+    #[rstest]
+    #[case::any_of_in_any_of_inner_passes(
+        json!({"anyOf": [{"anyOf": [{"type": "string"}, {"type": "boolean"}]}, {"type": "null"}]}),
+        "hello",
+        &[]
+    )]
+    #[case::any_of_in_any_of_inner_fails(
+        json!({"anyOf": [{"anyOf": [{"type": "string"}, {"type": "boolean"}]}, {"type": "null"}]}),
+        "5",
+        &["schemaType"]
+    )]
+    #[case::not_around_any_of_matching(
+        json!({"not": {"anyOf": [{"type": "string"}, {"type": "boolean"}]}}),
+        "hello",
+        &["schemaNot"]
+    )]
+    #[case::not_around_any_of_not_matching(
+        json!({"not": {"anyOf": [{"type": "string"}, {"type": "boolean"}]}}),
+        "5",
+        &[]
+    )]
+    #[case::one_of_branch_with_not_both_pass(
+        json!({"oneOf": [{"not": {"type": "string"}}, {"type": "integer"}]}),
+        "5",
+        &["schemaType"]
+    )]
+    #[case::one_of_branch_with_not_none_pass(
+        json!({"oneOf": [{"not": {"type": "string"}}, {"type": "integer"}]}),
+        "hello",
+        &["schemaType"]
+    )]
+    #[case::one_of_branch_with_not_exactly_one_passes(
+        json!({"oneOf": [{"not": {"type": "string"}}, {"type": "integer"}]}),
+        "true",
+        &[]
+    )]
+    #[case::if_with_any_of_selects_then(
+        json!({
+            "if": {"anyOf": [{"type": "string"}, {"type": "boolean"}]},
+            "then": {"type": "integer"}
+        }),
+        "hello",
+        &["schemaType"]
+    )]
+    #[case::if_with_any_of_selects_else(
+        json!({
+            "if": {"anyOf": [{"type": "string"}, {"type": "boolean"}]},
+            "else": {"type": "string"}
+        }),
+        "5",
+        &["schemaType"]
+    )]
+    #[case::contains_with_any_of_matches_second_branch(
+        json!({"contains": {"anyOf": [{"type": "string"}, {"type": "boolean"}]}}),
+        "[1, true]",
+        &[]
+    )]
+    #[case::contains_with_any_of_matches_nothing(
+        json!({"contains": {"anyOf": [{"type": "string"}, {"type": "boolean"}]}}),
+        "[1, 2]",
+        &["schemaContains"]
+    )]
+    fn nested_probes_produce_same_outcomes(
+        #[case] schema: serde_json::Value,
+        #[case] text: &str,
+        #[case] expected_codes: &[&str],
+    ) {
+        let result = diagnostics_for(&schema, text);
+        let codes: Vec<&str> = result.iter().map(code_of).collect();
+        assert_eq!(codes, expected_codes, "diagnostics: {result:?}");
+    }
+
+    // base64("a: 1\nb: 2\n")
+    const BASE64_TWO_INTEGERS: &str = "\"YTogMQpiOiAyCg==\"";
+
+    #[rstest]
+    #[case::content_matches("integer", true)]
+    #[case::content_violates("string", false)]
+    fn content_schema_inside_probe_gives_correct_outcome(
+        #[case] value_type: &str,
+        #[case] passes: bool,
+    ) {
+        let schema = json!({"anyOf": [
+            {
+                "type": "string",
+                "contentEncoding": "base64",
+                "contentSchema": {"type": "object", "properties": {
+                    "a": {"type": value_type}, "b": {"type": value_type}
+                }}
+            },
+            {"type": "integer"}
+        ]});
+        let result = diagnostics_for(&schema, BASE64_TWO_INTEGERS);
+        if passes {
+            assert!(result.is_empty(), "unexpected diagnostics: {result:?}");
+        } else {
+            assert_eq!(result.len(), 1, "only the anyOf diagnostic: {result:?}");
+            assert!(result[0].message.contains("(anyOf)"), "{result:?}");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Probes do not suppress diagnostics outside probes
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn diagnostics_after_failed_probe_are_all_reported() {
+        let mut schema = three_integers();
+        schema["anyOf"] = json!([{"required": ["z"]}, {"type": "array"}]);
+        let result = diagnostics_for(&schema, "a: p\nb: q\nc: r");
+        // Three property type errors plus the anyOf diagnostic.
+        assert_eq!(result.len(), 4, "diagnostics: {result:?}");
+    }
+
+    #[rstest]
+    #[case::then_branch("k: 1\na: p\nb: q")]
+    #[case::else_branch("a: p\nb: q")]
+    fn then_and_else_branches_report_all_diagnostics_after_if_probe(#[case] text: &str) {
+        let both_integers = json!({"properties": {
+            "a": {"type": "integer"}, "b": {"type": "integer"}
+        }});
+        let schema = json!({
+            "if": {"required": ["k"]},
+            "then": both_integers,
+            "else": both_integers,
+        });
+        let result = diagnostics_for(&schema, text);
+        assert_eq!(result.len(), 2, "diagnostics: {result:?}");
     }
 }
