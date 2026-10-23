@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-10-23)
 **Created:** 2026-10-23
 
 # Load Remote Schemas Regardless of Content-Type
@@ -47,8 +47,8 @@ setting, or SchemaStore could not be applied.
 - [x] Design review of the approach
 - [x] Task 1: load schemas regardless of Content-Type
 - [x] Task 2: log why a schema could not be applied
-- [ ] Push to `main` and confirm the full CI matrix is green
-- [ ] Comment on issue #89 with what was fixed (including
+- [x] Push to `main` and confirm the full CI matrix is green
+- [x] Comment on issue #89 with what was fixed (including
       Kubernetes auto-detection) and that redirecting
       URLs such as GitHub release downloads still fail
 
