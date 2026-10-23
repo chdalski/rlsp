@@ -51,8 +51,6 @@ pub enum SchemaError {
     TooDeep,
     /// Remote fetch count exceeded `MAX_REMOTE_FETCH_COUNT` in one resolution pass.
     TooManyRemoteFetches,
-    /// Response Content-Type was not JSON.
-    UnexpectedContentType(String),
 }
 
 impl std::fmt::Display for SchemaError {
@@ -68,9 +66,6 @@ impl std::fmt::Display for SchemaError {
                     f,
                     "Remote fetch count exceeded limit ({MAX_REMOTE_FETCH_COUNT})"
                 )
-            }
-            Self::UnexpectedContentType(ct) => {
-                write!(f, "Unexpected content type: {ct}")
             }
         }
     }
@@ -422,7 +417,7 @@ fn is_ssrf_blocked_host(host: &str) -> bool {
 /// Build a `ureq` agent with redirect following disabled, timeouts, and an
 /// optional proxy.
 ///
-/// Both fetch functions use this helper so agent construction is consistent.
+/// `fetch_json` callers use this helper so agent construction is consistent.
 fn build_agent(proxy: Option<&str>) -> ureq::Agent {
     let mut builder = ureq::Agent::config_builder()
         .max_redirects(0)
@@ -439,62 +434,34 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
     builder.build().new_agent()
 }
 
-/// Sanitize a `Content-Type` header value for use in error messages.
+/// GET `url` with `agent` and parse the response body as JSON.
 ///
-/// Strips non-printable characters and truncates to 256 chars so that a
-/// malicious server cannot inject control characters into diagnostic output.
-fn sanitize_content_type(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| c.is_ascii_graphic() || *c == ' ')
-        .take(256)
-        .collect()
-}
-
-/// Fetch a JSON Schema from `url`, returning the raw `Value` and parsed schema.
-///
-/// `url` should already be validated and normalised via
-/// [`validate_and_normalize_url`].  This function is blocking; call it via
-/// `tokio::task::spawn_blocking` from async contexts.
-///
-/// When `proxy` is `Some`, requests are routed through the given proxy URL.
-///
-/// When `ctx` is `Some`, remote `$ref` URIs within the fetched schema are
-/// resolved one level deep (depth-1 remote resolution).  `$ref`s inside those
-/// resolved remote documents are not followed further — this is intentional to
-/// cap the blast radius of a malicious schema that chains many remote refs.
-/// The breadth guard (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce
-/// an absolute cap even if this design decision is revisited later.
+/// The response is not required to carry any particular `Content-Type`:
+/// hosts such as `raw.githubusercontent.com` serve JSON as `text/plain`, so
+/// the size cap and the JSON parse decide whether a response is usable.
+/// The body is read only after the status is checked, through the decompressed
+/// reader, and never beyond `MAX_SCHEMA_BYTES + 1` bytes.
 ///
 /// # Errors
 ///
-/// Returns a [`SchemaError`] on network failure, size-limit breach, wrong
-/// Content-Type, or parse failure.
-pub fn fetch_schema_raw(
-    url: &str,
-    proxy: Option<&str>,
-    ctx: Option<&mut ParseContext<'_>>,
-) -> Result<(Value, JsonSchema), SchemaError> {
-    // Validate and normalise the URL before issuing any network request.
-    validate_and_normalize_url(url)?;
-
-    let agent = build_agent(proxy);
-
+/// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
+///   or a 3xx response (redirects are not followed).
+/// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::ParseFailed`] when the body is not valid JSON.
+fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
     let response = agent
         .get(url)
         .call()
         .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
 
-    // Verify Content-Type is JSON before reading the body.
-    // Sanitize the header value: strip non-printable chars and truncate to 256
-    // chars before embedding in the error to prevent injection via crafted headers.
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !content_type.contains("application/json") && !content_type.contains("application/schema") {
-        return Err(SchemaError::UnexpectedContentType(sanitize_content_type(
-            content_type,
+    // ureq reports 4xx/5xx as errors itself, so only 2xx and 3xx reach here.
+    // `build_agent` disables redirect following, so a 3xx response comes back
+    // as a success; its body is not a schema.
+    let status = response.status();
+    if status.is_redirection() {
+        return Err(SchemaError::FetchFailed(format!(
+            "HTTP status {}: redirects are not followed",
+            status.as_u16()
         )));
     }
 
@@ -510,13 +477,45 @@ pub fn fetch_schema_raw(
         .read_to_end(&mut buf)
         .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
 
-    // More than MAX_SCHEMA_BYTES bytes were read — response is too large.
     if buf.len() as u64 > MAX_SCHEMA_BYTES {
         return Err(SchemaError::ResponseTooLarge);
     }
 
-    let value: Value =
-        serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))?;
+    serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))
+}
+
+/// Fetch a JSON Schema from `url`, returning the raw `Value` and parsed schema.
+///
+/// `url` is validated with [`validate_and_normalize_url`] before any network
+/// request.  This function is blocking; call it via
+/// `tokio::task::spawn_blocking` from async contexts.
+///
+/// When `proxy` is `Some`, requests are routed through the given proxy URL.
+///
+/// When `ctx` is `Some`, remote `$ref` URIs within the fetched schema are
+/// resolved one level deep (depth-1 remote resolution).  `$ref`s inside those
+/// resolved remote documents are not followed further — this is intentional to
+/// cap the blast radius of a malicious schema that chains many remote refs.
+/// The breadth guard (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce
+/// an absolute cap even if this design decision is revisited later.
+///
+/// # Errors
+///
+/// - [`SchemaError::UrlNotPermitted`] when `url` fails the SSRF guard.
+/// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
+///   or a 3xx response (redirects are not followed).
+/// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::ParseFailed`] when the body is not JSON or not a schema.
+/// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
+pub fn fetch_schema_raw(
+    url: &str,
+    proxy: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
+) -> Result<(Value, JsonSchema), SchemaError> {
+    // Validate and normalise the URL before issuing any network request.
+    validate_and_normalize_url(url)?;
+
+    let value = fetch_json(&build_agent(proxy), url)?;
 
     check_json_depth(&value, 0)?;
 
@@ -543,32 +542,12 @@ const SCHEMASTORE_CATALOG_URL: &str = "https://www.schemastore.org/api/json/cata
 ///
 /// # Errors
 ///
-/// Returns a [`SchemaError`] on network failure, size-limit breach, or parse
-/// failure.
+/// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
+///   or a 3xx response (redirects are not followed).
+/// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::ParseFailed`] when the body is not JSON or not a catalog.
 pub fn fetch_schemastore_catalog(proxy: Option<&str>) -> Result<SchemaStoreCatalog, SchemaError> {
-    let agent = build_agent(proxy);
-
-    let response = agent
-        .get(SCHEMASTORE_CATALOG_URL)
-        .call()
-        .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
-
-    let mut limited = response
-        .into_body()
-        .into_reader()
-        .take(MAX_SCHEMA_BYTES + 1);
-
-    let mut buf = Vec::new();
-    limited
-        .read_to_end(&mut buf)
-        .map_err(|e| SchemaError::FetchFailed(e.to_string()))?;
-
-    if buf.len() as u64 > MAX_SCHEMA_BYTES {
-        return Err(SchemaError::ResponseTooLarge);
-    }
-
-    let value: Value =
-        serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))?;
+    let value = fetch_json(&build_agent(proxy), SCHEMASTORE_CATALOG_URL)?;
 
     parse_schemastore_catalog(&value)
         .ok_or_else(|| SchemaError::ParseFailed("not a SchemaStore catalog".to_string()))
@@ -1723,57 +1702,8 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Integration / fetch harness spike (Test 45)
-    // ══════════════════════════════════════════════════════════════════════════
-
-    // harness spike: 127.0.0.1 is blocked by SSRF guard before any
-    // network call is made.
-    #[test]
-    fn should_return_error_for_unreachable_url() {
-        let result = fetch_schema_raw("http://127.0.0.1:19999/nonexistent.json", None, None);
-        assert!(result.is_err());
-    }
-
-    // fetch happy path (parse pipeline without network).
-    // Constructs a minimal JSON Schema string, runs it through the same
-    // parse pipeline that `fetch_schema` uses after reading the response body:
-    // `serde_json::from_slice` → `check_json_depth` → `parse_schema`.
-    #[test]
-    fn should_parse_fetched_schema_from_valid_response() {
-        let body =
-            r#"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#;
-        let buf = body.as_bytes();
-
-        // Step 1: deserialise JSON (mirrors fetch_schema's from_slice call)
-        let value: Value = serde_json::from_slice(buf).expect("valid JSON should deserialise");
-
-        // Step 2: depth check (mirrors fetch_schema's check_json_depth call)
-        check_json_depth(&value, 0).expect("shallow schema should pass depth check");
-
-        // Step 3: parse into JsonSchema (mirrors fetch_schema's parse_schema call)
-        let schema = parse_schema(&value).expect("should produce a schema");
-
-        assert_eq!(schema_type_str(&schema), Some("object"));
-        let props = schema.properties.as_ref().expect("should have properties");
-        assert!(props.contains_key("name"));
-        assert_eq!(
-            schema_type_str(props.get("name").expect("name")),
-            Some("string")
-        );
-        let req = schema.required.as_ref().expect("should have required");
-        assert!(req.contains(&"name".to_string()));
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
     // Security tests (from Security Engineer assessment)
     // ══════════════════════════════════════════════════════════════════════════
-
-    // Sec-4: fetch_schema_raw rejects 127.0.0.1 before making a network call
-    #[test]
-    fn should_reject_loopback_ip_in_fetch() {
-        let result = fetch_schema_raw("http://127.0.0.1:8080/schema.json", None, None);
-        assert!(result.is_err());
-    }
 
     // Sec-5: URL exceeding 2048 chars is rejected (uses runtime format!, cannot be rstest literal)
     #[test]
@@ -1826,7 +1756,6 @@ mod tests {
     // are merged here; the duplicate entries (Sec-1/Test-47, Sec-2/Test-48,
     // Sec-3/Test-51) appear once each.
     #[rstest]
-    #[case::file_scheme("file:///etc/passwd")]
     #[case::localhost("http://localhost/schema.json")]
     #[case::link_local_aws_metadata("http://169.254.169.254/latest/meta-data/")]
     #[case::loopback_ip("http://127.0.0.1/schema.json")]
@@ -1858,38 +1787,6 @@ mod tests {
         assert!(
             validate_and_normalize_url(url).is_ok(),
             "must accept: {url}"
-        );
-    }
-
-    // response of exactly MAX_SCHEMA_BYTES bytes is accepted.
-    // The `.take(MAX_SCHEMA_BYTES + 1)` + `> MAX_SCHEMA_BYTES` logic allows
-    // responses up to and including MAX_SCHEMA_BYTES.
-    #[test]
-    fn should_return_error_when_response_exceeds_size_limit() {
-        // Produce a buffer of exactly MAX_SCHEMA_BYTES bytes and verify the
-        // size-check condition does NOT trigger for this boundary value.
-        let buf = vec![b'x'; MAX_SCHEMA_BYTES as usize];
-        assert!(
-            buf.len() as u64 <= MAX_SCHEMA_BYTES,
-            "exactly MAX_SCHEMA_BYTES bytes must not trigger ResponseTooLarge"
-        );
-    }
-
-    // response larger than MAX_SCHEMA_BYTES triggers ResponseTooLarge.
-    #[test]
-    fn should_return_error_when_response_exceeds_size_limit_over() {
-        // Build a body of MAX_SCHEMA_BYTES + 1 bytes (over the cap).
-        let body = vec![b'x'; MAX_SCHEMA_BYTES as usize + 1];
-        let cursor = std::io::Cursor::new(&body);
-        // Mirror the fetch logic: take MAX_SCHEMA_BYTES + 1, then check.
-        let mut limited = cursor.take(MAX_SCHEMA_BYTES + 1);
-        let mut buf = Vec::new();
-        limited.read_to_end(&mut buf).expect("read succeeds");
-
-        // More than MAX_SCHEMA_BYTES bytes read — the cap condition triggers.
-        assert!(
-            buf.len() as u64 > MAX_SCHEMA_BYTES,
-            "over-limit read should trigger ResponseTooLarge condition"
         );
     }
 
@@ -1958,36 +1855,6 @@ mod tests {
         assert_eq!(
             key_upper, key_lower,
             "host should be normalized to lowercase in cache key"
-        );
-    }
-
-    // redirect must not be followed (max_redirects(0) enforcement).
-    //
-    // With max_redirects(0), ureq returns the 3xx response as-is rather than
-    // following it. The test asserts that the status code is 302 — proving the
-    // redirect was not followed (which would have produced a 200 from /redirected).
-    #[test]
-    fn should_not_follow_redirects() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let addr = server.server_addr().to_ip().unwrap();
-        let url = format!("http://{addr}/schema.json");
-        let redirect_target = format!("http://{addr}/redirected");
-
-        std::thread::spawn(move || {
-            if let Ok(req) = server.recv() {
-                let location =
-                    tiny_http::Header::from_bytes(b"Location", redirect_target.as_bytes()).unwrap();
-                let response = tiny_http::Response::empty(302).with_header(location);
-                let _ = req.respond(response);
-            }
-        });
-
-        let agent = build_agent(None);
-        let response = agent.get(&url).call().expect("request should succeed");
-        assert_eq!(
-            response.status(),
-            302,
-            "agent must return 302 without following the redirect"
         );
     }
 
@@ -2787,42 +2654,6 @@ mod tests {
         );
     }
 
-    // Sec-R5: response with non-JSON Content-Type is rejected.
-    #[test]
-    fn fetch_schema_rejects_non_json_content_type() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let addr = server.server_addr().to_ip().unwrap();
-        let url = format!("http://{addr}/schema.json");
-
-        std::thread::spawn(move || {
-            if let Ok(req) = server.recv() {
-                let ct = tiny_http::Header::from_bytes(b"Content-Type", b"text/html").unwrap();
-                let response =
-                    tiny_http::Response::from_string("<html>not json</html>").with_header(ct);
-                let _ = req.respond(response);
-            }
-        });
-
-        // fetch_schema_raw is tested directly here; note that loopback bypass
-        // happens because we call build_agent directly and skip validate_and_normalize_url.
-        // We test the Content-Type check in isolation using a direct agent call.
-        let agent = build_agent(None);
-        let response = agent.get(&url).call().expect("request should succeed");
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        assert!(
-            !content_type.contains("application/json"),
-            "server returned non-JSON content type: {content_type}"
-        );
-        // Confirm our guard condition matches.
-        let is_json = content_type.contains("application/json")
-            || content_type.contains("application/schema");
-        assert!(!is_json, "guard should reject this content type");
-    }
-
     // Sec-R6: $id spoofing — a fetched schema's self-declared $id cannot
     // overwrite an existing cache entry for a different URL.
     // (Covered by the existing first-write-wins insert semantics — this test
@@ -2876,13 +2707,11 @@ mod tests {
     // Remote $ref resolution — functional tests (with tiny_http server)
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Remote-1: absolute $ref URL (served from a real HTTP server) resolves via
-    // the Content-Type-checking fetch path.
+    // Remote-1: absolute $ref URL resolves from the cache.
     //
-    // Uses a tiny_http server serving a valid JSON schema with Content-Type:
-    // application/json. The URL is https://example.com/... passed through the
-    // cache pre-population path to verify the full resolve_ref → cache flow
-    // without hitting the loopback SSRF guard.
+    // The URL is https://example.com/... passed through the cache
+    // pre-population path to verify the full resolve_ref → cache flow without
+    // hitting the loopback SSRF guard.
     #[test]
     fn remote_ref_absolute_url_resolves_to_fetched_schema() {
         // Pre-populate cache with a valid HTTPS URL (no actual network call).
@@ -2977,14 +2806,6 @@ mod tests {
         assert!(msg.contains("Remote fetch count"), "got: {msg}");
     }
 
-    #[test]
-    fn schema_error_display_unexpected_content_type() {
-        let e = SchemaError::UnexpectedContentType("text/html".to_string());
-        let msg = e.to_string();
-        assert!(msg.contains("Unexpected content type"), "got: {msg}");
-        assert!(msg.contains("text/html"), "got: {msg}");
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // fetch_schema_raw + ParseContext integration (Finding 1)
     // ══════════════════════════════════════════════════════════════════════════
@@ -3067,69 +2888,309 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Content-Type sanitization (Finding 2)
+    // fetch_json — shared request / bounded read / parse path
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Sanitize-1: non-printable control characters are stripped
-    #[test]
-    fn sanitize_content_type_strips_control_characters() {
-        let raw = "text/html\x00\x01\x1f\x7f";
-        let result = sanitize_content_type(raw);
-        assert_eq!(result, "text/html", "control chars must be stripped");
+    /// A loopback HTTP server that answers every request with one canned
+    /// response and records the request paths it saw.
+    ///
+    /// `fetch_json` is called against it directly: the SSRF guard lives in
+    /// `fetch_schema_raw`, which refuses loopback targets.
+    struct CannedServer {
+        url: String,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
-    // Sanitize-2: values longer than 256 chars are truncated
-    #[test]
-    fn sanitize_content_type_truncates_at_256_chars() {
-        let raw = "a".repeat(300);
-        let result = sanitize_content_type(&raw);
-        assert_eq!(result.len(), 256, "result must be truncated to 256 chars");
-    }
+    impl CannedServer {
+        /// `chunked` sends the body without a `Content-Length`.
+        fn start(status: u16, headers: &[(&str, &str)], body: Vec<u8>, chunked: bool) -> Self {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let addr = server.server_addr().to_ip().unwrap();
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let headers: Vec<tiny_http::Header> = headers
+                .iter()
+                .map(|(k, v)| tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap())
+                .collect();
 
-    // Sanitize-3: printable ASCII and spaces are preserved
-    #[test]
-    fn sanitize_content_type_preserves_printable_content() {
-        let raw = "application/json; charset=utf-8";
-        let result = sanitize_content_type(raw);
-        assert_eq!(result, raw, "printable content must be preserved");
-    }
+            let (thread_seen, thread_stop) = (seen.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let Ok(Some(req)) = server.recv_timeout(std::time::Duration::from_millis(50))
+                    else {
+                        continue;
+                    };
+                    thread_seen.lock().unwrap().push(req.url().to_string());
+                    let len = (!chunked).then_some(body.len());
+                    let response = tiny_http::Response::new(
+                        tiny_http::StatusCode(status),
+                        headers.clone(),
+                        std::io::Cursor::new(body.clone()),
+                        len,
+                        None,
+                    );
+                    let _ = req.respond(response);
+                }
+            });
 
-    // Sanitize-4: a tiny_http server returning an oversized Content-Type
-    // produces a truncated value after sanitization.  Uses build_agent directly
-    // to bypass validate_and_normalize_url (SSRF guard blocks loopback in
-    // fetch_schema_raw itself), same approach as Sec-R5.
-    #[test]
-    fn fetch_schema_raw_sanitizes_content_type_in_error() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let addr = server.server_addr().to_ip().unwrap();
-        let url = format!("http://{addr}/schema.json");
-
-        std::thread::spawn(move || {
-            if let Ok(req) = server.recv() {
-                // Content-Type that is longer than 256 printable chars.
-                let ct_value = format!("text/html; x={}", "a".repeat(300));
-                let ct =
-                    tiny_http::Header::from_bytes(b"Content-Type", ct_value.as_bytes()).unwrap();
-                let response = tiny_http::Response::from_string("not json").with_header(ct);
-                let _ = req.respond(response);
+            Self {
+                url: format!("http://{addr}/schema.json"),
+                seen,
+                stop,
             }
-        });
+        }
 
-        let agent = build_agent(None);
-        let response = agent.get(&url).call().expect("request should succeed");
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
+        fn seen(&self) -> Vec<String> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for CannedServer {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Valid JSON of exactly `len` bytes.
+    fn json_body_of_len(len: usize) -> Vec<u8> {
+        let mut body = br#"{"k":""#.to_vec();
+        body.resize(len - 2, b'a');
+        body.extend_from_slice(br#""}"#);
+        assert_eq!(body.len(), len);
+        body
+    }
+
+    #[rstest]
+    #[case::text_plain(&[("Content-Type", "text/plain")])]
+    #[case::text_plain_charset_utf8(&[("Content-Type", "text/plain; charset=utf-8")])]
+    #[case::application_octet_stream(&[("Content-Type", "application/octet-stream")])]
+    #[case::text_html(&[("Content-Type", "text/html")])]
+    #[case::application_json(&[("Content-Type", "application/json")])]
+    #[case::no_content_type_header(&[])]
+    fn fetch_json_accepts_valid_json_regardless_of_content_type(#[case] headers: &[(&str, &str)]) {
+        let server = CannedServer::start(200, headers, br#"{"type":"object"}"#.to_vec(), false);
+
+        let value = fetch_json(&build_agent(None), &server.url).expect("valid JSON must load");
+
+        assert_eq!(value, json!({"type": "object"}));
+    }
+
+    #[rstest]
+    #[case::html_body("text/html", b"<html>CANARY-7f3a</html>".to_vec())]
+    #[case::json_content_type_html_body("application/json", b"<html>CANARY-7f3a</html>".to_vec())]
+    #[case::empty_body("text/plain", Vec::new())]
+    fn fetch_json_returns_parse_failed_for_non_json_body(
+        #[case] content_type: &str,
+        #[case] body: Vec<u8>,
+    ) {
+        let server = CannedServer::start(200, &[("Content-Type", content_type)], body, false);
+
+        let result = fetch_json(&build_agent(None), &server.url);
+
+        let Err(SchemaError::ParseFailed(msg)) = result else {
+            panic!("expected ParseFailed, got {result:?}");
+        };
         assert!(
-            content_type.len() > 256,
-            "server must have sent an oversized Content-Type"
+            !msg.contains("CANARY-7f3a"),
+            "body leaked into error: {msg}"
         );
-        let sanitized = sanitize_content_type(content_type);
+    }
+
+    #[rstest]
+    #[case::exactly_max_bytes(MAX_SCHEMA_BYTES as usize, false, true)]
+    #[case::one_byte_over(MAX_SCHEMA_BYTES as usize + 1, false, false)]
+    #[case::one_byte_over_chunked(MAX_SCHEMA_BYTES as usize + 1, true, false)]
+    fn fetch_json_enforces_size_limit(
+        #[case] len: usize,
+        #[case] chunked: bool,
+        #[case] accepted: bool,
+    ) {
+        let server = CannedServer::start(200, &[], json_body_of_len(len), chunked);
+
+        let result = fetch_json(&build_agent(None), &server.url);
+
+        if accepted {
+            let value = result.expect("body of exactly MAX_SCHEMA_BYTES must load");
+            assert_eq!(value["k"].as_str().map(str::len), Some(len - 8));
+        } else {
+            assert!(
+                matches!(result, Err(SchemaError::ResponseTooLarge)),
+                "got {result:?}"
+            );
+        }
+    }
+
+    /// Gzip stream that inflates to more than `MAX_SCHEMA_BYTES` from a few
+    /// kilobytes: one literal followed by repeated 258-byte matches at distance
+    /// 1, all in a single fixed-Huffman deflate block.
+    fn gzip_bomb() -> Vec<u8> {
+        struct Bits {
+            out: Vec<u8>,
+            acc: u32,
+            used: u32,
+        }
+        impl Bits {
+            fn put(&mut self, value: u32, count: u32) {
+                for i in 0..count {
+                    self.acc |= ((value >> i) & 1) << self.used;
+                    self.used += 1;
+                    if self.used == 8 {
+                        self.out.push(self.acc as u8);
+                        self.acc = 0;
+                        self.used = 0;
+                    }
+                }
+            }
+            // Huffman codes are packed most-significant bit first.
+            fn put_code(&mut self, code: u32, count: u32) {
+                for i in (0..count).rev() {
+                    self.put((code >> i) & 1, 1);
+                }
+            }
+        }
+
+        let mut bits = Bits {
+            out: vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff],
+            acc: 0,
+            used: 0,
+        };
+        bits.put(1, 1); // BFINAL
+        bits.put(1, 2); // BTYPE = fixed Huffman
+        bits.put_code(0x30 + u32::from(b'x'), 8); // literal 'x'
+        for _ in 0..(MAX_SCHEMA_BYTES / 258 + 2) {
+            bits.put_code(0xC5, 8); // length symbol 285 = 258
+            bits.put_code(0, 5); // distance symbol 0 = 1
+        }
+        bits.put_code(0, 7); // end of block
+        bits.put(0, 7); // flush the partial byte
+        // CRC-32 and ISIZE are never read: the size cap stops the read first.
+        bits.out.extend_from_slice(&[0; 8]);
+        bits.out
+    }
+
+    #[test]
+    fn fetch_json_caps_decompressed_size() {
+        let bomb = gzip_bomb();
+        assert!(bomb.len() < 64 * 1024, "bomb must be small on the wire");
+        let server = CannedServer::start(
+            200,
+            &[
+                ("Content-Type", "application/json"),
+                ("Content-Encoding", "gzip"),
+            ],
+            bomb,
+            false,
+        );
+
+        let result = fetch_json(&build_agent(None), &server.url);
+
         assert!(
-            sanitized.len() <= 256,
-            "sanitized Content-Type must be truncated to ≤256 chars"
+            matches!(result, Err(SchemaError::ResponseTooLarge)),
+            "got {result:?}"
+        );
+    }
+
+    // max_redirects(0): ureq hands back the 3xx response; fetch_json must fail
+    // on it without following the Location or using its body.
+    #[rstest]
+    #[case::moved_permanently(301)]
+    #[case::found(302)]
+    #[case::temporary_redirect(307)]
+    #[case::permanent_redirect(308)]
+    fn fetch_json_rejects_redirect_without_following(#[case] status: u16) {
+        let server = CannedServer::start(
+            status,
+            &[
+                ("Location", "/redirected-CANARY"),
+                ("Content-Type", "application/json"),
+            ],
+            br#"{"type":"object"}"#.to_vec(),
+            false,
+        );
+
+        let result = fetch_json(&build_agent(None), &server.url);
+
+        let Err(SchemaError::FetchFailed(msg)) = result else {
+            panic!("expected FetchFailed, got {result:?}");
+        };
+        assert!(msg.contains(&status.to_string()), "got: {msg}");
+        assert!(msg.contains("redirects are not followed"), "got: {msg}");
+        assert!(!msg.contains("CANARY"), "Location leaked into error: {msg}");
+        assert_eq!(server.seen(), ["/schema.json"], "redirect was followed");
+    }
+
+    #[rstest]
+    #[case::not_found(404)]
+    #[case::internal_server_error(500)]
+    fn fetch_json_returns_fetch_failed_for_http_error_status(#[case] status: u16) {
+        let server = CannedServer::start(
+            status,
+            &[("Content-Type", "application/json")],
+            br#"{"type":"object","note":"CANARY-7f3a"}"#.to_vec(),
+            false,
+        );
+
+        let result = fetch_json(&build_agent(None), &server.url);
+
+        let Err(SchemaError::FetchFailed(msg)) = result else {
+            panic!("expected FetchFailed, got {result:?}");
+        };
+        assert!(msg.contains(&status.to_string()), "got: {msg}");
+        assert!(
+            !msg.contains("CANARY-7f3a"),
+            "body leaked into error: {msg}"
+        );
+    }
+
+    #[test]
+    fn fetch_json_returns_fetch_failed_when_connection_refused() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/schema.json", listener.local_addr().unwrap());
+        drop(listener);
+
+        let result = fetch_json(&build_agent(None), &url);
+
+        assert!(
+            matches!(result, Err(SchemaError::FetchFailed(_))),
+            "got {result:?}"
+        );
+    }
+
+    // The SSRF guard runs before any network call: a listener on the target
+    // port must never see a connection.
+    #[rstest]
+    #[case::loopback_ipv4("127.0.0.1")]
+    #[case::localhost("localhost")]
+    #[case::loopback_ipv6("[::1]")]
+    #[case::link_local("169.254.169.254")]
+    #[case::private("10.0.0.1")]
+    fn fetch_schema_raw_rejects_blocked_targets_before_any_network_call(#[case] host: &str) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://{host}:{port}/schema.json");
+
+        let result = fetch_schema_raw(&url, None, None);
+
+        assert!(
+            matches!(result, Err(SchemaError::UrlNotPermitted(_))),
+            "got {result:?}"
+        );
+        assert_eq!(
+            listener.accept().map(|_| ()).map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::WouldBlock),
+            "guard must reject before connecting"
+        );
+    }
+
+    #[test]
+    fn fetch_schema_raw_rejects_file_scheme() {
+        let result = fetch_schema_raw("file:///etc/passwd", None, None);
+
+        assert!(
+            matches!(result, Err(SchemaError::UrlNotPermitted(_))),
+            "got {result:?}"
         );
     }
 }

@@ -45,7 +45,7 @@ setting, or SchemaStore could not be applied.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: load schemas regardless of Content-Type
+- [x] Task 1: load schemas regardless of Content-Type
 - [ ] Task 2: log why a schema could not be applied
 - [ ] Push to `main` and confirm the full CI matrix is green
 - [ ] Comment on issue #89 with what was fixed (including
@@ -65,29 +65,29 @@ what caused this bug. `build_agent` disables redirect
 following (`max_redirects(0)`), so ureq returns a 3xx
 response as a success.
 
-- [ ] A schema served with `Content-Type: text/plain;
+- [x] A schema served with `Content-Type: text/plain;
       charset=utf-8`, with `application/octet-stream`, and
       without a `Content-Type` header is loaded
-- [ ] A non-JSON body fails with `SchemaError::ParseFailed`;
+- [x] A non-JSON body fails with `SchemaError::ParseFailed`;
       the SSRF guard, the `MAX_SCHEMA_BYTES` cap, and the
       JSON depth limit reject the same inputs as before
-- [ ] A 3xx response fails with `SchemaError::FetchFailed`
+- [x] A 3xx response fails with `SchemaError::FetchFailed`
       whose message names the HTTP status and states that
       redirects are not followed
-- [ ] The schema fetch and the catalog fetch share one
+- [x] The schema fetch and the catalog fetch share one
       implementation of request, bounded body read, and
       JSON parse
-- [ ] `SchemaError::UnexpectedContentType`,
+- [x] `SchemaError::UnexpectedContentType`,
       `sanitize_content_type`, and every test and comment
       that describes `Content-Type` validation are gone;
       the fetch functions' doc comments name the errors
       they return
-- [ ] Unit tests exercise the production fetch code, not a
+- [x] Unit tests exercise the production fetch code, not a
       re-implementation of it, for: the three
       `Content-Type` cases above, a non-JSON body, a body
       of exactly `MAX_SCHEMA_BYTES`, a body one byte over
       the cap, and a 3xx response
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
       opens a document whose `$schema` modeline points at
       a schema served as `text/plain; charset=utf-8`
       through the configured `httpProxy` (see the test
@@ -95,7 +95,7 @@ response as a success.
       diagnostics contain a schema-validation diagnostic
       for the document, and asserts that the fake proxy
       received the request
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Log why a schema could not be applied
 
