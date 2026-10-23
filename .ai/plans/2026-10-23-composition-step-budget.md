@@ -1,0 +1,267 @@
+**Repository:** root
+**Status:** NotStarted
+**Created:** 2026-10-23
+
+# Evaluate Every Composition Branch Within a Step Budget
+
+## Goal
+
+Schema validation and completion look at only the first 20
+`allOf`/`anyOf`/`oneOf` branches of a schema node, so real
+schemas lose diagnostics (cloud-init has 57 `allOf`
+branches; `package_update: 5` in branch 25 goes unflagged),
+`anyOf`/`oneOf` report false errors when the matching branch
+comes later, and completion misses keys. Evaluate every
+branch, bound validation by a shared step
+budget proportional to the document's size, and tell the
+user in the LSP log when validation stopped at that budget.
+
+## Context
+
+- `MAX_BRANCH_COUNT = 20` exists twice:
+  `rlsp-yaml/src/schema_validation/support.rs` (validation,
+  including the `unevaluatedProperties`/`unevaluatedItems`
+  helpers `collect_evaluated_properties` and
+  `collect_evaluated_item_count`) and
+  `rlsp-yaml/src/completion/support.rs` (completion walks in
+  `rlsp-yaml/src/completion/schema_completions.rs`, where it
+  also serves as a recursion depth cap).
+- Composition is validated by probes: `anyOf`, `oneOf`,
+  `not`, and `if` in
+  `rlsp-yaml/src/schema_validation/composition.rs` and
+  `contains` in `array_constraints.rs` validate into a
+  scratch context and read only whether it stayed empty.
+  Nested probes multiply — the per-node cap does not bound
+  that work; only `MAX_VALIDATION_DEPTH = 64` does.
+- `validate_schema` in `rlsp-yaml/src/schema_validation.rs`
+  is the validation entry point. Its production caller is
+  `Backend::process_schema` in `rlsp-yaml/src/server.rs`,
+  which already logs schema failures through
+  `schema_failure_message` (control/bidi character
+  replacement, `loggable_url`, length caps).
+- Test fixtures — vendored copies of real, self-contained
+  schemas (no remote `$ref`), each paired with real-world
+  documents:
+
+  | Schema | Source (pinned) | Licence | Documents |
+  |---|---|---|---|
+  | cloud-init | https://raw.githubusercontent.com/canonical/cloud-init/d5873d2e693cb3e83d7e50c97da3b8586faf8c2e/cloudinit/config/schemas/schema-cloud-config-v1.json | GPL-3.0 or Apache-2.0 (used under Apache-2.0) | a cloud-config document written for the test |
+  | GitHub workflow | https://raw.githubusercontent.com/SchemaStore/schemastore/57967c6f6d744228bdcd0500703d345bb8334574/src/schemas/json/github-workflow.json | Apache-2.0 | `tests/corpus/github-actions-matrix.yml`, `tests/corpus/release-plz-workflow.yml` |
+  | Compose spec | https://raw.githubusercontent.com/compose-spec/compose-go/52eea9f323cbdb2bf9c2092513615771faec4690/schema/compose-spec.json | Apache-2.0 | `tests/corpus/docker-compose.yml` |
+  | Kubernetes Deployment | https://raw.githubusercontent.com/yannh/kubernetes-json-schema/f7d855e49c34b039c9ef2196444910275e31e09e/master-standalone-strict/deployment-apps-v1.json | Apache-2.0 | `tests/corpus/kubernetes-deployment.yaml` |
+
+## Steps
+
+- [x] Clarify scope with the user
+- [x] Design review of the approach
+- [ ] Task 1: one probe helper that stops at the first
+      diagnostic
+- [ ] Task 2: validate every branch within a step budget
+- [ ] Task 3: log when validation stopped at the budget
+- [ ] Task 4: complete keys from every branch through one
+      property walk
+- [ ] Push to `main` and confirm the full CI matrix is green
+
+## Tasks
+
+### Task 1: One probe helper that stops at the first diagnostic
+
+The five probe sites build their scratch context the same
+way; one helper replaces them, so the budget and the
+undecided outcome of later tasks land in one place. A probe
+is read only as empty or non-empty, so it can stop at its
+first diagnostic — that cuts the work of failing branches,
+which grows once every branch is evaluated. Behavior is
+unchanged.
+
+- [ ] The five probe sites use one shared probe helper; none
+      builds its own scratch context
+- [ ] A probe stops validating once it has recorded a
+      diagnostic; validation outside probes still records
+      every diagnostic
+- [ ] These tests pass with their assertions unchanged: the
+      `anyOf`, `oneOf`, `not`, and `if`/`then`/`else` tests
+      in `composition.rs`, the `contains` tests in
+      `array_constraints.rs`, and
+      `content_schema_nested_sub_schema_uses_full_validation`
+      in `scalar_constraints.rs`
+- [ ] Build, tests, clippy, and fmt pass
+
+### Task 2: Validate every branch within a step budget
+
+Validation evaluates every composition branch. One step is
+one entry into `validate_node`, plus one per schema node the
+`collect_evaluated_*` helpers visit. The budget is shared by
+everything a single `validate_schema` run does, so nested
+probes cannot multiply past it.
+
+- [ ] Validation, including the `collect_evaluated_*`
+      helpers, evaluates every `allOf`/`anyOf`/`oneOf`
+      branch; no branch-count limit remains in
+      `schema_validation`
+- [ ] One step budget per `validate_schema` run is shared by
+      all documents, probes, `contentSchema` validation, and
+      the `collect_evaluated_*` helpers; its size is a fixed
+      floor plus a fixed number of steps per YAML node in
+      the run's documents
+- [ ] `validate_schema` returns its diagnostics together
+      with whether validation completed or stopped at the
+      budget
+- [ ] After the budget is exhausted, no diagnostic depends
+      on a result the budget cut short: `not`, `anyOf`,
+      `oneOf`, `contains`/`minContains`/`maxContains`
+      report nothing from an undecided probe, an undecided
+      `if` applies neither `then` nor `else`, and
+      `unevaluatedProperties`/`unevaluatedItems` report
+      nothing for a node whose evaluated properties or
+      items were not fully collected; diagnostics recorded
+      before exhaustion are kept
+- [ ] The four schemas in Context are vendored under
+      `rlsp-yaml/tests/fixtures/schemas/` from their pinned
+      sources, with each one's source URL and licence
+      recorded next to it, and the directory is excluded
+      from the published crate package
+- [ ] With one tenth of the production budget, each fixture
+      schema validates each of its documents to completion,
+      and at least one fixture document needs at least one
+      hundredth of its production budget
+- [ ] A cloud-config document containing `package_update: 5`
+      receives a type diagnostic for `package_update`
+- [ ] An `anyOf` and a `oneOf` whose only matching branch is
+      the 25th produce no diagnostic
+- [ ] A deeply nested hostile composition schema built in a
+      test, carrying `unevaluatedProperties: false` and
+      `unevaluatedItems: false`, stops at the budget, and
+      its result contains none of the diagnostics excluded
+      above
+- [ ] `any_of_message_branch_count_capped_at_max_branch_count`
+      in `composition.rs` asserts the full branch count, and
+      `should_complete_for_all_of_with_many_branches` in
+      `schema_validation.rs` asserts a diagnostic for every
+      unsatisfied branch
+- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+      seeds a schema whose `allOf` has more than 20 branches
+      (via `seed_schema_cache` and a modeline) and asserts
+      that a diagnostic from a branch beyond the 20th is
+      published
+- [ ] A Criterion bench case validates a document against a
+      schema with a wide `anyOf`/`oneOf`
+- [ ] Build, tests, clippy, and fmt pass
+
+### Task 3: Log when validation stopped at the budget
+
+When a validation run stops at the budget, the user learns
+from the LSP log that the diagnostics are incomplete, for
+every schema source. Like schema fetch failures, it is
+reported on every run that stops.
+
+- [ ] When validation stops at the budget, the client
+      receives a `window/logMessage` of type Warning that
+      names the schema URL, sanitized the same way as
+      schema failure messages, and states that validation
+      is incomplete
+- [ ] A run that completes sends no such Warning
+- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+      seeds a hostile composition schema, collects
+      client-bound messages, and asserts the Warning
+- [ ] `rlsp-yaml/docs/configuration.md` tells the reader
+      that schema validation work is bounded and what they
+      see when the bound is reached
+- [ ] `rlsp-yaml/docs/feature-log.md` records that every
+      composition branch is evaluated and that a Warning
+      reports validation stopped at the budget
+- [ ] Build, tests, clippy, and fmt pass
+
+### Task 4: Complete keys from every branch through one property walk
+
+Completion offers keys from every composition branch.
+`schema_has_properties`, `collect_schema_properties`, and
+`collect_schema_properties_keys_inner` answer the same
+question — which properties a schema offers, directly or
+through composition — and become one walk. Completion walks
+only the schema, so its cost is linear in the parsed schema
+tree and it needs no budget.
+
+- [ ] The three walks share one property walk; no
+      branch-count or depth limit remains in `completion`
+- [ ] Key completion offers properties from composition
+      branches beyond the 20th;
+      `should_cap_allof_branch_walking_at_max_branch_count`
+      asserts that, and
+      `should_not_panic_when_allof_depth_exceeds_max_branch_count`
+      carries a name that no longer refers to the removed
+      limit
+- [ ] Completion items keep their order, and the
+      `MAX_COMPLETION_ITEMS` cut is unchanged
+- [ ] Apart from the two tests above, the existing tests of
+      these walks and of key completion pass with their
+      assertions unchanged — among them the
+      `schema_has_properties_*` and
+      `collect_schema_properties_keys_*` tests and the
+      `(all required)` snippet tests in
+      `schema_completions.rs`
+- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+      sends completion requests for a document whose seeded
+      schema has more than 20 `allOf` branches and asserts
+      that a key defined only beyond the 20th branch is
+      offered, both at the top level and under a nested key
+      whose schema is reachable only through a branch beyond
+      the 20th
+- [ ] The feature-log entry for this change also covers
+      completion
+- [ ] Build, tests, clippy, and fmt pass
+
+## Non-Goals
+
+- Bounding schema size at parse time — `$ref` targets are
+  copied inline and only depth is limited (separate plan
+  after this one)
+- Hover documentation for array items and nested
+  composition (separate plan after this one)
+- Deduplicating completion items or changing which items
+  survive the `MAX_COMPLETION_ITEMS` cut
+- The `contentSchema` context's hard-coded format
+  validation and YAML version
+
+## Decisions
+
+- **Budget instead of a cap:** raising the cap still
+  truncates large schemas silently and leaves nesting
+  unbounded; removing it without replacement leaves hostile
+  nested schemas unbounded.
+- **Budget proportional to document size:** a fixed per-run
+  budget can be used up by a large valid file (many
+  manifests in one file); floor plus steps per node bounds
+  schema-driven multiplication per node and keeps total
+  work linear in document size.
+- **One budget shared by probes:** a fresh budget per probe
+  would leave nested `anyOf` unbounded.
+- **An undecided probe produces no diagnostic:** an
+  exhausted probe leaves its scratch empty and would read
+  as "matches", inventing `not`, `oneOf`, `contains`, and
+  `if`/`then` errors; exhaustion may only drop diagnostics.
+- **Signal in the log, not the document:** a Warning
+  matches the schema failure warnings; a document
+  diagnostic would sit permanently in the problems panel,
+  and silence would hide incomplete results.
+- **Budget Warning also for Kubernetes auto-detection:**
+  schema fetch failures stay silent for that source because
+  its URL is a guess; here the schema loaded, so the URL
+  was right.
+- **Single entry point:** `validate_schema` returns the
+  completeness together with the diagnostics; a wrapper
+  returning only diagnostics would let a future caller lose
+  the signal.
+- **Completion without a budget:** completion and hover
+  walk only the schema, never schema × document; their cost
+  is bounded by the parsed schema, whose depth parsing
+  already limits.
+- **Unified completion walk lands with the cap removal,
+  not as a task ahead of it:** the three walks carry
+  different limits today (branch and depth caps, depth cap
+  only, none), so one walk cannot keep all three behaviors
+  before the limits go.
+- **Fixtures excluded from the crate package:** about
+  1.1 MB of test-only data.
+- **No CloudFormation fixture:** its schema (7.6 MB)
+  exceeds `MAX_SCHEMA_BYTES`, so the server never loads it.
