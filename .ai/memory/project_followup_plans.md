@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
-  modified: 2026-10-23T18:54:19.825Z
+  modified: 2026-10-24T08:43:33.526Z
 ---
 
 <!-- Only track open items here. Completed work lives in its plan file
@@ -19,6 +19,7 @@ metadata:
 - **Schema plan queue (user-approved 2026-10-23, one plan at a time, in this order).** Resume `.ai/plans/2026-10-23-composition-step-budget.md` at Task 2 first (Task 1 committed in 4702cb80, not yet pushed). Then, each needing its own clarification + plan:
   1. Bound schema size at parse time — `$ref` targets are copied inline, only depth is limited (Non-Goal of the step-budget plan).
   2. Hover docs for array items and nested composition (Non-Goal of the step-budget plan).
+  2b. Bound the thread-local `REGEX_CACHE` (grows with every new pattern) and run `validate_schema` off the async executor (today inline at `server.rs` `process_schema`, not `spawn_blocking`) — Non-Goal of the step-budget plan, user-approved 2026-10-24.  2c. Bug (verified 2026-10-24): `unevaluatedItems: false` is dropped — it is parsed via `parse_schema_with_root`, which returns `None` for `Value::Bool(false)`, while `unevaluatedProperties` goes through `parse_additional_properties`, which handles `false`. So it never produces diagnostics. Check every other keyword parsed via `parse_schema_with_root` for the same boolean-`false` loss.
   3. `httpProxy` hardening — VS Code setting has no `scope` and is not in `restrictedConfigurations`, so an untrusted workspace can set it; `configuration.md` wrongly says "requests are made directly" when unset (ureq reads `ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY`).
   4. SSRF guard via DNS resolution — `is_ssrf_blocked_host` checks only the hostname string; `foo.localhost`, `localtest.me`, `127.0.0.1.nip.io` resolve to loopback and pass; fix idea: ureq `Agent::with_parts` + `unversioned::resolver::Resolver`; `configuration.md` claims "resolve to".
   5. Relative/local schemas (`$schema=./schema.json`, `file://`) — feature gap vs yaml-language-server.
