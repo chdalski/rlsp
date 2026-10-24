@@ -56,7 +56,7 @@ user in the LSP log when validation stopped at that budget.
 - [x] Design review of the approach
 - [x] Task 1: one probe helper that stops at the first
       diagnostic
-- [ ] Task 2: validate every branch within a step budget
+- [x] Task 2: validate every branch within a step budget
 - [ ] Task 3: log when validation stopped at the budget
 - [ ] Task 4: complete keys from every branch through one
       property walk
@@ -91,23 +91,51 @@ unchanged.
 
 Validation evaluates every composition branch. One step is
 one entry into `validate_node`, plus one per schema node the
-`collect_evaluated_*` helpers visit. The budget is shared by
-everything a single `validate_schema` run does, so nested
-probes cannot multiply past it.
+`collect_evaluated_*` helpers visit; operations whose work
+grows with their input — `uniqueItems`, the
+`dependentSchemas` clone, `contentSchema`/`contentEncoding`,
+`enum` and `required`/`dependentRequired` scans, regex
+compilation and matching, mapping and sequence width, and
+the length of scalar values — charge steps in proportion to
+that work. The
+budget is shared by everything a single `validate_schema`
+run does, so nested probes cannot multiply past it.
 
-- [ ] Validation, including the `collect_evaluated_*`
+- [x] Validation, including the `collect_evaluated_*`
       helpers, evaluates every `allOf`/`anyOf`/`oneOf`
       branch; no branch-count limit remains in
       `schema_validation`
-- [ ] One step budget per `validate_schema` run is shared by
+- [x] One step budget per `validate_schema` run is shared by
       all documents, probes, `contentSchema` validation, and
       the `collect_evaluated_*` helpers; its size is a fixed
-      floor plus a fixed number of steps per YAML node in
-      the run's documents
-- [ ] `validate_schema` returns its diagnostics together
-      with whether validation completed or stopped at the
-      budget
-- [ ] After the budget is exhausted, no diagnostic depends
+      floor plus a fixed number of steps per YAML node and
+      per byte of scalar content in the run's documents,
+      capped at a fixed ceiling that does not depend on
+      document size
+- [x] The operations listed above charge steps in
+      proportion to their work, and their results are
+      unchanged
+- [x] The steps a run uses depend only on the schema and the
+      run's documents, never on what a cache holds — a
+      schema pattern's compilation is charged once per run
+      for each distinct pattern, whether or not it is
+      cached, and its matching on every use
+- [x] Each distinct `format: regex` value is compiled at
+      most once per run; every use is still charged, so the
+      step total is the same as without reuse, and results
+      are unchanged
+- [x] Each compile attempt for a `format: regex` value or a
+      schema pattern (`pattern`, `patternProperties`) is
+      charged no fewer steps than the worst-case cost of an
+      attempt at that attempt's compile size limit, and the
+      security-engineer's sign-off lists no regex
+      compilation residual risk
+- [x] A run stops once the diagnostics it returns, across
+      all of its documents, reach a fixed maximum
+- [x] `validate_schema` returns its diagnostics together
+      with whether validation completed or stopped early
+      (budget or diagnostic limit)
+- [x] After the budget is exhausted, no diagnostic depends
       on a result the budget cut short: `not`, `anyOf`,
       `oneOf`, `contains`/`minContains`/`maxContains`
       report nothing from an undecided probe, an undecided
@@ -116,46 +144,52 @@ probes cannot multiply past it.
       nothing for a node whose evaluated properties or
       items were not fully collected; diagnostics recorded
       before exhaustion are kept
-- [ ] The four schemas in Context are vendored under
+- [x] The four schemas in Context are vendored under
       `rlsp-yaml/tests/fixtures/schemas/` from their pinned
       sources, with each one's source URL and licence
       recorded next to it, and the directory is excluded
       from the published crate package
-- [ ] With one tenth of the production budget, each fixture
+- [x] With one tenth of the production budget, each fixture
       schema validates each of its documents to completion,
       and at least one fixture document needs at least one
       hundredth of its production budget
-- [ ] A cloud-config document containing `package_update: 5`
+- [x] A cloud-config document containing `package_update: 5`
       receives a type diagnostic for `package_update`
-- [ ] An `anyOf` and a `oneOf` whose only matching branch is
+- [x] An `anyOf` and a `oneOf` whose only matching branch is
       the 25th produce no diagnostic
-- [ ] A deeply nested hostile composition schema built in a
+- [x] A deeply nested hostile composition schema built in a
       test, carrying `unevaluatedProperties: false` and
       `unevaluatedItems: false`, stops at the budget, and
       its result contains none of the diagnostics excluded
       above
-- [ ] `any_of_message_branch_count_capped_at_max_branch_count`
+- [x] A test schema that repeats an expensive operation
+      (e.g. `uniqueItems` over a large array) across many
+      branches stops at the budget, and a test document that
+      produces more diagnostics than the limit stops at the
+      diagnostic limit
+- [x] `any_of_message_branch_count_capped_at_max_branch_count`
       in `composition.rs` asserts the full branch count, and
       `should_complete_for_all_of_with_many_branches` in
       `schema_validation.rs` asserts a diagnostic for every
       unsatisfied branch
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
       seeds a schema whose `allOf` has more than 20 branches
       (via `seed_schema_cache` and a modeline) and asserts
       that a diagnostic from a branch beyond the 20th is
       published
-- [ ] A Criterion bench case validates a document against a
+- [x] A Criterion bench case validates a document against a
       schema with a wide `anyOf`/`oneOf`
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Log when validation stopped at the budget
 
-When a validation run stops at the budget, the user learns
-from the LSP log that the diagnostics are incomplete, for
-every schema source. Like schema fetch failures, it is
-reported on every run that stops.
+When a validation run stops early — at the budget or at the
+diagnostic limit — the user learns from the LSP log that the
+diagnostics are incomplete, for every schema source. Like
+schema fetch failures, it is reported on every run that
+stops.
 
-- [ ] When validation stops at the budget, the client
+- [ ] When validation stops early, the client
       receives a `window/logMessage` of type Warning that
       names the schema URL, sanitized the same way as
       schema failure messages, and states that validation
@@ -165,11 +199,13 @@ reported on every run that stops.
       seeds a hostile composition schema, collects
       client-bound messages, and asserts the Warning
 - [ ] `rlsp-yaml/docs/configuration.md` tells the reader
-      that schema validation work is bounded and what they
-      see when the bound is reached
+      that schema validation work and the number of
+      diagnostics are bounded and what they see when a bound
+      is reached
 - [ ] `rlsp-yaml/docs/feature-log.md` records that every
       composition branch is evaluated and that a Warning
-      reports validation stopped at the budget
+      reports validation stopped early (budget or diagnostic
+      limit)
 - [ ] Build, tests, clippy, and fmt pass
 
 ### Task 4: Complete keys from every branch through one property walk
@@ -222,6 +258,8 @@ tree and it needs no budget.
   survive the `MAX_COMPLETION_ITEMS` cut
 - The `contentSchema` context's hard-coded format
   validation and YAML version
+- Bounding the regex cache and running validation off the
+  async executor (separate plan after this one)
 
 ## Decisions
 
@@ -236,6 +274,27 @@ tree and it needs no budget.
   work linear in document size.
 - **One budget shared by probes:** a fresh budget per probe
   would leave nested `anyOf` unbounded.
+- **Steps weighted by work:** with one step per node visit,
+  a hostile schema could repeat an expensive operation
+  across many branches and the budget would not bound CPU
+  time; only the accounting changes, not the algorithms —
+  except for regex compilation, whose cost a fixed charge
+  cannot cover: `format: regex` results are reused within a
+  run, and every compile attempt — `format: regex` values
+  and schema patterns — is charged for the worst case at
+  its size limit (Task 2), so a hostile schema cannot
+  stretch one validation to tens of seconds. A flat
+  worst-case charge per use would stop ordinary documents;
+  a tighter compile limit would change results.
+- **Budget ceiling and diagnostic limit:** the ceiling keeps
+  a huge document from inflating its own budget; the
+  diagnostic limit keeps a run from building an unbounded
+  `publishDiagnostics` payload now that every branch can
+  report.
+- **No length or depth limit for embedded content:**
+  `contentSchema` content stays validated at any length,
+  with its own depth count; its work is bounded by the
+  weighted steps.
 - **An undecided probe produces no diagnostic:** an
   exhausted probe leaves its scratch empty and would read
   as "matches", inventing `not`, `oneOf`, `contains`, and

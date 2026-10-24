@@ -11,6 +11,8 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range
 use crate::scalar_helpers;
 use crate::schema::{JsonSchema, SchemaType};
 
+use super::context::{Budget, WORK_PER_STEP, work_steps};
+
 /// Maximum length of a `pattern` string we will compile and match, as a
 /// guard against pathological `ReDoS` inputs.
 pub(super) const MAX_PATTERN_LEN: usize = 1024;
@@ -21,9 +23,6 @@ pub(super) const REGEX_SIZE_LIMIT: usize = 512 * 1024;
 /// Maximum recursion depth for the validation walk.
 pub(super) const MAX_VALIDATION_DEPTH: usize = 64;
 
-/// Maximum number of `allOf` / `anyOf` / `oneOf` branches evaluated.
-pub(super) const MAX_BRANCH_COUNT: usize = 20;
-
 /// Maximum length of schema description text embedded in diagnostic messages.
 pub(super) const MAX_DESCRIPTION_LEN: usize = 200;
 
@@ -31,30 +30,181 @@ pub(super) const MAX_DESCRIPTION_LEN: usize = 200;
 pub(super) const MAX_ENUM_DISPLAY: usize = 5;
 
 thread_local! {
-    /// Per-thread regex cache, keyed by pattern string.
-    /// `None` means the pattern was tried and failed to compile within limits.
-    static REGEX_CACHE: RefCell<HashMap<String, Option<regex::Regex>>> =
-        RefCell::new(HashMap::new());
+    /// Per-thread cache of compiled schema patterns, keyed by pattern string.
+    /// Saves the compile, never the price: a run charges what a pattern's
+    /// compilation is priced at whether or not it finds it here.
+    static REGEX_CACHE: RefCell<HashMap<String, Compiled>> = RefCell::new(HashMap::new());
 }
 
-/// Return a compiled `Regex` for `pattern`, using the thread-local cache.
+/// Size limits a pattern is compiled under, smallest first, with the base price
+/// in budget steps of an attempt under each. A pattern too big for one limit is
+/// retried under the next; the last is `REGEX_SIZE_LIMIT`, so which patterns
+/// compile is the same as with that limit alone, but an ordinary pattern pays
+/// for the small attempt that suffices rather than for the worst case.
 ///
-/// Returns `None` if the pattern exceeds `REGEX_SIZE_LIMIT` or is otherwise
-/// invalid. The failed result is also cached so that subsequent calls with
-/// the same pattern skip recompilation.
-pub(super) fn get_regex(pattern: &str) -> Option<regex::Regex> {
-    REGEX_CACHE.with(|cache| {
-        let mut map = cache.borrow_mut();
-        if let Some(entry) = map.get(pattern) {
-            return entry.clone();
+/// The base prices cover the compile work up to the limit. Each attempt also
+/// parses the pattern, which `REGEX_PARSE_STEPS_PER_BYTE` covers.
+///
+/// Measured worst attempts, as steps (about 183 ns each), over short (up to 16
+/// bytes) pathological patterns such as `(\w{20}){20}`: 4 KiB: ~230; 64 KiB:
+/// ~2.0k; 512 KiB: ~16.6k. Parsing a 790-byte alternation took ~0.9k steps at
+/// 4 KiB. The base prices are about twice those worst attempts; the per-byte
+/// price covers parsing with the same margin. Re-measure before lowering them.
+///
+/// The third number of a tier is the work units (`WORK_PER_STEP` of them make a
+/// step) that matching one byte of haystack costs against a pattern compiled
+/// under it. Programs up to 64 KiB match in a small fraction of a step per byte;
+/// a program near `REGEX_SIZE_LIMIT` can fall out of the lazy DFA into the NFA
+/// simulation, measured up to ~210 steps per byte on a 64 KiB haystack (for
+/// example `(a|b)*[a-z]{7276}b` against `aaaa...`), so the last tier is priced
+/// at 512 steps per byte.
+const COMPILE_TIERS: [(usize, usize, usize); 3] = [
+    (4 * 1024, 512, 1),
+    (64 * 1024, 4_096, 1),
+    (REGEX_SIZE_LIMIT, 32_768, 512 * WORK_PER_STEP),
+];
+
+#[cfg(test)]
+thread_local! {
+    /// Compile attempts made on this thread, for tests that count compilations.
+    static COMPILE_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Compile attempts made on this thread so far.
+#[cfg(test)]
+pub(super) fn compile_attempts() -> usize {
+    COMPILE_ATTEMPTS.with(std::cell::Cell::get)
+}
+
+/// Budget steps per byte of pattern for parsing it, charged on every attempt.
+const REGEX_PARSE_STEPS_PER_BYTE: usize = 2;
+
+/// The outcome of compiling a pattern and what that was priced at.
+#[derive(Clone)]
+struct Compiled {
+    /// `None` when the pattern is not a valid regex within `REGEX_SIZE_LIMIT`.
+    regex: Option<regex::Regex>,
+    /// Budget steps the attempts that led to this outcome were priced at.
+    steps: usize,
+    /// Work units matching one byte of haystack costs, from the tier it compiled
+    /// under.
+    matching_work_per_byte: usize,
+}
+
+/// Budget steps for one compile attempt of a pattern of `len` bytes under the
+/// tier with base price `base`.
+const fn attempt_steps(base: usize, len: usize) -> usize {
+    base.saturating_add(len.saturating_mul(REGEX_PARSE_STEPS_PER_BYTE))
+}
+
+/// Compile `pattern` tier by tier, spending each attempt's price before making
+/// it. Returns `None` when the budget refuses an attempt.
+///
+/// Only a program too big for the tier's limit moves on to the next tier: any
+/// other error, a syntax error above all, would recur under every limit.
+fn compile_priced(pattern: &str, budget: &Budget) -> Option<Compiled> {
+    let mut steps = 0_usize;
+    for (limit, base, matching_work_per_byte) in COMPILE_TIERS {
+        let price = attempt_steps(base, pattern.len());
+        if !budget.spend(price) {
+            return None;
         }
-        let compiled = RegexBuilder::new(pattern)
-            .size_limit(REGEX_SIZE_LIMIT)
-            .build()
-            .ok();
-        map.insert(pattern.to_string(), compiled.clone());
-        compiled
+        steps = steps.saturating_add(price);
+        #[cfg(test)]
+        COMPILE_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+        match RegexBuilder::new(pattern).size_limit(limit).build() {
+            Ok(regex) => {
+                return Some(Compiled {
+                    regex: Some(regex),
+                    steps,
+                    matching_work_per_byte,
+                });
+            }
+            Err(regex::Error::CompiledTooBig(_)) => {}
+            Err(_) => {
+                return Some(Compiled {
+                    regex: None,
+                    steps,
+                    matching_work_per_byte,
+                });
+            }
+        }
+    }
+    Some(Compiled {
+        regex: None,
+        steps,
+        matching_work_per_byte: 0,
     })
+}
+
+/// Why a pattern could not be used.
+pub(super) enum PatternUnavailable {
+    /// It exceeds `REGEX_SIZE_LIMIT` or is not a valid regex.
+    Invalid,
+    /// The budget could not pay for it.
+    OverBudget,
+}
+
+/// Return a compiled `Regex` for the schema `pattern`.
+///
+/// A use costs one step plus the matching of the `haystack_len` bytes it will
+/// be matched against, priced per tier (see `COMPILE_TIERS`). The
+/// first use in a run also pays for compiling the
+/// pattern (see `COMPILE_TIERS`), at a price that depends only on the pattern —
+/// the same whether the thread-local cache already holds it or not — so the
+/// steps a run takes depend only on the schema and the documents.
+pub(super) fn compile_pattern(
+    pattern: &str,
+    haystack_len: usize,
+    budget: &Budget,
+) -> Result<regex::Regex, PatternUnavailable> {
+    let cached = REGEX_CACHE.with(|cache| cache.borrow().get(pattern).cloned());
+    let compiled = if let Some(compiled) = cached {
+        if !budget.has_paid_for_pattern(pattern) && !budget.spend(compiled.steps) {
+            return Err(PatternUnavailable::OverBudget);
+        }
+        compiled
+    } else {
+        let compiled = compile_priced(pattern, budget).ok_or(PatternUnavailable::OverBudget)?;
+        REGEX_CACHE.with(|cache| {
+            cache
+                .borrow_mut()
+                .insert(pattern.to_string(), compiled.clone());
+        });
+        compiled
+    };
+    budget.note_paid_for_pattern(pattern);
+    // An invalid pattern is never matched, but a use still costs a step: a schema
+    // can list many of them.
+    let matching = if compiled.regex.is_some() {
+        haystack_len.saturating_mul(compiled.matching_work_per_byte)
+    } else {
+        0
+    };
+    if !budget.spend(work_steps(matching).saturating_add(1)) {
+        return Err(PatternUnavailable::OverBudget);
+    }
+    compiled.regex.ok_or(PatternUnavailable::Invalid)
+}
+
+/// Whether the document value `value` is a valid regex, for `format: regex`.
+/// Returns `None` when the budget cannot pay for the check.
+///
+/// Each distinct value is compiled once per run, but every check of it pays the
+/// price of that compilation, so the steps do not depend on how often the
+/// value repeats. Values are not cached across runs: they come from documents.
+pub(super) fn is_valid_regex_value(value: &str, budget: &Budget) -> Option<bool> {
+    if value.len() > MAX_PATTERN_LEN {
+        return Some(false);
+    }
+    if let Some((valid, steps)) = budget.recall_regex_value(value) {
+        return budget.spend(steps).then_some(valid);
+    }
+    // Pay attempt by attempt before compiling, then keep the outcome.
+    let compiled = compile_priced(value, budget)?;
+    let valid = compiled.regex.is_some();
+    budget.remember_regex_value(value, (valid, compiled.steps));
+    Some(valid)
 }
 
 /// Extract the `loc` span from any AST node.
@@ -82,85 +232,93 @@ pub(super) fn node_key_str(node: &Node<Span>) -> Option<String> {
     }
 }
 
-/// Collect property names directly evaluated by `schema` (one level: `properties`,
-/// `patternProperties` keys, and composition sub-schema properties).
-/// Used to determine what composition branches consider "evaluated" without
-/// full recursive context threading.
-pub(super) fn collect_evaluated_properties(schema: &JsonSchema, key: &str) -> bool {
+/// The sub-schemas applied to the same instance as `schema`: every `allOf`,
+/// `anyOf`, and `oneOf` branch, then `then` and `else`.
+fn applicator_children(schema: &JsonSchema) -> impl Iterator<Item = &JsonSchema> {
+    schema
+        .all_of
+        .iter()
+        .chain(&schema.any_of)
+        .chain(&schema.one_of)
+        .flatten()
+        .chain(schema.then_schema.as_deref())
+        .chain(schema.else_schema.as_deref())
+}
+
+/// Whether `schema` or any schema nested in its composition keywords evaluates
+/// the property `key`: through `properties`, a matching `patternProperties`
+/// pattern, or a sub-schema.
+///
+/// Used by `unevaluatedProperties` to learn what composition branches consider
+/// evaluated. Visiting a schema node costs one `budget` step. Returns `None`
+/// when the budget or `MAX_VALIDATION_DEPTH` cut the scan short and the answer
+/// is unknown.
+pub(super) fn collect_evaluated_properties(
+    schema: &JsonSchema,
+    key: &str,
+    budget: &Budget,
+    depth: usize,
+) -> Option<bool> {
+    if depth > MAX_VALIDATION_DEPTH || !budget.spend(1) {
+        return None;
+    }
     // Matched by properties
     if schema
         .properties
         .as_ref()
         .is_some_and(|p| p.contains_key(key))
     {
-        return true;
+        return Some(true);
     }
     // Matched by patternProperties
     if let Some(pp) = &schema.pattern_properties {
         for (pattern, _) in pp {
-            if pattern.len() <= MAX_PATTERN_LEN
-                && let Some(re) = get_regex(pattern)
-                && re.is_match(key)
-            {
-                return true;
+            if pattern.len() > MAX_PATTERN_LEN {
+                continue;
+            }
+            match compile_pattern(pattern, key.len(), budget) {
+                Ok(re) if re.is_match(key) => return Some(true),
+                Ok(_) | Err(PatternUnavailable::Invalid) => {}
+                Err(PatternUnavailable::OverBudget) => return None,
             }
         }
     }
-    // Matched by allOf sub-schemas (one level deep)
-    if let Some(all_of) = &schema.all_of {
-        for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
-            if collect_evaluated_properties(branch, key) {
-                return true;
-            }
+    for child in applicator_children(schema) {
+        if collect_evaluated_properties(child, key, budget, depth + 1)? {
+            return Some(true);
         }
     }
-    // Matched by anyOf / oneOf sub-schemas (one level deep)
-    if let Some(any_of) = &schema.any_of {
-        for branch in any_of.iter().take(MAX_BRANCH_COUNT) {
-            if collect_evaluated_properties(branch, key) {
-                return true;
-            }
-        }
-    }
-    if let Some(one_of) = &schema.one_of {
-        for branch in one_of.iter().take(MAX_BRANCH_COUNT) {
-            if collect_evaluated_properties(branch, key) {
-                return true;
-            }
-        }
-    }
-    // Matched by if/then/else (one level deep)
-    if let Some(then_s) = &schema.then_schema
-        && collect_evaluated_properties(then_s, key)
-    {
-        return true;
-    }
-    if let Some(else_s) = &schema.else_schema
-        && collect_evaluated_properties(else_s, key)
-    {
-        return true;
-    }
-    false
+    Some(false)
 }
 
-/// Collect the number of prefix items directly covered by `schema` and its
-/// composition sub-schemas (one level deep).
-pub(super) fn collect_evaluated_item_count(schema: &JsonSchema) -> usize {
-    let mut count = schema.prefix_items.as_ref().map_or(0, Vec::len);
+/// Number of leading array items evaluated by `schema` and the `allOf`
+/// branches nested in it: `prefixItems` covers its length, `items` covers
+/// everything (`usize::MAX`).
+///
+/// Visiting a schema node costs one `budget` step. Returns `None` when the
+/// budget or `MAX_VALIDATION_DEPTH` cut the scan short and the answer is
+/// unknown.
+pub(super) fn collect_evaluated_item_count(
+    schema: &JsonSchema,
+    budget: &Budget,
+    depth: usize,
+) -> Option<usize> {
+    if depth > MAX_VALIDATION_DEPTH || !budget.spend(1) {
+        return None;
+    }
     // items (non-nil) covers all remaining indices — signal with usize::MAX
     if schema.items.is_some() {
-        return usize::MAX;
+        return Some(usize::MAX);
     }
-    if let Some(all_of) = &schema.all_of {
-        for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
-            let branch_count = collect_evaluated_item_count(branch);
-            if branch_count == usize::MAX {
-                return usize::MAX;
-            }
-            count = count.max(branch_count);
+    let mut count = schema.prefix_items.as_ref().map_or(0, Vec::len);
+    for branch in schema.all_of.iter().flatten() {
+        let branch_count = collect_evaluated_item_count(branch, budget, depth + 1)?;
+        if branch_count == usize::MAX {
+            return Some(usize::MAX);
         }
+        count = count.max(branch_count);
     }
-    count
+    Some(count)
 }
 
 pub(super) fn yaml_type_name(node: &Node<Span>) -> &'static str {

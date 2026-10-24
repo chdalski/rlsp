@@ -8,8 +8,24 @@ use crate::lsp_util::span_to_lsp;
 use crate::schema::JsonSchema;
 
 use super::context::Ctx;
-use super::probe_passes;
-use super::support::{MAX_BRANCH_COUNT, format_path, make_diagnostic, node_loc};
+use super::support::{format_path, make_diagnostic, node_loc};
+use super::{Probe, Tally, probe_passes, tally};
+
+/// Probe `node` against each branch in turn, lazily. Stops before the first
+/// probe the budget cannot pay for, so a schema with a huge branch list costs
+/// nothing once the budget is gone.
+fn probe_branches<'a>(
+    node: &'a Node<Span>,
+    branches: &'a [JsonSchema],
+    path: &'a [String],
+    ctx: &'a Ctx<'_>,
+    depth: usize,
+) -> impl Iterator<Item = Probe> + 'a {
+    branches
+        .iter()
+        .take_while(|_| !ctx.budget.is_exhausted())
+        .map(move |branch| probe_passes(node, branch, path, ctx, depth + 1))
+}
 
 pub(super) fn validate_composition(
     node: &Node<Span>,
@@ -22,7 +38,10 @@ pub(super) fn validate_composition(
 
     // allOf: all branches must pass
     if let Some(all_of) = &schema.all_of {
-        for branch in all_of.iter().take(MAX_BRANCH_COUNT) {
+        for branch in all_of {
+            if ctx.budget.is_exhausted() {
+                break;
+            }
             super::validate_node(node, branch, path, ctx, depth + 1);
         }
     }
@@ -33,19 +52,25 @@ pub(super) fn validate_composition(
 
     // anyOf: at least one branch must pass; if none do, emit a diagnostic
     if let Some(any_of) = &schema.any_of {
-        let branch_count = any_of.iter().take(MAX_BRANCH_COUNT).count();
-        let any_passes = any_of
-            .iter()
-            .take(MAX_BRANCH_COUNT)
-            .any(|branch| probe_passes(node, branch, path, ctx, depth + 1));
-        if !any_passes {
+        let mut undecided = false;
+        let matched = probe_branches(node, any_of, path, ctx, depth).any(|outcome| {
+            undecided |= outcome == Probe::Undecided;
+            outcome == Probe::Passes
+        });
+        undecided |= ctx.budget.is_exhausted();
+        if matched {
+            // One passing branch settles anyOf.
+        } else if undecided {
+            ctx.undecided = true;
+        } else {
             ctx.diagnostics.push(make_diagnostic(
                 node_range,
                 DiagnosticSeverity::ERROR,
                 "schemaType",
                 format!(
-                    "Value at {} does not match any of the {branch_count} allowed schemas (anyOf)",
-                    format_path(path)
+                    "Value at {} does not match any of the {} allowed schemas (anyOf)",
+                    format_path(path),
+                    any_of.len()
                 ),
             ));
         }
@@ -57,14 +82,13 @@ pub(super) fn validate_composition(
 
     // oneOf: exactly one branch must pass
     if let Some(one_of) = &schema.one_of {
-        let total = one_of.iter().take(MAX_BRANCH_COUNT).count();
-        let passing = one_of
-            .iter()
-            .take(MAX_BRANCH_COUNT)
-            .filter(|branch| probe_passes(node, branch, path, ctx, depth + 1))
-            .count();
+        let total = one_of.len();
+        let Tally { passing, undecided } = tally(probe_branches(node, one_of, path, ctx, depth));
 
-        if passing == 0 {
+        if undecided || ctx.budget.is_exhausted() {
+            // The number of passing branches is unknown.
+            ctx.undecided = true;
+        } else if passing == 0 {
             ctx.diagnostics.push(make_diagnostic(
                 node_range,
                 DiagnosticSeverity::ERROR,
@@ -92,18 +116,20 @@ pub(super) fn validate_composition(
     }
 
     // not: the value must NOT match the sub-schema
-    if let Some(not_schema) = &schema.not
-        && probe_passes(node, not_schema, path, ctx, depth + 1)
-    {
-        ctx.diagnostics.push(make_diagnostic(
-            node_range,
-            DiagnosticSeverity::ERROR,
-            "schemaNot",
-            format!(
-                "Value at {} must not match the schema defined in 'not'",
-                format_path(path)
-            ),
-        ));
+    if let Some(not_schema) = &schema.not {
+        match probe_passes(node, not_schema, path, ctx, depth + 1) {
+            Probe::Passes => ctx.diagnostics.push(make_diagnostic(
+                node_range,
+                DiagnosticSeverity::ERROR,
+                "schemaNot",
+                format!(
+                    "Value at {} must not match the schema defined in 'not'",
+                    format_path(path)
+                ),
+            )),
+            Probe::Fails => {}
+            Probe::Undecided => ctx.undecided = true,
+        }
     }
 
     if ctx.probe_decided() {
@@ -112,12 +138,17 @@ pub(super) fn validate_composition(
 
     // if / then / else (Draft-07)
     if let Some(if_schema) = &schema.if_schema {
-        if probe_passes(node, if_schema, path, ctx, depth + 1) {
-            if let Some(then_schema) = &schema.then_schema {
-                super::validate_node(node, then_schema, path, ctx, depth + 1);
+        let branch = match probe_passes(node, if_schema, path, ctx, depth + 1) {
+            Probe::Passes => schema.then_schema.as_deref(),
+            Probe::Fails => schema.else_schema.as_deref(),
+            Probe::Undecided => {
+                // Neither branch applies when the condition is unknown.
+                ctx.undecided = true;
+                None
             }
-        } else if let Some(else_schema) = &schema.else_schema {
-            super::validate_node(node, else_schema, path, ctx, depth + 1);
+        };
+        if let Some(branch) = branch {
+            super::validate_node(node, branch, path, ctx, depth + 1);
         }
     }
 }
@@ -155,7 +186,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1\nb: 2");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -175,7 +206,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
     }
 
@@ -195,7 +226,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -215,7 +246,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
     }
 
@@ -235,7 +266,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: 1");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -255,7 +286,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
     }
 
@@ -272,7 +303,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("a: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
     }
 
@@ -299,7 +330,7 @@ mod tests {
         )]);
         // val is a string of length 5 — if matches, then passes
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -321,7 +352,7 @@ mod tests {
         )]);
         // val is a short string — if matches, then fails
         let docs = parse_docs("val: hi");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinLength");
     }
@@ -344,7 +375,7 @@ mod tests {
         )]);
         // val is integer 5 — if doesn't match (not string), else passes (>= 0)
         let docs = parse_docs("val: 5");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -366,7 +397,7 @@ mod tests {
         )]);
         // val is integer 3 — if doesn't match, else fails (< 10)
         let docs = parse_docs("val: 3");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMinimum");
     }
@@ -389,7 +420,7 @@ mod tests {
         )]);
         // val is string — if matches, no then → no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -411,7 +442,7 @@ mod tests {
         )]);
         // val is integer — if doesn't match, no else → no diagnostic
         let docs = parse_docs("val: 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -433,7 +464,7 @@ mod tests {
         )]);
         // Without if, then/else are ignored — string value produces no diagnostic
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -454,7 +485,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -473,7 +504,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -487,7 +518,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -502,7 +533,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -519,7 +550,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: prod");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaNot");
     }
@@ -537,7 +568,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: dev");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -561,7 +592,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let any_of_diag = result
             .iter()
@@ -579,8 +610,8 @@ mod tests {
     }
 
     #[test]
-    fn any_of_message_branch_count_capped_at_max_branch_count() {
-        // 25 branches (> MAX_BRANCH_COUNT=20) — message should show 20
+    fn any_of_message_counts_every_branch() {
+        // 25 branches, none satisfied — the message counts all 25
         let branches: Vec<JsonSchema> = (0..25)
             .map(|i| JsonSchema {
                 required: Some(vec![format!("field_{i}")]),
@@ -592,7 +623,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let any_of_diag = result
             .iter()
@@ -600,8 +631,8 @@ mod tests {
             .expect("should have a schemaType diagnostic");
         let msg = &any_of_diag.message;
         assert!(
-            msg.contains("20"),
-            "message should contain capped count '20', got: {msg}"
+            msg.contains("25"),
+            "message should contain branch count '25', got: {msg}"
         );
     }
 
@@ -625,7 +656,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -656,7 +687,7 @@ mod tests {
         };
         // "a: hello" matches both branches
         let docs = parse_docs("a: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -687,7 +718,7 @@ mod tests {
         };
         // "a: hello" matches the first two branches (2 of 3)
         let docs = parse_docs("a: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let one_of_diag = result
             .iter()
@@ -721,7 +752,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         let msg = &result[0].message;
         assert!(
@@ -744,7 +775,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("42");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaType")
@@ -773,7 +804,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("val: hello");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaType")
@@ -787,7 +818,7 @@ mod tests {
 
     fn diagnostics_for(schema: &serde_json::Value, text: &str) -> Vec<Diagnostic> {
         let schema = parse_schema(schema).expect("valid schema");
-        validate_schema(&parse_docs(text), &schema, true, YamlVersion::V1_2)
+        validate_schema(&parse_docs(text), &schema, true, YamlVersion::V1_2).diagnostics
     }
 
     fn three_integers() -> serde_json::Value {

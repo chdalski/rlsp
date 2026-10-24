@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use crate::lsp_util::span_to_lsp;
 use crate::scalar_helpers;
@@ -14,7 +13,8 @@ use crate::server::YamlVersion;
 use super::context::Ctx;
 use super::formats;
 use super::support::{
-    MAX_PATTERN_LEN, format_path, get_regex, make_diagnostic, node_loc, yaml_to_json,
+    MAX_PATTERN_LEN, PatternUnavailable, compile_pattern, format_path, is_valid_regex_value,
+    make_diagnostic, node_loc, yaml_to_json,
 };
 use super::validate_node;
 
@@ -32,6 +32,12 @@ pub(super) fn validate_scalar_constraints(
         ..
     } = node
     {
+        // The checks below scan the text, which the step that entered the node
+        // pays for only up to one block.
+        if !ctx.budget.spend_work(value.len()) {
+            return;
+        }
+
         let is_plain = matches!(style, ScalarStyle::Plain);
 
         // String constraints apply to scalars that resolve to string type.
@@ -91,29 +97,35 @@ pub(super) fn validate_string_constraints(
                     format_path(path),
                 ),
             ));
-        } else if let Some(re) = get_regex(pattern) {
-            if !re.is_match(s) {
-                ctx.diagnostics.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::ERROR,
-                    "schemaPattern",
-                    format!(
-                        "Value at {} does not match pattern: {}",
-                        format_path(path),
-                        pattern
-                    ),
-                ));
-            }
         } else {
-            ctx.diagnostics.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::WARNING,
-                "schemaPatternLimit",
-                format!(
-                    "Pattern at {} could not be compiled and was not validated",
-                    format_path(path),
-                ),
-            ));
+            match compile_pattern(pattern, s.len(), ctx.budget) {
+                Ok(re) => {
+                    if !re.is_match(s) {
+                        ctx.diagnostics.push(make_diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            "schemaPattern",
+                            format!(
+                                "Value at {} does not match pattern: {}",
+                                format_path(path),
+                                pattern
+                            ),
+                        ));
+                    }
+                }
+                Err(PatternUnavailable::Invalid) => {
+                    ctx.diagnostics.push(make_diagnostic(
+                        range,
+                        DiagnosticSeverity::WARNING,
+                        "schemaPatternLimit",
+                        format!(
+                            "Pattern at {} could not be compiled and was not validated",
+                            format_path(path),
+                        ),
+                    ));
+                }
+                Err(PatternUnavailable::OverBudget) => ctx.undecided = true,
+            }
         }
     }
 
@@ -153,7 +165,7 @@ pub(super) fn validate_string_constraints(
 
     if ctx.format_validation {
         if let Some(format) = &schema.format {
-            validate_format(s, format, loc, path, ctx.diagnostics, ctx.idx);
+            validate_format(s, format, loc, path, ctx);
         }
         if schema.content_encoding.is_some()
             || schema.content_media_type.is_some()
@@ -172,8 +184,7 @@ pub(super) fn validate_format(
     format: &str,
     loc: Span,
     path: &[String],
-    diagnostics: &mut Vec<Diagnostic>,
-    idx: &LineIndex,
+    ctx: &mut Ctx<'_>,
 ) {
     let valid = match format {
         "date-time" => formats::is_valid_date_time(s),
@@ -188,7 +199,11 @@ pub(super) fn validate_format(
         "uri-reference" => formats::is_valid_uri_reference(s),
         "uri-template" => formats::is_valid_uri_template(s),
         "uuid" => formats::is_valid_uuid(s),
-        "regex" => formats::is_valid_regex(s),
+        // Compiles the value, priced by the budget; unaffordable means unknown.
+        "regex" => match is_valid_regex_value(s, ctx.budget) {
+            Some(valid) => valid,
+            None => return,
+        },
         "json-pointer" => formats::is_valid_json_pointer(s),
         "relative-json-pointer" => formats::is_valid_relative_json_pointer(s),
         "idn-hostname" => formats::is_valid_idn_hostname(s),
@@ -199,8 +214,8 @@ pub(super) fn validate_format(
         _ => return,
     };
     if !valid {
-        diagnostics.push(make_diagnostic(
-            span_to_lsp(loc, idx),
+        ctx.diagnostics.push(make_diagnostic(
+            span_to_lsp(loc, ctx.idx),
             DiagnosticSeverity::WARNING,
             "schemaFormat",
             format!(
@@ -224,6 +239,11 @@ pub(super) fn validate_content(
     path: &[String],
     ctx: &mut Ctx<'_>,
 ) {
+    // Decoding costs time proportional to the string, which one step does not cover.
+    if !ctx.budget.spend_work(s.len()) {
+        return;
+    }
+
     // Step 1: decode if contentEncoding is set
     let decoded_bytes: Option<Vec<u8>> = if let Some(enc) = &schema.content_encoding {
         let result = match enc.as_str() {
@@ -301,6 +321,11 @@ pub(super) fn validate_content_schema(
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .unwrap_or(raw);
 
+    // Parsing costs time proportional to the text, which one step does not cover.
+    if !ctx.budget.spend_work(content_text.len()) {
+        return;
+    }
+
     // Parse the content as YAML.
     let Ok(docs) = rlsp_yaml_parser::load(content_text) else {
         ctx.diagnostics.push(make_diagnostic(
@@ -321,8 +346,14 @@ pub(super) fn validate_content_schema(
     for doc in &docs {
         let mut content_path = path.to_vec();
         content_path.push("(content)".to_string());
-        let mut content_ctx = Ctx::new(ctx.diagnostics, true, YamlVersion::V1_2, doc.line_index())
-            .with_mode(ctx.mode);
+        let mut content_ctx = Ctx::new(
+            ctx.diagnostics,
+            true,
+            YamlVersion::V1_2,
+            doc.line_index(),
+            ctx.budget,
+        )
+        .with_mode(ctx.mode);
         validate_node(
             &doc.root,
             content_schema,
@@ -330,6 +361,7 @@ pub(super) fn validate_content_schema(
             &mut content_ctx,
             0,
         );
+        ctx.undecided |= content_ctx.undecided;
     }
 }
 
@@ -472,7 +504,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: ABC");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -487,7 +519,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -505,7 +537,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("code: abc");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPattern");
     }
@@ -523,7 +555,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: anything");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaPatternLimit");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -556,7 +588,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -586,7 +618,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -619,7 +651,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -649,7 +681,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -685,7 +717,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
     }
@@ -702,7 +734,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("val: 5");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -734,7 +766,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
     }
@@ -760,7 +792,7 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -779,7 +811,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 15");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -794,7 +826,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("count: 7");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaMultipleOf");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -822,7 +854,7 @@ mod tests {
     )]
     fn const_match_produces_no_diagnostics(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -837,7 +869,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("version: v2");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaConst");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -854,7 +886,7 @@ mod tests {
         )]);
         let text = "obj:\n  key: other";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         // yaml_to_json returns None for mappings — const check skipped
         assert!(result.iter().all(|d| code_of(d) != "schemaConst"));
     }
@@ -876,7 +908,7 @@ mod tests {
     fn tag_driven_string_scalar_applies_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
         let docs = parse_docs("value: hi");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaMinLength"),
             "string scalar must have minLength applied"
@@ -888,7 +920,7 @@ mod tests {
     fn tag_driven_null_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
         let docs = parse_docs("value: ~");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().all(|d| code_of(d) != "schemaMinLength"),
             "null scalar must not have string constraints applied"
@@ -900,7 +932,7 @@ mod tests {
     fn tag_driven_bool_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
         let docs = parse_docs("value: true");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().all(|d| code_of(d) != "schemaMinLength"),
             "bool scalar must not have string constraints applied"
@@ -912,7 +944,7 @@ mod tests {
     fn tag_driven_integer_scalar_skips_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
         let docs = parse_docs("value: 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().all(|d| code_of(d) != "schemaMinLength"),
             "integer scalar must not have string constraints applied"
@@ -924,7 +956,7 @@ mod tests {
     fn tag_driven_quoted_scalar_applies_min_length() {
         let schema = object_schema_with_props(vec![("value", min_length_schema(10))]);
         let docs = parse_docs("value: \"hi\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaMinLength"),
             "quoted scalar is always a string — minLength must apply"
@@ -947,7 +979,7 @@ mod tests {
     fn tag_driven_null_tagged_scalar_matches_const_null() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
         let docs = parse_docs("value: ~");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty(), "null scalar must match const: null");
     }
 
@@ -956,7 +988,7 @@ mod tests {
     fn tag_driven_true_bool_matches_const_true() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
         let docs = parse_docs("value: true");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty(), "true scalar must match const: true");
     }
 
@@ -965,7 +997,7 @@ mod tests {
     fn tag_driven_false_bool_does_not_match_const_true() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
         let docs = parse_docs("value: false");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaConst"),
             "false scalar must not match const: true"
@@ -977,7 +1009,7 @@ mod tests {
     fn tag_driven_integer_scalar_matches_const_number() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(42)))]);
         let docs = parse_docs("value: 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty(), "integer 42 must match const: 42");
     }
 
@@ -986,7 +1018,7 @@ mod tests {
     fn tag_driven_quoted_null_looking_scalar_is_string_not_null() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(null)))]);
         let docs = parse_docs("value: \"~\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaConst"),
             "quoted '~' is a string, not null — must not match const: null"
@@ -998,7 +1030,7 @@ mod tests {
     fn tag_driven_quoted_bool_looking_scalar_is_string_not_bool() {
         let schema = object_schema_with_props(vec![("value", const_schema(json!(true)))]);
         let docs = parse_docs("value: \"true\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaConst"),
             "quoted 'true' is a string, not bool — must not match const: true"
@@ -1023,7 +1055,7 @@ mod tests {
     ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
         let schema = content_schema_helper(encoding, media_type);
         let docs = parse_docs(text);
-        validate_schema(&docs, &schema, true, YamlVersion::V1_2)
+        validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics
     }
 
     // Tests 187, 189, 191, 193: valid contentEncoding → no diagnostics
@@ -1062,7 +1094,11 @@ mod tests {
         // "\"42\"" parses as YAML string "42", which is valid JSON
         let schema = content_schema_helper(None, Some("application/json"));
         let docs = parse_docs("\"42\"");
-        assert!(validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty());
+        assert!(
+            validate_schema(&docs, &schema, true, YamlVersion::V1_2)
+                .diagnostics
+                .is_empty()
+        );
     }
 
     // contentMediaType application/json: invalid (no encoding)
@@ -1128,7 +1164,7 @@ mod tests {
     fn content_validation_disabled_when_format_validation_off() {
         let schema = content_schema_helper(Some("base64"), Some("application/json"));
         let docs = parse_docs("not-valid-base64!!!");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -1161,7 +1197,9 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"NDI=\"");
         assert!(
-            validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty(),
+            validate_schema(&docs, &schema, true, YamlVersion::V1_2)
+                .diagnostics
+                .is_empty(),
             "valid base64-encoded integer should pass contentSchema validation"
         );
     }
@@ -1176,7 +1214,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"ImhlbGxvIg==\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaType"),
             "string decoded where integer expected should produce schemaType error: {result:?}"
@@ -1194,7 +1232,9 @@ mod tests {
         // The raw YAML value "42" (as a quoted string) should be parsed as YAML integer
         let docs = parse_docs("\"42\"");
         assert!(
-            validate_schema(&docs, &schema, true, YamlVersion::V1_2).is_empty(),
+            validate_schema(&docs, &schema, true, YamlVersion::V1_2)
+                .diagnostics
+                .is_empty(),
             "raw string '42' should validate as integer against contentSchema"
         );
     }
@@ -1208,7 +1248,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(None, None, sub);
         let docs = parse_docs("\"hello\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaType"),
             "string 'hello' should fail integer contentSchema: {result:?}"
@@ -1224,7 +1264,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"not-valid-base64!!!\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         // Should get encoding error but NOT contentSchema type error
         assert!(
             result.iter().any(|d| code_of(d) == "schemaContentEncoding"),
@@ -1245,7 +1285,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(None, Some("application/json"), sub);
         let docs = parse_docs("\"not json at all\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result
                 .iter()
@@ -1280,7 +1320,7 @@ mod tests {
         // base64("name: alice\n") = "bmFtZTogYWxpY2UK"
         let text = "\"bmFtZTogYWxpY2UK\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.is_empty(),
             "embedded YAML mapping should validate: {result:?}"
@@ -1307,7 +1347,7 @@ mod tests {
         // base64("name: 42\n") = "bmFtZTogNDIK"
         let text = "\"bmFtZTogNDIK\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             !result.is_empty(),
             "embedded mapping with integer name should fail string check: {result:?}"
@@ -1324,7 +1364,7 @@ mod tests {
         let schema = content_schema_with_sub(None, None, sub);
         let docs = parse_docs("\"hello\"");
         // format_validation = false → content keywords not checked
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         assert!(
             result.is_empty(),
             "contentSchema should not be checked when format_validation is off: {result:?}"
@@ -1342,7 +1382,7 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let text = "\"eyJrZXkiOiAidmFsdWUifQ==\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.is_empty(),
             "all three checks should pass: {result:?}"
@@ -1360,7 +1400,7 @@ mod tests {
         let schema = content_schema_with_sub(Some("base64"), None, sub);
         let text = "\"OiBiYWQ6IFs=\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             result.iter().any(|d| code_of(d) == "schemaContentSchema"),
             "unparseable decoded YAML should produce schemaContentSchema: {result:?}"
@@ -1377,7 +1417,7 @@ mod tests {
         let schema = content_schema_with_sub(None, None, sub);
         let text = "\"\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         // load("") returns 0 documents — nothing to validate, no diagnostics.
         assert!(
             result.is_empty(),
@@ -1407,7 +1447,7 @@ mod tests {
         // Embedded YAML: value is 42 (integer), but schema expects string
         let text = "\"dmFsdWU6IDQyCg==\"";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(
             !result.is_empty(),
             "nested schema should catch type mismatch: {result:?}"
@@ -1426,7 +1466,7 @@ mod tests {
         };
         let schema = object_schema_with_props(vec![("date", date_schema)]);
         let docs = parse_docs("date: not-a-date");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaFormat")
@@ -1448,7 +1488,7 @@ mod tests {
         };
         let schema = content_schema_with_sub(Some("base64"), Some("application/json"), sub);
         let docs = parse_docs("\"ImhlbGxvIg==\"");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaType")
@@ -1470,7 +1510,7 @@ mod tests {
         };
         let schema = object_schema_with_props(vec![("code", code_schema)]);
         let docs = parse_docs("code: hi");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaMinLength")
@@ -1494,7 +1534,7 @@ mod tests {
             ("c", date_schema),
         ]);
         let docs = parse_docs("a: foo\nb: bar\nc: not-a-date");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaFormat")

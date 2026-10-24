@@ -498,12 +498,13 @@ impl Backend {
 
             if let Some(s) = schema {
                 let format_validation = self.get_format_validation();
-                diagnostics.extend(crate::schema_validation::validate_schema(
+                let validation = crate::schema_validation::validate_schema(
                     documents,
                     &s,
                     format_validation,
                     yaml_version,
-                ));
+                );
+                diagnostics.extend(validation.diagnostics);
             }
         }
     }

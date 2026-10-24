@@ -74,7 +74,52 @@ fn bench_schema_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("schema_validation");
     for (name, text, docs) in &parsed {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, _text| {
-            b.iter(|| validate_schema(docs, &schema, false, YamlVersion::V1_2));
+            b.iter(|| validate_schema(docs, &schema, false, YamlVersion::V1_2).diagnostics);
+        });
+    }
+    group.finish();
+}
+
+/// Schema validation against a wide `anyOf` / `oneOf`.
+///
+/// Each of the 100 branches requires a field the document lacks, so validation
+/// probes every branch. The `exhausted` case adds `unevaluatedProperties` under
+/// nested compositions that outgrow the step budget, measuring the cost of
+/// stopping at it.
+fn bench_composition_validation(c: &mut Criterion) {
+    let branches: Vec<serde_json::Value> = (0..100)
+        .map(|i| serde_json::json!({ "required": [format!("field_{i}")] }))
+        .collect();
+    let nested = (0..4).fold(
+        serde_json::json!({ "required": ["missing"] }),
+        |inner, _| {
+            serde_json::json!({
+                "anyOf": vec![inner; 8],
+                "unevaluatedProperties": false
+            })
+        },
+    );
+    let cases = [
+        (
+            "any_of_100_branches",
+            serde_json::json!({ "anyOf": branches }),
+        ),
+        (
+            "one_of_100_branches",
+            serde_json::json!({ "oneOf": branches }),
+        ),
+        ("budget_exhausted", nested),
+    ];
+    let docs: Vec<Document<Span>> =
+        rlsp_yaml_parser::load("name: demo\nreplicas: 3\n").unwrap_or_default();
+
+    let mut group = c.benchmark_group("composition_validation");
+    for (name, raw) in &cases {
+        let Some(schema) = rlsp_yaml::schema::parse_schema(raw) else {
+            continue;
+        };
+        group.bench_with_input(BenchmarkId::from_parameter(name), &schema, |b, schema| {
+            b.iter(|| validate_schema(&docs, schema, false, YamlVersion::V1_2).diagnostics);
         });
     }
     group.finish();
@@ -107,6 +152,7 @@ criterion_group!(
     benches,
     bench_parse_and_validate,
     bench_schema_validation,
+    bench_composition_validation,
     bench_formatter
 );
 criterion_main!(benches);

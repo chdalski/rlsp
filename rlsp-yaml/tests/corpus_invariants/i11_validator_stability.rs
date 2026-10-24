@@ -34,7 +34,7 @@ pub fn i11_collect_diagnostics(
         &ValidationSettings::default(),
     ));
     all.extend(validate_yaml11_compat(docs));
-    all.extend(validate_schema(docs, schema, false, YamlVersion::V1_2));
+    all.extend(validate_schema(docs, schema, false, YamlVersion::V1_2).diagnostics);
     all
 }
 

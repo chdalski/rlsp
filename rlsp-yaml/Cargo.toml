@@ -10,6 +10,7 @@ repository.workspace = true
 homepage = "https://github.com/chdalski/rlsp"
 keywords = ["yaml", "lsp", "language-server"]
 categories = ["development-tools", "text-editors"]
+exclude = ["tests/fixtures/schemas/"]
 
 [lints]
 workspace = true

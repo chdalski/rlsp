@@ -230,3 +230,82 @@ async fn should_exercise_schema_lookup_in_completion() {
         "completion response should have a result field"
     );
 }
+
+// ---- composition branches beyond the twentieth ----
+//
+// Validation once looked at only the first 20 `allOf`/`anyOf`/`oneOf` branches
+// of a schema node. These tests seed a 25-branch schema and open a document
+// through the full LSP pipeline.
+
+const MANY_BRANCHES_SCHEMA_URL: &str = "https://example.com/many-branches.json";
+
+/// A schema whose `keyword` holds 25 branches, branch `i` requiring `field_i`.
+fn many_branches_schema(keyword: &str) -> rlsp_yaml::schema::JsonSchema {
+    let branches: Vec<_> = (0..25)
+        .map(|i| json!({ "required": [format!("field_{i}")] }))
+        .collect();
+    rlsp_yaml::schema::parse_schema(&json!({ keyword: branches }))
+        .expect("many_branches_schema: parse failed")
+}
+
+async fn diagnostic_messages(keyword: &str, document: &str) -> Vec<String> {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    service
+        .inner()
+        .seed_schema_cache(MANY_BRANCHES_SCHEMA_URL, many_branches_schema(keyword));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/many-branches.yaml";
+    let text = format!("# yaml-language-server: $schema={MANY_BRANCHES_SCHEMA_URL}\n{document}");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist")
+        .into_iter()
+        .map(|d| d.message)
+        .collect()
+}
+
+#[tokio::test]
+async fn should_report_diagnostic_from_all_of_branch_beyond_the_twentieth() {
+    // field_0..field_23 are present; only branch 25 (field_24) is unsatisfied.
+    let document = (0..24)
+        .map(|i| format!("field_{i}: x\n"))
+        .collect::<Vec<_>>()
+        .concat();
+
+    let messages = diagnostic_messages("allOf", &document).await;
+
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("missing required property 'field_24'")),
+        "expected the 25th allOf branch to report field_24; got: {messages:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_accept_document_matching_only_the_twenty_fifth_any_of_branch() {
+    let messages = diagnostic_messages("anyOf", "field_24: x\n").await;
+
+    assert!(
+        !messages.iter().any(|m| m.contains("anyOf")),
+        "the 25th anyOf branch matches; got: {messages:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_accept_document_matching_only_the_twenty_fifth_one_of_branch() {
+    let messages = diagnostic_messages("oneOf", "field_24: x\n").await;
+
+    assert!(
+        !messages.iter().any(|m| m.contains("oneOf")),
+        "the 25th oneOf branch matches; got: {messages:?}"
+    );
+}

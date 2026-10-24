@@ -9,6 +9,8 @@ use crate::schema::JsonSchema;
 use crate::server::YamlVersion;
 
 mod array_constraints;
+#[cfg(test)]
+mod budget_tests;
 mod composition;
 mod context;
 mod formats;
@@ -17,7 +19,7 @@ mod scalar_constraints;
 mod support;
 mod type_validation;
 
-use context::{Ctx, Mode};
+use context::{Budget, Ctx, MAX_DIAGNOSTICS, Mode, step_budget};
 use support::{
     MAX_ENUM_DISPLAY, MAX_VALIDATION_DEPTH, format_path, make_diagnostic, node_loc, yaml_to_json,
 };
@@ -26,19 +28,57 @@ use support::{
 // Public API
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Validate `docs` (parsed YAML ASTs) against `schema` and return diagnostics.
+/// Whether a validation run examined everything it was asked to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Completeness {
+    /// Every document was validated in full.
+    Complete,
+    /// The run ran out of steps, or reached the diagnostic limit, and stopped
+    /// early. Diagnostics found before that point stand; checks that depended on
+    /// unfinished work report nothing.
+    StoppedEarly,
+}
+
+/// The outcome of [`validate_schema`].
+#[derive(Debug)]
+pub struct Validation {
+    /// Everything found before the run finished or stopped.
+    pub diagnostics: Vec<Diagnostic>,
+    /// Whether the run covered all of its input.
+    pub completeness: Completeness,
+}
+
+/// Validate `docs` (parsed YAML ASTs) against `schema`.
 ///
 /// Each element of `docs` is one YAML document (separated by `---`).
 /// `format_validation` controls whether the `format` keyword is validated.
 /// `yaml_version` is used to suppress YAML 1.1 compatibility warnings when the
 /// user has explicitly opted into 1.1 semantics.
+///
+/// All documents share one step budget sized from the documents' node count, so
+/// a hostile schema cannot make the run cost more than a fixed multiple of the
+/// input, and the run returns at most `MAX_DIAGNOSTICS` diagnostics. The
+/// returned [`Completeness`] says whether either limit stopped it.
 #[must_use]
 pub fn validate_schema(
     docs: &[Document<Span>],
     schema: &JsonSchema,
     format_validation: bool,
     yaml_version: YamlVersion,
-) -> Vec<Diagnostic> {
+) -> Validation {
+    let budget = Budget::new(step_budget(docs));
+    validate_documents(docs, schema, format_validation, yaml_version, &budget)
+}
+
+/// [`validate_schema`] with an explicit `budget`, so tests can pick its size and
+/// read back what the run spent.
+fn validate_documents(
+    docs: &[Document<Span>],
+    schema: &JsonSchema,
+    format_validation: bool,
+    yaml_version: YamlVersion,
+    budget: &Budget,
+) -> Validation {
     let mut diagnostics = Vec::new();
 
     for doc in docs {
@@ -47,11 +87,27 @@ pub fn validate_schema(
             format_validation,
             yaml_version,
             doc.line_index(),
+            budget,
         );
         validate_node(&doc.root, schema, &[], &mut ctx, 0);
     }
 
-    diagnostics
+    // A node can record many diagnostics at once, so the entry check in
+    // `validate_node` alone can overshoot the limit.
+    if diagnostics.len() > MAX_DIAGNOSTICS {
+        diagnostics.truncate(MAX_DIAGNOSTICS);
+        budget.exhaust();
+    }
+
+    let completeness = if budget.is_exhausted() {
+        Completeness::StoppedEarly
+    } else {
+        Completeness::Complete
+    };
+    Validation {
+        diagnostics,
+        completeness,
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -69,7 +125,15 @@ fn validate_node(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
-    if depth > MAX_VALIDATION_DEPTH || ctx.probe_decided() {
+    if depth > MAX_VALIDATION_DEPTH {
+        ctx.undecided = true;
+        return;
+    }
+    if ctx.mode == Mode::Report && ctx.diagnostics.len() >= MAX_DIAGNOSTICS {
+        ctx.budget.exhaust();
+        return;
+    }
+    if ctx.probe_decided() || !ctx.budget.spend(1) {
         return;
     }
 
@@ -79,8 +143,9 @@ fn validate_node(
         return;
     }
 
-    // Enum check
+    // Enum check. The value is compared with each listed one.
     if let Some(enum_values) = &schema.enum_values
+        && ctx.budget.spend_work(enum_values.len())
         && let Some(yaml_val) = yaml_to_json(node)
         && !enum_values.contains(&yaml_val)
     {
@@ -154,27 +219,69 @@ fn validate_node(
     }
 }
 
-/// Whether `node` validates against `schema` without a single diagnostic.
+/// How a probe ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    /// Validated without a single diagnostic.
+    Passes,
+    /// Recorded a diagnostic.
+    Fails,
+    /// Recorded no diagnostic, but skipped checks it could not finish: its
+    /// silence is not a pass.
+    Undecided,
+}
+
+/// Passing probes counted over a run of branches or items.
+struct Tally {
+    passing: usize,
+    /// Some probe was undecided, so `passing` may undercount.
+    undecided: bool,
+}
+
+fn tally(outcomes: impl Iterator<Item = Probe>) -> Tally {
+    outcomes.fold(
+        Tally {
+            passing: 0,
+            undecided: false,
+        },
+        |tally, outcome| Tally {
+            passing: tally.passing + usize::from(outcome == Probe::Passes),
+            undecided: tally.undecided || outcome == Probe::Undecided,
+        },
+    )
+}
+
+/// Probe whether `node` validates against `schema`.
 ///
-/// Validates into a scratch context that inherits `ctx`'s options and stops at
-/// the first diagnostic, so nothing reaches `ctx.diagnostics`.
+/// Validates into a scratch context that inherits `ctx`'s options and budget and
+/// stops at the first diagnostic, so nothing reaches `ctx.diagnostics`. A caller
+/// that gets [`Probe::Undecided`] must set `ctx.undecided`, so an enclosing probe
+/// does not read the missing diagnostic as a pass.
 fn probe_passes(
     node: &Node<Span>,
     schema: &JsonSchema,
     path: &[String],
     ctx: &Ctx<'_>,
     depth: usize,
-) -> bool {
+) -> Probe {
     let mut scratch = Vec::new();
     let mut probe = Ctx::new(
         &mut scratch,
         ctx.format_validation,
         ctx.yaml_version,
         ctx.idx,
+        ctx.budget,
     )
     .with_mode(Mode::Probe);
     validate_node(node, schema, path, &mut probe, depth);
-    scratch.is_empty()
+    let undecided = probe.undecided;
+    if !scratch.is_empty() {
+        Probe::Fails
+    } else if undecided || ctx.budget.is_exhausted() {
+        Probe::Undecided
+    } else {
+        Probe::Passes
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -209,7 +316,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("server", server_schema)]);
         let text = "server:\n  port: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -240,7 +347,7 @@ mod tests {
         };
         let text = "a:\n  b:\n    c:\n      d: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &l1, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &l1, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -276,7 +383,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert!(
             result
@@ -314,7 +421,7 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -330,7 +437,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         let ap_diags: Vec<_> = result
             .iter()
             .filter(|d| code_of(d) == "schemaAdditionalProperty")
@@ -366,7 +473,7 @@ mod tests {
     )]
     fn violation_produces_error_severity(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -379,7 +486,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         let ap = result
             .iter()
             .find(|d| code_of(d) == "schemaAdditionalProperty")
@@ -397,7 +504,7 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -416,7 +523,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(msg.contains("prod"), "message should contain 'prod'");
@@ -434,7 +541,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -444,7 +551,7 @@ mod tests {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
         };
-        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -452,7 +559,7 @@ mod tests {
     fn should_return_empty_for_schema_with_no_constraints() {
         let schema = JsonSchema::default();
         let docs = parse_docs("anything: value\nnested:\n  key: 123");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -463,7 +570,7 @@ mod tests {
             ..JsonSchema::default()
         };
         // Simulate parse failure by passing empty docs slice
-        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -475,7 +582,7 @@ mod tests {
         };
         let text = "name: Alice\n---\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         // Second document is missing "name"
         assert_eq!(
             result
@@ -493,7 +600,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("anything: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -501,101 +608,88 @@ mod tests {
     // Security: Recursion / Depth Guard
     // ══════════════════════════════════════════════════════════════════════════
 
-    #[test]
-    fn should_complete_without_panic_for_deeply_nested_yaml_and_schema() {
-        // Build 100 levels of nested object schemas
-        let mut schema = JsonSchema {
-            schema_type: Some(SchemaType::Single("object".to_string())),
-            ..JsonSchema::default()
-        };
-        for _ in 0..100 {
-            schema = JsonSchema {
-                schema_type: Some(SchemaType::Single("object".to_string())),
-                properties: Some([("child".to_string(), schema)].into()),
-                ..JsonSchema::default()
-            };
-        }
-        // Build matching YAML with 100 levels of nesting
-        let mut text = String::new();
-        for i in 0..100 {
-            for _ in 0..i {
-                text.push_str("  ");
-            }
-            text.push_str("child:\n");
-        }
-        let docs = parse_docs(&text);
-        // Must return without panicking — result content doesn't matter
-        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-    }
-
-    #[test]
-    fn should_not_recurse_past_depth_limit() {
-        // Build 70 levels of nested properties with a string type leaf
+    // Nesting beyond MAX_VALIDATION_DEPTH is cut off without a panic. The cut is
+    // a depth limit, not budget exhaustion, so the run still reports Complete.
+    #[rstest]
+    #[case::just_past_depth_limit(70)]
+    #[case::far_past_depth_limit(100)]
+    fn nesting_past_depth_limit_completes_without_panic(#[case] levels: usize) {
         let mut schema = string_schema();
-        for _ in 0..70 {
+        for _ in 0..levels {
             schema = JsonSchema {
                 schema_type: Some(SchemaType::Single("object".to_string())),
                 properties: Some([("child".to_string(), schema)].into()),
                 ..JsonSchema::default()
             };
         }
-        // Build YAML where the leaf value is an integer (type mismatch)
+        // Matching YAML whose leaf value is an integer (type mismatch)
         let mut text = String::new();
-        for i in 0..70 {
-            for _ in 0..i {
-                text.push_str("  ");
-            }
+        for i in 0..levels {
+            text.push_str(&"  ".repeat(i));
             text.push_str("child:\n");
         }
-        for _ in 0..70 {
-            text.push_str("  ");
-        }
+        text.push_str(&"  ".repeat(levels));
         text.push_str("42\n");
         let docs = parse_docs(&text);
-        // Must return without panicking — depth guard may suppress leaf-level error
-        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.completeness, Completeness::Complete);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Security: Composition Branch Limits
+    // Composition branches are all evaluated
     // ══════════════════════════════════════════════════════════════════════════
 
-    #[test]
-    fn should_complete_in_bounded_time_for_one_of_with_many_alternatives() {
-        // 50 branches, each requiring a unique field not present in the YAML
-        let branches: Vec<JsonSchema> = (0..50)
+    // Each branch requires a field the document lacks.
+    fn required_field_branches(count: usize) -> Vec<JsonSchema> {
+        (0..count)
             .map(|i| JsonSchema {
                 required: Some(vec![format!("field_{i}")]),
                 ..JsonSchema::default()
             })
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn fifty_failing_one_of_branches_report_one_diagnostic_naming_all_fifty() {
         let schema = JsonSchema {
-            one_of: Some(branches),
+            one_of: Some(required_field_branches(50)),
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        // Must return (not hang) — result content doesn't matter
-        let _result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        assert_eq!(result.completeness, Completeness::Complete);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0].message.contains("50 oneOf"),
+            "message: {}",
+            result.diagnostics[0].message
+        );
     }
 
     #[test]
-    fn should_complete_for_all_of_with_many_branches() {
-        // 25 branches, each requiring a unique field
-        let branches: Vec<JsonSchema> = (0..25)
-            .map(|i| JsonSchema {
-                required: Some(vec![format!("field_{i}")]),
-                ..JsonSchema::default()
-            })
-            .collect();
+    fn all_of_reports_a_diagnostic_for_every_unsatisfied_branch() {
         let schema = JsonSchema {
-            all_of: Some(branches),
+            all_of: Some(required_field_branches(25)),
             ..JsonSchema::default()
         };
-        // Only field_0 is present — all other branches unsatisfied
+        // Only field_0 is present — the other 24 branches are unsatisfied
         let docs = parse_docs("field_0: value");
         let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
-        // Non-empty: at least one diagnostic for unsatisfied branches
-        assert!(!result.is_empty());
+        assert_eq!(result.completeness, Completeness::Complete);
+        let missing: Vec<&str> = result
+            .diagnostics
+            .iter()
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(missing.len(), 24, "diagnostics: {missing:?}");
+        for i in 1..25 {
+            assert!(
+                missing
+                    .iter()
+                    .any(|m| m.contains(&format!("required property 'field_{i}'"))),
+                "no diagnostic for field_{i}: {missing:?}"
+            );
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -620,7 +714,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         // Message must not contain the full 1000-char description
         for d in &result {
@@ -645,7 +739,7 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: invalid");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaEnum");
         // Message must be bounded — 50 values * ~6 chars each would be ~300+
@@ -668,7 +762,7 @@ mod tests {
         };
         let schema = object_schema_with_props(vec![("env", env_schema)]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaEnum")
@@ -688,11 +782,13 @@ mod tests {
         let schema = crate::schema::parse_schema(raw_schema).expect("valid schema");
         let docs = parse_docs(text);
         let mut diagnostics = Vec::new();
+        let budget = Budget::new(usize::MAX);
         let mut ctx = Ctx::new(
             &mut diagnostics,
             true,
             YamlVersion::V1_2,
             docs[0].line_index(),
+            &budget,
         )
         .with_mode(mode);
         validate_node(&docs[0].root, &schema, &[], &mut ctx, 0);

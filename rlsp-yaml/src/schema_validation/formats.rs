@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-use regex::RegexBuilder;
-
-use super::support::{MAX_PATTERN_LEN, REGEX_SIZE_LIMIT};
-
 /// RFC 3339 full date-time: `YYYY-MM-DDTHH:MM:SS[.frac](Z|+HH:MM|-HH:MM)`.
 pub(super) fn is_valid_date_time(s: &str) -> bool {
     // Split on 'T' or 't'
@@ -361,17 +357,6 @@ pub(super) fn is_valid_uuid(s: &str) -> bool {
     })
 }
 
-/// Validate a JSON Schema `regex` value by trying to compile it with the `regex` crate.
-pub(super) fn is_valid_regex(s: &str) -> bool {
-    if s.len() > MAX_PATTERN_LEN {
-        return false;
-    }
-    RegexBuilder::new(s)
-        .size_limit(REGEX_SIZE_LIMIT)
-        .build()
-        .is_ok()
-}
-
 /// JSON Pointer (RFC 6901): empty string or starts with `/`.
 /// Each token may not contain unescaped `~` (must be `~0` or `~1`).
 pub(super) fn is_valid_json_pointer(s: &str) -> bool {
@@ -463,7 +448,7 @@ mod tests {
     fn run_format(text: &str, fmt: &str) -> Vec<Diagnostic> {
         let schema = format_schema(fmt);
         let docs = parse_docs(text);
-        validate_schema(&docs, &schema, true, YamlVersion::V1_2)
+        validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -694,7 +679,7 @@ mod tests {
     fn format_validation_disabled_produces_no_format_diagnostics() {
         let schema = format_schema("date");
         let docs = parse_docs("not-a-date");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 }
