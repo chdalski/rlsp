@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::HashSet;
+use std::ops::ControlFlow;
 
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTag, Documentation, InsertTextFormat,
@@ -12,7 +13,7 @@ use crate::schema::{JsonSchema, SchemaType};
 use super::formatting::{
     json_value_to_yaml_label, truncate_description, truncate_enum_label, type_label,
 };
-use super::support::{MAX_BRANCH_COUNT, MAX_COMPLETION_ITEMS};
+use super::support::MAX_COMPLETION_ITEMS;
 
 /// Walk the schema tree following `path`, returning the sub-schema at that
 /// path if it exists. Returns `None` when the path exceeds the schema depth.
@@ -37,24 +38,43 @@ pub(super) fn resolve_schema_path<'a>(
         return resolve_schema_path(prop_schema, rest);
     }
 
-    // Walk composition branches (capped).
+    // Walk composition branches.
     [&schema.all_of, &schema.any_of, &schema.one_of]
         .into_iter()
         .flatten()
         .flat_map(|v| v.iter())
-        .take(MAX_BRANCH_COUNT)
         .find_map(|branch| resolve_schema_path(branch, path))
+}
+
+/// Visit every property `schema` offers, directly and through `allOf`,
+/// `anyOf` and `oneOf` branches, until `visit` breaks.
+///
+/// Own properties come first, then each branch list in that order, depth
+/// first. The walk is linear in the schema tree, so it needs no limit of its
+/// own: the schema parser bounds the tree's nesting depth, which bounds the
+/// recursion here.
+fn walk_properties<'a>(
+    schema: &'a JsonSchema,
+    visit: &mut impl FnMut(&'a str, &'a JsonSchema) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    if let Some(props) = &schema.properties {
+        for (key, prop_schema) in props {
+            visit(key, prop_schema)?;
+        }
+    }
+    for branch in [&schema.all_of, &schema.any_of, &schema.one_of]
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        walk_properties(branch, visit)?;
+    }
+    ControlFlow::Continue(())
 }
 
 /// Return true if the schema has any properties to suggest (direct or via composition).
 pub(super) fn schema_has_properties(schema: &JsonSchema) -> bool {
-    if schema.properties.as_ref().is_some_and(|p| !p.is_empty()) {
-        return true;
-    }
-    [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-        .any(|branch_list| branch_list.iter().any(schema_has_properties))
+    walk_properties(schema, &mut |_, _| ControlFlow::Break(())).is_break()
 }
 
 /// Produce key completion items from a resolved schema, excluding already-present keys.
@@ -63,7 +83,7 @@ pub(super) fn schema_key_completions(
     present: &HashSet<String>,
 ) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
-    collect_schema_properties(schema, present, &mut items, 0);
+    collect_schema_properties(schema, present, &mut items);
 
     // If 2+ required properties are missing, offer a snippet that inserts them all at once.
     if let Some(required) = &schema.required {
@@ -120,94 +140,59 @@ fn snippet_default(schema: &JsonSchema) -> &'static str {
     }
 }
 
-/// Recursively collect property names from a schema and its composition branches.
+/// Collect completion items for the properties of a schema and its composition
+/// branches, stopping once `MAX_COMPLETION_ITEMS` items exist.
 pub(super) fn collect_schema_properties(
     schema: &JsonSchema,
     present: &HashSet<String>,
     items: &mut Vec<CompletionItem>,
-    depth: usize,
 ) {
-    if depth >= MAX_BRANCH_COUNT {
-        return;
-    }
-
-    if let Some(props) = &schema.properties {
-        for (key, prop_schema) in props {
-            if present.contains(key.as_str()) {
-                continue;
-            }
-            if items.len() >= MAX_COMPLETION_ITEMS {
-                return;
-            }
-            let detail = type_label(prop_schema);
-            let documentation = prop_schema.description.as_deref().map(|d| {
-                Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: truncate_description(d),
-                })
-            });
-            let (tags, sort_text) = if prop_schema.deprecated == Some(true) {
-                (
-                    Some(vec![CompletionItemTag::DEPRECATED]),
-                    Some(format!("~{key}")),
-                )
-            } else {
-                (None, None)
-            };
-            items.push(CompletionItem {
-                label: key.clone(),
-                kind: Some(CompletionItemKind::FIELD),
-                detail,
-                documentation,
-                tags,
-                sort_text,
-                ..CompletionItem::default()
-            });
+    let _ = walk_properties(schema, &mut |key, prop_schema| {
+        if present.contains(key) {
+            return ControlFlow::Continue(());
         }
-    }
-
-    // Walk composition branches, capped.
-    let branch_lists = [&schema.all_of, &schema.any_of, &schema.one_of];
-    let mut branch_count = 0;
-    for branch_list in branch_lists.into_iter().flatten() {
-        for branch in branch_list {
-            if branch_count >= MAX_BRANCH_COUNT {
-                return;
-            }
-            collect_schema_properties(branch, present, items, depth + 1);
-            branch_count += 1;
+        let detail = type_label(prop_schema);
+        let documentation = prop_schema.description.as_deref().map(|d| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: truncate_description(d),
+            })
+        });
+        let (tags, sort_text) = if prop_schema.deprecated == Some(true) {
+            (
+                Some(vec![CompletionItemTag::DEPRECATED]),
+                Some(format!("~{key}")),
+            )
+        } else {
+            (None, None)
+        };
+        items.push(CompletionItem {
+            label: key.to_string(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail,
+            documentation,
+            tags,
+            sort_text,
+            ..CompletionItem::default()
+        });
+        if items.len() >= MAX_COMPLETION_ITEMS {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
         }
-    }
+    });
 }
 
 /// Return the set of all property names defined in a schema (direct + composition branches).
 pub(super) fn collect_schema_properties_keys(schema: &JsonSchema) -> HashSet<String> {
     let mut keys = HashSet::new();
-    collect_schema_properties_keys_inner(schema, &mut keys, 0);
+    let _ = walk_properties(schema, &mut |key, _| {
+        if !keys.contains(key) {
+            keys.insert(key.to_string());
+        }
+        ControlFlow::Continue(())
+    });
     keys
-}
-
-fn collect_schema_properties_keys_inner(
-    schema: &JsonSchema,
-    keys: &mut HashSet<String>,
-    depth: usize,
-) {
-    if depth >= MAX_BRANCH_COUNT {
-        return;
-    }
-    if let Some(props) = &schema.properties {
-        for key in props.keys() {
-            keys.insert(key.clone());
-        }
-    }
-    for branch_list in [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-    {
-        for branch in branch_list {
-            collect_schema_properties_keys_inner(branch, keys, depth + 1);
-        }
-    }
 }
 
 /// Produce value completion items from a schema (enum values or boolean type).
@@ -422,6 +407,282 @@ mod tests {
     fn collect_schema_properties_keys_empty_schema() {
         let keys = collect_schema_properties_keys(&JsonSchema::default());
         assert!(keys.is_empty(), "empty schema should produce empty key set");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Property walk over composition branches without a branch or depth limit
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// `count` branches; branch `i` defines the single property `field_{i}`.
+    fn field_branches(count: usize) -> Vec<JsonSchema> {
+        (0..count)
+            .map(|i| object_schema(vec![(&format!("field_{i}"), string_schema())]))
+            .collect()
+    }
+
+    /// Wrap `schema` in `depth` levels of single-branch `allOf`.
+    fn nest_in_all_of(schema: JsonSchema, depth: usize) -> JsonSchema {
+        (0..depth).fold(schema, |inner, _| JsonSchema {
+            all_of: Some(vec![inner]),
+            ..JsonSchema::default()
+        })
+    }
+
+    fn all_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            all_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn any_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            any_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn one_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            one_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// The `type` of the schema `path` resolves to, to tell resolved schemas apart.
+    fn resolved_type(schema: &JsonSchema, path: &[&str]) -> Option<String> {
+        let path: Vec<String> = path.iter().map(ToString::to_string).collect();
+        match resolve_schema_path(schema, &path)?.schema_type.as_ref()? {
+            SchemaType::Single(t) => Some(t.clone()),
+            SchemaType::Multiple(_) => None,
+        }
+    }
+
+    fn item_labels(items: &[CompletionItem]) -> Vec<&str> {
+        items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+            .map(|i| i.label.as_str())
+            .collect()
+    }
+
+    #[rstest]
+    #[case::any_of(any_of)]
+    #[case::one_of(one_of)]
+    fn schema_has_properties_finds_property_in_branch_beyond_twenty(
+        #[case] compose: fn(Vec<JsonSchema>) -> JsonSchema,
+    ) {
+        let mut branches = vec![JsonSchema::default(); 24];
+        branches.push(object_schema(vec![("late", string_schema())]));
+
+        assert!(schema_has_properties(&compose(branches)));
+    }
+
+    #[test]
+    fn schema_has_properties_is_false_when_no_branch_has_properties() {
+        assert!(!schema_has_properties(&any_of(vec![
+            JsonSchema::default();
+            25
+        ])));
+    }
+
+    #[test]
+    fn collect_schema_properties_keys_includes_branches_beyond_twenty() {
+        let keys = collect_schema_properties_keys(&all_of(field_branches(30)));
+
+        assert_eq!(keys.len(), 30);
+        assert!(keys.contains("field_0"));
+        assert!(keys.contains("field_29"));
+    }
+
+    #[test]
+    fn collect_schema_properties_keys_includes_nesting_beyond_twenty_levels() {
+        let schema = nest_in_all_of(object_schema(vec![("leaf", string_schema())]), 30);
+
+        assert!(collect_schema_properties_keys(&schema).contains("leaf"));
+    }
+
+    #[test]
+    fn schema_key_completions_walk_own_properties_then_each_composition_list_in_order() {
+        let schema = JsonSchema {
+            all_of: Some(vec![
+                all_of(vec![object_schema(vec![("inner", string_schema())])]),
+                object_schema(vec![("sibling", string_schema())]),
+            ]),
+            any_of: Some(vec![object_schema(vec![("from_any_of", string_schema())])]),
+            one_of: Some(vec![object_schema(vec![("from_one_of", string_schema())])]),
+            ..object_schema(vec![("own", string_schema())])
+        };
+
+        let items = schema_key_completions(&schema, &HashSet::new());
+
+        assert_eq!(
+            item_labels(&items),
+            ["own", "inner", "sibling", "from_any_of", "from_one_of"]
+        );
+    }
+
+    #[test]
+    fn schema_key_completions_stop_at_max_completion_items_across_branches() {
+        let branch = |prefix: &str| {
+            object_schema(
+                (0..60)
+                    .map(|i| (format!("{prefix}_{i}"), string_schema()))
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.clone()))
+                    .collect(),
+            )
+        };
+        let schema = all_of(vec![
+            branch("first"),
+            branch("second"),
+            object_schema(vec![("never_reached", string_schema())]),
+        ]);
+
+        let items = schema_key_completions(&schema, &HashSet::new());
+        let labels = item_labels(&items);
+
+        assert_eq!(labels.len(), MAX_COMPLETION_ITEMS);
+        assert_eq!(
+            labels.iter().filter(|l| l.starts_with("first_")).count(),
+            60
+        );
+        assert_eq!(
+            labels.iter().filter(|l| l.starts_with("second_")).count(),
+            40
+        );
+        assert!(!labels.contains(&"never_reached"));
+    }
+
+    #[test]
+    fn schema_key_completions_skipped_present_keys_do_not_count_toward_the_cut() {
+        let present: HashSet<String> = (0..MAX_COMPLETION_ITEMS)
+            .map(|i| format!("skipped_{i}"))
+            .collect();
+        let skipped: Vec<(String, JsonSchema)> = present
+            .iter()
+            .map(|k| (k.clone(), string_schema()))
+            .collect();
+        let schema = all_of(vec![
+            object_schema(
+                skipped
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.clone()))
+                    .collect(),
+            ),
+            object_schema(vec![("tail", string_schema())]),
+        ]);
+
+        let items = schema_key_completions(&schema, &present);
+
+        assert_eq!(item_labels(&items), ["tail"]);
+    }
+
+    #[test]
+    fn schema_key_completions_keep_a_key_defined_in_two_branches_twice() {
+        let schema = all_of(vec![
+            object_schema(vec![("dup", string_schema())]),
+            object_schema(vec![("dup", string_schema())]),
+        ]);
+
+        let items = schema_key_completions(&schema, &HashSet::new());
+
+        assert_eq!(item_labels(&items), ["dup", "dup"]);
+    }
+
+    #[test]
+    fn schema_key_completions_are_empty_when_every_branch_is_empty() {
+        let schema = all_of(vec![JsonSchema::default(); 3]);
+
+        assert!(schema_key_completions(&schema, &HashSet::new()).is_empty());
+    }
+
+    #[rstest]
+    #[case::all_of(all_of)]
+    #[case::any_of(any_of)]
+    #[case::one_of(one_of)]
+    fn resolve_schema_path_finds_key_in_branch_beyond_twenty(
+        #[case] compose: fn(Vec<JsonSchema>) -> JsonSchema,
+    ) {
+        let mut branches = vec![JsonSchema::default(); 25];
+        branches.push(object_schema(vec![("target", integer_schema())]));
+        let schema = compose(branches);
+
+        assert_eq!(
+            resolved_type(&schema, &["target"]).as_deref(),
+            Some("integer")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_continues_into_a_late_branch_for_a_multi_segment_path() {
+        let late = object_schema(vec![("a", object_schema(vec![("b", boolean_schema())]))]);
+        let mut branches = vec![JsonSchema::default(); 25];
+        branches.push(nest_in_all_of(late, 1));
+        let schema = all_of(branches);
+
+        assert_eq!(
+            resolved_type(&schema, &["a", "b"]).as_deref(),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_continues_to_next_branch_when_earlier_branch_dead_ends() {
+        let schema = all_of(vec![
+            object_schema(vec![("a", object_schema(vec![("x", string_schema())]))]),
+            object_schema(vec![("a", object_schema(vec![("b", boolean_schema())]))]),
+        ]);
+
+        assert_eq!(
+            resolved_type(&schema, &["a", "b"]).as_deref(),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_prefers_direct_property_then_all_of_over_one_of() {
+        let schema = JsonSchema {
+            all_of: Some(vec![object_schema(vec![("k", integer_schema())])]),
+            one_of: Some(vec![object_schema(vec![("k", boolean_schema())])]),
+            ..object_schema(vec![("direct", string_schema()), ("k", string_schema())])
+        };
+        assert_eq!(resolved_type(&schema, &["k"]).as_deref(), Some("string"));
+
+        let without_direct = JsonSchema {
+            properties: None,
+            ..schema
+        };
+        assert_eq!(
+            resolved_type(&without_direct, &["k"]).as_deref(),
+            Some("integer")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_is_none_for_a_missing_key_among_many_branches() {
+        let schema = all_of(field_branches(30));
+
+        assert!(resolve_schema_path(&schema, &["missing".to_string()]).is_none());
+    }
+
+    #[test]
+    fn walks_find_properties_in_a_very_deep_and_a_very_wide_schema() {
+        let deep = nest_in_all_of(object_schema(vec![("leaf", string_schema())]), 500);
+        let mut wide_branches = vec![JsonSchema::default(); 5_000];
+        wide_branches.push(object_schema(vec![("leaf", string_schema())]));
+        let wide = all_of(wide_branches);
+
+        for schema in [&deep, &wide] {
+            assert!(schema_has_properties(schema));
+            assert!(collect_schema_properties_keys(schema).contains("leaf"));
+            assert_eq!(
+                item_labels(&schema_key_completions(schema, &HashSet::new())),
+                ["leaf"]
+            );
+            assert_eq!(resolved_type(schema, &["leaf"]).as_deref(), Some("string"));
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1001,31 +1262,19 @@ mod tests {
     }
 
     #[test]
-    fn should_cap_allof_branch_walking_at_max_branch_count() {
-        let branches: Vec<JsonSchema> = (0..30)
-            .map(|i| JsonSchema {
-                properties: Some(
-                    std::iter::once((format!("field_{i}"), JsonSchema::default())).collect(),
-                ),
-                ..JsonSchema::default()
-            })
-            .collect();
-        let schema = JsonSchema {
-            all_of: Some(branches),
-            ..JsonSchema::default()
-        };
+    fn should_offer_keys_from_every_allof_branch_without_a_branch_cap() {
+        let schema = all_of(field_branches(30));
         let text = "irrelevant: x\n";
         let docs = parse_docs(text);
         let result = complete_at(&docs, pos(0, 0), Some(&schema));
 
-        let schema_prop_count = result
-            .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
-            .count();
-        assert!(
-            schema_prop_count <= 20,
-            "at most 20 allOf branches should be walked, got {schema_prop_count} schema props"
+        let labels = item_labels(&result);
+        assert_eq!(
+            labels.len(),
+            30,
+            "all 30 allOf branches should contribute a key, got {labels:?}"
         );
+        assert!(labels.contains(&"field_29"));
     }
 
     #[test]
@@ -1466,7 +1715,7 @@ mod tests {
     }
 
     #[test]
-    fn should_not_panic_when_allof_depth_exceeds_max_branch_count() {
+    fn should_offer_leaf_when_allof_nesting_exceeds_former_depth_limit() {
         fn deep_schema(depth: usize) -> JsonSchema {
             if depth == 0 {
                 return object_schema(vec![("leaf", JsonSchema::default())]);
@@ -1479,7 +1728,9 @@ mod tests {
         let schema = deep_schema(25);
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let _result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+
+        assert!(item_labels(&result).contains(&"leaf"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════

@@ -325,3 +325,101 @@ async fn should_complete_at_sequence_item_key_suggests_sibling_from_other_item()
         "should suggest sibling key 'age' from another item, got: {result_str}"
     );
 }
+
+// ── Completion over schemas with more than 20 composition branches ───────────
+
+const MANY_BRANCHES_SCHEMA_URL: &str = "https://example.com/test-many-branches-completion.json";
+
+/// Complete at (`line`, `character`) in `document` against a schema built
+/// from `all_of_branches`, returning the serialized completion result.
+async fn completion_with_all_of(
+    all_of_branches: Vec<serde_json::Value>,
+    document: &str,
+    line: u32,
+    character: u32,
+) -> String {
+    let schema = parse_schema(&json!({ "type": "object", "allOf": all_of_branches }))
+        .expect("many-branches schema parse failed");
+
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    service
+        .inner()
+        .seed_schema_cache(MANY_BRANCHES_SCHEMA_URL, schema);
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/many-branches-completion.yaml";
+    let text = format!("# yaml-language-server: $schema={MANY_BRANCHES_SCHEMA_URL}\n{document}");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    // The modeline occupies line 0, so the document's lines start at 1.
+    let resp = send(
+        &mut service,
+        completion_request(2, uri, line + 1, character),
+    )
+    .await;
+    let resp = resp.expect("completion should return a response");
+    let result = resp.result().expect("completion should have a result");
+    serde_json::to_string(result).expect("serialize")
+}
+
+/// 25 `allOf` branches: branch `i` (below 24) defines `field_{i}`; the last
+/// branch is `last`.
+fn field_branches_then(last: serde_json::Value) -> Vec<serde_json::Value> {
+    (0..24)
+        .map(|i| json!({ "properties": { format!("field_{i}"): { "type": "string" } } }))
+        .chain(std::iter::once(last))
+        .collect()
+}
+
+#[tokio::test]
+async fn should_complete_top_level_key_defined_in_all_of_branch_beyond_the_twentieth() {
+    let branches = field_branches_then(json!({
+        "properties": { "late_key": { "type": "string" } }
+    }));
+
+    // Blank line after the only key present, inside the top-level mapping.
+    let result_str = completion_with_all_of(branches, "field_0: x\n\n", 1, 0).await;
+
+    assert!(
+        result_str.contains("late_key"),
+        "should offer 'late_key' from branch 25, got: {result_str}"
+    );
+    assert!(
+        result_str.contains("field_1"),
+        "should offer 'field_1' from an early branch, got: {result_str}"
+    );
+    assert!(
+        !result_str.contains("\"field_0\""),
+        "should exclude present key 'field_0', got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_complete_nested_key_when_parent_schema_is_only_reachable_through_branch_beyond_the_twentieth()
+ {
+    let branches = field_branches_then(json!({
+        "properties": {
+            "server": {
+                "type": "object",
+                "properties": {
+                    "host": { "type": "string" },
+                    "port": { "type": "integer" }
+                }
+            }
+        }
+    }));
+
+    let result_str = completion_with_all_of(branches, "server:\n  host: x\n  \n", 2, 2).await;
+
+    assert!(
+        result_str.contains("port"),
+        "should offer 'port' under 'server' from branch 25, got: {result_str}"
+    );
+    assert!(
+        !result_str.contains("\"host\""),
+        "should exclude present key 'host', got: {result_str}"
+    );
+}

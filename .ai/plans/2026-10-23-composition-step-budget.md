@@ -58,7 +58,7 @@ user in the LSP log when validation stopped at that budget.
       diagnostic
 - [x] Task 2: validate every branch within a step budget
 - [x] Task 3: log when validation stopped at the budget
-- [ ] Task 4: complete keys from every branch through one
+- [x] Task 4: complete keys from every branch through one
       property walk
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -218,34 +218,34 @@ through composition — and become one walk. Completion walks
 only the schema, so its cost is linear in the parsed schema
 tree and it needs no budget.
 
-- [ ] The three walks share one property walk; no
+- [x] The three walks share one property walk; no
       branch-count or depth limit remains in `completion`
-- [ ] Key completion offers properties from composition
+- [x] Key completion offers properties from composition
       branches beyond the 20th;
       `should_cap_allof_branch_walking_at_max_branch_count`
       asserts that, and
       `should_not_panic_when_allof_depth_exceeds_max_branch_count`
       carries a name that no longer refers to the removed
       limit
-- [ ] Completion items keep their order, and the
+- [x] Completion items keep their order, and the
       `MAX_COMPLETION_ITEMS` cut is unchanged
-- [ ] Apart from the two tests above, the existing tests of
+- [x] Apart from the two tests above, the existing tests of
       these walks and of key completion pass with their
       assertions unchanged — among them the
       `schema_has_properties_*` and
       `collect_schema_properties_keys_*` tests and the
       `(all required)` snippet tests in
       `schema_completions.rs`
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
       sends completion requests for a document whose seeded
       schema has more than 20 `allOf` branches and asserts
       that a key defined only beyond the 20th branch is
       offered, both at the top level and under a nested key
       whose schema is reachable only through a branch beyond
       the 20th
-- [ ] The feature-log entry for this change also covers
+- [x] The feature-log entry for this change also covers
       completion
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 

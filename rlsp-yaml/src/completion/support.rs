@@ -2,8 +2,6 @@
 
 /// Maximum number of completion items returned.
 pub(super) const MAX_COMPLETION_ITEMS: usize = 100;
-/// Maximum number of allOf/anyOf/oneOf branches walked for property collection.
-pub(super) const MAX_BRANCH_COUNT: usize = 20;
 /// Maximum number of Unicode characters in a description shown in documentation.
 pub(super) const MAX_DESCRIPTION_LEN: usize = 200;
 /// Maximum number of Unicode characters in an enum label.
