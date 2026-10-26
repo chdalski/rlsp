@@ -30,3 +30,12 @@ missing_panics_doc = "warn"
 [workspace.lints.rust]
 warnings = "deny"
 missing_docs = "warn"
+
+# Builds and tests keep line tables for the workspace's crates and no debug info for
+# dependencies: smaller test binaries link faster and need less memory when cargo
+# links several of them in parallel.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
