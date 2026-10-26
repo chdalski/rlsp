@@ -13,6 +13,8 @@ mod completion_items;
 mod cursor_location;
 mod formatting;
 mod navigation;
+#[cfg(test)]
+mod reference_tests;
 mod schema_completions;
 mod support;
 
@@ -37,7 +39,6 @@ pub fn complete_at(
     position: Position,
     schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
-    let schema = schema.map(|s| &s.root);
     let cursor_line = position.line as usize;
     let mut items = match locate_cursor(docs, position) {
         CursorLocation::OutsideAny => Vec::new(),
@@ -63,10 +64,10 @@ pub fn complete_at(
             if let Some(s) = schema {
                 let mut items_path = enclosing_path;
                 items_path.push("[]".to_string());
-                if let Some(items_schema) = resolve_schema_path(s, &items_path)
-                    && schema_has_properties(items_schema)
+                if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
+                    && schema_has_properties(s, items_schema)
                 {
-                    return schema_key_completions(items_schema, &HashSet::new());
+                    return schema_key_completions(s, items_schema, &HashSet::new());
                 }
             }
             keys_to_items(
@@ -83,10 +84,10 @@ pub fn complete_at(
                 present_keys(mapping, cursor_line, d.line_index())
             });
             if let Some(s) = schema
-                && let Some(resolved_schema) = resolve_schema_path(s, &enclosing_path)
-                && schema_has_properties(resolved_schema)
+                && let Some(resolved_schema) = resolve_schema_path(s, &s.root, &enclosing_path)
+                && schema_has_properties(s, resolved_schema)
             {
-                return schema_key_completions(resolved_schema, &present);
+                return schema_key_completions(s, resolved_schema, &present);
             }
             keys_to_items(
                 collect_sibling_keys_ast(mapping)

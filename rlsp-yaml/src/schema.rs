@@ -90,21 +90,86 @@ pub enum AdditionalProperties {
     Schema(Box<JsonSchema>),
 }
 
+/// Index of a shared schema in the target table of a [`ParsedSchema`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TargetId(usize);
+
+impl TargetId {
+    /// The target at `index` in the table passed to [`ParsedSchema::with_targets`].
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+}
+
+/// What a `$ref` node refers to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaRef {
+    /// A schema in the target table of the [`ParsedSchema`] that holds the node.
+    Target(TargetId),
+    /// A `$ref` that could not be resolved, with its text.
+    Unresolved(String),
+}
+
 /// The result of parsing a schema document.
 ///
 /// A parsed schema is shared (`Arc<ParsedSchema>`) between the cache and every
 /// request that reads it, so it deliberately has no `Clone`.
+///
+/// A schema node whose `reference` is set is a reference node: it stands for
+/// the target it refers to and has no content of its own. Code that reads a
+/// sub-schema's fields must pass the sub-schema through [`Self::resolve`]
+/// first; a reference node read directly looks like an empty schema.
 #[derive(Debug)]
 pub struct ParsedSchema {
-    /// The root schema.
-    pub root: JsonSchema,
+    /// The root schema, which may be a reference node; read it through
+    /// [`Self::resolved_root`].
+    pub(crate) root: JsonSchema,
+    /// Schemas that reference nodes share. None of them is a reference node.
+    targets: Vec<JsonSchema>,
 }
 
 impl ParsedSchema {
-    /// Wrap `root` as a parsed schema.
+    /// Wrap `root` as a parsed schema without shared targets.
     #[must_use]
     pub const fn new(root: JsonSchema) -> Self {
-        Self { root }
+        Self {
+            root,
+            targets: Vec::new(),
+        }
+    }
+
+    /// Build a parsed schema whose reference nodes may refer to `targets`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchemaError::ParseFailed`] when a target is itself a
+    /// reference node: a reference resolves in one step.
+    pub fn with_targets(root: JsonSchema, targets: Vec<JsonSchema>) -> Result<Self, SchemaError> {
+        if let Some(index) = targets.iter().position(|t| t.reference.is_some()) {
+            return Err(SchemaError::ParseFailed(format!(
+                "schema target {index} is a reference"
+            )));
+        }
+        Ok(Self { root, targets })
+    }
+
+    /// The schema `schema` stands for: the target of a resolved reference node,
+    /// and `schema` itself otherwise. A reference to a target that does not
+    /// exist and an unresolved reference are `schema`, which reads as an empty
+    /// schema.
+    #[must_use]
+    pub fn resolve<'a>(&'a self, schema: &'a JsonSchema) -> &'a JsonSchema {
+        match &schema.reference {
+            Some(SchemaRef::Target(id)) => self.targets.get(id.0).unwrap_or(schema),
+            Some(SchemaRef::Unresolved(_)) | None => schema,
+        }
+    }
+
+    /// The root schema, resolved.
+    #[must_use]
+    pub fn resolved_root(&self) -> &JsonSchema {
+        self.resolve(&self.root)
     }
 }
 
@@ -180,8 +245,8 @@ pub struct JsonSchema {
     pub then_schema: Option<Box<Self>>,
     /// Applied when `if_schema` is not satisfied.
     pub else_schema: Option<Box<Self>>,
-    /// `$ref` target (resolved to an absolute URI or JSON-pointer fragment).
-    pub ref_path: Option<String>,
+    /// Set on a reference node, which stands for the schema it refers to.
+    pub reference: Option<SchemaRef>,
     /// `$anchor` value for fragment-based `$ref` resolution.
     pub anchor: Option<String>,
     /// `$dynamicAnchor` value for dynamic `$ref` resolution.
@@ -218,6 +283,120 @@ pub struct JsonSchema {
     pub unevaluated_properties: Option<AdditionalProperties>,
     /// Sub-schema for unevaluated array items (`unevaluatedItems`).
     pub unevaluated_items: Option<Box<Self>>,
+}
+
+/// Builders for schemas with shared targets, for the tests of every consumer.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::cell::RefCell;
+    use std::fmt::Debug;
+
+    use super::{JsonSchema, ParsedSchema, SchemaRef, TargetId};
+
+    /// A reference node to the target at `index`.
+    pub fn reference_to(index: usize) -> JsonSchema {
+        JsonSchema {
+            reference: Some(SchemaRef::Target(TargetId::new(index))),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// A parsed schema without shared targets, for helpers that take the parsed
+    /// schema next to the schema they inspect.
+    pub fn no_targets() -> ParsedSchema {
+        ParsedSchema::new(JsonSchema::default())
+    }
+
+    /// `root` with `targets` as its target table.
+    pub fn with_targets(root: JsonSchema, targets: Vec<JsonSchema>) -> ParsedSchema {
+        ParsedSchema::with_targets(root, targets).expect("no target is a reference node")
+    }
+
+    /// Runs `body` on a thread with a stack far smaller than the default one,
+    /// so a recursion that the schema does not bound overflows it instead of
+    /// passing unnoticed.
+    pub fn on_a_small_stack(body: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(body)
+            .expect("thread spawns")
+            .join()
+            .expect("the body does not panic or overflow its stack");
+    }
+
+    /// How [`Sharing::put`] places a schema.
+    #[derive(Clone, Copy)]
+    enum Placement {
+        Inline,
+        Shared,
+        Dangling,
+    }
+
+    /// Places the schemas of one test schema either inline, behind reference
+    /// nodes whose targets exist, or behind reference nodes whose targets do
+    /// not.
+    pub struct Sharing {
+        placement: Placement,
+        targets: RefCell<Vec<JsonSchema>>,
+    }
+
+    impl Sharing {
+        const fn new(placement: Placement) -> Self {
+            Self {
+                placement,
+                targets: RefCell::new(Vec::new()),
+            }
+        }
+
+        /// `schema` itself when placing inline, otherwise a reference node to
+        /// a new target that holds it. `schema` must not be a reference node.
+        pub fn put(&self, schema: JsonSchema) -> JsonSchema {
+            match self.placement {
+                Placement::Inline => schema,
+                Placement::Shared | Placement::Dangling => {
+                    let mut targets = self.targets.borrow_mut();
+                    targets.push(schema);
+                    reference_to(targets.len() - 1)
+                }
+            }
+        }
+
+        fn finish(self, root: JsonSchema) -> ParsedSchema {
+            match self.placement {
+                Placement::Inline | Placement::Dangling => ParsedSchema::new(root),
+                Placement::Shared => with_targets(root, self.targets.into_inner()),
+            }
+        }
+    }
+
+    /// Check that a consumer follows every reference `build` puts in a schema.
+    ///
+    /// `build` makes the schema, placing sub-schemas through [`Sharing::put`].
+    /// `observe` reads what the consumer makes of a schema. The schema with
+    /// reference nodes must give what the schema written inline gives, and the
+    /// reference nodes alone, without their targets, must give something else:
+    /// otherwise the case does not depend on the references.
+    pub fn assert_references_followed<T: PartialEq + Debug>(
+        build: impl Fn(&Sharing) -> JsonSchema,
+        observe: impl Fn(&ParsedSchema) -> T,
+    ) {
+        let parsed = |placement| {
+            let sharing = Sharing::new(placement);
+            let root = build(&sharing);
+            sharing.finish(root)
+        };
+        let expected = observe(&parsed(Placement::Inline));
+        assert_eq!(
+            observe(&parsed(Placement::Shared)),
+            expected,
+            "a reference is not followed"
+        );
+        assert_ne!(
+            observe(&parsed(Placement::Dangling)),
+            expected,
+            "the case does not depend on its references"
+        );
+    }
 }
 
 /// A mapping from a file glob pattern to a JSON Schema URL.
@@ -955,7 +1134,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
 
         // $ref — resolve immediately and return the referenced schema
         if let Some(Value::String(ref_str)) = obj.get("$ref") {
-            schema.ref_path = Some(ref_str.clone());
+            schema.reference = Some(SchemaRef::Unresolved(ref_str.clone()));
             if let Some(resolved) = self.resolve_ref(ref_str, base_uri, depth + 1) {
                 return Some(resolved);
             }
@@ -1268,6 +1447,121 @@ mod tests {
             SchemaType::Multiple(_) => None,
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ParsedSchema: target table and reference resolution
+    // ══════════════════════════════════════════════════════════════════════════
+
+    fn titled(title: &str) -> JsonSchema {
+        JsonSchema {
+            title: Some(title.to_string()),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn unresolved(ref_text: &str) -> JsonSchema {
+        JsonSchema {
+            reference: Some(SchemaRef::Unresolved(ref_text.to_string())),
+            ..JsonSchema::default()
+        }
+    }
+
+    #[test]
+    fn with_targets_keeps_targets_that_are_not_reference_nodes_in_order() {
+        let parsed = ParsedSchema::with_targets(
+            test_support::reference_to(1),
+            vec![titled("a"), titled("b")],
+        )
+        .expect("no target is a reference node");
+
+        assert_eq!(parsed.resolved_root().title.as_deref(), Some("b"));
+        assert_eq!(
+            parsed
+                .resolve(&test_support::reference_to(0))
+                .title
+                .as_deref(),
+            Some("a")
+        );
+    }
+
+    #[rstest]
+    #[case::self_reference(test_support::reference_to(0))]
+    #[case::reference_to_another_target(test_support::reference_to(1))]
+    #[case::unresolved(unresolved("#/x"))]
+    fn with_targets_rejects_a_target_that_is_a_reference_node(#[case] target: JsonSchema) {
+        let result = ParsedSchema::with_targets(JsonSchema::default(), vec![titled("a"), target]);
+
+        assert!(
+            matches!(result, Err(SchemaError::ParseFailed(_))),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_returns_a_schema_that_is_not_a_reference_node_itself() {
+        let parsed = ParsedSchema::new(JsonSchema::default());
+        let schema = titled("plain");
+
+        assert!(std::ptr::eq(parsed.resolve(&schema), &raw const schema));
+    }
+
+    #[test]
+    fn resolve_follows_a_reference_node_to_the_table_entry_in_one_step() {
+        let parsed = test_support::with_targets(JsonSchema::default(), vec![titled("a")]);
+        let node = test_support::reference_to(0);
+
+        let target = parsed.resolve(&node);
+
+        assert_eq!(target.title.as_deref(), Some("a"));
+        assert!(std::ptr::eq(parsed.resolve(target), target));
+    }
+
+    #[test]
+    fn resolve_ignores_the_own_fields_of_a_reference_node() {
+        let parsed = test_support::with_targets(JsonSchema::default(), vec![JsonSchema::default()]);
+        let node = JsonSchema {
+            title: Some("own".to_string()),
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            ..test_support::reference_to(0)
+        };
+
+        let target = parsed.resolve(&node);
+
+        assert!(target.title.is_none());
+        assert!(target.schema_type.is_none());
+    }
+
+    #[rstest]
+    #[case::past_the_table(1)]
+    #[case::far_past_the_table(usize::MAX)]
+    fn resolve_of_a_target_id_outside_the_table_is_the_node_itself(#[case] index: usize) {
+        let parsed = test_support::with_targets(JsonSchema::default(), vec![titled("a")]);
+        let node = test_support::reference_to(index);
+
+        assert!(std::ptr::eq(parsed.resolve(&node), &raw const node));
+    }
+
+    #[test]
+    fn resolve_of_a_reference_node_without_any_table_is_the_node_itself() {
+        let parsed = ParsedSchema::new(JsonSchema::default());
+        let node = test_support::reference_to(0);
+
+        assert!(std::ptr::eq(parsed.resolve(&node), &raw const node));
+    }
+
+    #[test]
+    fn resolve_of_an_unresolved_reference_is_the_node_itself() {
+        let parsed = test_support::with_targets(JsonSchema::default(), vec![titled("a")]);
+        let node = unresolved("#/missing");
+
+        assert!(std::ptr::eq(parsed.resolve(&node), &raw const node));
+    }
+
+    #[test]
+    fn a_default_schema_is_not_a_reference_node() {
+        assert!(JsonSchema::default().reference.is_none());
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // parse_schema
     // ══════════════════════════════════════════════════════════════════════════
@@ -1488,7 +1782,7 @@ mod tests {
         });
         let s = parse_schema(&v).expect("should resolve").root;
         assert_eq!(schema_type_str(&s), Some("string"));
-        assert!(s.ref_path.is_none());
+        assert!(s.reference.is_none());
     }
 
     #[test]
@@ -1865,15 +2159,15 @@ mod tests {
     }
 
     #[test]
-    fn ref_without_hash_prefix_yields_ref_path_only() {
-        // $ref without '#' prefix cannot be resolved locally — returns schema with ref_path set
+    fn ref_without_hash_prefix_yields_unresolved_reference_only() {
+        // $ref without '#' prefix cannot be resolved locally — returns a reference node
         let v = json!({"$ref": "http://example.com/other-schema.json"});
         let result = parse_schema(&v);
         // resolve_ref returns None for non-# refs; SchemaParser::parse returns Some(schema)
-        // with only ref_path set
+        // with only the unresolved reference set
         if let Some(s) = result {
             assert_eq!(
-                s.root.ref_path.as_deref(),
+                unresolved_ref(&s.root),
                 Some("http://example.com/other-schema.json")
             );
         }
@@ -2257,12 +2551,12 @@ mod tests {
         );
     }
 
-    // Anchor-4: anchor not found — ref unresolved, schema has ref_path but no type
+    // Anchor-4: anchor not found — ref unresolved, schema is an unresolved reference node without a type
     #[test]
-    fn ref_returns_schema_with_ref_path_when_anchor_not_found() {
+    fn ref_returns_schema_with_unresolved_reference_when_anchor_not_found() {
         let value = json!({ "$ref": "#nonexistent" });
         let schema = parse_schema(&value).unwrap().root;
-        assert_eq!(schema.ref_path, Some("#nonexistent".to_string()));
+        assert_eq!(unresolved_ref(&schema), Some("#nonexistent"));
         assert!(schema.schema_type.is_none());
     }
 
@@ -2438,14 +2732,11 @@ mod tests {
         let value = json!({ "$ref": "http://127.0.0.1/evil.json" });
         let mut cache = SchemaCache::new();
         // SchemaParser::parse + ParseContext attempts to fetch; SSRF guard blocks it.
-        // The $ref falls back to ref_path-only schema (no remote traversal).
+        // The $ref falls back to an unresolved reference node (no remote traversal).
         let mut ctx = ParseContext::new(&mut cache, None);
         let schema = parse_with(&value, None, Some(&mut ctx)).unwrap();
-        // Remote fetch was blocked — schema has ref_path set but no sub-schema content.
-        assert_eq!(
-            schema.ref_path.as_deref(),
-            Some("http://127.0.0.1/evil.json")
-        );
+        // Remote fetch was blocked — schema is an unresolved reference node without sub-schema content.
+        assert_eq!(unresolved_ref(&schema), Some("http://127.0.0.1/evil.json"));
         // Nothing was added to the cache (fetch never happened).
         assert!(cache.get("http://127.0.0.1/evil.json").is_none());
     }
@@ -2464,8 +2755,8 @@ mod tests {
             Some(&mut ParseContext::new(&mut cache, None)),
         )
         .unwrap();
-        // Blocked — ref_path preserved, no cached fetch.
-        assert_eq!(schema.ref_path.as_deref(), Some("evil.json"));
+        // Blocked — unresolved reference kept, no cached fetch.
+        assert_eq!(unresolved_ref(&schema), Some("evil.json"));
         assert!(cache.get("http://127.0.0.1/evil.json").is_none());
     }
 
@@ -2563,8 +2854,8 @@ mod tests {
         let mut cache = SchemaCache::new();
         let mut ctx = ParseContext::new(&mut cache, None);
         let schema = parse_with(&value, None, Some(&mut ctx)).unwrap();
-        // SSRF guard blocks — ref_path preserved, nothing cached.
-        assert_eq!(schema.ref_path.as_deref(), Some("file:///etc/passwd"));
+        // SSRF guard blocks — unresolved reference kept, nothing cached.
+        assert_eq!(unresolved_ref(&schema), Some("file:///etc/passwd"));
         assert!(cache.get("file:///etc/passwd").is_none());
     }
 
@@ -2740,11 +3031,11 @@ mod tests {
         let schema = parse_schema(&body).expect("should parse").root;
         let props = schema.properties.as_ref().expect("should have properties");
         let home = props.get("home").expect("should have home property");
-        // Without ctx, the $ref is stored as ref_path but not resolved.
+        // Without ctx, the $ref is kept as an unresolved reference.
         assert_eq!(
-            home.ref_path.as_deref(),
+            unresolved_ref(home),
             Some(ref_url),
-            "without ctx the $ref is unresolved, only ref_path is set"
+            "without ctx the $ref is unresolved, only the unresolved reference is set"
         );
         assert!(
             home.description.is_none(),
@@ -3090,6 +3381,14 @@ mod tests {
         cache
     }
 
+    /// The text of the unresolved `$ref` that `schema` stands for.
+    fn unresolved_ref(schema: &JsonSchema) -> Option<&str> {
+        match &schema.reference {
+            Some(SchemaRef::Unresolved(text)) => Some(text),
+            Some(SchemaRef::Target(_)) | None => None,
+        }
+    }
+
     fn debug_of(schema: &JsonSchema) -> String {
         format!("{schema:?}")
     }
@@ -3188,10 +3487,10 @@ mod tests {
     #[rstest]
     #[case::missing_pointer("#/x/missing")]
     #[case::missing_anchor("#nope")]
-    fn unresolved_ref_returns_ref_path_only_ignoring_siblings(#[case] ref_str: &str) {
+    fn unresolved_ref_returns_unresolved_reference_only_ignoring_siblings(#[case] ref_str: &str) {
         let value = json!({ "$ref": ref_str, "type": "string" });
         let schema = parse_schema(&value).expect("parses").root;
-        assert_eq!(schema.ref_path.as_deref(), Some(ref_str));
+        assert_eq!(unresolved_ref(&schema), Some(ref_str));
         assert!(schema.schema_type.is_none());
     }
 
@@ -3212,7 +3511,7 @@ mod tests {
         let value = json!({ "$dynamicRef": "#missing", "type": "string" });
         let schema = parse_schema(&value).expect("parses").root;
         assert_eq!(schema_type_str(&schema), Some("string"));
-        assert!(schema.ref_path.is_none());
+        assert!(schema.reference.is_none());
     }
 
     #[test]
@@ -3234,7 +3533,7 @@ mod tests {
             Some("REMOTE"),
             "a direct remote ref resolves with ctx"
         );
-        assert_eq!(props["a"].ref_path.as_deref(), Some(url));
+        assert_eq!(unresolved_ref(&props["a"]), Some(url));
         assert!(
             props["a"].description.is_none(),
             "a local target is parsed without ctx"
@@ -3289,7 +3588,7 @@ mod tests {
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": "other.json" });
         let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(schema.ref_path.as_deref(), Some("other.json"));
+        assert_eq!(unresolved_ref(&schema), Some("other.json"));
         assert!(ctx.visited.is_empty());
     }
 
@@ -3320,7 +3619,7 @@ mod tests {
         let mut ctx = ParseContext::new(&mut cache, None);
         let schema = resolve_with(a_url, &json!({}), None, Some(&mut ctx)).expect("resolves");
         let p = &schema.properties.as_ref().expect("properties")["p"];
-        assert_eq!(p.ref_path.as_deref(), Some(b_url));
+        assert_eq!(unresolved_ref(p), Some(b_url));
         assert!(
             p.description.is_none(),
             "depth-1 rule: b.json stays unresolved"
@@ -3348,7 +3647,7 @@ mod tests {
     #[rstest]
     #[case::missing_pointer("https://example.com/doc.json#/definitions/Nope")]
     #[case::missing_anchor("https://example.com/doc.json#nope")]
-    fn remote_fragment_miss_yields_ref_path_only(#[case] ref_str: &str) {
+    fn remote_fragment_miss_yields_unresolved_reference_only(#[case] ref_str: &str) {
         let mut cache = cache_with(&[(
             "https://example.com/doc.json",
             json!({ "description": "DOC" }),
@@ -3356,7 +3655,7 @@ mod tests {
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": ref_str });
         let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(schema.ref_path.as_deref(), Some(ref_str));
+        assert_eq!(unresolved_ref(&schema), Some(ref_str));
         assert!(schema.description.is_none());
     }
 
@@ -3423,7 +3722,7 @@ mod tests {
         let value = json!({ "$ref": "#/x-chain/R0", "x-chain": chain });
         let schema = parse_schema(&value).expect("parses").root;
         assert_eq!(schema.description.as_deref() == Some("LEAF"), resolved);
-        assert_eq!(schema.ref_path.is_none(), resolved);
+        assert_eq!(schema.reference.is_none(), resolved);
     }
 
     #[test]
@@ -3458,7 +3757,7 @@ mod tests {
         }
         let value = json!({ "$ref": url });
         let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(schema.ref_path.as_deref(), Some(url));
+        assert_eq!(unresolved_ref(&schema), Some(url));
         assert!(!cache.contains(url));
     }
 
@@ -3474,7 +3773,7 @@ mod tests {
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": ref_str });
         let schema = parse_with(&value, base, Some(&mut ctx)).expect("parses");
-        assert_eq!(schema.ref_path.as_deref(), Some(ref_str));
+        assert_eq!(unresolved_ref(&schema), Some(ref_str));
         assert!(ctx.visited.is_empty());
     }
 

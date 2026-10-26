@@ -15,6 +15,8 @@ mod composition;
 mod context;
 mod formats;
 mod mapping_constraints;
+#[cfg(test)]
+mod reference_tests;
 mod scalar_constraints;
 mod support;
 mod type_validation;
@@ -67,14 +69,14 @@ pub fn validate_schema(
     yaml_version: YamlVersion,
 ) -> Validation {
     let budget = Budget::new(step_budget(docs));
-    validate_documents(docs, &schema.root, format_validation, yaml_version, &budget)
+    validate_documents(docs, schema, format_validation, yaml_version, &budget)
 }
 
 /// [`validate_schema`] with an explicit `budget`, so tests can pick its size and
 /// read back what the run spent.
 fn validate_documents(
     docs: &[Document<Span>],
-    schema: &JsonSchema,
+    schema: &ParsedSchema,
     format_validation: bool,
     yaml_version: YamlVersion,
     budget: &Budget,
@@ -88,8 +90,9 @@ fn validate_documents(
             yaml_version,
             doc.line_index(),
             budget,
+            schema,
         );
-        validate_node(&doc.root, schema, &[], &mut ctx, 0);
+        validate_node(&doc.root, &schema.root, &[], &mut ctx, 0);
     }
 
     // A node can record many diagnostics at once, so the entry check in
@@ -118,6 +121,9 @@ fn validate_documents(
 ///
 /// `path` is the property path to the current node (for diagnostic messages).
 /// `depth` guards against stack overflow on deeply nested structures.
+///
+/// A reference node is resolved here, before the depth and step checks, so
+/// following a reference costs nothing.
 fn validate_node(
     node: &Node<Span>,
     schema: &JsonSchema,
@@ -125,6 +131,7 @@ fn validate_node(
     ctx: &mut Ctx<'_>,
     depth: usize,
 ) {
+    let schema = ctx.parsed.resolve(schema);
     if depth > MAX_VALIDATION_DEPTH {
         ctx.undecided = true;
         return;
@@ -271,8 +278,10 @@ fn probe_passes(
         ctx.yaml_version,
         ctx.idx,
         ctx.budget,
+        ctx.parsed,
     )
-    .with_mode(Mode::Probe);
+    .with_mode(Mode::Probe)
+    .with_content_depth(ctx.content_depth);
     validate_node(node, schema, path, &mut probe, depth);
     let undecided = probe.undecided;
     if !scratch.is_empty() {
@@ -807,6 +816,7 @@ mod tests {
             YamlVersion::V1_2,
             docs[0].line_index(),
             &budget,
+            &schema,
         )
         .with_mode(mode);
         validate_node(&docs[0].root, &schema.root, &[], &mut ctx, 0);

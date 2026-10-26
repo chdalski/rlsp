@@ -7,6 +7,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::Diagnostic;
 
+use crate::schema::ParsedSchema;
 use crate::server::YamlVersion;
 
 /// Steps every run may spend regardless of document size.
@@ -168,15 +169,21 @@ pub(super) enum Mode {
 ///
 /// Bundles the parameters that every helper needs — the diagnostic accumulator,
 /// the `format_validation` flag, the `yaml_version` for YAML 1.1 compatibility
-/// checks, the step `budget`, and the reporting `mode` — so individual helpers
-/// do not need many arguments.
+/// checks, the step `budget`, the reporting `mode`, and the parsed schema that
+/// resolves reference nodes — so individual helpers do not need many arguments.
 pub(super) struct Ctx<'a> {
     pub(super) diagnostics: &'a mut Vec<Diagnostic>,
     pub(super) format_validation: bool,
     pub(super) yaml_version: YamlVersion,
     pub(super) idx: &'a LineIndex,
     pub(super) budget: &'a Budget,
+    /// Resolves the reference nodes of the schema being validated against.
+    pub(super) parsed: &'a ParsedSchema,
     pub(super) mode: Mode,
+    /// How many embedded documents (`contentSchema`) enclose the node being
+    /// validated. Each of them restarts the validation depth, so this is the
+    /// bound on a schema that reaches `contentSchema` through a cycle.
+    pub(super) content_depth: usize,
     /// Set when this walk skipped a check it could not finish (depth limit,
     /// or a `collect_evaluated_*` scan the budget cut short). A probe that
     /// records no diagnostic but is undecided has not passed.
@@ -190,6 +197,7 @@ impl<'a> Ctx<'a> {
         yaml_version: YamlVersion,
         idx: &'a LineIndex,
         budget: &'a Budget,
+        parsed: &'a ParsedSchema,
     ) -> Self {
         Self {
             diagnostics,
@@ -197,13 +205,21 @@ impl<'a> Ctx<'a> {
             yaml_version,
             idx,
             budget,
+            parsed,
             mode: Mode::Report,
+            content_depth: 0,
             undecided: false,
         }
     }
 
     pub(super) const fn with_mode(mut self, mode: Mode) -> Self {
         self.mode = mode;
+        self
+    }
+
+    /// Sets the number of embedded documents that enclose the walk.
+    pub(super) const fn with_content_depth(mut self, content_depth: usize) -> Self {
+        self.content_depth = content_depth;
         self
     }
 

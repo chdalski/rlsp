@@ -23,7 +23,8 @@ pub(super) fn validate_unevaluated_items(
     let Some(unevaluated_schema) = &schema.unevaluated_items else {
         return;
     };
-    let Some(evaluated_count) = collect_evaluated_item_count(schema, ctx.budget, depth) else {
+    let Some(evaluated_count) = collect_evaluated_item_count(ctx.parsed, schema, ctx.budget, depth)
+    else {
         // Which items are evaluated is unknown: report nothing for any of them.
         ctx.undecided = true;
         return;

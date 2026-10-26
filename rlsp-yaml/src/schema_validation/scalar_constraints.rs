@@ -13,8 +13,8 @@ use crate::server::YamlVersion;
 use super::context::Ctx;
 use super::formats;
 use super::support::{
-    MAX_PATTERN_LEN, PatternUnavailable, compile_pattern, format_path, is_valid_regex_value,
-    make_diagnostic, node_loc, yaml_to_json,
+    MAX_CONTENT_DEPTH, MAX_PATTERN_LEN, PatternUnavailable, compile_pattern, format_path,
+    is_valid_regex_value, make_diagnostic, node_loc, yaml_to_json,
 };
 use super::validate_node;
 
@@ -315,6 +315,15 @@ pub(super) fn validate_content_schema(
     let Some(content_schema) = &schema.content_schema else {
         return;
     };
+    // Every embedded document restarts the validation depth: without this
+    // bound, a schema that reaches `contentSchema` through a cycle recurses
+    // until the budget runs out. Reaching it ends the run like running out of
+    // steps, so the client is told that validation is incomplete.
+    if ctx.content_depth >= MAX_CONTENT_DEPTH {
+        ctx.undecided = true;
+        ctx.budget.exhaust();
+        return;
+    }
 
     // Determine the text to parse: decoded bytes (as UTF-8) or raw string.
     let content_text = decoded_bytes
@@ -352,8 +361,10 @@ pub(super) fn validate_content_schema(
             YamlVersion::V1_2,
             doc.line_index(),
             ctx.budget,
+            ctx.parsed,
         )
-        .with_mode(ctx.mode);
+        .with_mode(ctx.mode)
+        .with_content_depth(ctx.content_depth + 1);
         validate_node(
             &doc.root,
             content_schema,

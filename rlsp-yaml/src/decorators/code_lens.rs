@@ -8,7 +8,7 @@ use crate::schema::ParsedSchema;
 #[must_use]
 pub fn code_lenses(schema_url: &str, schema: Option<&ParsedSchema>) -> Vec<CodeLens> {
     let title = schema
-        .and_then(|s| s.root.title.clone())
+        .and_then(|s| s.resolved_root().title.clone())
         .unwrap_or_else(|| schema_url.to_string());
 
     let range = Range {
@@ -38,7 +38,8 @@ pub fn code_lenses(schema_url: &str, schema: Option<&ParsedSchema>) -> Vec<CodeL
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::JsonSchema;
+    use crate::schema::test_support::{reference_to, with_targets};
+    use crate::schema::{JsonSchema, SchemaRef};
 
     fn schema_with_title(title: &str) -> JsonSchema {
         JsonSchema {
@@ -96,5 +97,61 @@ mod tests {
         assert_eq!(range.start.character, 0);
         assert_eq!(range.end.line, 0);
         assert_eq!(range.end.character, 0);
+    }
+
+    #[test]
+    fn uses_the_title_of_the_schema_a_root_reference_stands_for() {
+        let schema = with_targets(reference_to(0), vec![schema_with_title("Shared Title")]);
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(lenses[0].command.as_ref().unwrap().title, "Shared Title");
+    }
+
+    #[test]
+    fn uses_the_title_of_the_target_and_not_the_own_title_of_a_root_reference() {
+        let root = JsonSchema {
+            title: Some("Own Title".to_string()),
+            ..reference_to(0)
+        };
+        let schema = with_targets(root, vec![schema_with_title("Shared Title")]);
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(lenses[0].command.as_ref().unwrap().title, "Shared Title");
+    }
+
+    #[test]
+    fn uses_url_when_the_root_reference_points_past_the_target_table() {
+        let schema = with_targets(reference_to(3), vec![schema_with_title("Shared Title")]);
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(
+            lenses[0].command.as_ref().unwrap().title,
+            "https://example.com/schema.json"
+        );
+    }
+
+    #[test]
+    fn uses_url_when_the_root_is_an_unresolved_reference() {
+        let schema = ParsedSchema::new(JsonSchema {
+            reference: Some(SchemaRef::Unresolved("#/missing".to_string())),
+            ..JsonSchema::default()
+        });
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(
+            lenses[0].command.as_ref().unwrap().title,
+            "https://example.com/schema.json"
+        );
+    }
+
+    #[test]
+    fn uses_url_when_the_root_reference_has_no_target() {
+        let schema = ParsedSchema::new(reference_to(0));
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(
+            lenses[0].command.as_ref().unwrap().title,
+            "https://example.com/schema.json"
+        );
     }
 }

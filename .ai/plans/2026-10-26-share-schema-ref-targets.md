@@ -61,7 +61,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 2: one parser struct carries per-parse state
 - [x] Task 3: `definitions`/`$defs` are no longer parsed into the
       tree
-- [ ] Task 4: consumers follow reference nodes
+- [x] Task 4: consumers follow reference nodes
 - [ ] Task 5: remote documents are cached raw and parsed only as
       targets
 - [ ] Task 6: each `$ref` target is parsed once and shared
@@ -142,29 +142,29 @@ reader that does not follow it. Completion's property walk has no
 depth or branch limit and today relies on the parser's depth
 bound.
 
-- [ ] `ParsedSchema` holds a target table and resolves a
+- [x] `ParsedSchema` holds a target table and resolves a
       reference node in one step to a target that is never itself
       a reference node; an unresolved reference keeps its `$ref`
       text and validates permissively, as an unresolved `$ref`
       does today; `ref_path` no longer exists
-- [ ] For each consumer — validation, completion, hover, code
+- [x] For each consumer — validation, completion, hover, code
       lens — and each child-schema position of `JsonSchema` that
       the consumer reads, the root included, a test makes the
       schema at that position a reference node and gives the same
       diagnostics, completion items, hover text, or lens title as
       the same schema written inline
-- [ ] Validation of a document against a cyclic schema
+- [x] Validation of a document against a cyclic schema
       terminates, and following a reference spends no validation
       step
-- [ ] Key completion terminates on a cyclic schema and on a chain
+- [x] Key completion terminates on a cyclic schema and on a chain
       of 10 000 distinct targets each referencing the next,
       without a stack overflow; a target reached through two
       composition paths contributes its keys once; completion
       path resolution and hover terminate on a cyclic schema
-- [ ] Apart from replacing `ref_path`, the existing unit tests of
+- [x] Apart from replacing `ref_path`, the existing unit tests of
       the four consumers and the step-budget fixture tests pass
       with their assertions unchanged
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 5: Cache remote documents raw and parse them only as targets
 
@@ -325,6 +325,12 @@ budget fails, and the schema is not applied at all.
   step budget already bound recursion; following a reference
   spends no step, so the step counts of existing documents stay
   the same.
+- **Nested embedded content is capped at 8 levels:** embedded
+  documents restart the validation depth, so a schema that reaches
+  itself through `contentSchema` would recurse until the stack
+  overflows; past `MAX_CONTENT_DEPTH` the run stops like an
+  exhausted budget, with the existing Warning. Each embedded
+  document is still validated at full length and depth.
 - **One nesting rule:** with a worklist, parse recursion equals
   source nesting, so `MAX_JSON_DEPTH` replaces `MAX_REF_DEPTH`.
 - **Remote references only inside unused definitions are no

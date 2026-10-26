@@ -35,7 +35,6 @@ pub fn hover_at(
     position: Position,
     schema: Option<&ParsedSchema>,
 ) -> Option<Hover> {
-    let schema = schema.map(|s| &s.root);
     if docs.is_empty() {
         return None;
     }
@@ -55,9 +54,9 @@ pub fn hover_at(
 
     let mut markdown = format_hover_markdown(&formatted_path, &yaml_type, value.as_deref());
 
-    if let Some(s) = schema {
+    if let Some(parsed) = schema {
         let key_path = build_schema_key_path(&formatted_path);
-        if let Some(prop_schema) = resolve_schema_path(s, &key_path) {
+        if let Some(prop_schema) = resolve_schema_path(parsed, parsed.resolved_root(), &key_path) {
             let schema_section = format_schema_section(prop_schema);
             if !schema_section.is_empty() {
                 markdown.push('\n');
@@ -277,9 +276,16 @@ fn build_schema_key_path(dotted_path: &str) -> Vec<String> {
         .collect()
 }
 
-/// Resolve a dotted key path through a `JsonSchema`, returning the matching sub-schema
-/// for the final key. Returns `None` if the path cannot be resolved.
-fn resolve_schema_path<'a>(schema: &'a JsonSchema, path: &[String]) -> Option<&'a JsonSchema> {
+/// Resolve a dotted key path through `schema`, returning the matching sub-schema
+/// for the final key, resolved. Returns `None` if the path cannot be resolved.
+///
+/// Every step consumes a path segment, so the walk ends on a schema that
+/// references itself.
+fn resolve_schema_path<'a>(
+    parsed: &'a ParsedSchema,
+    schema: &'a JsonSchema,
+    path: &[String],
+) -> Option<&'a JsonSchema> {
     let [key, rest @ ..] = path else {
         return None;
     };
@@ -291,26 +297,30 @@ fn resolve_schema_path<'a>(schema: &'a JsonSchema, path: &[String]) -> Option<&'
         .and_then(|props| props.get(key.as_str()));
 
     // If not in direct properties, check composition branches
-    let found = found.or_else(|| find_in_branches(schema, key));
+    let found = found.or_else(|| find_in_branches(parsed, schema, key));
 
-    let child = found?;
+    let child = parsed.resolve(found?);
 
     if rest.is_empty() {
         Some(child)
     } else {
-        resolve_schema_path(child, rest)
+        resolve_schema_path(parsed, child, rest)
     }
 }
 
 /// Search composition branches (allOf / anyOf / oneOf) for a property key.
-fn find_in_branches<'a>(schema: &'a JsonSchema, key: &str) -> Option<&'a JsonSchema> {
+fn find_in_branches<'a>(
+    parsed: &'a ParsedSchema,
+    schema: &'a JsonSchema,
+    key: &str,
+) -> Option<&'a JsonSchema> {
     schema
         .all_of
         .iter()
         .flatten()
         .chain(schema.any_of.iter().flatten())
         .chain(schema.one_of.iter().flatten())
-        .find_map(|branch| branch.properties.as_ref()?.get(key))
+        .find_map(|branch| parsed.resolve(branch).properties.as_ref()?.get(key))
 }
 
 /// Format the schema information section appended below the structural hover.
@@ -1812,5 +1822,190 @@ mod tests {
             result.is_some(),
             "cursor at span start should be included (start-inclusive)"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Reference nodes
+    // ══════════════════════════════════════════════════════════════════════
+
+    mod references {
+        use super::*;
+        use crate::schema::test_support::{
+            Sharing, assert_references_followed, reference_to, with_targets,
+        };
+
+        fn object(props: Vec<(&str, JsonSchema)>) -> JsonSchema {
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("object".to_string())),
+                properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+                ..JsonSchema::default()
+            }
+        }
+
+        /// A schema with everything hover prints from a property schema.
+        fn described() -> JsonSchema {
+            JsonSchema {
+                description: Some("The name".to_string()),
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                default: Some(json!("anon")),
+                examples: Some(vec![json!("a"), json!("b")]),
+                ..JsonSchema::default()
+            }
+        }
+
+        #[rstest]
+        #[case::root(|t: &Sharing| t.put(object(vec![("name", described())])), "name: x\n", pos(0, 0))]
+        #[case::property(
+            |t: &Sharing| object(vec![("name", t.put(described()))]),
+            "name: x\n",
+            pos(0, 0)
+        )]
+        #[case::property_value(
+            |t: &Sharing| object(vec![("name", t.put(described()))]),
+            "name: x\n",
+            pos(0, 6)
+        )]
+        #[case::property_on_the_path(
+            |t: &Sharing| object(vec![("a", t.put(object(vec![("name", t.put(described()))])))]),
+            "a:\n  name: x\n",
+            pos(1, 2)
+        )]
+        #[case::all_of_branch(
+            |t: &Sharing| JsonSchema {
+                all_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                ..JsonSchema::default()
+            },
+            "name: x\n",
+            pos(0, 0)
+        )]
+        #[case::any_of_branch(
+            |t: &Sharing| JsonSchema {
+                any_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                ..JsonSchema::default()
+            },
+            "name: x\n",
+            pos(0, 0)
+        )]
+        #[case::one_of_branch(
+            |t: &Sharing| JsonSchema {
+                one_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                ..JsonSchema::default()
+            },
+            "name: x\n",
+            pos(0, 0)
+        )]
+        #[case::branch_on_the_path(
+            |t: &Sharing| object(vec![(
+                "a",
+                JsonSchema {
+                    all_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                    ..JsonSchema::default()
+                },
+            )]),
+            "a:\n  name: x\n",
+            pos(1, 2)
+        )]
+        fn a_reference_at_a_position_gives_the_hover_of_the_schema_written_inline(
+            #[case] build: fn(&Sharing) -> JsonSchema,
+            #[case] text: &str,
+            #[case] cursor: Position,
+        ) {
+            let docs = parse_docs(text);
+
+            assert_references_followed(build, |schema| hover_at(&docs, cursor, Some(schema)));
+        }
+
+        #[test]
+        fn hover_ends_on_a_schema_that_references_itself() {
+            let target = JsonSchema {
+                all_of: Some(vec![reference_to(0)]),
+                ..object(vec![("next", reference_to(0)), ("name", described())])
+            };
+            let schema = with_targets(reference_to(0), vec![target]);
+            let docs = parse_docs("next:\n  next:\n    next:\n      name: x\n");
+
+            let hover = hover_at(&docs, pos(3, 6), Some(&schema)).expect("hover");
+
+            assert!(
+                hover_content(&hover).contains("**Description:** The name"),
+                "{}",
+                hover_content(&hover)
+            );
+        }
+
+        #[test]
+        fn hover_follows_two_schemas_that_reference_each_other() {
+            let first = JsonSchema {
+                description: Some("first".to_string()),
+                ..object(vec![("down", reference_to(1))])
+            };
+            let second = JsonSchema {
+                description: Some("second".to_string()),
+                ..object(vec![("down", reference_to(0))])
+            };
+            let schema = with_targets(reference_to(0), vec![first, second]);
+            let docs = parse_docs("down:\n  down:\n    down: x\n");
+
+            let at = |line, character| {
+                let hover = hover_at(&docs, pos(line, character), Some(&schema)).expect("hover");
+                hover_content(&hover).to_string()
+            };
+
+            assert!(at(0, 0).contains("**Description:** second"), "{}", at(0, 0));
+            assert!(at(1, 2).contains("**Description:** first"), "{}", at(1, 2));
+            assert!(at(2, 4).contains("**Description:** second"), "{}", at(2, 4));
+        }
+
+        #[rstest]
+        #[case::unresolved(JsonSchema {
+            reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".to_string())),
+            ..JsonSchema::default()
+        })]
+        #[case::target_outside_the_table(reference_to(7))]
+        fn hover_on_a_reference_without_a_target_has_no_schema_section(#[case] node: JsonSchema) {
+            let schema = with_targets(object(vec![("name", node)]), vec![described()]);
+            let docs = parse_docs("name: x\n");
+
+            let hover = hover_at(&docs, pos(0, 0), Some(&schema)).expect("hover");
+
+            assert!(
+                !hover_content(&hover).contains("**Description:**"),
+                "{}",
+                hover_content(&hover)
+            );
+        }
+
+        #[test]
+        fn hover_reads_a_reference_node_as_its_target_and_not_by_its_own_fields() {
+            let node = JsonSchema {
+                description: Some("own".to_string()),
+                ..reference_to(0)
+            };
+            let schema = with_targets(object(vec![("name", node)]), vec![described()]);
+            let docs = parse_docs("name: x\n");
+
+            let hover = hover_at(&docs, pos(0, 0), Some(&schema)).expect("hover");
+
+            assert!(hover_content(&hover).contains("**Description:** The name"));
+            assert!(!hover_content(&hover).contains("own"));
+        }
+
+        #[test]
+        fn hover_on_a_key_the_cyclic_schema_does_not_declare_has_no_schema_section() {
+            let target = JsonSchema {
+                all_of: Some(vec![reference_to(0)]),
+                ..object(vec![("next", reference_to(0))])
+            };
+            let schema = with_targets(reference_to(0), vec![target]);
+            let docs = parse_docs("next:\n  missing: x\n");
+
+            let hover = hover_at(&docs, pos(1, 2), Some(&schema)).expect("hover");
+
+            assert!(
+                !hover_content(&hover).contains("**Description:**"),
+                "{}",
+                hover_content(&hover)
+            );
+        }
     }
 }

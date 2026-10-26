@@ -30,7 +30,7 @@ pub(super) fn validate_unevaluated_properties(
         let Some(key_str) = node_key_str(k) else {
             continue;
         };
-        match collect_evaluated_properties(schema, &key_str, ctx.budget, depth) {
+        match collect_evaluated_properties(ctx.parsed, schema, &key_str, ctx.budget, depth) {
             Some(true) => continue,
             Some(false) => {}
             None => {

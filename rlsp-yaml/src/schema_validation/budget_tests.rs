@@ -9,6 +9,7 @@ use super::support::{
     is_valid_regex_value,
 };
 use super::*;
+use crate::schema::test_support::no_targets;
 use crate::schema::{SchemaType, parse_schema};
 use crate::test_utils::parse_docs;
 
@@ -40,9 +41,9 @@ const COMPOSE_SPEC: &str = include_str!("../../tests/fixtures/schemas/compose-sp
 const KUBERNETES_DEPLOYMENT: &str =
     include_str!("../../tests/fixtures/schemas/kubernetes-deployment-apps-v1.json");
 
-fn fixture_schema(raw: &str) -> JsonSchema {
+fn fixture_schema(raw: &str) -> ParsedSchema {
     let value: serde_json::Value = serde_json::from_str(raw).expect("fixture is JSON");
-    parse_schema(&value).expect("fixture is a schema").root
+    parse_schema(&value).expect("fixture is a schema")
 }
 
 fn schema_of(raw: &serde_json::Value) -> JsonSchema {
@@ -54,7 +55,7 @@ fn run(raw_schema: &serde_json::Value, text: &str, steps: usize) -> Validation {
     let schema = schema_of(raw_schema);
     validate_documents(
         &parse_docs(text),
-        &schema,
+        &ParsedSchema::new(schema),
         true,
         YamlVersion::V1_2,
         &Budget::new(steps),
@@ -65,7 +66,13 @@ fn run(raw_schema: &serde_json::Value, text: &str, steps: usize) -> Validation {
 fn steps_needed(raw_schema: &serde_json::Value, text: &str) -> usize {
     let schema = schema_of(raw_schema);
     let budget = Budget::new(usize::MAX);
-    let _ = validate_documents(&parse_docs(text), &schema, true, YamlVersion::V1_2, &budget);
+    let _ = validate_documents(
+        &parse_docs(text),
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+        &budget,
+    );
     budget.spent()
 }
 
@@ -182,7 +189,7 @@ fn evaluated_properties_is_unknown_without_budget() {
     let schema = schema_of(&json!({"properties": {"a": {}}}));
 
     assert_eq!(
-        collect_evaluated_properties(&schema, "a", &Budget::new(0), 0),
+        collect_evaluated_properties(&no_targets(), &schema, "a", &Budget::new(0), 0),
         None
     );
 }
@@ -196,7 +203,7 @@ fn evaluated_properties_finds_a_key_declared_at_the_root_with_one_step() {
     };
 
     assert_eq!(
-        collect_evaluated_properties(&root, "a", &Budget::new(1), 0),
+        collect_evaluated_properties(&no_targets(), &root, "a", &Budget::new(1), 0),
         Some(true)
     );
 }
@@ -212,7 +219,7 @@ fn evaluated_properties_cut_short_before_the_declaring_branch_is_unknown(
     let schema = all_of_declaring("a", 1, 100);
 
     assert_eq!(
-        collect_evaluated_properties(&schema, "a", &Budget::new(steps), 0),
+        collect_evaluated_properties(&no_targets(), &schema, "a", &Budget::new(steps), 0),
         expected
     );
 }
@@ -229,7 +236,7 @@ fn evaluated_properties_needs_every_schema_node_to_rule_a_key_out(
     let budget = Budget::new(steps);
 
     assert_eq!(
-        collect_evaluated_properties(&schema, "a", &budget, 0),
+        collect_evaluated_properties(&no_targets(), &schema, "a", &budget, 0),
         expected
     );
     assert_eq!(budget.is_exhausted(), expected.is_none());
@@ -245,7 +252,7 @@ fn evaluated_properties_looks_past_the_twentieth_branch(#[case] keyword: &str) {
     let schema = schema_of(&json!({ keyword: branches }));
 
     assert_eq!(
-        collect_evaluated_properties(&schema, "a", &Budget::new(usize::MAX), 0),
+        collect_evaluated_properties(&no_targets(), &schema, "a", &Budget::new(usize::MAX), 0),
         Some(true)
     );
 }
@@ -256,6 +263,7 @@ fn evaluated_properties_is_unknown_past_the_depth_limit() {
 
     assert_eq!(
         collect_evaluated_properties(
+            &no_targets(),
             &schema,
             "a",
             &Budget::new(usize::MAX),
@@ -280,7 +288,7 @@ fn evaluated_item_count_covers_every_all_of_branch(
     let schema = schema_of(&raw);
 
     assert_eq!(
-        collect_evaluated_item_count(&schema, &Budget::new(usize::MAX), 0),
+        collect_evaluated_item_count(&no_targets(), &schema, &Budget::new(usize::MAX), 0),
         expected
     );
 }
@@ -290,11 +298,11 @@ fn evaluated_item_count_is_unknown_when_the_budget_cuts_the_scan() {
     let schema = schema_of(&json!({"allOf": [{}, {}, {}]}));
 
     assert_eq!(
-        collect_evaluated_item_count(&schema, &Budget::new(3), 0),
+        collect_evaluated_item_count(&no_targets(), &schema, &Budget::new(3), 0),
         None
     );
     assert_eq!(
-        collect_evaluated_item_count(&schema, &Budget::new(4), 0),
+        collect_evaluated_item_count(&no_targets(), &schema, &Budget::new(4), 0),
         Some(0)
     );
 }
@@ -619,7 +627,7 @@ fn depth_cut_inside_a_probe_is_undecided_not_a_pass(
 
     let result = validate_documents(
         &parse_docs(&text),
-        &schema,
+        &ParsedSchema::new(schema),
         true,
         YamlVersion::V1_2,
         &Budget::new(usize::MAX),
@@ -710,7 +718,13 @@ fn hostile_nested_composition_stops_at_the_budget_without_invented_diagnostics()
     let docs = parse_docs("a: 1\nb: [1, 2]");
     let budget = Budget::new(step_budget(&docs));
 
-    let result = validate_documents(&docs, &schema, true, YamlVersion::V1_2, &budget);
+    let result = validate_documents(
+        &docs,
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+        &budget,
+    );
 
     assert_eq!(result.completeness, Completeness::StoppedEarly);
     assert_eq!(
@@ -825,9 +839,9 @@ fn embedded_content_larger_than_the_budget_exhausts_it() {
 fn embedded_content_is_validated_from_depth_zero() {
     // The content is a document of its own: a string at the depth limit still
     // gets its content validated in full, and the outer nesting is not counted.
-    let schema = schema_of(&json!({
+    let parsed = ParsedSchema::new(schema_of(&json!({
         "contentSchema": {"properties": {"a": {"type": "string"}}}
-    }));
+    })));
     let docs = parse_docs("\"a: 1\"");
     let budget = Budget::new(usize::MAX);
     let mut diagnostics = Vec::new();
@@ -837,11 +851,12 @@ fn embedded_content_is_validated_from_depth_zero() {
         YamlVersion::V1_2,
         docs[0].line_index(),
         &budget,
+        &parsed,
     );
 
     validate_node(
         &docs[0].root,
-        &schema,
+        &parsed.root,
         &[],
         &mut ctx,
         support::MAX_VALIDATION_DEPTH,
@@ -900,7 +915,11 @@ const FIXTURES: [Fixture; 4] = [
     },
 ];
 
-fn validate_fixture_document(schema: &JsonSchema, text: &str, steps: Option<usize>) -> Validation {
+fn validate_fixture_document(
+    schema: &ParsedSchema,
+    text: &str,
+    steps: Option<usize>,
+) -> Validation {
     let docs = parse_docs(text);
     let budget = Budget::new(steps.unwrap_or_else(|| step_budget(&docs)));
     validate_documents(&docs, schema, true, YamlVersion::V1_2, &budget)
@@ -1005,7 +1024,7 @@ fn cloud_config_with_a_wrongly_typed_package_update_is_flagged() {
 
     let result = validate_schema(
         &parse_docs("#cloud-config\npackage_update: 5\npackages:\n  - git\n"),
-        &ParsedSchema::new(schema),
+        &schema,
         true,
         YamlVersion::V1_2,
     );
@@ -1230,7 +1249,13 @@ fn format_regex_value_the_budget_cannot_pay_for_reports_nothing() {
     let schema = schema_of(&json!({"properties": {"a": {"format": "regex"}}}));
     let text = format!("a: '{HUGE_REGEX}'");
     let docs = parse_docs(&text);
-    let result = validate_documents(&docs, &schema, true, YamlVersion::V1_2, &Budget::new(1_000));
+    let result = validate_documents(
+        &docs,
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+        &Budget::new(1_000),
+    );
 
     assert_eq!(result.completeness, Completeness::StoppedEarly);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -1402,7 +1427,13 @@ fn wide_mapping_under_many_branches_exhausts_the_budget() {
     let docs = parse_docs(&numbered_keys(3000));
     let budget = Budget::new(step_budget(&docs));
 
-    let result = validate_documents(&docs, &schema, true, YamlVersion::V1_2, &budget);
+    let result = validate_documents(
+        &docs,
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+        &budget,
+    );
 
     assert_eq!(result.completeness, Completeness::StoppedEarly);
     assert_eq!(budget.spent(), step_budget(&docs));

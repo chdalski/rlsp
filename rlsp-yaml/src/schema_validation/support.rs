@@ -9,7 +9,7 @@ use rlsp_yaml_parser::node::Node;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 use crate::scalar_helpers;
-use crate::schema::{JsonSchema, SchemaType};
+use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
 
 use super::context::{Budget, WORK_PER_STEP, work_steps};
 
@@ -22,6 +22,11 @@ pub(super) const REGEX_SIZE_LIMIT: usize = 512 * 1024;
 
 /// Maximum recursion depth for the validation walk.
 pub(super) const MAX_VALIDATION_DEPTH: usize = 64;
+
+/// Maximum nesting of embedded documents (`contentSchema`). Each level restarts
+/// the validation depth at zero, so a schema that applies itself through
+/// `contentSchema` is bounded by this alone. Reaching it ends the run early.
+pub(super) const MAX_CONTENT_DEPTH: usize = 8;
 
 /// Maximum length of schema description text embedded in diagnostic messages.
 pub(super) const MAX_DESCRIPTION_LEN: usize = 200;
@@ -254,11 +259,13 @@ fn applicator_children(schema: &JsonSchema) -> impl Iterator<Item = &JsonSchema>
 /// when the budget or `MAX_VALIDATION_DEPTH` cut the scan short and the answer
 /// is unknown.
 pub(super) fn collect_evaluated_properties(
+    parsed: &ParsedSchema,
     schema: &JsonSchema,
     key: &str,
     budget: &Budget,
     depth: usize,
 ) -> Option<bool> {
+    let schema = parsed.resolve(schema);
     if depth > MAX_VALIDATION_DEPTH || !budget.spend(1) {
         return None;
     }
@@ -284,7 +291,7 @@ pub(super) fn collect_evaluated_properties(
         }
     }
     for child in applicator_children(schema) {
-        if collect_evaluated_properties(child, key, budget, depth + 1)? {
+        if collect_evaluated_properties(parsed, child, key, budget, depth + 1)? {
             return Some(true);
         }
     }
@@ -299,10 +306,12 @@ pub(super) fn collect_evaluated_properties(
 /// budget or `MAX_VALIDATION_DEPTH` cut the scan short and the answer is
 /// unknown.
 pub(super) fn collect_evaluated_item_count(
+    parsed: &ParsedSchema,
     schema: &JsonSchema,
     budget: &Budget,
     depth: usize,
 ) -> Option<usize> {
+    let schema = parsed.resolve(schema);
     if depth > MAX_VALIDATION_DEPTH || !budget.spend(1) {
         return None;
     }
@@ -312,7 +321,7 @@ pub(super) fn collect_evaluated_item_count(
     }
     let mut count = schema.prefix_items.as_ref().map_or(0, Vec::len);
     for branch in schema.all_of.iter().flatten() {
-        let branch_count = collect_evaluated_item_count(branch, budget, depth + 1)?;
+        let branch_count = collect_evaluated_item_count(parsed, branch, budget, depth + 1)?;
         if branch_count == usize::MAX {
             return Some(usize::MAX);
         }

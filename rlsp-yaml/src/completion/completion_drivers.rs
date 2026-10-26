@@ -6,7 +6,7 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::CompletionItem;
 
-use crate::schema::JsonSchema;
+use crate::schema::ParsedSchema;
 
 use super::completion_items::{collect_values_for_key_ast, keys_to_items, merge_completions};
 use super::cursor_location::{node_span, scalar_key};
@@ -24,7 +24,7 @@ pub(super) fn complete_on_key<'a>(
     key: String,
     enclosing_path: &[String],
     mapping: &'a Node<Span>,
-    schema: Option<&JsonSchema>,
+    schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
     let present = docs.first().map_or_else(HashSet::new, |d| {
         present_keys(mapping, cursor_line, d.line_index())
@@ -41,10 +41,10 @@ pub(super) fn complete_on_key<'a>(
     };
     let structural = keys_to_items(structural_keys.into_iter().filter(|k| k != &key).collect());
     if let Some(s) = schema
-        && let Some(resolved_schema) = resolve_schema_path(s, enclosing_path)
-        && schema_has_properties(resolved_schema)
+        && let Some(resolved_schema) = resolve_schema_path(s, &s.root, enclosing_path)
+        && schema_has_properties(s, resolved_schema)
     {
-        let schema_properties = collect_schema_properties_keys(resolved_schema);
+        let schema_properties = collect_schema_properties_keys(s, resolved_schema);
         let schema_exclude: HashSet<String> = if schema_properties.contains(&key) {
             let mut ex = present;
             ex.insert(key);
@@ -52,7 +52,7 @@ pub(super) fn complete_on_key<'a>(
         } else {
             HashSet::from([key])
         };
-        let schema_items = schema_key_completions(resolved_schema, &schema_exclude);
+        let schema_items = schema_key_completions(s, resolved_schema, &schema_exclude);
         let filtered_structural: Vec<CompletionItem> = structural
             .into_iter()
             .filter(|i| !schema_exclude.contains(i.label.as_str()))
@@ -67,12 +67,12 @@ pub(super) fn complete_on_value(
     cursor_line: usize,
     key: &str,
     enclosing_path: Vec<String>,
-    schema: Option<&JsonSchema>,
+    schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
     if let Some(s) = schema {
         let mut value_path = enclosing_path;
         value_path.push(key.to_string());
-        if let Some(prop_schema) = resolve_schema_path(s, &value_path) {
+        if let Some(prop_schema) = resolve_schema_path(s, &s.root, &value_path) {
             let schema_items = schema_value_completions(prop_schema);
             if !schema_items.is_empty() {
                 return schema_items;
@@ -98,7 +98,7 @@ pub(super) fn complete_in_sequence_item<'a>(
     enclosing_path: Vec<String>,
     sequence: &'a Node<Span>,
     current_item: &'a Node<Span>,
-    schema: Option<&JsonSchema>,
+    schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
     let current_keys: HashSet<String> = if let Node::Mapping { entries, .. } = current_item {
         entries
@@ -117,10 +117,10 @@ pub(super) fn complete_in_sequence_item<'a>(
     if let Some(s) = schema {
         let mut items_path = enclosing_path;
         items_path.push("[]".to_string());
-        if let Some(items_schema) = resolve_schema_path(s, &items_path)
-            && schema_has_properties(items_schema)
+        if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
+            && schema_has_properties(s, items_schema)
         {
-            let schema_items = schema_key_completions(items_schema, &current_keys);
+            let schema_items = schema_key_completions(s, items_schema, &current_keys);
             let filtered_structural: Vec<CompletionItem> = structural
                 .into_iter()
                 .filter(|i| !current_keys.contains(i.label.as_str()))
