@@ -672,3 +672,9 @@ Schemas are fetched over HTTP/HTTPS and cached in memory for the session.
 - Private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
 - Link-local addresses (`169.254.0.0/16`, `fe80::/10`)
 - Unspecified addresses (`0.0.0.0`, `::`)
+
+## Schema Validation Limits
+
+Every `allOf`, `anyOf`, and `oneOf` branch of a schema is evaluated. To keep a complex or hostile schema from stalling the server, the work of one schema validation run is bounded in proportion to the size of the document, up to a fixed maximum, and the run returns at most 10,000 schema diagnostics. All documents of a multi-document file share these bounds.
+
+When a run reaches either bound, validation stops. Diagnostics found before that point are published; checks that had not finished report nothing, so the diagnostics may be incomplete, but the server never reports a problem the full run would not. The server then sends a `window/logMessage` of type Warning to the client's log, naming the schema URL and saying that validation is incomplete. The Warning is sent for every schema source, including Kubernetes auto-detection, and on every run that stops early; no diagnostic is added to the document. A run that completes sends no such Warning.

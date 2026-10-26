@@ -27,6 +27,7 @@ use tower_lsp::{Client, LanguageServer};
 use crate::document_store::DocumentStore;
 use crate::parser;
 use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
+use crate::schema_validation::Completeness;
 
 /// YAML specification version for formatting and diagnostic purposes.
 ///
@@ -113,7 +114,7 @@ const DEFAULT_KUBERNETES_VERSION: &str = "master";
 /// Longest schema URL echoed into a client log message, in characters.
 const MAX_LOGGED_URL_CHARS: usize = 200;
 
-/// Longest client log message about a schema failure, in characters.
+/// Longest client log message about a schema, in characters.
 const MAX_SCHEMA_LOG_CHARS: usize = 512;
 
 /// Where a schema URL came from, which decides whether a failure is logged.
@@ -133,10 +134,27 @@ enum SchemaSource {
 /// query and fragment, replaces control and bidirectional-formatting
 /// characters, and is length-capped.
 fn schema_failure_message(schema_url: &str, error: &schema::SchemaError) -> String {
-    let message = format!(
+    printable_log_message(&format!(
         "Schema {} could not be applied: {error}",
         loggable_url(schema_url)
-    );
+    ))
+}
+
+/// Build the log message for a schema whose validation stopped early.
+///
+/// The text is fixed and the URL goes through the same sanitizing as in
+/// [`schema_failure_message`].
+fn validation_incomplete_message(schema_url: &str) -> String {
+    printable_log_message(&format!(
+        "Validation against schema {} is incomplete: it stopped at its work or \
+         diagnostic limit, so some problems may not be reported",
+        loggable_url(schema_url)
+    ))
+}
+
+/// Replace control and bidirectional-formatting characters in `message` and cap
+/// its length at [`MAX_SCHEMA_LOG_CHARS`].
+fn printable_log_message(message: &str) -> String {
     let printable: String = message
         .chars()
         .map(|c| if is_unsafe_log_char(c) { '?' } else { c })
@@ -403,10 +421,25 @@ impl Backend {
             .await;
     }
 
+    /// Tell the user in the client log that validation against `schema_url`
+    /// stopped early, so its diagnostics are incomplete.
+    ///
+    /// Unlike a failed fetch this is logged for every source: the schema
+    /// loaded, so even an auto-detected Kubernetes URL was right.
+    async fn log_validation_incomplete(&self, schema_url: &str) {
+        self.client
+            .log_message(
+                tower_lsp::lsp_types::MessageType::WARNING,
+                validation_incomplete_message(schema_url),
+            )
+            .await;
+    }
+
     /// Normalize `schema_url`, record the association, fetch/cache the schema,
     /// and append schema-validation diagnostics to `diagnostics`.
     ///
-    /// Failures are logged to the client according to `source`.
+    /// Failures are logged to the client according to `source`; a run that
+    /// stops early is logged for every source.
     ///
     /// No Mutex guard is held across any `.await` point.
     async fn process_schema(
@@ -505,6 +538,9 @@ impl Backend {
                     yaml_version,
                 );
                 diagnostics.extend(validation.diagnostics);
+                if validation.completeness == Completeness::StoppedEarly {
+                    self.log_validation_incomplete(schema_url).await;
+                }
             }
         }
     }
@@ -1679,6 +1715,7 @@ impl LanguageServer for Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use tower_lsp::lsp_types::{
         FormattingOptions, HoverProviderCapability, OneOf, PartialResultParams,
         TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind,
@@ -2753,12 +2790,16 @@ mod tests {
         assert!(message.contains("not permitted"));
     }
 
-    #[test]
-    fn schema_failure_message_omits_userinfo_query_and_fragment() {
-        let message = schema_failure_message(
-            "https://user:secret@example.com/s.json?token=abc#frag",
-            &fetch_failed("http status: 404"),
-        );
+    /// The message builders that echo a schema URL, each given a URL only.
+    fn failure_message(url: &str) -> String {
+        schema_failure_message(url, &fetch_failed("http status: 404"))
+    }
+
+    #[rstest]
+    #[case::schema_failure(failure_message)]
+    #[case::validation_incomplete(validation_incomplete_message)]
+    fn url_message_omits_userinfo_query_and_fragment(#[case] build: fn(&str) -> String) {
+        let message = build("https://user:secret@example.com/s.json?token=abc#frag");
 
         assert!(message.contains("https://example.com/s.json"));
         for leaked in ["user", "secret", "token", "abc", "frag"] {
@@ -2766,9 +2807,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn schema_failure_message_replaces_unparsable_url_with_placeholder() {
-        let message = schema_failure_message("http://us er:pw@[bad", &fetch_failed("invalid URL"));
+    #[rstest]
+    #[case::schema_failure(failure_message)]
+    #[case::validation_incomplete(validation_incomplete_message)]
+    fn url_message_replaces_unparsable_url_with_placeholder(#[case] build: fn(&str) -> String) {
+        let message = build("http://us er:pw@[bad");
 
         assert!(message.contains("<unparsable URL, 20 bytes>"));
         assert!(!message.contains("pw@"));
@@ -2809,5 +2852,30 @@ mod tests {
 
         assert_eq!(message.chars().count(), MAX_SCHEMA_LOG_CHARS + 1);
         assert!(message.ends_with('…'));
+    }
+
+    // ---- validation_incomplete_message ----
+
+    #[test]
+    fn validation_incomplete_message_names_url_and_says_incomplete() {
+        let message = validation_incomplete_message("http://schema.invalid/schema.json");
+
+        assert!(message.contains("http://schema.invalid/schema.json"));
+        assert!(message.contains("incomplete"));
+    }
+
+    #[test]
+    fn validation_incomplete_message_contains_no_unsafe_characters_for_hostile_urls() {
+        for url in [
+            "http://schema.invalid/a\nb\x1bc\u{202e}d\u{2028}e",
+            "http://us er:pw@[bad\n\x1b\u{202e}",
+        ] {
+            let message = validation_incomplete_message(url);
+
+            assert!(
+                !message.chars().any(is_unsafe_log_char),
+                "unsafe character in {message:?}"
+            );
+        }
     }
 }

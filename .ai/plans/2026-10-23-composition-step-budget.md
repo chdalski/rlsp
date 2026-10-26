@@ -57,7 +57,7 @@ user in the LSP log when validation stopped at that budget.
 - [x] Task 1: one probe helper that stops at the first
       diagnostic
 - [x] Task 2: validate every branch within a step budget
-- [ ] Task 3: log when validation stopped at the budget
+- [x] Task 3: log when validation stopped at the budget
 - [ ] Task 4: complete keys from every branch through one
       property walk
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -189,24 +189,24 @@ diagnostics are incomplete, for every schema source. Like
 schema fetch failures, it is reported on every run that
 stops.
 
-- [ ] When validation stops early, the client
+- [x] When validation stops early, the client
       receives a `window/logMessage` of type Warning that
       names the schema URL, sanitized the same way as
       schema failure messages, and states that validation
       is incomplete
-- [ ] A run that completes sends no such Warning
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] A run that completes sends no such Warning
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
       seeds a hostile composition schema, collects
       client-bound messages, and asserts the Warning
-- [ ] `rlsp-yaml/docs/configuration.md` tells the reader
+- [x] `rlsp-yaml/docs/configuration.md` tells the reader
       that schema validation work and the number of
       diagnostics are bounded and what they see when a bound
       is reached
-- [ ] `rlsp-yaml/docs/feature-log.md` records that every
+- [x] `rlsp-yaml/docs/feature-log.md` records that every
       composition branch is evaluated and that a Warning
       reports validation stopped early (budget or diagnostic
       limit)
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 4: Complete keys from every branch through one property walk
 

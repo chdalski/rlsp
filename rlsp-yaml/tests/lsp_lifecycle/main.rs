@@ -21,5 +21,6 @@ mod schema_fetch;
 mod schema_modelines;
 mod selection_ranges;
 mod semantic_tokens;
+mod validation_limits;
 mod validators_integration;
 mod watched_files;

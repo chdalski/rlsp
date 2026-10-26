@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Complete Schema Composition Validation [completed]
+
+**Date:** 2026-10-24
+**Description:** Schema validation now evaluates every `allOf`, `anyOf`, and `oneOf` branch of a schema node, not only the first 20. Schemas with many branches (for example cloud-init, with 57 `allOf` branches) now report problems from all of them, and `anyOf`/`oneOf` no longer report a false error when the matching branch comes late. Validation work is bounded in proportion to the size of the document and the number of diagnostics is limited to 10,000 per run; when either bound stops a run early, the server sends a Warning to the client log naming the schema URL and saying that validation is incomplete. See [Schema Validation Limits](configuration.md#schema-validation-limits).
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### `.editorconfig` Support for the Formatter [completed]
 
 **Date:** 2026-05-20

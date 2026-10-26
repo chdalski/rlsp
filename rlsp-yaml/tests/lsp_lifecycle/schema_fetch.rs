@@ -13,12 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::json;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tower_lsp::LspService;
-use tower_lsp::lsp_types::{LogMessageParams, MessageType, NumberOrString};
+use tower_lsp::lsp_types::NumberOrString;
 
 use super::helpers::*;
 
@@ -150,26 +147,8 @@ fn serve_connection(
     )
 }
 
-/// Start a server whose client-bound log messages are collected.
-async fn start_server(
-    options: serde_json::Value,
-) -> (LspService<Backend>, UnboundedReceiver<LogMessageParams>) {
-    let (mut service, socket) = LspService::new(Backend::new);
-    let log = collect_log_messages(socket);
-
-    send(&mut service, initialize_request_with_options(1, &options)).await;
-    send(&mut service, initialized_notification()).await;
-    (service, log)
-}
-
 fn proxy_options(proxy_url: &str) -> serde_json::Value {
     json!({ "httpProxy": proxy_url })
-}
-
-/// Open a document whose `$schema` modeline names `schema_url`.
-async fn open_with_modeline(service: &mut LspService<Backend>, uri: &str, schema_url: &str) {
-    let text = format!("# yaml-language-server: $schema={schema_url}\ncount: not-a-number\n");
-    send(service, did_open_notification(uri, &text)).await;
 }
 
 /// Open a document whose `$schema` modeline names [`SCHEMA_URL`], with the
@@ -188,37 +167,6 @@ async fn schema_diagnostic_codes(proxy_url: &str) -> Vec<NumberOrString> {
         .into_iter()
         .filter_map(|d| d.code)
         .collect()
-}
-
-/// Return every Warning log message sent before the sentinel's own.
-///
-/// The sentinel is a document whose modeline names a loopback URL: the SSRF
-/// guard rejects it without any network access, which logs exactly one
-/// Warning. Client-bound messages arrive in order, so once the sentinel's
-/// Warning is seen, every Warning the earlier requests caused has been
-/// delivered. Without this anchor an absence assertion could pass because the
-/// messages were read too early.
-async fn warnings_before_sentinel(
-    service: &mut LspService<Backend>,
-    log: &mut UnboundedReceiver<LogMessageParams>,
-) -> Vec<String> {
-    const SENTINEL_URL: &str = "http://127.0.0.1/sentinel.json";
-    open_with_modeline(service, "file:///test/sentinel.yaml", SENTINEL_URL).await;
-
-    let mut warnings = Vec::new();
-    loop {
-        let message = tokio::time::timeout(Duration::from_secs(5), log.recv())
-            .await
-            .expect("sentinel Warning never arrived")
-            .expect("log channel closed before the sentinel Warning");
-        if message.typ != MessageType::WARNING {
-            continue;
-        }
-        if message.message.contains(SENTINEL_URL) {
-            return warnings;
-        }
-        warnings.push(message.message);
-    }
 }
 
 fn schema_type() -> NumberOrString {
