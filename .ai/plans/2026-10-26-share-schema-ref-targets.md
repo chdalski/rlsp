@@ -59,7 +59,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 1: parse results are shared, not copied, by the cache
       and every consumer
 - [x] Task 2: one parser struct carries per-parse state
-- [ ] Task 3: `definitions`/`$defs` are no longer parsed into the
+- [x] Task 3: `definitions`/`$defs` are no longer parsed into the
       tree
 - [ ] Task 4: consumers follow reference nodes
 - [ ] Task 5: remote documents are cached raw and parsed only as
@@ -118,14 +118,14 @@ The parser stores every `definitions`/`$defs` entry inline in the
 again at every `$ref` to it. `$ref`s keep resolving against the
 raw document.
 
-- [ ] `JsonSchema` has no `definitions` field and the parser no
+- [x] `JsonSchema` has no `definitions` field and the parser no
       longer parses `definitions`/`$defs` entries except as `$ref`
       targets
-- [ ] The tests that only assert the `definitions` field are
+- [x] The tests that only assert the `definitions` field are
       removed; every other `src/schema.rs` test — among them the
       local `$ref` resolution tests — and the step-budget fixture
       tests pass with their assertions unchanged
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 4: Follow reference nodes in every consumer
 

@@ -212,8 +212,6 @@ pub struct JsonSchema {
     pub dependent_required: Option<HashMap<String, Vec<String>>>,
     /// Property dependency sub-schemas (`dependentSchemas`).
     pub dependent_schemas: Option<HashMap<String, Self>>,
-    /// Merged `definitions` (Draft-04) and `$defs` (Draft-07) storage.
-    pub definitions: Option<HashMap<String, Self>>,
     /// Whether the schema is deprecated.
     pub deprecated: Option<bool>,
     /// Schema or denial for unevaluated properties (`unevaluatedProperties`).
@@ -917,8 +915,8 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             .map(Box::new);
     }
 
-    /// Populate `unevaluatedProperties`, `unevaluatedItems`, and `definitions`
-    /// on `schema` from `obj`. Extracted to keep `parse` under 100 lines.
+    /// Populate `unevaluatedProperties` and `unevaluatedItems` on `schema`
+    /// from `obj`. Extracted to keep `parse` under 100 lines.
     fn parse_extension_fields(
         &mut self,
         obj: &serde_json::Map<String, Value>,
@@ -933,17 +931,6 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             .get("unevaluatedItems")
             .and_then(|v| self.parse(v, base_uri, depth + 1))
             .map(Box::new);
-
-        // definitions (Draft-04) + $defs (Draft-07)
-        let defs_04 = self.parse_definitions(obj.get("definitions"), base_uri, depth);
-        let defs_07 = self.parse_definitions(obj.get("$defs"), base_uri, depth);
-        schema.definitions = match (defs_04, defs_07) {
-            (Some(mut a), Some(b)) => {
-                a.extend(b);
-                Some(a)
-            }
-            (a, b) => a.or(b),
-        };
     }
 
     fn parse(&mut self, value: &Value, base_uri: Option<&str>, depth: usize) -> Option<JsonSchema> {
@@ -1138,26 +1125,6 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             None
         } else {
             Some(schemas)
-        }
-    }
-
-    fn parse_definitions(
-        &mut self,
-        value: Option<&Value>,
-        base_uri: Option<&str>,
-        depth: usize,
-    ) -> Option<HashMap<String, JsonSchema>> {
-        let map = value?.as_object()?;
-        let mut result = HashMap::new();
-        for (k, v) in map {
-            if let Some(s) = self.parse(v, base_uri, depth + 1) {
-                result.insert(k.clone(), s);
-            }
-        }
-        if result.is_empty() {
-            None
-        } else {
-            Some(result)
         }
     }
 
@@ -1491,22 +1458,6 @@ mod tests {
         assert!(parse_schema(&Value::Bool(false)).is_none());
     }
 
-    #[test]
-    fn should_parse_draft04_definitions() {
-        let v = json!({"definitions": {"addr": {"type": "string"}}});
-        let s = parse_schema(&v).expect("should parse").root;
-        let defs = s.definitions.as_ref().expect("should have definitions");
-        assert!(defs.contains_key("addr"));
-    }
-
-    #[test]
-    fn should_parse_draft07_defs() {
-        let v = json!({"$defs": {"addr": {"type": "string"}}});
-        let s = parse_schema(&v).expect("should parse").root;
-        let defs = s.definitions.as_ref().expect("should have $defs");
-        assert!(defs.contains_key("addr"));
-    }
-
     // deprecated: true parses to Some(true)
     #[test]
     fn should_parse_deprecated_true() {
@@ -1527,6 +1478,17 @@ mod tests {
         });
         let s = parse_schema(&v).expect("should resolve").root;
         assert_eq!(schema_type_str(&s), Some("string"));
+    }
+
+    #[test]
+    fn should_resolve_ref_into_defs_container() {
+        let v = json!({
+            "$ref": "#/$defs/MyType",
+            "$defs": {"MyType": {"type": "string"}}
+        });
+        let s = parse_schema(&v).expect("should resolve").root;
+        assert_eq!(schema_type_str(&s), Some("string"));
+        assert!(s.ref_path.is_none());
     }
 
     #[test]
@@ -1936,41 +1898,6 @@ mod tests {
         assert!(
             s.all_of.is_none(),
             "allOf with only invalid entries should yield None"
-        );
-    }
-
-    // ── parse_definitions edge cases ─────────────────────────────────────────
-
-    #[test]
-    fn empty_definitions_object_yields_none() {
-        // definitions: {} — empty map produces no entries; field should be None
-        let v = json!({"definitions": {}});
-        let s = parse_schema(&v).expect("should parse").root;
-        assert!(
-            s.definitions.is_none(),
-            "empty definitions should yield None"
-        );
-    }
-
-    #[test]
-    fn both_definitions_and_defs_are_merged() {
-        // Both definitions (Draft-04) and $defs (Draft-07) present — merged
-        let v = json!({
-            "definitions": {"TypeA": {"type": "string"}},
-            "$defs": {"TypeB": {"type": "integer"}}
-        });
-        let s = parse_schema(&v).expect("should parse").root;
-        let defs = s
-            .definitions
-            .as_ref()
-            .expect("should have merged definitions");
-        assert!(
-            defs.contains_key("TypeA"),
-            "TypeA from definitions should be present"
-        );
-        assert!(
-            defs.contains_key("TypeB"),
-            "TypeB from $defs should be present"
         );
     }
 
@@ -3191,15 +3118,14 @@ mod tests {
         "oneOf",
         "dependencies",
         "dependentSchemas",
-        "definitions",
-        "$defs",
     ];
 
     /// Put `inner` under `keyword`; `tuple-items` is the array form of `items`.
     fn wrap(keyword: &str, inner: &Value) -> Value {
         match keyword {
-            "properties" | "patternProperties" | "dependencies" | "dependentSchemas"
-            | "definitions" | "$defs" => json!({ keyword: { "k": inner } }),
+            "properties" | "patternProperties" | "dependencies" | "dependentSchemas" => {
+                json!({ keyword: { "k": inner } })
+            }
             "prefixItems" | "allOf" | "anyOf" | "oneOf" => json!({ keyword: [inner] }),
             "tuple-items" => json!({ "items": [inner] }),
             "additionalItems" => json!({ "items": [], "additionalItems": inner }),
@@ -3550,5 +3476,32 @@ mod tests {
         let schema = parse_with(&value, base, Some(&mut ctx)).expect("parses");
         assert_eq!(schema.ref_path.as_deref(), Some(ref_str));
         assert!(ctx.visited.is_empty());
+    }
+
+    #[test]
+    fn remote_ref_in_an_unused_definition_is_not_resolved() {
+        let url = "https://example.com/child.json";
+        let mut cache = cache_with(&[(url, json!({ "description": "REMOTE" }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "definitions": { "D": { "$ref": url } },
+            "$defs": { "E": { "$ref": url } }
+        });
+        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        assert!(!debug_of(&schema).contains("REMOTE"));
+    }
+
+    #[test]
+    fn remote_ref_in_an_unused_definition_is_not_fetched() {
+        let url = "https://schema.invalid/unused.json";
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "definitions": { "D": { "$ref": url } },
+            "$defs": { "E": { "$ref": url } }
+        });
+        parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        assert!(ctx.visited.is_empty());
+        assert!(!ctx.cache.contains(url));
     }
 }
