@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed
 **Created:** 2026-10-23
 
 # Evaluate Every Composition Branch Within a Step Budget
@@ -60,7 +60,7 @@ user in the LSP log when validation stopped at that budget.
 - [x] Task 3: log when validation stopped at the budget
 - [x] Task 4: complete keys from every branch through one
       property walk
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
