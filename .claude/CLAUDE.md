@@ -692,15 +692,19 @@ not need to monitor this exchange.
 **Act on idle notifications, not timers.** When a
 teammate's turn ends, you receive its idle notification at
 once, with its final text. An idle teammate resumes only
-when something wakes it: a message from another agent, or
-the completion of a command it started in the background.
-Check each notification against what you are waiting for
-from that teammate:
+when another agent messages it — the end of a command it
+started in the background does not wake it (see
+`waiting-on-commands.md`). Check each notification against
+what you are waiting for from that teammate:
 
 - Its result has reached you in its own message —
   proceed.
-- It names a message or a running command it waits for —
-  let it wait; that event wakes it.
+- It names a message it waits for — let it wait; that
+  message wakes it.
+- It names a command it runs in the background — a stall
+  in the making, since the command's end will not wake it.
+  Message it at once to rerun the command in the
+  foreground with a covering timeout.
 - Anything else is a stall, even when the text reads like
   progress — no deliverable, or a result it says it sent
   that never reached you. Message it at once with what you
