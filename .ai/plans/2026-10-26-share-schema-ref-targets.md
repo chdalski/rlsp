@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-26)
 **Created:** 2026-10-26
 
 # Share `$ref` Targets and Bound Schema Size at Parse Time
@@ -67,7 +67,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 6: each `$ref` target is parsed once and shared
 - [x] Task 7: a schema whose parse exceeds the memory budget is
       rejected with a Warning
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
